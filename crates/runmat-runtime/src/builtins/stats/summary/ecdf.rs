@@ -183,6 +183,10 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let options = options.preflight_known()?;
     preflight_ecdf_sample(&y)?;
     let options = options.preflight_lengths(&y)?;
+    let mut borrowed = Vec::new();
+    crate::dispatcher::try_visit_gpu_handles(&y, &mut |handle| borrowed.push(handle.clone()))
+        .map_err(|cause| map_error(ECDF_OWNER, cause))?;
+    borrowed.extend(options.borrowed_handles()?);
     let gpu_source = match &y {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -208,10 +212,10 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             let outputs = eval.outputs_for_count(out_count)?;
             Ok(crate::output_count::output_list_with_padding(
                 out_count,
-                restore_ecdf_outputs(outputs, gpu_source.as_ref())?,
+                restore_ecdf_outputs(outputs, gpu_source.as_ref(), &borrowed)?,
             ))
         }
-        None => restore_ecdf_output(eval.f_value()?, gpu_source.as_ref()),
+        None => restore_ecdf_output(eval.f_value()?, gpu_source.as_ref(), &borrowed),
     }
 }
 
@@ -282,16 +286,15 @@ fn preflight_ecdf_sample(value: &Value) -> BuiltinResult<()> {
 fn restore_ecdf_outputs(
     outputs: Vec<Value>,
     source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    borrowed: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Vec<Value>> {
     let mut staged = Vec::with_capacity(outputs.len());
     for value in outputs {
-        let protected = staged
-            .iter()
-            .filter_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        let mut protected = borrowed.iter().collect::<Vec<_>>();
+        protected.extend(staged.iter().filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        }));
         match restore_ecdf_output_protecting(value, source, &protected) {
             Ok(value) => staged.push(value),
             Err(mut error) => {
@@ -311,8 +314,10 @@ fn restore_ecdf_outputs(
 fn restore_ecdf_output(
     value: Value,
     source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    borrowed: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    restore_ecdf_output_protecting(value, source, &[])
+    let protected = borrowed.iter().collect::<Vec<_>>();
+    restore_ecdf_output_protecting(value, source, &protected)
 }
 
 fn restore_ecdf_output_protecting(

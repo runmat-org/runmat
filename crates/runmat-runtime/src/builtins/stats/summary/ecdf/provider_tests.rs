@@ -235,6 +235,7 @@ fn abandoned_unpolled_and_pending_calls_retain_borrowed_input() {
 struct SiblingAliasProvider {
     owner: TestAllocationOwner,
     retained: Mutex<Vec<GpuTensorHandle>>,
+    borrowed_alias: Mutex<Option<GpuTensorHandle>>,
     probes: Mutex<Vec<RetirementProbe>>,
     uploads: AtomicUsize,
 }
@@ -252,11 +253,31 @@ impl AccelProvider for SiblingAliasProvider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { panic!("output staging must not download") })
     }
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move {
+            let shape = handle.shape().to_vec();
+            let count = shape.iter().product();
+            Ok(HostNumericTensorOwned {
+                data: HostNumericDataOwned::F64(vec![1.0; count]),
+                shape,
+                storage: GpuTensorStorage::Real,
+            })
+        })
+    }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         let index = self.uploads.fetch_add(1, Ordering::SeqCst);
         let mut retained = self.retained.lock().unwrap();
         if index == 1 {
-            return Ok(retained.first().expect("first staged output").clone());
+            return Ok(self
+                .borrowed_alias
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap_or_else(|| retained.first().expect("first staged output"))
+                .clone());
         }
         let HostNumericDataView::F64(data) = host.data else {
             panic!("expected double outputs")
@@ -278,6 +299,7 @@ fn second_output_alias_is_rejected_without_retiring_borrowed_source() {
     let provider = Box::leak(Box::new(SiblingAliasProvider {
         owner: TestAllocationOwner::new(),
         retained: Mutex::new(Vec::new()),
+        borrowed_alias: Mutex::new(None),
         probes: Mutex::new(Vec::new()),
         uploads: AtomicUsize::new(0),
     }));
@@ -291,7 +313,7 @@ fn second_output_alias_is_rejected_without_retiring_borrowed_source() {
         Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0], vec![3, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
     ];
-    let error = restore_ecdf_outputs(outputs, Some(&source.handle)).unwrap_err();
+    let error = restore_ecdf_outputs(outputs, Some(&source.handle), &[]).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:ecdf:Internal"));
     assert!(error.message().contains("alias"), "{error}");
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
@@ -300,5 +322,48 @@ fn second_output_alias_is_rejected_without_retiring_borrowed_source() {
     let probes = provider.probes.lock().unwrap().clone();
     assert_eq!(probes.len(), 1);
     provider.retained.lock().unwrap().clear();
+    assert_eq!(probes[0].retirements(), 1);
+}
+
+#[test]
+fn resident_frequency_alias_on_second_output_preserves_borrowed_control_and_cleans_first() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(SiblingAliasProvider {
+        owner: TestAllocationOwner::new(),
+        retained: Mutex::new(Vec::new()),
+        borrowed_alias: Mutex::new(None),
+        probes: Mutex::new(Vec::new()),
+        uploads: AtomicUsize::new(0),
+    }));
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let sample = provider
+        .owner
+        .allocate_zeroed(vec![3, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let frequency = provider
+        .owner
+        .allocate_zeroed(vec![3, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    *provider.borrowed_alias.lock().unwrap() = Some(frequency.handle.clone());
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let error = block_on(ecdf_builtin(vec![
+        Value::GpuTensor(sample.handle.clone()),
+        Value::from("Frequency"),
+        Value::GpuTensor(frequency.handle.clone()),
+    ]))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:ecdf:Internal"));
+    assert!(error.message().contains("alias"), "{error}");
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
+    sample.handle.allocation_lease().validate_live().unwrap();
+    frequency.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(sample.probe.retirements(), 0);
+    assert_eq!(frequency.probe.retirements(), 0);
+    let probes = provider.probes.lock().unwrap().clone();
+    assert_eq!(probes.len(), 1);
+    provider.retained.lock().unwrap().clear();
+    provider.borrowed_alias.lock().unwrap().take();
     assert_eq!(probes[0].retirements(), 1);
 }

@@ -43,6 +43,10 @@ fn unknown() -> ValueFact {
     ValueFact::unknown(DynamicReason::RuntimeValue)
 }
 
+fn cannot_be_axes_handle(value: &ValueFact) -> bool {
+    value.shape.element_count().is_some_and(|count| count != 1)
+}
+
 fn known_bad_data(
     builtin: EmpiricalBuiltin,
     value: &ValueFact,
@@ -172,7 +176,7 @@ fn validate_ecdf_options(
                 } else if request.arguments.get(index + 1).is_some_and(|fact| {
                     !matches!(
                         fact.kind,
-                        ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
+                        ValueKindFact::Numeric(_) | ValueKindFact::Unknown
                     ) || fact.shape.element_count().is_some_and(|n| n != 1)
                 }) {
                     diagnostics.push(error("ALPHA", "ecdf Alpha must be numeric"));
@@ -193,6 +197,8 @@ fn validate_ecdf_options(
                         fact.kind,
                         ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
                     )
+                        || matches!(fact.kind, ValueKindFact::Numeric(NumericFact { domain: NumericDomain::Complex, .. }))
+                        || matches!(&fact.shape, ShapeFact::Shaped { dims } if dims.len() >= 2 && matches!((&dims[0], &dims[1]), (runmat_types::DimensionFact::Known(rows), runmat_types::DimensionFact::Known(cols)) if *rows > 1 && *cols > 1))
                 }) {
                     diagnostics.push(error("OPTION", "ecdf observation controls must be numeric"));
                 }
@@ -222,16 +228,23 @@ fn validate_ecdf_options(
 
 pub(super) fn ecdf(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
-    let sample_index =
-        usize::from(request.arguments.len() >= 2 && request.arguments.len().is_multiple_of(2));
+    let even_form = request.arguments.len() >= 2 && request.arguments.len().is_multiple_of(2);
+    let ambiguous_axes = even_form
+        && request
+            .arguments
+            .first()
+            .is_some_and(|fact| !cannot_be_axes_handle(fact));
+    let sample_index = usize::from(ambiguous_axes);
     if request.arguments.is_empty() {
         diagnostics.push(error("ARITY", "ecdf requires sample data"));
+    } else if even_form && !ambiguous_axes {
+        diagnostics.push(error("OPTION", "ecdf options require name-value pairs"));
     }
     if let Some(value) = request.arguments.get(sample_index) {
         known_bad_data(EmpiricalBuiltin::Ecdf, value, &mut diagnostics);
     }
     validate_ecdf_options(request, sample_index, &mut diagnostics);
-    let bad = !diagnostics.is_empty();
+    let bad = !diagnostics.is_empty() || ambiguous_axes;
     let residency = match request
         .arguments
         .get(sample_index)
@@ -277,11 +290,22 @@ pub(super) fn cdfplot(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Cal
     if !(1..=2).contains(&request.arguments.len()) {
         diagnostics.push(error("ARITY", "cdfplot requires data and optional axes"));
     }
+    let ambiguous_axes = request.arguments.len() == 2
+        && request
+            .arguments
+            .first()
+            .is_some_and(|fact| !cannot_be_axes_handle(fact));
+    if request.arguments.len() == 2 && !ambiguous_axes {
+        diagnostics.push(error(
+            "AXES",
+            "cdfplot requires a scalar axes handle before data",
+        ));
+    }
     let sample = request.arguments.last();
     if let Some(sample) = sample {
         known_bad_data(EmpiricalBuiltin::Cdfplot, sample, &mut diagnostics);
     }
-    let bad = !diagnostics.is_empty();
+    let bad = !diagnostics.is_empty() || ambiguous_axes;
     let scalar = if bad {
         unknown()
     } else {

@@ -140,6 +140,21 @@ impl EcdfOptionPlan {
         Ok(self)
     }
 
+    pub(super) fn borrowed_handles(
+        &self,
+    ) -> BuiltinResult<Vec<runmat_accelerate_api::GpuTensorHandle>> {
+        let mut handles = Vec::new();
+        for step in &self.steps {
+            if let Step::Deferred(_, value) = step {
+                crate::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
+                    handles.push(handle.clone());
+                })
+                .map_err(|cause| map_error(ECDF_OWNER, cause))?;
+            }
+        }
+        Ok(handles)
+    }
+
     pub(super) async fn resolve(self) -> BuiltinResult<Options> {
         let mut options = Options::default();
         for step in self.steps {

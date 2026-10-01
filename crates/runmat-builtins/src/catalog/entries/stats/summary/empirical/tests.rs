@@ -154,3 +154,84 @@ fn cdfplot_known_matrix_is_diagnosed_without_claiming_a_handle() {
         assert!(matches!(result.outputs[1].kind, ValueKindFact::Unknown));
     }
 }
+
+#[test]
+fn ambiguous_axes_forms_and_known_invalid_controls_never_prove_outputs() {
+    let vector = sample(&[2, 1]);
+    let numeric_scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let option_name = ValueFact::scalar(ValueKindFact::String);
+    let cases = [
+        infer_ecdf(
+            vec![vector.clone(), vector.clone()],
+            vec![LiteralValue::Unknown; 2],
+            1,
+        ),
+        infer_ecdf(
+            vec![numeric_scalar.clone(), vector.clone()],
+            vec![LiteralValue::Unknown; 2],
+            1,
+        ),
+        infer_ecdf(
+            vec![
+                vector.clone(),
+                option_name.clone(),
+                ValueFact::scalar(ValueKindFact::Logical),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Alpha".into()),
+                LiteralValue::Unknown,
+            ],
+            1,
+        ),
+        infer_ecdf(
+            vec![vector.clone(), option_name.clone(), sample(&[2, 2])],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Frequency".into()),
+                LiteralValue::Unknown,
+            ],
+            1,
+        ),
+        infer_ecdf(
+            vec![
+                vector.clone(),
+                option_name,
+                ValueFact::proven(
+                    ValueKindFact::Numeric(NumericFact {
+                        class: NumericClass::Double,
+                        domain: NumericDomain::Complex,
+                    }),
+                    ShapeFact::from(vec![Some(2), Some(1)]),
+                    StorageFact::Dense,
+                ),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Censoring".into()),
+                LiteralValue::Unknown,
+            ],
+            1,
+        ),
+    ];
+    for result in cases {
+        assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+    }
+    let cdfplot = |first: ValueFact| {
+        inference::cdfplot(
+            &CallRequest {
+                arguments: vec![first, vector.clone()],
+                literals: LiteralContext::new(vec![LiteralValue::Unknown; 2]),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+            },
+            &CDFPLOT_CATALOG_ENTRY,
+        )
+    };
+    for result in [cdfplot(vector), cdfplot(numeric_scalar)] {
+        assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+        assert!(matches!(result.outputs[1].kind, ValueKindFact::Unknown));
+    }
+}

@@ -82,6 +82,33 @@ fn ecdf_accepts_typed_integer_data_frequency_and_censoring() {
 }
 
 #[test]
+fn invalid_non_axes_forms_and_control_shapes_match_catalog_diagnostics() {
+    let sample = || tensor(vec![1.0, 2.0]);
+    assert!(block_on(ecdf_builtin(vec![sample(), sample()])).is_err());
+    assert!(block_on(cdfplot_builtin(vec![sample(), sample()])).is_err());
+    assert!(block_on(ecdf_builtin(vec![
+        sample(),
+        Value::from("Alpha"),
+        Value::Bool(true),
+    ]))
+    .is_err());
+    assert!(block_on(ecdf_builtin(vec![
+        tensor(vec![1.0, 2.0, 3.0, 4.0]),
+        Value::from("Frequency"),
+        Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap()),
+    ]))
+    .is_err());
+    assert!(block_on(ecdf_builtin(vec![
+        sample(),
+        Value::from("Censoring"),
+        Value::ComplexTensor(
+            runmat_value::ComplexTensor::new(vec![(0.0, 0.0), (0.0, 0.0)], vec![2, 1]).unwrap(),
+        ),
+    ]))
+    .is_err());
+}
+
+#[test]
 fn ecdf_alpha_rejects_typed_integer_boundary_value() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let err = block_on(ecdf_builtin(vec![
