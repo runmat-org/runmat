@@ -1157,19 +1157,12 @@ fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
 }
 
 fn exact_integer_as_f64(value: &IntValue, label: &str) -> BuiltinResult<f64> {
-    const MAX_EXACT_INTEGER: u64 = 1 << 53;
-    match value {
-        IntValue::I8(value) => Ok(*value as f64),
-        IntValue::I16(value) => Ok(*value as f64),
-        IntValue::I32(value) => Ok(*value as f64),
-        IntValue::I64(value) if value.unsigned_abs() <= MAX_EXACT_INTEGER => Ok(*value as f64),
-        IntValue::U8(value) => Ok(*value as f64),
-        IntValue::U16(value) => Ok(*value as f64),
-        IntValue::U32(value) => Ok(*value as f64),
-        IntValue::U64(value) if *value <= MAX_EXACT_INTEGER => Ok(*value as f64),
-        _ => Err(invalid(format!(
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
+        Ok(value.to_f64())
+    } else {
+        Err(invalid(format!(
             "mnrfit: integer {label} values must be exactly representable as double"
-        ))),
+        )))
     }
 }
 
@@ -1177,23 +1170,12 @@ fn ensure_exact_integer_tensor(tensor: &Tensor, label: &str) -> BuiltinResult<()
     if tensor.integer_storage().is_none() {
         return Ok(());
     }
-    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
     for index in 0..tensor.len() {
-        let exact = match tensor.numeric_value_at(index) {
-            Some(NumericScalar::I8(value)) => i128::from(value),
-            Some(NumericScalar::I16(value)) => i128::from(value),
-            Some(NumericScalar::I32(value)) => i128::from(value),
-            Some(NumericScalar::I64(value)) => i128::from(value),
-            Some(NumericScalar::U8(value)) => i128::from(value),
-            Some(NumericScalar::U16(value)) => i128::from(value),
-            Some(NumericScalar::U32(value)) => i128::from(value),
-            Some(NumericScalar::U64(value)) => i128::from(value),
-            _ => continue,
-        };
-        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
-            return Err(invalid(format!(
-                "mnrfit: integer {label} values must be exactly representable as double"
-            )));
+        if let Some(value) = tensor
+            .numeric_value_at(index)
+            .and_then(NumericScalar::into_int_value)
+        {
+            exact_integer_as_f64(&value, label)?;
         }
     }
     Ok(())
@@ -1675,5 +1657,33 @@ mod tests {
         ))
         .unwrap_err();
         assert!(error.message.contains("exactly representable"));
+    }
+
+    #[test]
+    fn mnrfit_integer_boundary_accepts_all_exact_binary64_values() {
+        for (integer, storage) in [
+            (
+                IntValue::I64(1_i64 << 54),
+                IntegerStorage::I64(vec![1_i64 << 54]),
+            ),
+            (IntValue::I64(i64::MIN), IntegerStorage::I64(vec![i64::MIN])),
+            (
+                IntValue::U64(1_u64 << 54),
+                IntegerStorage::U64(vec![1_u64 << 54]),
+            ),
+        ] {
+            assert_eq!(
+                exact_integer_as_f64(&integer, "Tolerance").unwrap(),
+                integer.to_f64()
+            );
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            ensure_exact_integer_tensor(&tensor, "X").unwrap();
+        }
+        for integer in [
+            IntValue::I64((1_i64 << 53) + 1),
+            IntValue::U64((1_u64 << 53) + 1),
+        ] {
+            assert!(exact_integer_as_f64(&integer, "Tolerance").is_err());
+        }
     }
 }
