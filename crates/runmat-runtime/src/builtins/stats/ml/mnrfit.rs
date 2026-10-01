@@ -464,9 +464,13 @@ fn contains_explicit_gpu(value: &Value) -> bool {
 }
 
 async fn gather_value(value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(|err| invalid(format!("mnrfit: {err}")))
+    gather_if_needed_async(&value).await.map_err(|cause| {
+        let mut error = invalid(format!("mnrfit: {cause}"));
+        error.gpu_gather_retry = cause.gpu_gather_retry;
+        error.span = cause.span;
+        error.source = Some(Box::new(cause));
+        error
+    })
 }
 
 async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -1334,6 +1338,10 @@ fn invert_matrix(a: Vec<f64>, n: usize) -> BuiltinResult<Vec<f64>> {
     }
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "mnrfit/provider_tests.rs"]
+mod provider_tests;
 
 #[cfg(test)]
 mod tests {
