@@ -49,8 +49,9 @@ impl ResidentSelectPlan {
                 ),
             "select requires matching real floating precision"
         );
-        let shape = broadcast_shape(mask.shape(), then_value.shape())?;
-        let shape = broadcast_shape(&shape, else_value.shape())?;
+        let shape =
+            runmat_types::geometry::broadcast_concrete_shape(mask.shape(), then_value.shape())?;
+        let shape = runmat_types::geometry::broadcast_concrete_shape(&shape, else_value.shape())?;
         let len = checked_len(&shape)?;
         Ok(Self {
             shape,
@@ -83,53 +84,16 @@ fn checked_len(shape: &[usize]) -> Result<usize> {
         .ok_or_else(|| anyhow!("select tensor size overflow"))
 }
 
-fn broadcast_shape(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>> {
-    let mut output = Vec::new();
-    let rank = lhs.len().max(rhs.len());
-    output.try_reserve_exact(rank)?;
-    for axis in 0..rank {
-        let extent_at = |shape: &[usize]| {
-            if rank >= 2 && shape.len() == 1 {
-                if axis == 1 {
-                    shape[0]
-                } else {
-                    1
-                }
-            } else {
-                shape.get(axis).copied().unwrap_or(1)
-            }
-        };
-        let a = extent_at(lhs);
-        let b = extent_at(rhs);
-        let extent = if a == b {
-            a
-        } else if a == 1 {
-            b
-        } else if b == 1 {
-            a
-        } else {
-            return Err(anyhow!(
-                "select non-singleton dimension mismatch at axis {}: {} versus {}",
-                axis + 1,
-                a,
-                b
-            ));
-        };
-        output.push(extent);
-    }
-    Ok(output)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn column_major_broadcast_and_empty_geometry_are_checked() {
-        assert_eq!(broadcast_shape(&[2, 1], &[1, 3]).unwrap(), [2, 3]);
-        assert_eq!(broadcast_shape(&[0, 2], &[1, 2]).unwrap(), [0, 2]);
-        assert_eq!(broadcast_shape(&[3], &[2, 3]).unwrap(), [2, 3]);
-        assert!(broadcast_shape(&[2, 2], &[3, 2]).is_err());
+        assert_eq!(
+            runmat_types::geometry::broadcast_concrete_shape(&[2, 1], &[1, 3]).unwrap(),
+            [2, 3]
+        );
         assert!(checked_len(&[usize::MAX, 2]).is_err());
     }
 }

@@ -2,6 +2,7 @@ pub mod codec;
 pub mod contract;
 pub mod declaration;
 pub mod fact;
+pub mod geometry;
 pub mod identity;
 pub mod integer_literal;
 pub mod rules;

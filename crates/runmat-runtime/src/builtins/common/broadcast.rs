@@ -10,29 +10,18 @@ pub fn broadcast_shapes(
     left: &[usize],
     right: &[usize],
 ) -> Result<Vec<usize>, String> {
-    let rank = left.len().max(right.len());
-    let left = align_shape(left, rank);
-    let right = align_shape(right, rank);
-    let mut shape = Vec::with_capacity(rank);
-    for dim in 0..rank {
-        let a = left[dim];
-        let b = right[dim];
-        if a == b {
-            shape.push(a);
-        } else if a == 1 {
-            shape.push(b);
-        } else if b == 1 {
-            shape.push(a);
-        } else {
-            return Err(format!(
-                "{fn_name}: size mismatch between inputs (dimension {} has lengths {} and {})",
-                dim + 1,
-                a,
-                b
-            ));
+    runmat_types::geometry::broadcast_concrete_shape(left, right).map_err(|error| match error {
+        runmat_types::geometry::ConcreteBroadcastError::IncompatibleAxis {
+            axis,
+            left,
+            right,
+        } => format!(
+            "{fn_name}: size mismatch between inputs (dimension {axis} has lengths {left} and {right})"
+        ),
+        runmat_types::geometry::ConcreteBroadcastError::ShapeAllocation => {
+            format!("{fn_name}: cannot allocate broadcast shape metadata")
         }
-    }
-    Ok(shape)
+    })
 }
 
 /// Compute column-major strides for a given shape.
@@ -294,6 +283,26 @@ pub(crate) mod tests {
         assert_eq!(align_shape(&[2, 3], 4), vec![2, 3, 1, 1]);
         assert_eq!(align_shape(&[3], 3), vec![1, 3, 1]);
         assert_eq!(align_shape(&[3], 1), vec![3]);
+    }
+
+    #[test]
+    fn concrete_broadcast_adapter_preserves_shape_and_legacy_diagnostic() {
+        for (left, right, expected) in [
+            (&[2, 1][..], &[1, 3][..], &[2, 3][..]),
+            (&[3][..], &[2, 3][..], &[2, 3][..]),
+            (&[0, 2][..], &[1, 2][..], &[0, 2][..]),
+            (&[2, 1, 4][..], &[1, 3, 1][..], &[2, 3, 4][..]),
+        ] {
+            assert_eq!(broadcast_shapes("sample", left, right).unwrap(), expected);
+            assert_eq!(
+                broadcast_shapes("sample", left, right).unwrap(),
+                runmat_types::geometry::broadcast_concrete_shape(left, right).unwrap()
+            );
+        }
+        assert_eq!(
+            broadcast_shapes("sample", &[2, 3], &[2, 4]).unwrap_err(),
+            "sample: size mismatch between inputs (dimension 2 has lengths 3 and 4)"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
