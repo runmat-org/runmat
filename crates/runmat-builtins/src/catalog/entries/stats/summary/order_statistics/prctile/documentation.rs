@@ -51,9 +51,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Percentile shape, interpolation and integer compatibility", location: "builtins::stats::summary::order_stats::tests" }],
-        notes: &["Legacy description, behaviors, median example, FAQ, links and source preserved; added a dimension example and value assertions. Null feature/integration metadata omitted."],
+        implementation: &[BuiltinDocumentationLink { label: "Percentile admission and interpolation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/order_stats/quantiles.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Percentile shape, interpolation and integer compatibility", location: "crates/runmat-runtime/src/builtins/stats/summary/order_stats/tests.rs" }],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

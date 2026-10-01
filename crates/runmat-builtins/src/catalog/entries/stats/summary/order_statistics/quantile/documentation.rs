@@ -58,9 +58,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Quantile interpolation, options and integer compatibility", location: "builtins::stats::summary::order_stats::tests" }],
-        notes: &["Legacy description, behaviors, quartile example, FAQ, links and source preserved; added count and vecdim examples with value assertions. `Method` choices are version-sensitive: linear/exact are historical aliases, inclusive/exclusive are newer documented choices. Null feature/integration metadata omitted."],
+        implementation: &[BuiltinDocumentationLink { label: "Quantile admission and interpolation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/order_stats/quantiles.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Quantile interpolation, options and integer compatibility", location: "crates/runmat-runtime/src/builtins/stats/summary/order_stats/tests.rs" }],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

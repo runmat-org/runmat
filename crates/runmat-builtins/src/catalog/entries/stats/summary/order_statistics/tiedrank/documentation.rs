@@ -59,9 +59,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Rank, tie adjustment and wide-integer semantics", location: "builtins::stats::summary::order_stats::tests" }],
-        notes: &["Legacy description, all six behaviors, rank example, FAQ, links and source preserved; added output and integer notes and value assertions. Null feature/integration metadata omitted."],
+        implementation: &[BuiltinDocumentationLink { label: "Ranking and tie corrections", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/order_stats/ranks.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Rank, tie adjustment and wide-integer semantics", location: "crates/runmat-runtime/src/builtins/stats/summary/order_stats/tests.rs" }],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };
