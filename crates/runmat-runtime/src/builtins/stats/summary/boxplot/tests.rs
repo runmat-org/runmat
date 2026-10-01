@@ -290,6 +290,41 @@ fn computes_matrix_columns_and_outliers() {
 }
 
 #[test]
+fn axis_limits_remain_finite_for_extreme_and_constant_finite_data() {
+    let mut stats = BoxStats {
+        label: "A".into(),
+        position: 1.0,
+        width: 0.5,
+        color: Vec4::ONE,
+        q1: -f64::MAX,
+        median: 0.0,
+        q3: f64::MAX,
+        lower_whisker: -f64::MAX,
+        upper_whisker: f64::MAX,
+        outliers: Vec::new(),
+    };
+    let (_, data) = super::plot::axis_limits(&[stats.clone()], &BoxplotOptions::default())
+        .expect("opposite finite extrema retain finite bounds");
+    assert_eq!(data, Some((-f64::MAX, f64::MAX)));
+
+    stats.q1 = f64::MAX;
+    stats.median = f64::MAX;
+    stats.lower_whisker = f64::MAX;
+    let (_, data) = super::plot::axis_limits(&[stats.clone()], &BoxplotOptions::default())
+        .expect("constant maximum has a representable neighboring bound");
+    assert_eq!(data, Some((f64::MAX.next_down(), f64::MAX)));
+
+    stats.position = f64::MAX;
+    stats.width = f64::MAX;
+    let error = super::plot::axis_limits(&[stats], &BoxplotOptions::default())
+        .expect_err("unrepresentable category span rejects before graphics effects");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+}
+
+#[test]
 fn groups_text_labels_with_group_order_and_labels() {
     let labels = CellArray::new(
         vec![

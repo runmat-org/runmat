@@ -173,6 +173,56 @@ fn known_text_group_vectors_are_not_misdiagnosed_as_unpaired_options() {
 }
 
 #[test]
+fn known_character_row_count_mismatch_is_rejected() {
+    let group = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(3), Some(2)]),
+        StorageFact::Dense,
+    );
+    let result = call(
+        vec![real(vec![Some(4), Some(1)]), group],
+        vec![LiteralValue::Unknown; 2],
+        1,
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "GROUP"));
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
+fn complex_visual_control_is_not_proven_valid() {
+    let option_name = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let complex = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let result = call(
+        vec![real(vec![Some(4), Some(1)]), option_name, complex],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Whisker".into()),
+            LiteralValue::Unknown,
+        ],
+        1,
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "OPTION"));
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
 fn unknown_scalar_text_option_name_does_not_become_a_group() {
     let name = ValueFact::proven(
         ValueKindFact::String,

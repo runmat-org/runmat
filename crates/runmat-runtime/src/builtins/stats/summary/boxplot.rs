@@ -230,6 +230,7 @@ pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_sample_group_extensions(&x, group.as_ref())?;
     admission::admit_host_visible(&x, group.as_ref())?;
     let option_plan = BoxplotOptionPlan::admit(args, first_option)?;
+    option_plan.admit_host_color_groups(&x)?;
     let mut inputs = vec![x];
     if let Some(group) = group {
         inputs.push(group);

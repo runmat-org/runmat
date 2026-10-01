@@ -2,9 +2,9 @@
 use super::options::BoxplotOptionKind;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    LiteralContext, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact,
-    ValueKindFact,
+    infer_call, CallContract, CallInference, CallRequest, DimensionFact, DynamicReason,
+    InferenceDiagnostic, LiteralContext, NumericClass, NumericDomain, NumericFact, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
 
 fn handles() -> ValueFact {
@@ -66,22 +66,33 @@ fn bad_group(fact: &ValueFact, sample: &ValueFact) -> bool {
             return true;
         }
     }
-    if matches!(
-        fact.kind,
-        ValueKindFact::Cell(_) | ValueKindFact::Object(_) | ValueKindFact::Character
-    ) {
+    if matches!(fact.kind, ValueKindFact::Cell(_) | ValueKindFact::Object(_)) {
         return false;
     }
-    let (Some(group_count), Some(sample_count), Some(dims)) = (
-        fact.shape.element_count(),
-        sample.shape.element_count(),
-        sample.shape.known_dims(),
-    ) else {
+    let group_count = if matches!(fact.kind, ValueKindFact::Character) {
+        first_known_extent(&fact.shape)
+    } else {
+        fact.shape.element_count()
+    };
+    let (Some(group_count), Some(sample_count)) = (group_count, sample.shape.element_count())
+    else {
         return false;
     };
     // Matrix inputs also admit row-wise groups, which are repeated per column.
-    let rows = dims.first().copied().flatten();
-    group_count != sample_count && rows != Some(group_count)
+    let rows = first_known_extent(&sample.shape);
+    let matrix_rows = matches!(&sample.shape, ShapeFact::Shaped { dims } if dims.len() == 2 && matches!(dims.get(0), Some(DimensionFact::Known(rows)) if *rows > 1) && matches!(dims.get(1), Some(DimensionFact::Known(cols)) if *cols > 1));
+    group_count != sample_count && !(matrix_rows && rows == Some(group_count))
+}
+
+fn first_known_extent(shape: &ShapeFact) -> Option<usize> {
+    match shape {
+        ShapeFact::Scalar => Some(1),
+        ShapeFact::Shaped { dims } => match dims.first() {
+            Some(DimensionFact::Known(extent)) => Some(*extent),
+            _ => None,
+        },
+        ShapeFact::Unknown | ShapeFact::Ranked { .. } => None,
+    }
 }
 
 fn known_bad_option(kind: BoxplotOptionKind, value: &ValueFact, numeric: Option<f64>) -> bool {
@@ -90,7 +101,11 @@ fn known_bad_option(kind: BoxplotOptionKind, value: &ValueFact, numeric: Option<
         Whisker | Jitter | OutlierSize => {
             !matches!(
                 value.kind,
-                ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
+                ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                }) | ValueKindFact::Logical
+                    | ValueKindFact::Unknown
             ) || value.shape.element_count().is_some_and(|count| count != 1)
                 || numeric.is_some_and(|n| {
                     !n.is_finite()
@@ -114,6 +129,7 @@ fn known_bad_option(kind: BoxplotOptionKind, value: &ValueFact, numeric: Option<
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let args = &request.arguments;
     let mut diagnostics = Vec::new();
+    let mut input_roles_unresolved = false;
     if args.is_empty() {
         diagnostics.push(InferenceDiagnostic::error(
             "ARITY",
@@ -130,6 +146,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         // A scalar numeric first argument can also denote axes. Only a known
         // non-scalar first argument fixes the direct-data argument positions.
         let direct = first.shape.element_count().is_some_and(|count| count != 1);
+        input_roles_unresolved = !direct && args.len() > 1;
         if direct {
             let second_is_group =
                 args.get(1)
@@ -143,11 +160,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                             ValueKindFact::String => {
                                 second.shape.element_count().is_some_and(|count| count != 1)
                             }
-                            ValueKindFact::Character => second
-                                .shape
-                                .known_dims()
-                                .and_then(|dims| dims.first().copied().flatten())
-                                .is_some_and(|rows| rows != 1),
+                            ValueKindFact::Character => {
+                                first_known_extent(&second.shape).is_some_and(|rows| rows != 1)
+                            }
                             _ => false,
                         },
                     });
@@ -194,11 +209,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             }
         }
     }
-    let mut contract = CallContract::fixed(vec![if diagnostics.is_empty() {
-        handles()
-    } else {
-        ValueFact::unknown(DynamicReason::RuntimeValue)
-    }]);
+    let mut contract =
+        CallContract::fixed(vec![if diagnostics.is_empty() && !input_roles_unresolved {
+            handles()
+        } else {
+            ValueFact::unknown(DynamicReason::RuntimeValue)
+        }]);
     // The established runtime pads additional requested outputs with empty
     // values. Their contents are not a second graphics handle contract.
     contract.maximum_outputs = None;

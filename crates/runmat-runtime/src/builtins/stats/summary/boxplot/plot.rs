@@ -10,7 +10,7 @@ pub(super) fn render_boxplot(
         .iter()
         .map(|stats| stats.label.clone())
         .collect::<Vec<_>>();
-    let limits = axis_limits(boxes, options);
+    let limits = axis_limits(boxes, options)?;
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let mut plans = Some(plans);
     let handles_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -78,9 +78,12 @@ pub(super) fn render_boxplot(
     Ok(handles)
 }
 
-type AxisLimits = (Option<(f64, f64)>, Option<(f64, f64)>);
+pub(super) type AxisLimits = (Option<(f64, f64)>, Option<(f64, f64)>);
 
-fn axis_limits(boxes: &[BoxStats], options: &BoxplotOptions) -> AxisLimits {
+pub(super) fn axis_limits(
+    boxes: &[BoxStats],
+    options: &BoxplotOptions,
+) -> BuiltinResult<AxisLimits> {
     let min_pos = boxes
         .iter()
         .map(|stats| stats.position - stats.width)
@@ -109,23 +112,52 @@ fn axis_limits(boxes: &[BoxStats], options: &BoxplotOptions) -> AxisLimits {
         }
     }
     if !min_data.is_finite() || !max_data.is_finite() {
-        min_data = 0.0;
-        max_data = 1.0;
+        return Err(invalid("boxplot: plotted data require finite axis limits"));
     }
-    if (max_data - min_data).abs() < f64::EPSILON {
-        min_data -= 0.5;
-        max_data += 0.5;
+    if min_data == max_data {
+        let lower = min_data - 0.5;
+        let upper = max_data + 0.5;
+        min_data = if lower.is_finite() && lower < min_data {
+            lower
+        } else {
+            min_data.next_down()
+        };
+        max_data = if upper.is_finite() && upper > max_data {
+            upper
+        } else {
+            max_data.next_up()
+        };
     } else {
-        let pad = (max_data - min_data).abs() * 0.08;
-        min_data -= pad;
-        max_data += pad;
+        let span = max_data - min_data;
+        if span.is_finite() {
+            let pad = span * 0.08;
+            let lower = min_data - pad;
+            let upper = max_data + pad;
+            if lower.is_finite() {
+                min_data = lower;
+            }
+            if upper.is_finite() {
+                max_data = upper;
+            }
+        }
+    }
+    if !min_pos.is_finite()
+        || !max_pos.is_finite()
+        || min_pos >= max_pos
+        || !min_data.is_finite()
+        || !max_data.is_finite()
+        || min_data >= max_data
+    {
+        return Err(invalid(
+            "boxplot: plotted axis limits are not representable",
+        ));
     }
     let category = Some((min_pos.min(0.5), max_pos.max(boxes.len() as f64 + 0.5)));
     let data = Some((min_data, max_data));
-    match options.orientation {
+    Ok(match options.orientation {
         Orientation::Vertical => (category, data),
         Orientation::Horizontal => (data, category),
-    }
+    })
 }
 
 fn build_plot_plans(boxes: &[BoxStats], options: &BoxplotOptions) -> BuiltinResult<Vec<PlotPlan>> {

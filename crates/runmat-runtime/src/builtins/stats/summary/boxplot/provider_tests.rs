@@ -142,6 +142,40 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
             Value::GpuTensor(resident.handle.clone()),
             categorical_group(vec![1.0, 2.0, 1.0, 2.0, 1.0], true),
         ],
+        vec![
+            Value::GpuTensor(resident.handle.clone()),
+            Value::String("ColorGroup".into()),
+            Value::Complex(1.0, 1.0),
+        ],
+        vec![
+            sample(),
+            Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::GpuTensor(option.handle.clone()),
+                        Value::Complex(1.0, 1.0),
+                    ],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ),
+        ],
+        vec![
+            sample(),
+            Value::String("ColorGroup".into()),
+            Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::GpuTensor(option.handle.clone()),
+                        Value::Complex(1.0, 1.0),
+                    ],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ),
+        ],
     ];
     for args in calls {
         let err = block_on(boxplot_builtin(args)).expect_err("known invalid host input");

@@ -36,6 +36,7 @@ fn validate_known_group(
     x_shape: Option<&[usize]>,
     x_count: usize,
 ) -> BuiltinResult<()> {
+    validate_group_leaf_classes(group)?;
     if matches!(group, Value::Cell(_) | Value::Object(_)) && !value_contains_gpu(group)? {
         return super::groups::validate_known_host_group(group, x_shape, x_count);
     }
@@ -76,4 +77,28 @@ fn validate_known_group(
         }
     }
     Ok(())
+}
+
+fn validate_group_leaf_classes(group: &Value) -> BuiltinResult<()> {
+    match group {
+        Value::Cell(cell) => {
+            for value in &cell.data {
+                validate_group_leaf_classes(value)?;
+            }
+            Ok(())
+        }
+        Value::GpuTensor(handle) if handle.physical().storage() != GpuTensorStorage::Real => Err(
+            invalid("boxplot: grouping data must be real numeric or text"),
+        ),
+        Value::Object(object) if !object.is_class(runmat_types::standard::CATEGORICAL) => {
+            Err(invalid("boxplot: grouping data must be categorical"))
+        }
+        Value::Complex(_, _)
+        | Value::ComplexTensor(_)
+        | Value::SparseTensor(_)
+        | Value::Struct(_) => Err(invalid(
+            "boxplot: grouping data must be real numeric or text",
+        )),
+        _ => Ok(()),
+    }
 }
