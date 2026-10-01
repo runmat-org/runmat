@@ -290,6 +290,9 @@ pub(super) fn poissinv_scalar(
     distribution_math::poisson_inverse(p, lambda, poll)
 }
 
+// Retained for inverse-quantile boundary witnesses; production search owns
+// its CDF evaluation in the shared distribution-math service.
+#[cfg(test)]
 pub(super) fn poisscdf_scalar(k: f64, lambda: f64) -> f64 {
     if k.is_nan() || lambda.is_nan() || lambda < 0.0 {
         return f64::NAN;
