@@ -1,8 +1,8 @@
 //! Hierarchical agglomerative clustering compatibility surface.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, DistanceMetricKind, LINKAGE_ERROR_INTERNAL,
-    LINKAGE_ERROR_INVALID_ARGUMENT,
+    matrix_size_for_condensed_length, BuiltinErrorDescriptor, DistanceMetricKind,
+    LINKAGE_ERROR_INTERNAL, LINKAGE_ERROR_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
