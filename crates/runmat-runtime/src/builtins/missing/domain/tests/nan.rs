@@ -360,3 +360,58 @@ fn nanmin_pairwise_preserves_exact_wide_same_class_integers() {
         Some(&IntegerStorage::U64(vec![1_u64 << 53, u64::MAX - 1]))
     );
 }
+
+#[test]
+fn nanmin_pairwise_never_falls_back_to_lossy_wide_integer_comparison() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let mixed_classes = block_on(nanmin_builtin(
+        Value::Int(IntValue::U64(u64::MAX)),
+        vec![Value::Int(IntValue::I64(-1))],
+    ))
+    .expect_err("mismatched integer classes cannot be widened through double");
+    assert_eq!(
+        mixed_classes.identifier(),
+        Some("RunMat:missing:InvalidArgument")
+    );
+    assert!(mixed_classes.message().contains("matching integer classes"));
+
+    let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        .expect("wide integer tensor");
+    let floating = tensor(vec![0.0, 1.0], vec![1, 2]);
+    let mixed_array = block_on(nanmin_builtin(Value::Tensor(wide), vec![floating]))
+        .expect_err("inexact wide integer cannot enter floating-array fallback");
+    assert_eq!(
+        mixed_array.identifier(),
+        Some("RunMat:missing:InvalidArgument")
+    );
+    assert!(mixed_array
+        .message()
+        .contains("cannot convert wide integers"));
+}
+
+#[test]
+fn nanmin_pairwise_uses_omit_nan_for_exact_integer_and_nan_scalar() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let result = block_on(nanmin_builtin(
+        Value::Int(IntValue::U64(u64::MAX)),
+        vec![Value::Num(f64::NAN)],
+    ))
+    .expect("NaN should select the exact integer operand");
+    assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
+}
+
+#[test]
+fn nanmin_pairwise_propagates_exact_integer_shape_failure() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let left =
+        Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![2, 1]).expect("integer left");
+    let right =
+        Tensor::new_integer(IntegerStorage::U64(vec![3, 4, 5]), vec![3, 1]).expect("integer right");
+    let error = block_on(nanmin_builtin(
+        Value::Tensor(left),
+        vec![Value::Tensor(right)],
+    ))
+    .expect_err("incompatible exact integer shapes");
+    assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
+    assert!(error.message().contains("dimension mismatch"));
+}

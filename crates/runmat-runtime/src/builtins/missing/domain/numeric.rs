@@ -20,25 +20,40 @@ pub(super) fn is_empty_numeric_placeholder(value: &Value) -> bool {
 }
 
 pub(super) fn pairwise_nan_min(left: Value, right: Value) -> BuiltinResult<Value> {
-    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&left)
-        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&right)
-    {
-        if let Ok(Some(evaluation)) =
-            crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
-                &left,
-                &right,
-                crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
-                crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural,
-                false,
-            )
-        {
-            return Ok(evaluation.values);
+    let left_integer =
+        crate::builtins::math::reduction::integer_native::value_has_integer_storage(&left);
+    let right_integer =
+        crate::builtins::math::reduction::integer_native::value_has_integer_storage(&right);
+    if left_integer || right_integer {
+        match crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
+            &left,
+            &right,
+            crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural,
+            true,
+        ) {
+            Ok(Some(evaluation)) => return Ok(evaluation.values),
+            Err(error) => return Err(invalid_argument(format!("nanmin: {error}"))),
+            Ok(None) if left_integer && right_integer => {
+                return Err(invalid_argument(
+                    "nanmin: integer pairwise inputs require matching integer classes",
+                ));
+            }
+            Ok(None)
+                if !integer_values_exact_in_f64(&left) || !integer_values_exact_in_f64(&right) =>
+            {
+                return Err(invalid_argument(
+                    "nanmin: mixed floating/integer pairwise inputs cannot convert wide integers to double exactly",
+                ));
+            }
+            Ok(None) => {}
         }
     }
-    let left_scalar = numeric_scalar(&left, "nanmin left").ok();
-    let right_scalar = numeric_scalar(&right, "nanmin right").ok();
-    if let (Some(a), Some(b)) = (left_scalar, right_scalar) {
-        return Ok(Value::Num(nan_min_pair(a, b)));
+    if is_scalar_numeric(&left) && is_scalar_numeric(&right) {
+        return Ok(Value::Num(nan_min_pair(
+            numeric_scalar(&left, "nanmin left")?,
+            numeric_scalar(&right, "nanmin right")?,
+        )));
     }
     let left = numeric_tensor(left, "nanmin left")?;
     let right = numeric_tensor(right, "nanmin right")?;
@@ -46,6 +61,23 @@ pub(super) fn pairwise_nan_min(left: Value, right: Value) -> BuiltinResult<Value
     Tensor::new_with_dtype(data, shape, dtype)
         .map(Value::Tensor)
         .map_err(internal_error)
+}
+
+fn integer_values_exact_in_f64(value: &Value) -> bool {
+    match value {
+        Value::Int(integer) => crate::builtins::common::validation::integer_is_exact_f64(integer),
+        Value::Tensor(tensor) => tensor.integer_storage().is_none_or(|storage| {
+            storage
+                .exact_values()
+                .all(|integer| crate::builtins::common::validation::integer_is_exact_f64(&integer))
+        }),
+        _ => true,
+    }
+}
+
+fn is_scalar_numeric(value: &Value) -> bool {
+    matches!(value, Value::Num(_) | Value::Int(_) | Value::Bool(_))
+        || matches!(value, Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor))
 }
 
 pub(super) fn broadcast_pairwise_numeric(
