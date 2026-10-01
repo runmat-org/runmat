@@ -1,39 +1,36 @@
 use super::*;
-use super::*;
-normal_descriptor!("normcdf", NORMAL_CDF_SIGNATURES);
-normal_integer_surface!(
-    "normcdf",
-    "normcdf-integer-x",
-    "RunMat:compatibility:NormcdfIntegerXExtension",
-    "normcdf-integer-mu",
-    "RunMat:compatibility:NormcdfIntegerMuExtension",
-    "normcdf-integer-sigma",
-    "RunMat:compatibility:NormcdfIntegerSigmaExtension",
-    "normcdf-logical-input",
-    "RunMat:compatibility:NormcdfLogicalInputExtension"
-);
+use runmat_builtins::{
+    NORMCDF_INTEGER_MU_EXTENSION as INTEGER_MU_EXTENSION,
+    NORMCDF_INTEGER_SIGMA_EXTENSION as INTEGER_SIGMA_EXTENSION,
+    NORMCDF_INTEGER_X_EXTENSION as INTEGER_X_EXTENSION,
+    NORMCDF_LOGICAL_INPUT_EXTENSION as LOGICAL_INPUT_EXTENSION,
+};
 
 #[runtime_builtin(
     name = "normcdf",
-    category = "stats/summary",
-    summary = "Evaluate the normal cumulative distribution function.",
-    keywords = "normcdf,normal,gaussian,cdf,statistics",
-    type_resolver(super::normal_type),
-    descriptor(self::DESCRIPTOR),
-    extensions(self::EXTENSIONS),
-    integer_capabilities(self::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::normcdf"
 )]
 pub(crate) async fn normcdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_extensions(&value, &rest)?;
-    let args = super::normal_args("normcdf", value, rest, true).await?;
+    super::ensure_normal_extensions(
+        "normcdf",
+        &value,
+        &rest,
+        [
+            &INTEGER_X_EXTENSION,
+            &INTEGER_MU_EXTENSION,
+            &INTEGER_SIGMA_EXTENSION,
+        ],
+        &LOGICAL_INPUT_EXTENSION,
+    )?;
+    let args = super::normal_args("normcdf", value, rest, DistributionKind::NormalCdf).await?;
     let data = args
         .x
         .iter()
         .zip(args.mu.iter())
         .zip(args.sigma.iter())
         .map(|((x, mu), sigma)| {
-            if args.upper {
+            if args.tail == DistributionTail::Upper {
                 super::normcdf_upper_scalar(*x, *mu, *sigma)
             } else {
                 super::normcdf_scalar(*x, *mu, *sigma)

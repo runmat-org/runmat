@@ -1,32 +1,29 @@
 use super::*;
-use super::*;
-normal_descriptor!("normpdf", NORMAL_SIGNATURES_X);
-normal_integer_surface!(
-    "normpdf",
-    "normpdf-integer-x",
-    "RunMat:compatibility:NormpdfIntegerXExtension",
-    "normpdf-integer-mu",
-    "RunMat:compatibility:NormpdfIntegerMuExtension",
-    "normpdf-integer-sigma",
-    "RunMat:compatibility:NormpdfIntegerSigmaExtension",
-    "normpdf-logical-input",
-    "RunMat:compatibility:NormpdfLogicalInputExtension"
-);
+use runmat_builtins::{
+    NORMPDF_INTEGER_MU_EXTENSION as INTEGER_MU_EXTENSION,
+    NORMPDF_INTEGER_SIGMA_EXTENSION as INTEGER_SIGMA_EXTENSION,
+    NORMPDF_INTEGER_X_EXTENSION as INTEGER_X_EXTENSION,
+    NORMPDF_LOGICAL_INPUT_EXTENSION as LOGICAL_INPUT_EXTENSION,
+};
 
 #[runtime_builtin(
     name = "normpdf",
-    category = "stats/summary",
-    summary = "Evaluate the normal probability density function.",
-    keywords = "normpdf,normal,gaussian,pdf,statistics",
-    type_resolver(super::normal_type),
-    descriptor(self::DESCRIPTOR),
-    extensions(self::EXTENSIONS),
-    integer_capabilities(self::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::normpdf"
 )]
 pub(crate) async fn normpdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_extensions(&value, &rest)?;
-    let args = super::normal_args("normpdf", value, rest, false).await?;
+    super::ensure_normal_extensions(
+        "normpdf",
+        &value,
+        &rest,
+        [
+            &INTEGER_X_EXTENSION,
+            &INTEGER_MU_EXTENSION,
+            &INTEGER_SIGMA_EXTENSION,
+        ],
+        &LOGICAL_INPUT_EXTENSION,
+    )?;
+    let args = super::normal_args("normpdf", value, rest, DistributionKind::NormalPdf).await?;
     let data = args
         .x
         .iter()

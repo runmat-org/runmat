@@ -1,61 +1,13 @@
 use super::*;
-use super::*;
-normal_descriptor!("tpdf", T_PDF_SIGNATURES);
-
-const INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tpdf-integer-x",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tpdf accepts typed-integer evaluation points",
-    error_identifier: Some("RunMat:compatibility:TpdfIntegerXExtension"),
+use runmat_builtins::{
+    TPDF_INTEGER_NU_EXTENSION as INTEGER_NU_EXTENSION,
+    TPDF_INTEGER_X_EXTENSION as INTEGER_X_EXTENSION,
+    TPDF_LOGICAL_INPUT_EXTENSION as LOGICAL_INPUT_EXTENSION,
 };
-const INTEGER_NU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tpdf-integer-degrees-of-freedom",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tpdf accepts typed-integer degrees of freedom",
-    error_identifier: Some("RunMat:compatibility:TpdfIntegerDegreesOfFreedomExtension"),
-};
-const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tpdf-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tpdf accepts logical numeric input",
-    error_identifier: Some("RunMat:compatibility:TpdfLogicalInputExtension"),
-};
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    INTEGER_X_EXTENSION,
-    INTEGER_NU_EXTENSION,
-    LOGICAL_INPUT_EXTENSION,
-];
-
-const INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public tpdf evaluation points are single or double; native integers are independently gated and must cross the binary64 PDF boundary exactly.",
-    }];
-const INTEGER_NU_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "nu",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public tpdf degrees of freedom are single or double; native integers are independently gated and must cross the binary64 PDF boundary exactly.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "y = tpdf(integer_x, nu)", inputs: &INTEGER_X_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::SameSizeOrScalar, notes: "Admitted integer x values are checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider." },
-    BuiltinIntegerCapabilityDescriptor { form: "y = tpdf(x, integer_nu)", inputs: &INTEGER_NU_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::SameSizeOrScalar, notes: "Admitted integer nu values are checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider." },
-];
 
 #[runtime_builtin(
     name = "tpdf",
-    category = "stats/summary",
-    summary = "Evaluate the Student's t probability density function.",
-    keywords = "tpdf,student t,pdf,statistics,distribution",
-    type_resolver(super::normal_type),
-    descriptor(self::DESCRIPTOR),
-    extensions(self::EXTENSIONS),
-    integer_capabilities(self::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::tpdf"
 )]
 pub(crate) async fn tpdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
