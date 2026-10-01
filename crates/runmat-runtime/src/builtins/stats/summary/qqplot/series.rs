@@ -184,8 +184,40 @@ fn quantile_from_sorted(values: &[f64], p: f64) -> f64 {
         values[lo]
     } else {
         let weight = position - lo as f64;
-        values[lo] * (1.0 - weight) + values[hi] * weight
+        convex_interpolate(values[lo], values[hi], weight)
     }
+}
+
+fn convex_interpolate(lo: f64, hi: f64, weight: f64) -> f64 {
+    let scale = lo.abs().max(hi.abs());
+    if scale == 0.0 {
+        return 0.0;
+    }
+    scale * ((lo / scale) * (1.0 - weight) + (hi / scale) * weight)
+}
+
+fn quartile_slope(x25: f64, x75: f64, y25: f64, y75: f64) -> f64 {
+    if x25 == x75 {
+        return 0.0;
+    }
+    let x_scale = x25.abs().max(x75.abs());
+    let y_scale = y25.abs().max(y75.abs());
+    if y_scale == 0.0 {
+        return 0.0;
+    }
+    let dx = x75 / x_scale - x25 / x_scale;
+    let dy = y75 / y_scale - y25 / y_scale;
+    if dx == 0.0 {
+        return 0.0;
+    }
+    let (dy_fraction, dy_exponent) = libm::frexp(dy);
+    let (y_fraction, y_exponent) = libm::frexp(y_scale);
+    let (dx_fraction, dx_exponent) = libm::frexp(dx);
+    let (x_fraction, x_exponent) = libm::frexp(x_scale);
+    libm::ldexp(
+        (dy_fraction * y_fraction) / (dx_fraction * x_fraction),
+        dy_exponent + y_exponent - dx_exponent - x_exponent,
+    )
 }
 
 fn reference_lines(x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -200,30 +232,76 @@ fn reference_lines(x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f
     }
     finite.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
     let xs = finite.iter().map(|(x, _)| *x).collect::<Vec<_>>();
-    let ys = finite.iter().map(|(_, y)| *y).collect::<Vec<_>>();
+    let mut ys = finite.iter().map(|(_, y)| *y).collect::<Vec<_>>();
+    ys.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     let x25 = quantile_from_sorted(&xs, 0.25);
     let x75 = quantile_from_sorted(&xs, 0.75);
     let y25 = quantile_from_sorted(&ys, 0.25);
     let y75 = quantile_from_sorted(&ys, 0.75);
-    let slope = if (x75 - x25).abs() > f64::EPSILON {
-        (y75 - y25) / (x75 - x25)
-    } else {
-        0.0
-    };
-    let intercept = y25 - slope * x25;
+    let slope = quartile_slope(x25, x75, y25, y75);
+    let intercept = (-slope).mul_add(x25, y25);
     let min_x = *xs.first().unwrap();
     let max_x = *xs.last().unwrap();
     let reference_x = if min_x < max_x {
         vec![min_x, max_x]
     } else {
         let pad = min_x.abs().max(1.0) * 0.5;
-        vec![min_x - pad, max_x + pad]
+        if min_x > 0.0 && !(max_x + pad).is_finite() {
+            vec![min_x - pad, min_x]
+        } else if min_x < 0.0 && !(min_x - pad).is_finite() {
+            vec![min_x, min_x + pad]
+        } else {
+            vec![min_x - pad, max_x + pad]
+        }
     };
     let reference_y = reference_x
         .iter()
-        .map(|x| slope * *x + intercept)
+        .map(|x| slope.mul_add(*x, intercept))
         .collect::<Vec<_>>();
     let quartile_x = vec![x25, x75];
     let quartile_y = vec![y25, y75];
     (reference_x, reference_y, quartile_x, quartile_y)
+}
+
+#[cfg(test)]
+mod reference_geometry_tests {
+    use super::*;
+
+    #[test]
+    fn tiny_distinct_quartiles_produce_nonzero_slope() {
+        let (x, y, qx, qy) = reference_lines(
+            &[1.0e-300, 2.0e-300, 3.0e-300, 4.0e-300],
+            &[2.0, 4.0, 6.0, 8.0],
+        );
+        assert_eq!(x, vec![1.0e-300, 4.0e-300]);
+        assert!((y[0] - 2.0).abs() < 1.0e-12);
+        assert!((y[1] - 8.0).abs() < 1.0e-12);
+        assert!(qx[1] > qx[0]);
+        assert!(qy[1] > qy[0]);
+    }
+
+    #[test]
+    fn finite_opposite_sign_quartiles_do_not_overflow_difference() {
+        let data = [-1.7e308, -1.6e308, 1.6e308, 1.7e308];
+        let (x, y, _, _) = reference_lines(&data, &data);
+        assert_eq!(x, data.iter().copied().step_by(3).collect::<Vec<_>>());
+        assert!(y.iter().all(|value| value.is_finite()));
+        for (actual, expected) in y.iter().zip(x.iter()) {
+            assert!((actual / expected - 1.0).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn y_quartiles_use_marginal_order_not_x_pair_order() {
+        let (_, _, _, y_quartiles) = reference_lines(&[1.0, 2.0, 3.0, 4.0], &[4.0, 3.0, 2.0, 1.0]);
+        assert_eq!(y_quartiles, vec![1.75, 3.25]);
+    }
+
+    #[test]
+    fn convex_quantile_of_large_finite_observations_stays_finite() {
+        let values = [1.6e308, 1.7e308];
+        let middle = quantile_from_sorted(&values, 0.5);
+        assert!(middle.is_finite());
+        assert!((middle / 1.65e308 - 1.0).abs() < 1.0e-15);
+    }
 }
