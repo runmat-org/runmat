@@ -3,21 +3,15 @@ use super::{descriptive_error, gathered, is_real_typed_integer_value};
 use crate::builtins::common::{random_args::keyword_of, tensor};
 use crate::BuiltinResult;
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, KURTOSIS_GPU_MULTI_AXIS_EXTENSION,
-    KURTOSIS_INTEGER_CONTROL_EXTENSION, KURTOSIS_INTEGER_DATA_EXTENSION,
-    MAD_INTEGER_DATA_EXTENSION, MAD_TYPED_INTEGER_CONTROL_EXTENSION,
-    SKEWNESS_GPU_MULTI_AXIS_EXTENSION, SKEWNESS_INTEGER_CONTROL_EXTENSION,
-    SKEWNESS_INTEGER_DATA_EXTENSION,
+    moment_flag_from_f64, BuiltinExtensionDescriptor, MomentControl, ReductionNaN as NanFlag,
+    KURTOSIS_GPU_MULTI_AXIS_EXTENSION, KURTOSIS_INTEGER_CONTROL_EXTENSION,
+    KURTOSIS_INTEGER_DATA_EXTENSION, MAD_INTEGER_DATA_EXTENSION,
+    MAD_TYPED_INTEGER_CONTROL_EXTENSION, SKEWNESS_GPU_MULTI_AXIS_EXTENSION,
+    SKEWNESS_INTEGER_CONTROL_EXTENSION, SKEWNESS_INTEGER_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 use std::cmp::Ordering;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum NanFlag {
-    Include,
-    Omit,
-}
 
 #[derive(Clone)]
 enum Axes {
@@ -66,13 +60,9 @@ pub(super) fn scalar_flag(name: &str, value: &Value) -> BuiltinResult<Option<usi
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => return Ok(None),
     };
-    if !raw.is_finite() || raw.fract().abs() > 1e-12 || !(0.0..=1.0).contains(&raw) {
-        return Err(descriptive_error(
-            name,
-            format!("{name}: flag must be 0 or 1"),
-        ));
-    }
-    Ok(Some(raw as usize))
+    moment_flag_from_f64(raw)
+        .map(|flag| Some(usize::from(flag)))
+        .ok_or_else(|| descriptive_error(name, format!("{name}: flag must be 0 or 1")))
 }
 
 async fn dims_from_value(name: &str, value: &Value) -> BuiltinResult<Vec<usize>> {
@@ -104,14 +94,13 @@ async fn parse_reduce_options(
     let mut nanflag = default_nanflag;
     for arg in rest {
         if let Some(keyword) = keyword_of(&arg) {
-            match keyword.as_str() {
-                "all" => axes = Axes::All,
-                "includenan" | "includemissing" => nanflag = NanFlag::Include,
-                "omitnan" | "omitmissing" => nanflag = NanFlag::Omit,
-                other => {
+            match MomentControl::from_public_option(&keyword) {
+                Some(MomentControl::All) => axes = Axes::All,
+                Some(MomentControl::Missing(policy)) => nanflag = policy,
+                None => {
                     return Err(descriptive_error(
                         name,
-                        format!("{name}: unsupported option '{other}'"),
+                        format!("{name}: unsupported option '{keyword}'"),
                     ));
                 }
             }

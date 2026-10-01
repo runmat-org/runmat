@@ -2,6 +2,39 @@ use super::super::flagged::scalar_flag;
 use super::*;
 
 #[test]
+fn singleton_dimension_retains_following_selector_and_missing_policy() {
+    let input =
+        || Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0, f64::NAN, 6.0], vec![2, 3]).unwrap());
+    let result = block_on(kurtosis::kurtosis_builtin(
+        input(),
+        vec![
+            Value::Num(1.0),
+            Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
+            Value::from("all"),
+            Value::from("includenan"),
+            Value::from("omitmissing"),
+        ],
+    ))
+    .unwrap();
+    let expected = block_on(kurtosis::kurtosis_builtin(
+        input(),
+        vec![Value::Num(1.0), Value::from("all")],
+    ))
+    .unwrap();
+    assert_eq!(tensor_values(result), tensor_values(expected));
+
+    let along_second = block_on(kurtosis::kurtosis_builtin(
+        input(),
+        vec![
+            Value::Num(1.0),
+            Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    assert_eq!(tensor_values(along_second).1, vec![2, 1]);
+}
+
+#[test]
 fn scalar_flag_accepts_typed_integer_tensor_scalars() {
     let one =
         Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1]), vec![1, 1]).expect("flag");

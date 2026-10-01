@@ -1,6 +1,6 @@
 //! Static facts for the flagged deviation and moment reductions.
-use super::policy::MomentStatisticKind;
-use crate::BuiltinCatalogEntry;
+use super::policy::{moment_flag_from_f64, MomentControl, MomentStatisticKind};
+use crate::{BuiltinCatalogEntry, ReductionNaN as MissingMode};
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
     LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact,
@@ -13,12 +13,6 @@ enum Selector {
     All,
     Dimensions(Vec<usize>),
     Dynamic,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MissingMode {
-    Include,
-    Omit,
 }
 
 pub(super) fn infer(
@@ -102,15 +96,15 @@ fn parse_options(
     let mut index = 1;
     let mut ambiguous_first = false;
     if let Some(first) = request.literals.literal_args.get(1) {
-        match first {
+        match first_flag_literal(first) {
             LiteralValue::Empty => index += 1,
             LiteralValue::Bool(value) => {
                 flag = u8::from(*value);
                 index += 1;
             }
             LiteralValue::Number(_) | LiteralValue::Real { .. } | LiteralValue::Integer { .. } => {
-                match literal_dimension(first) {
-                    Some(value @ 0..=1) => flag = value as u8,
+                match literal_flag(first_flag_literal(first)) {
+                    Some(value) => flag = value,
                     _ => diagnostics.push(error("FLAG", "flag must be 0 or 1")),
                 }
                 index += 1;
@@ -124,8 +118,6 @@ fn parse_options(
             _ => {}
         }
     }
-    let mut saw_selector = false;
-    let mut saw_missing = false;
     while index < request.arguments.len() {
         let literal = request
             .literals
@@ -135,63 +127,81 @@ fn parse_options(
         match literal {
             LiteralValue::Character(text)
             | LiteralValue::String(text)
-            | LiteralValue::Keyword(text) => match text.to_ascii_lowercase().as_str() {
-                "all" if !saw_selector => {
+            | LiteralValue::Keyword(text) => match MomentControl::from_public_option(text) {
+                Some(MomentControl::All) => {
                     selector = Selector::All;
-                    saw_selector = true;
                 }
-                "omitnan" | "omitmissing" if !saw_missing => {
-                    missing = MissingMode::Omit;
-                    saw_missing = true;
+                Some(MomentControl::Missing(policy)) => {
+                    missing = policy;
                 }
-                "includenan" | "includemissing" if !saw_missing => {
-                    missing = MissingMode::Include;
-                    saw_missing = true;
-                }
-                _ => diagnostics.push(error("OPTIONS", "unsupported or duplicate option")),
+                None => diagnostics.push(error("OPTIONS", "unsupported reduction option")),
             },
-            LiteralValue::Vector(values) if values.len() == 1 => {
-                match literal_dimension(&values[0]) {
-                    Some(value @ 0..=1) => flag = value as u8,
-                    Some(_) => diagnostics.push(error("FLAG", "flag must be 0 or 1")),
-                    None => ambiguous_first = true,
-                }
-                index += 1;
-            }
-            LiteralValue::Matrix(rows) if rows.len() == 1 && rows[0].len() == 1 => {
-                match literal_dimension(&rows[0][0]) {
-                    Some(value @ 0..=1) => flag = value as u8,
-                    Some(_) => diagnostics.push(error("FLAG", "flag must be 0 or 1")),
-                    None => ambiguous_first = true,
-                }
-                index += 1;
-            }
             LiteralValue::Number(_)
             | LiteralValue::Real { .. }
             | LiteralValue::Integer { .. }
-            | LiteralValue::Vector(_) => {
-                if saw_selector {
-                    diagnostics.push(error("DIMENSION", "only one dimension selector is allowed"));
-                } else {
-                    selector = parse_selector(literal, diagnostics);
-                    saw_selector = true;
-                }
+            | LiteralValue::Vector(_)
+            | LiteralValue::Matrix(_) => {
+                selector = parse_selector(literal, diagnostics);
             }
             LiteralValue::Unknown => selector = Selector::Dynamic,
             _ => diagnostics.push(error("OPTIONS", "unsupported reduction option")),
         }
         index += 1;
     }
-    if ambiguous_first {
+    if ambiguous_first || !diagnostics.is_empty() {
         selector = Selector::Dynamic;
     }
     (selector, flag, missing)
 }
 
+fn first_flag_literal(literal: &LiteralValue) -> &LiteralValue {
+    match literal {
+        LiteralValue::Vector(values) if values.is_empty() => &LiteralValue::Empty,
+        LiteralValue::Vector(values)
+            if values.len() == 1 && is_numeric_flag_literal(&values[0]) =>
+        {
+            &values[0]
+        }
+        LiteralValue::Matrix(rows) if rows.is_empty() || rows.iter().all(Vec::is_empty) => {
+            &LiteralValue::Empty
+        }
+        LiteralValue::Matrix(rows)
+            if rows.len() == 1 && rows[0].len() == 1 && is_numeric_flag_literal(&rows[0][0]) =>
+        {
+            &rows[0][0]
+        }
+        other => other,
+    }
+}
+
+fn is_numeric_flag_literal(literal: &LiteralValue) -> bool {
+    matches!(
+        literal,
+        LiteralValue::Number(_)
+            | LiteralValue::Real { .. }
+            | LiteralValue::Integer { .. }
+            | LiteralValue::Unknown
+    )
+}
+
+fn literal_flag(literal: &LiteralValue) -> Option<u8> {
+    match literal {
+        LiteralValue::Integer { text, .. } => text.parse::<u8>().ok().filter(|flag| *flag <= 1),
+        other => LiteralContext::numeric_from_literal(other).and_then(moment_flag_from_f64),
+    }
+}
+
 fn parse_selector(literal: &LiteralValue, diagnostics: &mut Vec<InferenceDiagnostic>) -> Selector {
-    let values = match literal {
-        LiteralValue::Vector(values) => values.as_slice(),
-        other => std::slice::from_ref(other),
+    let values: Vec<_> = match literal {
+        LiteralValue::Vector(values) => values.iter().collect(),
+        LiteralValue::Matrix(rows) if rows.len() == 1 || rows.iter().all(|row| row.len() == 1) => {
+            rows.iter().flatten().collect()
+        }
+        LiteralValue::Matrix(_) => {
+            diagnostics.push(error("DIMENSION", "dimension array must be a vector"));
+            return Selector::Dynamic;
+        }
+        other => vec![other],
     };
     let mut dims = Vec::new();
     for value in values {
@@ -200,10 +210,7 @@ fn parse_selector(literal: &LiteralValue, diagnostics: &mut Vec<InferenceDiagnos
         }
         match literal_dimension(value) {
             Some(dim) if dim > 0 => dims.push(dim),
-            _ => diagnostics.push(error(
-                "DIMENSION",
-                "dimensions must be distinct positive integers",
-            )),
+            _ => diagnostics.push(error("DIMENSION", "dimensions must be positive integers")),
         }
     }
     if dims.is_empty() {
@@ -215,6 +222,7 @@ fn parse_selector(literal: &LiteralValue, diagnostics: &mut Vec<InferenceDiagnos
 fn literal_dimension(literal: &LiteralValue) -> Option<usize> {
     match literal {
         LiteralValue::Integer { text, .. } => text.parse::<usize>().ok(),
+        LiteralValue::Bool(value) => Some(usize::from(*value)),
         other => LiteralContext::numeric_from_literal(other).and_then(|value| {
             (value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value < usize::MAX as f64)
                 .then_some(value as usize)
@@ -340,6 +348,62 @@ mod tests {
         assert_eq!(flag, 1);
         assert!(matches!(selector, Selector::Default));
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn later_singleton_axes_do_not_consume_following_options() {
+        for dimension in [
+            LiteralValue::Vector(vec![LiteralValue::Number(2.0)]),
+            LiteralValue::Matrix(vec![vec![LiteralValue::Number(2.0)]]),
+        ] {
+            let request = options(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(1.0),
+                dimension.clone(),
+                LiteralValue::String("all".into()),
+                LiteralValue::String("includenan".into()),
+                LiteralValue::String("omitmissing".into()),
+            ]);
+            let mut diagnostics = Vec::new();
+            let (selector, flag, missing) =
+                parse_options(&request, MomentStatisticKind::Kurtosis, &mut diagnostics);
+            assert!(diagnostics.is_empty());
+            assert!(matches!(selector, Selector::All));
+            assert_eq!(flag, 1);
+            assert_eq!(missing, MissingMode::Omit);
+
+            let request = options(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(1.0),
+                dimension,
+            ]);
+            let (selector, _, _) =
+                parse_options(&request, MomentStatisticKind::Kurtosis, &mut diagnostics);
+            assert!(matches!(selector, Selector::Dimensions(ref dimensions) if dimensions == &[2]));
+        }
+    }
+
+    #[test]
+    fn first_array_flag_and_logical_dimension_keep_distinct_roles() {
+        let request = options(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Vector(vec![LiteralValue::Number(2.0)]),
+        ]);
+        let mut diagnostics = Vec::new();
+        let (selector, _, _) =
+            parse_options(&request, MomentStatisticKind::Kurtosis, &mut diagnostics);
+        assert!(!diagnostics.is_empty());
+        assert!(matches!(selector, Selector::Dynamic));
+
+        let request = options(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Vector(vec![LiteralValue::Bool(true)]),
+        ]);
+        let mut diagnostics = Vec::new();
+        let (selector, _, _) =
+            parse_options(&request, MomentStatisticKind::Kurtosis, &mut diagnostics);
+        assert!(diagnostics.is_empty());
+        assert!(matches!(selector, Selector::Dimensions(ref dimensions) if dimensions == &[1]));
     }
 
     #[test]
