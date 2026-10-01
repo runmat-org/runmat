@@ -151,12 +151,14 @@ pub enum SceneExportErrorKind {
 pub struct SceneExportError {
     pub kind: SceneExportErrorKind,
     pub message: String,
+    source: Option<crate::plots::PlotDataExportError>,
 }
 
 impl SceneExportError {
     fn budget_exceeded(used: usize, added: usize, max: usize) -> Self {
         Self {
             kind: SceneExportErrorKind::BudgetExceeded,
+            source: None,
             message: format!(
                 "figure scene export exceeds budget: {} + {} bytes > {} bytes",
                 used, added, max
@@ -168,6 +170,7 @@ impl SceneExportError {
         Self {
             kind: SceneExportErrorKind::UnexportableGpuData,
             message: message.into(),
+            source: None,
         }
     }
 
@@ -175,6 +178,7 @@ impl SceneExportError {
         Self {
             kind: SceneExportErrorKind::Serialization,
             message: message.into(),
+            source: None,
         }
     }
 
@@ -182,6 +186,15 @@ impl SceneExportError {
         Self {
             kind: SceneExportErrorKind::Readback,
             message: message.into(),
+            source: None,
+        }
+    }
+
+    fn readback_typed(source: crate::plots::PlotDataExportError) -> Self {
+        Self {
+            kind: SceneExportErrorKind::Readback,
+            message: source.to_string(),
+            source: Some(source),
         }
     }
 }
@@ -192,7 +205,13 @@ impl fmt::Display for SceneExportError {
     }
 }
 
-impl Error for SceneExportError {}
+impl Error for SceneExportError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|source| source as &(dyn Error + 'static))
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct SceneExportBudget {
@@ -1961,9 +1980,9 @@ impl ScenePlot {
         let scene_plot = match plot {
             PlotElement::Line(line) => {
                 let (x_data, y_data) = line
-                    .export_numeric_xy_data()
+                    .export_numeric_xy_data_typed()
                     .await
-                    .map_err(SceneExportError::readback)?
+                    .map_err(SceneExportError::readback_typed)?
                     .ok_or_else(|| {
                         SceneExportError::unexportable("line plot has no exportable scene data")
                     })?;
@@ -1990,9 +2009,9 @@ impl ScenePlot {
             PlotElement::ReferenceLine(_) => Self::from_plot(plot, axes_index),
             PlotElement::Scatter(scatter) => {
                 let (x_data, y_data) = scatter
-                    .export_numeric_xy_data()
+                    .export_numeric_xy_data_typed()
                     .await
-                    .map_err(SceneExportError::readback)?
+                    .map_err(SceneExportError::readback_typed)?
                     .ok_or_else(|| {
                         SceneExportError::unexportable("scatter plot has no exportable scene data")
                     })?;
@@ -3873,6 +3892,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu::PlotReadbackError;
     use crate::plots::{
         AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
         MeshPlot, NumericPlotData, PatchPlot, PieChart, PolarHistogramDisplayStyle, QuiverPlot,
@@ -3880,6 +3900,27 @@ mod tests {
         SurfacePlot,
     };
     use glam::{Vec3, Vec4};
+
+    #[test]
+    fn typed_scene_readback_keeps_the_original_device_failure() {
+        let cause = crate::plots::PlotDataExportError::Readback(PlotReadbackError::Access(
+            runmat_accelerate_api::WgpuAccessError::WrongDevice,
+        ));
+        let error = SceneExportError::readback_typed(cause.clone());
+        assert_eq!(error.kind, SceneExportErrorKind::Readback);
+        assert_eq!(error.message, cause.to_string());
+        assert_eq!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<crate::plots::PlotDataExportError>()),
+            Some(&cause)
+        );
+        assert!(error
+            .source()
+            .and_then(Error::source)
+            .and_then(|source| source.downcast_ref::<PlotReadbackError>())
+            .is_some());
+    }
 
     #[test]
     fn async_scene_export_covers_every_plot_element_variant() {

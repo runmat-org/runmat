@@ -6,6 +6,11 @@ pub(super) trait ReferenceLineRuntimeErrors {
     fn internal(self, message: impl Into<String>) -> RuntimeError;
     fn invalid_with_source(self, message: impl Into<String>, cause: RuntimeError) -> RuntimeError;
     fn internal_with_source(self, message: impl Into<String>, cause: RuntimeError) -> RuntimeError;
+    fn internal_with_plot_source(
+        self,
+        message: impl Into<String>,
+        cause: runmat_plot::plots::PlotDataExportError,
+    ) -> RuntimeError;
 }
 
 impl ReferenceLineRuntimeErrors for ReferenceLineOwner {
@@ -23,6 +28,20 @@ impl ReferenceLineRuntimeErrors for ReferenceLineOwner {
 
     fn internal_with_source(self, message: impl Into<String>, cause: RuntimeError) -> RuntimeError {
         self.sourced_error(self.internal_descriptor(), message, cause)
+    }
+
+    fn internal_with_plot_source(
+        self,
+        message: impl Into<String>,
+        cause: runmat_plot::plots::PlotDataExportError,
+    ) -> RuntimeError {
+        let mut builder = build_runtime_error(message)
+            .with_builtin(self.name())
+            .with_source(cause);
+        if let Some(identifier) = self.internal_descriptor().identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
     }
 }
 

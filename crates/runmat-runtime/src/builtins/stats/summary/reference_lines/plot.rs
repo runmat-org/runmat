@@ -52,18 +52,21 @@ pub(super) async fn least_squares_specs(
 
         let data = match plot {
             PlotElement::Scatter(plot) => {
-                Some(plot.export_scene_xy_data().await.map_err(|err| {
-                    owner.internal(format!(
-                        "{}: unable to read scatter data: {err}",
-                        owner.name()
-                    ))
+                Some(plot.export_scene_xy_data_typed().await.map_err(|err| {
+                    owner.internal_with_plot_source(
+                        format!("{}: unable to read scatter data: {err}", owner.name()),
+                        err,
+                    )
                 })?)
             }
             PlotElement::Line(plot)
                 if plot.marker.is_some() && matches!(plot.line_style, LineStyle::None) =>
             {
-                Some(plot.export_scene_xy_data().await.map_err(|err| {
-                    owner.internal(format!("{}: unable to read line data: {err}", owner.name()))
+                Some(plot.export_scene_xy_data_typed().await.map_err(|err| {
+                    owner.internal_with_plot_source(
+                        format!("{}: unable to read line data: {err}", owner.name()),
+                        err,
+                    )
                 })?)
             }
             _ => None,

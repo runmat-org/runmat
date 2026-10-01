@@ -8,9 +8,9 @@ use crate::core::{
     PipelineType, RenderData, Vertex,
 };
 use crate::gpu::line::LineGpuInputs;
-use crate::gpu::util::readback_scalar_buffer_f64;
+use crate::gpu::util::readback_scalar_buffer_f64_typed;
 use crate::plots::scatter::MarkerStyle as ScatterMarkerStyle;
-use crate::plots::NumericPlotData;
+use crate::plots::{NumericPlotData, PlotDataExportError};
 use glam::{Vec3, Vec4};
 use log::{trace, warn};
 use runmat_value::NumericStorage;
@@ -129,7 +129,15 @@ impl LinePlot {
     }
 
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if let Some((x, y)) = self.export_numeric_xy_data().await? {
+        self.export_scene_xy_data_typed()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_scene_xy_data_typed(
+        &self,
+    ) -> Result<(Vec<f64>, Vec<f64>), PlotDataExportError> {
+        if let Some((x, y)) = self.export_numeric_xy_data_typed().await? {
             return Ok((x.materialize_f64(), y.materialize_f64()));
         }
         Ok((Vec::new(), Vec::new()))
@@ -138,49 +146,73 @@ impl LinePlot {
     pub async fn export_numeric_xy_data(
         &self,
     ) -> Result<Option<(NumericPlotData, NumericPlotData)>, String> {
+        self.export_numeric_xy_data_typed()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_numeric_xy_data_typed(
+        &self,
+    ) -> Result<Option<(NumericPlotData, NumericPlotData)>, PlotDataExportError> {
         match (&self.source_x, &self.source_y) {
             (Some(x), Some(y)) if x.len() == y.len() => {
                 return Ok(Some((x.clone(), y.clone())));
             }
             (None, None) => {}
-            _ => return Err("line plot has partial CPU source data".to_string()),
+            _ => {
+                return Err(PlotDataExportError::SourceUnavailable(
+                    "line plot has partial CPU source data",
+                ))
+            }
         }
 
         if let Some(inputs) = &self.gpu_line_inputs {
-            let context = shared_wgpu_context().ok_or_else(|| {
-                "line plot has GPU source data but no shared WGPU context is installed".to_string()
-            })?;
+            let context = shared_wgpu_context().ok_or(PlotDataExportError::SourceUnavailable(
+                "line plot has GPU source data but no shared WGPU context is installed",
+            ))?;
             let len = inputs.len as usize;
-            let x =
-                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
-                    .await?;
-            let y =
-                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
-                    .await?;
+            let x = readback_scalar_buffer_f64_typed(
+                &context.access,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64_typed(
+                &context.access,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
             let shape = vec![1, len];
             let (x, y) = match inputs.scalar {
                 crate::gpu::ScalarType::F64 => (
-                    NumericPlotData::new(NumericStorage::F64(x), shape.clone())?,
-                    NumericPlotData::new(NumericStorage::F64(y), shape)?,
+                    NumericPlotData::new(NumericStorage::F64(x), shape.clone())
+                        .map_err(PlotDataExportError::InvalidSourceLayout)?,
+                    NumericPlotData::new(NumericStorage::F64(y), shape)
+                        .map_err(PlotDataExportError::InvalidSourceLayout)?,
                 ),
                 crate::gpu::ScalarType::F32 => (
                     NumericPlotData::new(
                         NumericStorage::F32(x.into_iter().map(|v| v as f32).collect()),
                         shape.clone(),
-                    )?,
+                    )
+                    .map_err(PlotDataExportError::InvalidSourceLayout)?,
                     NumericPlotData::new(
                         NumericStorage::F32(y.into_iter().map(|v| v as f32).collect()),
                         shape,
-                    )?,
+                    )
+                    .map_err(PlotDataExportError::InvalidSourceLayout)?,
                 ),
             };
             return Ok(Some((x, y)));
         }
 
         if self.gpu_vertices.is_some() {
-            return Err(
-                "line plot has GPU render vertices but no exportable source data".to_string(),
-            );
+            return Err(PlotDataExportError::SourceUnavailable(
+                "line plot has GPU render vertices but no exportable source data",
+            ));
         }
 
         Ok(None)

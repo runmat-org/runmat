@@ -8,6 +8,7 @@ pub mod bar;
 pub mod contour;
 pub mod contour_fill;
 pub mod errorbar;
+mod export_error;
 pub mod figure;
 pub mod line;
 pub mod line3;
@@ -29,6 +30,7 @@ pub use bar::{BarChart, PolarHistogramDisplayStyle};
 pub use contour::ContourPlot;
 pub use contour_fill::ContourFillPlot;
 pub use errorbar::ErrorBar;
+pub use export_error::PlotDataExportError;
 pub use figure::{
     AxesKind, AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
 };

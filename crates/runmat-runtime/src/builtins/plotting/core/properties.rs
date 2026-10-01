@@ -6922,11 +6922,12 @@ fn line_xy_data_for_properties(
     if let (Some(x), Some(y)) = line.source_data() {
         return Ok((x.clone(), y.clone()));
     }
-    futures::executor::block_on(line.export_numeric_xy_data())
+    futures::executor::block_on(line.export_numeric_xy_data_typed())
         .map_err(|err| {
-            plotting_error(
+            plotting_error_with_source(
                 builtin,
                 format!("{builtin}: unable to read line source data: {err}"),
+                err,
             )
         })?
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: line has no source data")))
@@ -6956,11 +6957,12 @@ fn scatter_xy_data_for_properties(
     if let (Some(x), Some(y)) = scatter.source_data() {
         return Ok((x.clone(), y.clone()));
     }
-    futures::executor::block_on(scatter.export_numeric_xy_data())
+    futures::executor::block_on(scatter.export_numeric_xy_data_typed())
         .map_err(|err| {
-            plotting_error(
+            plotting_error_with_source(
                 builtin,
                 format!("{builtin}: unable to read scatter source data: {err}"),
+                err,
             )
         })?
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: scatter has no source data")))

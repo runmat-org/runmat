@@ -1,18 +1,48 @@
 use super::*;
 use pollster::FutureExt;
+use std::error::Error;
 use wgpu::util::DeviceExt;
 
 #[test]
 fn cleanup_failure_cannot_report_success_or_erase_the_original_error() {
+    let cleanup = PlotReadbackError::UnmapPanicked;
+    let primary = PlotReadbackError::Decode("decode");
     assert_eq!(
-        combine_cleanup(Ok(42), Err("cleanup".into())),
-        Err("cleanup".into())
+        combine_cleanup(Ok(42), Err(cleanup.clone())),
+        Err(cleanup.clone())
     );
     assert_eq!(
-        combine_cleanup::<()>(Err("decode".into()), Err("cleanup".into())),
-        Err("decode; additionally, cleanup".into())
+        combine_cleanup::<()>(Err(primary.clone()), Err(cleanup.clone())),
+        Err(PlotReadbackError::WithCleanup {
+            primary: Box::new(primary),
+            cleanup: Box::new(cleanup)
+        })
     );
     assert_eq!(combine_cleanup(Ok(42), Ok(())), Ok(42));
+
+    let error = combine_cleanup::<()>(
+        Err(PlotReadbackError::Access(
+            runmat_accelerate_api::WgpuAccessError::WrongDevice,
+        )),
+        Err(PlotReadbackError::CleanupAccess(
+            runmat_accelerate_api::WgpuAccessError::Poisoned,
+        )),
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(),
+        "WGPU permit belongs to another device authority; additionally, GPU readback cleanup could not acquire its device: WGPU emission gate is poisoned");
+    assert_eq!(
+        error.cleanup_cause(),
+        Some(&PlotReadbackError::CleanupAccess(
+            runmat_accelerate_api::WgpuAccessError::Poisoned,
+        ))
+    );
+    let primary = error.source().expect("primary source remains inspectable");
+    assert!(primary.downcast_ref::<PlotReadbackError>().is_some());
+    assert!(primary
+        .source()
+        .and_then(|source| source.downcast_ref::<runmat_accelerate_api::WgpuAccessError>())
+        .is_some());
 }
 
 fn device_access() -> WgpuDeviceAccess {
@@ -63,11 +93,14 @@ fn readback_releases_access_and_mapping_for_reuse() {
         expected[0]
     );
     let decode_error = readback_mapped::<()>(&access, &buffer, 16, |_| {
-        Err("decoder rejected payload".into())
+        Err(PlotReadbackError::Decode("decoder rejected payload"))
     })
     .block_on()
     .unwrap_err();
-    assert_eq!(decode_error, "decoder rejected payload");
+    assert_eq!(
+        decode_error,
+        PlotReadbackError::Decode("decoder rejected payload")
+    );
     #[cfg(panic = "unwind")]
     {
         // Exercise the actual async readback owner, not a standalone Mapping.

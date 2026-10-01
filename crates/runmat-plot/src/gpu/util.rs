@@ -1,4 +1,4 @@
-use crate::gpu::{GpuInputBuffer, ScalarType};
+use crate::gpu::{GpuInputBuffer, PlotReadbackError, ScalarType};
 use futures::channel::oneshot;
 use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
 use runmat_accelerate_api::WgpuDeviceAccess;
@@ -19,7 +19,7 @@ struct Mapping<'a> {
     registered: bool,
 }
 impl Mapping<'_> {
-    fn finish(&mut self) -> Result<(), String> {
+    fn finish(&mut self) -> Result<(), PlotReadbackError> {
         if !self.registered {
             return Ok(());
         }
@@ -29,8 +29,8 @@ impl Mapping<'_> {
             self.access
                 .with_cleanup(|cleanup| cleanup.unmap_buffer(self.buffer))
         })
-        .map_err(|_| "GPU readback unmap panicked; mapping state is uncertain".to_string())?
-        .map_err(|error| format!("GPU readback cleanup could not acquire its device: {error}"))
+        .map_err(|_| PlotReadbackError::UnmapPanicked)?
+        .map_err(PlotReadbackError::CleanupAccess)
     }
 }
 impl Drop for Mapping<'_> {
@@ -46,21 +46,26 @@ pub(crate) async fn readback_bytes(
     buffer: &wgpu::Buffer,
     byte_len: usize,
 ) -> Result<Vec<u8>, String> {
-    readback_mapped(access, buffer, byte_len, |bytes| Ok(bytes.to_vec())).await
+    readback_mapped(access, buffer, byte_len, |bytes| Ok(bytes.to_vec()))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 async fn readback_mapped<T>(
     access: &WgpuDeviceAccess,
     buffer: &wgpu::Buffer,
     byte_len: usize,
-    decode: impl FnOnce(&[u8]) -> Result<T, String>,
-) -> Result<T, String> {
+    decode: impl FnOnce(&[u8]) -> Result<T, PlotReadbackError>,
+) -> Result<T, PlotReadbackError> {
     if byte_len == 0 {
         return decode(&[]);
     }
-    let byte_len_u64 = u64::try_from(byte_len).map_err(|error| error.to_string())?;
+    let byte_len_u64 = u64::try_from(byte_len).map_err(|_| PlotReadbackError::ByteSizeOverflow)?;
     if byte_len_u64 > buffer.size() {
-        return Err("GPU readback buffer too small".to_string());
+        return Err(PlotReadbackError::BufferTooSmall {
+            requested: byte_len,
+            available: buffer.size(),
+        });
     }
     let slice = buffer.slice(0..byte_len_u64);
     let (tx, rx) = oneshot::channel();
@@ -78,34 +83,43 @@ async fn readback_mapped<T>(
                     let _ = tx.send(result);
                 });
             })
-            .map_err(|error| error.to_string())?;
+            .map_err(PlotReadbackError::Access)?;
         #[cfg(not(target_arch = "wasm32"))]
         access.poll(wgpu::Maintain::Wait);
         #[cfg(target_arch = "wasm32")]
         access.poll(wgpu::Maintain::Poll);
         rx.await
-            .map_err(|_| "map callback dropped".to_string())?
-            .map_err(|error| error.to_string())?;
+            .map_err(|_| PlotReadbackError::MapCallbackDropped)?
+            .map_err(PlotReadbackError::Map)?;
         access
             .with_shared(|_| {
                 let data = slice.get_mapped_range();
                 if data.len() < byte_len {
-                    return Err("GPU readback buffer too small".to_string());
+                    return Err(PlotReadbackError::BufferTooSmall {
+                        requested: byte_len,
+                        available: data.len() as u64,
+                    });
                 }
                 decode(&data[..byte_len])
             })
-            .map_err(|error| error.to_string())?
+            .map_err(PlotReadbackError::Access)?
     }
     .await;
     // The mapped view and emission permit have both ended before cleanup.
     combine_cleanup(result, mapping.finish())
 }
 
-fn combine_cleanup<T>(result: Result<T, String>, cleanup: Result<(), String>) -> Result<T, String> {
+fn combine_cleanup<T>(
+    result: Result<T, PlotReadbackError>,
+    cleanup: Result<(), PlotReadbackError>,
+) -> Result<T, PlotReadbackError> {
     match (result, cleanup) {
         (result, Ok(())) => result,
         (Ok(_), Err(cleanup)) => Err(cleanup),
-        (Err(error), Err(cleanup)) => Err(format!("{error}; additionally, {cleanup}")),
+        (Err(error), Err(cleanup)) => Err(PlotReadbackError::WithCleanup {
+            primary: Box::new(error),
+            cleanup: Box::new(cleanup),
+        }),
     }
 }
 
@@ -116,13 +130,12 @@ fn combine_cleanup<T>(result: Result<T, String>, cleanup: Result<(), String>) ->
 /// emission permit is active: progress and mapping cleanup need that authority.
 pub async fn readback_u32(access: &WgpuDeviceAccess, buffer: &wgpu::Buffer) -> Result<u32, String> {
     readback_mapped(access, buffer, 4, |bytes| {
-        Ok(u32::from_le_bytes(
-            bytes
-                .try_into()
-                .map_err(|_| "invalid u32 readback extent".to_string())?,
-        ))
+        Ok(u32::from_le_bytes(bytes.try_into().map_err(|_| {
+            PlotReadbackError::Decode("invalid u32 readback extent")
+        })?))
     })
     .await
+    .map_err(|error| error.to_string())
 }
 
 /// Read one float under the same raw staging-buffer and future-lifetime
@@ -149,6 +162,7 @@ pub async fn readback_f32_buffer(
             .collect())
     })
     .await
+    .map_err(|error| error.to_string())
 }
 
 /// Copy and read bytes using the buffer's actual device authority. Exported
@@ -159,24 +173,30 @@ pub async fn copy_readback_bytes(
     buffer: &GpuInputBuffer,
     byte_len: usize,
 ) -> Result<Vec<u8>, String> {
-    copy_readback_mapped(access, buffer, byte_len, |bytes| Ok(bytes.to_vec())).await
+    copy_readback_mapped(access, buffer, byte_len, |bytes| Ok(bytes.to_vec()))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 async fn copy_readback_mapped<T>(
     access: &WgpuDeviceAccess,
     buffer: &GpuInputBuffer,
     byte_len: usize,
-    decode: impl FnOnce(&[u8]) -> Result<T, String>,
-) -> Result<T, String> {
+    decode: impl FnOnce(&[u8]) -> Result<T, PlotReadbackError>,
+) -> Result<T, PlotReadbackError> {
     if byte_len == 0 {
         return decode(&[]);
     }
     let staging = access
-        .with_shared(|emission| -> Result<_, String> {
-            let source = buffer.buffer(emission).map_err(|error| error.to_string())?;
-            let byte_size = u64::try_from(byte_len).map_err(|error| error.to_string())?;
+        .with_shared(|emission| -> Result<_, PlotReadbackError> {
+            let source = buffer.buffer(emission).map_err(PlotReadbackError::Access)?;
+            let byte_size =
+                u64::try_from(byte_len).map_err(|_| PlotReadbackError::ByteSizeOverflow)?;
             if byte_size > source.size() {
-                return Err("GPU copy readback buffer too small".to_string());
+                return Err(PlotReadbackError::CopyBufferTooSmall {
+                    requested: byte_len,
+                    available: source.size(),
+                });
             }
             let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-plot-readback-staging"),
@@ -190,7 +210,7 @@ async fn copy_readback_mapped<T>(
             emission.queue().submit(Some(commands));
             Ok(staging)
         })
-        .map_err(|error| error.to_string())??;
+        .map_err(PlotReadbackError::Access)??;
     readback_mapped(access, &staging, byte_len, decode).await
 }
 
@@ -202,13 +222,26 @@ pub async fn readback_scalar_buffer_f64(
     element_count: usize,
     scalar: ScalarType,
 ) -> Result<Vec<f64>, String> {
+    readback_scalar_buffer_f64_typed(access, buffer, element_count, scalar)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Typed form for internal export consumers that must retain the original
+/// device, map, and cleanup causes.
+pub(crate) async fn readback_scalar_buffer_f64_typed(
+    access: &WgpuDeviceAccess,
+    buffer: &GpuInputBuffer,
+    element_count: usize,
+    scalar: ScalarType,
+) -> Result<Vec<f64>, PlotReadbackError> {
     let width = match scalar {
         ScalarType::F32 => 4,
         ScalarType::F64 => 8,
     };
     let byte_len = element_count
         .checked_mul(width)
-        .ok_or("readback byte size overflow")?;
+        .ok_or(PlotReadbackError::ByteSizeOverflow)?;
     copy_readback_mapped(access, buffer, byte_len, |bytes| match scalar {
         ScalarType::F32 => Ok(bytes
             .chunks_exact(4)
