@@ -7,7 +7,7 @@ mod model;
 mod prediction;
 mod prior;
 
-use self::{coefficients::*, labels::*, model::*, prediction::*, prior::*};
+use self::{coefficients::*, labels::*, model::*, prediction::*};
 
 use nalgebra::DMatrix;
 use runmat_builtins::{
