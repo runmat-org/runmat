@@ -10,7 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    ResolveContext, Type, KURTOSIS_GPU_MULTI_AXIS_EXTENSION, KURTOSIS_INTEGER_CONTROL_EXTENSION,
+    KURTOSIS_INTEGER_DATA_EXTENSION, MAD_INTEGER_DATA_EXTENSION,
+    MAD_TYPED_INTEGER_CONTROL_EXTENSION, SKEWNESS_GPU_MULTI_AXIS_EXTENSION,
+    SKEWNESS_INTEGER_CONTROL_EXTENSION, SKEWNESS_INTEGER_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, IntValue, NumericDType, StringArray, Tensor, Value};
@@ -27,38 +30,6 @@ const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Input data array.",
 };
 
-const PARAM_FLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "flag",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Normalization or deviation mode flag.",
-};
-
-const PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "dim",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Dimension, dimension vector, or \"all\" selector.",
-};
-
-const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Optional dimension and missing-value arguments.",
-};
-
-const OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Computed statistic.",
-}];
-
 const OUTPUT_TABLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tbl",
     ty: BuiltinParamType::Any,
@@ -68,231 +39,6 @@ const OUTPUT_TABLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 }];
 
 const INPUTS_X: [BuiltinParamDescriptor; 1] = [PARAM_X];
-const INPUTS_X_FLAG: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_FLAG];
-const INPUTS_X_FLAG_OPTIONS: [BuiltinParamDescriptor; 4] =
-    [PARAM_X, PARAM_FLAG, PARAM_DIM, PARAM_OPTIONS];
-macro_rules! flagged_signatures {
-    ($const_name:ident, $name:literal) => {
-        const $const_name: [BuiltinSignatureDescriptor; 3] = [
-            BuiltinSignatureDescriptor {
-                label: concat!("Y = ", $name, "(X)"),
-                inputs: &INPUTS_X,
-                outputs: &OUTPUT_Y,
-            },
-            BuiltinSignatureDescriptor {
-                label: concat!("Y = ", $name, "(X, flag)"),
-                inputs: &INPUTS_X_FLAG,
-                outputs: &OUTPUT_Y,
-            },
-            BuiltinSignatureDescriptor {
-                label: concat!("Y = ", $name, "(X, flag, dim)"),
-                inputs: &INPUTS_X_FLAG_OPTIONS,
-                outputs: &OUTPUT_Y,
-            },
-        ];
-    };
-}
-
-flagged_signatures!(MAD_SIGNATURES, "mad");
-flagged_signatures!(SKEWNESS_SIGNATURES, "skewness");
-flagged_signatures!(KURTOSIS_SIGNATURES, "kurtosis");
-
-const MAD_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mad-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mad with typed-integer input data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MadIntegerDataExtension"),
-};
-
-const MAD_TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "mad-typed-integer-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "mad with a typed-integer flag or dimension control is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:MadTypedIntegerControlExtension"),
-    };
-
-const MAD_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    MAD_INTEGER_DATA_EXTENSION,
-    MAD_TYPED_INTEGER_CONTROL_EXTENSION,
-];
-
-const MAD_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data domain is single or double; RunMat mode additionally materializes all eight real integer classes into the double deviation domain.",
-    }];
-
-const MAD_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "flag_or_dimension",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are a mode-gated RunMat extension.",
-    }];
-
-const MAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = mad(X, flag, dim_or_vecdim_or_all) with integer X",
-        inputs: &MAD_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat's integer-data extension enters one explicit double computation/output boundary; flag 0/default computes mean absolute deviation and flag 1 computes median absolute deviation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = mad(X, flag_or_dimension, ...) with floating X",
-        inputs: &MAD_INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed-integer controls are decoded exactly on the host and are independently gated from the integer-data extension.",
-    },
-];
-
-macro_rules! floating_stat_integer_metadata {
-    (
-        $data_extension:ident,
-        $control_extension:ident,
-        $extensions:ident,
-        $data_inputs:ident,
-        $control_inputs:ident,
-        $capabilities:ident,
-        $name:literal,
-        $data_id:literal,
-        $control_id:literal,
-        $data_error:literal,
-        $control_error:literal,
-        $data_notes:literal,
-        $control_notes:literal
-    ) => {
-        const $data_extension: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-            id: $data_id,
-            mode: BuiltinExtensionMode::RunMatOnly,
-            description: concat!($name, " with typed-integer input data is a RunMat extension"),
-            error_identifier: Some($data_error),
-        };
-        const $control_extension: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-            id: $control_id,
-            mode: BuiltinExtensionMode::RunMatOnly,
-            description: concat!(
-                $name,
-                " with a typed-integer flag or dimension control is a RunMat extension"
-            ),
-            error_identifier: Some($control_error),
-        };
-        const $extensions: [BuiltinExtensionDescriptor; 2] =
-            [$data_extension, $control_extension];
-        const $data_inputs: [BuiltinIntegerInputCapability; 1] =
-            [BuiltinIntegerInputCapability {
-                name: "X",
-                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-                availability: BuiltinIntegerInputAvailability::RunMatOnly,
-                scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-                notes: $data_notes,
-            }];
-        const $control_inputs: [BuiltinIntegerInputCapability; 1] =
-            [BuiltinIntegerInputCapability {
-                name: "flag_or_dimension",
-                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-                availability: BuiltinIntegerInputAvailability::RunMatOnly,
-                scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-                notes: $control_notes,
-            }];
-        const $capabilities: [BuiltinIntegerCapabilityDescriptor; 2] = [
-            BuiltinIntegerCapabilityDescriptor {
-                form: concat!("Y = ", $name, "(X, ...) with integer X"),
-                inputs: &$data_inputs,
-                computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-                output_class: BuiltinIntegerOutputClassRule::Double,
-                overflow: BuiltinIntegerOverflowRule::NotApplicable,
-                backend: BuiltinIntegerBackendRule::GatherFallback,
-                overload: BuiltinIntegerOverloadKind::Multiple,
-                notes: "RunMat's integer-data extension enters one explicit double computation/output boundary after compatibility is decided from host storage or resident dtype metadata.",
-            },
-            BuiltinIntegerCapabilityDescriptor {
-                form: concat!(
-                    "Y = ",
-                    $name,
-                    "(X, integer_flag_or_dimension, ...) with floating X"
-                ),
-                inputs: &$control_inputs,
-                computation_domain: BuiltinIntegerComputationDomain::Structural,
-                output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-                overflow: BuiltinIntegerOverflowRule::NotApplicable,
-                backend: BuiltinIntegerBackendRule::HostOnly,
-                overload: BuiltinIntegerOverloadKind::StructuralParameter,
-                notes: "Typed-integer controls are decoded exactly and independently gated from integer data.",
-            },
-        ];
-    };
-}
-
-floating_stat_integer_metadata!(
-    SKEWNESS_INTEGER_DATA_EXTENSION,
-    SKEWNESS_INTEGER_CONTROL_EXTENSION,
-    SKEWNESS_EXTENSIONS_BASE,
-    SKEWNESS_INTEGER_DATA_INPUT,
-    SKEWNESS_INTEGER_CONTROL_INPUT,
-    SKEWNESS_INTEGER_CAPABILITIES,
-    "skewness",
-    "skewness-integer-data",
-    "skewness-typed-integer-control",
-    "RunMat:compatibility:SkewnessIntegerDataExtension",
-    "RunMat:compatibility:SkewnessTypedIntegerControlExtension",
-    "The documented data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
-    "The documented bias flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are mode-gated."
-);
-
-floating_stat_integer_metadata!(
-    KURTOSIS_INTEGER_DATA_EXTENSION,
-    KURTOSIS_INTEGER_CONTROL_EXTENSION,
-    KURTOSIS_EXTENSIONS_BASE,
-    KURTOSIS_INTEGER_DATA_INPUT,
-    KURTOSIS_INTEGER_CONTROL_INPUT,
-    KURTOSIS_INTEGER_CAPABILITIES,
-    "kurtosis",
-    "kurtosis-integer-data",
-    "kurtosis-typed-integer-control",
-    "RunMat:compatibility:KurtosisIntegerDataExtension",
-    "RunMat:compatibility:KurtosisTypedIntegerControlExtension",
-    "The documented data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
-    "The documented bias flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are mode-gated."
-);
-
-const SKEWNESS_GPU_MULTI_AXIS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "skewness-gpu-all-or-vecdim",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "skewness with all or vecdim on a GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SkewnessGpuMultiAxisExtension"),
-};
-
-const KURTOSIS_GPU_MULTI_AXIS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "kurtosis-gpu-all-or-vecdim",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "kurtosis with all or vecdim on a GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KurtosisGpuMultiAxisExtension"),
-};
-
-const SKEWNESS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    SKEWNESS_EXTENSIONS_BASE[0],
-    SKEWNESS_EXTENSIONS_BASE[1],
-    SKEWNESS_GPU_MULTI_AXIS_EXTENSION,
-];
-
-const KURTOSIS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    KURTOSIS_EXTENSIONS_BASE[0],
-    KURTOSIS_EXTENSIONS_BASE[1],
-    KURTOSIS_GPU_MULTI_AXIS_EXTENSION,
-];
 
 const TABULATE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "tabulate-integer-data",
@@ -514,7 +260,11 @@ async fn parse_flagged_options(
     let mut flag = default_flag;
     let mut start = 0usize;
     if let Some(first) = rest.first() {
-        if keyword_of(first).is_none() {
+        if matches!(first, Value::Tensor(tensor) if tensor.is_empty()) {
+            // An empty first argument explicitly requests the default flag,
+            // leaving the following argument available as a dimension.
+            start = 1;
+        } else if keyword_of(first).is_none() {
             if let Some(parsed) = scalar_flag(name, first)? {
                 flag = parsed;
                 start = 1;
@@ -690,7 +440,7 @@ fn rest_requests_multi_axis(rest: &[Value]) -> bool {
     rest.iter().any(|value| {
         keyword_of(value).is_some_and(|keyword| keyword == "all")
             || matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) > 1)
-            || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().product::<usize>() > 1)
+            || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().any(|extent| *extent > 1))
     })
 }
 
@@ -1048,17 +798,10 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
 
 pub mod mad {
     use super::*;
-    descriptive_descriptor!("mad", MAD_SIGNATURES);
 
     #[runtime_builtin(
         name = "mad",
-        category = "stats/summary",
-        summary = "Compute mean or median absolute deviation.",
-        keywords = "mad,mean absolute deviation,median absolute deviation,statistics",
-        type_resolver(super::descriptive_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::MAD_EXTENSIONS),
-        integer_capabilities(super::MAD_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::summary::descriptive::mad"
     )]
     pub(crate) async fn mad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1077,17 +820,10 @@ pub mod mad {
 
 pub mod skewness {
     use super::*;
-    descriptive_descriptor!("skewness", SKEWNESS_SIGNATURES);
 
     #[runtime_builtin(
         name = "skewness",
-        category = "stats/summary",
-        summary = "Compute sample skewness.",
-        keywords = "skewness,third moment,statistics,summary",
-        type_resolver(super::descriptive_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::SKEWNESS_EXTENSIONS),
-        integer_capabilities(super::SKEWNESS_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::summary::descriptive::skewness"
     )]
     pub(crate) async fn skewness_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1118,17 +854,10 @@ pub mod skewness {
 
 pub mod kurtosis {
     use super::*;
-    descriptive_descriptor!("kurtosis", KURTOSIS_SIGNATURES);
 
     #[runtime_builtin(
         name = "kurtosis",
-        category = "stats/summary",
-        summary = "Compute sample kurtosis.",
-        keywords = "kurtosis,fourth moment,statistics,summary",
-        type_resolver(super::descriptive_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::KURTOSIS_EXTENSIONS),
-        integer_capabilities(super::KURTOSIS_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::summary::descriptive::kurtosis"
     )]
     pub(crate) async fn kurtosis_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1388,6 +1117,16 @@ mod tests {
         ))
         .unwrap();
         assert_close(tensor_values(median_mad).0[0], 1.0);
+    }
+
+    #[test]
+    fn empty_flag_placeholder_preserves_following_dimension() {
+        let input = Value::Tensor(Tensor::new(vec![1.0, 2.0, 10.0], vec![1, 3]).unwrap());
+        let empty = Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap());
+        let result = block_on(mad::mad_builtin(input, vec![empty, Value::Num(2.0)])).unwrap();
+        let (values, shape) = tensor_values(result);
+        assert_eq!(shape, vec![1, 1]);
+        assert_close(values[0], 34.0 / 9.0);
     }
 
     #[test]
