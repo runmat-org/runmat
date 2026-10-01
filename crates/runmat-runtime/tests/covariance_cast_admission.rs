@@ -13,29 +13,54 @@ enum Mode {
     Valid,
     RawShape,
     RawInteger,
+    RawLogical,
+    RawOwner,
+    RawBorrowAlias,
     ConvertedShape,
+    ConvertedClass,
+    ConvertedBorrowAlias,
+    CastFault,
 }
 
 struct Provider {
     owner: TestAllocationOwner,
+    foreign: TestAllocationOwner,
     mode: Mode,
     casts: AtomicUsize,
     downloads: AtomicUsize,
     outputs: Mutex<Vec<RetirementProbe>>,
+    borrowed: Mutex<Option<allocation::WeakGpuTensorHandle>>,
 }
 
 impl Provider {
     fn new(mode: Mode) -> &'static Self {
         Box::leak(Box::new(Self {
             owner: TestAllocationOwner::new(),
+            foreign: TestAllocationOwner::new(),
             mode,
             casts: AtomicUsize::new(0),
             downloads: AtomicUsize::new(0),
             outputs: Mutex::new(Vec::new()),
+            borrowed: Mutex::new(None),
         }))
     }
 
     fn result(&self, converted: bool) -> anyhow::Result<GpuTensorHandle> {
+        if matches!(self.mode, Mode::ConvertedBorrowAlias) && converted {
+            return self
+                .borrowed
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .acquire()
+                .map_err(Into::into);
+        }
+        if matches!(self.mode, Mode::RawLogical) && !converted {
+            let allocation = self.owner.allocate_logical(vec![0; 4], vec![2, 2])?;
+            self.outputs.lock().unwrap().push(allocation.probe);
+            return Ok(allocation.handle);
+        }
         let shape = if matches!(self.mode, Mode::RawShape) && !converted
             || matches!(self.mode, Mode::ConvertedShape) && converted
         {
@@ -45,14 +70,17 @@ impl Provider {
         };
         let element = if matches!(self.mode, Mode::RawInteger) && !converted {
             NumericElementType::I32
-        } else if converted {
+        } else if converted && !matches!(self.mode, Mode::ConvertedClass) {
             NumericElementType::F32
         } else {
             NumericElementType::F64
         };
-        let allocation = self
-            .owner
-            .allocate_zeroed(shape, element, GpuTensorStorage::Real)?;
+        let owner = if matches!(self.mode, Mode::RawOwner) && !converted {
+            &self.foreign
+        } else {
+            &self.owner
+        };
+        let allocation = owner.allocate_zeroed(shape, element, GpuTensorStorage::Real)?;
         self.outputs.lock().unwrap().push(allocation.probe);
         Ok(allocation.handle)
     }
@@ -78,25 +106,31 @@ impl AccelProvider for Provider {
 
     fn covariance<'a>(
         &'a self,
-        _: &'a GpuTensorHandle,
+        input: &'a GpuTensorHandle,
         _: Option<&'a GpuTensorHandle>,
         _: Option<&'a GpuTensorHandle>,
         _: &'a CovarianceOptions,
     ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        *self.borrowed.lock().unwrap() = Some(input.downgrade());
         Box::pin(async move {
-            self.result(false)
-                .map_err(ProviderExecutionError::from_source)
+            if matches!(self.mode, Mode::RawBorrowAlias) {
+                return Ok(input.clone());
+            }
+            self.result(false).map_err(Into::into)
         })
     }
 
     fn corrcoef<'a>(
         &'a self,
-        _: &'a GpuTensorHandle,
+        input: &'a GpuTensorHandle,
         _: &'a CorrcoefOptions,
     ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        *self.borrowed.lock().unwrap() = Some(input.downgrade());
         Box::pin(async move {
-            self.result(false)
-                .map_err(ProviderExecutionError::from_source)
+            if matches!(self.mode, Mode::RawBorrowAlias) {
+                return Ok(input.clone());
+            }
+            self.result(false).map_err(Into::into)
         })
     }
 
@@ -105,7 +139,12 @@ impl AccelProvider for Provider {
         _: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         self.casts.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async move { self.result(true) })
+        Box::pin(async move {
+            if matches!(self.mode, Mode::CastFault) {
+                anyhow::bail!("cast execution failed");
+            }
+            self.result(true)
+        })
     }
 }
 
@@ -115,7 +154,13 @@ fn covariance_family_validates_raw_results_before_conversion_and_converted_resul
         for mode in [
             Mode::RawShape,
             Mode::RawInteger,
+            Mode::RawLogical,
+            Mode::RawOwner,
+            Mode::RawBorrowAlias,
             Mode::ConvertedShape,
+            Mode::ConvertedClass,
+            Mode::ConvertedBorrowAlias,
+            Mode::CastFault,
             Mode::Valid,
         ] {
             let provider = Provider::new(mode);
@@ -158,7 +203,14 @@ fn covariance_family_validates_raw_results_before_conversion_and_converted_resul
             }
             assert_eq!(
                 provider.casts.load(Ordering::SeqCst),
-                if matches!(mode, Mode::RawShape | Mode::RawInteger) {
+                if matches!(
+                    mode,
+                    Mode::RawShape
+                        | Mode::RawInteger
+                        | Mode::RawLogical
+                        | Mode::RawOwner
+                        | Mode::RawBorrowAlias
+                ) {
                     0
                 } else {
                     1

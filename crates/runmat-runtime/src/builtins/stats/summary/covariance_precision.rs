@@ -121,20 +121,21 @@ impl CovariancePrecision {
                 .iter()
                 .all(|input| !output.shares_allocation_with(input))
         };
-        let validate_live = |output: &GpuTensorHandle| -> BuiltinResult<()> {
-            output.allocation_lease().validate_live().map_err(|source| {
-                let mut error = provider_error(ProviderExecutionError::from_source(source));
+        if let Err(source) = result.allocation_lease().validate_live() {
+            let mut error = provider_error(ProviderExecutionError::from_source(source));
+            error.gpu_gather_retry = GpuGatherRetry::Never;
+            return Err(gpu_helpers::reject_gpu_output(result, error));
+        }
+        let raw_precision = match runmat_accelerate_api::handle_precision(&result) {
+            Some(ProviderPrecision::F32) => ProviderPrecision::F32,
+            Some(ProviderPrecision::F64) => ProviderPrecision::F64,
+            _ => {
+                let mut error = invalid_output("invalid raw provider result");
                 error.gpu_gather_retry = GpuGatherRetry::Never;
-                gpu_helpers::reject_gpu_output(output.clone(), error)
-            })
+                return Err(gpu_helpers::reject_gpu_output(result, error));
+            }
         };
-        validate_live(&result)?;
-        let raw_precision = runmat_accelerate_api::handle_precision(&result);
-        if !matches!(
-            raw_precision,
-            Some(ProviderPrecision::F32 | ProviderPrecision::F64)
-        ) || !validate(&result, raw_precision.expect("checked floating precision"))
-        {
+        if !validate(&result, raw_precision) {
             let mut error = invalid_output("invalid raw provider result");
             error.gpu_gather_retry = GpuGatherRetry::Never;
             return Err(gpu_helpers::reject_gpu_output(result, error));
@@ -148,7 +149,11 @@ impl CovariancePrecision {
         };
         match cast {
             Ok(output) => {
-                validate_live(&output)?;
+                if let Err(source) = output.allocation_lease().validate_live() {
+                    let mut error = provider_error(ProviderExecutionError::from_source(source));
+                    error.gpu_gather_retry = GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(output, error));
+                }
                 if !validate(&output, self.provider_precision())
                     || output.shares_allocation_with(&result)
                 {
@@ -159,7 +164,11 @@ impl CovariancePrecision {
                 Ok(Some(output))
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-            Err(error) => Err(provider_error(ProviderExecutionError::from_source(error))),
+            Err(error) => {
+                let mut failure = provider_error(error.into());
+                failure.gpu_gather_retry = GpuGatherRetry::Never;
+                Err(failure)
+            }
         }
     }
 }
