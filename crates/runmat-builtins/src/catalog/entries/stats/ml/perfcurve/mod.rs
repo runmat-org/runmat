@@ -9,7 +9,8 @@ mod tests;
 pub use contract::*;
 pub use entry::PERFCURVE_CATALOG_ENTRY;
 pub use options::{
-    PerfcurveCriterion, PerfcurveOptionName, PerfcurvePriorKeyword, PerfcurveProcessNaN,
+    PerfcurveBoolean, PerfcurveCriterion, PerfcurveOptionName, PerfcurvePriorKeyword,
+    PerfcurveProcessNaN,
 };
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&PERFCURVE_CATALOG_ENTRY];

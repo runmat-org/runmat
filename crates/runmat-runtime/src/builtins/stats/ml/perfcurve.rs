@@ -14,8 +14,9 @@ use runmat_value::IntValue;
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, PerfcurveCriterion as Criterion, PerfcurvePriorKeyword,
-    PerfcurveProcessNaN as ProcessNaN, PERFCURVE_ERROR_INTERNAL as ERROR_INTERNAL,
+    BuiltinErrorDescriptor, PerfcurveBoolean, PerfcurveCriterion as Criterion,
+    PerfcurvePriorKeyword, PerfcurveProcessNaN as ProcessNaN,
+    PERFCURVE_ERROR_INTERNAL as ERROR_INTERNAL,
     PERFCURVE_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
     PERFCURVE_ERROR_UNSUPPORTED as ERROR_UNSUPPORTED, PERFCURVE_INTEGER_LABELS_EXTENSION,
     PERFCURVE_INTEGER_LOGICAL_CONTROLS_EXTENSION, PERFCURVE_INTEGER_NUMERIC_OPTIONS_EXTENSION,
@@ -78,9 +79,16 @@ async fn perfcurve_builtin(
         return Ok(Value::OutputList(Vec::new()));
     }
 
-    let (labels, scores, posclass, controls) = admitted.finish().await?;
+    let (labels, scores, posclass, controls, precomputed_negatives) = admitted.finish().await?;
     let output_limit = requested_outputs.unwrap_or(1).max(1);
-    let outputs = perfcurve_compute(labels, scores, posclass, controls, output_limit)?;
+    let outputs = perfcurve_compute(
+        labels,
+        scores,
+        posclass,
+        controls,
+        precomputed_negatives,
+        output_limit,
+    )?;
     match requested_outputs {
         None => Ok(outputs.into_iter().next().expect("perfcurve publishes X")),
         Some(count) => Ok(output_count::output_list_with_padding(count, outputs)),
@@ -198,6 +206,7 @@ fn perfcurve_compute(
     scores: Vec<f64>,
     posclass: Label,
     rest: Vec<admission::DecodedOption>,
+    precomputed_negatives: Option<Vec<Label>>,
     output_limit: usize,
 ) -> BuiltinResult<Vec<Value>> {
     if labels.labels.len() != scores.len() {
@@ -214,7 +223,10 @@ fn perfcurve_compute(
         return Err(invalid("perfcurve: posclass must appear in labels"));
     }
     let options = parse_options(rest, labels.kind)?;
-    let neg_classes = negative_classes(&labels, &posclass, options.neg_class.as_ref())?;
+    let neg_classes = match precomputed_negatives {
+        Some(classes) => classes,
+        None => negative_classes(&labels, &posclass, options.neg_class.as_ref())?,
+    };
     if neg_classes.is_empty() {
         return Err(invalid(
             "perfcurve: at least one negative class must be present",
@@ -241,17 +253,22 @@ fn perfcurve_compute(
         options.ycrit,
         &options.cost,
     )?;
-    let auc = if let Some(xvals) = &options.xvals {
-        auc_interval(&full_curve.x, &full_curve.y, xvals)
+    let auc = if output_limit >= 4 {
+        if let Some(xvals) = &options.xvals {
+            auc_interval(&full_curve.x, &full_curve.y, xvals)
+        } else {
+            auc(&full_curve.x, &full_curve.y)
+        }
     } else {
-        auc(&full_curve.x, &full_curve.y)
+        0.0
     };
-    let mut curve = full_curve.clone();
-    if let Some(xvals) = &options.xvals {
-        curve = apply_xvals(&curve, xvals, options.use_nearest)?;
-    }
+    let mut curve = if let Some(xvals) = &options.xvals {
+        apply_xvals(&full_curve, xvals, options.use_nearest)?
+    } else {
+        full_curve
+    };
     curve.auc = auc;
-    let opt = optimal_point(&curve, &options);
+    let opt = (output_limit >= 5).then(|| optimal_point(&curve, &options));
 
     let mut outputs = vec![tensor_column(curve.x)?];
     if output_limit >= 2 {
@@ -264,6 +281,7 @@ fn perfcurve_compute(
         outputs.push(Value::Num(curve.auc));
     }
     if output_limit >= 5 {
+        let opt = opt.expect("requested optimal point was computed");
         outputs.push(tensor_row(vec![opt.0, opt.1])?);
     }
     if output_limit >= 6 {
@@ -315,6 +333,7 @@ fn parse_options(
                 }
                 options.neg_class = Some(deduped);
             }
+            admission::DecodedOption::NegClassPrepared(labels) => options.neg_class = Some(labels),
             admission::DecodedOption::Weights(weights) => options.weights = Some(weights),
             admission::DecodedOption::Prior(prior) => options.prior = prior,
             admission::DecodedOption::Cost(cost) => options.cost = cost,
@@ -392,11 +411,14 @@ fn parse_prior(value: &Value) -> BuiltinResult<PriorOption> {
             "perfcurve: Prior values must be finite and nonnegative",
         ));
     }
-    let total = values[0] + values[1];
-    if total <= 0.0 {
+    let scale = values[0].max(values[1]);
+    if scale <= 0.0 {
         return Err(invalid("perfcurve: Prior values must have positive sum"));
     }
-    Ok(PriorOption::Values(values[0] / total, values[1] / total))
+    let positive = values[0] / scale;
+    let negative = values[1] / scale;
+    let total = positive + negative;
+    Ok(PriorOption::Values(positive / total, negative / total))
 }
 
 fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
@@ -454,13 +476,17 @@ fn scalar_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
         Value::Int(value) if value.is_zero() => Ok(false),
         Value::Int(value) if value.try_to_u64() == Some(1) => Ok(true),
-        _ => match canonical(&scalar_text(value, name)?).as_str() {
-            "true" | "on" | "yes" => Ok(true),
-            "false" | "off" | "no" => Ok(false),
-            other => Err(invalid(format!(
-                "perfcurve: {name} must be logical; got '{other}'"
-            ))),
-        },
+        _ => {
+            let text = scalar_text(value, name)?;
+            PerfcurveBoolean::from_public(&text)
+                .map(PerfcurveBoolean::value)
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "perfcurve: {name} must be logical; got '{}'",
+                        canonical(&text)
+                    ))
+                })
+        }
     }
 }
 

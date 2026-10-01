@@ -140,6 +140,47 @@ fn known_invalid_host_label_or_option_geometry_precedes_download() {
 }
 
 #[test]
+fn known_invalid_negative_classes_precede_resident_score_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let scores = provider.resident_scores();
+    for (observed_labels, options, expected) in [
+        (
+            tensor(&[1.0, 1.0, 1.0, 1.0], &[4, 1]),
+            vec![],
+            "negative class",
+        ),
+        (
+            labels(),
+            vec![Value::from("NegClass"), Value::Num(1.0)],
+            "posclass",
+        ),
+        (
+            labels(),
+            vec![Value::from("NegClass"), Value::from("not-numeric")],
+            "numeric",
+        ),
+        (
+            labels(),
+            vec![Value::from("NegClass"), tensor(&[], &[0, 1])],
+            "NegClass",
+        ),
+    ] {
+        let error = block_on(perfcurve_builtin(
+            observed_labels,
+            Value::GpuTensor(scores.clone()),
+            Value::Num(1.0),
+            options,
+        ))
+        .expect_err("host-known invalid class plan");
+        assert!(error.message().contains(expected), "{}", error.message());
+        assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
+    }
+    block_on(provider.inner.download(&scores)).expect("source allocation remains live");
+}
+
+#[test]
 fn unsupported_output_count_precedes_download() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = CountingProvider::new();

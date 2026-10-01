@@ -2,6 +2,7 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::{IntegerStorage, StringArray};
 
+#[path = "tests/provider_preflight.rs"]
 mod provider_preflight;
 
 #[test]
@@ -115,6 +116,19 @@ fn wide_integer_class_identity_and_exact_score_boundary() {
         error.identifier(),
         PERFCURVE_INTEGER_SCORES_EXTENSION.error_identifier
     );
+}
+
+#[test]
+fn finite_large_priors_normalize_without_overflow() {
+    let _outputs = output_count::push_output_count(Some(4));
+    let result = block_on(perfcurve_builtin(
+        tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
+        tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
+        Value::Num(1.0),
+        vec![Value::from("Prior"), tensor(&[1.0e308, 1.0e308], &[1, 2])],
+    ))
+    .expect("finite large prior pair");
+    assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
 }
 
 fn tensor(data: &[f64], shape: &[usize]) -> Value {

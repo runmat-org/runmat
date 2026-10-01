@@ -152,4 +152,34 @@ fn all_public_option_spellings_decode_once_into_typed_identities() {
         Some(PerfcurveProcessNaN::AddToFalse)
     );
     assert!(PerfcurveOptionName::from_public("x-crit").is_none());
+    assert_eq!(
+        PerfcurveBoolean::from_public("On"),
+        Some(PerfcurveBoolean::True)
+    );
+}
+
+#[test]
+fn invalid_literal_logical_control_has_no_proven_output() {
+    let request = call(
+        vec![
+            numeric(&[4, 1]),
+            numeric(&[4, 1]),
+            numeric(&[1, 1]),
+            ValueFact::scalar(ValueKindFact::String),
+            numeric(&[1, 1]),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("UseNearest".into()),
+            LiteralValue::Number(2.0),
+        ],
+        1,
+    );
+    assert!(request
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PERFCURVE-NEAREST"));
+    assert!(matches!(request.outputs[0].kind, ValueKindFact::Unknown));
 }

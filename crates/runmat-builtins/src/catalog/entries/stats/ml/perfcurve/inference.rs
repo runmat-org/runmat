@@ -1,6 +1,9 @@
 //! Conservative, option-aware public facts for performance curves.
 
-use super::{PerfcurveCriterion, PerfcurveOptionName, PerfcurvePriorKeyword, PerfcurveProcessNaN};
+use super::{
+    PerfcurveBoolean, PerfcurveCriterion, PerfcurveOptionName, PerfcurvePriorKeyword,
+    PerfcurveProcessNaN,
+};
 use crate::catalog::inference::{argument_error, literal_text};
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;
@@ -75,6 +78,21 @@ fn label_kind_known_invalid(value: &ValueFact) -> bool {
             .as_ref()
             .is_some_and(|class| !class.is(runmat_types::standard::CATEGORICAL)),
         _ => true,
+    }
+}
+
+fn use_nearest_literal_valid(literal: &LiteralValue) -> Option<bool> {
+    match literal {
+        LiteralValue::Unknown => None,
+        LiteralValue::Bool(_) => Some(true),
+        LiteralValue::Number(_) | LiteralValue::Real { .. } | LiteralValue::Integer { .. } => Some(
+            LiteralContext::numeric_from_literal(literal)
+                .is_some_and(|value| value == 0.0 || value == 1.0),
+        ),
+        _ => Some(
+            literal_text(literal)
+                .is_some_and(|text| PerfcurveBoolean::from_public(&text).is_some()),
+        ),
     }
 }
 
@@ -235,6 +253,12 @@ fn validate_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagno
                             index + 1,
                         ));
                     }
+                } else if literal.is_some_and(|literal| !matches!(literal, LiteralValue::Unknown)) {
+                    diagnostics.push(diagnostic(
+                        "RM-CATALOG-PERFCURVE-CRITERION",
+                        "criterion must be an admitted text scalar",
+                        index + 1,
+                    ));
                 } else {
                     dynamic = true;
                 }
@@ -248,6 +272,12 @@ fn validate_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagno
                             index + 1,
                         ));
                     }
+                } else if literal.is_some_and(|literal| !matches!(literal, LiteralValue::Unknown)) {
+                    diagnostics.push(diagnostic(
+                        "RM-CATALOG-PERFCURVE-PROCESSNAN",
+                        "ProcessNaN must be an admitted text scalar",
+                        index + 1,
+                    ));
                 } else {
                     dynamic = true;
                 }
@@ -347,13 +377,16 @@ fn validate_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagno
                         | ValueKindFact::Character
                         | ValueKindFact::Unknown
                 ) || value.shape.element_count().is_some_and(|n| n != 1)
+                    || literal.and_then(use_nearest_literal_valid) == Some(false)
                 {
                     diagnostics.push(diagnostic(
                         "RM-CATALOG-PERFCURVE-NEAREST",
                         "UseNearest must be scalar logical",
                         index + 1,
                     ));
-                } else if value.kind == ValueKindFact::Unknown {
+                } else if value.kind == ValueKindFact::Unknown
+                    || literal.and_then(use_nearest_literal_valid).is_none()
+                {
                     dynamic = true;
                 }
             }

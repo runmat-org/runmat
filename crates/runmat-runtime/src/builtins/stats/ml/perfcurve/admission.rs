@@ -7,6 +7,7 @@ pub(super) enum DecodedOption {
     XCrit(Criterion),
     YCrit(Criterion),
     NegClass(LabelVector),
+    NegClassPrepared(Vec<Label>),
     Weights(Vec<f64>),
     Prior(PriorOption),
     Cost([[f64; 2]; 2]),
@@ -31,12 +32,19 @@ pub(super) struct AdmittedCall {
     pub(super) scores: AdmittedInput<Vec<f64>>,
     pub(super) posclass: AdmittedInput<Label>,
     pub(super) controls: Vec<AdmittedOption>,
+    pub(super) precomputed_negatives: Option<Vec<Label>>,
 }
 
 impl AdmittedCall {
     pub(super) async fn finish(
         self,
-    ) -> BuiltinResult<(LabelVector, Vec<f64>, Label, Vec<DecodedOption>)> {
+    ) -> BuiltinResult<(
+        LabelVector,
+        Vec<f64>,
+        Label,
+        Vec<DecodedOption>,
+        Option<Vec<Label>>,
+    )> {
         let labels = match self.labels {
             AdmittedInput::Host(labels) => labels,
             AdmittedInput::Resident(value) => labels_from_value(gather(value).await?, "labels")?,
@@ -65,7 +73,13 @@ impl AdmittedCall {
         for control in self.controls {
             controls.push(control.finish().await?);
         }
-        Ok((labels, scores, posclass, controls))
+        Ok((
+            labels,
+            scores,
+            posclass,
+            controls,
+            self.precomputed_negatives,
+        ))
     }
 }
 
@@ -281,6 +295,29 @@ pub(super) fn preflight(
         Value::GpuTensor(_) => AdmittedInput::Resident(posclass),
         value => AdmittedInput::Host(scalar_label_from_value(value, "posclass")?),
     };
+    let mut explicit = None;
+    let mut deferred_explicit = false;
+    if let AdmittedInput::Host(labels) = &labels {
+        for control in &mut admitted {
+            match control {
+                AdmittedOption::Host(DecodedOption::NegClass(values)) => {
+                    let selected = dedupe_labels(coerce_labels_to_kind(
+                        std::mem::take(&mut values.labels),
+                        labels.kind,
+                        "NegClass",
+                    )?);
+                    if selected.is_empty() {
+                        return Err(invalid("perfcurve: NegClass cannot be empty"));
+                    }
+                    explicit = Some(selected.clone());
+                    *control = AdmittedOption::Host(DecodedOption::NegClassPrepared(selected));
+                }
+                AdmittedOption::Resident(OptionName::NegClass, _) => deferred_explicit = true,
+                _ => {}
+            }
+        }
+    }
+    let mut precomputed_negatives = None;
     if let (AdmittedInput::Host(labels), AdmittedInput::Host(posclass)) = (&labels, &posclass) {
         let positive = coerce_label_to_kind(posclass.clone(), labels.kind, "posclass")?;
         if !labels
@@ -290,11 +327,21 @@ pub(super) fn preflight(
         {
             return Err(invalid("perfcurve: posclass must appear in labels"));
         }
+        if !deferred_explicit {
+            let classes = negative_classes(labels, &positive, explicit.as_ref())?;
+            if classes.is_empty() {
+                return Err(invalid(
+                    "perfcurve: at least one negative class must be present",
+                ));
+            }
+            precomputed_negatives = Some(classes);
+        }
     }
     Ok(AdmittedCall {
         labels,
         scores,
         posclass,
         controls: admitted,
+        precomputed_negatives,
     })
 }

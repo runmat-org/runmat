@@ -118,6 +118,26 @@ pub enum PerfcurvePriorKeyword {
     Uniform,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PerfcurveBoolean {
+    False,
+    True,
+}
+
+impl PerfcurveBoolean {
+    pub fn from_public(text: &str) -> Option<Self> {
+        Some(match canonical(text).as_str() {
+            "true" | "on" | "yes" => Self::True,
+            "false" | "off" | "no" => Self::False,
+            _ => return None,
+        })
+    }
+
+    pub const fn value(self) -> bool {
+        matches!(self, Self::True)
+    }
+}
+
 impl PerfcurvePriorKeyword {
     pub fn from_public(text: &str) -> Option<Self> {
         Some(match canonical(text).as_str() {
