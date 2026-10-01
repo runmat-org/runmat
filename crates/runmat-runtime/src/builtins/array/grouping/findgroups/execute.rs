@@ -1,7 +1,7 @@
 use runmat_value::Value;
 
-use crate::builtins::common::grouping_keys::KeyOrder;
 use crate::builtins::array::grouping::variables::build_index;
+use crate::builtins::common::grouping_keys::KeyOrder;
 use crate::{gather_if_needed_async, BuiltinResult};
 
 use super::{error, extensions, input::FindGroupsInput, output};

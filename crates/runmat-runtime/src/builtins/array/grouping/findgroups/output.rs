@@ -1,7 +1,7 @@
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::grouping_keys::GroupIndex;
 use crate::builtins::array::grouping::variables::label_columns;
+use crate::builtins::common::grouping_keys::GroupIndex;
 use crate::builtins::table::table_from_columns;
 use crate::BuiltinResult;
 

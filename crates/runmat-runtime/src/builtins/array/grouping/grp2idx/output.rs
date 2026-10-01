@@ -2,8 +2,8 @@ use runmat_value::{CellArray, CharArray, Tensor, Value};
 
 use crate::BuiltinResult;
 
-use crate::builtins::common::grouping_keys::GroupIndex;
 use super::error;
+use crate::builtins::common::grouping_keys::GroupIndex;
 
 pub(super) fn indices(index: &GroupIndex) -> BuiltinResult<Value> {
     Tensor::new(index.ids.clone(), vec![index.ids.len(), 1])

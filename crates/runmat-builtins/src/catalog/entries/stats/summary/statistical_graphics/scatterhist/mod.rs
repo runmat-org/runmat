@@ -64,5 +64,3 @@ pub const SCATTERHIST_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: true,
 };
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&SCATTERHIST_CATALOG_ENTRY];

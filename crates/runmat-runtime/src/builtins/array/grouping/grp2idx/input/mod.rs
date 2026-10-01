@@ -8,8 +8,8 @@ use runmat_value::{NumericScalar, Value};
 
 use crate::BuiltinResult;
 
-use crate::builtins::common::grouping_keys::{GroupIndex, KeyAtom, KeyOrder};
 use super::error;
+use crate::builtins::common::grouping_keys::{GroupIndex, KeyAtom, KeyOrder};
 
 pub(super) struct GroupingInput {
     pub(super) value: Value,
