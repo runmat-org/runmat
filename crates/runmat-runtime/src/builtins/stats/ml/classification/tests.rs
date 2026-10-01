@@ -4,7 +4,8 @@ use runmat_value::IntegerStorage;
 
 mod core;
 mod integer;
-mod labels;
+#[path = "tests/labels.rs"]
+mod label_cases;
 mod provider;
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
