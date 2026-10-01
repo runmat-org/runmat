@@ -49,3 +49,11 @@ The process fixture starts from an already authenticated canonical mesh, not aut
 is not failure/replacement restart. Remote generator tasks are not remote whole-study
 spatial execution or distributed operators. Physical body-field quadrature/dynamics
 evidence remains separately governed; these layout tests do not replace it.
+
+Typed admission is a separate requirement from layout equivalence. Callable admission,
+prepared signal validation and transported expectations invoke the shared core physical
+signal validator. The process fixtures validate both generated and explicit declarations.
+A scalar topology field's entity axis does not turn temperature into a physical vector:
+Node1 values may omit a component frame, whereas component-valued fields still require
+one. A declared frame remains validated. Shape, approximation evidence and frame
+negatives must reject at admission/import, not merely during a later numerical solve.

@@ -32,6 +32,10 @@ pub(super) async fn run() {
                     PhysicalSignal::BodyForceDensity,
                 )
             };
+            runmat_analysis_core::validate_physical_signals(std::slice::from_ref(&authored))
+                .unwrap();
+            runmat_analysis_core::validate_physical_signals(std::slice::from_ref(&explicit))
+                .unwrap();
             // Independently spell MATLAB's tail storage: component, then canonical node.
             let mut scale = Vec::new();
             for component in 0..width {

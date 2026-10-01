@@ -31,10 +31,15 @@ fn digest(label: &str) -> Digest {
 }
 
 fn signal(shape: SignalShape, precision: SignalPrecision) -> PhysicalSignal {
+    let frame = if matches!(shape, SignalShape::Scalar) {
+        None
+    } else {
+        Some(runmat_analysis_core::CoordinateFrame::Global)
+    };
     PhysicalSignal::Force(Signal::<Force> {
         signal_id: SignalId("load".into()),
         shape,
-        frame: None,
+        frame,
         representation: SignalRepresentation::Generator(SignalGenerator {
             invocation: runmat_analysis_core::GeneratorInvocation {
                 callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
@@ -296,6 +301,15 @@ fn topology_expectation_authenticates_mesh_and_reopened_realization_rows() {
                 topology_binding: Some(binding.clone()),
             };
             expected.validate_for_mesh(&mesh).unwrap();
+            let mut invalid_contract = expected.clone();
+            match &mut invalid_contract.authored {
+                PhysicalSignal::Temperature(signal) => {
+                    signal.evidence.max_absolute_error = Some(f64::NAN);
+                }
+                PhysicalSignal::BodyForceDensity(signal) => signal.frame = None,
+                _ => unreachable!(),
+            }
+            assert!(invalid_contract.validate().is_err());
             let mut missing = expected.clone();
             missing.topology_binding = None;
             assert!(missing.validate().is_err());

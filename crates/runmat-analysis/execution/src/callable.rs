@@ -357,6 +357,8 @@ fn admit_signal_generator(
     callable: CallableAdmission<'_>,
     binding: FrozenCallableBinding,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    runmat_analysis_core::validate_physical_signals(std::slice::from_ref(signal))
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let generator = signal.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
@@ -835,6 +837,30 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.sample_points, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
         assert_eq!(first.function, ProgramFunctionId(7));
+    }
+
+    #[test]
+    fn callable_admission_rejects_invalid_typed_physical_contracts() {
+        let PhysicalSignal::Force(template) = signal() else {
+            unreachable!()
+        };
+        let mut invalid_evidence = template.clone();
+        invalid_evidence.evidence.max_absolute_error = Some(f64::NAN);
+        let mut invalid_shape = template.clone();
+        invalid_shape.shape = SignalShape::Tensor(vec![0, 3]);
+        let mut invalid_frame = template;
+        invalid_frame.shape = SignalShape::Vector3;
+        for invalid in [invalid_evidence, invalid_shape, invalid_frame] {
+            assert!(admit_named_signal_generator(
+                &PhysicalSignal::Force(invalid),
+                revision(),
+                callable(),
+                digest("executable-source"),
+                &analysis(),
+                &BTreeSet::new(),
+            )
+            .is_err());
+        }
     }
 
     #[test]

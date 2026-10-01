@@ -84,6 +84,23 @@ fn typed_node_vector_and_scalar_concrete_fields_are_valid() {
 }
 
 #[test]
+fn scalar_topology_values_do_not_require_a_component_frame() {
+    let mut scalar = field(
+        1,
+        SignalRepresentation::Constant(SignalValue::Tensor {
+            shape: vec![2, 1],
+            values: vec![Temperature::new(300.0), Temperature::new(310.0)],
+        }),
+        1,
+    );
+    scalar.frame = None;
+    assert!(validate_signal(&scalar).is_ok());
+    let mut vector = field(3, SignalRepresentation::Constant(body(2, 3)), 1);
+    vector.frame = None;
+    assert!(validate_signal(&vector).is_err());
+}
+
+#[test]
 fn concrete_fields_require_exact_finite_positive_two_dimensional_tensors() {
     let invalid = [
         body(0, 3),
@@ -221,6 +238,8 @@ fn field_validation_preserves_frames_precision_and_approximation_evidence() {
         1,
     );
     scalar.frame = None;
+    assert!(validate_signal(&scalar).is_ok());
+    scalar.evidence.max_absolute_error = Some(f64::NAN);
     assert!(validate_signal(&scalar).is_err());
 }
 

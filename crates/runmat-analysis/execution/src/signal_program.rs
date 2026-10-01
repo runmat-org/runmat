@@ -113,6 +113,8 @@ pub struct SignalMaterializationExpectation {
 
 impl SignalMaterializationExpectation {
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
+        runmat_analysis_core::validate_physical_signals(std::slice::from_ref(&self.authored))
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         validate_topology_binding(&self.authored, self.topology_binding.as_ref())?;
         self.admitted.program_revision.validate()?;
         let generator = self.authored.generator().ok_or_else(|| {
@@ -176,6 +178,8 @@ impl SignalMaterializationExpectation {
 
 impl PreparedSignalMaterialization {
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
+        runmat_analysis_core::validate_physical_signals(std::slice::from_ref(&self.authored))
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         validate_topology_binding(&self.authored, self.topology_binding.as_ref())?;
         self.program.descriptor.validate_for_portable_host()?;
         validate_signal_generator_chunks(
