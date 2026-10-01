@@ -2,15 +2,15 @@
 
 use runmat_builtins::{BuiltinErrorDescriptor, BuiltinExtensionDescriptor};
 use runmat_builtins::{
-    DistanceControlKind, DistanceSelectionKind, KnnMetric, KnnOption, KnnSearchMethod,
-    DISTANCE_ERROR_INTERNAL, DISTANCE_ERROR_INVALID_ARGUMENT, KNN_GPU_FAST_DISTANCE_EXTENSION,
-    KNN_GPU_INCLUDE_TIES_EXTENSION, KNN_GPU_NSMETHOD_EXTENSION, KNN_GPU_SORT_INDICES_EXTENSION,
-    KNN_INTEGER_DATA_EXTENSION, KNN_INTEGER_FLOATING_CONTROL_EXTENSION,
-    KNN_INTEGER_LOGICAL_CONTROL_EXTENSION, KNN_INTEGER_STRUCTURAL_EXTENSION,
-    PDIST2_INTEGER_CONTROL_EXTENSION, PDIST2_INTEGER_DATA_EXTENSION,
-    PDIST2_INTEGER_SELECTION_EXTENSION, PDIST_INTEGER_CONTROL_EXTENSION,
-    PDIST_INTEGER_DATA_EXTENSION, SQUAREFORM_EXPLICIT_GPU_EXTENSION,
-    SQUAREFORM_INTEGER_INPUT_EXTENSION,
+    DistanceControlKind, DistanceSelectionKind, KnnCacheSizeKeyword, KnnMetric, KnnOption,
+    KnnSearchMethod, DISTANCE_ERROR_INTERNAL, DISTANCE_ERROR_INVALID_ARGUMENT,
+    KNN_GPU_FAST_DISTANCE_EXTENSION, KNN_GPU_INCLUDE_TIES_EXTENSION, KNN_GPU_NSMETHOD_EXTENSION,
+    KNN_GPU_SORT_INDICES_EXTENSION, KNN_INTEGER_DATA_EXTENSION,
+    KNN_INTEGER_FLOATING_CONTROL_EXTENSION, KNN_INTEGER_LOGICAL_CONTROL_EXTENSION,
+    KNN_INTEGER_STRUCTURAL_EXTENSION, PDIST2_INTEGER_CONTROL_EXTENSION,
+    PDIST2_INTEGER_DATA_EXTENSION, PDIST2_INTEGER_SELECTION_EXTENSION,
+    PDIST_INTEGER_CONTROL_EXTENSION, PDIST_INTEGER_DATA_EXTENSION,
+    SQUAREFORM_EXPLICIT_GPU_EXTENSION, SQUAREFORM_INTEGER_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, Tensor, Value};
@@ -36,7 +36,8 @@ mod tests;
 use metric_compute::{condensed_distances, distance_matrix};
 use options::{
     parse_knnsearch_options, parse_metric, parse_metric_kind, parse_metric_name,
-    preflight_knn_metric_parameter, split_pdist2_options, validate_numeric_cache_sizes,
+    preflight_knn_metric_parameter, scalar_parameter, split_pdist2_options,
+    validate_numeric_cache_sizes,
 };
 #[cfg(test)]
 use options::{parse_logical_scalar, parse_positive_integer};
@@ -201,7 +202,11 @@ async fn strip_cache_size_option(
                     format!("{name}: CacheSize requires a value"),
                 ));
             };
-            if keyword_of(value).is_some_and(|keyword| keyword.eq_ignore_ascii_case("maximal")) {
+            if keyword_of(value)
+                .as_deref()
+                .and_then(KnnCacheSizeKeyword::from_keyword)
+                == Some(KnnCacheSizeKeyword::Maximal)
+            {
                 index += 2;
                 continue;
             }

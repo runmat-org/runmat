@@ -1,5 +1,6 @@
 use super::*;
 use futures::executor::block_on;
+use runmat_builtins::{KNNSEARCH_EXTENSIONS, KNNSEARCH_INTEGER_CAPABILITIES};
 use runmat_value::IntegerStorage;
 use runmat_value::NumericDType;
 

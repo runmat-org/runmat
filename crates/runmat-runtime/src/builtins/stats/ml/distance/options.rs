@@ -159,7 +159,11 @@ fn ensure_no_metric_parameter(
     }
 }
 
-async fn scalar_parameter(name: &'static str, value: &Value, label: &str) -> BuiltinResult<f64> {
+pub(super) async fn scalar_parameter(
+    name: &'static str,
+    value: &Value,
+    label: &str,
+) -> BuiltinResult<f64> {
     let gathered = gather_value(name, value.clone()).await?;
     match gathered {
         Value::Num(value) => Ok(value),

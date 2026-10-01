@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use runmat_value::{CellArray, Tensor, Value};
 
-use super::metric_compute::row_distance;
+use super::metric_compute::{row_distance, row_value};
 use super::{
     internal_error, DistanceMetric, KnnOptions, Selection, EPS, KNNSEARCH_NAME, PDIST2_NAME,
 };
