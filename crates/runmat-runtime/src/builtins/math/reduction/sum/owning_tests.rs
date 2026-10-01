@@ -1,9 +1,9 @@
 use super::*;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
-    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProviderFuture, GpuHandleProvenance,
-    GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned, HostNumericTensorView,
-    HostTensorView, NumericElementType, ProviderPrecision, ThreadProviderGuard,
+    AccelDownloadFuture, AccelNumericDownloadFuture, GpuHandleProvenance, GpuTensorStorage,
+    HostNumericDataOwned, HostNumericTensorOwned, HostNumericTensorView, HostTensorView,
+    NumericElementType, ProviderPrecision, ThreadProviderGuard,
 };
 use std::{
     future::Future,
