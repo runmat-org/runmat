@@ -11,7 +11,6 @@ use output::*;
 use solver::*;
 
 use runmat_value::{IntValue, NumericScalar};
-use std::cmp::Ordering;
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -26,10 +25,9 @@ use runmat_builtins::{
     MNRFIT_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};
+use runmat_value::{CharArray, LogicalArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::stats::summary::distribution_math;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mnrfit";
