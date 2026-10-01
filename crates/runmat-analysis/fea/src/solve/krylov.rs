@@ -2,8 +2,10 @@
 
 use crate::{algebra::ScopedSpmvError, planning::resource::LocalExecutionPlan};
 
+mod envelope;
 pub(crate) mod right_diagonal;
 pub(crate) mod right_ilu;
+pub(crate) use envelope::GmresWorkEnvelope;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GmresPolicy {
@@ -119,10 +121,7 @@ fn restarted_gmres_with_updates<E>(
     let size = right_hand_side.len();
     if size == 0
         || initial.len() != size
-        || policy.restart == 0
-        || policy.maximum_iterations == 0
-        || !policy.relative_tolerance.is_finite()
-        || policy.relative_tolerance <= 0.0
+        || GmresWorkEnvelope::derive(size, policy).is_err()
         || right_hand_side
             .iter()
             .chain(initial)
@@ -213,7 +212,8 @@ fn restarted_gmres_with_updates<E>(
             let projected = projected_rhs[column];
             projected_rhs[column] = cosines[column] * projected;
             projected_rhs[column + 1] = -sines[column] * projected;
-            iterations = iterations.saturating_add(1);
+            // The checked policy is bounded by u32::MAX before any allocation.
+            iterations += 1;
             completed = column + 1;
             if projected_rhs[column + 1].abs() <= policy.relative_tolerance * reference_norm
                 || basis.len() == column + 1

@@ -3,6 +3,8 @@
 mod assembly;
 mod boundary;
 mod input;
+mod plan;
+pub use plan::MagneticSystemPlan;
 mod resources;
 mod response;
 #[cfg(test)]
@@ -15,11 +17,22 @@ pub(crate) use input::compile_canonical_input;
 pub(crate) fn validate_projection_envelope(
     projection: &AnalysisProjection,
 ) -> Result<crate::topology::TetrahedralEdgeSpace, MagnetostaticError> {
+    Ok(validated_spaces(projection)?.0)
+}
+fn validated_spaces(
+    projection: &AnalysisProjection,
+) -> Result<
+    (
+        crate::topology::TetrahedralEdgeSpace,
+        boundary::MagneticBoundarySpace,
+    ),
+    MagnetostaticError,
+> {
     let edges = crate::topology::TetrahedralEdgeSpace::derive(projection)
         .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
-    boundary::MagneticBoundarySpace::derive(projection, &edges)?;
+    let boundary = boundary::MagneticBoundarySpace::derive(projection, &edges)?;
     assembly::validate_affine_geometry(projection)?;
-    Ok(edges)
+    Ok((edges, boundary))
 }
 pub use input::{solve_canonical_static, validate_canonical_input};
 pub use response::{MagneticFieldSample, MagnetostaticResponse};
@@ -72,6 +85,26 @@ pub fn solve_full_grounded_volume(
     }
     response::solve(
         assembly::MagneticAssembly::assemble(projection, volumes)?,
+        residual_target,
+    )
+}
+
+/// Execute the same experimental kernel using exact precomputed sparse support.
+/// The plan is revalidated against canonical topology before physical assembly;
+/// it does not authorize scheduler placement, publication or production execution.
+pub fn solve_full_grounded_volume_with_plan(
+    projection: &AnalysisProjection,
+    volumes: &[MagneticVolumeData],
+    residual_target: f64,
+    plan: &MagneticSystemPlan,
+) -> Result<MagnetostaticResponse, MagnetostaticError> {
+    if !residual_target.is_finite() || residual_target <= 0.0 || residual_target >= 1.0 {
+        return Err(MagnetostaticError::InvalidInput(
+            "relative residual target".into(),
+        ));
+    }
+    response::solve(
+        assembly::MagneticAssembly::assemble_with_plan(projection, volumes, plan)?,
         residual_target,
     )
 }

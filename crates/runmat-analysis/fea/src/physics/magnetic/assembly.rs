@@ -1,4 +1,6 @@
-use super::{boundary::MagneticBoundarySpace, MagneticVolumeData, MagnetostaticError};
+use super::{
+    boundary::MagneticBoundarySpace, MagneticSystemPlan, MagneticVolumeData, MagnetostaticError,
+};
 use crate::{
     algebra::{
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
@@ -26,6 +28,15 @@ impl<'a> MagneticAssembly<'a> {
         projection: &'a AnalysisProjection,
         volumes: &[MagneticVolumeData],
     ) -> Result<Self, MagnetostaticError> {
+        let plan = MagneticSystemPlan::derive(projection)?;
+        Self::assemble_with_plan(projection, volumes, &plan)
+    }
+    pub fn assemble_with_plan(
+        projection: &'a AnalysisProjection,
+        volumes: &[MagneticVolumeData],
+        plan: &MagneticSystemPlan,
+    ) -> Result<Self, MagnetostaticError> {
+        plan.validate_for(projection)?;
         let edge_space = TetrahedralEdgeSpace::derive(projection)
             .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
         let boundary = MagneticBoundarySpace::derive(projection, &edge_space)?;
@@ -79,22 +90,29 @@ impl<'a> MagneticAssembly<'a> {
             .ok_or_else(|| {
                 MagnetostaticError::InvalidInput("magnetic dimension overflow".into())
             })?;
-        let mut saddle = RealSparseAssembler::square(
-            dimension,
+        if dimension != plan.saddle_pattern().rows() {
+            return Err(MagnetostaticError::InvalidInput(
+                "planned magnetic dimension mismatch".into(),
+            ));
+        }
+        let mut saddle = RealSparseAssembler::with_pattern(
+            plan.saddle_pattern().clone(),
             OperatorRole::Stiffness,
             MatrixProperties::SYMMETRIC_INDEFINITE,
-        );
+        )
+        .map_err(|e| MagnetostaticError::Operator(e.to_string()))?;
         saddle.add_contribution(ContributionProvenance {
             domain: ContributionDomain::Electromagnetic,
             contribution_id: ContributionId(
                 "magnetic_physical_curl_curl_and_weak_coulomb_gauge".into(),
             ),
         });
-        let mut stiffness = RealSparseAssembler::square(
-            edge_rows.len(),
+        let mut stiffness = RealSparseAssembler::with_pattern(
+            plan.physical_pattern().clone(),
             OperatorRole::Stiffness,
             MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        );
+        )
+        .map_err(|e| MagnetostaticError::Operator(e.to_string()))?;
         let mut load = vec![0.0; edge_rows.len()];
         let length = projection.characteristic_length_m;
         if !length.is_finite() || length <= 0.0 {

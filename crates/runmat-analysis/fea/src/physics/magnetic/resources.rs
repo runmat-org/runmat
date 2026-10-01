@@ -3,6 +3,7 @@
 //! The borrowed model/mesh and canonical result encoding are outside this view.
 
 use super::MagnetostaticError;
+use crate::solve::krylov::{GmresPolicy, GmresWorkEnvelope};
 use crate::topology::AnalysisProjection;
 use runmat_analysis_core::AnalysisModel;
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
@@ -83,8 +84,8 @@ fn from_counts(
     usize::try_from(samples).map_err(|_| resource("host sample count overflow"))?;
     // Shared GMRES reports a u32 counter; do not authorize a saturating policy
     // whose nominal iteration count cannot be represented by that counter.
-    let iterations = mul(dimension, 40)?.max(128);
-    u32::try_from(iterations).map_err(|_| resource("GMRES iteration count overflow"))?;
+    let host_dimension =
+        usize::try_from(dimension).map_err(|_| resource("host dimension overflow"))?;
 
     // All sequential support phases are added: seen-node identities, edge
     // inventory/key/index maps and retained oriented-edge/element records;
@@ -108,26 +109,24 @@ fn from_counts(
 
     // Element contribution slots, not observed nonzeros: physical K has at most
     // 36 per tetrahedron; saddle has 36 + 2*24. No gauge-gauge entries. BTree
-    // discovery and finished CSR are reserved additively, never presumed aliased.
+    // support preparation, retained plan, validation rederivation, cloned planned
+    // assemblers and finished CSR are additive, never presumed aliased.
     let support_entries = mul(elements, 120)?;
     let matrices = sum(&[
         mul(support_entries, 512)?,
         mul(add(add(edges, dimension)?, 2)?, 256)?,
     ])?;
-    let restart = dimension.min(128);
-    let basis_scalars = mul(add(restart, 1)?, dimension)?;
-    let hessenberg_scalars = mul(add(restart, 1)?, restart)?;
-    // Include ten full vectors for RHS/initial/solution/residual, spmv and
-    // normalization/recomputed residual and post-solve physical/gauge checks.
-    // Rotation/projected-RHS/back-substitution arrays and growing Vec headers
-    // are separate; doubling scalar storage covers allocation capacity growth.
-    let krylov_scalars = sum(&[
-        basis_scalars,
-        hessenberg_scalars,
-        mul(dimension, 10)?,
-        add(mul(restart, 5)?, 1)?,
-    ])?;
-    let krylov = add(mul(krylov_scalars, 16)?, mul(add(restart, 8)?, 128)?)?;
+    // The shared recurrence owns its own allocation bound. Reserve magnetic
+    // borrowed RHS/initial and post-solve physical/gauge callback/check buffers
+    // separately; no physics-private duplicate Arnoldi/Hessenberg inventory.
+    let workspace = if host_dimension == 0 {
+        0
+    } else {
+        GmresWorkEnvelope::derive(host_dimension, gmres_policy(host_dimension, 1e-10)?)
+            .map_err(|error| resource(format!("shared GMRES envelope: {error:?}")))?
+            .resident_bytes_upper_bound
+    };
+    let krylov = sum(&[workspace, mul(mul(dimension, 10)?, 16)?, 4096])?;
     let numerical = add(matrices, krylov)?;
 
     // Retained response: edge identity pairs+circulations (72 logical bytes),
@@ -152,6 +151,22 @@ fn from_counts(
         assembly_and_solver_bytes: numerical,
         retained_response_bytes: retained,
         total_bytes: total,
+    })
+}
+
+pub(super) fn gmres_policy(
+    dimension: usize,
+    tolerance: f64,
+) -> Result<GmresPolicy, MagnetostaticError> {
+    let maximum_iterations = dimension
+        .checked_mul(40)
+        .map(|n| n.max(128))
+        .filter(|n| u32::try_from(*n).is_ok())
+        .ok_or_else(|| resource("GMRES iteration count overflow"))?;
+    Ok(GmresPolicy {
+        relative_tolerance: tolerance,
+        restart: dimension.min(128),
+        maximum_iterations,
     })
 }
 

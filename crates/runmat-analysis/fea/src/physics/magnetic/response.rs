@@ -1,6 +1,6 @@
 use super::{assembly::MagneticAssembly, MagnetostaticError};
 use crate::algebra::{dot_canonical, spmv};
-use crate::solve::krylov::{restarted_gmres, GmresPolicy};
+use crate::solve::krylov::restarted_gmres;
 use runmat_meshing_core::StableDigest;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -34,22 +34,13 @@ pub(super) fn solve(
     tolerance: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
     let n = assembled.saddle.rows();
-    let maximum_iterations = n
-        .checked_mul(40)
-        .map(|v| v.max(128))
-        .filter(|v| u32::try_from(*v).is_ok())
-        .ok_or_else(|| MagnetostaticError::InvalidInput("GMRES iteration count overflow".into()))?;
     let (solution, iterations) = if n == 0 {
         (Vec::new(), 0)
     } else {
         let result = restarted_gmres(
             &assembled.scaled_rhs,
             &vec![0.0; n],
-            GmresPolicy {
-                relative_tolerance: tolerance,
-                restart: n.min(128),
-                maximum_iterations,
-            },
+            super::resources::gmres_policy(n, tolerance)?,
             |x| spmv(&assembled.saddle, x).map_err(|e| MagnetostaticError::Operator(e.into())),
             |a, b| Ok(dot_canonical(a, b)),
             || false,
