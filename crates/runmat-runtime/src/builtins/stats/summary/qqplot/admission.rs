@@ -59,7 +59,11 @@ fn validate_host_percentages(value: &Value) -> BuiltinResult<()> {
         Value::Num(number) => valid(*number),
         Value::Int(number) => valid(number.to_f64()),
         Value::Bool(_) | Value::LogicalArray(_) | Value::GpuTensor(_) => true,
-        Value::Tensor(tensor) => tensor.materialize_f64().into_iter().all(valid),
+        Value::Tensor(tensor) => (0..tensor.len()).all(|index| {
+            tensor
+                .numeric_value_at(index)
+                .is_some_and(|number| valid(number.materialize_f64()))
+        }),
         _ => return Ok(()), // the role check has already rejected this class
     };
     if host_values_valid {

@@ -79,11 +79,33 @@ pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<Option<ParsedI
                     )));
                 }
             } else {
-                table_variable_name(selector, &names, role)?;
+                let name = table_variable_name(selector, &names, role)?;
+                if let Some(variables) = crate::builtins::table::table_variables_ref(table)
+                    .map_err(|err| invalid_with_source(err.message.clone(), err))?
+                {
+                    if let Some(value) = variables.fields.get(&name) {
+                        validate_selected_host_data(value, &name)?;
+                    }
+                }
             }
         }
     }
     Ok(None)
+}
+
+fn validate_selected_host_data(value: &Value, name: &str) -> BuiltinResult<()> {
+    let shape = match value {
+        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => None,
+        _ => return Err(invalid(format!("binscatter: {name} must be numeric"))),
+    };
+    if shape.is_some_and(|dims| dims.iter().filter(|&&extent| extent > 1).count() > 1) {
+        return Err(invalid(format!(
+            "binscatter: {name} must be a real numeric vector"
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn parse_inputs(mut args: Vec<Value>) -> BuiltinResult<ParsedInputs> {

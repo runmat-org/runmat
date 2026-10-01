@@ -121,6 +121,8 @@ pub(crate) fn build_binscatter_chart(
     let y_limits = derive_axis_limits(&y_projection.values, y_projection.limits, "YLimits")?;
     let x_edges = linspace(x_limits.0, x_limits.1, num_bins[0] + 1);
     let y_edges = linspace(y_limits.0, y_limits.1, num_bins[1] + 1);
+    validate_edges(&x_edges, "XBinEdges")?;
+    validate_edges(&y_edges, "YBinEdges")?;
     let cell_count = num_bins[0]
         .checked_mul(num_bins[1])
         .ok_or_else(|| invalid("binscatter: NumBins product is too large"))?;
@@ -158,6 +160,8 @@ pub(crate) fn build_binscatter_chart(
         .iter()
         .map(|edge| edge + y_projection.output_origin)
         .collect::<Vec<_>>();
+    validate_edges(&output_x_edges, "XBinEdges")?;
+    validate_edges(&output_y_edges, "YBinEdges")?;
     let surface = build_surface_from_counts(
         &counts,
         &output_x_edges,
@@ -249,8 +253,17 @@ fn derive_axis_limits(
     };
     if lo == hi {
         let pad = lo.abs().max(1.0) * 0.5;
-        lo -= pad;
-        hi += pad;
+        if (hi + pad).is_finite() {
+            hi += pad;
+        }
+        if (lo - pad).is_finite() {
+            lo -= pad;
+        }
+        if lo == hi {
+            return Err(invalid(format!(
+                "binscatter: {name} cannot be represented by finite bin edges"
+            )));
+        }
     }
     Ok((lo, hi))
 }
@@ -280,15 +293,25 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
     if count <= 1 {
         return vec![start];
     }
-    let step = (stop - start) / (count - 1) as f64;
     let mut out = Vec::with_capacity(count);
     for idx in 0..count {
-        out.push(start + step * idx as f64);
+        let fraction = idx as f64 / (count - 1) as f64;
+        out.push(start.mul_add(1.0 - fraction, stop * fraction));
     }
     if let Some(last) = out.last_mut() {
         *last = stop;
     }
     out
+}
+
+fn validate_edges(edges: &[f64], name: &str) -> BuiltinResult<()> {
+    if edges.iter().any(|edge| !edge.is_finite()) || edges.windows(2).any(|pair| pair[0] > pair[1])
+    {
+        return Err(invalid(format!(
+            "binscatter: {name} must contain finite increasing coordinates"
+        )));
+    }
+    Ok(())
 }
 
 fn find_bin_index(value: f64, edges: &[f64]) -> Option<usize> {
@@ -315,5 +338,40 @@ fn find_bin_index(value: f64, edges: &[f64]) -> Option<usize> {
                 Some(index - 1)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod finite_edge_tests {
+    use super::*;
+
+    #[test]
+    fn opposite_finite_extremes_have_finite_monotone_edges() {
+        let edges = linspace(-f64::MAX, f64::MAX, 5);
+        validate_edges(&edges, "XBinEdges").unwrap();
+        assert_eq!(edges.first().copied(), Some(-f64::MAX));
+        assert_eq!(edges[2], 0.0);
+        assert_eq!(edges.last().copied(), Some(f64::MAX));
+    }
+
+    #[test]
+    fn constant_realmax_has_one_sided_finite_padding() {
+        let limits = derive_axis_limits(&[f64::MAX, f64::MAX], None, "XLimits").unwrap();
+        assert!(limits.0.is_finite() && limits.0 < limits.1);
+        assert_eq!(limits.1, f64::MAX);
+        let edges = linspace(limits.0, limits.1, 3);
+        validate_edges(&edges, "XBinEdges").unwrap();
+    }
+
+    #[test]
+    fn extreme_observations_publish_finite_chart_edges() {
+        let data = Tensor::new(vec![-f64::MAX, f64::MAX], vec![2, 1]).unwrap();
+        let chart =
+            build_binscatter_chart(&data, &data, [2, 2], None, None, false, 1.0, None, None)
+                .unwrap();
+        validate_edges(&chart.x_bin_edges, "XBinEdges").unwrap();
+        validate_edges(&chart.y_bin_edges, "YBinEdges").unwrap();
+        assert_eq!(chart.x_bin_edges, vec![-f64::MAX, 0.0, f64::MAX]);
+        assert_eq!(chart.values.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
     }
 }

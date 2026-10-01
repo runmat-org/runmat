@@ -166,6 +166,16 @@ fn is_option_name(value: &Value) -> bool {
 }
 
 pub(crate) fn parse_num_bins(value: &Value) -> BuiltinResult<[usize; 2]> {
+    let known_len = match value {
+        Value::Tensor(tensor) => Some(tensor.len()),
+        Value::LogicalArray(array) => Some(array.len()),
+        _ => None,
+    };
+    if known_len.is_some_and(|len| len != 1 && len != 2) {
+        return Err(invalid(
+            "binscatter: NumBins must be a scalar or two-element vector",
+        ));
+    }
     if let Some(values) = integer_values(value) {
         let bins = match values.as_slice() {
             [n] => [positive_bin_count_integer(n, "NumBins")?; 2],
@@ -225,9 +235,26 @@ pub(crate) fn parse_limits(value: &Value, name: &str) -> BuiltinResult<Tensor> {
 }
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
+    if let Value::Tensor(tensor) = value {
+        return Ok((0..tensor.len())
+            .map(|index| {
+                tensor
+                    .numeric_value_at(index)
+                    .expect("numeric tensor element remains present")
+                    .materialize_f64()
+            })
+            .collect());
+    }
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid(format!("binscatter: {name} must be numeric")))?;
-    Ok(tensor_values_f64(&tensor))
+    Ok((0..tensor.len())
+        .map(|index| {
+            tensor
+                .numeric_value_at(index)
+                .expect("numeric tensor element remains present")
+                .materialize_f64()
+        })
+        .collect())
 }
 
 fn positive_bin_count(value: f64, name: &str) -> BuiltinResult<usize> {
