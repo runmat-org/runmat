@@ -1,6 +1,7 @@
 //! Mean provider strategies retain typed failures and own every intermediate.
 use super::*;
 
+#[path = "provider_execution/admission.rs"]
 mod admission;
 use admission::{adapt_output_class, admit_double_omitnan_stage, admit_result, desired_precision};
 
