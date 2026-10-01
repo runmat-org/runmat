@@ -160,12 +160,19 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
             runmat_accelerate::placement::PlacementEventKind::Prepare,
             runmat_accelerate::placement::PlacementEventKind::Selected,
             runmat_accelerate::placement::PlacementEventKind::Upload,
-            runmat_accelerate::placement::PlacementEventKind::Compile,
             runmat_accelerate::placement::PlacementEventKind::Queue,
             runmat_accelerate::placement::PlacementEventKind::Kernel,
         ] {
             assert!(kinds.contains(&required), "missing {required:?}: {kinds:?}");
         }
+        assert!(trace.events.iter().any(|event| {
+            event.kind == runmat_accelerate::placement::PlacementEventKind::Prepare
+                && event.reason.as_deref() == Some("generate_wgsl")
+                && event.duration_ns.is_some()
+        }));
+        // This fixture submits source through the provider facade. It does not
+        // expose a separate device pipeline compilation measurement.
+        assert!(!kinds.contains(&runmat_accelerate::placement::PlacementEventKind::Compile));
         assert!(!kinds.contains(&runmat_accelerate::placement::PlacementEventKind::Complete));
         assert!(trace
             .events

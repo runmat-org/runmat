@@ -739,7 +739,7 @@ pub fn execute_reduction_with_shape_placed(
         .plan
         .generate_reduction_wgsl(scalar_ty)
         .ok_or_else(|| anyhow!("fusion: reduction WGSL generation failed"))?;
-    observer.compile(started);
+    observer.shader_source_generation(started);
     timer.mark("generate_wgsl");
     if std::env::var("RUNMAT_DEBUG_DUMP_FUSED_WGSL").is_ok() {
         println!(

@@ -81,7 +81,7 @@ async fn execute_elementwise_outputs(
         let shader = request
             .plan
             .generate_typed_wgsl(output_ids, &program, scalar_type)?;
-        FusionPlacementObserver::new(request.placement).compile(started);
+        FusionPlacementObserver::new(request.placement).shader_source_generation(started);
         Ok::<_, anyhow::Error>((program, classes, shader))
     }
     .await;
@@ -385,7 +385,7 @@ async fn execute_elementwise_outputs(
                             &program,
                             scalar_type,
                         )?;
-                        observer.compile(started);
+                        observer.shader_source_generation(started);
                         let started = Instant::now();
                         let metadata = protect_kernel_inputs(&handles);
                         let output = provider.fused_elementwise(

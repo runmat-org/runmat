@@ -1847,6 +1847,14 @@ fn fusion_feasibility_rejection_resumes_shared_runtime_before_provider_side_effe
         assert!(!rejected.is_empty(), "expected a rejected fusion region");
         for trace in &rejected {
             assert!(trace.complete);
+            assert!(
+                trace.events.iter().any(|event| {
+                    event.kind == runmat_accelerate::placement::PlacementEventKind::Prepare
+                        && event.reason.as_deref() == Some("generate_wgsl")
+                        && event.duration_ns.is_some()
+                }),
+                "host shader-source preparation remains observed"
+            );
             assert!(trace.events.iter().any(|event| {
                 event.kind == runmat_accelerate::placement::PlacementEventKind::Complete
                     && event.variant

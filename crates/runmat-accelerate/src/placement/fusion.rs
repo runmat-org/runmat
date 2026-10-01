@@ -144,9 +144,11 @@ impl FusionPlacementObserver {
         );
     }
 
-    pub(crate) fn compile(&self, started: Instant) {
+    /// Generate shader source on the host. Device pipeline compilation happens
+    /// inside provider execution, not while preparing a candidate's source.
+    pub(crate) fn shader_source_generation(&self, started: Instant) {
         self.timed(
-            PlacementEventKind::Compile,
+            PlacementEventKind::Prepare,
             started,
             None,
             Some("generate_wgsl"),
