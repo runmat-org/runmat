@@ -10,7 +10,6 @@ pub mod isstable;
 pub mod lqr;
 pub(crate) mod model_polynomial;
 pub mod nyquist;
-pub(crate) mod plot_setup_error;
 pub mod pole;
 pub mod pzmap;
 pub(crate) mod response;
