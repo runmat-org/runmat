@@ -2120,12 +2120,21 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn min_type_with_two_args_returns_tensor() {
-        let out = min_type(
+    fn min_type_keeps_unknown_rhs_family_dynamic_but_proves_nonempty_pairwise() {
+        let unknown = min_type(
             &[Type::Tensor { shape: None }, Type::Tensor { shape: None }],
             &ResolveContext::new(Vec::new()),
         );
-        assert_eq!(out, Type::tensor());
+        assert_eq!(unknown, Type::Unknown);
+
+        let pairwise = min_type(
+            &[Type::Tensor { shape: None }, Type::Tensor { shape: None }],
+            &ResolveContext::new(vec![
+                runmat_types::LiteralValue::Unknown,
+                runmat_types::LiteralValue::Vector(vec![runmat_types::LiteralValue::Number(2.0)]),
+            ]),
+        );
+        assert_eq!(pairwise, Type::tensor());
     }
 
     #[test]
