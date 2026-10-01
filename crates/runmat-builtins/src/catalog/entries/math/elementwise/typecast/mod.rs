@@ -13,14 +13,12 @@ use crate::{
     BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, MathInferenceRule,
     REQUIRED_DEFAULT_BINDING,
 };
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::ExecutionStackRequirement;
 
 pub use contract::{
     TYPECAST_DESCRIPTOR, TYPECAST_ERROR_GPU_UNSUPPORTED, TYPECAST_ERROR_INTERNAL,
     TYPECAST_ERROR_INVALID_ARGUMENT, TYPECAST_ERROR_INVALID_INPUT, TYPECAST_INTEGER_CAPABILITIES,
 };
-
-const EFFECTS: &[EffectKind] = &[EffectKind::MaySuspend, EffectKind::MayThrow];
 
 pub const TYPECAST_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -37,7 +35,7 @@ pub const TYPECAST_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: EFFECTS,
+        effects: contract::EFFECTS,
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {

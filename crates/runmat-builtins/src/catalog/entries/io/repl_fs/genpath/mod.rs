@@ -3,7 +3,7 @@ mod documentation;
 pub(in crate::catalog::entries::io::repl_fs) mod inference;
 
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::ExecutionStackRequirement;
 
 pub use contract::{
     GENPATH_DESCRIPTOR, GENPATH_ERROR_CURRENT_FOLDER, GENPATH_ERROR_EXCLUDES_TYPE,
@@ -11,13 +11,6 @@ pub use contract::{
     GENPATH_ERROR_PROVIDER, GENPATH_ERROR_TOO_MANY_INPUTS, GENPATH_ERROR_TOO_MANY_OUTPUTS,
     GENPATH_EXCLUDES_EXTENSION, GENPATH_NUMERIC_CHARACTER_CODES_EXTENSION,
 };
-
-const EFFECTS: [EffectKind; 4] = [
-    EffectKind::EnvironmentRead,
-    EffectKind::FilesystemRead,
-    EffectKind::MaySuspend,
-    EffectKind::MayThrow,
-];
 
 pub const GENPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -38,7 +31,7 @@ pub const GENPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         semantic_kind: BuiltinSemanticKind::Filesystem,
         workspace_effect: None,
         environment_effect: None,
-        effects: &EFFECTS,
+        effects: &contract::EFFECTS,
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {

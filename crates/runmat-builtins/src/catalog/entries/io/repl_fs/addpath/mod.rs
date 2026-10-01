@@ -3,7 +3,7 @@ mod documentation;
 pub(in crate::catalog::entries::io::repl_fs) mod inference;
 
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::ExecutionStackRequirement;
 
 pub use contract::{
     ADDPATH_DESCRIPTOR, ADDPATH_ERROR_ARGUMENT_TYPE, ADDPATH_ERROR_CURRENT_FOLDER,
@@ -11,14 +11,6 @@ pub use contract::{
     ADDPATH_ERROR_POSITION, ADDPATH_ERROR_PROVIDER, ADDPATH_ERROR_TOO_FEW_ARGUMENTS,
     ADDPATH_NUMERIC_CHARACTER_CODES_EXTENSION,
 };
-
-const EFFECTS: [EffectKind; 5] = [
-    EffectKind::EnvironmentRead,
-    EffectKind::EnvironmentWrite,
-    EffectKind::FilesystemRead,
-    EffectKind::MaySuspend,
-    EffectKind::MayThrow,
-];
 
 pub const ADDPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -37,7 +29,7 @@ pub const ADDPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         semantic_kind: BuiltinSemanticKind::Workspace,
         workspace_effect: None,
         environment_effect: Some(BuiltinEnvironmentEffect::PathMutation),
-        effects: &EFFECTS,
+        effects: &contract::EFFECTS,
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {

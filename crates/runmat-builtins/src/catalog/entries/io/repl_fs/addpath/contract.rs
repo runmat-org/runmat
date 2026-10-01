@@ -1,4 +1,5 @@
 use crate::*;
+use runmat_types::EffectKind;
 
 const OLD_PATH: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "oldpath",
@@ -142,3 +143,11 @@ pub(super) const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] =
         notes:
             "Code points decode exactly, invalid Unicode rejects, and mutation remains host-owned.",
     }];
+
+pub(super) const EFFECTS: [EffectKind; 5] = [
+    EffectKind::EnvironmentRead,
+    EffectKind::EnvironmentWrite,
+    EffectKind::FilesystemRead,
+    EffectKind::MaySuspend,
+    EffectKind::MayThrow,
+];

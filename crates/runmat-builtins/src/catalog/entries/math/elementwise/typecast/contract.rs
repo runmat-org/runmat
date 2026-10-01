@@ -7,6 +7,8 @@ use crate::{
     BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES,
 };
 
+use runmat_types::EffectKind;
+
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
@@ -110,3 +112,5 @@ pub const TYPECAST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
     BuiltinIntegerCapabilityDescriptor { form: "Y = typecast(integer_X, newtype)", inputs: &INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Scalar and vector inputs preserve their native byte sequence and orientation; output class and element count follow the requested element width." },
     BuiltinIntegerCapabilityDescriptor { form: "Y = typecast(gpuArray(integer_X), newtype)", inputs: &INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Real numeric resident input is transferred exactly through its owning provider, reinterpreted without floating conversion, and restored to that provider; complex, logical, and like GPU forms reject before transfer." },
 ];
+
+pub(super) const EFFECTS: &[EffectKind] = &[EffectKind::MaySuspend, EffectKind::MayThrow];

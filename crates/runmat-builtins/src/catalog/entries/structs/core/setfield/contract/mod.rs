@@ -1,8 +1,10 @@
 mod descriptor;
+mod errors;
 mod extension;
 mod integer;
 
 pub use descriptor::*;
+pub use errors::*;
 pub use extension::{
     SETFIELD_EXTENSIONS, SETFIELD_INDEXED_RESIDENT_EXTENSION, SETFIELD_OBJECT_FAMILY_EXTENSION,
     SETFIELD_TEXTUAL_INDEX_EXTENSION,

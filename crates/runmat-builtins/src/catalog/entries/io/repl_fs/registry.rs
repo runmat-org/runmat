@@ -1,33 +1,9 @@
+mod groups;
+#[cfg(test)]
+mod tests;
+
 pub(in crate::catalog::entries::io) fn extend_entries(
     entries: &mut Vec<&'static crate::BuiltinCatalogEntry>,
 ) {
-    super::super::super::extend_groups(
-        entries,
-        &[
-            super::addpath::ENTRIES,
-            super::cd::ENTRIES,
-            super::directory_lifecycle::ENTRIES,
-            super::directory_listing::ENTRIES,
-            super::environment::ENTRIES,
-            super::exist::ENTRIES,
-            super::file_transfer::ENTRIES,
-            super::genpath::ENTRIES,
-            super::installation_path::ENTRIES,
-            super::open::ENTRIES,
-            super::opentoline::ENTRIES,
-            super::path::ENTRIES,
-            super::path_predicate::ENTRIES,
-            super::path_syntax::ENTRIES,
-            super::pcode::ENTRIES,
-            super::pwd::ENTRIES,
-            super::rmpath::ENTRIES,
-            super::run::ENTRIES,
-            super::savepath::ENTRIES,
-            super::source_inventory::ENTRIES,
-            super::temporary_path::ENTRIES,
-            super::uigetdir::ENTRIES,
-            super::uigetfile::ENTRIES,
-            super::uiputfile::ENTRIES,
-        ],
-    );
+    super::super::super::extend_groups(entries, groups::ENTRY_GROUPS);
 }

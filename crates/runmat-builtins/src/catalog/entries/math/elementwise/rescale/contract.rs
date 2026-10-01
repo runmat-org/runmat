@@ -7,6 +7,8 @@ use crate::{
     BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES,
 };
 
+use runmat_types::EffectKind;
+
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "R",
     ty: BuiltinParamType::NumericArray,
@@ -147,3 +149,5 @@ pub const RESCALE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
             "The class of A controls single-versus-double output; bound classes do not change it.",
     },
 ];
+
+pub(super) const EFFECTS: &[EffectKind] = &[EffectKind::MaySuspend, EffectKind::MayThrow];

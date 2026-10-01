@@ -1,4 +1,5 @@
 use crate::*;
+use runmat_types::EffectKind;
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "pathstr",
@@ -158,4 +159,11 @@ pub(super) const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] = &
         notes:
             "Code points decode exactly, invalid Unicode rejects, and traversal remains host-owned.",
     },
+];
+
+pub(super) const EFFECTS: [EffectKind; 4] = [
+    EffectKind::EnvironmentRead,
+    EffectKind::FilesystemRead,
+    EffectKind::MaySuspend,
+    EffectKind::MayThrow,
 ];

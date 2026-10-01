@@ -1,0 +1,28 @@
+use crate::BuiltinCatalogEntry;
+
+pub(super) const ENTRY_GROUPS: &[&[&BuiltinCatalogEntry]] = &[
+    super::super::addpath::ENTRIES,
+    super::super::cd::ENTRIES,
+    super::super::directory_lifecycle::ENTRIES,
+    super::super::directory_listing::ENTRIES,
+    super::super::environment::ENTRIES,
+    super::super::exist::ENTRIES,
+    super::super::file_transfer::ENTRIES,
+    super::super::genpath::ENTRIES,
+    super::super::installation_path::ENTRIES,
+    super::super::open::ENTRIES,
+    super::super::opentoline::ENTRIES,
+    super::super::path::ENTRIES,
+    super::super::path_predicate::ENTRIES,
+    super::super::path_syntax::ENTRIES,
+    super::super::pcode::ENTRIES,
+    super::super::pwd::ENTRIES,
+    super::super::rmpath::ENTRIES,
+    super::super::run::ENTRIES,
+    super::super::savepath::ENTRIES,
+    super::super::source_inventory::ENTRIES,
+    super::super::temporary_path::ENTRIES,
+    super::super::uigetdir::ENTRIES,
+    super::super::uigetfile::ENTRIES,
+    super::super::uiputfile::ENTRIES,
+];
