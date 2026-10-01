@@ -89,6 +89,40 @@ fn plain_numeric_pair_is_an_explicit_runmat_extension() {
 }
 
 #[test]
+fn single_resident_crossentropy_reduction_publishes_double_without_download() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let predictions = [0.8_f32, 0.2];
+        let targets = [1.0_f32, 0.0];
+        let upload = |data: &[f32]| {
+            provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F32(data),
+                    shape: &[2, 1],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .unwrap()
+        };
+        let predictions = upload(&predictions);
+        let targets = upload(&targets);
+        provider.reset_telemetry();
+        let result = block_on(crossentropy_builtin(
+            Value::GpuTensor(predictions.clone()),
+            Value::GpuTensor(targets.clone()),
+            Vec::new(),
+        ))
+        .unwrap();
+        let Value::Num(loss) = result else {
+            panic!("reduced loss must be a double scalar")
+        };
+        assert!((loss + f64::from(0.8_f32).ln() / 2.0).abs() < 1e-6);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        predictions.allocation_lease().validate_live().unwrap();
+        targets.allocation_lease().validate_live().unwrap();
+    });
+}
+
+#[test]
 fn integer_input_is_rejected_by_strict_mode_before_payload_conversion() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let err = block_on(crossentropy_builtin(

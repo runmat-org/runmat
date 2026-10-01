@@ -4694,37 +4694,39 @@ impl AccelProvider for InProcessProvider {
             "crossentropy_terms: complex inputs are not supported"
         );
 
+        let precision = runmat_accelerate_api::handle_precision(request.predictions)
+            .ok_or_else(|| anyhow!("crossentropy_terms: floating predictions required"))?;
+        ensure!(
+            [Some(request.targets), request.weights, request.mask]
+                .into_iter()
+                .flatten()
+                .all(|handle| runmat_accelerate_api::handle_precision(handle) == Some(precision)),
+            "crossentropy_terms: operands must share floating precision"
+        );
         let (predictions, targets, weights, mask) = {
-            let guard = registry(self.device_id)
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            let predictions = guard
-                .get(request.predictions)
-                .cloned()
-                .ok_or_else(|| anyhow!("crossentropy_terms: unknown predictions buffer"))?;
-            let targets = guard
-                .get(request.targets)
-                .cloned()
-                .ok_or_else(|| anyhow!("crossentropy_terms: unknown targets buffer"))?;
-            let weights = request
-                .weights
-                .map(|handle| {
-                    guard
-                        .get(handle)
-                        .cloned()
-                        .ok_or_else(|| anyhow!("crossentropy_terms: unknown weights buffer"))
-                })
-                .transpose()?;
-            let mask = request
-                .mask
-                .map(|handle| {
-                    guard
-                        .get(handle)
-                        .cloned()
-                        .ok_or_else(|| anyhow!("crossentropy_terms: unknown mask buffer"))
-                })
-                .transpose()?;
-            (predictions, targets, weights, mask)
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("crossentropy_terms: allocation owner is poisoned"))?;
+            let read = |handle: &GpuTensorHandle| -> Result<Vec<f64>> {
+                match guard.get(handle) {
+                    Some(InProcessNumericData::F64(values)) => Ok(values.clone()),
+                    Some(InProcessNumericData::F32(values)) => {
+                        Ok(values.iter().copied().map(f64::from).collect())
+                    }
+                    Some(InProcessNumericData::Integer(_)) => Err(anyhow!(
+                        "crossentropy_terms: integer storage is unsupported"
+                    )),
+                    None => Err(anyhow!(
+                        "crossentropy_terms: input is not a live owned allocation"
+                    )),
+                }
+            };
+            (
+                read(request.predictions)?,
+                read(request.targets)?,
+                request.weights.map(&read).transpose()?,
+                request.mask.map(&read).transpose()?,
+            )
         };
         ensure!(
             predictions.len() == len
@@ -4734,17 +4736,21 @@ impl AccelProvider for InProcessProvider {
             "crossentropy_terms: tensor shapes do not match buffer lengths"
         );
 
+        let losses = provider_crossentropy_terms(
+            &predictions,
+            &targets,
+            weights.as_deref(),
+            mask.as_deref(),
+            request.mode,
+        )?;
+        let data = match precision {
+            ProviderPrecision::F32 => {
+                InProcessNumericData::F32(losses.into_iter().map(|value| value as f32).collect())
+            }
+            ProviderPrecision::F64 => InProcessNumericData::F64(losses),
+        };
         Ok(ProviderCrossentropyResult {
-            losses: self.allocate_tensor(
-                provider_crossentropy_terms(
-                    &predictions,
-                    &targets,
-                    weights.as_deref(),
-                    mask.as_deref(),
-                    request.mode,
-                )?,
-                shape,
-            )?,
+            losses: self.allocate_numeric_data(data, shape, GpuTensorStorage::Real)?,
         })
     }
 

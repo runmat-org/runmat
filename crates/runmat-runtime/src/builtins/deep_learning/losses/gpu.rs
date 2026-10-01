@@ -139,13 +139,18 @@ pub(super) async fn try_crossentropy_gpu(
         factor_handles[0],
         factor_handles[1],
     ];
-    validate_result_handle(
+    if let Err(error) = validate_result_handle(
         &result.losses,
         predictions.shape(),
         precision,
         provider,
         &borrowed.into_iter().flatten().collect::<Vec<_>>(),
-    )?;
+    ) {
+        return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+            result.losses,
+            error,
+        ));
+    }
     crate::builtins::common::gpu_helpers::propagate_output_provenance(
         &mut result.losses,
         borrowed.into_iter().flatten(),
@@ -163,7 +168,19 @@ pub(super) async fn try_crossentropy_gpu(
             };
             let mut sum_protected = vec![predictions, targets, &result.losses];
             sum_protected.extend(factor_handles.into_iter().flatten());
-            validate_result_handle(&sum, &[1, 1], precision, provider, &sum_protected)?;
+            // Ordinary sum accumulates in double regardless of the loss
+            // tensor's precision. The reduced public loss is a double scalar.
+            if let Err(error) = validate_result_handle(
+                &sum,
+                &[1, 1],
+                Some(runmat_accelerate_api::ProviderPrecision::F64),
+                provider,
+                &sum_protected,
+            ) {
+                return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                    sum, error,
+                ));
+            }
             let scalar = match provider.read_scalar(&sum, 0) {
                 Ok(value) => value / options.normalization_denominator(len, predictions.shape())?,
                 Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
