@@ -859,6 +859,25 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn std_repeated_axis_vector_reduces_once() {
+        let input = Tensor::new((1..=12).map(f64::from).collect(), vec![3, 4]).unwrap();
+        let axes = Tensor::new(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let result = std_builtin(
+            Value::Tensor(input),
+            vec![Value::Num(0.0), Value::Tensor(axes)],
+        )
+        .expect("repeated axis vector");
+        let Value::Tensor(output) = result else {
+            panic!("expected column tensor");
+        };
+        assert_eq!(output.shape, vec![3, 1]);
+        for value in values(&output) {
+            assert!((value - 15.0_f64.sqrt()).abs() < 1e-12);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn std_vecdim_multiple_axes() {
         let tensor = Tensor::new(
             (1..=24).map(|v| v as f64).collect::<Vec<_>>(),

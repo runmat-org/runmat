@@ -114,7 +114,7 @@ fn proven_double_shape_and_invalid_controls_remain_conservative() {
         ],
         vec![
             LiteralValue::Number(0.0),
-            LiteralValue::Vector(vec![LiteralValue::Number(2.0), LiteralValue::Number(2.0)]),
+            LiteralValue::Vector(vec![LiteralValue::Number(2.0), LiteralValue::Number(0.0)]),
         ],
         vec![LiteralValue::Empty, LiteralValue::Empty],
     ] {
@@ -124,6 +124,26 @@ fn proven_double_shape_and_invalid_controls_remain_conservative() {
             CertaintyFact::Dynamic(_)
         ));
     }
+}
+
+#[test]
+fn repeated_axes_in_one_vector_reduce_the_axis_once() {
+    let result = call(
+        numeric(
+            NumericClass::Double,
+            ShapeFact::from(vec![Some(3), Some(4)]),
+        ),
+        vec![
+            LiteralValue::Number(0.0),
+            LiteralValue::Vector(vec![LiteralValue::Number(2.0), LiteralValue::Number(2.0)]),
+        ],
+        1,
+    );
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), Some(1)])
+    );
+    assert_eq!(result.outputs[0].certainty, CertaintyFact::Proven);
 }
 
 #[test]
