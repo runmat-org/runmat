@@ -252,9 +252,11 @@ pub(super) fn validate_structural_inputs(
                 (StructuralLoadKind::BodyForce, true)
             }
             (RealizedExcitationKind::Moment(_), _) => (StructuralLoadKind::Moment, false),
-            (RealizedExcitationKind::HeatGeneration(_), _) => {
-                (StructuralLoadKind::HeatGeneration, false)
-            }
+            (
+                RealizedExcitationKind::HeatGeneration(_)
+                | RealizedExcitationKind::HeatGenerationField(_),
+                _,
+            ) => (StructuralLoadKind::HeatGeneration, false),
             (RealizedExcitationKind::HeatFlux(_), _) => (StructuralLoadKind::HeatFlux, false),
             (RealizedExcitationKind::TemperatureField(_), _) => {
                 unreachable!("temperature fields are coupling inputs, not structural loads")
@@ -399,7 +401,8 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
         RealizedExcitationKind::BodyForce(_) | RealizedExcitationKind::BodyForceField(_) => {
             StructuralLoadKind::BodyForce
         }
-        RealizedExcitationKind::HeatGeneration(_) => StructuralLoadKind::HeatGeneration,
+        RealizedExcitationKind::HeatGeneration(_)
+        | RealizedExcitationKind::HeatGenerationField(_) => StructuralLoadKind::HeatGeneration,
         RealizedExcitationKind::HeatFlux(_) => StructuralLoadKind::HeatFlux,
         RealizedExcitationKind::TemperatureField(_) => StructuralLoadKind::TemperatureField,
         RealizedExcitationKind::AmbientTemperature(_) => StructuralLoadKind::AmbientTemperature,

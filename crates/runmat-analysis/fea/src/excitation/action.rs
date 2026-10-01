@@ -94,6 +94,29 @@ pub(super) fn realize_kind(
             newtons_per_cubic_meter,
             sample
         )?),
+        ExcitationAction::HeatGeneration(action)
+            if matches!(signal.shape(), SignalShape::TopologyField { .. }) =>
+        {
+            use runmat_analysis_core::{
+                CoordinateFrame, ExcitationDistribution, ExcitationKinematics,
+            };
+            if action.frame != CoordinateFrame::Global
+                || action.distribution != ExcitationDistribution::TopologyField
+                || action.kinematics != ExcitationKinematics::FixedFrame
+            {
+                return Err(RealizationError::new(
+                    "element scalar density requires global fixed-frame topology-field distribution",
+                ));
+            }
+            let PhysicalSignal::HeatGenerationDensity(signal) = signal else {
+                return Err(quantity_mismatch());
+            };
+            RealizedExcitationKind::HeatGenerationField(super::field::ElementScalarField::sample(
+                signal,
+                sample,
+                |value| value.watts_per_cubic_meter,
+            )?)
+        }
         ExcitationAction::HeatGeneration(_) => {
             RealizedExcitationKind::HeatGeneration(scalar_action!(
                 signal,

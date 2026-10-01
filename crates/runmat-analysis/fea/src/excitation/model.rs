@@ -91,6 +91,7 @@ pub(crate) enum RealizedExcitationKind {
     BodyForce(ComplexVector3),
     BodyForceField(super::field::NodalVectorField),
     HeatGeneration(ComplexScalar),
+    HeatGenerationField(super::field::ElementScalarField),
     HeatFlux(ComplexScalar),
     TemperatureField(ComplexScalar),
     AmbientTemperature(ComplexScalar),
@@ -197,6 +198,9 @@ impl RealizedExcitationKind {
             Self::BodyForce(value) => Self::BodyForce(value.component(component)),
             Self::BodyForceField(value) => Self::BodyForceField(value.component(component)),
             Self::HeatGeneration(value) => Self::HeatGeneration(value.component(component)),
+            Self::HeatGenerationField(value) => {
+                Self::HeatGenerationField(value.component(component))
+            }
             Self::HeatFlux(value) => Self::HeatFlux(value.component(component)),
             Self::TemperatureField(value) => Self::TemperatureField(value.component(component)),
             Self::AmbientTemperature(value) => Self::AmbientTemperature(value.component(component)),

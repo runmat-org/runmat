@@ -137,6 +137,7 @@ async fn parent() {
         magnetic_authored::run().await;
         #[cfg(not(feature = "occt-native"))]
         panic!("magnetic authored conformance requires occt-native");
+        #[cfg(feature = "occt-native")]
         return;
     }
     if std::env::args_os().any(|argument| argument == "--magnetic-only") {

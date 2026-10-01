@@ -22,11 +22,14 @@ use super::{constitutive_stats, ThermalConstitutiveStats};
 
 #[cfg(test)]
 mod convergence_tests;
+#[cfg(test)]
+mod element_density_tests;
 mod energy_recovery;
 mod recovery;
 mod steady;
 mod steady_reference;
 mod temperature_field;
+mod volume_source;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ThermalOperatorAssembly {
@@ -187,6 +190,7 @@ pub(crate) fn assemble(
             "thermal planned support shape mismatch".into(),
         ));
     }
+    volume_source::validate_fields(mesh, &projection, excitations)?;
     let mut conductivity = RealSparseAssembler::with_pattern(
         support
             .try_clone()
@@ -268,22 +272,30 @@ pub(crate) fn assemble(
     let mut applied_source = vec![0.0; projection.nodes.len()];
     let mut source_evidence = Vec::new();
     for excitation in excitations.iter() {
-        let (value, rule) = match excitation.kind {
-            RealizedExcitationKind::HeatGeneration(value) => {
-                (value, SpatialIntegrationRule::VolumeKeastFifteen)
+        let (real, imaginary, rule) = match excitation.kind {
+            RealizedExcitationKind::HeatGeneration(value) => (
+                value.real,
+                value.imaginary,
+                SpatialIntegrationRule::VolumeKeastFifteen,
+            ),
+            RealizedExcitationKind::HeatGenerationField(_) => {
+                (0.0, 0.0, SpatialIntegrationRule::VolumeKeastFifteen)
             }
-            RealizedExcitationKind::HeatFlux(value) => {
-                (value, SpatialIntegrationRule::BoundaryDunavantSeven)
-            }
+            RealizedExcitationKind::HeatFlux(value) => (
+                value.real,
+                value.imaginary,
+                SpatialIntegrationRule::BoundaryDunavantSeven,
+            ),
             _ => continue,
         };
-        if value.imaginary != 0.0 {
+        if imaginary != 0.0 {
             return Err(ThermalAssemblyError::ComplexSource {
                 excitation_id: excitation.excitation_id.0.clone(),
             });
         }
         let entity_count = match excitation.kind {
-            RealizedExcitationKind::HeatGeneration(_) => projection
+            RealizedExcitationKind::HeatGeneration(_)
+            | RealizedExcitationKind::HeatGenerationField(_) => projection
                 .elements
                 .iter()
                 .filter(|element| volume_matches(element, &excitation.target))
@@ -297,7 +309,8 @@ pub(crate) fn assemble(
             return Err(ThermalAssemblyError::UnmappedSource {
                 excitation_id: excitation.excitation_id.0.clone(),
                 entity_kind: match excitation.kind {
-                    RealizedExcitationKind::HeatGeneration(_) => "volume elements",
+                    RealizedExcitationKind::HeatGeneration(_)
+                    | RealizedExcitationKind::HeatGenerationField(_) => "volume elements",
                     _ => "boundary faces",
                 },
             });
@@ -306,34 +319,21 @@ pub(crate) fn assemble(
             ScalarProjectionAccumulator::new(excitation, &projection, rule, entity_count)
                 .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
         match excitation.kind {
-            RealizedExcitationKind::HeatGeneration(_) => {
-                for element in projection
-                    .elements
-                    .iter()
-                    .filter(|element| volume_matches(element, &excitation.target))
-                {
-                    projection
-                        .visit_element_quadrature(element, |point| {
-                            let integrated = value.real * point.volume_weight_m3;
-                            evidence.add_requested(integrated, 0.0);
-                            for (&node, &shape) in
-                                element.node_indices.iter().zip(point.shape_values())
-                            {
-                                let nodal = integrated * shape;
-                                applied_source[node] += nodal;
-                                evidence.add_projected(node, nodal, 0.0);
-                            }
-                        })
-                        .map_err(|error| {
-                            ThermalAssemblyError::InvalidProjection(error.to_string())
-                        })?;
-                }
+            RealizedExcitationKind::HeatGeneration(_)
+            | RealizedExcitationKind::HeatGenerationField(_) => {
+                volume_source::integrate(
+                    &projection,
+                    excitation,
+                    real,
+                    &mut applied_source,
+                    &mut evidence,
+                )?;
             }
             RealizedExcitationKind::HeatFlux(_) => {
                 for face in boundary_faces_for_target(&projection, &excitation.target) {
                     projection
                         .visit_boundary_quadrature(face, |point| {
-                            let integrated = value.real * point.area_weight_m2;
+                            let integrated = real * point.area_weight_m2;
                             evidence.add_requested(integrated, 0.0);
                             for (&node, &shape) in
                                 face.node_indices.iter().zip(point.shape_values())

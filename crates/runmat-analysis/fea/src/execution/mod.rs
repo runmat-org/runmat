@@ -16,6 +16,11 @@ mod accuracy_source;
 mod buckling_result;
 mod buckling_workload;
 mod electrical_static;
+mod electrothermal;
+pub use electrothermal::{
+    bind_retained_joule_heat, execute_steady_electrothermal_from_retained,
+    RetainedJouleHeatTransfer, SteadyElectrothermalCompletion,
+};
 mod magnetic_static;
 pub use magnetic_static::{
     magnetic_native_field_definition_inventory, magnetic_native_field_definitions,

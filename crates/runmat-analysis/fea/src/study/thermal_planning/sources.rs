@@ -59,6 +59,12 @@ pub(super) fn validate(
         };
         let realized = realize_step_excitations(model, step, sample).map_err(invalid)?;
         for action in realized.iter() {
+            if let RealizedExcitationKind::HeatGenerationField(ref field) = action.kind {
+                if !field.is_real() {
+                    return Err(invalid("thermal element scalar density must be real"));
+                }
+                continue;
+            }
             let value = match action.kind {
                 RealizedExcitationKind::HeatGeneration(value)
                 | RealizedExcitationKind::HeatFlux(value)

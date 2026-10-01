@@ -26,6 +26,259 @@ fn workload() -> ThermalWorkload {
     }
 }
 
+fn element_field(rows: usize) -> ThermalWorkload {
+    let mut workload = workload();
+    let mut action = workload.model.excitations[0].excitation().clone();
+    action.target = ExcitationTarget::WholeModel;
+    action.direction = None;
+    action.distribution = ExcitationDistribution::TopologyField;
+    action.projection.preserve_resultant = true;
+    action.projection.preserve_moment = false;
+    let signal = Signal {
+        signal_id: action.signal_id.clone(),
+        shape: SignalShape::TopologyField {
+            topology_id: runmat_execution::Digest::from_bytes([8; 32]).to_string(),
+            location: FieldLocation::Element,
+            component_count: 1,
+        },
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Constant(SignalValue::Tensor {
+            shape: vec![rows, 1],
+            values: vec![HeatGenerationDensity::new(2.0); rows],
+        }),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 1,
+        },
+        provenance: SignalProvenance::Authored,
+    };
+    workload.model.signals = vec![PhysicalSignal::HeatGenerationDensity(signal)];
+    workload.model.excitations = vec![ExcitationAction::HeatGeneration(action)];
+    workload
+}
+
+fn field_signal(workload: &mut ThermalWorkload) -> &mut Signal<HeatGenerationDensity> {
+    let PhysicalSignal::HeatGenerationDensity(signal) = &mut workload.model.signals[0] else {
+        panic!("field fixture")
+    };
+    signal
+}
+
+fn field_facts(workload: &ThermalWorkload) -> ThermalRealizationResourceFacts {
+    ThermalRealizationResourceFacts::derive(&workload.model, &workload.model.sequence.steps[0])
+        .unwrap()
+}
+
+#[test]
+fn element_scalar_sampling_payload_is_explicit_grows_and_preserves_scalar_reservation() {
+    let small = field_facts(&element_field(1));
+    let large = field_facts(&element_field(17));
+    let shape_bytes = 2 * std::mem::size_of::<usize>() as u64;
+    assert_eq!(small.field_payload_bytes.0, 32 + shape_bytes);
+    assert_eq!(large.field_payload_bytes.0, 32 * 17 + shape_bytes);
+    assert_eq!(
+        large.field_payload_bytes.0 - small.field_payload_bytes.0,
+        32 * 16
+    );
+    assert_eq!(large.vector_bytes, small.vector_bytes);
+    assert_eq!(
+        large.metadata_estimated_bytes,
+        small.metadata_estimated_bytes
+    );
+    assert_eq!(
+        large.reservation_bytes().unwrap().0 - small.reservation_bytes().unwrap().0,
+        32 * 16
+    );
+    let scalar = field_facts(&workload());
+    assert_eq!(scalar.field_payload_bytes, ByteCount(0));
+    assert_eq!(
+        scalar.reservation_bytes().unwrap().0,
+        scalar.vector_bytes.0 + scalar.metadata_estimated_bytes.0 + scalar.signal_lookup_bytes.0
+    );
+    assert!(scalar_field_payload(u64::MAX, 1).is_err());
+    assert!(scalar_field_payload(1, u64::MAX).is_err());
+    let mut overflow = small;
+    overflow.field_payload_bytes = ByteCount(u64::MAX);
+    assert!(overflow.reservation_bytes().is_err());
+}
+
+#[test]
+fn time_tensor_interpolation_reserves_endpoints_output_shapes_and_retained_field() {
+    let mut workload = element_field(7);
+    let signal = field_signal(&mut workload);
+    let SignalRepresentation::Constant(value) = signal.representation.clone() else {
+        panic!("constant fixture")
+    };
+    signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+        domain: TabulatedSignalDomain::TimeSeconds,
+        knots: vec![
+            SignalKnot::continuous(0.0, SignalOrdinate::Real(value.clone())),
+            SignalKnot::continuous(1.0, SignalOrdinate::Real(value)),
+        ],
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::Reject,
+    });
+    let facts = field_facts(&workload);
+    assert_eq!(
+        facts.field_payload_bytes.0,
+        64 * 7 + 6 * std::mem::size_of::<usize>() as u64
+    );
+    let signal = field_signal(&mut workload);
+    let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
+        unreachable!()
+    };
+    let SignalKnotValue::Continuous(SignalOrdinate::Real(real)) = table.knots[0].value.clone()
+    else {
+        unreachable!()
+    };
+    table.knots[0].value = SignalKnotValue::Continuous(SignalOrdinate::Complex {
+        real: real.clone(),
+        imaginary: real,
+    });
+    assert_eq!(
+        field_facts(&workload).field_payload_bytes,
+        facts.field_payload_bytes
+    );
+}
+
+#[test]
+fn element_scalar_field_is_included_in_both_order_exact_preassembly_ceiling() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let mut workload = element_field(mesh.topology.volume_elements.len());
+        let SignalShape::TopologyField { topology_id, .. } = &mut field_signal(&mut workload).shape
+        else {
+            unreachable!()
+        };
+        *topology_id =
+            runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()).to_string();
+        let facts = ThermalPreassemblyResourceFacts::derive(
+            &[],
+            &workload.model,
+            &workload.model.sequence.steps[0],
+            &mesh,
+            &workload.solve_schedule().unwrap(),
+            &crate::admission::admit_nonstructural(
+                PhysicsFamily::Thermal,
+                workload.procedure.procedure(),
+                Some(&mesh),
+                SourceImplementation::CanonicalVolumeProjection,
+                BoundaryTransferImplementation::CanonicalBoundaryProjection,
+                workload.formulation_requirement,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(facts.realization.field_payload_bytes.0 > 0);
+        let required = facts.reservation_bytes().unwrap().0;
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = required - 1;
+        assert!(
+            matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual,.. })) if actual == required)
+        );
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = required;
+        workload.execute(&mesh).unwrap();
+    }
+}
+
+#[test]
+fn field_envelope_rejects_malformed_shapes_locations_values_and_unmaterialized_sources() {
+    for failure in 0..7 {
+        let mut workload = element_field(3);
+        let signal = field_signal(&mut workload);
+        match failure {
+            0 => {
+                let SignalShape::TopologyField { location, .. } = &mut signal.shape else {
+                    unreachable!()
+                };
+                *location = FieldLocation::Node;
+            }
+            1 => {
+                let SignalShape::TopologyField {
+                    component_count, ..
+                } = &mut signal.shape
+                else {
+                    unreachable!()
+                };
+                *component_count = 2;
+            }
+            2 => {
+                let SignalShape::TopologyField { topology_id, .. } = &mut signal.shape else {
+                    unreachable!()
+                };
+                *topology_id = "foreign".into();
+            }
+            3 => {
+                let SignalRepresentation::Constant(SignalValue::Tensor { shape, .. }) =
+                    &mut signal.representation
+                else {
+                    unreachable!()
+                };
+                shape[0] = 4;
+            }
+            4 => {
+                let SignalRepresentation::Constant(SignalValue::Tensor { values, .. }) =
+                    &mut signal.representation
+                else {
+                    unreachable!()
+                };
+                values[0] = HeatGenerationDensity::new(f64::NAN);
+            }
+            5 => {
+                signal.representation = SignalRepresentation::Constant(SignalValue::Scalar(
+                    HeatGenerationDensity::new(2.0),
+                ));
+            }
+            _ => {
+                signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+                    domain: TabulatedSignalDomain::FrequencyHertz,
+                    knots: Vec::new(),
+                    interpolation: SignalInterpolation::Linear,
+                    extrapolation: SignalExtrapolation::Reject,
+                });
+            }
+        }
+        assert!(ThermalRealizationResourceFacts::derive(
+            &workload.model,
+            &workload.model.sequence.steps[0]
+        )
+        .is_err());
+    }
+    let mut malformed = element_field(3);
+    let signal = field_signal(&mut malformed);
+    let SignalRepresentation::Constant(value) = signal.representation.clone() else {
+        unreachable!()
+    };
+    signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+        domain: TabulatedSignalDomain::TimeSeconds,
+        knots: vec![SignalKnot::continuous(
+            0.0,
+            SignalOrdinate::Complex {
+                real: value,
+                imaginary: SignalValue::Tensor {
+                    shape: vec![2, 1],
+                    values: vec![HeatGenerationDensity::new(1.0); 2],
+                },
+            },
+        )],
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::Reject,
+    });
+    assert!(ThermalRealizationResourceFacts::derive(
+        &malformed.model,
+        &malformed.model.sequence.steps[0]
+    )
+    .is_err());
+}
+
 #[test]
 fn inventory_counts_all_actions_and_each_case_membership_without_copying_selection() {
     let mut workload = workload();
