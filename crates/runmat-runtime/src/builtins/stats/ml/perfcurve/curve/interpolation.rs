@@ -86,7 +86,12 @@ pub(super) fn roc_slope(curve: &Curve, options: &Options) -> f64 {
     if false_positive_cost <= 0.0 || false_negative_cost <= 0.0 || pos_prior <= 0.0 {
         f64::NAN
     } else {
-        (false_positive_cost * neg_prior) / (false_negative_cost * pos_prior)
+        numerics::product_ratio(
+            false_positive_cost,
+            neg_prior,
+            false_negative_cost,
+            pos_prior,
+        )
     }
 }
 

@@ -160,6 +160,26 @@ fn finite_large_observation_weights_have_explicit_empirical_boundary_and_stable_
 }
 
 #[test]
+fn finite_extreme_costs_keep_expected_cost_curve_finite() {
+    let _outputs = output_count::push_output_count(Some(2));
+    let result = block_on(perfcurve_builtin(
+        tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
+        tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
+        Value::Num(1.0),
+        vec![
+            Value::from("XCrit"),
+            Value::from("ecost"),
+            Value::from("Cost"),
+            tensor(&[1.0e308; 4], &[2, 2]),
+        ],
+    ))
+    .expect("finite nonnegative cost matrix is admitted");
+    for expected_cost in output_tensor(&result, 0).materialize_f64() {
+        assert!((expected_cost / 1.0e308 - 1.0).abs() < 1.0e-15);
+    }
+}
+
+#[test]
 fn empirical_and_uniform_priors_select_different_roc_operating_points() {
     let _outputs = output_count::push_output_count(Some(5));
     let run = |controls| {

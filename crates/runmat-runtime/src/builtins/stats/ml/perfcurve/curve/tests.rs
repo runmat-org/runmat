@@ -43,3 +43,78 @@ fn optimal_roc_slope_uses_effective_empirical_class_mass() {
     };
     assert_eq!(interpolation::roc_slope(&curve, &options), 1.0);
 }
+
+#[test]
+fn expected_cost_keeps_finite_extreme_weighted_means() {
+    let balanced = Counts {
+        tp: 1.0,
+        fp: 1.0,
+        tn: 1.0,
+        fn_: 1.0,
+    };
+    let large = [[1.0e308; 2]; 2];
+    let result = core::criterion_value(balanced, Criterion::ExpectedCost, &large);
+    assert!((result / 1.0e308 - 1.0).abs() < 1.0e-15);
+
+    // A tiny count paired with the largest cost must not erase a smaller,
+    // dominant cost in another occupied cell.
+    let mixed = Counts {
+        tp: 0.0,
+        fp: 1.0,
+        tn: f64::from_bits(1),
+        fn_: 0.0,
+    };
+    let mixed_cost = [[1.0e308, 1.0e-308], [0.0, 0.0]];
+    let expected = 1.0e308 * f64::from_bits(1) + 1.0e-308;
+    let result = core::criterion_value(mixed, Criterion::ExpectedCost, &mixed_cost);
+    assert!((result / expected - 1.0).abs() < 1.0e-14);
+}
+
+#[test]
+fn extreme_roc_cost_ratio_preserves_finite_slope_and_negative_difference_policy() {
+    let mut options = Options {
+        xcrit: Criterion::Fpr,
+        ycrit: Criterion::Tpr,
+        neg_class: None,
+        weights: None,
+        prior: PriorOption::Empirical,
+        cost: [[0.0, 1.0e308], [5.0e307, 0.0]],
+        tvals: None,
+        xvals: None,
+        use_nearest: true,
+        process_nan: ProcessNaN::Ignore,
+    };
+    let mut curve = Curve {
+        x: vec![0.0, 0.5],
+        y: vec![0.0, 0.5],
+        thresholds: vec![1.0, 0.5],
+        counts: vec![
+            Counts {
+                tp: 1.0,
+                fp: 1.0,
+                tn: 1.0,
+                fn_: 1.0,
+            },
+            Counts {
+                tp: 0.0,
+                fp: 0.0,
+                tn: 2.0,
+                fn_: 2.0,
+            },
+        ],
+        auc: 0.0,
+    };
+    assert!((interpolation::roc_slope(&curve, &options) - 2.0).abs() < 1.0e-15);
+    assert_eq!(optimal_point(&curve, &options), (0.0, 0.0));
+
+    options.cost = [[0.0, 1.0e-308], [1.0e-308, 0.0]];
+    curve.counts[0] = Counts {
+        tp: 0.0,
+        fp: 0.0,
+        tn: 1.0e-308,
+        fn_: 1.0e-308,
+    };
+    assert!((interpolation::roc_slope(&curve, &options) - 1.0).abs() < 1.0e-15);
+    options.cost = [[2.0, 1.0], [1.0, 2.0]];
+    assert!(interpolation::roc_slope(&curve, &options).is_nan());
+}

@@ -60,6 +60,7 @@ pub(super) struct Curve {
 
 mod core;
 mod interpolation;
+mod numerics;
 mod observations;
 mod subclasses;
 #[cfg(test)]

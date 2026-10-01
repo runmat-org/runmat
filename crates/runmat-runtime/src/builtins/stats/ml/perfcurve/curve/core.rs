@@ -133,13 +133,35 @@ pub(super) fn criterion_value(counts: Counts, criterion: Criterion, cost: &[[f64
         Criterion::PredictedPositive => counts.tp + counts.fp,
         Criterion::RatePredictedPositive => ratio(counts.tp + counts.fp, counts.total()),
         Criterion::RatePredictedNegative => ratio(counts.tn + counts.fn_, counts.total()),
-        Criterion::ExpectedCost => ratio(
-            (cost[0][0] * counts.tn)
-                + (cost[0][1] * counts.fp)
-                + (cost[1][0] * counts.fn_)
-                + (cost[1][1] * counts.tp),
-            counts.total(),
-        ),
+        Criterion::ExpectedCost => expected_cost(counts, cost),
+    }
+}
+
+fn expected_cost(counts: Counts, cost: &[[f64; 2]; 2]) -> f64 {
+    let total = counts.total();
+    if total.is_nan() || total <= 0.0 {
+        return f64::NAN;
+    }
+    let components = [
+        (cost[0][0], counts.tn),
+        (cost[0][1], counts.fp),
+        (cost[1][0], counts.fn_),
+        (cost[1][1], counts.tp),
+    ];
+    let maximum = cost.iter().flatten().copied().fold(0.0_f64, f64::max);
+    let mut mean = 0.0_f64;
+    for (value, count) in components {
+        // Divide each nonnegative class mass by the total as part of a
+        // scaled product. Multiplying value * count first can overflow even
+        // though their weighted mean is finite.
+        mean += numerics::product_ratio(value, count, total, 1.0);
+    }
+    // Rounded class fractions can add to slightly more than one. A weighted
+    // mean of nonnegative costs cannot exceed the largest input cost.
+    if mean.is_nan() {
+        f64::NAN
+    } else {
+        mean.min(maximum)
     }
 }
 
