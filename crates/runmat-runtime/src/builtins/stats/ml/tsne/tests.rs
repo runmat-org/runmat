@@ -1,6 +1,75 @@
 use super::*;
 use crate::builtins::common::random;
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
+    ThreadProviderGuard,
+};
 use runmat_value::{IntegerStorage, StructValue};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct RejectingDownloadProvider {
+    owner: TestAllocationOwner,
+    downloads: AtomicUsize,
+}
+
+impl AccelProvider for RejectingDownloadProvider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "t-SNE admission fixture".into()
+    }
+    fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unexpected upload")
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("unexpected download") })
+    }
+    fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("unexpected native download") })
+    }
+}
+
+#[tokio::test]
+async fn malformed_host_visible_controls_reject_before_provider_work() {
+    let provider = Box::leak(Box::new(RejectingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let observation = Value::GpuTensor(resident.handle.clone());
+    for controls in [
+        vec![Value::from("Algorithm"), Value::Num(3.0)],
+        vec![Value::from("Distance"), Value::from("not-a-metric")],
+        vec![Value::from("NumDimensions"), Value::Num(0.0)],
+        vec![Value::from("Perplexity"), Value::Num(-1.0)],
+        vec![
+            Value::from("NumDimensions"),
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
+        ],
+        vec![Value::from("Options"), {
+            let mut fields = StructValue::new();
+            fields.insert("OutputFcn", observation.clone());
+            Value::Struct(fields)
+        }],
+        vec![Value::from("Options"), {
+            let mut fields = StructValue::new();
+            fields.insert("MaxIter", Value::Num(0.0));
+            Value::Struct(fields)
+        }],
+    ] {
+        assert!(tsne_builtin(observation.clone(), controls).await.is_err());
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+}
 
 #[test]
 fn option_spellings_and_preflight_are_typed_and_preeffect() {
@@ -13,8 +82,8 @@ fn option_spellings_and_preflight_are_typed_and_preeffect() {
         Some(DistanceMetric::Seuclidean)
     );
     assert_eq!(Algorithm::from_keyword("exact"), Some(Algorithm::Exact));
-    assert!(preflight_option_headers(&[Value::from("Distance")]).is_err());
-    assert!(preflight_option_headers(&[Value::from("unknown"), Value::from("value")]).is_err());
+    assert!(option_headers(vec![Value::from("Distance")]).is_err());
+    assert!(option_headers(vec![Value::from("unknown"), Value::from("value")]).is_err());
     assert!(preflight_observations(&Value::from("not observations")).is_err());
 }
 

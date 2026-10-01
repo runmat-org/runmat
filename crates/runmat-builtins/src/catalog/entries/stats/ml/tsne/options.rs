@@ -38,18 +38,6 @@ impl TsneOption {
             _ => None,
         }
     }
-
-    pub const fn requires_exact_integer_to_double(self) -> bool {
-        matches!(
-            self,
-            Self::CacheSize
-                | Self::Exaggeration
-                | Self::InitialY
-                | Self::LearnRate
-                | Self::Perplexity
-                | Self::Theta
-        )
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -9,9 +9,10 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::{random_args::keyword_of, tensor};
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+mod admission;
 mod geometry;
 mod metric;
 mod optimizer;
@@ -19,6 +20,10 @@ mod options;
 #[cfg(test)]
 mod tests;
 
+use admission::{
+    admit_options, materialize_options, option_headers, AdmittedOption, AdmittedStatsetField,
+    OptionHeader,
+};
 use optimizer::compute_tsne;
 #[cfg(test)]
 use options::is_empty_numeric;
@@ -124,14 +129,17 @@ struct EmbeddingResult {
     builtin_path = "crate::builtins::stats::ml::tsne"
 )]
 pub(crate) async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    preflight_option_headers(&rest)?;
     preflight_observations(&x)?;
-    ensure_tsne_extensions(&x, &rest)?;
-    let x = gather(x).await?;
-    let rest = gather_all(rest).await?;
+    let headers = option_headers(rest)?;
+    ensure_tsne_extensions(&x, &headers)?;
+    let admitted = admit_options(headers)?;
     ensure_exact_tsne_integer_value(&x, "observation data")?;
-    ensure_exact_tsne_floating_options(&rest)?;
-    let options = parse_options(rest)?;
+    ensure_exact_tsne_floating_options(&admitted)?;
+    let x = gather(x).await?;
+    ensure_exact_tsne_integer_value(&x, "observation data")?;
+    let admitted = materialize_options(admitted).await?;
+    ensure_exact_tsne_floating_options(&admitted)?;
+    let options = parse_options(admitted)?;
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("tsne: {err}")))?;
     let result = compute_tsne(tensor, options)?;
@@ -168,22 +176,24 @@ fn tsne_value_contains_explicit_gpu(value: &Value) -> bool {
     }
 }
 
-fn ensure_tsne_extensions(x: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_tsne_extensions(x: &Value, rest: &[OptionHeader]) -> BuiltinResult<()> {
     if tsne_value_contains_typed_integer(x) {
         crate::compatibility::ensure_builtin_extension_enabled(&TSNE_INTEGER_DATA_EXTENSION, NAME)?;
     }
     if rest
         .iter()
-        .skip(1)
-        .step_by(2)
-        .any(tsne_value_contains_typed_integer)
+        .any(|(_, value)| tsne_value_contains_typed_integer(value))
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &TSNE_INTEGER_OPTION_EXTENSION,
             NAME,
         )?;
     }
-    if tsne_value_contains_explicit_gpu(x) || rest.iter().any(tsne_value_contains_explicit_gpu) {
+    if tsne_value_contains_explicit_gpu(x)
+        || rest
+            .iter()
+            .any(|(_, value)| tsne_value_contains_explicit_gpu(value))
+    {
         crate::compatibility::ensure_builtin_extension_enabled(
             &TSNE_RESIDENT_INPUT_EXTENSION,
             NAME,
@@ -234,26 +244,39 @@ fn ensure_exact_tsne_integer_value(value: &Value, role: &str) -> BuiltinResult<(
     }
 }
 
-fn ensure_exact_tsne_floating_options(rest: &[Value]) -> BuiltinResult<()> {
-    for pair in rest.chunks_exact(2) {
-        let Some(name) = keyword_of(&pair[0]) else {
-            continue;
-        };
-        let Some(option) = TsneOption::from_keyword(&name) else {
-            continue;
-        };
-        if option.requires_exact_integer_to_double() {
-            ensure_exact_tsne_integer_value(&pair[1], &name)?;
-        }
-        if option == TsneOption::Options {
-            if let Value::Struct(options) = &pair[1] {
-                for (field_name, value) in &options.fields {
-                    if TsneStatsetField::from_keyword(field_name) == Some(TsneStatsetField::TolFun)
-                    {
+fn ensure_exact_tsne_floating_options(rest: &[AdmittedOption]) -> BuiltinResult<()> {
+    for option in rest {
+        match option {
+            AdmittedOption::CacheSizeNumeric(value) => {
+                ensure_exact_tsne_integer_value(value, "CacheSize")?
+            }
+            AdmittedOption::Exaggeration(value) => {
+                ensure_exact_tsne_integer_value(value, "Exaggeration")?
+            }
+            AdmittedOption::InitialY(value) => ensure_exact_tsne_integer_value(value, "InitialY")?,
+            AdmittedOption::LearnRate(value) => {
+                ensure_exact_tsne_integer_value(value, "LearnRate")?
+            }
+            AdmittedOption::Perplexity(value) => {
+                ensure_exact_tsne_integer_value(value, "Perplexity")?
+            }
+            AdmittedOption::Theta(value) => ensure_exact_tsne_integer_value(value, "Theta")?,
+            AdmittedOption::Options(fields) => {
+                for field in fields {
+                    if let AdmittedStatsetField::TolFun(value) = field {
                         ensure_exact_tsne_integer_value(value, "Options.TolFun")?;
                     }
                 }
             }
+            AdmittedOption::OptionsEmptyResident(_) => {}
+            AdmittedOption::Algorithm(_)
+            | AdmittedOption::CacheSizeMaximal
+            | AdmittedOption::Distance(_)
+            | AdmittedOption::NumDimensions(_)
+            | AdmittedOption::NumPcaComponents(_)
+            | AdmittedOption::Standardize(_)
+            | AdmittedOption::NumPrint(_)
+            | AdmittedOption::Verbose(_) => {}
         }
     }
     Ok(())
@@ -263,26 +286,6 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value)
         .await
         .map_err(with_tsne_context)
-}
-
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
-    }
-    Ok(out)
-}
-
-fn preflight_option_headers(values: &[Value]) -> BuiltinResult<()> {
-    if !values.len().is_multiple_of(2) {
-        return Err(invalid("tsne: name-value options must be paired"));
-    }
-    for pair in values.chunks_exact(2) {
-        let name = keyword_of(&pair[0]).ok_or_else(|| invalid("tsne: option name must be text"))?;
-        TsneOption::from_keyword(&name)
-            .ok_or_else(|| invalid(format!("tsne: unknown option '{name}'")))?;
-    }
-    Ok(())
 }
 
 fn preflight_observations(value: &Value) -> BuiltinResult<()> {
