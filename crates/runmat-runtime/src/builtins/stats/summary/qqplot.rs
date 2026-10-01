@@ -17,6 +17,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const NAME: &str = "qqplot";
 mod admission;
+mod geometry;
 mod plot;
 mod series;
 use plot::render_series;
