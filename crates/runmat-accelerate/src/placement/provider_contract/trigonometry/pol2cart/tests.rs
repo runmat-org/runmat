@@ -79,6 +79,6 @@ fn coordinate_wgpu_cost_includes_extra_upload_without_completion_claim() {
     );
     assert_eq!(cost.components.queue_ns, 100_000);
     assert_eq!(cost.components.download_ns, 0);
-    assert_eq!(cost.scratch_bytes, work.scratch_bytes);
+    assert_eq!(cost.scratch_bytes, Some(work.scratch_bytes));
     assert_eq!(cost.source, EstimateSource::StaticPrior);
 }

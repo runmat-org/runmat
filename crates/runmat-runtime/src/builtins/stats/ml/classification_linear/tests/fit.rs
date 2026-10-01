@@ -71,8 +71,7 @@ fn typed_fitclinear_actions_preserve_ignored_payload_and_response_orientation() 
         .preflight_values(&wrong_y)
         .unwrap();
     assert!(preflight_response_shape(&first, &wrong_y, &wrong)
-        .err()
-        .expect("known response mismatch")
+        .expect_err("known response mismatch")
         .message()
         .contains("length(Y)"));
     let invalid = vec![
