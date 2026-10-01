@@ -33,7 +33,7 @@ fn known_bad_control(
     let count = fact.shape.element_count();
     let numeric_real = matches!(&fact.kind, ValueKindFact::Numeric(number) if number.domain == NumericDomain::Real);
     let numeric_complex = matches!(&fact.kind, ValueKindFact::Numeric(number) if number.domain == NumericDomain::Complex);
-    match kind {
+    let invalid_for_option = match kind {
         BinscatterOptionKind::NumBins => {
             if numeric_complex || known_bad_vector(fact) || count.is_some_and(|n| n != 1 && n != 2)
             {
@@ -78,9 +78,9 @@ fn known_bad_control(
                     }))
         }
         BinscatterOptionKind::UnsupportedMatlabOption => true,
-    }
-    || {
-        (!numeric_real
+    };
+    invalid_for_option
+        || (!numeric_real
             && !matches!(fact.kind, ValueKindFact::Logical)
             && matches!(
                 kind,
@@ -89,7 +89,6 @@ fn known_bad_control(
                     | BinscatterOptionKind::YLimits
             )
             && !matches!(fact.kind, ValueKindFact::Unknown))
-    }
 }
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
