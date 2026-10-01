@@ -656,3 +656,27 @@ fn label_orientation_changes_axes_rotation_without_changing_horizontal_labels() 
         Some(0.0)
     );
 }
+
+#[test]
+fn unrepresentable_filled_vertices_reject_before_plot_state_changes() {
+    let _guard = crate::builtins::plotting::lock_plot_test_context();
+    crate::builtins::plotting::reset_plot_state();
+    let options =
+        BoxplotOptions::parse(vec![Value::from("BoxStyle"), Value::from("filled")]).unwrap();
+    let boxes = build_box_stats(
+        tensor(vec![f64::MAX, f64::MAX, f64::MAX], vec![3, 1]),
+        None,
+        &options,
+    )
+    .unwrap();
+    let before = clone_figure(current_figure_handle()).unwrap();
+    assert_eq!(before.plots().count(), 0);
+    let error = render_boxplot(&boxes, &options)
+        .expect_err("f32 patch boundary must fail before publication");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+    let after = clone_figure(current_figure_handle()).unwrap();
+    assert_eq!(after.plots().count(), 0);
+}
