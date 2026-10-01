@@ -189,7 +189,7 @@ fn tinv_preserves_native_single_output_precision() {
 
 #[test]
 fn tinv_declares_independent_integer_role_metadata() {
-    let builtin = runmat_builtins::builtin_function_by_name("tinv").unwrap();
+    let builtin = &runmat_builtins::TINV_CATALOG_ENTRY;
     assert_eq!(builtin.integer_capabilities.len(), 2);
     assert_eq!(builtin.extensions.len(), 3);
     assert!(builtin

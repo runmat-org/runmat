@@ -44,13 +44,20 @@ fn chi2cdf_integer_roles_are_gated_and_wide_values_do_not_round() {
         .contains("exactly representable as double"));
 
     let signed_wide_error = block_on(chi2cdf::chi2cdf_builtin(
-        Value::Int(runmat_value::IntValue::I64(i64::MIN)),
+        Value::Int(runmat_value::IntValue::I64(i64::MIN + 1)),
         vec![Value::Num(5.0)],
     ))
     .unwrap_err();
     assert!(signed_wide_error
         .message()
         .contains("exactly representable as double"));
+
+    let signed_minimum = block_on(chi2cdf::chi2cdf_builtin(
+        Value::Int(runmat_value::IntValue::I64(i64::MIN)),
+        vec![Value::Num(5.0)],
+    ))
+    .expect("the signed minimum is exactly representable as double");
+    assert!(matches!(signed_minimum, Value::Num(value) if value == 0.0));
 }
 
 #[test]

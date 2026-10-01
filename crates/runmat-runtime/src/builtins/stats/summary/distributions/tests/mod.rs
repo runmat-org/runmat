@@ -36,7 +36,8 @@ fn all_integer_binocdf_storages(value: i8) -> Vec<IntegerStorage> {
 }
 
 mod normal;
-mod icdf;
+#[path = "icdf.rs"]
+mod inverse_distribution;
 mod student_t;
 mod binomial;
 mod chi_square;
