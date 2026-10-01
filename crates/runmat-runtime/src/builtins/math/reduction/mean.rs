@@ -42,12 +42,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         },
     ],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: Some(256),
     workgroup_size: Some(256),
     accepts_nan_mode: true,
-    notes: "Providers can specialise mean reductions; omitnan currently falls back to the host.",
+    notes: "Real floating reductions, including omitnan, stay resident when the exact owner supports the required hooks. An unsupported hook uses the admitted class-preserving host boundary and restores to the input owner; a singleton identity may share its allocation. Complex inputs retain their typed host fallback unless an owner supplies a complete complex route.",
 };
 
 fn mean_descriptor_error_with_message(
@@ -1436,9 +1436,17 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
         }
     }
 
-    let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-    let reduced = mean_tensor(gathered, args.axes.clone(), args.nan_mode)?;
-    Ok(tensor::tensor_into_value(reduced))
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    match gathered {
+        Value::ComplexTensor(tensor) => mean_host_complex_tensor(tensor, args),
+        Value::Tensor(tensor) => {
+            let reduced = mean_tensor(tensor, args.axes.clone(), args.nan_mode)?;
+            Ok(tensor::tensor_into_value(reduced))
+        }
+        _ => Err(mean_internal_error(
+            "mean: provider returned an unsupported gathered numeric value",
+        )),
+    }
 }
 
 #[path = "mean/provider_execution.rs"]
@@ -1713,6 +1721,7 @@ fn reduce_complex_tensor_mean_dim(
     let stride_after = dim_product(&shape[dim..]);
     let out_len = tensor::element_count(&output_shape);
     let mut output = vec![(0.0f64, 0.0f64); out_len];
+    let values = tensor.materialize_f64();
 
     for after in 0..stride_after {
         for before in 0..stride_before {
@@ -1723,7 +1732,7 @@ fn reduce_complex_tensor_mean_dim(
 
             for k in 0..reduce_len {
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let (re, im) = tensor.materialize_f64()[idx];
+                let (re, im) = values[idx];
                 let is_nan = re.is_nan() || im.is_nan();
                 match nan_mode {
                     ReductionNaN::Include => {
@@ -2800,6 +2809,79 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(gathered.materialize_f64(), vec![(2.5, 5.0)]);
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_unsupported_hook_restores_typed_result_to_input_owner() {
+        test_support::with_test_provider(|provider| {
+            for single in [false, true] {
+                let input = if single {
+                    ComplexTensor::from_f32(
+                        vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                        vec![2, 2],
+                    )
+                    .unwrap()
+                } else {
+                    ComplexTensor::new(
+                        vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                        vec![2, 2],
+                    )
+                    .unwrap()
+                };
+                let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+                let result = mean_builtin(Value::GpuTensor(input.clone()), Vec::new()).unwrap();
+                let Value::GpuTensor(result) = result else {
+                    panic!("complex GPU mean must retain residency");
+                };
+                assert_eq!(result.device_id(), input.device_id());
+                assert_eq!(
+                    runmat_accelerate_api::handle_storage(&result),
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_precision(&result),
+                    runmat_accelerate_api::handle_precision(&input)
+                );
+                let gathered =
+                    block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+                let Value::ComplexTensor(gathered) = gathered else {
+                    panic!("complex GPU mean must preserve complex storage");
+                };
+                assert_eq!(gathered.shape, vec![1, 2]);
+                assert_eq!(gathered.materialize_f64(), vec![(2.0, 3.0), (6.0, 7.0)]);
+                input.allocation_lease().validate_live().unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_omitnan_uses_typed_host_boundary() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::from_f32(
+                vec![(1.0, 2.0), (f32::NAN, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                vec![2, 2],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let result = mean_builtin(
+                Value::GpuTensor(input.clone()),
+                vec![Value::Int(IntValue::I32(1)), Value::from("omitnan")],
+            )
+            .unwrap();
+            let Value::GpuTensor(result) = result else {
+                panic!("complex omitnan result must remain resident");
+            };
+            assert_eq!(result.device_id(), input.device_id());
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("complex omitnan result must retain its class");
+            };
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.materialize_f64(), vec![(1.0, 2.0), (6.0, 7.0)]);
+            input.allocation_lease().validate_live().unwrap();
         });
     }
 

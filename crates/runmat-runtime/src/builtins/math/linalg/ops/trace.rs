@@ -133,13 +133,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         },
     ],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: Some(256),
     workgroup_size: Some(256),
     accepts_nan_mode: false,
     notes:
-        "Uses provider diagonal extraction followed by a sum reduction when available; otherwise gathers once, computes on the host, and uploads a 1×1 scalar back to the device.",
+        "Resident inputs retain their exact owner. A capable provider extracts the diagonal and sums it in double precision, then restores single precision when required; scalar identity results may share the input allocation. Unsupported hooks gather once, compute on the host, and restore the typed scalar to the same owner.",
 };
 
 fn trace_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {

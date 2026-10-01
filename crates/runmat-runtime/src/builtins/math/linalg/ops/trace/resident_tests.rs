@@ -2,25 +2,50 @@
 use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
-    test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
-    GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType, ProviderExecutionFuture,
+    test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
+    AccelProvider, AccelProviderFuture, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
+    HostNumericTensorOwned, HostTensorView, NumericElementType, ProviderExecutionFuture,
     ProviderPrecision, ThreadProviderGuard,
 };
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 struct ComplexTraceProvider {
     owner: TestAllocationOwner,
     diagonals: AtomicUsize,
     sums: AtomicUsize,
     casts: AtomicUsize,
+    downloads: AtomicUsize,
+    values: Mutex<HashMap<u64, HostNumericTensorOwned>>,
 }
 
 impl ComplexTraceProvider {
-    fn allocate(&self, shape: Vec<usize>, element: NumericElementType) -> GpuTensorHandle {
-        self.owner
-            .allocate_zeroed(shape, element, GpuTensorStorage::ComplexInterleaved)
+    fn allocate(&self, shape: Vec<usize>, data: HostNumericDataOwned) -> GpuTensorHandle {
+        let payload = HostNumericTensorOwned {
+            data,
+            shape,
+            storage: GpuTensorStorage::ComplexInterleaved,
+        };
+        let handle = self
+            .owner
+            .allocate_numeric(payload.clone())
             .expect("fixture allocation")
-            .handle
+            .handle;
+        self.values
+            .lock()
+            .unwrap()
+            .insert(handle.buffer_id(), payload);
+        handle
+    }
+
+    fn payload(&self, handle: &GpuTensorHandle) -> anyhow::Result<HostNumericTensorOwned> {
+        self.values
+            .lock()
+            .unwrap()
+            .get(&handle.buffer_id())
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("fixture payload unavailable"))
     }
 }
 
@@ -41,17 +66,43 @@ impl AccelProvider for ComplexTraceProvider {
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
 
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move {
+            self.downloads.fetch_add(1, Ordering::SeqCst);
+            self.payload(handle)
+        })
+    }
+
     fn diag_extract(&self, matrix: &GpuTensorHandle, _: isize) -> anyhow::Result<GpuTensorHandle> {
         self.diagonals.fetch_add(1, Ordering::SeqCst);
         if matrix.shape() == [1, 1] {
             return Ok(matrix.clone());
         }
-        let element = match runmat_accelerate_api::handle_precision(matrix) {
-            Some(ProviderPrecision::F32) => NumericElementType::F32,
-            Some(ProviderPrecision::F64) => NumericElementType::F64,
-            None => anyhow::bail!("floating input required"),
+        let payload = self.payload(matrix)?;
+        let rows = matrix.shape()[0];
+        let diagonal = match payload.data {
+            HostNumericDataOwned::F32(data) => HostNumericDataOwned::F32(
+                (0..rows)
+                    .flat_map(|index| {
+                        let position = 2 * (index + index * rows);
+                        [data[position], data[position + 1]]
+                    })
+                    .collect(),
+            ),
+            HostNumericDataOwned::F64(data) => HostNumericDataOwned::F64(
+                (0..rows)
+                    .flat_map(|index| {
+                        let position = 2 * (index + index * rows);
+                        [data[position], data[position + 1]]
+                    })
+                    .collect(),
+            ),
+            _ => anyhow::bail!("floating input required"),
         };
-        Ok(self.allocate(vec![matrix.shape()[0], 1], element))
+        Ok(self.allocate(vec![rows, 1], diagonal))
     }
 
     fn reduce_sum<'a>(
@@ -65,17 +116,33 @@ impl AccelProvider for ComplexTraceProvider {
             {
                 return Ok(diagonal.clone());
             }
-            Ok(self.allocate(vec![1, 1], NumericElementType::F64))
+            let payload = self.payload(diagonal)?;
+            let values: Vec<f64> = match payload.data {
+                HostNumericDataOwned::F32(data) => data.into_iter().map(f64::from).collect(),
+                HostNumericDataOwned::F64(data) => data,
+                _ => anyhow::bail!("floating diagonal required"),
+            };
+            let (real, imaginary) = values
+                .chunks_exact(2)
+                .fold((0.0, 0.0), |sum, pair| (sum.0 + pair[0], sum.1 + pair[1]));
+            Ok(self.allocate(vec![1, 1], HostNumericDataOwned::F64(vec![real, imaginary])))
         })
     }
 
     fn unary_single<'a>(
         &'a self,
-        _: &'a GpuTensorHandle,
+        input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.casts.fetch_add(1, Ordering::SeqCst);
-            Ok(self.allocate(vec![1, 1], NumericElementType::F32))
+            let payload = self.payload(input)?;
+            let HostNumericDataOwned::F64(data) = payload.data else {
+                anyhow::bail!("double result required before single cast")
+            };
+            Ok(self.allocate(
+                vec![1, 1],
+                HostNumericDataOwned::F32(data.into_iter().map(|value| value as f32).collect()),
+            ))
         })
     }
 }
@@ -88,9 +155,20 @@ fn complex_diagonal_and_sum_remain_resident_for_capable_provider() {
             diagonals: AtomicUsize::new(0),
             sums: AtomicUsize::new(0),
             casts: AtomicUsize::new(0),
+            downloads: AtomicUsize::new(0),
+            values: Mutex::new(HashMap::new()),
         }));
         let _selected = ThreadProviderGuard::set(Some(provider));
-        let input = provider.allocate(vec![2, 2], element);
+        let data = match element {
+            NumericElementType::F32 => {
+                HostNumericDataOwned::F32(vec![1.0, 2.0, 100.0, 200.0, -50.0, -60.0, 7.0, 8.0])
+            }
+            NumericElementType::F64 => {
+                HostNumericDataOwned::F64(vec![1.0, 2.0, 100.0, 200.0, -50.0, -60.0, 7.0, 8.0])
+            }
+            _ => unreachable!(),
+        };
+        let input = provider.allocate(vec![2, 2], data);
         let output = block_on(super::trace_builtin(Value::GpuTensor(input.clone()))).unwrap();
         let Value::GpuTensor(output) = output else {
             panic!("capable provider must keep complex trace resident")
@@ -109,6 +187,14 @@ fn complex_diagonal_and_sum_remain_resident_for_capable_provider() {
             provider.casts.load(Ordering::SeqCst),
             usize::from(element == NumericElementType::F32)
         );
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output)))
+            .expect("gather capable-provider trace result");
+        let Value::ComplexTensor(gathered) = gathered else {
+            panic!("trace must preserve complex storage");
+        };
+        assert_eq!(gathered.materialize_f64(), vec![(8.0, 10.0)]);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
         input.allocation_lease().validate_live().unwrap();
     }
 }
@@ -120,9 +206,11 @@ fn scalar_complex_diagonal_and_sum_may_keep_the_input_allocation() {
         diagonals: AtomicUsize::new(0),
         sums: AtomicUsize::new(0),
         casts: AtomicUsize::new(0),
+        downloads: AtomicUsize::new(0),
+        values: Mutex::new(HashMap::new()),
     }));
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let input = provider.allocate(vec![1, 1], NumericElementType::F64);
+    let input = provider.allocate(vec![1, 1], HostNumericDataOwned::F64(vec![3.0, -4.0]));
     let output = block_on(super::trace_builtin(Value::GpuTensor(input.clone()))).unwrap();
     let Value::GpuTensor(output) = output else {
         panic!("scalar complex trace must stay resident")
@@ -130,5 +218,12 @@ fn scalar_complex_diagonal_and_sum_may_keep_the_input_allocation() {
     assert!(output.shares_allocation_with(&input));
     assert_eq!(provider.diagonals.load(Ordering::SeqCst), 1);
     assert_eq!(provider.sums.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output)))
+        .expect("gather scalar trace result");
+    let Value::ComplexTensor(gathered) = gathered else {
+        panic!("scalar trace must retain complex storage");
+    };
+    assert_eq!(gathered.materialize_f64(), vec![(3.0, -4.0)]);
     input.allocation_lease().validate_live().unwrap();
 }
