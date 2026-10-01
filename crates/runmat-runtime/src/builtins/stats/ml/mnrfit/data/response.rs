@@ -244,14 +244,7 @@ async fn text_outcomes(
     cooperation
         .completed((values.len() % 16_384) as u64)
         .await?;
-    let classes = class_census::sort_unique(
-        classes,
-        String::cmp,
-        |left, right| left == right,
-        "text class census",
-        cooperation,
-    )
-    .await?;
+    let classes = class_census::sort_unique_text(classes, cooperation).await?;
     if classes.len() < 2 {
         return Err(invalid("mnrfit: Y must contain at least two classes"));
     }

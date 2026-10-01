@@ -4,6 +4,9 @@ use std::cmp::Ordering;
 
 use super::{invalid, BuiltinResult, FitCooperation};
 
+mod text;
+pub(super) use self::text::sort_unique_text;
+
 const RUN: usize = 4_096;
 
 /// Sort and deduplicate without an unbounded synchronous `sort` turn. Values
@@ -111,14 +114,7 @@ mod tests {
             .rev()
             .map(|i| format!("label-{i:05}"))
             .collect();
-        let ordered = block_on(sort_unique(
-            text,
-            String::cmp,
-            |left, right| left == right,
-            "text class census",
-            &mut FitCooperation::new(None),
-        ))
-        .unwrap();
+        let ordered = block_on(sort_unique_text(text, &mut FitCooperation::new(None))).unwrap();
         assert_eq!(ordered.first().unwrap(), "label-00000");
         assert_eq!(ordered.last().unwrap(), &format!("label-{:05}", RUN + 1));
     }
