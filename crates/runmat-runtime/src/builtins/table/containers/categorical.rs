@@ -2,6 +2,9 @@ use super::*;
 use crate::builtins::table::display::trim_float;
 use runmat_value::NumericScalar;
 
+mod labels;
+pub(crate) use self::labels::{categorical_label_view, CategoricalLabelView};
+
 pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let source = args
         .first()
@@ -873,15 +876,9 @@ fn categorical_numeric_label(value: NumericScalar) -> String {
 }
 
 fn categorical_object_labels(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
-    let categories = categorical_categories(object)?;
-    let codes = categorical_codes(object)?;
-    (0..codes.len())
-        .map(|index| {
-            codes
-                .numeric_value_at(index)
-                .ok_or_else(|| invalid_variable("categorical: invalid numeric code storage"))
-                .map(|code| category_label_for_numeric_code(code, &categories).unwrap_or_default())
-        })
+    let labels = categorical_label_view(object)?;
+    (0..labels.len())
+        .map(|index| labels.label_at(index).map(str::to_owned))
         .collect()
 }
 
@@ -972,7 +969,7 @@ fn categorical_is_ordinal(object: &ObjectInstance) -> bool {
     matches!(object.properties.get("Ordinal"), Some(Value::Bool(true)))
 }
 
-fn category_label_for_code(code: f64, categories: &[String]) -> Option<String> {
+fn category_label_for_code<'a>(code: f64, categories: &'a [String]) -> Option<&'a str> {
     if !code.is_finite() || code < 1.0 {
         return None;
     }
@@ -980,20 +977,23 @@ fn category_label_for_code(code: f64, categories: &[String]) -> Option<String> {
     if (idx as f64 - code).abs() > f64::EPSILON {
         return None;
     }
-    categories.get(idx - 1).cloned()
+    categories.get(idx - 1).map(String::as_str)
 }
 
-fn category_label_for_integer_code(
+fn category_label_for_integer_code<'a>(
     code: &runmat_value::IntValue,
-    categories: &[String],
-) -> Option<String> {
+    categories: &'a [String],
+) -> Option<&'a str> {
     code.try_to_usize()
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| categories.get(index))
-        .cloned()
+        .map(String::as_str)
 }
 
-fn category_label_for_numeric_code(code: NumericScalar, categories: &[String]) -> Option<String> {
+fn category_label_ref_for_numeric_code<'a>(
+    code: NumericScalar,
+    categories: &'a [String],
+) -> Option<&'a str> {
     match code {
         NumericScalar::F64(code) => category_label_for_code(code, categories),
         NumericScalar::F32(code) => category_label_for_code(f64::from(code), categories),
@@ -1001,6 +1001,10 @@ fn category_label_for_numeric_code(code: NumericScalar, categories: &[String]) -
             .into_int_value()
             .and_then(|code| category_label_for_integer_code(&code, categories)),
     }
+}
+
+fn category_label_for_numeric_code(code: NumericScalar, categories: &[String]) -> Option<String> {
+    category_label_ref_for_numeric_code(code, categories).map(str::to_owned)
 }
 
 struct CategoricalCompareBase {

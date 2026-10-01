@@ -1,6 +1,37 @@
 use super::*;
 use crate::builtins::common::tensor;
 use futures::executor::block_on;
+use runmat_value::{IntegerStorage, ObjectInstance, StringArray};
+
+#[test]
+fn categorical_response_uses_table_owned_borrowed_code_decoding() {
+    let prefix = "c".repeat(16_385);
+    let first = format!("{prefix}a");
+    let second = format!("{prefix}b");
+    let mut object = ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
+    object.properties.insert(
+        "Codes".into(),
+        Value::Tensor(Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 2]), vec![3, 1]).unwrap()),
+    );
+    object.properties.insert(
+        "Categories".into(),
+        Value::StringArray(
+            StringArray::new(vec![first.clone(), second.clone()], vec![1, 2]).unwrap(),
+        ),
+    );
+    let response = block_on(response_outcomes(
+        Value::Object(object),
+        3,
+        ResponseExactness::ValidateDownloaded,
+        &mut FitCooperation::new(None),
+    ))
+    .expect("categorical codes use the canonical table decoder without eager category copies");
+    let ClassNames::Text(classes) = response.classes else {
+        panic!("categorical responses must retain text class labels");
+    };
+    assert_eq!(classes, vec![first, second]);
+    assert_eq!(response.outcomes, vec![vec![0.0, 1.0, 0.0]]);
+}
 
 #[test]
 fn pending_browser_style_turn_cancels_during_design_without_publication() {

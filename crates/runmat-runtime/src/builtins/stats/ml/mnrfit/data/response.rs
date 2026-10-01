@@ -55,7 +55,16 @@ pub(in super::super) async fn response_outcomes(
         }
         Value::Cell(cell) => cellstr_outcomes(&cell, rows, cooperation).await,
         Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
-            let labels = crate::builtins::table::categorical_labels(&Value::Object(object))?;
+            let source = crate::builtins::table::categorical_label_view(&object)?;
+            let mut labels = reserved(source.len(), "categorical response labels")?;
+            for index in 0..source.len() {
+                let label = source.label_at(index)?;
+                labels.push(class_census::clone_text(label, cooperation).await?);
+                if (index + 1).is_multiple_of(16_384) {
+                    cooperation.completed(16_384).await?;
+                }
+            }
+            cooperation.completed((source.len() % 16_384) as u64).await?;
             text_outcomes(labels, vec![rows, 1], rows, cooperation).await
         }
         Value::Num(value) if rows == 1 => numeric_outcomes(vec![value], vec![1, 1], rows, cooperation).await,
