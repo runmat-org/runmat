@@ -1121,7 +1121,7 @@ impl AccelProvider for TestProvider {
             let idx = i + rows * i;
             out.push(data[idx]);
         }
-        Ok(self.push(out, vec![len]))
+        Ok(self.push(out, vec![len, 1]))
     }
 
     fn reshape(
@@ -1277,6 +1277,15 @@ fn evaluate_expression(
         Ok(value)
     })()
     .map_err(suspension::record_provider_error)
+}
+
+#[test]
+fn fused_shader_fixture_uses_canonical_remainder_math_and_boolean_literals() {
+    let evaluate = |expression| evaluate_expression(expression, 0, &[], &[], &[], &[]).unwrap();
+    assert_eq!(evaluate("rm_remainder_f64(-5.5, 2.0, true)"), 0.5);
+    assert_eq!(evaluate("rm_remainder_f64(-5.5, 2.0, false)"), -1.5);
+    assert_eq!(evaluate("rm_remainder_f32(-5.5, 2.0, true)"), 0.5);
+    assert_eq!(evaluate("rm_remainder_f32(-5.5, 2.0, false)"), -1.5);
 }
 
 #[derive(Clone, Debug)]
@@ -1486,6 +1495,12 @@ impl<'a> ExprParser<'a> {
 
     fn parse_identifier(&mut self, name: String) -> anyhow::Result<f64> {
         self.advance();
+        if name == "true" {
+            return Ok(1.0);
+        }
+        if name == "false" {
+            return Ok(0.0);
+        }
         if let Some(rest) = name
             .strip_prefix("tmp")
             .or_else(|| name.strip_prefix("typed"))
@@ -1606,6 +1621,34 @@ impl<'a> ExprParser<'a> {
             "isFinite" => Ok(if arg(0)?.is_finite() { 1.0 } else { 0.0 }),
             "isInf" => Ok(if arg(0)?.is_infinite() { 1.0 } else { 0.0 }),
             "select" => Ok(if arg(2)? != 0.0 { arg(1)? } else { arg(0)? }),
+            "rm_remainder_f32" => {
+                let kind = if arg(2)? != 0.0 {
+                    runmat_types::FloatingRemainderKind::Modulus
+                } else {
+                    runmat_types::FloatingRemainderKind::Remainder
+                };
+                Ok(f64::from(
+                    runmat_runtime::builtins::math::rounding::floating_remainder::apply_f32(
+                        arg(0)? as f32,
+                        arg(1)? as f32,
+                        kind,
+                    ),
+                ))
+            }
+            "rm_remainder_f64" => {
+                let kind = if arg(2)? != 0.0 {
+                    runmat_types::FloatingRemainderKind::Modulus
+                } else {
+                    runmat_types::FloatingRemainderKind::Remainder
+                };
+                Ok(
+                    runmat_runtime::builtins::math::rounding::floating_remainder::apply_f64(
+                        arg(0)?,
+                        arg(1)?,
+                        kind,
+                    ),
+                )
+            }
             "f32" => Ok(f64::from(arg(0)? as f32)),
             "f64" => Ok(arg(0)?),
             _ => Err(anyhow!("unsupported function '{name}' in fused shader")),
