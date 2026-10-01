@@ -48,7 +48,7 @@ pub(super) fn plot_ecdf_line(
         plot_index,
     );
     if let Err(err) = render_result {
-        if crate::builtins::plotting::core::error::presentation_unavailable(&err) {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(internal_with_cause(builtin, err));
