@@ -264,8 +264,8 @@ fn selected_axis(
                 None => {
                     if let Some(dimensions) = request.literals.literal_vector_at(index) {
                         let mut axes = Vec::with_capacity(dimensions.len());
-                        for dimension in dimensions {
-                            match literal_dimension(&dimension) {
+                        for dimension in &dimensions {
+                            match literal_dimension(dimension) {
                                 Some(Ok(dim)) => axes.push(dim - 1),
                                 _ => {
                                     diagnostics.push(diagnostic(
