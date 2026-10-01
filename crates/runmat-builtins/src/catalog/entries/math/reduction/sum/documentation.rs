@@ -16,7 +16,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ]},
         BuiltinDocumentationSection { heading: "Numeric classes", paragraphs: &[
             "The default mode preserves single inputs and returns double for double, integer, and logical inputs. Explicit 'double' returns double even when a selected dimension lies beyond the stored rank. 'native' preserves the input numeric class; native integer accumulation uses exact typed storage and saturating arithmetic where required.",
-            "The public 'like', prototype form described in older documentation is not admitted by this builtin. Use the supported 'native' or 'double' output-class option instead.",
+            "`sum` does not support a 'like' prototype option. Use 'native' or 'double' to select the output class.",
         ]},
         BuiltinDocumentationSection { heading: "GPU and fused execution", paragraphs: &[
             "Eligible resident reductions use provider `reduce_sum_dim` or `reduce_sum` operations. NaN omission and unsupported provider forms can gather through the exact owner; supported native integer reductions have resident operations rather than a blanket host fallback. Output-class adaptation restores through the input's provider when that provider supports the class, and may return a host value for an automatically placed result when it does not.",
@@ -100,7 +100,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Owning sum reduction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/sum.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Sum options, typed integer, provider and fusion semantics", location: "builtins::math::reduction::sum::tests" }],
-        notes: &["Legacy six examples, FAQ, links and semantic behaviors retained or corrected. The older like prototype example and residency claims conflict with the runtime's explicit like rejection and resident native integer route; the replacement resident native example exercises an admitted form. Native, browser and real-provider execution require integrated qualification."],
+        notes: &["Provider output-class adaptation preserves supported resident execution. Unsupported result classes retain the input's explicit or automatic placement policy."],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

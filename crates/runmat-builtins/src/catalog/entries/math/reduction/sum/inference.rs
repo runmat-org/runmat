@@ -59,7 +59,7 @@ fn infer_output(
         None | Some(LiteralReductionOutput::Default) if input_class == NumericClass::Single => {
             NumericClass::Single
         }
-        _ => NumericClass::Double,
+        None | Some(LiteralReductionOutput::Default) => NumericClass::Double,
     };
     let storage = if input.residency == ResidencyFact::Host {
         match shape.element_count() {
