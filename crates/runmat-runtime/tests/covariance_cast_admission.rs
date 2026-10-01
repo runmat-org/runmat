@@ -28,6 +28,7 @@ struct Provider {
     foreign: TestAllocationOwner,
     mode: Mode,
     casts: AtomicUsize,
+    uploads: AtomicUsize,
     downloads: AtomicUsize,
     outputs: Mutex<Vec<RetirementProbe>>,
     borrowed: Mutex<Option<allocation::WeakGpuTensorHandle>>,
@@ -41,6 +42,7 @@ impl Provider {
             foreign: TestAllocationOwner::new(),
             mode,
             casts: AtomicUsize::new(0),
+            uploads: AtomicUsize::new(0),
             downloads: AtomicUsize::new(0),
             outputs: Mutex::new(Vec::new()),
             borrowed: Mutex::new(None),
@@ -102,6 +104,23 @@ impl AccelProvider for Provider {
         anyhow::bail!("unexpected upload")
     }
 
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.uploads.fetch_add(1, Ordering::SeqCst);
+        let HostNumericDataView::F32(values) = host.data else {
+            anyhow::bail!("restoration requires native single output");
+        };
+        let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F32(values.to_vec()),
+            shape: host.shape.to_vec(),
+            storage: host.storage,
+        })?;
+        self.outputs.lock().unwrap().push(allocation.probe);
+        Ok(allocation.handle)
+    }
+
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { anyhow::bail!("unexpected download") })
@@ -112,13 +131,23 @@ impl AccelProvider for Provider {
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
-        let probe = self.input_probe.lock().unwrap().clone();
+        let mut probes = self.outputs.lock().unwrap().clone();
+        probes.extend(self.input_probe.lock().unwrap().iter().cloned());
         Box::pin(async move {
-            let probe = probe.ok_or_else(|| anyhow::anyhow!("unexpected numeric download"))?;
-            let data = probe.with_data(handle, |view| match view {
-                HostNumericDataView::F32(values) => Ok(HostNumericDataOwned::F32(values.to_vec())),
-                _ => anyhow::bail!("numeric download requires native single input"),
-            })??;
+            let data = probes
+                .iter()
+                .find_map(|probe| {
+                    probe
+                        .with_data(handle, |view| match view {
+                            HostNumericDataView::F32(values) => {
+                                Some(HostNumericDataOwned::F32(values.to_vec()))
+                            }
+                            _ => None,
+                        })
+                        .ok()
+                        .flatten()
+                })
+                .ok_or_else(|| anyhow::anyhow!("unexpected native single download"))?;
             Ok(HostNumericTensorOwned {
                 data,
                 shape: handle.shape().to_vec(),
@@ -197,20 +226,32 @@ fn typed_unsupported_cast_uses_admitted_host_materialization_without_retiring_in
         ))
         .unwrap();
         let output = match result {
-            Value::Tensor(value) => value,
+            Value::GpuTensor(value) => value,
             Value::OutputList(mut values) if values.len() == 1 => {
-                let Value::Tensor(value) = values.remove(0) else {
-                    panic!("{builtin} should materialize its output on the admitted host path");
+                let Value::GpuTensor(value) = values.remove(0) else {
+                    panic!("{builtin} should restore its output to the original device");
                 };
                 value
             }
-            _ => panic!("{builtin} should materialize its output on the admitted host path"),
+            _ => panic!("{builtin} should restore its output to the original device"),
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
+        assert_eq!(handle_precision(&output), Some(ProviderPrecision::F32));
+        assert!(!output.shares_allocation_with(&input.handle));
         assert_eq!(provider.casts.load(Ordering::SeqCst), 1);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
+        let downloaded = block_on(provider.download_numeric(&output)).unwrap();
+        let HostNumericDataOwned::F32(values) = downloaded.data else {
+            panic!("{builtin} restoration changed numeric precision");
+        };
+        assert_eq!(downloaded.shape, vec![2, 2]);
+        assert!(values
+            .iter()
+            .all(|&value| (value - if builtin == "cov" { 0.5 } else { 1.0 }).abs() < 1e-6));
         assert!(input.handle.allocation_lease().validate_live().is_ok());
         assert_eq!(input.probe.retirements(), 0);
+        drop(output);
         assert!(provider
             .outputs
             .lock()
