@@ -128,12 +128,9 @@ pub(super) fn decode_option(kind: BoxplotOptionKind, value: Value) -> BuiltinRes
         }
         LabelVerbosity => {
             let text = text_scalar(&value, "LabelVerbosity")?;
-            if text != "all" && text != "minor" && text != "majorminor" {
-                return Err(invalid(
-                    "boxplot: LabelVerbosity must be 'all', 'minor', or 'majorminor'",
-                ));
-            }
-            DecodedOption::Validated(kind)
+            DecodedOption::LabelVerbosity(super::LabelVerbosity::parse(&text).ok_or_else(|| {
+                invalid("boxplot: LabelVerbosity must be 'all', 'minor', or 'majorminor'")
+            })?)
         }
         ColorGroup => DecodedOption::ColorGroup(value),
         FactorDirection => {

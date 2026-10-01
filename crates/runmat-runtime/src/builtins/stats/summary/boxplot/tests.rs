@@ -144,6 +144,61 @@ fn multifactor_group_identity_does_not_depend_on_joined_display_text() {
 }
 
 #[test]
+fn label_verbosity_uses_factor_identity_and_respects_custom_labels() {
+    use crate::builtins::common::grouping_keys::KeyAtom;
+
+    let first = Value::StringArray(
+        StringArray::new(vec!["a".into(), "a".into(), "b".into()], vec![3, 1]).unwrap(),
+    );
+    let second = Value::StringArray(
+        StringArray::new(vec!["one".into(), "two".into(), "one".into()], vec![3, 1]).unwrap(),
+    );
+    let factors = Value::Cell(CellArray::new(vec![first, second], 1, 2).unwrap());
+    let boxes = build_box_stats(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(factors),
+        &BoxplotOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(boxes.len(), 3);
+    assert_eq!(
+        appearance::tick_labels(&boxes, LabelVerbosity::All, false),
+        vec!["a,one", "a,two", "b,one"]
+    );
+    assert_eq!(
+        appearance::tick_labels(&boxes, LabelVerbosity::Minor, false),
+        vec!["a,one", ",two", "b,one"]
+    );
+    assert_eq!(
+        appearance::tick_labels(&boxes, LabelVerbosity::MajorMinor, false),
+        vec!["a,one", ",two", "b,one"]
+    );
+    let reordered = [boxes[0].clone(), boxes[2].clone()];
+    assert_eq!(
+        appearance::tick_labels(&reordered, LabelVerbosity::Minor, false),
+        vec!["a,one", "b,"]
+    );
+    assert_eq!(
+        appearance::tick_labels(&reordered, LabelVerbosity::MajorMinor, false),
+        vec!["a,one", "b,one"]
+    );
+
+    let mut repeated_text = boxes.clone();
+    repeated_text[1].group_key[0] = KeyAtom::Integer(IntValue::U64(9_007_199_254_740_993));
+    repeated_text[0].group_key[0] = KeyAtom::Text("9007199254740993".into());
+    repeated_text[0].label = "9007199254740993,one".into();
+    repeated_text[1].label = "9007199254740993,two".into();
+    assert_eq!(
+        appearance::tick_labels(&repeated_text[..2], LabelVerbosity::Minor, false),
+        vec!["9007199254740993,one", "9007199254740993,two"]
+    );
+    assert_eq!(
+        appearance::tick_labels(&boxes, LabelVerbosity::Minor, true),
+        vec!["a,one", "a,two", "b,one"]
+    );
+}
+
+#[test]
 fn extensions_are_independently_mode_gated() {
     let data = || tensor(vec![1.0, 2.0], vec![2, 1]);
     let integer_data = || int_tensor(IntegerStorage::I16(vec![1, 2]), vec![2, 1]);
@@ -349,6 +404,7 @@ fn computes_matrix_columns_and_outliers() {
 fn axis_limits_remain_finite_for_extreme_and_constant_finite_data() {
     let mut stats = BoxStats {
         label: "A".into(),
+        group_key: Vec::new(),
         position: 1.0,
         width: 0.5,
         color: Vec4::ONE,
@@ -519,6 +575,7 @@ fn jitter_zero_keeps_outliers_centered_and_datalim_clips() {
     };
     let stats = BoxStats {
         label: "A".to_string(),
+        group_key: Vec::new(),
         position: 3.0,
         width: 0.5,
         color: Vec4::ONE,

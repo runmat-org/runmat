@@ -6,10 +6,8 @@ pub(super) fn render_boxplot(
     options: &BoxplotOptions,
 ) -> BuiltinResult<Vec<f64>> {
     let plans = build_plot_plans(boxes, options)?;
-    let labels = boxes
-        .iter()
-        .map(|stats| stats.label.clone())
-        .collect::<Vec<_>>();
+    let labels =
+        super::appearance::tick_labels(boxes, options.label_verbosity, options.labels.is_some());
     let limits = axis_limits(boxes, options)?;
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let mut plans = Some(plans);

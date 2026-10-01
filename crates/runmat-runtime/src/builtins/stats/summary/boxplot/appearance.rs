@@ -25,6 +25,67 @@ pub(super) enum LabelOrientation {
     Horizontal,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum LabelVerbosity {
+    All,
+    Minor,
+    MajorMinor,
+}
+
+impl LabelVerbosity {
+    pub(super) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "all" => Some(Self::All),
+            "minor" => Some(Self::Minor),
+            "majorminor" => Some(Self::MajorMinor),
+            _ => None,
+        }
+    }
+}
+
+pub(super) fn tick_labels(
+    boxes: &[super::BoxStats],
+    verbosity: LabelVerbosity,
+    custom_labels: bool,
+) -> Vec<String> {
+    boxes
+        .iter()
+        .enumerate()
+        .map(|(index, stats)| {
+            if custom_labels || verbosity == LabelVerbosity::All || stats.group_key.is_empty() {
+                return stats.label.clone();
+            }
+            let previous = index
+                .checked_sub(1)
+                .and_then(|previous| boxes.get(previous));
+            let parts = stats
+                .group_key
+                .iter()
+                .enumerate()
+                .map(|(factor, key)| {
+                    let show = previous.is_none_or(|previous| match verbosity {
+                        LabelVerbosity::All => true,
+                        LabelVerbosity::Minor => previous.group_key.get(factor) != Some(key),
+                        LabelVerbosity::MajorMinor => {
+                            previous.group_key.get(..=factor) != Some(&stats.group_key[..=factor])
+                        }
+                    });
+                    if show {
+                        key.label()
+                    } else {
+                        String::new()
+                    }
+                })
+                .collect::<Vec<_>>();
+            if parts.iter().all(String::is_empty) {
+                String::new()
+            } else {
+                parts.join(",")
+            }
+        })
+        .collect()
+}
+
 impl LabelOrientation {
     pub(super) fn parse(text: &str) -> Option<Self> {
         match text {

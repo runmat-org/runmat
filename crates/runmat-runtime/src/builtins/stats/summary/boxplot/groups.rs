@@ -72,6 +72,7 @@ pub(super) fn build_box_stats(
                 .as_ref()
                 .map_or_else(|| group_label_text(&label), |labels| labels[idx].clone());
             let mut stats = stats_for_values(display, values, options.whisker)?;
+            stats.group_key = label;
             stats.position = positions[idx];
             stats.width = widths[idx];
             stats.color = color_for(idx, &options.box_colors);

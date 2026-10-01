@@ -41,6 +41,7 @@ pub(super) fn stats_for_values(
     }
     Ok(BoxStats {
         label,
+        group_key: Vec::new(),
         position: 0.0,
         width: 0.5,
         color: Vec4::ONE,

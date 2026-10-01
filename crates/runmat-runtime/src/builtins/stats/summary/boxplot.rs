@@ -24,7 +24,8 @@ const NAME: &str = "boxplot";
 mod admission;
 mod appearance;
 mod plan;
-use appearance::{BoxStyle, LabelOrientation, MedianStyle, NotchStyle};
+use crate::builtins::common::grouping_keys::KeyAtom;
+use appearance::{BoxStyle, LabelOrientation, LabelVerbosity, MedianStyle, NotchStyle};
 use plan::BoxplotOptionPlan;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,11 +64,14 @@ struct BoxplotOptions {
     notch_style: NotchStyle,
     label_orientation: LabelOrientation,
     label_orientation_explicit: bool,
+    label_verbosity: LabelVerbosity,
+    label_verbosity_explicit: bool,
 }
 
 #[derive(Clone, Debug)]
 struct BoxStats {
     label: String,
+    group_key: Vec<KeyAtom>,
     position: f64,
     width: f64,
     color: Vec4,
@@ -119,6 +123,8 @@ impl Default for BoxplotOptions {
             notch_style: NotchStyle::Off,
             label_orientation: LabelOrientation::Horizontal,
             label_orientation_explicit: false,
+            label_verbosity: LabelVerbosity::All,
+            label_verbosity_explicit: false,
         }
     }
 }
