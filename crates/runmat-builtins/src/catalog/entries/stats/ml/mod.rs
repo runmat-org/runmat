@@ -4,6 +4,9 @@
 mod confusionmat;
 mod distance_errors;
 mod distance_geometry;
+mod fitclinear;
+mod fitctree;
+mod fitlm;
 mod kmeans;
 mod knnsearch;
 mod linkage;
@@ -15,6 +18,9 @@ mod tsne;
 pub use self::confusionmat::*;
 pub use self::distance_errors::*;
 pub use self::distance_geometry::*;
+pub use self::fitclinear::*;
+pub use self::fitctree::*;
+pub use self::fitlm::*;
 pub use self::kmeans::*;
 pub use self::knnsearch::*;
 pub use self::linkage::*;
@@ -25,6 +31,9 @@ pub use self::tsne::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(confusionmat::ENTRIES.iter().copied());
+    values.extend(fitclinear::ENTRIES.iter().copied());
+    values.extend(fitctree::ENTRIES.iter().copied());
+    values.extend(fitlm::ENTRIES.iter().copied());
     values.extend(kmeans::ENTRIES.iter().copied());
     values.extend(knnsearch::ENTRIES.iter().copied());
     values.extend(linkage::ENTRIES.iter().copied());

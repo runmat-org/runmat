@@ -11,17 +11,23 @@ mod rounding;
 mod signal;
 mod symbolic;
 mod trigonometry;
+mod interpolation;
+mod ode;
+mod poly;
 
-pub use bitwise::*;
-pub use discrete::*;
-pub use elementwise::*;
-pub use integer_division::*;
-pub use linalg::*;
-pub use reduction::*;
-pub use rounding::*;
-pub use signal::*;
-pub use symbolic::*;
-pub use trigonometry::*;
+pub use self::bitwise::*;
+pub use self::discrete::*;
+pub use self::elementwise::*;
+pub use self::integer_division::*;
+pub use self::interpolation::*;
+pub use self::linalg::*;
+pub use self::ode::*;
+pub use self::poly::*;
+pub use self::reduction::*;
+pub use self::rounding::*;
+pub use self::signal::*;
+pub use self::symbolic::*;
+pub use self::trigonometry::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     bitwise::extend_entries(values);
@@ -34,4 +40,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     signal::extend_entries(values);
     symbolic::extend_entries(values);
     trigonometry::extend_entries(values);
+    interpolation::extend_entries(values);
+    ode::extend_entries(values);
+    poly::extend_entries(values);
 }
