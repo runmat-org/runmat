@@ -38,6 +38,16 @@ fn ensure_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
 )]
 pub(crate) async fn wblinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_extensions(&value, &rest)?;
+    if !matches!(rest.len(), 0 | 2) {
+        return Err(super::normal_error(
+            "wblinv",
+            "wblinv: expected one or three numeric arguments",
+        ));
+    }
+    let inputs = std::iter::once(&value)
+        .chain(rest.iter())
+        .collect::<Vec<_>>();
+    numeric_inputs("wblinv", &inputs, NumericShapePolicy::Broadcast)?;
     let output = super::NormalOutputPlan::inspect("wblinv", &value, &rest)?;
     let (a, b) = match rest.as_slice() {
         [] => (super::scalar_tensor(1.0), super::scalar_tensor(1.0)),

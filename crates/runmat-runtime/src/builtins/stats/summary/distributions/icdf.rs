@@ -18,6 +18,8 @@ pub(crate) async fn icdf_builtin(name: Value, p: Value, rest: Vec<Value>) -> Bui
                 "icdf: fitted distribution object form accepts exactly two inputs",
             ));
         }
+        crate::builtins::stats::summary::fitdist::validate_icdf_probability_distribution(&name)?;
+        super::numeric_inputs("icdf", &[&p], super::NumericShapePolicy::Broadcast)?;
         let admission = IcdfAdmission::new(&p, &[])?;
         let p = gather_input(p).await?;
         ensure_exact_integer_boundary(&p, "p")?;
@@ -28,6 +30,14 @@ pub(crate) async fn icdf_builtin(name: Value, p: Value, rest: Vec<Value>) -> Bui
     }
 
     let distribution = parse_distribution_name(&name)?;
+    if !distribution.accepts_parameter_count(rest.len()) {
+        return Err(super::normal_error(
+            "icdf",
+            "icdf: incorrect parameter count for this distribution",
+        ));
+    }
+    let inputs = std::iter::once(&p).chain(rest.iter()).collect::<Vec<_>>();
+    super::numeric_inputs("icdf", &inputs, super::NumericShapePolicy::Broadcast)?;
     let admission = IcdfAdmission::new(&p, &rest)?;
     let p = gather_input(p).await?;
     let mut gathered_rest = Vec::with_capacity(rest.len());

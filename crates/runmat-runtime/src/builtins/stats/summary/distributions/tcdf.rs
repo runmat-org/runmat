@@ -45,6 +45,7 @@ async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<Args> {
     }
     let nu_value = rest.pop().expect("one nu argument");
     ensure_extensions(&value, &nu_value)?;
+    numeric_inputs("tcdf", &[&value, &nu_value], NumericShapePolicy::Broadcast)?;
     let output = NormalOutputPlan::inspect("tcdf", &value, std::slice::from_ref(&nu_value))?;
     let x = super::normal_value_to_tensor("tcdf", "x", value).await?;
     let nu = super::normal_value_to_tensor("tcdf", "nu", nu_value).await?;

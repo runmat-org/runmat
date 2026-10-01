@@ -53,3 +53,31 @@ fn upper_tail_is_a_typed_option_not_a_numeric_operand() {
         .iter()
         .any(|diagnostic| diagnostic.code == "TAIL"));
 }
+
+#[test]
+fn one_element_resident_double_does_not_prove_scalar_storage() {
+    let mut request =
+        super::super::test_support::request(super::super::policy::DistributionKind::NormalCdf);
+    request.arguments.truncate(1);
+    request.literals.literal_args.truncate(1);
+    request.arguments[0] = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Dense,
+    );
+    assert_eq!(
+        infer(&request, &NORMCDF_CATALOG_ENTRY).outputs[0].storage,
+        StorageFact::Scalar
+    );
+    request.arguments[0].residency = ResidencyFact::Device { provider: None };
+    let resident = infer(&request, &NORMCDF_CATALOG_ENTRY);
+    assert_eq!(resident.outputs[0].storage, StorageFact::Unknown);
+    assert_eq!(resident.outputs[0].residency, ResidencyFact::Unknown);
+    assert_eq!(
+        resident.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+}

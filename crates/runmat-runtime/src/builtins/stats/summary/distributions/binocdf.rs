@@ -42,6 +42,7 @@ async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<Binocdf
     }
     let inputs = [&value, &rest[0], &rest[1]];
     ensure_extensions(inputs)?;
+    numeric_inputs("binocdf", &inputs, NumericShapePolicy::Broadcast)?;
     let output = NormalOutputPlan::inspect("binocdf", &value, &rest)?;
     let x = super::normal_value_to_tensor("binocdf", "x", value).await?;
     let n = super::normal_value_to_tensor("binocdf", "n", rest.remove(0)).await?;

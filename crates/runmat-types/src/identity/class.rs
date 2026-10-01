@@ -230,6 +230,8 @@ pub mod standard {
         StaticClassIdentity::new("ClassificationTree");
     pub const CLASSIFICATION_LINEAR: StaticClassIdentity =
         StaticClassIdentity::new("ClassificationLinear");
+    pub const PROBABILITY_DISTRIBUTION: StaticClassIdentity =
+        StaticClassIdentity::new("ProbabilityDistribution");
     pub const CALENDAR_DURATION: StaticClassIdentity = StaticClassIdentity::new("calendarDuration");
     pub const TRANSFER_FUNCTION: StaticClassIdentity = StaticClassIdentity::new("tf");
     pub const STATE_SPACE: StaticClassIdentity = StaticClassIdentity::new("ss");

@@ -1,4 +1,41 @@
 use super::*;
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+};
+
+#[test]
+fn invalid_distribution_calls_fail_before_resident_provider_access() {
+    let owner = TestAllocationOwner::new();
+    let resident = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    // This descriptor has no registered provider. An accidental download or
+    // owner selection would report ownership instead of the intended error.
+    let input = Value::GpuTensor(resident.handle.clone());
+    let bad_normal = block_on(normpdf::normpdf_builtin(
+        input.clone(),
+        vec![Value::from("bad")],
+    ))
+    .unwrap_err();
+    assert_eq!(
+        bad_normal.identifier(),
+        Some("RunMat:normpdf:InvalidArgument")
+    );
+
+    let bad_named = block_on(icdf::icdf_builtin(
+        Value::from("Normal"),
+        input.clone(),
+        vec![Value::from("bad")],
+    ))
+    .unwrap_err();
+    assert_eq!(bad_named.identifier(), Some("RunMat:icdf:InvalidArgument"));
+
+    let bad_arity = block_on(wblinv::wblinv_builtin(input, vec![Value::Num(1.0)])).unwrap_err();
+    assert_eq!(
+        bad_arity.identifier(),
+        Some("RunMat:wblinv:InvalidArgument")
+    );
+}
 
 #[test]
 fn distribution_context_preserves_provider_failure_identity_and_retry_policy() {

@@ -16,6 +16,7 @@ pub(crate) async fn tinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResul
     }
     let nu_value = rest.into_iter().next().expect("one nu argument");
     ensure_extensions(&value, &nu_value)?;
+    numeric_inputs("tinv", &[&value, &nu_value], NumericShapePolicy::Broadcast)?;
     let output = NormalOutputPlan::inspect("tinv", &value, std::slice::from_ref(&nu_value))?;
     let p = super::normal_value_to_tensor("tinv", "p", value).await?;
     let nu = super::normal_value_to_tensor("tinv", "nu", nu_value).await?;

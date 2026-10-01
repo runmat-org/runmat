@@ -54,7 +54,7 @@ fn fitted_object_output_class_follows_probability_not_opaque_parameters() {
         super::super::test_support::request(super::super::policy::DistributionKind::GenericInv);
     request.arguments[0] = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
         class: None,
-        runtime_class: Some(runmat_types::ClassIdentity::new("ProbabilityDistribution").unwrap()),
+        runtime_class: Some(runmat_types::standard::PROBABILITY_DISTRIBUTION.owned()),
         properties: std::collections::BTreeMap::new(),
         properties_complete: false,
         handle_semantics: Some(false),
@@ -78,4 +78,29 @@ fn fitted_object_output_class_follows_probability_not_opaque_parameters() {
         double.outputs[0].numeric().unwrap().class,
         NumericClass::Double
     );
+
+    request.arguments[0] = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(runmat_types::standard::TABLE.owned()),
+        properties: std::collections::BTreeMap::new(),
+        properties_complete: false,
+        handle_semantics: Some(false),
+    }));
+    assert!(infer(&request, &ICDF_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "FAMILY"));
+
+    if let ValueKindFact::Object(object) = &mut request.arguments[0].kind {
+        object.runtime_class = None;
+    }
+    let unknown_class = infer(&request, &ICDF_CATALOG_ENTRY);
+    assert!(!unknown_class
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "FAMILY"));
+    assert!(matches!(
+        unknown_class.outputs[0].certainty,
+        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+    ));
 }

@@ -34,6 +34,10 @@ pub(super) async fn normal_args(
             format!("{name}: expected x, x, mu, or x, mu, sigma"),
         ));
     }
+    let inputs = std::iter::once(&first)
+        .chain(rest.iter())
+        .collect::<Vec<_>>();
+    numeric_inputs(name, &inputs, NumericShapePolicy::Broadcast)?;
     let output = NormalOutputPlan::inspect(name, &first, &rest)?;
     let x = normal_value_to_tensor(name, "x or p", first).await?;
     let (mu, sigma) = match rest.as_slice() {
@@ -161,6 +165,7 @@ pub(super) async fn t_args(name: &str, first: Value, rest: Vec<Value>) -> Builti
             format!("{name}: expected x and nu arguments"),
         ));
     }
+    numeric_inputs(name, &[&first, &rest[0]], NumericShapePolicy::Broadcast)?;
     let x = value_to_tensor(name, first).await?;
     let nu = value_to_tensor(name, rest[0].clone()).await?;
     let (x, nu, shape) = broadcast_pair(name, &x, &nu)?;
@@ -173,6 +178,16 @@ pub(super) async fn three_args(
     rest: Vec<Value>,
     defaults: Option<(f64, f64)>,
 ) -> BuiltinResult<ThreeArgs> {
+    if !matches!((rest.len(), defaults.is_some()), (0, true) | (2, _)) {
+        return Err(normal_error(
+            name,
+            format!("{name}: expected one or three numeric arguments"),
+        ));
+    }
+    let inputs = std::iter::once(&first)
+        .chain(rest.iter())
+        .collect::<Vec<_>>();
+    numeric_inputs(name, &inputs, NumericShapePolicy::Broadcast)?;
     let (a, b) = match (rest.as_slice(), defaults) {
         ([], Some((a, b))) => (scalar_tensor(a), scalar_tensor(b)),
         ([a, b], _) => (

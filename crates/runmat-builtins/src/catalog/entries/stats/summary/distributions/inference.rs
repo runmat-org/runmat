@@ -68,7 +68,14 @@ pub(super) fn infer(
     let mut shape = ShapeFact::Scalar;
     let mut any_single = false;
     let mut unknown_class = false;
-    let mut unknown_input = false;
+    let mut unknown_input = kind == DistributionKind::GenericInv
+        && match arguments.first().map(|argument| &argument.kind) {
+            Some(ValueKindFact::Object(object)) => object.runtime_class.is_none(),
+            Some(ValueKindFact::String | ValueKindFact::Character) => {
+                request.literals.literal_string_at(0).is_none()
+            }
+            _ => true,
+        };
     for (offset, argument) in numeric.iter().enumerate() {
         match &argument.kind {
             ValueKindFact::Numeric(fact) if fact.domain == NumericDomain::Real => {
@@ -123,8 +130,12 @@ pub(super) fn infer(
             result
         }
     };
+    let host_inputs = numeric
+        .iter()
+        .all(|argument| argument.residency == ResidencyFact::Host);
     output.storage = match (class, output.shape.element_count()) {
-        (Some(NumericClass::Double), Some(1)) => StorageFact::Scalar,
+        (Some(NumericClass::Double), Some(1)) if host_inputs => StorageFact::Scalar,
+        (Some(NumericClass::Double), Some(1)) => StorageFact::Unknown,
         (Some(_), Some(_)) => StorageFact::Dense,
         _ => StorageFact::Unknown,
     };
@@ -148,7 +159,18 @@ fn validate_family(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnos
         return;
     }
     match &arguments[0].kind {
-        ValueKindFact::Object(_) => {
+        ValueKindFact::Object(object) => {
+            if object
+                .runtime_class
+                .as_ref()
+                .is_some_and(|class| !class.is(runmat_types::standard::PROBABILITY_DISTRIBUTION))
+            {
+                diagnostics.push(error(
+                    "FAMILY",
+                    "icdf requires a fitted probability distribution object",
+                    0,
+                ));
+            }
             if arguments.len() != 2 {
                 diagnostics.push(error(
                     "ARITY",

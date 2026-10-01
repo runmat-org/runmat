@@ -39,6 +39,11 @@ async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<Args> {
     }
     let nu_value = rest.pop().expect("one nu argument");
     ensure_extensions(&value, &nu_value)?;
+    numeric_inputs(
+        "chi2cdf",
+        &[&value, &nu_value],
+        NumericShapePolicy::SameSizeOrScalar,
+    )?;
     let output = NormalOutputPlan::inspect("chi2cdf", &value, std::slice::from_ref(&nu_value))?;
     let x = super::normal_value_to_tensor("chi2cdf", "x", value).await?;
     let nu = super::normal_value_to_tensor("chi2cdf", "nu", nu_value).await?;

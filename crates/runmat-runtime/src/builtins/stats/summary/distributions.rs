@@ -13,10 +13,12 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 mod admission;
 mod geometry;
 mod numerics;
+mod preflight;
 
 use admission::*;
 use geometry::*;
 use numerics::*;
+use preflight::{numeric_inputs, NumericShapePolicy};
 pub mod normpdf;
 
 pub mod normcdf;

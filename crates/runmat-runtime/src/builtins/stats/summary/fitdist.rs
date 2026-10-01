@@ -26,7 +26,7 @@ const PDF_NAME: &str = "pdf";
 const CDF_NAME: &str = "cdf";
 const RANDOM_NAME: &str = "random";
 const PROBABILITY_DISTRIBUTION_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("ProbabilityDistribution");
+    runmat_types::standard::PROBABILITY_DISTRIBUTION;
 const MIN_POSITIVE: f64 = 1.0e-12;
 
 const OUTPUT_PD: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -1139,6 +1139,12 @@ pub(crate) async fn icdf_probability_distribution(
         .map(|value| icdf_scalar(&fit, value))
         .collect::<Vec<_>>();
     finish_for("icdf", shape, data)
+}
+
+/// Authenticate a fitted distribution before an `icdf` caller accesses a
+/// resident probability input. Parsing remains owned by this domain.
+pub(crate) fn validate_icdf_probability_distribution(value: &Value) -> BuiltinResult<()> {
+    distribution_from_value(value).map(|_| ())
 }
 
 async fn parse_named_eval_parameters(
