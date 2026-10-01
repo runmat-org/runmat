@@ -121,8 +121,16 @@ pub(crate) fn build_binscatter_chart(
     let y_limits = derive_axis_limits(&y_projection.values, y_projection.limits, "YLimits")?;
     let x_edges = linspace(x_limits.0, x_limits.1, num_bins[0] + 1);
     let y_edges = linspace(y_limits.0, y_limits.1, num_bins[1] + 1);
-    validate_edges(&x_edges, "XBinEdges")?;
-    validate_edges(&y_edges, "YBinEdges")?;
+    validate_edges(
+        &x_edges,
+        "XBinEdges",
+        x_projection.exact_bin_limits.is_none(),
+    )?;
+    validate_edges(
+        &y_edges,
+        "YBinEdges",
+        y_projection.exact_bin_limits.is_none(),
+    )?;
     let cell_count = num_bins[0]
         .checked_mul(num_bins[1])
         .ok_or_else(|| invalid("binscatter: NumBins product is too large"))?;
@@ -160,8 +168,16 @@ pub(crate) fn build_binscatter_chart(
         .iter()
         .map(|edge| edge + y_projection.output_origin)
         .collect::<Vec<_>>();
-    validate_edges(&output_x_edges, "XBinEdges")?;
-    validate_edges(&output_y_edges, "YBinEdges")?;
+    validate_edges(
+        &output_x_edges,
+        "XBinEdges",
+        x_projection.exact_bin_limits.is_none(),
+    )?;
+    validate_edges(
+        &output_y_edges,
+        "YBinEdges",
+        y_projection.exact_bin_limits.is_none(),
+    )?;
     let surface = build_surface_from_counts(
         &counts,
         &output_x_edges,
@@ -304,11 +320,14 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
     out
 }
 
-fn validate_edges(edges: &[f64], name: &str) -> BuiltinResult<()> {
-    if edges.iter().any(|edge| !edge.is_finite()) || edges.windows(2).any(|pair| pair[0] > pair[1])
+fn validate_edges(edges: &[f64], name: &str, require_distinct: bool) -> BuiltinResult<()> {
+    if edges.iter().any(|edge| !edge.is_finite())
+        || edges
+            .windows(2)
+            .any(|pair| pair[0] > pair[1] || (require_distinct && pair[0] == pair[1]))
     {
         return Err(invalid(format!(
-            "binscatter: {name} must contain finite increasing coordinates"
+            "binscatter: {name} cannot represent distinct finite bin boundaries"
         )));
     }
     Ok(())
@@ -348,7 +367,7 @@ mod finite_edge_tests {
     #[test]
     fn opposite_finite_extremes_have_finite_monotone_edges() {
         let edges = linspace(-f64::MAX, f64::MAX, 5);
-        validate_edges(&edges, "XBinEdges").unwrap();
+        validate_edges(&edges, "XBinEdges", true).unwrap();
         assert_eq!(edges.first().copied(), Some(-f64::MAX));
         assert_eq!(edges[2], 0.0);
         assert_eq!(edges.last().copied(), Some(f64::MAX));
@@ -360,7 +379,7 @@ mod finite_edge_tests {
         assert!(limits.0.is_finite() && limits.0 < limits.1);
         assert_eq!(limits.1, f64::MAX);
         let edges = linspace(limits.0, limits.1, 3);
-        validate_edges(&edges, "XBinEdges").unwrap();
+        validate_edges(&edges, "XBinEdges", true).unwrap();
     }
 
     #[test]
@@ -369,9 +388,20 @@ mod finite_edge_tests {
         let chart =
             build_binscatter_chart(&data, &data, [2, 2], None, None, false, 1.0, None, None)
                 .unwrap();
-        validate_edges(&chart.x_bin_edges, "XBinEdges").unwrap();
-        validate_edges(&chart.y_bin_edges, "YBinEdges").unwrap();
+        validate_edges(&chart.x_bin_edges, "XBinEdges", true).unwrap();
+        validate_edges(&chart.y_bin_edges, "YBinEdges", true).unwrap();
         assert_eq!(chart.x_bin_edges, vec![-f64::MAX, 0.0, f64::MAX]);
         assert_eq!(chart.values.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn unrepresentable_floating_bin_boundary_rejects_before_publication() {
+        let adjacent = f64::from_bits(1.0f64.to_bits() + 1);
+        let x = Tensor::new(vec![1.0, adjacent], vec![2, 1]).unwrap();
+        let y = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
+        let error = build_binscatter_chart(&x, &y, [2, 2], None, None, false, 1.0, None, None)
+            .err()
+            .expect("a binary64 midpoint does not exist between adjacent numbers");
+        assert!(error.message().contains("distinct finite bin boundaries"));
     }
 }

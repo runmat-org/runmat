@@ -213,6 +213,37 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             "binscatter x and y must contain the same number of elements",
         ));
     }
+    // The third argument may be positional NumBins for direct X/Y, or Y for
+    // axes/X/Y. When X is scalar and both other known lengths disagree, neither
+    // interpretation can produce a chart.
+    if !direct_xy
+        && args.len() == 3
+        && args[0].shape.element_count() == Some(1)
+        && matches!(
+            args[0].kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical
+        )
+        && matches!(
+            args[1].kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical
+        )
+        && matches!(
+            args[2].kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical
+        )
+        && args[1].shape.element_count().is_some_and(|second| {
+            second != 1
+                && args[2]
+                    .shape
+                    .element_count()
+                    .is_some_and(|third| third != second)
+        })
+    {
+        diagnostics.push(InferenceDiagnostic::error(
+            "LENGTH",
+            "binscatter x and y must contain the same number of elements",
+        ));
+    }
     let mut contract = CallContract::fixed(vec![if diagnostics.is_empty() {
         chart_handle()
     } else {

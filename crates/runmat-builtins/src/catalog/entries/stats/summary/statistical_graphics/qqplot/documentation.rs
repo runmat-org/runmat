@@ -24,7 +24,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Samples and returned handles",
             paragraphs: &[
-                "For each plotted series, the returned handle vector contains the quantile-point line, a solid quartile line, and a dashed fitted reference line. The one-sample reference passes through the first and third quartiles of the theoretical normal and observed sample quantiles.",
+                "For each plotted series, the returned handle vector contains the quantile-point line, a solid quartile line, and a dashed fitted reference line. A one-sample plot returns a 3-by-1 vector of line handles. The one-sample reference passes through the first and third quartiles of the theoretical normal and observed sample quantiles.",
                 "RunMat supports numeric vectors and matrices. Two sample matrices are paired by column; one vector can be compared with each column of a matrix. Distribution-object inputs and table-variable routing are outside this supported surface.",
             ],
         },
@@ -41,7 +41,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             id: "qqplot-normal",
             title: "Compare a sample with a normal distribution",
             program: "h = qqplot([1; 2; 4; 8])",
-            display_output: Some("h is a 3-by-1 vector of line handles."),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
@@ -53,9 +53,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "qqplot-percentages",
-            title: "Compare explicit sample quantiles",
+            title: "Compare explicit sample quantiles (YData is [5 10 15])",
             program: "h = qqplot([0; 10; 20], [], [25 50 75]); y = get(h(1),'YData')",
-            display_output: Some("y is [5 10 15]."),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
@@ -67,9 +67,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "qqplot-two-samples",
-            title: "Compare two medians",
+            title: "Compare median quantiles 3 and 4",
             program: "h = qqplot([1; 3; 5], [2; 4; 6], 50)",
-            display_output: Some("The plotted point compares median quantiles 3 and 4."),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,

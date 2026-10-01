@@ -67,6 +67,16 @@ fn ambiguous_scalar_axes_cannot_prove_missing_y_or_mismatched_xy() {
     );
     assert!(!result.diagnostics.is_empty());
     assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+    let three = call(
+        vec![
+            real(vec![Some(1), Some(1)]),
+            real(vec![Some(2), Some(1)]),
+            real(vec![Some(1), Some(1)]),
+        ],
+        vec![],
+    );
+    assert!(!three.diagnostics.is_empty());
+    assert!(matches!(three.outputs[0].kind, ValueKindFact::Unknown));
 }
 
 #[test]
