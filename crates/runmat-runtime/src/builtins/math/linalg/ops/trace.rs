@@ -624,9 +624,10 @@ pub(crate) mod tests {
             let Value::GpuTensor(output) = result else {
                 panic!("complex trace must retain resident class")
             };
-            let Value::ComplexTensor(host) =
-                test_support::gather(Value::GpuTensor(output)).unwrap()
-            else {
+            let Value::ComplexTensor(host) = futures::executor::block_on(
+                gpu_helpers::gather_value_async(&Value::GpuTensor(output)),
+            )
+            .unwrap() else {
                 panic!("complex trace must preserve complex storage")
             };
             assert_eq!(host.materialize_f64(), vec![(8.0, 10.0)]);
@@ -655,9 +656,10 @@ pub(crate) mod tests {
             let Value::GpuTensor(output) = result else {
                 panic!("single complex trace must stay typed on its owner")
             };
-            let Value::ComplexTensor(gathered) =
-                test_support::gather(Value::GpuTensor(output)).unwrap()
-            else {
+            let Value::ComplexTensor(gathered) = futures::executor::block_on(
+                gpu_helpers::gather_value_async(&Value::GpuTensor(output)),
+            )
+            .unwrap() else {
                 panic!("single complex trace must retain complex storage")
             };
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);

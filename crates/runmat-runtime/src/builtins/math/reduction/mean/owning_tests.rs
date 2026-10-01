@@ -114,6 +114,7 @@ fn mean_only_unsupported_hooks_allow_fallback_and_execution_errors_retain_source
             &input.handle,
             &MeanAxes::Dim(1),
             ReductionNaN::Include,
+            &OutputTemplate::Default,
         ));
         match (mode, result) {
             (Mode::Unsupported, Ok(None)) => {}
