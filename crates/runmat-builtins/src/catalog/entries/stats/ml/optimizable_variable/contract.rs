@@ -78,3 +78,35 @@ pub const OPTIMIZABLE_VARIABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+
+pub const OPTIMIZABLE_VARIABLE_INTEGER_RANGE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "optimizable-variable-integer-range",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "optimizableVariable with fixed-width integer Range storage is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:OptimizableVariableIntegerRangeExtension"),
+    };
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [OPTIMIZABLE_VARIABLE_INTEGER_RANGE_EXTENSION];
+
+const INTEGER_RANGE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "Range",
+    classes: &crate::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "MATLAB documents double numeric bounds. RunMat accepts native integer bounds only when both convert to binary64 exactly.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "optimizableVariable(Name, integer_Range, ...)",
+        inputs: &INTEGER_RANGE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The constructed object retains the authoritative typed Range payload; bayesopt converts exact bounds at its numerical search boundary.",
+    }];

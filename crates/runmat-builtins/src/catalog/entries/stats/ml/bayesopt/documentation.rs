@@ -13,14 +13,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Variables, callbacks and search",
             paragraphs: &[
                 "The objective is invoked as fun(X), where X is a one-row table with a column for each variable. Real, integer and categorical variables are supported, including valid logarithmic numeric ranges and Optimize=false fixed variables.",
-                "The in-memory search uses deterministic low-discrepancy seed points, then a Gaussian-process surrogate with expected-improvement-style acquisition. Finite integer and categorical spaces stop when every unique candidate has been exhausted, even if MaxObjectiveEvaluations is larger.",
+                "The in-memory search uses deterministic low-discrepancy seed points, then a Gaussian-process surrogate with expected-improvement-style acquisition. It stops when its finite unique candidate pool is exhausted, even if MaxObjectiveEvaluations is larger; the pool is not an exhaustive enumeration of every possible point in a large domain.",
                 "The objective can return a scalar value or a struct with Objective and optional ConstraintViolations. Violations at or below zero are feasible. XConstraintFcn, when supplied, is a logical feasibility filter evaluated before the objective.",
             ],
         },
         BuiltinDocumentationSection {
             heading: "Options, results and limits",
             paragraphs: &[
-                "Supported controls include MaxObjectiveEvaluations, NumSeedPoints, AcquisitionFunctionName, ExplorationRatio, IsObjectiveDeterministic, Verbose, UseParallel=false, empty PlotFcn/OutputFcn and XConstraintFcn. Warm starts, conditional variables, nonempty plotting/output callbacks and parallel evaluation return explicit unsupported errors.",
+                "Supported controls include MaxObjectiveEvaluations (1 through 2048), NumSeedPoints, AcquisitionFunctionName, ExplorationRatio, IsObjectiveDeterministic, Verbose, UseParallel=false, empty PlotFcn/OutputFcn and XConstraintFcn. Warm starts, conditional variables, nonempty plotting/output callbacks and parallel evaluation return explicit unsupported errors.",
                 "The result exposes XTrace, ObjectiveTrace, ObjectiveMinimumTrace, ObjectiveEvaluationTimeTrace, FeasibilityTrace, OptimizationTrace, XAtMinObjective, MinObjective, BestPoint, BestObjective, VariableDescriptions, Options, Output, ExitFlag and surrogate metadata. Only the single-result form is currently implemented.",
                 "This is a host control-flow solver. It materializes resident variable metadata and option inputs, invokes callbacks on the host, and returns a host result. It does not schedule surrogate updates or objective callbacks on a GPU provider; datastore-backed objective forms are not implemented.",
             ],

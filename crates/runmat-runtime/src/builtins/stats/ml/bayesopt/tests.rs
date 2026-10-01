@@ -1,0 +1,384 @@
+use super::*;
+use futures::executor::block_on;
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
+use runmat_value::IntegerStorage;
+use std::sync::Arc;
+
+fn variable(name: &str, range: Vec<f64>, var_type: Option<&str>) -> Value {
+    let mut object = ObjectInstance::new("optimizableVariable");
+    object
+        .properties
+        .insert("Name".into(), Value::String(name.into()));
+    object.properties.insert(
+        "Range".into(),
+        Value::Tensor(Tensor::new(range, vec![1, 2]).unwrap()),
+    );
+    object.properties.insert(
+        "Type".into(),
+        Value::String(var_type.unwrap_or("real").into()),
+    );
+    object
+        .properties
+        .insert("Transform".into(), Value::String("none".into()));
+    object
+        .properties
+        .insert("Optimize".into(), Value::Bool(true));
+    Value::Object(object)
+}
+
+fn variable_with_range(name: &str, range: Value, var_type: Option<&str>) -> Value {
+    let mut object = ObjectInstance::new("optimizableVariable");
+    object
+        .properties
+        .insert("Name".into(), Value::String(name.into()));
+    object.properties.insert("Range".into(), range);
+    object.properties.insert(
+        "Type".into(),
+        Value::String(var_type.unwrap_or("real").into()),
+    );
+    object
+        .properties
+        .insert("Transform".into(), Value::String("none".into()));
+    object
+        .properties
+        .insert("Optimize".into(), Value::Bool(true));
+    Value::Object(object)
+}
+
+#[test]
+fn output_count_and_bad_variable_identity_are_rejected_before_callbacks() {
+    let error = block_on(bayesopt_in_runtime(
+        None,
+        Some(2),
+        Value::Num(0.0),
+        Value::Num(1.0),
+        vec![],
+    ))
+    .expect_err("multiple results are unsupported before callback admission");
+    assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+
+    let mut unrelated = ObjectInstance::new(runmat_types::standard::LINEAR_MODEL);
+    unrelated
+        .properties
+        .insert("Name".into(), Value::String("x".into()));
+    let error = parse_variables(Value::Object(unrelated)).expect_err("wrong object class");
+    assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+}
+
+#[test]
+fn candidate_identity_keeps_text_categories_distinct_from_numeric_values() {
+    let numeric = VariableValue::Numeric(1.0);
+    let text = VariableValue::Categorical("1.00000000000000000".into());
+    assert_ne!(numeric.key(), text.key());
+    assert_eq!(
+        VariableValue::Numeric(-0.0).key(),
+        VariableValue::Numeric(0.0).key()
+    );
+}
+
+fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+    let tensor = Tensor::new_integer(storage, shape).unwrap();
+    Value::Tensor(tensor)
+}
+
+#[test]
+fn option_parsers_read_all_integer_storage_variants() {
+    let storages = [
+        IntegerStorage::I8(vec![1]),
+        IntegerStorage::I16(vec![1]),
+        IntegerStorage::I32(vec![1]),
+        IntegerStorage::I64(vec![1]),
+        IntegerStorage::U8(vec![1]),
+        IntegerStorage::U16(vec![1]),
+        IntegerStorage::U32(vec![1]),
+        IntegerStorage::U64(vec![1]),
+    ];
+    for storage in storages {
+        let value = poisoned_int_tensor(storage, vec![1, 1]);
+        assert!(option_bool(&value, "Verbose").unwrap());
+        assert_eq!(
+            option_usize(&value, "MaxObjectiveEvaluations", 1, 2).unwrap(),
+            1
+        );
+        assert_eq!(option_unit_f64(&value, "ExplorationRatio").unwrap(), 1.0);
+    }
+
+    #[test]
+    fn cancelled_invocation_stops_before_search_or_callback() {
+        let source = CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(CancellationReason::User);
+        let error = block_on(bayesopt_in_runtime(
+            Some(&runtime),
+            None,
+            Value::Num(0.0),
+            Value::Num(0.0),
+            vec![],
+        ))
+        .expect_err("cancelled call must not invoke objective");
+        assert!(error
+            .identifier()
+            .is_some_and(|identifier| identifier.ends_with(":Cancelled")));
+    }
+}
+
+fn categorical_variable(name: &str, categories: Vec<&str>) -> Value {
+    let mut object = ObjectInstance::new("optimizableVariable");
+    object
+        .properties
+        .insert("Name".into(), Value::String(name.into()));
+    object.properties.insert(
+        "Range".into(),
+        Value::StringArray(
+            StringArray::new(
+                categories.into_iter().map(str::to_string).collect(),
+                vec![1, 2],
+            )
+            .unwrap(),
+        ),
+    );
+    object
+        .properties
+        .insert("Type".into(), Value::String("categorical".into()));
+    object
+        .properties
+        .insert("Transform".into(), Value::String("none".into()));
+    object
+        .properties
+        .insert("Optimize".into(), Value::Bool(true));
+    Value::Object(object)
+}
+
+fn variable_cell(values: Vec<Value>) -> Value {
+    Value::Cell(CellArray::new(values, 1, 2).unwrap())
+}
+
+fn table_scalar_arg(args: &[Value], name: &str) -> f64 {
+    let Value::Object(table) = &args[0] else {
+        panic!("expected table");
+    };
+    let Value::Struct(vars) = table.properties.get("__table_variables").unwrap() else {
+        panic!("expected table variables");
+    };
+    let Value::Tensor(tensor) = vars.fields.get(name).unwrap() else {
+        panic!("expected numeric column");
+    };
+    tensor.materialize_f64()[0]
+}
+
+fn table_string_arg(args: &[Value], name: &str) -> String {
+    let Value::Object(table) = &args[0] else {
+        panic!("expected table");
+    };
+    let Value::Struct(vars) = table.properties.get("__table_variables").unwrap() else {
+        panic!("expected table variables");
+    };
+    let Value::StringArray(array) = vars.fields.get(name).unwrap() else {
+        panic!("expected string column");
+    };
+    array.data[0].clone()
+}
+
+#[test]
+fn bayesopt_minimizes_quadratic_over_optimizable_variables() {
+    let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        |_function, args, requested_outputs| {
+            assert_eq!(requested_outputs, 1);
+            let x = table_scalar_arg(args, "x");
+            let y = table_scalar_arg(args, "y");
+            Box::pin(async move {
+                crate::sequence::single_value_sequence(Value::Num(
+                    (x - 0.25).powi(2) + (y + 0.5).powi(2),
+                ))
+            })
+        },
+    )));
+    let result = block_on(bayesopt_builtin(
+        Value::BoundFunctionHandle {
+            name: "objective".into(),
+            function: 1,
+        },
+        variable_cell(vec![
+            variable("x", vec![-1.0, 1.0], None),
+            variable("y", vec![-1.0, 1.0], None),
+        ]),
+        vec![
+            Value::String("MaxObjectiveEvaluations".into()),
+            Value::Num(24.0),
+            Value::String("NumSeedPoints".into()),
+            Value::Num(6.0),
+        ],
+    ))
+    .unwrap();
+    let Value::Object(object) = result else {
+        panic!("expected BayesianOptimization object");
+    };
+    assert!(object.class_name.is(RESULT_CLASS));
+    let Some(Value::Num(minimum)) = object.properties.get("MinObjective") else {
+        panic!("expected minimum");
+    };
+    assert!(*minimum < 0.08, "minimum was {minimum}");
+    assert!(matches!(
+        object.properties.get("XTrace"),
+        Some(Value::Object(table)) if table.class_name.is(runmat_types::standard::TABLE)
+    ));
+}
+
+#[test]
+fn bayesopt_rejects_parallel_option_explicitly() {
+    let err = block_on(bayesopt_builtin(
+        Value::FunctionHandle("objective".into()),
+        variable("x", vec![0.0, 1.0], None),
+        vec![Value::String("UseParallel".into()), Value::Bool(true)],
+    ))
+    .unwrap_err();
+    assert_eq!(err.identifier(), Some("RunMat:bayesopt:Unsupported"));
+}
+
+#[test]
+fn bayesopt_honors_x_constraint_function() {
+    let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        |function, args, _requested_outputs| {
+            let x = table_scalar_arg(args, "x");
+            crate::sequence::single_value_future(async move {
+                if function == 2 {
+                    Ok(Value::Bool(x >= 0.0))
+                } else {
+                    Ok(Value::Num((x - 0.4).powi(2)))
+                }
+            })
+        },
+    )));
+    let result = block_on(bayesopt_builtin(
+        Value::BoundFunctionHandle {
+            name: "objective".into(),
+            function: 1,
+        },
+        variable("x", vec![-1.0, 1.0], None),
+        vec![
+            Value::String("MaxObjectiveEvaluations".into()),
+            Value::Num(12.0),
+            Value::String("XConstraintFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "constraint".into(),
+                function: 2,
+            },
+        ],
+    ))
+    .unwrap();
+    let Value::Object(object) = result else {
+        panic!("expected result object");
+    };
+    let Some(Value::Num(count)) = object.properties.get("NumObjectiveEvaluations") else {
+        panic!("expected count");
+    };
+    assert_eq!(*count, 12.0);
+}
+
+#[test]
+fn bayesopt_supports_mixed_variables_and_objective_constraint_struct() {
+    let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        |_function, args, _requested_outputs| {
+            let n = table_scalar_arg(args, "n");
+            let family = table_string_arg(args, "family");
+            crate::sequence::single_value_future(async move {
+                let mut out = StructValue::new();
+                let family_penalty = if family == "rbf" { 0.0 } else { 1.0 };
+                out.insert("Objective", Value::Num((n - 2.0).powi(2) + family_penalty));
+                out.insert("ConstraintViolations", Value::Num(1.5 - n));
+                Ok(Value::Struct(out))
+            })
+        },
+    )));
+    let result = block_on(bayesopt_builtin(
+        Value::BoundFunctionHandle {
+            name: "objective".into(),
+            function: 3,
+        },
+        variable_cell(vec![
+            variable("n", vec![1.0, 3.0], Some("integer")),
+            categorical_variable("family", vec!["linear", "rbf"]),
+        ]),
+        vec![
+            Value::String("MaxObjectiveEvaluations".into()),
+            Value::Num(18.0),
+            Value::String("AcquisitionFunctionName".into()),
+            Value::String("expected-improvement".into()),
+        ],
+    ))
+    .unwrap();
+    let Value::Object(object) = result else {
+        panic!("expected result object");
+    };
+    let Some(Value::Num(minimum)) = object.properties.get("MinObjective") else {
+        panic!("expected minimum");
+    };
+    assert!(*minimum <= 0.25, "minimum was {minimum}");
+    assert!(matches!(
+        object.properties.get("FeasibilityTrace"),
+        Some(Value::LogicalArray(_))
+    ));
+}
+
+#[test]
+fn bayesopt_reads_typed_integer_storage_exactly() {
+    let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        |function, args, _requested_outputs| {
+            let x = table_scalar_arg(args, "x");
+            crate::sequence::single_value_future(async move {
+                if function == 11 {
+                    return Ok(poisoned_int_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]));
+                }
+                let mut out = StructValue::new();
+                out.insert("Objective", Value::Num((x - 1.0).powi(2)));
+                out.insert(
+                    "ConstraintViolations",
+                    poisoned_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+                );
+                Ok(Value::Struct(out))
+            })
+        },
+    )));
+    let result = block_on(bayesopt_builtin(
+        Value::BoundFunctionHandle {
+            name: "objective".into(),
+            function: 10,
+        },
+        variable_with_range(
+            "x",
+            poisoned_int_tensor(IntegerStorage::I16(vec![-1, 2]), vec![1, 2]),
+            None,
+        ),
+        vec![
+            Value::String("MaxObjectiveEvaluations".into()),
+            poisoned_int_tensor(IntegerStorage::U8(vec![6]), vec![1, 1]),
+            Value::String("NumSeedPoints".into()),
+            poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+            Value::String("ExplorationRatio".into()),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+            Value::String("IsObjectiveDeterministic".into()),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+            Value::String("XConstraintFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "constraint".into(),
+                function: 11,
+            },
+        ],
+    ))
+    .unwrap();
+    let Value::Object(object) = result else {
+        panic!("expected BayesianOptimization object");
+    };
+    let Some(Value::Num(count)) = object.properties.get("NumObjectiveEvaluations") else {
+        panic!("expected count");
+    };
+    assert_eq!(*count, 6.0);
+    let Some(Value::Num(minimum)) = object.properties.get("MinObjective") else {
+        panic!("expected minimum");
+    };
+    assert!(*minimum <= 0.25, "minimum was {minimum}");
+}

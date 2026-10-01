@@ -27,9 +27,9 @@ pub const OPTIMIZABLE_VARIABLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatal
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
-        accelerator: BuiltinAcceleratorPolicy::Optional,
+        accelerator: BuiltinAcceleratorPolicy::Forbidden,
         residency: BuiltinResidencyPolicy::GatherToHost,
-        fusion: BuiltinFusionPolicy::Never,
+        fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::MaterializeArguments,
     },
     link: BuiltinLinkContract {
@@ -39,8 +39,8 @@ pub const OPTIMIZABLE_VARIABLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatal
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
-    integer_capabilities: &[],
+    extensions: &contract::EXTENSIONS,
+    integer_capabilities: &OPTIMIZABLE_VARIABLE_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };
