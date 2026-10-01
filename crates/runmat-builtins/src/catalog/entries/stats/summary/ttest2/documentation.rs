@@ -1,4 +1,4 @@
-//! User-facing ttest2 contract, migrated without retiring its editable JSON shadow.
+//! User-facing two-sample test contract and examples.
 use crate::*;
 
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
@@ -6,6 +6,15 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     target: BuiltinDocumentationLinkTarget::Source(
         "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/hypothesis.rs",
     ),
+};
+
+const ENGINE_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Two-sample statistics and output geometry",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/hypothesis/ttest2_engine.rs"),
+};
+const OPTIONS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Typed control admission",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/hypothesis/ttest2_options.rs"),
 };
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
@@ -27,7 +36,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "The four outputs are a logical test decision `h`, double p-value `p`, double confidence interval `ci`, and a struct with double `tstat`, `df`, and `sd` fields.",
         ] },
         BuiltinDocumentationSection { heading: "Resident inputs", paragraphs: &[
-            "GPU samples are gathered through their provider for host reductions and Student-t distribution calculations. Preserving output residency and resident statistical kernels remain implementation gaps.",
+            "GPU samples are gathered through their owning provider for host reductions and Student-t distribution calculations. Outputs are host values; this operation does not use a resident statistical kernel.",
         ] },
     ],
     examples: &[
@@ -66,7 +75,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[SOURCE, ENGINE_SOURCE, OPTIONS_SOURCE],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
                 label: "Equal and unequal variance, tail, missing, dimension, and integer tests",
@@ -74,8 +83,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest,
                 label: "Two-sample test executes from a MATLAB-syntax script",
                 location: "crates/runmat-vm/tests/stats_ml.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
+                label: "Provider admission, gather causes and borrowed-input lifetime",
+                location: "crates/runmat-runtime/src/builtins/stats/summary/hypothesis/ttest2_provider_tests.rs" },
         ],
-        notes: &["The current runtime computes on the host after provider gather; resident output and kernels are not yet qualified."],
+        notes: &["Computation and result publication occur on the host after owning-provider gather."],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),
