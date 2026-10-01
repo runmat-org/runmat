@@ -68,8 +68,6 @@ const OUTPUT_TABLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 }];
 
 const INPUTS_X: [BuiltinParamDescriptor; 1] = [PARAM_X];
-const INPUTS_X_DIM: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_DIM];
-const INPUTS_X_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_DIM, PARAM_OPTIONS];
 const INPUTS_X_FLAG: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_FLAG];
 const INPUTS_X_FLAG_OPTIONS: [BuiltinParamDescriptor; 4] =
     [PARAM_X, PARAM_FLAG, PARAM_DIM, PARAM_OPTIONS];
