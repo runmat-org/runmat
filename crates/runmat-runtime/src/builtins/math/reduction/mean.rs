@@ -3,8 +3,7 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{BuiltinErrorDescriptor, MeanControl, MeanOutputClass as OutputTemplate};
 pub use runmat_builtins::{
-    MEAN_DESCRIPTOR, MEAN_ERROR_INTERNAL, MEAN_ERROR_INVALID_ARGUMENT, MEAN_ERROR_INVALID_INPUT,
-    MEAN_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
+    MEAN_ERROR_INTERNAL, MEAN_ERROR_INVALID_ARGUMENT, MEAN_ERROR_INVALID_INPUT,
 };
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar,
@@ -1939,6 +1938,7 @@ async fn ensure_device(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use runmat_builtins::MEAN_DESCRIPTOR;
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
