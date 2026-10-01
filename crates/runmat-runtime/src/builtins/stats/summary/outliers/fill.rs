@@ -86,14 +86,14 @@ pub(super) fn fill_slice(
                 Some(original[linear].clamp(result.lower_full[linear], result.upper_full[linear]))
             }
             FillMethod::Constant(value) => Some(*value),
-            FillMethod::Previous => previous_good(&original, result, indices, pos),
-            FillMethod::Next => next_good(&original, result, indices, pos),
+            FillMethod::Previous => previous_good(original, result, indices, pos),
+            FillMethod::Next => next_good(original, result, indices, pos),
             FillMethod::Nearest => Some(
-                nearest_good(&original, result, indices, pos).unwrap_or(result.center_full[linear]),
+                nearest_good(original, result, indices, pos).unwrap_or(result.center_full[linear]),
             ),
             FillMethod::Linear => Some(
-                linear_interp(&original, result, indices, pos).unwrap_or_else(|| {
-                    nearest_good(&original, result, indices, pos)
+                linear_interp(original, result, indices, pos).unwrap_or_else(|| {
+                    nearest_good(original, result, indices, pos)
                         .unwrap_or(result.center_full[linear])
                 }),
             ),
