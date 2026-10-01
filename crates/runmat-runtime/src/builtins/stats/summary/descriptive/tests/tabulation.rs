@@ -11,6 +11,61 @@ struct RejectingDownloadProvider {
     downloads: AtomicUsize,
 }
 
+struct PendingDownloadProvider {
+    owner: TestAllocationOwner,
+    downloads: AtomicUsize,
+}
+
+impl AccelProvider for PendingDownloadProvider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+
+    fn device_info(&self) -> String {
+        "tabulate pending fixture".into()
+    }
+
+    fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unexpected upload")
+    }
+
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { futures::future::pending().await })
+    }
+
+    fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { futures::future::pending().await })
+    }
+}
+
+#[tokio::test]
+async fn tabulate_cancelled_pending_gather_leaves_borrowed_allocation_live() {
+    let provider = Box::leak(Box::new(PendingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let mut pending = Box::pin(tabulate::tabulate_builtin(Value::GpuTensor(
+        resident.handle.clone(),
+    )));
+    assert!(matches!(
+        futures::poll!(pending.as_mut()),
+        std::task::Poll::Pending
+    ));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    drop(pending);
+    assert_eq!(resident.probe.retirements(), 0);
+    drop(resident.handle);
+    assert_eq!(resident.probe.retirements(), 1);
+}
+
 impl AccelProvider for RejectingDownloadProvider {
     fn device_id(&self) -> u32 {
         self.owner.device_id()
