@@ -45,6 +45,10 @@ fn classes() -> Value {
     tensor(vec![1.0, 2.0], vec![1, 2])
 }
 
+fn labels() -> Value {
+    tensor(vec![1.0, 2.0], vec![2, 1])
+}
+
 fn assert_gather_cause(error: &RuntimeError, owner: EncodingBuiltin) {
     assert_eq!(error.identifier(), owner.invalid().identifier);
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -269,7 +273,7 @@ fn encoding_download_failures_keep_cause_retry_and_caller_lease() {
     );
     assert_failed_download(
         block_on(onehotencode_builtin(
-            classes(),
+            labels(),
             Value::Num(2.0),
             vec![resident()],
         )),
