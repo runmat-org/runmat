@@ -6,6 +6,20 @@ use runmat_builtins::{
 };
 use runmat_value::{IntegerStorage, LogicalArray};
 
+fn canonical_entry(name: &str) -> &'static runmat_builtins::BuiltinCatalogEntry {
+    let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name)
+        .expect("canonical empirical identity");
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name(name);
+    assert_eq!(bindings.len(), 1, "one canonical implementation binding");
+    assert_eq!(bindings[0].identity.builtin, entry.identity);
+    assert_eq!(bindings[0].identity.variant, "default");
+    assert!(
+        builtin_function_by_name(name).is_none(),
+        "no legacy authority"
+    );
+    entry
+}
+
 fn tensor(data: Vec<f64>) -> Value {
     Value::Tensor(Tensor::new(data.clone(), vec![data.len(), 1]).unwrap())
 }
@@ -246,7 +260,7 @@ fn ecdf_rejects_fractional_frequency_counts() {
 
 #[test]
 fn ecdf_descriptor_exposes_role_specific_integer_policy() {
-    let builtin = builtin_function_by_name(ECDF_NAME).expect("registered ecdf");
+    let builtin = canonical_entry(ECDF_NAME);
     assert_eq!(builtin.extensions, &ECDF_EXTENSIONS);
     assert_eq!(builtin.integer_capabilities.len(), 3);
 }
@@ -413,7 +427,7 @@ fn cdfplot_rejects_nonvector_nd_data_before_mutating_graphics() {
 
 #[test]
 fn cdfplot_descriptor_classifies_integer_and_runtime_extensions() {
-    let builtin = builtin_function_by_name(CDFPLOT_NAME).expect("registered cdfplot");
+    let builtin = canonical_entry(CDFPLOT_NAME);
     assert_eq!(builtin.extensions, &CDFPLOT_EXTENSIONS);
     assert_eq!(
         builtin
