@@ -47,10 +47,10 @@ fn evaluate<T: FloatingMaximum>(
     right_shape: &[usize],
     output_shape: &[usize],
 ) -> Result<Vec<T>> {
-    let count = output_shape
-        .iter()
-        .try_fold(1usize, |n, &extent| n.checked_mul(extent))
-        .ok_or_else(|| anyhow!("elementwise maximum output extent overflow"))?;
+    let count = logical_len_for_shape("elementwise maximum", output_shape)?;
+    if count == 0 {
+        return Ok(Vec::new());
+    }
     let left_strides = runtime_compute_strides(left_shape);
     let right_strides = runtime_compute_strides(right_shape);
     let mut output = Vec::new();
@@ -271,6 +271,31 @@ mod tests {
         assert_eq!(
             block_on(provider.download_numeric(&result)).unwrap().data,
             HostNumericDataOwned::F32(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+        );
+    }
+
+    #[test]
+    fn maximum_keeps_empty_shape_without_allocating_by_other_extents() {
+        let provider = InProcessProvider::new();
+        let empty = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[]),
+                shape: &[0, 3],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let scalar = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.0]),
+                shape: &[1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let result = block_on(provider.elem_max(&empty, &scalar)).unwrap();
+        assert_eq!(result.shape(), &[0, 3]);
+        assert_eq!(
+            block_on(provider.download_numeric(&result)).unwrap().data,
+            HostNumericDataOwned::F32(Vec::new())
         );
     }
 }
