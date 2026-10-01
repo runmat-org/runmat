@@ -9,7 +9,7 @@ use runmat_execution::{
 };
 use runmat_value::Value;
 
-use super::ExecutionServiceError;
+use super::{CpuCooperationPolicy, ExecutionServiceError};
 
 static NEXT_SERVICE_NONCE: AtomicU64 = AtomicU64::new(1);
 
@@ -150,6 +150,16 @@ pub enum AwaitAction {
 }
 
 pub trait RuntimeExecutionServices {
+    fn cpu_cooperation_policy(&self) -> CpuCooperationPolicy {
+        CpuCooperationPolicy::NeverYield
+    }
+
+    fn cooperate_cpu(
+        &self,
+    ) -> crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Complete process-local values retained by this service. `None` means
     /// alias visibility is unavailable, not that the service retains nothing.
     fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {

@@ -1,5 +1,6 @@
 mod capture;
 mod completion;
+mod cooperation;
 mod errors;
 mod running_future;
 mod services;
@@ -8,6 +9,7 @@ pub mod value_codec;
 
 pub use capture::{validate_spawn_capture, validate_spawn_captures};
 pub use completion::RootedValueSequence;
+pub use cooperation::{CpuCooperationBudget, CpuCooperationPolicy};
 pub use errors::{decode_runtime_failure, encode_runtime_failure, ExecutionServiceError};
 pub use running_future::RunningFutureLease;
 pub use services::{

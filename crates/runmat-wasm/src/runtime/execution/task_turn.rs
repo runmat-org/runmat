@@ -1,0 +1,98 @@
+//! One browser task turn for cooperative CPU execution.
+//!
+//! A resolved Promise only schedules another microtask and can starve the
+//! worker's message queue. MessageChannel posts a real task instead.
+
+use std::cell::RefCell;
+use std::future::Future;
+use std::pin::Pin;
+use std::rc::Rc;
+use std::task::{Context, Poll, Waker};
+
+use runmat_runtime::execution::ExecutionServiceError;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
+use web_sys::{MessageChannel, MessageEvent, MessagePort};
+
+#[derive(Default)]
+struct TurnState {
+    ready: bool,
+    waker: Option<Waker>,
+}
+
+pub(super) struct BrowserTaskTurn {
+    receive: MessagePort,
+    send: MessagePort,
+    callback: Closure<dyn FnMut(MessageEvent)>,
+    state: Rc<RefCell<TurnState>>,
+    posted: bool,
+}
+
+impl BrowserTaskTurn {
+    pub(super) fn new() -> Result<Self, ExecutionServiceError> {
+        let channel = MessageChannel::new().map_err(schedule_error)?;
+        let receive = channel.port1();
+        let send = channel.port2();
+        let state = Rc::new(RefCell::new(TurnState::default()));
+        let callback_state = Rc::clone(&state);
+        let callback = Closure::wrap(Box::new(move |_event: MessageEvent| {
+            let waker = {
+                let mut state = callback_state.borrow_mut();
+                state.ready = true;
+                state.waker.take()
+            };
+            if let Some(waker) = waker {
+                waker.wake();
+            }
+        }) as Box<dyn FnMut(MessageEvent)>);
+        receive.set_onmessage(Some(callback.as_ref().unchecked_ref()));
+        receive.start();
+        Ok(Self {
+            receive,
+            send,
+            callback,
+            state,
+            posted: false,
+        })
+    }
+}
+
+impl Future for BrowserTaskTurn {
+    type Output = Result<(), ExecutionServiceError>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut state = self.state.borrow_mut();
+        if state.ready {
+            return Poll::Ready(Ok(()));
+        }
+        state.waker = Some(context.waker().clone());
+        drop(state);
+        if !self.posted {
+            // Mark before posting so a failed post never causes a second
+            // submission. The owned future is dropped on error.
+            self.posted = true;
+            if let Err(error) = self.send.post_message(&JsValue::UNDEFINED) {
+                return Poll::Ready(Err(schedule_error(error)));
+            }
+        }
+        Poll::Pending
+    }
+}
+
+impl Drop for BrowserTaskTurn {
+    fn drop(&mut self) {
+        self.receive.set_onmessage(None);
+        self.receive.close();
+        self.send.close();
+        self.state.borrow_mut().waker = None;
+        // Retain the callback until after removing the event listener.
+        let _ = &self.callback;
+    }
+}
+
+fn schedule_error(error: JsValue) -> ExecutionServiceError {
+    ExecutionServiceError::Infrastructure(format!(
+        "browser CPU task-turn scheduling failed: {error:?}"
+    ))
+}

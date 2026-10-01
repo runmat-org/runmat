@@ -19,7 +19,8 @@ use runmat_execution_runner::{
     DriverCommand, DriverConfig, PoolSpec, TaskSubmission, WorkerSpec,
 };
 use runmat_runtime::execution::{
-    AwaitAction, DeferredCall, ExecutionServiceError, RuntimeExecutionServices,
+    AwaitAction, CpuCooperationPolicy, DeferredCall, ExecutionServiceError,
+    RuntimeExecutionServices,
 };
 use runmat_value::Value;
 
@@ -357,6 +358,18 @@ impl BrowserExecutionService {
 }
 
 impl RuntimeExecutionServices for BrowserExecutionService {
+    fn cpu_cooperation_policy(&self) -> CpuCooperationPolicy {
+        // Work units are charged by CPU kernels at their existing bounded
+        // checkpoints. This is a scheduling quantum, not a placement estimate.
+        CpuCooperationPolicy::WorkQuantum(std::num::NonZeroU64::new(16_384).unwrap())
+    }
+
+    fn cooperate_cpu(
+        &self,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+        Box::pin(async { super::task_turn::BrowserTaskTurn::new()?.await })
+    }
+
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         let state = self.state.try_borrow().ok()?;
         for future in state.futures.values() {

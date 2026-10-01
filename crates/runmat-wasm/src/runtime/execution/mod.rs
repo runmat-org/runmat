@@ -4,6 +4,7 @@ mod model;
 mod resources;
 mod service;
 mod state;
+mod task_turn;
 
 pub(crate) use admission::execute_local_program;
 pub(crate) use host::execution_host_from_options;

@@ -159,6 +159,12 @@ impl RuntimeContext {
         self.cancellation.borrow().clone()
     }
 
+    /// Create work accounting for this invocation generation. The adapter
+    /// owns the quantum and the actual scheduling primitive.
+    pub fn cpu_cooperation(&self) -> crate::execution::CpuCooperationBudget {
+        crate::execution::CpuCooperationBudget::new(self.execution.clone(), self.cancellation())
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.cancellation.borrow().is_cancelled()
     }
