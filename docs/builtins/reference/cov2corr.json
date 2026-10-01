@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f32", "f64"],
     "broadcasting": "none",
-    "notes": "RunMat alias for `corrcov`; resident real gpuArray covariance matrices route through the provider `covariance_to_correlation` hook and return resident correlation and sigma gpuArray outputs."
+    "notes": "Resident real gpuArray covariance matrices are a RunMat extension. An available provider `covariance_to_correlation` hook returns resident standard-deviation and correlation outputs; unsupported providers use the host reference path."
   },
   "fusion": {
     "elementwise": false,
@@ -27,26 +27,27 @@
     "unit": "builtins::stats::summary::covariance_conversion::tests",
     "integration": "crates/runmat-vm/tests/stats_ml.rs"
   },
-  "description": "`cov2corr(C)` is a RunMat alias that applies the same covariance-to-correlation conversion as `corrcov(C)`. `[R,sigma] = cov2corr(C)` also returns `sqrt(diag(C))` as an n-by-1 standard-deviation vector.",
+  "description": "`ExpSigma = cov2corr(ExpCovariance)` returns a 1-by-n row of standard deviations. `[ExpSigma,ExpCorrC] = cov2corr(ExpCovariance)` also returns the n-by-n correlation matrix. The output order and shape follow the Finance Toolbox API and differ from `corrcov`.",
   "behaviors": [
-    "`C` must be a real numeric square matrix stored as double or single precision. Scalar numeric values are accepted as 1-by-1 covariance matrices.",
+    "The documented Finance Toolbox input is a real double square covariance matrix. RunMat mode also accepts real single, typed-integer, and logical inputs; scalar numeric inputs are treated as 1-by-1 matrices.",
     "The diagonal entries of `C` are interpreted as variances and must be nonnegative.",
     "RunMat validates symmetry within floating-point tolerance before converting.",
     "RunMat rejects covariance entries whose magnitude exceeds the variance-implied pairwise bound `sqrt(C(i,i)*C(j,j))`.",
     "Entries involving a zero-variance variable produce `NaN` because the correlation denominator is zero.",
-    "Real gpuArray inputs stay resident when the active provider implements covariance-to-correlation conversion."
+    "The first output is a row vector of standard deviations. The second is the correlation matrix; this is not an alias for `corrcov`.",
+    "Resident real gpuArray input is a RunMat extension and stays resident when the active provider implements covariance-to-correlation conversion."
   ],
   "examples": [
     {
       "description": "Convert covariance to correlation",
-      "input": "C = [16 4; 4 25];\nR = cov2corr(C)",
-      "output": "R = [1 0.2; 0.2 1]"
+      "input": "C = [16 4; 4 25];\n[ExpSigma,ExpCorrC] = cov2corr(C)",
+      "output": "ExpSigma = [4 5]\nExpCorrC = [1 0.2; 0.2 1]"
     }
   ],
   "faqs": [
     {
       "question": "Is `cov2corr` different from `corrcov`?",
-      "answer": "No. In RunMat, `cov2corr` is an alias for the same covariance-to-correlation conversion as `corrcov`. It is documented as a RunMat alias rather than an official MathWorks API."
+      "answer": "Yes. `cov2corr` returns standard deviations first as a row and the correlation matrix second. `corrcov` returns correlation first and standard deviations second as a column."
     }
   ],
   "links": [

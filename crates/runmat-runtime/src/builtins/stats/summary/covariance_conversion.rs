@@ -4,13 +4,9 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderCovarianceToCorrelationResult,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    CORRCOV_INTEGER_DATA_EXTENSION, CORRCOV_LOGICAL_DATA_EXTENSION, COV2CORR_GPU_INPUT_EXTENSION,
+    COV2CORR_INTEGER_DATA_EXTENSION, COV2CORR_LOGICAL_DATA_EXTENSION,
+    COV2CORR_SINGLE_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
@@ -21,231 +17,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const OUTPUT_R: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "R",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Correlation matrix corresponding to the covariance matrix.",
-};
-
-const OUTPUT_SIGMA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sigma",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Column vector of standard deviations computed from diag(C).",
-};
-
-const OUTPUT_EXP_SIGMA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "ExpSigma",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Row vector of standard deviations computed from diag(ExpCovariance).",
-};
-
-const OUTPUT_EXP_CORR: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "ExpCorrC",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Correlation matrix corresponding to ExpCovariance.",
-};
-
-const OUTPUTS_R: [BuiltinParamDescriptor; 1] = [OUTPUT_R];
-const OUTPUTS_R_SIGMA: [BuiltinParamDescriptor; 2] = [OUTPUT_R, OUTPUT_SIGMA];
-const OUTPUTS_EXP_SIGMA_CORR: [BuiltinParamDescriptor; 2] = [OUTPUT_EXP_SIGMA, OUTPUT_EXP_CORR];
-
-const INPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Square covariance matrix.",
-}];
-
-const CORRCOV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "R = corrcov(C)",
-        inputs: &INPUT_C,
-        outputs: &OUTPUTS_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, sigma] = corrcov(C)",
-        inputs: &INPUT_C,
-        outputs: &OUTPUTS_R_SIGMA,
-    },
-];
-
-const INPUT_EXP_COVARIANCE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ExpCovariance",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Square covariance matrix.",
-}];
-
-const COV2CORR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[ExpSigma, ExpCorrC] = cov2corr(ExpCovariance)",
-    inputs: &INPUT_EXP_COVARIANCE,
-    outputs: &OUTPUTS_EXP_SIGMA_CORR,
-}];
-
-const CORRCOV_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "corrcov-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "corrcov with typed-integer covariance data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CorrcovIntegerDataExtension"),
-};
-
-const CORRCOV_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "corrcov-logical-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "corrcov with logical covariance data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CorrcovLogicalDataExtension"),
-};
-
-const CORRCOV_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    CORRCOV_INTEGER_DATA_EXTENSION,
-    CORRCOV_LOGICAL_DATA_EXTENSION,
-];
-
-const COV2CORR_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cov2corr-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cov2corr with typed-integer covariance data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Cov2corrIntegerDataExtension"),
-};
-
-const COV2CORR_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cov2corr-logical-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cov2corr with logical covariance data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Cov2corrLogicalDataExtension"),
-};
-
-const COV2CORR_SINGLE_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cov2corr-single-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cov2corr with single covariance data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Cov2corrSingleDataExtension"),
-};
-
-const COV2CORR_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cov2corr-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cov2corr with a resident GPU covariance matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Cov2corrGpuInputExtension"),
-};
-
-const COV2CORR_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    COV2CORR_INTEGER_DATA_EXTENSION,
-    COV2CORR_LOGICAL_DATA_EXTENSION,
-    COV2CORR_SINGLE_DATA_EXTENSION,
-    COV2CORR_GPU_INPUT_EXTENSION,
-];
-
-const CORRCOV_INTEGER_C_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "C",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "The documented covariance-matrix domain is floating; RunMat mode additionally accepts all eight real integer classes.",
-}];
-
-const COV2CORR_INTEGER_C_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ExpCovariance",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented Finance Toolbox covariance-matrix domain is double; RunMat mode additionally accepts all eight real integer classes.",
-    }];
-
-const CORRCOV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[R, sigma] = corrcov(integer_C)",
-        inputs: &CORRCOV_INTEGER_C_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat validates exact integer symmetry before converting covariance values into double square-root and normalization arithmetic.",
-    }];
-
-const COV2CORR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[ExpSigma, ExpCorrC] = cov2corr(integer_ExpCovariance)",
-        inputs: &COV2CORR_INTEGER_C_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat validates exact integer symmetry before returning double standard deviations and correlation coefficients in the documented Finance Toolbox order and shapes.",
-    }];
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COVARIANCE_CONVERSION.INTERNAL",
-    identifier: None,
-    when: "Internal tensor allocation fails.",
-    message: "covariance conversion: internal error",
-};
-
-macro_rules! conversion_descriptor {
-    ($name:literal, $signatures:expr, $invalid_when:literal) => {
-        const ERRORS: [BuiltinErrorDescriptor; 2] = [
-            BuiltinErrorDescriptor {
-                code: concat!("RM.", $name, ".INVALID_ARGUMENT"),
-                identifier: Some(concat!("RunMat:", $name, ":InvalidArgument")),
-                when: $invalid_when,
-                message: "covariance conversion: invalid argument",
-            },
-            BuiltinErrorDescriptor {
-                code: concat!("RM.", $name, ".INTERNAL"),
-                identifier: Some(concat!("RunMat:", $name, ":Internal")),
-                when: ERROR_INTERNAL.when,
-                message: ERROR_INTERNAL.message,
-            },
-        ];
-
-        pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-fn corrcov_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
-        Some(Type::Unknown) | None => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
-fn cov2corr_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Tensor { shape: Some(shape) }) | Some(Type::Logical { shape: Some(shape) }) => {
-            let width = shape.first().copied().flatten();
-            Type::Tensor {
-                shape: Some(vec![Some(1), width]),
-            }
-        }
-        Some(Type::Tensor { shape: None }) | Some(Type::Logical { shape: None }) => Type::tensor(),
-        Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
-        Some(Type::Unknown) | None => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
 
 #[derive(Clone, Copy)]
 enum ConversionKind {
@@ -666,12 +437,6 @@ async fn covariance_conversion_builtin(
 pub mod corrcov {
     use super::*;
 
-    conversion_descriptor!(
-        "corrcov",
-        CORRCOV_SIGNATURES,
-        "Input is nonnumeric, complex, outside the documented single/double domain or declared RunMat extensions, non-square, non-finite, asymmetric, not positive semidefinite, or too many arguments/outputs are supplied."
-    );
-
     #[runmat_macros::register_gpu_spec(
         builtin_path = "crate::builtins::stats::summary::covariance_conversion::corrcov"
     )]
@@ -705,14 +470,7 @@ pub mod corrcov {
 
     #[runtime_builtin(
         name = "corrcov",
-        category = "stats/summary",
-        summary = "Convert a covariance matrix to a correlation matrix.",
-        keywords = "corrcov,covariance,correlation,standard deviation,statistics",
-        accel = "sink",
-        type_resolver(super::corrcov_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(CORRCOV_EXTENSIONS),
-        integer_capabilities(CORRCOV_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::summary::covariance_conversion::corrcov"
     )]
     pub(crate) async fn corrcov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -722,12 +480,6 @@ pub mod corrcov {
 
 pub mod cov2corr {
     use super::*;
-
-    conversion_descriptor!(
-        "cov2corr",
-        COV2CORR_SIGNATURES,
-        "Input is nonnumeric, complex, outside the documented double domain or declared RunMat extensions, non-square, non-finite, asymmetric, not positive semidefinite, or too many arguments/outputs are supplied."
-    );
 
     #[runmat_macros::register_gpu_spec(
         builtin_path = "crate::builtins::stats::summary::covariance_conversion::cov2corr"
@@ -762,14 +514,7 @@ pub mod cov2corr {
 
     #[runtime_builtin(
         name = "cov2corr",
-        category = "stats/summary",
-        summary = "Convert a covariance matrix to a correlation matrix.",
-        keywords = "cov2corr,covariance,correlation,standard deviation,statistics",
-        accel = "sink",
-        type_resolver(super::cov2corr_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(COV2CORR_EXTENSIONS),
-        integer_capabilities(COV2CORR_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::summary::covariance_conversion::cov2corr"
     )]
     pub(crate) async fn cov2corr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
