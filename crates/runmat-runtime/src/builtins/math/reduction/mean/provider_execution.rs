@@ -1,5 +1,6 @@
 //! Mean provider strategies retain typed failures and own every intermediate.
 use super::*;
+use runmat_accelerate_api::GpuTensorStorage;
 
 #[path = "provider_execution/admission.rs"]
 mod admission;
@@ -39,6 +40,14 @@ pub(super) async fn execute(
     output_class: &OutputTemplate,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let dims = resolve_native_dims(input.shape(), axes)?;
+    // NaN preparation and count masks operate on real scalar lanes. A complex
+    // owner needs a complete complex omission route even for a singleton:
+    // omitting a NaN pair changes both components of that scalar result.
+    if nan_mode == ReductionNaN::Omit
+        && runmat_accelerate_api::handle_storage(input) == GpuTensorStorage::ComplexInterleaved
+    {
+        return Ok(None);
+    }
     if dims.is_empty() {
         return match adapt_output_class(provider, input, input.clone(), output_class).await {
             Ok(output) => Ok(Some(output)),
@@ -200,6 +209,12 @@ pub(super) async fn reduce_mean_vecdim_nd_gpu(
     let rank = handle.shape().len();
     if rank == 0 || dims_1based.is_empty() {
         return Ok(handle.clone());
+    }
+    // The generic permutation/reshape shortcut is a real-lane strategy.
+    // Complex owners may still provide direct N-D, global, or dimensional
+    // reduction hooks; do not stage an unqualified pairwise shortcut first.
+    if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved {
+        return Err(MeanProviderFailure::Unsupported);
     }
     // Convert to 0-based and filter in-bounds
     let mut reduce_dims: Vec<usize> = dims_1based

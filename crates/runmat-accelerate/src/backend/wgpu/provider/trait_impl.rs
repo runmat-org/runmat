@@ -473,8 +473,16 @@ impl AccelProvider for WgpuProvider {
         dims_zero_based: &'a [usize],
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if self.get_entry_raw(a)?.integer_type().is_some() {
+            let entry = self.get_entry_raw(a)?;
+            if entry.integer_type().is_some() {
                 self.integer_reduce_mean_dims_exec(dims_zero_based, "mean", a)
+            } else if entry.storage == GpuTensorStorage::ComplexInterleaved
+                && !dims_zero_based.is_empty()
+                && dims_zero_based.iter().all(|&dim| dim < entry.shape.len())
+            {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "complex resident mean requires a complex reduction kernel",
+                ))
             } else {
                 self.reduce_nd_mean_exec(a, dims_zero_based).await
             }
@@ -1900,8 +1908,16 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if self.get_entry_raw(a)?.integer_type().is_some() {
+            let entry = self.get_entry_raw(a)?;
+            if entry.integer_type().is_some() {
                 self.integer_reduce_mean_dim_exec(dim, "mean", a)
+            } else if entry.storage == GpuTensorStorage::ComplexInterleaved
+                && entry.shape.len() == 2
+                && dim <= 1
+            {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "complex resident mean requires a complex reduction kernel",
+                ))
             } else {
                 self.reduce_dim_sum_mean_exec(
                     a,
@@ -2017,8 +2033,13 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if self.get_entry_raw(a)?.integer_type().is_some() {
+            let entry = self.get_entry_raw(a)?;
+            if entry.integer_type().is_some() {
                 self.integer_reduce_mean_global_exec("mean", a)
+            } else if entry.storage == GpuTensorStorage::ComplexInterleaved {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "complex resident mean requires a complex reduction kernel",
+                ))
             } else {
                 self.reduce_mean_global_exec(a)
             }

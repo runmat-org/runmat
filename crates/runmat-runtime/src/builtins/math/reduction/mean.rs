@@ -2886,6 +2886,61 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn mean_complex_gpu_all_preserves_double_value_and_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(
+                vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                vec![2, 2],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let result =
+                mean_builtin(Value::GpuTensor(input.clone()), vec![Value::from("all")]).unwrap();
+            let Value::GpuTensor(result) = result else {
+                panic!("complex all reduction must retain residency");
+            };
+            assert_eq!(result.device_id(), input.device_id());
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+            match gathered {
+                Value::ComplexTensor(gathered) => {
+                    assert_eq!(gathered.shape, vec![1, 1]);
+                    assert_eq!(gathered.materialize_f64(), vec![(4.0, 5.0)]);
+                }
+                Value::Complex(real, imaginary) => assert_eq!((real, imaginary), (4.0, 5.0)),
+                other => panic!("complex all reduction changed class: {other:?}"),
+            }
+            input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_singleton_omitnan_does_not_publish_unchecked_identity() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(f64::NAN, 4.0)], vec![1, 1]).unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let result = mean_builtin(
+                Value::GpuTensor(input.clone()),
+                vec![Value::from("omitnan")],
+            )
+            .unwrap();
+            let Value::GpuTensor(result) = result else {
+                panic!("complex singleton omitnan result must remain resident");
+            };
+            assert_eq!(result.device_id(), input.device_id());
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+            let (real, imaginary) = match gathered {
+                Value::Complex(real, imaginary) => (real, imaginary),
+                Value::ComplexTensor(tensor) => tensor.materialize_f64()[0],
+                other => panic!("complex singleton result changed class: {other:?}"),
+            };
+            assert!(real.is_nan() && imaginary.is_nan());
+            input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
     fn mean_weights_accept_resident_gpu_weights() {
         test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();

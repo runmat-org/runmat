@@ -59,7 +59,7 @@ pub(super) async fn adapt_output_class(
     }
     .map_err(mean_provider_error)?;
     let contract = UnaryGpuOutputContract {
-        storage: GpuTensorStorage::Real,
+        storage: runmat_accelerate_api::handle_storage(input),
         precision: Some(target),
         integer: None,
         logical: false,

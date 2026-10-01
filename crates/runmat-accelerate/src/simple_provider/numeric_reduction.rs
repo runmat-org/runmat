@@ -8,6 +8,22 @@ use std::ops::AddAssign;
 mod tests;
 
 impl InProcessProvider {
+    pub(super) fn admit_mean_storage(&self, input: &GpuTensorHandle) -> Result<()> {
+        if input.physical().storage() != GpuTensorStorage::ComplexInterleaved {
+            return Ok(());
+        }
+        let guard = numeric_registry()
+            .lock_for(self.device_id)
+            .map_err(|_| anyhow!("mean: allocation owner is poisoned"))?;
+        ensure!(
+            guard.get(input).is_some(),
+            "mean: input is not a live owned allocation"
+        );
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "mean: complex resident reduction is not implemented by this provider",
+        ))
+    }
+
     pub(super) fn ordinary_numeric_sum(
         &self,
         input: &GpuTensorHandle,
@@ -96,10 +112,6 @@ impl InProcessProvider {
             "reduce_sum_dim: only 2D supported"
         );
         ensure!(dim <= 1, "reduce_sum_dim: only dims 0 or 1 supported");
-        ensure!(
-            input.physical().storage() == GpuTensorStorage::Real,
-            "reduce_sum_dim: real storage is required"
-        );
         let rows = input.shape()[0];
         let cols = input.shape()[1];
         let layout = input.view().layout();
@@ -109,6 +121,11 @@ impl InProcessProvider {
                 "reduce_sum_dim: transpose view differs from source geometry"
             );
         }
+        self.admit_mean_storage(input)?;
+        ensure!(
+            input.physical().storage() == GpuTensorStorage::Real,
+            "reduce_sum_dim: real storage is required"
+        );
         let count = rows
             .checked_mul(cols)
             .ok_or_else(|| anyhow!("reduce_sum_dim: extent overflow"))?;

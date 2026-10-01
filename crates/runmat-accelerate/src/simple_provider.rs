@@ -8083,6 +8083,7 @@ impl AccelProvider for InProcessProvider {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
                 return self.reduce_integer_mean_native(a).await;
             }
+            self.admit_mean_storage(a)?;
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
                 .get(a)
