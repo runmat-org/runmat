@@ -78,7 +78,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     if let Some(name) = request.literals.literal_string_at(2) {
-        if LassoglmDistribution::from_public_name(name).is_none() {
+        if LassoglmDistribution::from_public_name(&name).is_none() {
             diagnostics.push(argument_error(
                 "RM-CATALOG-LASSOGLM-DISTR",
                 "distribution must be normal, binomial, or poisson",
@@ -90,7 +90,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut unknown_option_name = false;
     for index in (3..request.arguments.len().saturating_sub(1)).step_by(2) {
         if let Some(name) = request.literals.literal_string_at(index) {
-            match LassoglmOption::from_public_name(name) {
+            match LassoglmOption::from_public_name(&name) {
                 Some(LassoglmOption::Lambda) => {
                     // Runtime sorts and de-duplicates multi-element Lambda vectors.
                     lambdas = request

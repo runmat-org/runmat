@@ -6,7 +6,10 @@ use super::common::{
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, ShapeFact, ValueKindFact};
 
-pub(super) fn decode(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(in super::super) fn decode(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() < 3 {
         diagnostics.push(error(

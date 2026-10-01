@@ -42,14 +42,14 @@ pub const LASSO_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
     LASSO_RESIDENT_INPUT_EXTENSION,
 ];
 
-pub const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "X or y",
     classes: &crate::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
     notes: "Native integer data is gated before gather and must be exactly representable at the binary64 solver boundary.",
 }];
-pub const INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+const INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "Alpha, Lambda, LambdaRatio, Weights, or RelTol",
         classes: &crate::ALL_INTEGER_CLASSES,
@@ -57,7 +57,7 @@ pub const INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Native integer floating parameters are gated and checked for exact binary64 representation.",
     }];
-pub const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "CV, DFmax, MaxIter, MCReps, or NumLambda",
         classes: &crate::ALL_INTEGER_CLASSES,
@@ -65,7 +65,7 @@ pub const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "Native integer structural controls are gated and decoded exactly without a floating round trip.",
     }];
-pub const INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
+const INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "Intercept, Standardize, or UseCovariance",
         classes: &crate::ALL_INTEGER_CLASSES,

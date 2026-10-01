@@ -5,7 +5,10 @@ use runmat_types::{
     CallInference, CallRequest, DimensionFact, NumericClass, ShapeFact, ValueKindFact,
 };
 
-pub(super) fn dummyvar(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(in super::super) fn dummyvar(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() != 1 {
         diagnostics.push(error("ARITY", "dummyvar requires one grouping argument"));

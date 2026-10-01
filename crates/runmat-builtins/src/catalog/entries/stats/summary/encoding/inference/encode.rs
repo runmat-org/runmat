@@ -4,9 +4,12 @@ use super::common::{
     OutputSelection,
 };
 use crate::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest, DimensionFact, ShapeFact, ValueKindFact};
+use runmat_types::{CallInference, CallRequest, ShapeFact, ValueKindFact};
 
-pub(super) fn encode(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(in super::super) fn encode(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() < 2 {
         diagnostics.push(error(

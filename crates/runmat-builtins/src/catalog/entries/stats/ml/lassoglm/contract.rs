@@ -44,9 +44,9 @@ pub const LASSOGLM_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
     LASSOGLM_RESIDENT_INPUT_EXTENSION,
 ];
 
-pub const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X or Y", classes: &crate::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer predictor or response data is gated before gather and checked at the binary64 solver boundary." }];
-pub const INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "Alpha, BinomialSize, Lambda, LambdaRatio, Offset, RelTol/TolX/TolFun, Weights, or Options.TolX/TolFun", classes: &crate::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer floating parameters are gated and require exact binary64 representation." }];
-pub const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X or Y", classes: &crate::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer predictor or response data is gated before gather and checked at the binary64 solver boundary." }];
+const INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "Alpha, BinomialSize, Lambda, LambdaRatio, Offset, RelTol/TolX/TolFun, Weights, or Options.TolX/TolFun", classes: &crate::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer floating parameters are gated and require exact binary64 representation." }];
+const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "CV, MaxIter, MCReps, NumLambda, or Options.MaxIter",
         classes: &crate::ALL_INTEGER_CLASSES,
@@ -54,7 +54,7 @@ pub const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "Native integer structural controls are gated and decoded exactly.",
     }];
-pub const INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
+const INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "Constant/Intercept, Standardize, or Options.UseParallel",
         classes: &crate::ALL_INTEGER_CLASSES,

@@ -81,7 +81,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut width_depends_on_runtime_option = false;
     for index in (2..request.arguments.len().saturating_sub(1)).step_by(2) {
         if let Some(name) = request.literals.literal_string_at(index) {
-            match LassoOption::from_public_name(name) {
+            match LassoOption::from_public_name(&name) {
                 Some(LassoOption::Lambda) => {
                     // Multi-element Lambda vectors are sorted and de-duplicated at runtime.
                     lambdas = request
