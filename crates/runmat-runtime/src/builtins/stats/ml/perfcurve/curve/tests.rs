@@ -56,6 +56,17 @@ fn expected_cost_keeps_finite_extreme_weighted_means() {
     let result = core::criterion_value(balanced, Criterion::ExpectedCost, &large);
     assert!((result / 1.0e308 - 1.0).abs() < 1.0e-15);
 
+    let unequal = Counts {
+        tp: 0.0,
+        fp: 1.0,
+        tn: 3.0,
+        fn_: 0.0,
+    };
+    let near_maximum = [[f64::MAX, f64::MAX / 2.0], [0.0, 0.0]];
+    let expected = f64::MAX * (7.0 / 8.0);
+    let result = core::criterion_value(unequal, Criterion::ExpectedCost, &near_maximum);
+    assert!((result / expected - 1.0).abs() < 1.0e-15);
+
     // A tiny count paired with the largest cost must not erase a smaller,
     // dominant cost in another occupied cell.
     let mixed = Counts {

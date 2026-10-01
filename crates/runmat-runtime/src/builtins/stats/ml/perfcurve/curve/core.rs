@@ -139,30 +139,39 @@ pub(super) fn criterion_value(counts: Counts, criterion: Criterion, cost: &[[f64
 
 fn expected_cost(counts: Counts, cost: &[[f64; 2]; 2]) -> f64 {
     let total = counts.total();
-    if total.is_nan() || total <= 0.0 {
+    if !total.is_finite() || total <= 0.0 {
         return f64::NAN;
     }
-    let components = [
+    let mut components = [
         (cost[0][0], counts.tn),
         (cost[0][1], counts.fp),
         (cost[1][0], counts.fn_),
         (cost[1][1], counts.tp),
     ];
-    let maximum = cost.iter().flatten().copied().fold(0.0_f64, f64::max);
+    if components.iter().any(|(_, count)| *count < 0.0) {
+        return f64::NAN;
+    }
+    // Start with the largest mass. The online mean stays between the costs
+    // already visited, and a later tiny mass can still contribute through
+    // the scaled product even when adding it cannot change the running mass.
+    components.sort_by(|left, right| right.1.total_cmp(&left.1));
+    let mut mass = 0.0_f64;
     let mut mean = 0.0_f64;
     for (value, count) in components {
-        // Divide each nonnegative class mass by the total as part of a
-        // scaled product. Multiplying value * count first can overflow even
-        // though their weighted mean is finite.
-        mean += numerics::product_ratio(value, count, total, 1.0);
+        if count == 0.0 {
+            continue;
+        }
+        let next_mass = mass + count;
+        let difference = value - mean;
+        let adjustment = numerics::product_ratio(difference.abs(), count, next_mass, 1.0);
+        mean = if difference.is_sign_negative() {
+            mean - adjustment
+        } else {
+            mean + adjustment
+        };
+        mass = next_mass;
     }
-    // Rounded class fractions can add to slightly more than one. A weighted
-    // mean of nonnegative costs cannot exceed the largest input cost.
-    if mean.is_nan() {
-        f64::NAN
-    } else {
-        mean.min(maximum)
-    }
+    mean
 }
 
 fn ratio(numerator: f64, denominator: f64) -> f64 {

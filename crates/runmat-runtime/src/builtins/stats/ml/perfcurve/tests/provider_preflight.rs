@@ -198,6 +198,49 @@ fn unsupported_output_count_precedes_download() {
 }
 
 #[test]
+fn discarded_call_admits_host_structure_without_download_or_curve_execution() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _outputs = output_count::push_output_count(Some(0));
+    let scores = provider.resident_scores();
+
+    let error = block_on(perfcurve_builtin(
+        labels(),
+        Value::GpuTensor(scores.clone()),
+        Value::Num(1.0),
+        vec![
+            Value::from("Weights"),
+            tensor(&[1.0, -1.0, 1.0, 1.0], &[4, 1]),
+        ],
+    ))
+    .expect_err("known-invalid host control is rejected even without output");
+    assert!(error.message().contains("Weights"));
+    assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
+
+    let empty = block_on(perfcurve_builtin(
+        labels(),
+        Value::GpuTensor(scores.clone()),
+        Value::Num(1.0),
+        vec![],
+    ))
+    .expect("discarded call does not materialize the resident score vector");
+    assert!(matches!(empty, Value::OutputList(outputs) if outputs.is_empty()));
+    assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
+
+    let empty = block_on(perfcurve_builtin(
+        labels(),
+        tensor(&[f64::INFINITY, 0.8, 0.4, 0.1], &[4, 1]),
+        Value::Num(1.0),
+        vec![],
+    ))
+    .expect("discarded call does not run the data-dependent curve kernel");
+    assert!(matches!(empty, Value::OutputList(outputs) if outputs.is_empty()));
+    assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
+    block_on(provider.inner.download(&scores)).expect("borrowed score allocation remains live");
+}
+
+#[test]
 fn failed_gather_preserves_provider_cause_and_borrowed_input() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = RejectDownloadProvider::new();
