@@ -1,7 +1,10 @@
 //! Actual generator placement/layout evidence on already authenticated canonical meshes.
 //! Not authored mesh selection, whole-study resource admission or physics/restart qualification.
 use super::*;
-use runmat_analysis_core::{BodyForceDensity, FieldLocation, Temperature};
+use runmat_analysis_core::{
+    AuthoredSignalFieldLocation, AuthoredSignalTopologySelector, BodyForceDensity, FieldLocation,
+    Temperature,
+};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 pub(super) async fn run() {
@@ -32,6 +35,19 @@ pub(super) async fn run() {
                     PhysicalSignal::BodyForceDensity,
                 )
             };
+            let deferred = authored.with_shape(SignalShape::DeferredTopologyField {
+                selector: AuthoredSignalTopologySelector::StudySolverMesh {
+                    location: AuthoredSignalFieldLocation::Node,
+                },
+                component_count: width,
+            });
+            assert_eq!(deferred.shape().realized_component_count(Some(nodes)), None);
+            let transition =
+                runmat_analysis_execution::SignalTopologyResolution::derive(&deferred, &mesh)
+                    .unwrap();
+            transition.validate_for(&deferred, &mesh).unwrap();
+            assert_eq!(transition.resolved(), &authored);
+            let authored = transition.resolved().clone();
             runmat_analysis_core::validate_physical_signals(std::slice::from_ref(&authored))
                 .unwrap();
             runmat_analysis_core::validate_physical_signals(std::slice::from_ref(&explicit))

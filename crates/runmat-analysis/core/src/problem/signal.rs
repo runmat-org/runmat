@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 mod shape;
+pub use shape::{AuthoredSignalFieldLocation, AuthoredSignalTopologySelector, SignalShape};
 mod value;
 pub use value::SignalValue;
 
@@ -304,19 +305,6 @@ pub struct Signal<Q> {
     pub precision: SignalPrecision,
     pub evidence: SignalApproximationEvidence,
     pub provenance: SignalProvenance,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignalShape {
-    Scalar,
-    Vector3,
-    Tensor(Vec<usize>),
-    TopologyField {
-        topology_id: String,
-        location: crate::FieldLocation,
-        component_count: usize,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 
+mod resolution;
+pub use resolution::SignalTopologyResolution;
+
 /// Canonical mesh-domain rows, not a physics recovery/quadrature convention.
 /// Transported bindings must pass `validate_for` against the authoritative mesh.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -51,6 +54,11 @@ impl SignalTopologyBinding {
         signal: &PhysicalSignal,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisBridgeResult<Option<Self>> {
+        if matches!(signal.shape(), SignalShape::DeferredTopologyField { .. }) {
+            return Err(invalid(
+                "deferred topology selector requires an explicit mesh resolution transition",
+            ));
+        }
         let SignalShape::TopologyField {
             topology_id,
             location,

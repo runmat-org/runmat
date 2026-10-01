@@ -13,6 +13,9 @@ use super::{
 };
 use runmat_geometry_core::GeometryRegionRole;
 
+#[cfg(test)]
+mod deferred_topology_tests;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthoredExcitation {
@@ -206,6 +209,11 @@ fn validate_excitation(
     if quantity != excitation.kind.quantity() {
         return Err("excitation signal has the wrong physical quantity".into());
     }
+    if shape.topology_component_count().is_some()
+        && excitation.distribution != ExcitationDistribution::TopologyField
+    {
+        return Err("topology-field signals require topology-field distribution".into());
+    }
     if !valid_shape_and_direction(excitation.kind, &shape, excitation.direction.is_some()) {
         return Err("excitation direction is incompatible with its kind and signal shape".into());
     }
@@ -277,6 +285,26 @@ fn valid_shape_and_direction(
     shape: &SignalShape,
     has_direction: bool,
 ) -> bool {
+    if let Some(width) = shape.topology_component_count() {
+        return !has_direction
+            && match kind {
+                AuthoredExcitationKind::Traction
+                | AuthoredExcitationKind::BodyForce
+                | AuthoredExcitationKind::CurrentDensity
+                | AuthoredExcitationKind::MagneticVectorPotential
+                | AuthoredExcitationKind::InletVelocity
+                | AuthoredExcitationKind::WallMotion => width == 3,
+                AuthoredExcitationKind::Pressure
+                | AuthoredExcitationKind::HeatGeneration
+                | AuthoredExcitationKind::HeatFlux
+                | AuthoredExcitationKind::TemperatureField
+                | AuthoredExcitationKind::AmbientTemperature
+                | AuthoredExcitationKind::TerminalVoltage
+                | AuthoredExcitationKind::AcousticPressure
+                | AuthoredExcitationKind::NormalVelocity => width == 1,
+                _ => false,
+            };
+    }
     let scalar = shape == &SignalShape::Scalar;
     let vector = shape == &SignalShape::Vector3;
     match kind {

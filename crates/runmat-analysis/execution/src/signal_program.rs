@@ -272,6 +272,11 @@ fn validate_topology_binding(
     binding: Option<&crate::SignalTopologyBinding>,
 ) -> AnalysisBridgeResult<()> {
     match (authored.shape(), binding) {
+        (runmat_analysis_core::SignalShape::DeferredTopologyField { .. }, _) => {
+            Err(AnalysisBridgeError::Invalid(
+                "deferred topology requires resolution before materialization preparation".into(),
+            ))
+        }
         (runmat_analysis_core::SignalShape::TopologyField { .. }, Some(binding)) => {
             binding.validate_shape(authored)
         }

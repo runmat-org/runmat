@@ -102,7 +102,8 @@ fn validate_excitations(
                     signal.quantity()
                 ));
             }
-            if !matches!(signal.shape(), SignalShape::Scalar)
+            if !(matches!(signal.shape(), SignalShape::Scalar)
+                || signal.shape().topology_component_count() == Some(1) && signal.frame().is_none())
                 && signal.frame() != Some(&excitation.frame)
             {
                 return Err(
@@ -211,7 +212,7 @@ fn validate_action_policy(
         return Err("distribution is incompatible with the excitation action".to_string());
     }
     if matches!(action, ExcitationAction::BodyForce(_))
-        && (matches!(signal.shape(), SignalShape::TopologyField { .. })
+        && (signal.shape().topology_component_count().is_some()
             != (excitation.distribution == ExcitationDistribution::TopologyField))
     {
         return Err("spatial body-density signals require topology-field distribution; uniform density requires intensity-per-volume".into());

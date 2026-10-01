@@ -14,6 +14,7 @@ use runmat_types::{OperationParameterArity, OperationTypePattern};
 use std::collections::BTreeMap;
 
 mod sampled;
+mod topology;
 
 pub(super) struct LowerSignal<'a> {
     pub declaration: &'a CheckedFeaDeclaration,
@@ -114,15 +115,7 @@ pub(super) fn lower(
     let extrapolation = super::policy::extrapolation(declaration, statements, diagnostics)?;
     validate_generator_members(declaration, statements, diagnostics);
 
-    let vector = body.iter().any(|statement| {
-        matches!(&statement.kind, CheckedFeaStatementKind::Assignment { target, .. } if target.as_slice() == ["frame"])
-    });
-    let frame = optional_frame(declaration, body, vector, diagnostics)?;
-    let shape = if vector {
-        SignalShape::Vector3
-    } else {
-        SignalShape::Scalar
-    };
+    let (shape, frame) = topology::shape(declaration, body, diagnostics)?;
     let callable = GeneratorCallable::ImportedFunction(Box::new(ImportedFunctionIdentity {
         module_path: facts.module_path.as_str().to_string(),
         symbol: facts.symbol.as_str().to_string(),

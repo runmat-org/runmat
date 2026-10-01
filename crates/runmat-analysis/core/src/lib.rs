@@ -203,14 +203,15 @@ pub use problem::response_spectrum::{
     SpectrumEvidence, SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse,
 };
 pub use problem::signal::{
-    GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
-    GeneratorInvocation, GeneratorProvenance, ImportedFunctionIdentity, NumericalDataSource,
-    PhysicalQuantityKind, PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence,
-    SignalArtifactDomain, SignalArtifactRef, SignalDomainKind, SignalExtrapolation,
-    SignalGenerator, SignalId, SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate,
-    SignalPointContinuity, SignalPrecision, SignalProvenance, SignalRepresentation,
-    SignalSampleApproach, SignalSamplingPolicy, SignalShape, SignalValue, StandardWaveform,
-    StandardWaveformKind, TabulatedSignal, TabulatedSignalDomain,
+    AuthoredSignalFieldLocation, AuthoredSignalTopologySelector, GeneratorArgument,
+    GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy, GeneratorInvocation,
+    GeneratorProvenance, ImportedFunctionIdentity, NumericalDataSource, PhysicalQuantityKind,
+    PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence, SignalArtifactDomain,
+    SignalArtifactRef, SignalDomainKind, SignalExtrapolation, SignalGenerator, SignalId,
+    SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate, SignalPointContinuity,
+    SignalPrecision, SignalProvenance, SignalRepresentation, SignalSampleApproach,
+    SignalSamplingPolicy, SignalShape, SignalValue, StandardWaveform, StandardWaveformKind,
+    TabulatedSignal, TabulatedSignalDomain,
 };
 pub use problem::structure::{
     BeamElementModel, BeamSectionModel, ConformalSolidAttachment, HomogeneousShellReferenceSurface,

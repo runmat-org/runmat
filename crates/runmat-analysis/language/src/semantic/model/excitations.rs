@@ -5,8 +5,8 @@ use crate::{
 };
 use runmat_analysis_core::{
     AuthoredExcitation, AuthoredExcitationCase, AuthoredExcitationKind, AuthoredExcitationTarget,
-    AuthoredParameterizedSignal, CoordinateFrame, ExcitationCaseActivation, ExcitationKinematics,
-    PhysicalSignal, ProjectionRequirement, SignalId,
+    AuthoredParameterizedSignal, CoordinateFrame, ExcitationCaseActivation, ExcitationDistribution,
+    ExcitationKinematics, PhysicalSignal, ProjectionRequirement, SignalId,
 };
 use runmat_parser::fea::FeaModelDefinitionKind;
 use std::collections::BTreeSet;
@@ -152,7 +152,11 @@ fn explicit_excitation(
         target,
         frame,
         direction,
-        distribution: kind.default_distribution(),
+        distribution: if signal.shape().topology_component_count().is_some() {
+            ExcitationDistribution::TopologyField
+        } else {
+            kind.default_distribution()
+        },
         kinematics,
         signal_id,
         active_step_ids: Vec::new(),

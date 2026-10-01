@@ -5,6 +5,8 @@ use crate::{
     AnalysisValidationError,
 };
 
+#[cfg(test)]
+mod deferred_topology_tests;
 mod generator;
 #[cfg(test)]
 mod topology_field_tests;
@@ -64,6 +66,12 @@ fn invalid<T>(signal_id: &str, detail: impl Into<String>) -> Result<T, AnalysisV
 }
 
 fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> {
+    if matches!(signal.shape, SignalShape::DeferredTopologyField { .. })
+        && (!matches!(signal.representation, SignalRepresentation::Generator(_))
+            || !matches!(signal.provenance, SignalProvenance::Authored))
+    {
+        return Err("deferred topology fields require an authored generator declaration".into());
+    }
     let mut expected_shape = signal
         .shape
         .component_extents()
@@ -81,13 +89,7 @@ fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> 
     }
     // A topology axis indexes entities, not physical vector components. A scalar
     // field may retain a declared spatial frame but needs no component frame.
-    let scalar_field = matches!(
-        signal.shape,
-        SignalShape::TopologyField {
-            component_count: 1,
-            ..
-        }
-    );
+    let scalar_field = signal.shape.topology_component_count() == Some(1);
     if !expected_shape.is_empty() && !scalar_field && signal.frame.is_none() {
         return Err("vector, tensor, and topology-field signals require a frame".to_string());
     }

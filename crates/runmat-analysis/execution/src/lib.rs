@@ -51,7 +51,7 @@ pub use signal_layout::CanonicalGeneratorValueLayout;
 mod signal_materialization;
 mod signal_program;
 mod signal_topology;
-pub use signal_topology::SignalTopologyBinding;
+pub use signal_topology::{SignalTopologyBinding, SignalTopologyResolution};
 mod spectral_materialization;
 mod state_publication;
 mod state_transition;

@@ -1,5 +1,59 @@
 //! Shared signal-shape cardinality and concrete topology resolution.
-use super::SignalShape;
+use serde::{Deserialize, Serialize};
+
+mod physical_signal;
+
+/// Authored entity domains whose ordering can be supplied by one canonical solver mesh.
+/// Quadrature and other physics-owned domains require separate explicit contracts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoredSignalFieldLocation {
+    Node,
+    Cell,
+    Element,
+    Face,
+    Edge,
+}
+
+impl From<AuthoredSignalFieldLocation> for crate::FieldLocation {
+    fn from(location: AuthoredSignalFieldLocation) -> Self {
+        match location {
+            AuthoredSignalFieldLocation::Node => Self::Node,
+            AuthoredSignalFieldLocation::Cell => Self::Cell,
+            AuthoredSignalFieldLocation::Element => Self::Element,
+            AuthoredSignalFieldLocation::Face => Self::Face,
+            AuthoredSignalFieldLocation::Edge => Self::Edge,
+        }
+    }
+}
+
+/// Unresolved ownership, not a topology digest or permission to infer entity ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum AuthoredSignalTopologySelector {
+    StudySolverMesh {
+        location: AuthoredSignalFieldLocation,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum SignalShape {
+    Scalar,
+    Vector3,
+    Tensor(Vec<usize>),
+    TopologyField {
+        topology_id: String,
+        location: crate::FieldLocation,
+        component_count: usize,
+    },
+    /// An authored generator declaration. It has no numerical cardinality until
+    /// an authenticated resolver creates a distinct mesh-bound `TopologyField`.
+    DeferredTopologyField {
+        selector: AuthoredSignalTopologySelector,
+        component_count: usize,
+    },
+}
 
 impl SignalShape {
     pub fn component_extents(&self) -> Option<Vec<usize>> {
@@ -14,6 +68,9 @@ impl SignalShape {
             } if !topology_id.trim().is_empty() && *component_count > 0 => {
                 Some(vec![*component_count])
             }
+            Self::DeferredTopologyField {
+                component_count, ..
+            } if *component_count > 0 => Some(vec![*component_count]),
             _ => None,
         }
     }
@@ -39,6 +96,19 @@ impl SignalShape {
             } if !topology_id.trim().is_empty() && *component_count > 0 => topology_entity_count
                 .filter(|entities| *entities > 0)
                 .and_then(|entities| entities.checked_mul(*component_count)),
+            _ => None,
+        }
+    }
+
+    /// Declared physical width of a field, independent of entity resolution.
+    pub fn topology_component_count(&self) -> Option<usize> {
+        match self {
+            Self::TopologyField {
+                component_count, ..
+            }
+            | Self::DeferredTopologyField {
+                component_count, ..
+            } => Some(*component_count),
             _ => None,
         }
     }

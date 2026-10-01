@@ -576,6 +576,11 @@ fn decode_chunk(
         SignalShape::Vector3 => &[3],
         SignalShape::Tensor(extents) => extents,
         SignalShape::TopologyField { .. } => &field_extents,
+        SignalShape::DeferredTopologyField { .. } => {
+            return Err(AnalysisBridgeError::Invalid(
+                "deferred topology cannot decode generator output".into(),
+            ));
+        }
     };
     crate::signal_layout::canonical_sample_layout(output.values, sample_count, extents)
 }
@@ -621,6 +626,11 @@ fn validate_result_shape(
     let sample_count = u64::try_from(sample_count)
         .map_err(|_| AnalysisBridgeError::Invalid("signal sample count exceeds u64".into()))?;
     let expected_tail = match shape {
+        SignalShape::DeferredTopologyField { .. } => {
+            return Err(AnalysisBridgeError::Invalid(
+                "deferred topology has no generator output shape".into(),
+            ));
+        }
         SignalShape::Scalar => Vec::new(),
         SignalShape::Vector3 => vec![3],
         SignalShape::Tensor(extents) => extents
