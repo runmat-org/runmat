@@ -124,7 +124,10 @@ fn stage_contract(
     } else {
         input_class
     });
-    if count == 1 && (raw_double || output_class == NumericClass::Double) {
+    // The published Double scalar becomes Value::Num. Single publication
+    // remains a Tensor and preserves its N-D shape, even when one element
+    // remains after a reduction.
+    if count == 1 && final_output_class == Some(NumericClass::Double) {
         output_shape = vec![1, 1];
     }
     Some(FusionReductionContract {
@@ -247,5 +250,40 @@ mod tests {
         assert!(mixed[1].identity);
         assert_eq!(mixed[1].input_class, NumericClass::Double);
         assert_eq!(mixed[1].output_class, NumericClass::Single);
+    }
+
+    #[test]
+    fn vecdim_singleton_shape_tracks_tensor_until_publication() {
+        let input = single(vec![3.0, 5.0], vec![1, 1, 2]);
+        let axes = |dims: Vec<f64>| Value::Tensor(Tensor::new(dims, vec![1, 2]).unwrap());
+        let one = stages(&input, &[Value::Num(3.0)]).unwrap();
+        assert_eq!(one[0].output_shape, vec![1, 1, 1]);
+        assert_eq!(one[0].output_class, NumericClass::Single);
+        let Value::Tensor(one_actual) =
+            futures::executor::block_on(mean_builtin(input.clone(), vec![Value::Num(3.0)]))
+                .unwrap()
+        else {
+            panic!("Single one-element mean remains a tensor");
+        };
+        assert_eq!(one_actual.shape, one[0].output_shape);
+        let pair = stages(&input, &[axes(vec![3.0, 4.0])]).unwrap();
+        assert_eq!(pair[0].output_shape, vec![1, 1, 1]);
+        assert_eq!(pair[0].output_class, NumericClass::Double);
+        assert_eq!(pair[1].input_shape, vec![1, 1, 1]);
+        assert_eq!(pair[1].output_shape, vec![1, 1, 1]);
+        assert_eq!(pair[1].output_class, NumericClass::Single);
+        let Value::Tensor(pair_actual) =
+            futures::executor::block_on(mean_builtin(input.clone(), vec![axes(vec![3.0, 4.0])]))
+                .unwrap()
+        else {
+            panic!("Single vecdim publication remains a tensor");
+        };
+        assert_eq!(pair_actual.shape, pair[1].output_shape);
+        let double = stages(
+            &input,
+            &[axes(vec![3.0, 4.0]), Value::String("double".into())],
+        )
+        .unwrap();
+        assert_eq!(double[1].output_shape, vec![1, 1]);
     }
 }
