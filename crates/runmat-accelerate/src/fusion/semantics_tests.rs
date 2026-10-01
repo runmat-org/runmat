@@ -183,6 +183,85 @@ fn source_constants_retain_signed_zero_values_and_nan_payloads() {
 }
 
 #[test]
+fn slot_constants_are_authenticated_even_when_value_ids_are_unchanged() {
+    let mut first = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::Add,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    first.constants.insert(0, Value::Num(1.0));
+    let mut second = first.clone();
+    second.constants.insert(0, Value::Num(2.0));
+    let values = [Value::Num(4.0), Value::Num(5.0)];
+    let admitted = resolve(&first, &values).unwrap();
+    assert_ne!(
+        admitted.cache_identity().unwrap(),
+        resolve(&second, &values).unwrap().cache_identity().unwrap()
+    );
+    assert!(admitted.require_source_plan(&second).is_err());
+}
+
+#[test]
+fn tensor_constant_identity_retains_physical_precision_and_shape() {
+    let source = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::Add,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    let with_payload = |tensor| {
+        let mut plan = source.clone();
+        plan.const_values.insert(7, Value::Tensor(tensor));
+        plan
+    };
+    let double = with_payload(runmat_value::Tensor::new(vec![1.0], vec![1, 1]).unwrap());
+    let single = with_payload(runmat_value::Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap());
+    let rank_three = with_payload(runmat_value::Tensor::new(vec![1.0], vec![1, 1, 1]).unwrap());
+    let values = [Value::Num(4.0), Value::Num(5.0)];
+    let admitted = resolve(&double, &values).unwrap();
+    assert_ne!(
+        admitted.cache_identity().unwrap(),
+        resolve(&single, &values).unwrap().cache_identity().unwrap()
+    );
+    assert_ne!(
+        admitted.cache_identity().unwrap(),
+        resolve(&rank_three, &values)
+            .unwrap()
+            .cache_identity()
+            .unwrap()
+    );
+    assert!(admitted.require_source_plan(&single).is_err());
+    assert!(admitted.require_source_plan(&rank_three).is_err());
+}
+
+#[test]
+fn opaque_plan_constant_fails_before_source_admission() {
+    let mut source = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::Add,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    source
+        .const_values
+        .insert(7, Value::FunctionHandle("opaque".into()));
+    let error = resolve(&source, &[Value::Num(4.0), Value::Num(5.0)]).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("fusion constant has no exact source identity"),
+        "{error}"
+    );
+}
+
+#[test]
 fn real_inputs_do_not_fabricate_power_domain_evidence() {
     let plan = plan(
         vec![FusionOp::Primitive {
