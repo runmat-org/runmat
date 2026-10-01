@@ -5,6 +5,11 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lasso.rs"),
 };
 
+const SOLVER_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Coordinate-descent solver",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lasso/solver.rs"),
+};
+
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("lasso"),
@@ -39,7 +44,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     links: &[SOURCE, BuiltinDocumentationLink { label: "corr", target: BuiltinDocumentationLinkTarget::Builtin("corr") }, BuiltinDocumentationLink { label: "normalize", target: BuiltinDocumentationLinkTarget::Builtin("normalize") }, BuiltinDocumentationLink { label: "lassoglm", target: BuiltinDocumentationLinkTarget::Builtin("lassoglm") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Lasso options, solver and FitInfo", location: "crates/runmat-runtime/src/builtins/stats/ml/lasso.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM statistical semantics", location: "crates/runmat-vm/tests/integer_json_join_and_statistical_semantics.rs" }], notes: &["Executable examples, native/browser execution, provider ownership and placement remain pending exact-source qualification."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, SOLVER_SOURCE], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Lasso options, solver and FitInfo", location: "crates/runmat-runtime/src/builtins/stats/ml/lasso/tests.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM statistical semantics", location: "crates/runmat-vm/tests/integer_json_join_and_statistical_semantics.rs" },
+    ], notes: &["Fitting uses a CPU coordinate-descent solver with double coefficients and host FitInfo values."] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),
 };

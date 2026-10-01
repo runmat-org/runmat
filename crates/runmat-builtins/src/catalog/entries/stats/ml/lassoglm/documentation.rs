@@ -5,6 +5,11 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lassoglm.rs"),
 };
 
+const SOLVER_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Regularized GLM solver",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lassoglm/solver.rs"),
+};
+
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("lassoglm"), slug: Some("lassoglm"),
@@ -39,7 +44,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     links: &[SOURCE, BuiltinDocumentationLink { label: "lasso", target: BuiltinDocumentationLinkTarget::Builtin("lasso") }, BuiltinDocumentationLink { label: "mnrfit", target: BuiltinDocumentationLinkTarget::Builtin("mnrfit") }, BuiltinDocumentationLink { label: "statset", target: BuiltinDocumentationLinkTarget::Builtin("statset") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "GLM options, solver and FitInfo", location: "crates/runmat-runtime/src/builtins/stats/ml/lassoglm.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM GLM forms", location: "crates/runmat-vm/tests/stats_ml.rs" }], notes: &["Executable examples, native/browser execution, provider ownership and placement remain pending exact-source qualification."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, SOLVER_SOURCE], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "GLM options, solver and FitInfo", location: "crates/runmat-runtime/src/builtins/stats/ml/lassoglm/tests.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM GLM forms", location: "crates/runmat-vm/tests/stats_ml.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM exact integer solver boundaries", location: "crates/runmat-vm/tests/integer_json_join_and_statistical_semantics.rs" },
+    ], notes: &["Fitting uses a CPU regularized GLM solver with double coefficients and host FitInfo values."] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),
 };
