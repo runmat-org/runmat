@@ -170,7 +170,7 @@ pub(super) fn eval_pp_scalar(
     };
     let t = xq - pp.breaks[piece];
     let rows = pp.pieces * pp.dim;
-    let row = series * pp.pieces + piece;
+    let row = piece * pp.dim + series;
     let mut acc = 0.0;
     for col in 0..pp.order {
         acc = acc * t + pp.coefs[row + col * rows];

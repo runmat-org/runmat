@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Syntax",
             paragraphs: &["`yq = ppval(pp, xq)` evaluates at scalar or array query points. A single-valued polynomial preserves the query shape; a polynomial with multiple component values places its component dimensions before the query dimensions.",
-                "`pp` contains `form`, `breaks`, `coefs`, `pieces`, `order`, and `dim` fields. The coefficient table is evaluated with Horner's method in the selected interval. Queries outside the breakpoint range use the first or last polynomial piece for extrapolation."],
+                "`pp` contains `form`, `breaks`, `coefs`, `pieces`, `order`, and `dim` fields. In a vector-valued pp, flattened coefficient rows place component values within each piece before moving to the next piece. The coefficient table is evaluated with Horner's method in the selected interval. Queries outside the breakpoint range use the first or last polynomial piece for extrapolation."],
         },
         BuiltinDocumentationSection {
             heading: "Execution",
@@ -39,6 +39,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "spline", target: BuiltinDocumentationLinkTarget::Builtin("spline") },
         BuiltinDocumentationLink { label: "pchip", target: BuiltinDocumentationLinkTarget::Builtin("pchip") },
         BuiltinDocumentationLink { label: "MATLAB ppval reference", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/ppval.html") },
+        BuiltinDocumentationLink { label: "MATLAB mkpp coefficient layout", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/mkpp.html") },
         BuiltinDocumentationLink { label: "Open an issue", target: BuiltinDocumentationLinkTarget::External("https://github.com/runmat-org/runmat/issues/new/choose") },
     ],
     media: &[],

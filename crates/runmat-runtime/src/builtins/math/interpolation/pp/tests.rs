@@ -169,6 +169,22 @@ fn ppval_multiseries_places_component_dimension_before_queries() {
 }
 
 #[test]
+fn generated_vector_valued_pp_coefficients_are_piece_major() {
+    let series = NumericSeries {
+        x: vec![0.0, 1.0, 2.0],
+        y: vec![10.0, 11.0, 12.0, 20.0, 22.0, 24.0],
+        series: 2,
+        component_shape: vec![2],
+        sample_axis: SampleAxis::Last,
+    };
+    let pp = build_pchip_pp(&series, "pchip").unwrap();
+    assert_eq!(pp.pieces, 2);
+    assert_eq!(pp.dim, 2);
+    let rows = pp.pieces * pp.dim;
+    assert_eq!(&pp.coefs[3 * rows..4 * rows], &[10.0, 20.0, 11.0, 22.0]);
+}
+
+#[test]
 fn final_sample_axis_roundtrips_nonsquare_component_and_query_dimensions() {
     let samples = (0..4)
         .flat_map(|sample| (0..6).map(move |component| (component * 100 + sample) as f64))

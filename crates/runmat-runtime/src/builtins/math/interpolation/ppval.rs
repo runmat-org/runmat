@@ -91,7 +91,7 @@ mod tests {
     use super::*;
     use crate::builtins::math::interpolation::pp::{build_spline_pp, pp_to_value, NumericSeries};
     use futures::executor::block_on;
-    use runmat_value::Tensor;
+    use runmat_value::{StructValue, Tensor};
 
     #[test]
     fn ppval_evaluates_spline_struct() {
@@ -147,6 +147,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn ppval_reads_piece_major_rows_from_external_vector_valued_pp() {
+        let mut pp = StructValue::new();
+        pp.insert("form", Value::String("pp".into()));
+        pp.insert(
+            "breaks",
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap()),
+        );
+        // Rows are component 1 then component 2 within each interval;
+        // columns are the linear and constant coefficients.
+        pp.insert(
+            "coefs",
+            Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0], vec![4, 2]).unwrap(),
+            ),
+        );
+        pp.insert("pieces", Value::Num(2.0));
+        pp.insert("order", Value::Num(2.0));
+        pp.insert("dim", Value::Num(2.0));
+        let query = Value::Tensor(Tensor::new(vec![0.5, 1.5], vec![1, 2]).unwrap());
+        let Value::Tensor(output) = block_on(ppval_builtin(Value::Struct(pp), query)).unwrap()
+        else {
+            panic!("two-component pp must return a tensor");
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.materialize_f64(), vec![10.5, 21.0, 31.5, 42.0]);
     }
 
     #[test]

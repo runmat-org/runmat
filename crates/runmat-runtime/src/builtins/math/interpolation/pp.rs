@@ -227,7 +227,7 @@ pub fn build_spline_pp_with_slopes(
         let y = &series.y[s * n..(s + 1) * n];
         let local = spline_coefs_for_series(&series.x, y, endpoint_slopes.map(|slopes| slopes[s]))?;
         for piece in 0..pieces {
-            let row = s * pieces + piece;
+            let row = piece * series.series + s;
             for col in 0..order {
                 coefs[row + col * rows] = local[piece][col];
             }
@@ -264,7 +264,7 @@ pub fn build_pchip_pp(
         let y = &series.y[s * n..(s + 1) * n];
         let local = pchip_coefs_for_series(&series.x, y);
         for piece in 0..pieces {
-            let row = s * pieces + piece;
+            let row = piece * series.series + s;
             for col in 0..order {
                 coefs[row + col * rows] = local[piece][col];
             }
