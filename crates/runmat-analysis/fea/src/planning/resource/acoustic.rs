@@ -52,6 +52,21 @@ fn mul(a: u64, b: u64) -> Result<u64, ResourcePlanningError> {
         .ok_or(ResourcePlanningError::Overflow("acoustic byte product"))
 }
 
+fn krylov_workspace_bytes(block: u64, restart: u64) -> Result<u64, ResourcePlanningError> {
+    // GMRES basis may grow geometrically. Include twice (restart+1) vectors; Hessenberg,
+    // rotations, projected RHS, residual/update temporaries and Vec headers independently.
+    let krylov_values = add(
+        mul(mul(add(restart, 1)?, block)?, 2)?,
+        add(
+            mul(add(restart, 1)?, restart)?,
+            // Twelve original block work vectors and one retained physical
+            // warm start for power continuation within the same iteration budget.
+            add(mul(block, 13)?, mul(add(restart, 1)?, 8)?)?,
+        )?,
+    )?;
+    add(mul(krylov_values, 8)?, mul(add(restart, 1)?, 96)?)
+}
+
 fn evidence_profile(
     workload: &AcousticHarmonicWorkload,
 ) -> Result<SerializedCanonicalProfile, ResourcePlanningError> {
@@ -217,16 +232,7 @@ pub fn build_acoustic_resource_plan(
     // including spare node/key/pointer slots. CSR values+columns add 16 bytes per entry;
     // finalization and discovered storage coexist. Spare capacity is included conservatively.
     let operators = add(mul(support, 160)?, mul(add(nodes, 1)?, 3 * 64)?)?;
-    // GMRES basis may grow geometrically. Include twice (restart+1) vectors; Hessenberg,
-    // rotations, projected RHS, residual/update temporaries and Vec headers independently.
-    let krylov_values = add(
-        mul(mul(add(restart, 1)?, block)?, 2)?,
-        add(
-            mul(add(restart, 1)?, restart)?,
-            add(mul(block, 12)?, mul(add(restart, 1)?, 8)?)?,
-        )?,
-    )?;
-    let krylov = add(mul(krylov_values, 8)?, mul(add(restart, 1)?, 96)?)?;
+    let krylov = krylov_workspace_bytes(block, restart)?;
     // Full vectors: lifting/real/imaginary/apply's six SpMV buffers, source, prescribed,
     // free indexes, pressure and recovery fields. Boundary ownership sets/faces and source
     // accumulators are separate from projection. These phase lifetimes are summed, not maxed.

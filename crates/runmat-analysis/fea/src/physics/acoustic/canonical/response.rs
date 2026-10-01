@@ -1,11 +1,12 @@
 use super::{assembly::AcousticAssembly, AcousticHarmonicError, AcousticHarmonicPolicy};
 use crate::{
-    algebra::spmv,
     excitation::{ProjectionScalar, ProjectionVector3, SpatialProjectionEvidence},
     solve::krylov::{restarted_gmres, GmresPolicy},
     topology::AnalysisProjection,
 };
+mod power;
 mod reduced;
+mod refinement;
 
 #[derive(Debug, Clone)]
 pub struct CanonicalAcousticResponse {
@@ -32,45 +33,21 @@ pub(super) fn solve(
     assembly: AcousticAssembly,
     frequency_hz: f64,
     policy: AcousticHarmonicPolicy,
+    power_tolerance: f64,
 ) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
-    let size = assembly.projection.nodes.len();
-    let (real, imaginary, iterations, relative_residual) = reduced::solve(&assembly, policy)?;
-    let (ar, ai) = assembly.apply(&real, &imaginary);
-    let br = spmv(&assembly.impedance, &real).expect("validated pressure shape");
-    let bi = spmv(&assembly.impedance, &imaginary).expect("validated pressure shape");
-    let mean_impedance_loss_w = 0.5
-        * (0..size)
-            .map(|i| real[i] * br[i] + imaginary[i] * bi[i])
-            .sum::<f64>();
-    let mean_input_power_w = (0..size)
-        .map(|i| {
-            let (source_real, source_imaginary) = if assembly.prescribed[i].is_some() {
-                // Sum specified natural flux with pressure-boundary reaction flux.
-                (ar[i], ai[i])
-            } else {
-                (assembly.source[i].real, assembly.source[i].imaginary)
-            };
-            (real[i] * source_imaginary - imaginary[i] * source_real) / (2.0 * assembly.omega)
-        })
-        .sum::<f64>();
-    // Include reactive apparent power so a lossless cavity is not normalized by zero
-    // real power. No dimensional floor may hide a small-amplitude imbalance.
-    let power_scale = (0..size)
-        .map(|i| {
-            let source = if assembly.prescribed[i].is_some() {
-                (ar[i], ai[i])
-            } else {
-                (assembly.source[i].real, assembly.source[i].imaginary)
-            };
-            real[i].hypot(imaginary[i]) * source.0.hypot(source.1) / (2.0 * assembly.omega)
-        })
-        .sum::<f64>()
-        .max(mean_impedance_loss_w.abs());
-    let power_relative_error = if power_scale == 0.0 {
-        0.0
-    } else {
-        (mean_input_power_w - mean_impedance_loss_w).abs() / power_scale
-    };
+    let (solution, power) = refinement::solve(&assembly, policy, power_tolerance)?;
+    let reduced::ReducedSolution {
+        real,
+        imaginary,
+        iterations,
+        relative_residual,
+        ..
+    } = solution;
+    let power::PowerClosure {
+        mean_input_power_w,
+        mean_impedance_loss_w,
+        power_relative_error,
+    } = power;
     let recovered = super::recovery::recover(&assembly, &real, &imaginary)?;
     if real
         .iter()

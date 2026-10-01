@@ -9,6 +9,20 @@ use runmat_analysis_core::*;
 mod periodic;
 mod source;
 
+#[test]
+fn power_continuation_reserves_its_retained_coordinates_without_budget_multiplication() {
+    // Block 16, restart 4: ten basis vectors, 5x4 Hessenberg, twelve
+    // existing block work vectors plus one retained warm-start vector, forty scalars
+    // for rotations/projected RHS, and five 96-byte header allowances.
+    let without_warm_start = (10 * 16 + 5 * 4 + 12 * 16 + 40) * 8 + 5 * 96;
+    assert_eq!(
+        krylov_workspace_bytes(16, 4).unwrap(),
+        without_warm_start + 16 * 8
+    );
+    assert!(krylov_workspace_bytes(u64::MAX, 4).is_err());
+    assert!(krylov_workspace_bytes(16, u64::MAX).is_err());
+}
+
 fn workload() -> AcousticHarmonicWorkload {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     replace_fixture_excitations(&mut model, Vec::new());

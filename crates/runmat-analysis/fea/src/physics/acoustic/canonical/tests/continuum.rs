@@ -48,6 +48,7 @@ fn solve_duct(
             restart: 128,
             maximum_iterations: 8192,
         },
+        1e-8,
     )
     .unwrap()
 }

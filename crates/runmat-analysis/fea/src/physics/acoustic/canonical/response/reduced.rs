@@ -9,7 +9,8 @@ mod tests;
 pub(super) fn solve(
     assembly: &AcousticAssembly,
     policy: AcousticHarmonicPolicy,
-) -> Result<(Vec<f64>, Vec<f64>, u32, f64), AcousticHarmonicError> {
+    initial: Option<&[f64]>,
+) -> Result<ReducedSolution, AcousticHarmonicError> {
     let owned;
     let reduction = match &assembly.reduction {
         Some(reduction) => reduction,
@@ -36,22 +37,26 @@ pub(super) fn solve(
     let (solution, iterations, relative_residual) = if reduction.reduced_dof_count == 0 {
         (Vec::new(), 0, 0.0)
     } else {
+        let zero = vec![0.0; rhs.len()];
         let result = restarted_gmres(
             &rhs,
-            &vec![0.0; rhs.len()],
+            initial.unwrap_or(&zero),
             GmresPolicy {
                 relative_tolerance: policy.relative_tolerance,
                 restart: policy.restart,
                 maximum_iterations: policy.maximum_iterations,
             },
-            |value| {
-                let expanded = reduction.expand_linear(value)?;
-                reduction.transpose_apply(&apply(assembly, &expanded))
+            |value| -> Result<Vec<f64>, AcousticHarmonicError> {
+                let expanded = reduction
+                    .expand_linear(value)
+                    .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
+                reduction
+                    .transpose_apply(&apply(assembly, &expanded))
+                    .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))
             },
             |a, b| Ok(a.iter().zip(b).map(|(a, b)| a * b).sum()),
             crate::is_fea_cancelled,
-        )
-        .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?
+        )?
         .ok_or(AcousticHarmonicError::Breakdown)?;
         if result.cancelled {
             return Err(AcousticHarmonicError::Cancelled);
@@ -74,7 +79,21 @@ pub(super) fn solve(
         .expand(&solution)
         .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
     let imaginary = full.split_off(size);
-    Ok((full, imaginary, iterations, relative_residual))
+    Ok(ReducedSolution {
+        real: full,
+        imaginary,
+        coordinates: solution,
+        iterations,
+        relative_residual,
+    })
+}
+
+pub(super) struct ReducedSolution {
+    pub real: Vec<f64>,
+    pub imaginary: Vec<f64>,
+    pub coordinates: Vec<f64>,
+    pub iterations: u32,
+    pub relative_residual: f64,
 }
 
 fn apply(assembly: &AcousticAssembly, full: &[f64]) -> Vec<f64> {

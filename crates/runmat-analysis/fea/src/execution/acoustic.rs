@@ -141,6 +141,7 @@ impl AcousticHarmonicWorkload {
             self.step_id.as_str(),
             self.frequency,
             self.solver,
+            self.power_balance_relative_tolerance,
         )
         .map_err(invalid)?;
         AcousticHarmonicSolverResult::new(self, mesh, formulation, response)

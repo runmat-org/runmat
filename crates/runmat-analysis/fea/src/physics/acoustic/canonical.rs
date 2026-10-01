@@ -86,6 +86,13 @@ pub enum AcousticHarmonicError {
     Breakdown,
     #[error("canonical acoustic Krylov solve did not converge")]
     NotConverged,
+    #[error("canonical acoustic power closure did not converge: iterations={iterations}, relative_residual={relative_residual:e}, power_relative_error={power_relative_error:e}, power_tolerance={power_tolerance:e}")]
+    PowerNotConverged {
+        iterations: u32,
+        relative_residual: f64,
+        power_relative_error: f64,
+        power_tolerance: f64,
+    },
     #[error("canonical acoustic solve was cancelled")]
     Cancelled,
 }
@@ -103,7 +110,13 @@ pub fn solve_canonical_harmonic(
     step_id: &str,
     frequency: Frequency,
     policy: AcousticHarmonicPolicy,
+    power_tolerance: f64,
 ) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
+    if !power_tolerance.is_finite() || power_tolerance <= 0.0 || power_tolerance >= 1.0 {
+        return Err(AcousticHarmonicError::InvalidInput(
+            "power closure tolerance".into(),
+        ));
+    }
     let step = validate_input(model, step_id, frequency, policy)?;
     let frequency_hz = frequency.hertz;
     let omega = std::f64::consts::TAU * frequency_hz;
@@ -128,7 +141,7 @@ pub fn solve_canonical_harmonic(
         sample,
     )?;
     let assembly = assembly.with_periodic_constraints(mesh, model, step, &excitations)?;
-    response::solve(assembly, frequency_hz, policy)
+    response::solve(assembly, frequency_hz, policy, power_tolerance)
 }
 
 pub(crate) fn validate_input<'a>(

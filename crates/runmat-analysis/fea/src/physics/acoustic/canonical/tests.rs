@@ -126,6 +126,7 @@ fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_
                     relative_tolerance: 1e-11,
                     ..Default::default()
                 },
+                1e-8,
             )
             .unwrap();
             let mut squared = 0.0;
@@ -268,6 +269,7 @@ fn prescribed_pressure_and_impedance_solve_close_power() {
         "acoustic",
         Frequency::new(0.1),
         AcousticHarmonicPolicy::default(),
+        1e-8,
     )
     .unwrap();
     assert!(result.relative_residual < 1e-9);
@@ -290,7 +292,8 @@ fn canonical_acoustics_rejects_invalid_frequency_and_material_attenuation() {
             &mesh,
             "acoustic",
             Frequency::new(0.0),
-            AcousticHarmonicPolicy::default()
+            AcousticHarmonicPolicy::default(),
+            1e-8,
         ),
         Err(AcousticHarmonicError::InvalidInput(_))
     ));
@@ -301,7 +304,8 @@ fn canonical_acoustics_rejects_invalid_frequency_and_material_attenuation() {
             &mesh,
             "acoustic",
             Frequency::new(0.1),
-            AcousticHarmonicPolicy::default()
+            AcousticHarmonicPolicy::default(),
+            1e-8,
         ),
         Err(AcousticHarmonicError::Unsupported(_))
     ));
@@ -330,6 +334,7 @@ fn rigid_duct_converges_to_independent_standing_wave_without_artificial_loss() {
                 relative_tolerance: 1e-11,
                 ..Default::default()
             },
+            1e-8,
         )
         .unwrap();
         let error = (result
@@ -392,6 +397,7 @@ fn straight_and_curved_tet10_preserve_integrals_and_affine_velocity_recovery() {
             assembly,
             1.0 / std::f64::consts::TAU,
             AcousticHarmonicPolicy::default(),
+            1e-8,
         )
         .unwrap();
         let velocity = &result.element_velocity_m_per_s[0];
@@ -430,6 +436,7 @@ fn quadratic_phasor_recovery_integrates_products_not_products_of_averages() {
         assembly,
         1.0 / std::f64::consts::TAU,
         AcousticHarmonicPolicy::default(),
+        1e-8,
     )
     .unwrap();
     // v=(-1/3 + 2ix/3,0,0), I=(x²/6,0,0). Unit tetrahedral moments
@@ -458,6 +465,7 @@ fn boundaries_fail_closed_on_missing_targets_overlap_and_radiation() {
             "acoustic",
             Frequency::new(0.2),
             AcousticHarmonicPolicy::default(),
+            1e-8,
         )
     };
     assert!(matches!(
@@ -503,7 +511,8 @@ fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
                 &mesh,
                 "acoustic",
                 Frequency::new(0.2),
-                AcousticHarmonicPolicy::default()
+                AcousticHarmonicPolicy::default(),
+                1e-8,
             ),
             Err(AcousticHarmonicError::Boundary(_))
         ));

@@ -206,13 +206,20 @@ fn free_phased_helmholtz_pressure_matches_independent_complex_dense_lifting() {
         assert!(expected[0].0.hypot(expected[0].1) > 0.01);
         for amplitude in [1e-12, 1.0, 1e12] {
             let assembly = assembly(phase, amplitude);
-            let (real, imaginary, iterations, residual) = solve(
+            let super::ReducedSolution {
+                real,
+                imaginary,
+                iterations,
+                relative_residual: residual,
+                ..
+            } = solve(
                 &assembly,
                 AcousticHarmonicPolicy {
                     relative_tolerance: 1e-12,
                     restart: 8,
                     maximum_iterations: 64,
                 },
+                None,
             )
             .unwrap();
             assert!(iterations > 0, "free phased DOFs must actually be solved");
