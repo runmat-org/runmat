@@ -36,6 +36,9 @@ fn validate_known_group(
     x_shape: Option<&[usize]>,
     x_count: usize,
 ) -> BuiltinResult<()> {
+    if matches!(group, Value::Cell(_) | Value::Object(_)) && !value_contains_gpu(group)? {
+        return super::groups::validate_known_host_group(group, x_shape, x_count);
+    }
     let count = match group {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Some(1),
         Value::Tensor(tensor) => Some(tensor.len()),

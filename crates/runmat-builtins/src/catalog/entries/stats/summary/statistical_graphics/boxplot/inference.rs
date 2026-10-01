@@ -94,7 +94,8 @@ fn known_bad_option(kind: BoxplotOptionKind, value: &ValueFact, numeric: Option<
             ) || value.shape.element_count().is_some_and(|count| count != 1)
                 || numeric.is_some_and(|n| {
                     !n.is_finite()
-                        || (kind == OutlierSize && n <= 0.0)
+                        || (kind == OutlierSize
+                            && (n <= 0.0 || !((n as f32).is_finite() && (n as f32) > 0.0)))
                         || (kind != OutlierSize && n < 0.0)
                 })
         }

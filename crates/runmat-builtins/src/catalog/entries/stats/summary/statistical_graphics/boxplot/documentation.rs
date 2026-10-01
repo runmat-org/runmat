@@ -13,9 +13,17 @@ const OPTIONS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Boxplot ordered option plan",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/boxplot/plan.rs"),
 };
+const OPTION_DECODING_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Boxplot option value decoding",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/boxplot/plan/decoding.rs"),
+};
 const GROUPS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Boxplot grouping and statistics",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/boxplot/groups.rs"),
+};
+const LABELS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Boxplot exact group identity",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/boxplot/groups/labels.rs"),
 };
 const PLOT_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Boxplot graphics rendering",
@@ -65,7 +73,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample {
             id: "boxplot-columns", title: "Plot one box for each matrix column",
-            program: "h = boxplot([1 10; 2 20; 3 30; 4 40]);",
+            program: "h = boxplot([1 10; 2 20; 3 30; 4 40])",
             display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics,
@@ -85,7 +93,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "boxplot-horizontal", title: "Use horizontal orientation and a custom whisker length",
-            program: "h = boxplot([1;2;3;100], 'Orientation', 'horizontal', 'Whisker', 1);",
+            program: "h = boxplot([1;2;3;100], 'Orientation', 'horizontal', 'Whisker', 1)",
             display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics,
@@ -99,7 +107,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     links: &[SOURCE, ECDF, HISTOGRAM],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE, ADMISSION_SOURCE, OPTIONS_SOURCE, GROUPS_SOURCE, PLOT_SOURCE],
+        implementation: &[SOURCE, ADMISSION_SOURCE, OPTIONS_SOURCE, OPTION_DECODING_SOURCE, GROUPS_SOURCE, LABELS_SOURCE, PLOT_SOURCE],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Box grouping, quartiles, options, compatibility and plotted handles", location: "crates/runmat-runtime/src/builtins/stats/summary/boxplot/tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident admission and borrowed input ownership", location: "crates/runmat-runtime/src/builtins/stats/summary/boxplot/provider_tests.rs" },

@@ -67,6 +67,11 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
             Value::Num(-1.0),
         ],
         vec![
+            Value::GpuTensor(resident.handle.clone()),
+            Value::String("OutlierSize".into()),
+            Value::Num(f64::MAX),
+        ],
+        vec![
             sample(),
             Value::String("Whisker".into()),
             Value::GpuTensor(option.handle.clone()),
@@ -81,8 +86,38 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
             Value::Num(1.0),
         ],
         vec![
+            sample(),
+            Value::String("Notch".into()),
+            Value::GpuTensor(option.handle.clone()),
+        ],
+        vec![
+            sample(),
+            Value::String("FullFactors".into()),
+            Value::GpuTensor(option.handle.clone()),
+        ],
+        vec![
+            sample(),
+            Value::String("ColorGroup".into()),
+            Value::Cell(
+                CellArray::new(vec![Value::GpuTensor(option.handle.clone())], 1, 1).unwrap(),
+            ),
+            Value::String("Jitter".into()),
+            Value::Num(-1.0),
+        ],
+        vec![
             Value::String("invalid sample".into()),
             Value::GpuTensor(resident.handle.clone()),
+        ],
+        vec![
+            Value::GpuTensor(resident.handle.clone()),
+            Value::Cell(
+                CellArray::new(
+                    vec![Value::String("A".into()), Value::String("B".into())],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ),
         ],
     ];
     for args in calls {
@@ -94,6 +129,30 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
         assert_eq!(resident.probe.retirements(), 0);
         assert_eq!(option.probe.retirements(), 0);
     }
+}
+
+#[test]
+fn nested_resident_group_is_compatibility_gated_before_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(RejectDownloads::default()));
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let group = provider
+        .owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let nested =
+        Value::Cell(CellArray::new(vec![Value::GpuTensor(group.handle.clone())], 1, 1).unwrap());
+    let err = block_on(boxplot_builtin(vec![sample(), nested]))
+        .expect_err("nested resident group is a RunMat-only extension");
+    assert_eq!(
+        err.identifier(),
+        BOXPLOT_GPU_INPUT_EXTENSION.error_identifier
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    group.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(group.probe.retirements(), 0);
 }
 
 #[test]

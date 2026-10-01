@@ -112,6 +112,30 @@ fn typed_option_name_and_invalid_host_value_are_diagnosed() {
 }
 
 #[test]
+fn unrepresentable_plot_size_is_not_proven_as_an_admitted_option() {
+    let text = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let result = call(
+        vec![
+            real(vec![Some(4), Some(1)]),
+            text,
+            real(vec![Some(1), Some(1)]),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("OutlierSize".into()),
+            LiteralValue::Number(f64::MAX),
+        ],
+        1,
+    );
+    assert!(!result.diagnostics.is_empty());
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
 fn unknown_values_and_padded_requested_outputs_remain_conservative() {
     let result = call(
         vec![ValueFact::unknown(

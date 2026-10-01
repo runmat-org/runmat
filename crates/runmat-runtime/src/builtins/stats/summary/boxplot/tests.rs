@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::plotting::{clone_figure, current_figure_handle};
 use futures::executor::block_on;
-use runmat_value::{IntegerStorage, LogicalArray};
+use runmat_value::{IntegerStorage, LogicalArray, StringArray};
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).expect("tensor"))
@@ -10,6 +10,51 @@ fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
 fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
     Value::Tensor(tensor)
+}
+
+#[test]
+fn heterogeneous_cell_group_keys_do_not_collapse_into_display_text() {
+    let wide = 9_007_199_254_740_993_u64;
+    let labels = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::Int(IntValue::U64(wide)),
+                Value::String(wide.to_string()),
+            ],
+            2,
+            1,
+        )
+        .unwrap(),
+    );
+    let boxes = build_box_stats(
+        tensor(vec![1.0, 2.0], vec![2, 1]),
+        Some(labels),
+        &BoxplotOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(boxes.len(), 2);
+    assert_eq!(boxes[0].median, 1.0);
+    assert_eq!(boxes[1].median, 2.0);
+    assert_eq!(boxes[0].label, boxes[1].label);
+}
+
+#[test]
+fn multifactor_group_identity_does_not_depend_on_joined_display_text() {
+    let first =
+        Value::StringArray(StringArray::new(vec!["a,b".into(), "a".into()], vec![2, 1]).unwrap());
+    let second =
+        Value::StringArray(StringArray::new(vec!["c".into(), "b,c".into()], vec![2, 1]).unwrap());
+    let factors = Value::Cell(CellArray::new(vec![first, second], 1, 2).unwrap());
+    let boxes = build_box_stats(
+        tensor(vec![1.0, 2.0], vec![2, 1]),
+        Some(factors),
+        &BoxplotOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(boxes.len(), 2);
+    assert_eq!(boxes[0].median, 1.0);
+    assert_eq!(boxes[1].median, 2.0);
+    assert_eq!(boxes[0].label, boxes[1].label);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Box plot compatibility helper.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use glam::Vec4;
 use runmat_builtins::{
@@ -170,8 +170,11 @@ fn value_contains_logical(value: &Value) -> bool {
         || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_logical))
 }
 
-fn value_contains_gpu(value: &Value) -> bool {
-    matches!(value, Value::GpuTensor(_))
+fn value_contains_gpu(value: &Value) -> BuiltinResult<bool> {
+    let mut found = false;
+    crate::dispatcher::try_visit_gpu_handles(value, &mut |_| found = true)
+        .map_err(|err| invalid_with_source(format!("boxplot: {err}"), err))?;
+    Ok(found)
 }
 
 fn enable_boxplot_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
@@ -193,7 +196,11 @@ fn ensure_sample_group_extensions(x: &Value, group: Option<&Value>) -> BuiltinRe
             enable_boxplot_extension(&BOXPLOT_LOGICAL_GROUP_EXTENSION)?;
         }
     }
-    if value_contains_gpu(x) || group.is_some_and(value_contains_gpu) {
+    let group_contains_gpu = match group {
+        Some(group) => value_contains_gpu(group)?,
+        None => false,
+    };
+    if value_contains_gpu(x)? || group_contains_gpu {
         enable_boxplot_extension(&BOXPLOT_GPU_INPUT_EXTENSION)?;
     }
     Ok(())

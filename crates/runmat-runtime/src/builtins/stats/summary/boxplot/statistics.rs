@@ -20,8 +20,13 @@ pub(super) fn stats_for_values(
     let median = percentile_sorted(&finite, 0.5);
     let q3 = percentile_sorted(&finite, 0.75);
     let iqr = q3 - q1;
-    let lower_fence = q1 - whisker * iqr;
-    let upper_fence = q3 + whisker * iqr;
+    let (lower_fence, upper_fence) = if whisker == 0.0 {
+        // An overflowing IQR still has exact zero-length whiskers at Q1/Q3.
+        // Multiplying 0 by an infinite intermediate would produce NaN fences.
+        (q1, q3)
+    } else {
+        (q1 - whisker * iqr, q3 + whisker * iqr)
+    };
     let mut lower_whisker = None;
     let mut upper_whisker = None;
     let mut outliers = Vec::new();
@@ -45,6 +50,25 @@ pub(super) fn stats_for_values(
         upper_whisker: upper_whisker.unwrap_or(median),
         outliers,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_whisker_keeps_extreme_outlier_when_iqr_overflows() {
+        let max = f64::MAX;
+        let stats = stats_for_values(
+            "A".into(),
+            vec![-0.8 * max, -0.8 * max, 0.8 * max, 0.8 * max, max],
+            0.0,
+        )
+        .unwrap();
+        assert_eq!(stats.q1, -0.8 * max);
+        assert_eq!(stats.q3, 0.8 * max);
+        assert_eq!(stats.outliers, vec![max]);
+    }
 }
 
 fn percentile_sorted(values: &[f64], p: f64) -> f64 {

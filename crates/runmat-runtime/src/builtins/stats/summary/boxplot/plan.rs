@@ -2,6 +2,8 @@
 use super::options::*;
 use super::*;
 use runmat_accelerate_api::GpuTensorStorage;
+mod decoding;
+use decoding::decode_option;
 
 pub(super) struct BoxplotOptionPlan {
     steps: Vec<PlannedOption>,
@@ -62,11 +64,14 @@ impl BoxplotOptionPlan {
                     enable_boxplot_extension(&BOXPLOT_LOGICAL_OPTION_EXTENSION)?;
                 }
             }
-            if value_contains_gpu(&value) {
+            let resident = value_contains_gpu(&value)?;
+            if resident {
                 enable_boxplot_extension(&BOXPLOT_GPU_INPUT_EXTENSION)?;
             }
             if let Value::GpuTensor(handle) = &value {
                 validate_resident_option(kind, handle)?;
+                steps.push(PlannedOption::Resident(kind, value));
+            } else if resident {
                 steps.push(PlannedOption::Resident(kind, value));
             } else {
                 steps.push(PlannedOption::Host(decode_option(kind, value)?));
@@ -156,178 +161,14 @@ fn validate_resident_option(
         .ok_or_else(|| invalid("boxplot: option shape overflows"))?;
     use BoxplotOptionKind::*;
     match kind {
-        Whisker | OutlierSize | Jitter | Notch | FullFactors if len != 1 => {
+        Whisker | OutlierSize | Jitter if len != 1 => {
             Err(invalid("boxplot: scalar option has invalid shape"))
         }
         DataLim if len != 2 => Err(invalid("boxplot: DataLim must have two elements")),
-        Orientation | Symbol | PlotStyle | BoxStyle | MedianStyle | ExtremeMode
-        | LabelOrientation | LabelVerbosity | FactorDirection | FactorSeparator => {
+        Orientation | Symbol | PlotStyle | BoxStyle | MedianStyle | Notch | FullFactors
+        | ExtremeMode | LabelOrientation | LabelVerbosity | FactorDirection => {
             Err(invalid("boxplot: text options must be host values"))
         }
         _ => Ok(()),
     }
-}
-
-fn decode_option(kind: BoxplotOptionKind, value: Value) -> BuiltinResult<DecodedOption> {
-    use BoxplotOptionKind::*;
-    let decoded = match kind {
-        Whisker => {
-            let whisker = scalar(&value, "Whisker")?;
-            if !whisker.is_finite() || whisker < 0.0 {
-                return Err(invalid(
-                    "boxplot: Whisker must be a nonnegative finite scalar",
-                ));
-            }
-            DecodedOption::Whisker(whisker)
-        }
-        Orientation => {
-            DecodedOption::Orientation(match text_scalar(&value, "Orientation")?.as_str() {
-                "vertical" => super::Orientation::Vertical,
-                "horizontal" => super::Orientation::Horizontal,
-                _ => {
-                    return Err(invalid(
-                        "boxplot: Orientation must be 'vertical' or 'horizontal'",
-                    ))
-                }
-            })
-        }
-        Labels => DecodedOption::Labels(text_vector(&value, "Labels")?),
-        GroupOrder => DecodedOption::GroupOrder(text_vector(&value, "GroupOrder")?),
-        Positions => {
-            let values = numeric_vector(&value, "Positions")?;
-            if values.iter().any(|value| !value.is_finite()) {
-                return Err(invalid("boxplot: Positions must be finite"));
-            }
-            DecodedOption::Positions(values)
-        }
-        Widths => {
-            let values = numeric_vector(&value, "Widths")?;
-            if values.is_empty()
-                || values
-                    .iter()
-                    .any(|value| !value.is_finite() || *value <= 0.0)
-            {
-                return Err(invalid("boxplot: Widths must be positive finite values"));
-            }
-            DecodedOption::Widths(values)
-        }
-        OutlierSize => {
-            let size = scalar(&value, "OutlierSize")?;
-            if !size.is_finite() || size <= 0.0 {
-                return Err(invalid(
-                    "boxplot: OutlierSize must be a positive finite scalar",
-                ));
-            }
-            let physical_size = size as f32;
-            if !physical_size.is_finite() || physical_size <= 0.0 {
-                return Err(invalid(
-                    "boxplot: OutlierSize must be representable as a positive plot size",
-                ));
-            }
-            DecodedOption::OutlierSize(physical_size)
-        }
-        Symbol => {
-            let text = value_text_preserve_case(&value, "Symbol")?;
-            let (marker, color) = parse_symbol(&text)?;
-            DecodedOption::Symbol(marker, color)
-        }
-        Colors => DecodedOption::Colors(parse_colors(&value)?),
-        PlotStyle => DecodedOption::PlotStyle(match text_scalar(&value, "PlotStyle")?.as_str() {
-            "traditional" => false,
-            "compact" => true,
-            _ => {
-                return Err(invalid(
-                    "boxplot: PlotStyle must be 'traditional' or 'compact'",
-                ))
-            }
-        }),
-        BoxStyle => {
-            let text = text_scalar(&value, "BoxStyle")?;
-            if text != "outline" && text != "filled" {
-                return Err(invalid("boxplot: BoxStyle must be 'outline' or 'filled'"));
-            }
-            DecodedOption::Validated(kind)
-        }
-        MedianStyle => {
-            let text = text_scalar(&value, "MedianStyle")?;
-            if text != "line" && text != "target" {
-                return Err(invalid("boxplot: MedianStyle must be 'line' or 'target'"));
-            }
-            DecodedOption::Validated(kind)
-        }
-        Notch => {
-            parse_on_off_marker(&value, "Notch")?;
-            DecodedOption::Validated(kind)
-        }
-        Jitter => {
-            let jitter = scalar(&value, "Jitter")?;
-            if !jitter.is_finite() || jitter < 0.0 {
-                return Err(invalid("boxplot: Jitter must be nonnegative and finite"));
-            }
-            DecodedOption::Jitter(jitter)
-        }
-        DataLim => {
-            let limits = numeric_vector(&value, "DataLim")?;
-            if limits.len() != 2
-                || limits.iter().any(|value| value.is_nan())
-                || limits[0] > limits[1]
-            {
-                return Err(invalid(
-                    "boxplot: DataLim must be a two-element numeric range",
-                ));
-            }
-            DecodedOption::DataLim(finite_data_lim(limits[0], limits[1]))
-        }
-        ExtremeMode => {
-            DecodedOption::ExtremeMode(match text_scalar(&value, "ExtremeMode")?.as_str() {
-                "clip" => super::ExtremeMode::Clip,
-                "compress" => super::ExtremeMode::Compress,
-                _ => return Err(invalid("boxplot: ExtremeMode must be 'compress' or 'clip'")),
-            })
-        }
-        LabelOrientation => {
-            let text = text_scalar(&value, "LabelOrientation")?;
-            if text != "inline" && text != "horizontal" {
-                return Err(invalid(
-                    "boxplot: LabelOrientation must be 'inline' or 'horizontal'",
-                ));
-            }
-            DecodedOption::Validated(kind)
-        }
-        LabelVerbosity => {
-            let text = text_scalar(&value, "LabelVerbosity")?;
-            if text != "all" && text != "minor" && text != "majorminor" {
-                return Err(invalid(
-                    "boxplot: LabelVerbosity must be 'all', 'minor', or 'majorminor'",
-                ));
-            }
-            DecodedOption::Validated(kind)
-        }
-        ColorGroup => DecodedOption::ColorGroup(value),
-        FactorDirection => {
-            validate_choice_vector(&value, "FactorDirection", &["data", "list"])?;
-            DecodedOption::Validated(kind)
-        }
-        FullFactors => {
-            parse_on_off(&value, "FullFactors")?;
-            DecodedOption::Validated(kind)
-        }
-        FactorGap => {
-            let values = numeric_vector(&value, "FactorGap")?;
-            if values
-                .iter()
-                .any(|value| !value.is_finite() || *value < 0.0)
-            {
-                return Err(invalid(
-                    "boxplot: FactorGap must contain nonnegative finite values",
-                ));
-            }
-            DecodedOption::Validated(kind)
-        }
-        FactorSeparator => {
-            validate_factor_separator(&value)?;
-            DecodedOption::Validated(kind)
-        }
-    };
-    Ok(decoded)
 }
