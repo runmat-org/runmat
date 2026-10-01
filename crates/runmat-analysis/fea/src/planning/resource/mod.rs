@@ -3,15 +3,21 @@
 mod accuracy;
 mod acoustic;
 mod electrical_static;
+mod magnetic_static;
 pub use acoustic::{
     acoustic_harmonic_result_payload_bytes_upper_bound, build_acoustic_resource_plan,
     PreparedAcousticResourceFacts,
 };
 pub use contract::AcousticHarmonicResourceDemand;
 pub use contract::ElectricalStaticResourceDemand;
+pub use contract::{MagneticGmresResourceEnvelope, MagnetostaticResourceDemand};
 pub use electrical_static::{
     build_electrical_static_resource_plan, electrical_static_result_payload_bytes_upper_bound,
     electrical_static_solver_admission, PreparedElectricalStaticResourceFacts,
+};
+pub use magnetic_static::{
+    build_magnetostatic_resource_plan, magnetostatic_result_payload_bytes_upper_bound,
+    PreparedMagnetostaticResourceFacts,
 };
 mod result_publication;
 mod state_publication;

@@ -101,6 +101,7 @@ mod electrical_static;
 mod field_recovery;
 mod frequency;
 mod history_finalization;
+mod magnetostatic;
 mod modal;
 mod observation;
 mod random_response;
@@ -127,6 +128,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::SolveThermal => thermal::execute(invocation),
             AnalysisWorkKind::SolveAcousticHarmonic => acoustic_harmonic::execute(invocation),
             AnalysisWorkKind::SolveElectricalStatic => electrical_static::execute(invocation),
+            AnalysisWorkKind::SolveMagnetostatic => magnetostatic::execute(invocation),
             AnalysisWorkKind::RecoverField => field_recovery::execute_field_recovery(invocation),
             AnalysisWorkKind::EvaluateObservationPartition => {
                 observation::execute_observation_partition(invocation)

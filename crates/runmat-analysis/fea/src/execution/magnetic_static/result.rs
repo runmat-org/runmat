@@ -320,6 +320,9 @@ impl MagnetostaticSolverResult {
     pub fn producer(&self) -> StepIdentity {
         self.data.producer
     }
+    pub fn source_workload(&self) -> AnalysisWorkloadIdentity {
+        self.data.source_workload
+    }
     pub fn mesh_digest(&self) -> Digest {
         self.data.mesh_digest
     }

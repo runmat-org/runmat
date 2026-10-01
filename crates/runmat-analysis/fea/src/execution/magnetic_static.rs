@@ -10,7 +10,12 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
+mod admitted;
 pub(in crate::execution) mod fields;
+mod receipt;
+pub use receipt::{
+    MagneticNumericalReceipt, MagneticNumericalReceiptArtifact, MAGNETIC_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod publication;
 mod result;
 pub use result::MagnetostaticSolverResult;

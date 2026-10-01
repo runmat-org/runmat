@@ -24,8 +24,10 @@ use crate::execution::{
 mod accuracy_demand;
 mod acoustic_demand;
 mod electrical_static_demand;
+mod magnetic_static_demand;
 pub use acoustic_demand::AcousticHarmonicResourceDemand;
 pub use electrical_static_demand::ElectricalStaticResourceDemand;
+pub use magnetic_static_demand::{MagneticGmresResourceEnvelope, MagnetostaticResourceDemand};
 mod assembly_demand;
 pub use accuracy_demand::AccuracyEvaluationResourceDemand;
 mod error;
@@ -243,6 +245,7 @@ pub enum PartitioningPolicy {
 pub enum FeaResourcePhase {
     AcousticHarmonic(AnalysisWorkloadIdentity),
     ElectricalStatic(AnalysisWorkloadIdentity),
+    Magnetostatic(AnalysisWorkloadIdentity),
     ResultPublication(crate::execution::PublicationRequestIdentity),
     SemanticStatePublication(Digest),
     AccuracyEvaluation(AccuracyEvaluationRequestIdentity),
@@ -336,6 +339,7 @@ pub use observation_demand::{
 pub enum FeaResourceDemand {
     AcousticHarmonic(AcousticHarmonicResourceDemand),
     ElectricalStatic(ElectricalStaticResourceDemand),
+    Magnetostatic(MagnetostaticResourceDemand),
     ResultPublication(ResultPublicationResourceDemand),
     SemanticStatePublication(SemanticStatePublicationResourceDemand),
     AccuracyEvaluation(AccuracyEvaluationResourceDemand),

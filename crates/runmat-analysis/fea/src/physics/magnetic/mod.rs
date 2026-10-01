@@ -5,7 +5,7 @@ mod boundary;
 mod input;
 mod plan;
 pub use plan::MagneticSystemPlan;
-mod resources;
+pub(crate) mod resources;
 mod response;
 #[cfg(test)]
 pub(crate) mod test_support;

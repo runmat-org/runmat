@@ -2,6 +2,7 @@ mod accuracy;
 mod acoustic;
 mod common;
 mod electrical_static;
+pub(super) mod magnetic_static;
 mod result_publication;
 mod state_publication;
 use common::validate_common;
@@ -51,6 +52,11 @@ pub fn build_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
+        (FeaResourcePhase::Magnetostatic(workload), FeaResourceDemand::Magnetostatic(demand))
+            if *workload == demand.workload =>
+        {
+            magnetic_static::build_magnetostatic_plan(input.clone(), demand)
+        }
         (
             FeaResourcePhase::ElectricalStatic(workload),
             FeaResourceDemand::ElectricalStatic(demand),

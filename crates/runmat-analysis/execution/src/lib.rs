@@ -72,6 +72,10 @@ mod electrical_static_plan;
 mod electrical_static_result;
 mod electrical_static_task;
 mod electrical_study;
+mod magnetic_state_profiles;
+mod magnetostatic_plan;
+mod magnetostatic_result;
+mod magnetostatic_task;
 pub use electrical_state_profiles::electrical_state_publication_profiles;
 pub use electrical_static_plan::{
     prepare_electrical_static_inputs, rederive_electrical_static_resource_plan,
@@ -88,6 +92,14 @@ pub use electrical_study::{
     prepare_electrical_study_root, CompletedElectricalStudy, ElectricalStudyCoordinator,
     ElectricalStudyPhase, ElectricalStudyPreparation, ElectricalStudyResultClosure,
     ElectricalStudyResultPhase, PreparedElectricalStudyRoot,
+};
+pub use magnetic_state_profiles::magnetic_state_publication_profiles;
+pub use magnetostatic_plan::{
+    prepare_magnetostatic_inputs, rederive_magnetostatic_resource_plan, PreparedMagnetostaticInputs,
+};
+pub use magnetostatic_result::{import_magnetostatic_result, ImportedMagnetostaticResult};
+pub use magnetostatic_task::{
+    prepare_magnetostatic_task, MagnetostaticTaskPreparation, PreparedMagnetostaticTask,
 };
 mod acoustic_harmonic_result;
 mod acoustic_harmonic_task;

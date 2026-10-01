@@ -161,7 +161,7 @@ fn from_counts(
     })
 }
 
-pub(super) fn gmres_policy(
+pub(crate) fn gmres_policy(
     dimension: usize,
     tolerance: f64,
 ) -> Result<GmresPolicy, MagnetostaticError> {

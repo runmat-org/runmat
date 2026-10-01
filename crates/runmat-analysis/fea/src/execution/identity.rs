@@ -6,6 +6,8 @@ use serde::Serialize;
 use super::{AnalysisExecutionError, AnalysisExecutionResult, SweepDefinition};
 
 mod contract;
+#[cfg(test)]
+mod magnetic_tests;
 
 pub use contract::*;
 
@@ -359,6 +361,14 @@ impl AccuracyIdentity {
 }
 
 impl NumericalPlanIdentity {
+    /// Canonical magnetic edge/gauge workload and original mesh, not placement or chunks.
+    pub fn from_magnetostatic_workload(
+        workload: AnalysisWorkloadIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("magnetostatic-numerical-plan", &(workload, topology))
+    }
+
     /// Static electrical equation and canonical topology, independent of placement.
     pub fn from_electrical_static_workload(
         workload: AnalysisWorkloadIdentity,

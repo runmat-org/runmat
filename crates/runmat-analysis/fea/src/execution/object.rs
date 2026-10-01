@@ -38,6 +38,7 @@ pub enum AnalysisNumericalObjectKind {
     ThermalWorkload,
     AcousticHarmonicWorkload,
     ElectricalStaticWorkload,
+    MagnetostaticWorkload,
     Mesh,
     Signal,
     ResponseSpectrum,

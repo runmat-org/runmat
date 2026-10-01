@@ -58,6 +58,8 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
+#[path = "analysis_process_conformance/magnetic.rs"]
+mod magnetic;
 #[path = "analysis_process_conformance/modal_transient.rs"]
 mod modal_transient;
 #[path = "analysis_process_conformance/publication_chain.rs"]
@@ -103,10 +105,15 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--magnetic-only") {
+        magnetic::run().await;
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--signal-layout-only") {
         signal::run().await;
         return;
     }
+    magnetic::run().await;
     let directory = tempfile::tempdir().unwrap();
     let (host, program, input_objects, resource_plan) =
         fixture(revision(), "analysis-process-conformance");

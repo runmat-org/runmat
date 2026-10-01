@@ -17,7 +17,10 @@ mod buckling_result;
 mod buckling_workload;
 mod electrical_static;
 mod magnetic_static;
-pub use magnetic_static::{MagnetostaticSolverResult, MagnetostaticWorkload};
+pub use magnetic_static::{
+    MagneticNumericalReceipt, MagneticNumericalReceiptArtifact, MagnetostaticSolverResult,
+    MagnetostaticWorkload, MAGNETIC_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod error;
 pub use electrical_static::{
     ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,

@@ -105,6 +105,7 @@ pub enum AnalysisWorkKind {
     SolveThermal,
     SolveAcousticHarmonic,
     SolveElectricalStatic,
+    SolveMagnetostatic,
     MaterializeSignal,
     CompileConstraints,
     AssembleOperator,
