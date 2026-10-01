@@ -4,7 +4,6 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericTensorView, HostTensorView,
     NumericElementType,
 };
-use std::error::Error as _;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 struct CountingProvider {
