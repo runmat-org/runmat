@@ -168,13 +168,13 @@ impl ScalarProgram {
         self.identity
     }
 
-    /// Structural validation alone does not authenticate a serialized
-    /// program's claimed source. Execution owners must compare it with their
-    /// captured, admitted source identity before lowering or submission.
-    pub fn require_source_identity(&self, expected: Digest) -> Result<()> {
+    /// A decoded wire is only structurally valid. A future submission owner
+    /// must rederive the expected program from its captured, admitted source
+    /// and compare the *whole* identity, including operations and literal bits.
+    pub fn require_rederived_identity(&self, expected: &Self) -> Result<()> {
         ensure!(
-            self.wire.source_identity == expected,
-            "scalar source identity mismatch"
+            self.identity == expected.identity,
+            "scalar program differs from rederived source"
         );
         Ok(())
     }

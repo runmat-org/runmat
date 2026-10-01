@@ -28,12 +28,38 @@ impl TypedProducer {
         mut expressions: HashMap<ValueId, String>,
         roots: Option<&[ValueId]>,
     ) -> Result<Self> {
+        program.require_source_plan(plan)?;
+        let selected = roots
+            .map(|roots| producer_indices(plan, &expressions, roots))
+            .transpose()?;
+        // Multi-output and complete legacy emission do not construct a scalar
+        // program. Advertised closed bindings still have to pass their typed
+        // class and arity contract before their legacy WGSL expression is used.
+        if !matches!(roots, Some([_])) {
+            for (index, operation) in plan.operations.iter().enumerate() {
+                if selected
+                    .as_ref()
+                    .is_some_and(|indices| !indices.contains(&index))
+                {
+                    continue;
+                }
+                let (_, output) = operands(operation);
+                if output.is_some_and(|id| {
+                    program
+                        .declaration(id)
+                        .and_then(|declaration| declaration.semantics)
+                        .and_then(|semantics| semantics.scalar_operation)
+                        .is_some()
+                }) {
+                    program::resolved_operation(program, operation)?;
+                }
+            }
+        }
         // The checked closed operation stream is the arithmetic authority for
         // its admitted subset. WGSL-only declarations keep their established
         // path until their exact numerical policy is represented there too.
         if let Some(&[root]) = roots {
             if let Some(checked) = Self::emit_checked_program(plan, program, buffer_type, root)? {
-                checked.require_source_identity(program.cache_identity()?)?;
                 if let Some(lowered) =
                     Self::lower_checked_wgsl(&checked, buffer_type, expressions.clone())?
                 {
@@ -41,9 +67,6 @@ impl TypedProducer {
                 }
             }
         }
-        let selected = roots
-            .map(|roots| producer_indices(plan, &expressions, roots))
-            .transpose()?;
         let mut body = String::new();
         let mut helpers = Vec::new();
         for (index, operation) in plan.operations.iter().enumerate() {

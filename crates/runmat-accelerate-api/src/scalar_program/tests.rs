@@ -41,9 +41,15 @@ fn exact_literal_bits_are_identified_and_unknown_revisions_rejected() {
     let mut revised = positive.wire().clone();
     revised.semantic_revision += 1;
     assert!(ScalarProgram::from_wire(revised).is_err());
-    assert!(positive.require_source_identity(source()).is_ok());
-    assert!(positive
-        .require_source_identity(Digest::sha256(b"unrelated binding"))
+    assert!(positive.require_rederived_identity(&positive).is_ok());
+    let mut counterfeit = positive.wire().clone();
+    counterfeit.nodes[1] = ScalarNode::Literal {
+        id: 1,
+        value: ScalarLiteral::F32Bits((-0.0f32).to_bits()),
+    };
+    assert!(ScalarProgram::from_wire(counterfeit)
+        .unwrap()
+        .require_rederived_identity(&positive)
         .is_err());
     let encoded = serde_json::to_vec(positive.wire()).unwrap();
     let decoded: ScalarProgramWire = serde_json::from_slice(&encoded).unwrap();

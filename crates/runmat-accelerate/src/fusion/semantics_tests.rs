@@ -97,6 +97,49 @@ fn equal_final_class_does_not_collapse_different_interior_program_identities() {
 }
 
 #[test]
+fn equal_facts_do_not_merge_distinct_primitive_or_operand_topology() {
+    let add = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::Add,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    let subtract = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::Sub,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    let reversed = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::Sub,
+            inputs: vec![1, 0],
+            output: Some(2),
+        }],
+        2,
+    );
+    let values = [Value::Num(7.0), Value::Num(3.0)];
+    let add_facts = resolve(&add, &values).unwrap();
+    let subtract_facts = resolve(&subtract, &values).unwrap();
+    let reversed_facts = resolve(&reversed, &values).unwrap();
+    assert_eq!(add_facts.fact(2).unwrap(), subtract_facts.fact(2).unwrap());
+    assert_ne!(
+        add_facts.cache_identity().unwrap(),
+        subtract_facts.cache_identity().unwrap()
+    );
+    assert_ne!(
+        subtract_facts.cache_identity().unwrap(),
+        reversed_facts.cache_identity().unwrap()
+    );
+    assert!(subtract_facts.require_source_plan(&reversed).is_err());
+    assert!(subtract_facts.require_source_plan(&subtract).is_ok());
+}
+
+#[test]
 fn real_inputs_do_not_fabricate_power_domain_evidence() {
     let plan = plan(
         vec![FusionOp::Primitive {

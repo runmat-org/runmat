@@ -222,7 +222,7 @@ fn primitive_operation(op: PrimitiveOp) -> Option<ScalarOperation> {
     Some(ScalarOperation::Operator(kind))
 }
 
-fn resolved_operation(
+pub(super) fn resolved_operation(
     program: &ResolvedProgram,
     operation: &FusionOp,
 ) -> Result<Option<ScalarOperation>> {

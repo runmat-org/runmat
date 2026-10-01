@@ -7,6 +7,7 @@ use crate::precision::PrecisionPolicy;
 use anyhow::{anyhow, Result};
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_builtins::infer_catalog_call;
+use runmat_builtins::BuiltinBindingIdentity;
 use runmat_execution::Digest;
 use runmat_runtime::builtins::common::spec::{CanonicalFusionDeclaration, FusionAdmissionContext};
 use runmat_runtime::value_fact::value_fact;
@@ -15,13 +16,68 @@ use runmat_types::{
     OperatorKind, OutputSelection, ValueFact,
 };
 use runmat_value::Value;
+use serde::Serialize;
 
 use super::semantic_bindings::{self, SemanticBinding};
 use super::{FusionGroupPlan, FusionOp};
-use crate::graph::{PrimitiveOp, ValueId};
+use crate::graph::{FusionCallOrigin, PrimitiveOp, ValueId};
+
+/// Ordered source topology after the canonical binding capture. Public names
+/// never become a second execution identity after this boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+enum SourceOperationIdentity {
+    Primitive {
+        operation: PrimitiveOp,
+        binding: Option<BuiltinBindingIdentity>,
+        inputs: Vec<ValueId>,
+        output: Option<ValueId>,
+    },
+    Builtin {
+        binding: BuiltinBindingIdentity,
+        origin: FusionCallOrigin,
+        inputs: Vec<ValueId>,
+        output: Option<ValueId>,
+    },
+}
+
+fn source_operations(
+    plan: &FusionGroupPlan,
+    snapshots: &[Option<SemanticBinding>],
+) -> Result<Vec<SourceOperationIdentity>> {
+    plan.operations
+        .iter()
+        .zip(snapshots)
+        .map(|(operation, snapshot)| match operation {
+            FusionOp::Primitive { op, inputs, output } => Ok(SourceOperationIdentity::Primitive {
+                operation: *op,
+                binding: snapshot.map(|binding| binding.declaration.binding),
+                inputs: inputs.clone(),
+                output: *output,
+            }),
+            FusionOp::Builtin {
+                origin,
+                inputs,
+                output,
+                ..
+            } => Ok(SourceOperationIdentity::Builtin {
+                binding: snapshot
+                    .ok_or_else(|| anyhow!("fusion builtin has no captured binding"))?
+                    .declaration
+                    .binding,
+                origin: *origin,
+                inputs: inputs.clone(),
+                output: *output,
+            }),
+        })
+        .collect()
+}
 
 #[derive(Debug)]
 pub(crate) struct ResolvedProgram {
+    source_operations: Vec<SourceOperationIdentity>,
+    source_input_ids: Vec<ValueId>,
+    source_constant_ids: Vec<ValueId>,
+    source_root: Option<ValueId>,
     facts: HashMap<ValueId, ValueFact>,
     source_inputs: Vec<ValueFact>,
     precision_policy: PrecisionPolicy,
@@ -118,6 +174,9 @@ impl ResolvedProgram {
                 "captured fusion binding does not match the operation"
             ));
         }
+        let source_operations = source_operations(plan, snapshots)?;
+        let mut source_constant_ids = plan.const_values.keys().copied().collect::<Vec<_>>();
+        source_constant_ids.sort_unstable();
         let source_inputs: Vec<_> = inputs.iter().map(|value| value_fact(value)).collect();
         let effective_input = |mut fact: ValueFact| {
             if precision_policy.permits_double_to_single()
@@ -218,6 +277,10 @@ impl ResolvedProgram {
             }
         }
         Ok(Self {
+            source_operations,
+            source_input_ids: plan.inputs.clone(),
+            source_constant_ids,
+            source_root: plan.output,
             facts,
             binding_contracts,
             source_inputs,
@@ -301,8 +364,12 @@ impl ResolvedProgram {
             })
             .collect();
         Ok(Digest::sha256(serde_json::to_vec(&(
-            "typed-fusion-v1",
+            "typed-fusion-v2",
             runmat_builtins::BUILTIN_CATALOG_SCHEMA_VERSION,
+            &self.source_operations,
+            &self.source_input_ids,
+            &self.source_constant_ids,
+            self.source_root,
             declarations,
             facts,
             &self.source_inputs,
@@ -312,6 +379,26 @@ impl ResolvedProgram {
             &self.evidence,
             &self.admission_work,
         ))?))
+    }
+
+    pub fn require_source_plan(&self, plan: &FusionGroupPlan) -> Result<()> {
+        let snapshots = semantic_bindings::capture(plan)?;
+        if source_operations(plan, &snapshots)? != self.source_operations
+            || plan.inputs != self.source_input_ids
+            || plan.output != self.source_root
+        {
+            return Err(anyhow!(
+                "fusion source topology differs from admitted program"
+            ));
+        }
+        let mut constants = plan.const_values.keys().copied().collect::<Vec<_>>();
+        constants.sort_unstable();
+        if constants != self.source_constant_ids {
+            return Err(anyhow!(
+                "fusion source constants differ from admitted program"
+            ));
+        }
+        Ok(())
     }
 }
 
