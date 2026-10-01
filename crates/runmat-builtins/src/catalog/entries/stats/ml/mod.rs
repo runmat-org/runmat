@@ -12,6 +12,7 @@ mod knnsearch;
 mod linkage;
 mod pairwise_distance;
 mod predict;
+mod ridge;
 mod squareform;
 mod tsne;
 
@@ -26,6 +27,7 @@ pub use self::knnsearch::*;
 pub use self::linkage::*;
 pub use self::pairwise_distance::*;
 pub use self::predict::*;
+pub use self::ridge::*;
 pub use self::squareform::*;
 pub use self::tsne::*;
 
@@ -39,6 +41,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(linkage::ENTRIES.iter().copied());
     pairwise_distance::extend_entries(values);
     values.extend(predict::ENTRIES.iter().copied());
+    values.extend(ridge::ENTRIES.iter().copied());
     values.extend(squareform::ENTRIES.iter().copied());
     values.extend(tsne::ENTRIES.iter().copied());
 }
