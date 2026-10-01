@@ -88,6 +88,56 @@ pub async fn series_from_values_on_axis(
     series_from_tensor(x, y_tensor, axis, name)
 }
 
+/// Spline interprets two extra values along the final sample axis as the
+/// first and last derivatives. PCHIP and interp1 never use this grammar.
+pub async fn spline_samples_from_values(
+    x_value: Value,
+    y_value: Value,
+    name: &'static str,
+) -> BuiltinResult<SplineSamples> {
+    let x = vector_from_value(x_value, "X", name).await?;
+    validate_breaks(&x, name)?;
+    let y_host = materialize_if_resident(y_value).await?;
+    let y_tensor = tensor::value_into_tensor_for(name, y_host)
+        .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
+    let y_shape = canonical_shape(&y_tensor.shape, tensor_len(&y_tensor));
+    let y = tensor::tensor_into_values_f64(y_tensor);
+    let endpoint_count = x
+        .len()
+        .checked_add(2)
+        .ok_or_else(|| interp_error(name, format!("{name}: sample count overflow")))?;
+    let vector_endpoint_form = y.len() == endpoint_count && is_vector_shape(&y_shape);
+    if vector_endpoint_form || y_shape.last().copied() == Some(endpoint_count) {
+        let components = y.len() / endpoint_count;
+        let mut values = Vec::with_capacity(components * x.len());
+        let mut slopes = Vec::with_capacity(components);
+        for component in 0..components {
+            slopes.push(EndpointSlopes {
+                first: y[component],
+                last: y[(endpoint_count - 1) * components + component],
+            });
+        }
+        for sample in 0..x.len() {
+            values.extend_from_slice(&y[(sample + 1) * components..(sample + 2) * components]);
+        }
+        let mut sample_shape = if vector_endpoint_form {
+            vec![1, x.len()]
+        } else {
+            y_shape
+        };
+        *sample_shape.last_mut().expect("canonical tensor shape") = x.len();
+        let series = series_from_data(x, sample_shape, values, SampleAxis::Last, name)?;
+        return Ok(SplineSamples {
+            series,
+            endpoint_slopes: Some(slopes),
+        });
+    }
+    Ok(SplineSamples {
+        series: series_from_data(x, y_shape, y, SampleAxis::Last, name)?,
+        endpoint_slopes: None,
+    })
+}
+
 pub async fn implicit_series_from_values(
     y_value: Value,
     name: &'static str,
@@ -106,9 +156,21 @@ fn series_from_tensor(
     axis: SampleAxis,
     name: &'static str,
 ) -> BuiltinResult<NumericSeries> {
+    let y_shape = canonical_shape(&y_tensor.shape, tensor_len(&y_tensor));
+    let y = tensor::tensor_into_values_f64(y_tensor);
+    series_from_data(x, y_shape, y, axis, name)
+}
+
+fn series_from_data(
+    x: Vec<f64>,
+    y_shape: Vec<usize>,
+    y: Vec<f64>,
+    axis: SampleAxis,
+    name: &'static str,
+) -> BuiltinResult<NumericSeries> {
     validate_breaks(&x, name)?;
     let n = x.len();
-    let y_len = tensor_len(&y_tensor);
+    let y_len = y.len();
     if y_len != n && !y_len.is_multiple_of(n) {
         return Err(interp_error(
             name,
@@ -116,7 +178,6 @@ fn series_from_tensor(
         ));
     }
 
-    let y_shape = canonical_shape(&y_tensor.shape, y_len);
     let (series, trailing_shape, sample_axis) = if y_len == n && is_vector_shape(&y_shape) {
         (1, Vec::new(), axis)
     } else if axis == SampleAxis::First && y_shape.first().copied() == Some(n) {
@@ -153,7 +214,6 @@ fn series_from_tensor(
         ));
     }
 
-    let y = tensor::tensor_into_values_f64(y_tensor);
     let y = if sample_axis == SampleAxis::Last && series > 1 {
         let mut series_major = vec![0.0; y.len()];
         for sample in 0..n {

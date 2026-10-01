@@ -18,8 +18,8 @@ use crate::builtins::common::spec::{
 };
 
 use super::pp::{
-    build_spline_pp, evaluate_pp, pp_to_value, query_points, series_from_values_on_axis,
-    Extrapolation, PpOutputLayout, SampleAxis,
+    build_spline_pp_with_slopes, evaluate_pp, pp_to_value, query_points,
+    spline_samples_from_values, Extrapolation, PpOutputLayout, SampleAxis,
 };
 use crate::{build_runtime_error, RuntimeError};
 
@@ -269,18 +269,19 @@ async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinR
         )
         .await?;
     }
-    let series = series_from_values_on_axis(x, y, SampleAxis::Last, NAME)
+    let samples = spline_samples_from_values(x, y, NAME)
         .await
         .map_err(|err| {
             spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INVALID_INPUT)
         })?;
-    let output_layout = match series.sample_axis {
+    let output_layout = match samples.series.sample_axis {
         SampleAxis::First => PpOutputLayout::QueryLeading,
         SampleAxis::Last => PpOutputLayout::ComponentLeading,
     };
-    let pp = build_spline_pp(&series, NAME).map_err(|err| {
-        spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
-    })?;
+    let pp = build_spline_pp_with_slopes(&samples.series, samples.endpoint_slopes.as_deref(), NAME)
+        .map_err(|err| {
+            spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
+        })?;
     match rest.len() {
         0 => pp_to_value(pp, NAME).map_err(|err| {
             spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
@@ -346,6 +347,47 @@ mod tests {
             panic!("expected scalar");
         };
         assert!((result - 2.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn spline_vector_endpoint_slopes_reproduce_cubic_and_column_vector_form() {
+        let x = row(&[0.0, 1.0, 2.0]);
+        for y_shape in [vec![1, 5], vec![5, 1]] {
+            let y = Value::Tensor(Tensor::new(vec![0.0, 0.0, 1.0, 8.0, 12.0], y_shape).unwrap());
+            let value = block_on(spline_builtin(x.clone(), y, vec![row(&[0.5, 1.5])]))
+                .expect("clamped spline");
+            let Value::Tensor(output) = value else {
+                panic!("vector query must return a tensor");
+            };
+            assert_eq!(output.shape, vec![1, 2]);
+            assert!((output.materialize_f64()[0] - 0.125).abs() < 1e-12);
+            assert!((output.materialize_f64()[1] - 3.375).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn spline_array_endpoint_slopes_apply_to_each_component() {
+        let y = Value::Tensor(
+            Tensor::new(
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 3.0, 8.0, 17.0, 12.0, 24.0],
+                vec![2, 5],
+            )
+            .unwrap(),
+        );
+        let value = block_on(spline_builtin(
+            row(&[0.0, 1.0, 2.0]),
+            y,
+            vec![row(&[0.5, 1.5])],
+        ))
+        .expect("array clamped spline");
+        let Value::Tensor(output) = value else {
+            panic!("array-valued spline must return a tensor");
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        let expected = [0.125, 1.25, 3.375, 7.75];
+        for (actual, expected) in output.materialize_f64().iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
     }
 
     #[test]

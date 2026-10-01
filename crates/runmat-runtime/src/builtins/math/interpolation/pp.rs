@@ -36,6 +36,18 @@ pub struct NumericSeries {
     pub sample_axis: SampleAxis,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EndpointSlopes {
+    pub first: f64,
+    pub last: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct SplineSamples {
+    pub series: NumericSeries,
+    pub endpoint_slopes: Option<Vec<EndpointSlopes>>,
+}
+
 /// Where samples lie in a nonscalar input. Interp1 consumes columns, while
 /// pchip and spline consume the final axis of an array-valued function.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,14 +122,28 @@ pub fn build_spline_pp(
     series: &NumericSeries,
     name: &'static str,
 ) -> BuiltinResult<PiecewisePolynomial> {
+    build_spline_pp_with_slopes(series, None, name)
+}
+
+pub fn build_spline_pp_with_slopes(
+    series: &NumericSeries,
+    endpoint_slopes: Option<&[EndpointSlopes]>,
+    name: &'static str,
+) -> BuiltinResult<PiecewisePolynomial> {
     let n = series.x.len();
+    if endpoint_slopes.is_some_and(|slopes| slopes.len() != series.series) {
+        return Err(interp_error(
+            name,
+            format!("{name}: endpoint slope shape mismatch"),
+        ));
+    }
     let pieces = n - 1;
     let order = 4;
     let rows = pieces * series.series;
     let mut coefs = vec![0.0; rows * order];
     for s in 0..series.series {
         let y = &series.y[s * n..(s + 1) * n];
-        let local = spline_coefs_for_series(&series.x, y)?;
+        let local = spline_coefs_for_series(&series.x, y, endpoint_slopes.map(|slopes| slopes[s]))?;
         for piece in 0..pieces {
             let row = s * pieces + piece;
             for col in 0..order {

@@ -243,3 +243,24 @@ fn legacy_first_axis_samples_remain_admitted_when_last_axis_does_not_match() {
     assert_eq!(result.shape, vec![1, 2, 2]);
     assert_eq!(result.materialize_f64(), vec![1.0, 9.0, 10.0, 90.0]);
 }
+
+#[test]
+fn square_sample_matrix_uses_documented_last_axis_for_pchip_and_spline() {
+    let series = futures::executor::block_on(series_from_values_on_axis(
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
+        Value::Tensor(
+            Tensor::new(
+                vec![1.0, 10.0, 100.0, 2.0, 20.0, 200.0, 3.0, 30.0, 300.0],
+                vec![3, 3],
+            )
+            .unwrap(),
+        ),
+        SampleAxis::Last,
+        "pchip",
+    ))
+    .unwrap();
+    assert_eq!(series.sample_axis, SampleAxis::Last);
+    assert_eq!(series.trailing_shape, vec![3]);
+    assert_eq!(&series.y[..3], &[1.0, 2.0, 3.0]);
+    assert_eq!(&series.y[3..6], &[10.0, 20.0, 30.0]);
+}

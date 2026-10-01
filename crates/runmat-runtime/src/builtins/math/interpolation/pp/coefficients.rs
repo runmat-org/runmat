@@ -1,7 +1,14 @@
 use super::*;
 
-pub(super) fn spline_coefs_for_series(x: &[f64], y: &[f64]) -> BuiltinResult<Vec<[f64; 4]>> {
+pub(super) fn spline_coefs_for_series(
+    x: &[f64],
+    y: &[f64],
+    endpoint_slopes: Option<EndpointSlopes>,
+) -> BuiltinResult<Vec<[f64; 4]>> {
     let n = x.len();
+    if let Some(slopes) = endpoint_slopes {
+        return clamped_spline_coefs(x, y, slopes);
+    }
     if n == 2 {
         let h = x[1] - x[0];
         return Ok(vec![[0.0, 0.0, (y[1] - y[0]) / h, y[0]]]);
@@ -28,6 +35,54 @@ pub(super) fn spline_coefs_for_series(x: &[f64], y: &[f64]) -> BuiltinResult<Vec
     a[n - 1][n - 1] = -h[n - 3];
 
     let second = solve_dense(a, rhs)?;
+    Ok(second_derivatives_to_coefs(x, y, &second))
+}
+
+/// Solve the strictly diagonally dominant tridiagonal second-derivative
+/// system for a clamped cubic spline in linear space and time.
+fn clamped_spline_coefs(
+    x: &[f64],
+    y: &[f64],
+    slopes: EndpointSlopes,
+) -> BuiltinResult<Vec<[f64; 4]>> {
+    let n = x.len();
+    let widths: Vec<f64> = x.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    let secants: Vec<f64> = y
+        .windows(2)
+        .zip(widths.iter())
+        .map(|(pair, &width)| (pair[1] - pair[0]) / width)
+        .collect();
+    let mut diagonal = vec![0.0; n];
+    let mut upper = vec![0.0; n - 1];
+    let mut rhs = vec![0.0; n];
+    diagonal[0] = 2.0 * widths[0];
+    upper[0] = widths[0];
+    rhs[0] = 6.0 * (secants[0] - slopes.first);
+    for i in 1..n - 1 {
+        diagonal[i] = 2.0 * (widths[i - 1] + widths[i]);
+        upper[i] = widths[i];
+        rhs[i] = 6.0 * (secants[i] - secants[i - 1]);
+    }
+    diagonal[n - 1] = 2.0 * widths[n - 2];
+    rhs[n - 1] = 6.0 * (slopes.last - secants[n - 2]);
+
+    for i in 1..n {
+        let lower = widths[i - 1];
+        let factor = lower / diagonal[i - 1];
+        diagonal[i] -= factor * upper[i - 1];
+        rhs[i] -= factor * rhs[i - 1];
+    }
+    let mut second = vec![0.0; n];
+    second[n - 1] = rhs[n - 1] / diagonal[n - 1];
+    for i in (0..n - 1).rev() {
+        second[i] = (rhs[i] - upper[i] * second[i + 1]) / diagonal[i];
+    }
+    if second.iter().any(|value| !value.is_finite()) {
+        return Err(interp_error(
+            "spline",
+            "spline: invalid endpoint slope system",
+        ));
+    }
     Ok(second_derivatives_to_coefs(x, y, &second))
 }
 
