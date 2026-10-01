@@ -3,6 +3,7 @@
 
 use super::super::*;
 use super::trace::{ResidentStageKind, ResidentTrace};
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::deep_learning::model::parameters::ParameterRole;
 use runmat_accelerate_api::{AccelProvider, ProviderActivationAdjoint};
 

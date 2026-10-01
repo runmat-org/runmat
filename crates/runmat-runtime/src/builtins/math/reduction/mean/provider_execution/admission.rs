@@ -1,6 +1,7 @@
 //! Physical descriptor and requested-class admission for resident mean.
 use super::*;
 use gpu_helpers::{GpuOutputAliasPolicy, UnaryGpuOutputContract};
+use runmat_accelerate_api::GpuTensorStorage;
 
 fn exact_execution_owner(
     provider: &dyn AccelProvider,
