@@ -226,6 +226,10 @@ pub mod standard {
     pub const SERIES_NETWORK: StaticClassIdentity = StaticClassIdentity::new("SeriesNetwork");
     pub const DAG_NETWORK: StaticClassIdentity = StaticClassIdentity::new("DAGNetwork");
     pub const LINEAR_MODEL: StaticClassIdentity = StaticClassIdentity::new("LinearModel");
+    pub const OPTIMIZABLE_VARIABLE: StaticClassIdentity =
+        StaticClassIdentity::new("optimizableVariable");
+    pub const BAYESIAN_OPTIMIZATION: StaticClassIdentity =
+        StaticClassIdentity::new("BayesianOptimization");
     pub const CLASSIFICATION_TREE: StaticClassIdentity =
         StaticClassIdentity::new("ClassificationTree");
     pub const CLASSIFICATION_LINEAR: StaticClassIdentity =

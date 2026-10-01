@@ -3,9 +3,11 @@
 use std::collections::{BTreeMap, HashSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, OptimizableVariableOption, OptimizationVariableTransform as Transform,
+    OptimizationVariableType as VariableType, OPTIMIZABLE_VARIABLE_ERROR_FLOW as ERROR_FLOW,
+    OPTIMIZABLE_VARIABLE_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    OPTIMIZABLE_VARIABLE_ERROR_INVALID_OPTION as ERROR_INVALID_OPTION,
+    OPTIMIZABLE_VARIABLE_ERROR_INVALID_RANGE as ERROR_INVALID_RANGE,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -17,115 +19,14 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_helpers;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::builtins::common::validation::integer_is_exact_f64;
+use crate::{
+    build_runtime_error, gather_if_needed_async, BuiltinResult, GpuGatherRetry, RuntimeError,
+};
 
 const NAME: &str = "optimizableVariable";
 const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("optimizableVariable");
-
-const OUTPUT_VAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "variable",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bayesian optimization variable metadata object.",
-}];
-
-const INPUTS_BASE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Variable name.",
-    },
-    BuiltinParamDescriptor {
-        name: "Range",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric two-element bounds or categorical choices.",
-    },
-];
-
-const INPUTS_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Variable name.",
-    },
-    BuiltinParamDescriptor {
-        name: "Range",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric two-element bounds or categorical choices.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options Type, Transform, and Optimize.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "v = optimizableVariable(Name, Range)",
-        inputs: &INPUTS_BASE,
-        outputs: &OUTPUT_VAR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "v = optimizableVariable(Name, Range, Name, Value)",
-        inputs: &INPUTS_OPTIONS,
-        outputs: &OUTPUT_VAR,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMIZABLE_VARIABLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:optimizableVariable:InvalidArgument"),
-    when: "The variable name, range, or name-value arguments are malformed.",
-    message: "optimizableVariable: invalid argument",
-};
-
-const ERROR_INVALID_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMIZABLE_VARIABLE.INVALID_RANGE",
-    identifier: Some("RunMat:optimizableVariable:InvalidRange"),
-    when: "The supplied range is incompatible with the requested variable type.",
-    message: "optimizableVariable: invalid range",
-};
-
-const ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMIZABLE_VARIABLE.INVALID_OPTION",
-    identifier: Some("RunMat:optimizableVariable:InvalidOption"),
-    when: "A name-value option is unknown or has an unsupported value.",
-    message: "optimizableVariable: invalid option",
-};
-
-const ERROR_FLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMIZABLE_VARIABLE.FLOW",
-    identifier: Some("RunMat:optimizableVariable:Flow"),
-    when: "Gathering a metadata input fails.",
-    message: "optimizableVariable: flow failure",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ERROR_INVALID_ARGUMENT,
-    ERROR_INVALID_RANGE,
-    ERROR_INVALID_OPTION,
-    ERROR_FLOW,
-];
-
-pub const OPTIMIZABLE_VARIABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
+    runmat_types::standard::OPTIMIZABLE_VARIABLE;
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::stats::ml::optimizable_variable"
@@ -164,8 +65,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Create Bayesian optimization variable metadata.",
     keywords = "optimizableVariable,bayesopt,optimization,variable,Type,Transform,Optimize",
     accel = "cpu",
-    type_resolver(optimizable_variable_type),
-    descriptor(crate::builtins::stats::ml::optimizable_variable::OPTIMIZABLE_VARIABLE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::optimizable_variable"
 )]
 async fn optimizable_variable_builtin(
@@ -173,6 +73,33 @@ async fn optimizable_variable_builtin(
     range: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !rest.len().is_multiple_of(2) {
+        return Err(error(
+            "optimizableVariable: name-value options must be paired",
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    // Reject host-visible invalid controls before requesting any provider data.
+    for pair in rest.chunks_exact(2) {
+        if !matches!(pair[0], Value::GpuTensor(_)) {
+            let name = parse_text_scalar(&pair[0], "option name", &ERROR_INVALID_OPTION)?;
+            if OptimizableVariableOption::from_public_name(&name).is_none() {
+                return Err(error(
+                    format!("optimizableVariable: unknown option '{name}'"),
+                    &ERROR_INVALID_OPTION,
+                ));
+            }
+        }
+    }
+    if !matches!(name, Value::GpuTensor(_)) {
+        let variable_name = parse_text_scalar(&name, "Name", &ERROR_INVALID_ARGUMENT)?;
+        if variable_name.trim().is_empty() {
+            return Err(error(
+                "optimizableVariable: Name must be a nonempty text scalar",
+                &ERROR_INVALID_ARGUMENT,
+            ));
+        }
+    }
     let name = gather_if_needed_async(&name)
         .await
         .map_err(|err| remap_flow(err, "name"))?;
@@ -209,11 +136,11 @@ async fn optimizable_variable_builtin(
         .insert("Range".to_string(), range.value().clone());
     object.properties.insert(
         "Type".to_string(),
-        Value::String(var_type.as_str().to_string()),
+        Value::String(var_type.public_name().to_string()),
     );
     object.properties.insert(
         "Transform".to_string(),
-        Value::String(options.transform.as_str().to_string()),
+        Value::String(options.transform.public_name().to_string()),
     );
     object
         .properties
@@ -221,71 +148,24 @@ async fn optimizable_variable_builtin(
     Ok(Value::Object(object))
 }
 
-fn optimizable_variable_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
+fn variable_type(value: &Value) -> BuiltinResult<VariableType> {
+    let text = parse_text_scalar(value, "Type", &ERROR_INVALID_OPTION)?;
+    VariableType::from_public_name(&text).ok_or_else(|| {
+        error(
+            format!("optimizableVariable: unsupported Type '{text}'"),
+            &ERROR_INVALID_OPTION,
+        )
+    })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VariableType {
-    Real,
-    Integer,
-    Categorical,
-}
-
-impl VariableType {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
-        match parse_text_scalar(value, "Type", &ERROR_INVALID_OPTION)?
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "real" => Ok(Self::Real),
-            "integer" => Ok(Self::Integer),
-            "categorical" => Ok(Self::Categorical),
-            other => Err(error(
-                format!("optimizableVariable: unsupported Type '{other}'"),
-                &ERROR_INVALID_OPTION,
-            )),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Real => "real",
-            Self::Integer => "integer",
-            Self::Categorical => "categorical",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Transform {
-    None,
-    Log,
-}
-
-impl Transform {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
-        match parse_text_scalar(value, "Transform", &ERROR_INVALID_OPTION)?
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "none" => Ok(Self::None),
-            "log" => Ok(Self::Log),
-            other => Err(error(
-                format!("optimizableVariable: unsupported Transform '{other}'"),
-                &ERROR_INVALID_OPTION,
-            )),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Log => "log",
-        }
-    }
+fn transform(value: &Value) -> BuiltinResult<Transform> {
+    let text = parse_text_scalar(value, "Transform", &ERROR_INVALID_OPTION)?;
+    Transform::from_public_name(&text).ok_or_else(|| {
+        error(
+            format!("optimizableVariable: unsupported Transform '{text}'"),
+            &ERROR_INVALID_OPTION,
+        )
+    })
 }
 
 #[derive(Debug)]
@@ -313,18 +193,20 @@ impl Options {
             let name = parse_text_scalar(&pair[0], "option name", &ERROR_INVALID_OPTION)?
                 .trim()
                 .to_ascii_lowercase();
-            pairs.insert(name, pair[1].clone());
+            let option = OptimizableVariableOption::from_public_name(&name).ok_or_else(|| {
+                error(
+                    format!("optimizableVariable: unknown option '{name}'"),
+                    &ERROR_INVALID_OPTION,
+                )
+            })?;
+            pairs.insert(option, pair[1].clone());
         }
-        for (name, value) in pairs {
-            match name.as_str() {
-                "type" => options.var_type = Some(VariableType::parse(&value)?),
-                "transform" => options.transform = Transform::parse(&value)?,
-                "optimize" => options.optimize = parse_bool(&value, "Optimize")?,
-                other => {
-                    return Err(error(
-                        format!("optimizableVariable: unknown option '{other}'"),
-                        &ERROR_INVALID_OPTION,
-                    ));
+        for (option, value) in pairs {
+            match option {
+                OptimizableVariableOption::Type => options.var_type = Some(variable_type(&value)?),
+                OptimizableVariableOption::Transform => options.transform = transform(&value)?,
+                OptimizableVariableOption::Optimize => {
+                    options.optimize = parse_bool(&value, "Optimize")?
                 }
             }
         }
@@ -349,6 +231,18 @@ impl OptimizableRange {
     fn parse(value: Value, explicit_type: Option<VariableType>) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(tensor) => {
+                if tensor.integer_storage().is_some_and(|storage| {
+                    (0..storage.len()).any(|index| {
+                        storage
+                            .value_at(index)
+                            .is_none_or(|value| !integer_is_exact_f64(&value))
+                    })
+                }) {
+                    return Err(error(
+                        "optimizableVariable: integer Range bounds must be exactly representable as double",
+                        &ERROR_INVALID_RANGE,
+                    ));
+                }
                 let values = tensor_helpers::tensor_values_f64(&tensor);
                 Self::numeric_from_values(Value::Tensor(tensor), &values)
             }
@@ -357,6 +251,12 @@ impl OptimizableRange {
                 &[n],
             ),
             Value::Int(i) => {
+                if !integer_is_exact_f64(&i) {
+                    return Err(error(
+                        "optimizableVariable: integer Range bounds must be exactly representable as double",
+                        &ERROR_INVALID_RANGE,
+                    ));
+                }
                 let n = i.to_f64();
                 Self::numeric_from_values(
                     Value::Tensor(Tensor::new(vec![n], vec![1, 1]).unwrap()),
@@ -586,13 +486,17 @@ fn error(message: impl Into<String>, descriptor: &'static BuiltinErrorDescriptor
 }
 
 fn remap_flow(err: RuntimeError, label: &str) -> RuntimeError {
-    error(
-        format!(
-            "optimizableVariable: failed to gather {label}: {}",
-            err.message()
-        ),
-        &ERROR_FLOW,
-    )
+    let mut builder = build_runtime_error(format!(
+        "optimizableVariable: failed to gather {label}: {}",
+        err.message()
+    ))
+    .with_builtin(NAME)
+    .with_source(err)
+    .with_gpu_gather_retry(GpuGatherRetry::Never);
+    if let Some(identifier) = ERROR_FLOW.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[cfg(test)]
@@ -822,5 +726,35 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.to_string().contains("unique"));
+    }
+
+    #[test]
+    fn wide_integer_bounds_require_exact_binary64_conversion() {
+        let exact_lower = 1_u64 << 54;
+        let exact_upper = exact_lower + 4;
+        let accepted = block_on(optimizable_variable_builtin(
+            Value::String("wide".into()),
+            typed_integer_range(IntegerStorage::U64(vec![exact_lower, exact_upper])),
+            vec![
+                Value::String("Type".into()),
+                Value::String("integer".into()),
+            ],
+        ))
+        .expect("aligned wide bounds remain exact");
+        assert!(object(accepted).class_name.is(CLASS_IDENTITY));
+
+        let error = block_on(optimizable_variable_builtin(
+            Value::String("rounded".into()),
+            typed_integer_range(IntegerStorage::U64(vec![
+                (1_u64 << 53) + 1,
+                (1_u64 << 53) + 3,
+            ])),
+            vec![
+                Value::String("Type".into()),
+                Value::String("integer".into()),
+            ],
+        ))
+        .expect_err("rounded bounds must not become a different search domain");
+        assert_eq!(error.identifier(), ERROR_INVALID_RANGE.identifier);
     }
 }

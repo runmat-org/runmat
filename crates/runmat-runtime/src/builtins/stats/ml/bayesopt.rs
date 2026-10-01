@@ -5,9 +5,10 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BayesoptAcquisition as Acquisition, BayesoptOption, BuiltinErrorDescriptor,
+    OptimizationVariableTransform as Transform, OptimizationVariableType as VariableType,
+    BAYESOPT_ERROR_FLOW as ERROR_FLOW, BAYESOPT_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    BAYESOPT_ERROR_OBJECTIVE as ERROR_OBJECTIVE, BAYESOPT_ERROR_UNSUPPORTED as ERROR_UNSUPPORTED,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -19,102 +20,21 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::optim::common::{call_function, value_to_scalar};
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::builtins::common::validation::native_integer_value_is_exact_f64;
+use crate::{
+    build_runtime_error, gather_if_needed_async, BuiltinResult, GpuGatherRetry, RuntimeError,
+};
 
 const NAME: &str = "bayesopt";
 const RESULT_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("BayesianOptimization");
+    runmat_types::standard::BAYESIAN_OPTIMIZATION;
 const OPTIMIZABLE_VARIABLE_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("optimizableVariable");
+    runmat_types::standard::OPTIMIZABLE_VARIABLE;
 const DEFAULT_MAX_EVALS: usize = 30;
 const DEFAULT_SEED_POINTS: usize = 4;
 const MAX_CANDIDATES: usize = 2048;
 const MAX_EVALS_LIMIT: usize = MAX_CANDIDATES;
 const GP_NOISE: f64 = 1.0e-8;
-
-const OUTPUT_RESULT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "results",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "BayesianOptimization compatibility result object.",
-}];
-
-const PARAM_OBJECTIVE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "fun",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Objective callback evaluated as fun(X), where X is a one-row table.",
-};
-
-const PARAM_VARIABLES: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "vars",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "optimizableVariable object or cell/object collection.",
-};
-
-const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "NameValue",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description:
-        "Name-value options including MaxObjectiveEvaluations and AcquisitionFunctionName.",
-};
-
-const INPUTS: [BuiltinParamDescriptor; 3] = [PARAM_OBJECTIVE, PARAM_VARIABLES, PARAM_OPTIONS];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "results = bayesopt(fun, vars, Name, Value)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT_RESULT,
-}];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BAYESOPT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:bayesopt:InvalidArgument"),
-    when: "Variables, name-value options, callback outputs, or constraints are malformed.",
-    message: "bayesopt: invalid argument",
-};
-
-const ERROR_OBJECTIVE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BAYESOPT.OBJECTIVE",
-    identifier: Some("RunMat:bayesopt:Objective"),
-    when: "The objective callback cannot be evaluated or returns an invalid objective value.",
-    message: "bayesopt: objective evaluation failed",
-};
-
-const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BAYESOPT.UNSUPPORTED",
-    identifier: Some("RunMat:bayesopt:Unsupported"),
-    when: "A requested Bayesian optimization option requires infrastructure outside this slice.",
-    message: "bayesopt: unsupported option",
-};
-
-const ERROR_FLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BAYESOPT.FLOW",
-    identifier: Some("RunMat:bayesopt:Flow"),
-    when: "An input cannot be gathered before Bayesian optimization begins.",
-    message: "bayesopt: failed to gather input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ERROR_INVALID_ARGUMENT,
-    ERROR_OBJECTIVE,
-    ERROR_UNSUPPORTED,
-    ERROR_FLOW,
-];
-
-pub const BAYESOPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::ml::bayesopt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -146,19 +66,85 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "bayesopt",
     execution_stack = "process",
+    context = true,
+    requested_outputs = true,
     category = "stats/ml",
     summary = "Run deterministic Bayesian optimization over optimizableVariable metadata.",
     keywords = "bayesopt,Bayesian optimization,optimizableVariable,expected improvement",
     accel = "cpu",
-    type_resolver(bayesopt_type),
-    descriptor(crate::builtins::stats::ml::bayesopt::BAYESOPT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::bayesopt"
 )]
+async fn bayesopt_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    objective: Value,
+    variables: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    bayesopt_in_runtime(
+        runtime.as_ref(),
+        requested_outputs,
+        objective,
+        variables,
+        rest,
+    )
+    .await
+}
+
+#[cfg(test)]
 async fn bayesopt_builtin(
     objective: Value,
     variables: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    bayesopt_in_runtime(
+        None,
+        crate::output_count::current_output_count(),
+        objective,
+        variables,
+        rest,
+    )
+    .await
+}
+
+async fn bayesopt_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    objective: Value,
+    variables: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    check_cancellation(runtime)?;
+    if requested_outputs.is_some_and(|count| count > 1) {
+        return Err(bayesopt_error(
+            "bayesopt supports one result output",
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    if !is_callable(&objective) {
+        return Err(bayesopt_error(
+            "bayesopt: objective must be callable",
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    if !rest.len().is_multiple_of(2) {
+        return Err(bayesopt_error(
+            "bayesopt: name-value options must be paired",
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    for pair in rest.chunks_exact(2) {
+        if !matches!(pair[0], Value::GpuTensor(_)) {
+            let name = value_to_text(&pair[0], "option name")?;
+            if BayesoptOption::from_public_name(&name).is_none() {
+                return Err(bayesopt_error(
+                    format!("bayesopt: unsupported option '{name}'"),
+                    &ERROR_INVALID_ARGUMENT,
+                ));
+            }
+        }
+    }
     let variables = gather_if_needed_async(&variables)
         .await
         .map_err(|err| map_flow(err, "variables"))?;
@@ -172,18 +158,26 @@ async fn bayesopt_builtin(
     }
     let vars = parse_variables(variables)?;
     let options = BayesoptOptions::parse(gathered_rest)?;
-    let outcome = optimize(objective, vars, options).await?;
-    finalize(outcome)
+    check_cancellation(runtime)?;
+    let outcome = optimize(runtime, objective, vars, options).await?;
+    finalize(outcome, requested_outputs)
 }
 
-fn bayesopt_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
+fn check_cancellation(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<()> {
+    if let Some(runtime) = runtime.filter(|runtime| runtime.is_cancelled()) {
+        return Err(build_runtime_error("bayesopt: execution was cancelled")
+            .with_builtin(NAME)
+            .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+            .build());
+    }
+    Ok(())
 }
 
 fn map_flow(err: RuntimeError, label: &str) -> RuntimeError {
-    bayesopt_error(
+    bayesopt_error_with_source(
         format!("bayesopt: failed to gather {label}: {}", err.message()),
         &ERROR_FLOW,
+        err,
     )
 }
 
@@ -196,6 +190,59 @@ fn bayesopt_error(
         builder = builder.with_identifier(identifier);
     }
     builder.build()
+}
+
+fn bayesopt_error_with_source(
+    message: impl Into<String>,
+    descriptor: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_gpu_gather_retry(GpuGatherRetry::Never)
+        .with_source(source);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinResult<Value> {
+    let callback = crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone());
+    crate::call_feval_async_with_outputs(callback, &args, 1).await
+}
+
+fn objective_scalar(value: Value) -> BuiltinResult<f64> {
+    if !native_integer_value_is_exact_f64(&value) {
+        return Err(bayesopt_error(
+            "bayesopt: objective integer value must be exactly representable as double",
+            &ERROR_OBJECTIVE,
+        ));
+    }
+    let number = match value {
+        Value::Num(value) => value,
+        Value::Int(value) => value.to_f64(),
+        Value::Bool(value) => f64::from(u8::from(value)),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            tensor::tensor_value_f64(&tensor, 0)
+        }
+        Value::LogicalArray(logical) if logical.data.len() == 1 => {
+            f64::from(u8::from(logical.data[0] != 0))
+        }
+        other => {
+            return Err(bayesopt_error(
+                format!("bayesopt: objective must return a real numeric scalar, got {other:?}"),
+                &ERROR_OBJECTIVE,
+            ))
+        }
+    };
+    if !number.is_finite() {
+        return Err(bayesopt_error(
+            "bayesopt: objective must be finite",
+            &ERROR_OBJECTIVE,
+        ));
+    }
+    Ok(number)
 }
 
 #[derive(Clone, Debug)]
@@ -211,12 +258,6 @@ enum VariableKind {
     Real { lower: f64, upper: f64 },
     Integer { lower: i64, upper: i64 },
     Categorical { categories: Vec<String> },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Transform {
-    None,
-    Log,
 }
 
 fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
@@ -277,20 +318,20 @@ fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
 
 fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
     let name = string_property(object, "Name")?;
-    let var_type = string_property(object, "Type")?.to_ascii_lowercase();
-    let transform = match string_property(object, "Transform")?
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "none" => Transform::None,
-        "log" => Transform::Log,
-        other => {
-            return Err(bayesopt_error(
-                format!("bayesopt: unsupported Transform '{other}'"),
-                &ERROR_INVALID_ARGUMENT,
-            ))
-        }
-    };
+    let public_type = string_property(object, "Type")?;
+    let var_type = VariableType::from_public_name(&public_type).ok_or_else(|| {
+        bayesopt_error(
+            format!("bayesopt: unsupported variable Type '{public_type}'"),
+            &ERROR_INVALID_ARGUMENT,
+        )
+    })?;
+    let public_transform = string_property(object, "Transform")?;
+    let transform = Transform::from_public_name(&public_transform).ok_or_else(|| {
+        bayesopt_error(
+            format!("bayesopt: unsupported Transform '{public_transform}'"),
+            &ERROR_INVALID_ARGUMENT,
+        )
+    })?;
     let optimize = match object.properties.get("Optimize") {
         Some(Value::Bool(value)) => *value,
         Some(other) => {
@@ -307,8 +348,8 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
             &ERROR_INVALID_ARGUMENT,
         )
     })?;
-    let kind = match var_type.as_str() {
-        "real" => {
+    let kind = match var_type {
+        VariableType::Real => {
             let (lower, upper) = numeric_range(range, &name)?;
             if transform == Transform::Log && lower <= 0.0 {
                 return Err(bayesopt_error(
@@ -318,7 +359,7 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
             }
             VariableKind::Real { lower, upper }
         }
-        "integer" => {
+        VariableType::Integer => {
             let (lower, upper) = numeric_range(range, &name)?;
             if lower.fract() != 0.0 || upper.fract() != 0.0 {
                 return Err(bayesopt_error(
@@ -332,12 +373,18 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
                     &ERROR_INVALID_ARGUMENT,
                 ));
             }
+            if lower < i64::MIN as f64 || upper >= 9_223_372_036_854_775_808.0 {
+                return Err(bayesopt_error(
+                    format!("bayesopt: integer variable '{name}' exceeds the supported signed integer range"),
+                    &ERROR_INVALID_ARGUMENT,
+                ));
+            }
             VariableKind::Integer {
                 lower: lower as i64,
                 upper: upper as i64,
             }
         }
-        "categorical" => {
+        VariableType::Categorical => {
             if transform != Transform::None {
                 return Err(bayesopt_error(
                     format!(
@@ -349,12 +396,6 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
             VariableKind::Categorical {
                 categories: categorical_range(range, &name)?,
             }
-        }
-        other => {
-            return Err(bayesopt_error(
-                format!("bayesopt: unsupported variable Type '{other}'"),
-                &ERROR_INVALID_ARGUMENT,
-            ))
         }
     };
     Ok(Variable {
@@ -382,6 +423,12 @@ fn string_property(object: &ObjectInstance, name: &str) -> BuiltinResult<String>
 }
 
 fn numeric_range(value: &Value, name: &str) -> BuiltinResult<(f64, f64)> {
+    if !native_integer_value_is_exact_f64(value) {
+        return Err(bayesopt_error(
+            format!("bayesopt: integer Range for '{name}' must be exactly representable as double"),
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
     let values = match value {
         Value::Tensor(tensor) => tensor::tensor_values_f64(tensor),
         Value::Num(n) => vec![*n],
@@ -457,23 +504,6 @@ struct BayesoptOptions {
     raw_options: StructValue,
 }
 
-#[derive(Clone, Copy)]
-enum Acquisition {
-    ExpectedImprovement,
-    ExpectedImprovementPlus,
-    LowerConfidenceBound,
-}
-
-impl Acquisition {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ExpectedImprovement => "expected-improvement",
-            Self::ExpectedImprovementPlus => "expected-improvement-plus",
-            Self::LowerConfidenceBound => "lower-confidence-bound",
-        }
-    }
-}
-
 impl BayesoptOptions {
     fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
         if !args.len().is_multiple_of(2) {
@@ -493,28 +523,34 @@ impl BayesoptOptions {
 
         for pair in args.chunks_exact(2) {
             let name = value_to_text(&pair[0], "option name")?;
-            let canonical = canonical_option(&name);
+            let option = BayesoptOption::from_public_name(&name).ok_or_else(|| {
+                bayesopt_error(
+                    format!("bayesopt: unsupported option '{name}'"),
+                    &ERROR_INVALID_ARGUMENT,
+                )
+            })?;
+            let canonical = option.public_name();
             let value = pair[1].clone();
-            match canonical.as_str() {
-                "MaxObjectiveEvaluations" => {
+            match option {
+                BayesoptOption::MaxObjectiveEvaluations => {
                     max_evals = option_usize(&value, &canonical, 1, MAX_EVALS_LIMIT)?
                 }
-                "NumSeedPoints" => {
+                BayesoptOption::NumSeedPoints => {
                     num_seed_points = option_usize(&value, &canonical, 0, MAX_EVALS_LIMIT)?
                 }
-                "AcquisitionFunctionName" => {
+                BayesoptOption::AcquisitionFunctionName => {
                     acquisition = parse_acquisition(&value)?;
                 }
-                "ExplorationRatio" => {
+                BayesoptOption::ExplorationRatio => {
                     exploration_ratio = option_unit_f64(&value, &canonical)?;
                 }
-                "IsObjectiveDeterministic" => {
+                BayesoptOption::IsObjectiveDeterministic => {
                     deterministic = option_bool(&value, &canonical)?;
                 }
-                "Verbose" => {
+                BayesoptOption::Verbose => {
                     verbose = option_bool(&value, &canonical)?;
                 }
-                "UseParallel" => {
+                BayesoptOption::UseParallel => {
                     if option_bool(&value, &canonical)? {
                         return Err(bayesopt_error(
                             "bayesopt: UseParallel=true requires the parallel execution infrastructure",
@@ -522,7 +558,7 @@ impl BayesoptOptions {
                         ));
                     }
                 }
-                "XConstraintFcn" => {
+                BayesoptOption::XConstraintFcn => {
                     if is_empty_option(&value) {
                         x_constraint = None;
                     } else if is_callable(&value) {
@@ -534,7 +570,7 @@ impl BayesoptOptions {
                         ));
                     }
                 }
-                "PlotFcn" | "OutputFcn" => {
+                BayesoptOption::PlotFcn | BayesoptOption::OutputFcn => {
                     if !is_empty_option(&value) {
                         return Err(bayesopt_error(
                             format!("bayesopt: {canonical} callbacks are not supported in this headless runtime slice"),
@@ -542,7 +578,7 @@ impl BayesoptOptions {
                         ));
                     }
                 }
-                "ConditionalVariableFcn" => {
+                BayesoptOption::ConditionalVariableFcn => {
                     if !is_empty_option(&value) {
                         return Err(bayesopt_error(
                             "bayesopt: ConditionalVariableFcn requires dynamic variable activation support",
@@ -550,16 +586,12 @@ impl BayesoptOptions {
                         ));
                     }
                 }
-                "InitialX" | "InitialObjective" | "InitialConstraintViolations" => {
+                BayesoptOption::InitialX
+                | BayesoptOption::InitialObjective
+                | BayesoptOption::InitialConstraintViolations => {
                     return Err(bayesopt_error(
                         format!("bayesopt: {canonical} warm starts are not supported yet"),
                         &ERROR_UNSUPPORTED,
-                    ));
-                }
-                other => {
-                    return Err(bayesopt_error(
-                        format!("bayesopt: unsupported option '{other}'"),
-                        &ERROR_INVALID_ARGUMENT,
                     ));
                 }
             }
@@ -572,7 +604,7 @@ impl BayesoptOptions {
         raw_options.insert("NumSeedPoints", Value::Num(num_seed_points as f64));
         raw_options.insert(
             "AcquisitionFunctionName",
-            Value::String(acquisition.as_str().to_string()),
+            Value::String(acquisition.public_name().to_string()),
         );
         raw_options.insert("ExplorationRatio", Value::Num(exploration_ratio));
         raw_options.insert("IsObjectiveDeterministic", Value::Bool(deterministic));
@@ -592,47 +624,18 @@ impl BayesoptOptions {
     }
 }
 
-fn canonical_option(name: &str) -> String {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "maxobjectiveevaluations" => "MaxObjectiveEvaluations",
-        "numseedpoints" => "NumSeedPoints",
-        "acquisitionfunctionname" => "AcquisitionFunctionName",
-        "explorationratio" => "ExplorationRatio",
-        "isobjectivedeterministic" => "IsObjectiveDeterministic",
-        "verbose" => "Verbose",
-        "useparallel" => "UseParallel",
-        "xconstraintfcn" => "XConstraintFcn",
-        "plotfcn" => "PlotFcn",
-        "outputfcn" => "OutputFcn",
-        "conditionalvariablefcn" => "ConditionalVariableFcn",
-        "initialx" => "InitialX",
-        "initialobjective" => "InitialObjective",
-        "initialconstraintviolations" => "InitialConstraintViolations",
-        other => other,
-    }
-    .to_string()
-}
-
 fn parse_acquisition(value: &Value) -> BuiltinResult<Acquisition> {
-    let text = value_to_text(value, "AcquisitionFunctionName")?
-        .to_ascii_lowercase()
-        .replace('_', "-");
-    match text.as_str() {
-        "expected-improvement" | "expected-improvement-per-second" => {
-            Ok(Acquisition::ExpectedImprovement)
-        }
-        "expected-improvement-plus" | "expected-improvement-per-second-plus" => {
-            Ok(Acquisition::ExpectedImprovementPlus)
-        }
-        "lower-confidence-bound" => Ok(Acquisition::LowerConfidenceBound),
-        other => Err(bayesopt_error(
-            format!("bayesopt: unsupported AcquisitionFunctionName '{other}'"),
+    let text = value_to_text(value, "AcquisitionFunctionName")?;
+    Acquisition::from_public_name(&text).ok_or_else(|| {
+        bayesopt_error(
+            format!("bayesopt: unsupported AcquisitionFunctionName '{text}'"),
             &ERROR_INVALID_ARGUMENT,
-        )),
-    }
+        )
+    })
 }
 
 async fn optimize(
+    runtime: Option<&crate::context::RuntimeContext>,
     objective: Value,
     variables: Vec<Variable>,
     options: BayesoptOptions,
@@ -651,6 +654,7 @@ async fn optimize(
     let mut exhausted_candidates = false;
 
     while observations.len() < options.max_evals {
+        check_cancellation(runtime)?;
         let Some(point) =
             choose_next_point(&options, &candidates, &observations, &seen, &mut surrogate)
         else {
@@ -671,11 +675,13 @@ async fn optimize(
         let row = point.to_table(&variables)?;
         let eval_start = Instant::now();
         let callback = call_function(&objective, vec![row]).await.map_err(|err| {
-            bayesopt_error(
+            bayesopt_error_with_source(
                 format!("bayesopt: objective evaluation failed: {}", err.message()),
                 &ERROR_OBJECTIVE,
+                err,
             )
         })?;
+        check_cancellation(runtime)?;
         let elapsed = eval_start.elapsed().as_secs_f64();
         let objective_value = parse_objective_value(callback).await?;
         observations.push(Observation {
@@ -707,7 +713,7 @@ fn choose_next_point(
     options: &BayesoptOptions,
     candidates: &[Point],
     observations: &[Observation],
-    seen: &HashSet<String>,
+    seen: &HashSet<PointKey>,
     surrogate: &mut SurrogateSummary,
 ) -> Option<Point> {
     if observations.len() < options.num_seed_points {
@@ -810,13 +816,18 @@ struct Point {
     encoded: Vec<f64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct PointKey(Vec<PointCoordinate>);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum PointCoordinate {
+    Numeric(u64),
+    Categorical(String),
+}
+
 impl Point {
-    fn key(&self) -> String {
-        self.values
-            .iter()
-            .map(VariableValue::key)
-            .collect::<Vec<_>>()
-            .join("|")
+    fn key(&self) -> PointKey {
+        PointKey(self.values.iter().map(VariableValue::key).collect())
     }
 
     fn to_table(&self, variables: &[Variable]) -> BuiltinResult<Value> {
@@ -838,10 +849,12 @@ enum VariableValue {
 }
 
 impl VariableValue {
-    fn key(&self) -> String {
+    fn key(&self) -> PointCoordinate {
         match self {
-            Self::Numeric(value) => format!("{value:.17}"),
-            Self::Categorical(value) => value.clone(),
+            Self::Numeric(value) => {
+                PointCoordinate::Numeric(if *value == 0.0 { 0.0f64 } else { *value }.to_bits())
+            }
+            Self::Categorical(value) => PointCoordinate::Categorical(value.clone()),
         }
     }
 
@@ -906,8 +919,8 @@ fn point_from_unit(variables: &[Variable], units: &[f64]) -> Point {
                 let value = decode_integer(*lower, *upper, variable.transform, unit);
                 values.push(VariableValue::Numeric(value as f64));
                 if variable.optimize {
-                    let denom = (*upper - *lower).max(1) as f64;
-                    encoded.push((value - *lower) as f64 / denom);
+                    let denom = (i128::from(*upper) - i128::from(*lower)).max(1) as f64;
+                    encoded.push((i128::from(value) - i128::from(*lower)) as f64 / denom);
                 }
             }
             VariableKind::Categorical { categories } => {
@@ -948,7 +961,7 @@ fn encode_real(lower: f64, upper: f64, transform: Transform, value: f64) -> f64 
 
 fn decode_integer(lower: i64, upper: i64, transform: Transform, unit: f64) -> i64 {
     let value = match transform {
-        Transform::None => lower as f64 + (upper - lower) as f64 * unit,
+        Transform::None => lower as f64 + (i128::from(upper) - i128::from(lower)) as f64 * unit,
         Transform::Log => {
             let lo = (lower.max(1) as f64).ln();
             let hi = (upper.max(1) as f64).ln();
@@ -1127,9 +1140,16 @@ struct ObjectiveValue {
 }
 
 async fn parse_objective_value(value: Value) -> BuiltinResult<ObjectiveValue> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| bayesopt_error(format!("bayesopt: {}", err.message()), &ERROR_OBJECTIVE))?;
+    let value = gather_if_needed_async(&value).await.map_err(|err| {
+        bayesopt_error_with_source(
+            format!(
+                "bayesopt: objective output gather failed: {}",
+                err.message()
+            ),
+            &ERROR_OBJECTIVE,
+            err,
+        )
+    })?;
     match value {
         Value::Struct(st) => {
             let objective = st
@@ -1143,9 +1163,7 @@ async fn parse_objective_value(value: Value) -> BuiltinResult<ObjectiveValue> {
                         &ERROR_OBJECTIVE,
                     )
                 })?;
-            let objective = value_to_scalar(NAME, objective).map_err(|err| {
-                bayesopt_error(format!("bayesopt: {}", err.message()), &ERROR_OBJECTIVE)
-            })?;
+            let objective = objective_scalar(objective)?;
             let constraint_violations = match st
                 .fields
                 .get("ConstraintViolations")
@@ -1161,9 +1179,7 @@ async fn parse_objective_value(value: Value) -> BuiltinResult<ObjectiveValue> {
             })
         }
         other => Ok(ObjectiveValue {
-            objective: value_to_scalar(NAME, other).map_err(|err| {
-                bayesopt_error(format!("bayesopt: {}", err.message()), &ERROR_OBJECTIVE)
-            })?,
+            objective: objective_scalar(other)?,
             constraint_violations: Vec::new(),
         }),
     }
@@ -1171,18 +1187,20 @@ async fn parse_objective_value(value: Value) -> BuiltinResult<ObjectiveValue> {
 
 async fn constraint_allows(handle: &Value, row: Value) -> BuiltinResult<bool> {
     let value = call_function(handle, vec![row]).await.map_err(|err| {
-        bayesopt_error(
+        bayesopt_error_with_source(
             format!(
                 "bayesopt: XConstraintFcn evaluation failed: {}",
                 err.message()
             ),
             &ERROR_OBJECTIVE,
+            err,
         )
     })?;
     let value = gather_if_needed_async(&value).await.map_err(|err| {
-        bayesopt_error(
+        bayesopt_error_with_source(
             format!("bayesopt: XConstraintFcn gather failed: {}", err.message()),
             &ERROR_OBJECTIVE,
+            err,
         )
     })?;
     match value {
@@ -1208,9 +1226,9 @@ struct BayesoptOutcome {
     exhausted_candidates: bool,
 }
 
-fn finalize(outcome: BayesoptOutcome) -> BuiltinResult<Value> {
+fn finalize(outcome: BayesoptOutcome, requested_outputs: Option<usize>) -> BuiltinResult<Value> {
     let result = result_object(outcome)?;
-    match crate::output_count::current_output_count() {
+    match requested_outputs {
         None => Ok(result),
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![result])),
@@ -1282,7 +1300,7 @@ fn result_object(outcome: BayesoptOutcome) -> BuiltinResult<Value> {
     surrogate.insert("LengthScale", Value::Num(outcome.surrogate.length_scale));
     surrogate.insert("Noise", Value::Num(outcome.surrogate.noise));
 
-    let mut object = ObjectInstance::new(RESULT_CLASS.to_string());
+    let mut object = ObjectInstance::new(RESULT_CLASS);
     object.properties.insert("XTrace".into(), x_trace);
     object
         .properties
@@ -1455,7 +1473,7 @@ fn variable_descriptions(variables: &[Variable]) -> BuiltinResult<Value> {
     let values = variables
         .iter()
         .map(|var| {
-            let mut object = ObjectInstance::new("optimizableVariable");
+            let mut object = ObjectInstance::new(OPTIMIZABLE_VARIABLE_CLASS);
             object
                 .properties
                 .insert("Name".into(), Value::String(var.name.clone()));
@@ -1463,22 +1481,17 @@ fn variable_descriptions(variables: &[Variable]) -> BuiltinResult<Value> {
                 "Type".into(),
                 Value::String(
                     match &var.kind {
-                        VariableKind::Real { .. } => "real",
-                        VariableKind::Integer { .. } => "integer",
-                        VariableKind::Categorical { .. } => "categorical",
+                        VariableKind::Real { .. } => VariableType::Real,
+                        VariableKind::Integer { .. } => VariableType::Integer,
+                        VariableKind::Categorical { .. } => VariableType::Categorical,
                     }
+                    .public_name()
                     .into(),
                 ),
             );
             object.properties.insert(
                 "Transform".into(),
-                Value::String(
-                    match var.transform {
-                        Transform::None => "none",
-                        Transform::Log => "log",
-                    }
-                    .into(),
-                ),
+                Value::String(var.transform.public_name().into()),
             );
             object
                 .properties
@@ -1718,6 +1731,37 @@ mod tests {
             .properties
             .insert("Optimize".into(), Value::Bool(true));
         Value::Object(object)
+    }
+
+    #[test]
+    fn output_count_and_bad_variable_identity_are_rejected_before_callbacks() {
+        let error = block_on(bayesopt_in_runtime(
+            None,
+            Some(2),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![],
+        ))
+        .expect_err("multiple results are unsupported before callback admission");
+        assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+
+        let mut unrelated = ObjectInstance::new(runmat_types::standard::LINEAR_MODEL);
+        unrelated
+            .properties
+            .insert("Name".into(), Value::String("x".into()));
+        let error = parse_variables(Value::Object(unrelated)).expect_err("wrong object class");
+        assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn candidate_identity_keeps_text_categories_distinct_from_numeric_values() {
+        let numeric = VariableValue::Numeric(1.0);
+        let text = VariableValue::Categorical("1.00000000000000000".into());
+        assert_ne!(numeric.key(), text.key());
+        assert_eq!(
+            VariableValue::Numeric(-0.0).key(),
+            VariableValue::Numeric(0.0).key()
+        );
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
