@@ -21,6 +21,9 @@ pub use mean_options::{MeanControl, MeanOutputClass};
 pub(super) use median_inference::{admitted_median_controls, inferred_median_shape};
 pub use median_options::MedianControl;
 pub use min_inference::infer_min_type;
+pub(super) use min_inference::{
+    admitted_min_reduction_controls, inferred_min_shape, is_empty_placeholder,
+};
 pub use min_options::{MinComparisonMethod, MinControl};
 pub use missing_policy::ReductionNaN;
 pub(super) use numeric_inference::LiteralReductionOutput;

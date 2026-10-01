@@ -1,9 +1,29 @@
 use super::numeric_inference::{
-    infer_numeric_reduction_type, EmptyAxesPolicy, LiteralReductionControl, ScalarResultClass,
+    admitted_literal_controls, infer_numeric_reduction_type, inferred_shape_fact, EmptyAxesPolicy,
+    KnownControls, LiteralReductionControl, ScalarResultClass,
 };
 use super::{MinComparisonMethod, MinControl};
 use crate::{ResolveContext, Type};
-use runmat_types::LiteralValue;
+use runmat_types::{LiteralValue, ShapeFact};
+
+pub(crate) fn admitted_min_reduction_controls(
+    argument_count: usize,
+    context: &ResolveContext,
+    option_start: usize,
+) -> Option<KnownControls> {
+    admitted_literal_controls(
+        argument_count,
+        context,
+        min_literal_control,
+        None,
+        option_start,
+        EmptyAxesPolicy::Default,
+    )
+}
+
+pub(crate) fn inferred_min_shape(source: &ShapeFact, controls: &KnownControls) -> ShapeFact {
+    inferred_shape_fact(source, controls)
+}
 
 /// Distinguish the pairwise and reduction call families before proving any
 /// class or axis fact. A reduction requires its public empty placeholder.
@@ -42,7 +62,7 @@ fn min_literal_control(literal: &LiteralValue) -> Option<LiteralReductionControl
     })
 }
 
-fn is_empty_placeholder(literal: &LiteralValue) -> bool {
+pub(crate) fn is_empty_placeholder(literal: &LiteralValue) -> bool {
     match literal {
         LiteralValue::Empty => true,
         LiteralValue::Vector(values) => values.is_empty(),
