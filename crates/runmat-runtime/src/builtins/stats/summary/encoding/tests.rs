@@ -34,3 +34,5 @@ mod encode;
 mod decode;
 #[path = "tests/shared.rs"]
 mod shared;
+#[path = "tests/provider_contract.rs"]
+mod provider_contract;
