@@ -63,7 +63,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[SOURCE],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
             label: "Normalization methods, exactness, precision, dimension, and provider restoration",
-            location: "crates/runmat-runtime/src/builtins/stats/summary/normalize.rs" }],
+            location: "crates/runmat-runtime/src/builtins/stats/summary/normalize/tests.rs" }],
         notes: &["All substantive legacy forms, two examples, GPU limits and related links are retained; executable example qualification remains pending."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
