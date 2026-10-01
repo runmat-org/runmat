@@ -3,6 +3,7 @@
 mod boundary;
 mod contract;
 mod derive;
+mod edge_space;
 mod element;
 mod flow;
 mod identity;
@@ -17,6 +18,7 @@ pub use contract::{
     BoundaryNormalOrientation, BoundaryQuadraturePoint, ProjectedBoundaryFace, ProjectedElement,
     ProjectedNode, VolumePointLocation, VolumeQuadraturePoint,
 };
+pub use edge_space::{EdgeElementMoments, EdgeQuadraturePoint, OrientedEdge, TetrahedralEdgeSpace};
 pub use flow::FlowTopologyProjection;
 
 #[cfg(test)]

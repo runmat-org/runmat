@@ -57,6 +57,16 @@ pub(crate) fn visit_volume_rule(
         visit(VolumeQuadraturePoint {
             position_m: weighted_position(coordinates, &shape_values[..node_count]),
             volume_weight_m3: reference_weight * determinant,
+            barycentric,
+            physical_barycentric_gradients: TETRAHEDRON_DERIVATIVES.map(|derivative| {
+                std::array::from_fn(|physical_axis| {
+                    (0..3)
+                        .map(|reference_axis| {
+                            inverse[physical_axis][reference_axis] * derivative[reference_axis]
+                        })
+                        .sum()
+                })
+            }),
             shape_values,
             physical_shape_gradients,
             node_count,

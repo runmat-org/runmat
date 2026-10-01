@@ -222,6 +222,8 @@ pub struct ProjectedElement {
 pub struct VolumeQuadraturePoint {
     pub position_m: [f64; 3],
     pub volume_weight_m3: f64,
+    pub(super) barycentric: [f64; 4],
+    pub(super) physical_barycentric_gradients: [[f64; 3]; 4],
     pub(super) shape_values: [f64; 10],
     pub(super) physical_shape_gradients: [[f64; 3]; 10],
     pub(super) node_count: usize,
@@ -286,6 +288,8 @@ pub enum BoundaryNormalOrientation {
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum AnalysisProjectionError {
+    #[error("edge space does not match canonical projection: {0}")]
+    InvalidEdgeSpace(&'static str),
     #[error("analysis projection resource estimate failed: {0}")]
     ResourceEstimate(String),
     #[error("canonical solver mesh is invalid: {0}")]
