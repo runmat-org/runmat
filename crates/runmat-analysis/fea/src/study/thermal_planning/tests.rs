@@ -315,6 +315,22 @@ fn shared_heat_source_is_preserved_and_unmaterialized_signal_is_rejected() {
         activation: ExcitationCaseActivation::Always,
     }];
     study.model.excitations = vec![ExcitationAction::HeatGeneration(action)];
+    study.model.sequence.steps[0].activations = vec![
+        StepObjectActivation {
+            object: StepObjectRef::Constraint("temperature".into()),
+            lifecycle: ActivationLifecycle::Activate,
+        },
+        StepObjectActivation {
+            object: StepObjectRef::Excitation(
+                study.model.excitations[0]
+                    .excitation()
+                    .excitation_id
+                    .0
+                    .clone(),
+            ),
+            lifecycle: ActivationLifecycle::Activate,
+        },
+    ];
     assert_eq!(
         plan_thermal_study(&study, policy()).unwrap().model,
         study.model

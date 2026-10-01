@@ -13,9 +13,12 @@ pub fn thermal_step_initial_selection_supported(step: &ProcedureStep) -> bool {
                 && input.use_as == StateUse::PhysicalInitialState
                 && input.conflict == InitialStateConflictPolicy::Reject
         })
-        && (step.activations.is_empty() || !step.state_inputs.is_empty())
-        && step.activations.iter().all(|activation| {
+        // Loads, constraints and boundaries are not initial-state selections.
+        // Their identities/lifecycles remain shared sequence admission work.
+        && step.activations.iter().filter(|activation| {
             matches!(&activation.object, StepObjectRef::InitialCondition(_))
+        }).all(|activation| {
+            !step.state_inputs.is_empty()
                 && activation.lifecycle == ActivationLifecycle::Activate
         })
 }
@@ -26,6 +29,9 @@ pub(super) fn supported(model: &AnalysisModel, step: &ProcedureStep) -> bool {
             .activations
             .iter()
             .enumerate()
+            .filter(|(_, activation)| {
+                matches!(&activation.object, StepObjectRef::InitialCondition(_))
+            })
             .all(|(index, activation)| {
                 !step.activations[..index]
                     .iter()

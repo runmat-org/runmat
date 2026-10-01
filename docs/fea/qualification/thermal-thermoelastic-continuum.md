@@ -9,6 +9,16 @@ qualification group passes 11/11 (77512, 14.21 s), and strict FEA all-target lin
 The first fixture run omitted the heat source from its closed activation inventory; that was
 corrected explicitly, without changing the reference, mandatory meshes or error bounds.
 
+The October 1 admission regression check again passes all six continuum cases
+(14.48 s), along with solved thermal-to-harmonic response and prescribed-temperature
+sampling. Initial-state selection now validates only initial-condition activations;
+shared sequence validation still owns load/constraint identities and lifecycles.
+The authored activation inventory, solved-temperature transfer and independent
+gates are unchanged. Thermal planning passes 16 tests including mixed selections
+and unsupported-input rejection. Retained backend reservation tests count both
+primary and bounded power-refinement solves and preserve one-byte-under rejection.
+These focused checks do not establish a green full regression or production gate.
+
 ## Independent continuum reference
 
 The unit cube has prescribed reference temperature at x=0 and x=1, insulated lateral faces,

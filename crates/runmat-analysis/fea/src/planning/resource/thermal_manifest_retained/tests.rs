@@ -55,9 +55,20 @@ fn retained_metadata_is_explicit_and_composed_before_assembly() {
                 + 2 * std::mem::size_of::<ThermalEnergyBalance>()) as u64
         );
         assert_eq!(retained.source_bytes.0, 0);
+        // Three samples yield two time steps. Each may retain the initial
+        // algebraic solve plus one bounded physical-power refinement solve.
+        assert_eq!(workload.solve_schedule().unwrap().solve_count(), 2);
+        assert_eq!(
+            workload
+                .solve_schedule()
+                .unwrap()
+                .maximum_linear_solve_count()
+                .unwrap(),
+            4
+        );
         assert_eq!(
             retained.backend_bytes.0,
-            (2 * std::mem::size_of::<AcceleratorSolveEvidence>()) as u64
+            (4 * std::mem::size_of::<AcceleratorSolveEvidence>()) as u64
         );
         assert!(retained.identity_heap_bytes.0 > 0);
         assert!(retained.diagnostic_bytes.0 > 0);
