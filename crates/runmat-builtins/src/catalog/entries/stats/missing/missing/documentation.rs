@@ -61,6 +61,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Scalar, shaped, exact integer and compatibility admission", location: "crates/runmat-runtime/src/builtins/missing/domain/tests/core.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled missing construction", location: "crates/runmat-vm/tests/missing_values.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Exact integer size controls and MATLAB-mode rejection", location: "crates/runmat-vm/tests/integer_datetime_metadata_and_nonzero_semantics.rs" },
         ],
         notes: &[],
     },
