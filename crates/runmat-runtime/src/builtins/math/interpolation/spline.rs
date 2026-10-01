@@ -18,7 +18,8 @@ use crate::builtins::common::spec::{
 };
 
 use super::pp::{
-    build_spline_pp, evaluate_pp, pp_to_value, query_points, series_from_values, Extrapolation,
+    build_spline_pp, evaluate_pp, pp_to_value, query_points, series_from_values_on_axis,
+    Extrapolation, PpOutputLayout, SampleAxis,
 };
 use crate::{build_runtime_error, RuntimeError};
 
@@ -268,9 +269,15 @@ async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinR
         )
         .await?;
     }
-    let series = series_from_values(x, y, NAME).await.map_err(|err| {
-        spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INVALID_INPUT)
-    })?;
+    let series = series_from_values_on_axis(x, y, SampleAxis::Last, NAME)
+        .await
+        .map_err(|err| {
+            spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INVALID_INPUT)
+        })?;
+    let output_layout = match series.sample_axis {
+        SampleAxis::First => PpOutputLayout::QueryLeading,
+        SampleAxis::Last => PpOutputLayout::ComponentLeading,
+    };
     let pp = build_spline_pp(&series, NAME).map_err(|err| {
         spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
     })?;
@@ -287,7 +294,14 @@ async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinR
                         &SPLINE_ERROR_INVALID_INPUT,
                     )
                 })?;
-            evaluate_pp(&pp, &query, &Extrapolation::Extrapolate, NAME).map_err(|err| {
+            evaluate_pp(
+                &pp,
+                &query,
+                &Extrapolation::Extrapolate,
+                output_layout,
+                NAME,
+            )
+            .map_err(|err| {
                 spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
             })
         }
@@ -332,6 +346,33 @@ mod tests {
             panic!("expected scalar");
         };
         assert!((result - 2.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn spline_preserves_nonsquare_array_component_axes() {
+        let data = (0..4)
+            .flat_map(|sample| (0..6).map(move |component| (component * 100 + sample) as f64))
+            .collect();
+        let value = block_on(spline_builtin(
+            row(&[1.0, 2.0, 3.0, 4.0]),
+            Value::Tensor(Tensor::new(data, vec![2, 3, 4]).unwrap()),
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+            )],
+        ))
+        .expect("array-valued spline");
+        let Value::Tensor(output) = value else {
+            panic!("array-valued spline must return a tensor");
+        };
+        assert_eq!(output.shape, vec![2, 3, 2, 2]);
+        let values = output.materialize_f64();
+        for query in 0..4 {
+            for component in 0..6 {
+                assert!(
+                    (values[component + query * 6] - (component * 100 + query) as f64).abs() < 1e-9
+                );
+            }
+        }
     }
 
     #[test]

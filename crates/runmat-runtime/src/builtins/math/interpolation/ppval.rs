@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 
-use super::pp::{evaluate_pp, pp_from_value, query_points, Extrapolation};
+use super::pp::{evaluate_pp, pp_from_value, query_points, Extrapolation, PpOutputLayout};
 use crate::{build_runtime_error, RuntimeError};
 
 const NAME: &str = "ppval";
@@ -76,8 +76,14 @@ async fn ppval_builtin(pp: Value, xq: Value) -> crate::BuiltinResult<Value> {
     let query = query_points(xq, NAME).await.map_err(|err| {
         ppval_error_with_message(err.message().to_string(), &PPVAL_ERROR_INVALID_INPUT)
     })?;
-    evaluate_pp(&parsed, &query, &Extrapolation::Extrapolate, NAME)
-        .map_err(|err| ppval_error_with_message(err.message().to_string(), &PPVAL_ERROR_INTERNAL))
+    evaluate_pp(
+        &parsed,
+        &query,
+        &Extrapolation::Extrapolate,
+        PpOutputLayout::ComponentLeading,
+        NAME,
+    )
+    .map_err(|err| ppval_error_with_message(err.message().to_string(), &PPVAL_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
@@ -94,6 +100,7 @@ mod tests {
             y: vec![1.0, 4.0, 9.0],
             series: 1,
             trailing_shape: Vec::new(),
+            sample_axis: super::super::pp::SampleAxis::Last,
         };
         let pp = pp_to_value(
             build_spline_pp(&series, "spline").expect("spline"),
@@ -107,6 +114,39 @@ mod tests {
         };
         assert!((tensor.materialize_f64()[0] - 2.25).abs() < 1e-10);
         assert!((tensor.materialize_f64()[1] - 6.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn ppval_evaluates_nonsquare_array_valued_struct() {
+        let samples = (0..4)
+            .flat_map(|sample| (0..6).map(move |component| (component * 100 + sample) as f64))
+            .collect();
+        let series = block_on(super::super::pp::series_from_values_on_axis(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap()),
+            Value::Tensor(Tensor::new(samples, vec![2, 3, 4]).unwrap()),
+            super::super::pp::SampleAxis::Last,
+            "pchip",
+        ))
+        .unwrap();
+        let pp = pp_to_value(
+            super::super::pp::build_pchip_pp(&series, "pchip").unwrap(),
+            "pchip",
+        )
+        .unwrap();
+        let query = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+        let Value::Tensor(output) = block_on(ppval_builtin(pp, query)).unwrap() else {
+            panic!("array-valued ppval must return a tensor");
+        };
+        assert_eq!(output.shape, vec![2, 3, 2, 2]);
+        let values = output.materialize_f64();
+        for sample in 0..4 {
+            for component in 0..6 {
+                assert_eq!(
+                    values[component + sample * 6],
+                    (component * 100 + sample) as f64
+                );
+            }
+        }
     }
 
     #[test]

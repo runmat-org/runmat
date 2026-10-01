@@ -11,7 +11,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection {
             heading: "Syntax",
-            paragraphs: &["`yq = ppval(pp, xq)` evaluates at scalar or array query points. A single-valued polynomial preserves the query shape; a polynomial with multiple component values appends its component dimension.",
+            paragraphs: &["`yq = ppval(pp, xq)` evaluates at scalar or array query points. A single-valued polynomial preserves the query shape; a polynomial with multiple component values places its component dimensions before the query dimensions.",
                 "`pp` contains `form`, `breaks`, `coefs`, `pieces`, `order`, and `dim` fields. The coefficient table is evaluated with Horner's method in the selected interval. Queries outside the breakpoint range use the first or last polynomial piece for extrapolation."],
         },
         BuiltinDocumentationSection {
@@ -38,6 +38,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     links: &[
         BuiltinDocumentationLink { label: "spline", target: BuiltinDocumentationLinkTarget::Builtin("spline") },
         BuiltinDocumentationLink { label: "pchip", target: BuiltinDocumentationLinkTarget::Builtin("pchip") },
+        BuiltinDocumentationLink { label: "MATLAB ppval reference", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/ppval.html") },
         BuiltinDocumentationLink { label: "Open an issue", target: BuiltinDocumentationLinkTarget::External("https://github.com/runmat-org/runmat/issues/new/choose") },
     ],
     media: &[],

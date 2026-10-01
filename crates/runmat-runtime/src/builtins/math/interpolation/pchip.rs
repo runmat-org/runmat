@@ -18,7 +18,8 @@ use crate::builtins::common::spec::{
 };
 
 use super::pp::{
-    build_pchip_pp, evaluate_pp, pp_to_value, query_points, series_from_values, Extrapolation,
+    build_pchip_pp, evaluate_pp, pp_to_value, query_points, series_from_values_on_axis,
+    Extrapolation, PpOutputLayout, SampleAxis,
 };
 use crate::{build_runtime_error, RuntimeError};
 
@@ -293,9 +294,15 @@ async fn pchip_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRe
     if let Some(query) = rest.first() {
         ensure_pchip_integer_boundary(query, &PCHIP_INTEGER_QUERY_EXTENSION, "Xq").await?;
     }
-    let series = series_from_values(x, y, NAME).await.map_err(|err| {
-        pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INVALID_INPUT)
-    })?;
+    let series = series_from_values_on_axis(x, y, SampleAxis::Last, NAME)
+        .await
+        .map_err(|err| {
+            pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INVALID_INPUT)
+        })?;
+    let output_layout = match series.sample_axis {
+        SampleAxis::First => PpOutputLayout::QueryLeading,
+        SampleAxis::Last => PpOutputLayout::ComponentLeading,
+    };
     let pp = build_pchip_pp(&series, NAME).map_err(|err| {
         pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INTERNAL)
     })?;
@@ -309,7 +316,14 @@ async fn pchip_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRe
                 .map_err(|err| {
                     pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INVALID_INPUT)
                 })?;
-            evaluate_pp(&pp, &query, &Extrapolation::Extrapolate, NAME).map_err(|err| {
+            evaluate_pp(
+                &pp,
+                &query,
+                &Extrapolation::Extrapolate,
+                output_layout,
+                NAME,
+            )
+            .map_err(|err| {
                 pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INTERNAL)
             })
         }
@@ -363,6 +377,34 @@ mod tests {
             .materialize_f64()
             .windows(2)
             .all(|pair| pair[1] >= pair[0]));
+    }
+
+    #[test]
+    fn pchip_uses_last_sample_axis_and_component_leading_output() {
+        let data = (0..4)
+            .flat_map(|sample| (0..6).map(move |component| (component * 100 + sample) as f64))
+            .collect();
+        let value = block_on(pchip_builtin(
+            row(&[1.0, 2.0, 3.0, 4.0]),
+            Value::Tensor(Tensor::new(data, vec![2, 3, 4]).unwrap()),
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+            )],
+        ))
+        .expect("array-valued pchip");
+        let Value::Tensor(output) = value else {
+            panic!("array-valued pchip must return a tensor");
+        };
+        assert_eq!(output.shape, vec![2, 3, 2, 2]);
+        let values = output.materialize_f64();
+        for query in 0..4 {
+            for component in 0..6 {
+                assert_eq!(
+                    values[component + query * 6],
+                    (component * 100 + query) as f64
+                );
+            }
+        }
     }
 
     #[test]

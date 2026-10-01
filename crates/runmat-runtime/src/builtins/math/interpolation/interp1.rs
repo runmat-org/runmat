@@ -25,6 +25,7 @@ use super::pp::{
     build_pchip_pp, build_spline_pp, evaluate_linear_or_nearest, evaluate_pp,
     implicit_series_from_values, is_vector_shape, parse_extrapolation, parse_method, query_points,
     series_from_values, validate_breaks, vector_from_value, Extrapolation, InterpMethod,
+    PpOutputLayout,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
@@ -479,14 +480,26 @@ async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         InterpMethod::Spline => {
             let pp = build_spline_pp(&parsed.series, NAME)
                 .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))?;
-            evaluate_pp(&pp, &parsed.query, &parsed.extrap_for_cubic(), NAME)
-                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
+            evaluate_pp(
+                &pp,
+                &parsed.query,
+                &parsed.extrap_for_cubic(),
+                PpOutputLayout::QueryLeading,
+                NAME,
+            )
+            .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
         }
         InterpMethod::Pchip => {
             let pp = build_pchip_pp(&parsed.series, NAME)
                 .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))?;
-            evaluate_pp(&pp, &parsed.query, &parsed.extrap_for_cubic(), NAME)
-                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
+            evaluate_pp(
+                &pp,
+                &parsed.query,
+                &parsed.extrap_for_cubic(),
+                PpOutputLayout::QueryLeading,
+                NAME,
+            )
+            .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
         }
     }
 }
