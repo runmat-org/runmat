@@ -9,8 +9,8 @@ fn fitctree_header_retains_typed_options_and_rejects_malformed_pairs() {
         .unwrap();
     assert_eq!(header.option_start, 1);
     assert_eq!(header.options.len(), 1);
-    assert_eq!(header.options[0].identity, FitctreeOption::MinLeafSize);
-    assert_eq!(header.options[0].index, 1);
+    assert_eq!(header.options[0].name.identity, FitctreeOption::MinLeafSize);
+    assert_eq!(header.options[0].name.index, 1);
 
     let odd = vec![Value::Num(0.0), Value::from("MinLeafSize")];
     assert!(HeaderInspection::inspect(&first, &odd)

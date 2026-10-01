@@ -14,7 +14,12 @@ struct OptionSlot {
 
 pub(super) struct FitctreeArguments {
     pub option_start: usize,
-    pub options: Vec<NamedOption>,
+    pub options: Vec<PreparedOption>,
+}
+
+pub(super) struct PreparedOption {
+    pub name: NamedOption,
+    pub predecoded: Option<FitctreeAction>,
 }
 
 pub(super) struct NamedOption {
@@ -95,16 +100,31 @@ impl HeaderInspection {
                     "fitctree: option '{spelling}' is not supported yet"
                 )));
             }
-            options.push(NamedOption {
-                index: slot.index,
-                spelling,
-                identity,
+            options.push(PreparedOption {
+                name: NamedOption {
+                    index: slot.index,
+                    spelling,
+                    identity,
+                },
+                predecoded: None,
             });
         }
         Ok(FitctreeArguments {
             option_start: self.option_start,
             options,
         })
+    }
+}
+
+impl FitctreeArguments {
+    pub fn preflight_values(mut self, rest: &[Value]) -> BuiltinResult<Self> {
+        for option in &mut self.options {
+            let value = &rest[option.name.index + 1];
+            if !crate::dispatcher::value_contains_gpu(value) {
+                option.predecoded = Some(decode_option(&option.name, value)?);
+            }
+        }
+        Ok(self)
     }
 }
 
@@ -120,6 +140,58 @@ pub(super) fn preflight_matrix_rank(first: &Value) -> BuiltinResult<()> {
     };
     if rank.is_some_and(|rank| rank > 2) {
         return Err(fitctree_invalid("fitctree: X must be a 2-D numeric matrix"));
+    }
+    Ok(())
+}
+
+pub(super) fn preflight_response_shape(
+    first: &Value,
+    rest: &[Value],
+    arguments: &FitctreeArguments,
+) -> BuiltinResult<()> {
+    let response = if is_table_value(first) {
+        if arguments.option_start == 1 {
+            rest.first().filter(|value| scalar_text(value).is_none())
+        } else {
+            None
+        }
+    } else {
+        rest.first()
+    };
+    let Some(response) = response else {
+        return Ok(());
+    };
+    let shape = match response {
+        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        _ => None,
+    };
+    let Some(shape) = shape else {
+        return Ok(());
+    };
+    if shape.len() > 2
+        || (shape.first().copied().unwrap_or(1) != 1 && shape.get(1).copied().unwrap_or(1) != 1)
+    {
+        return Err(fitctree_invalid("predict: Y must be a vector"));
+    }
+    if !is_table_value(first) {
+        let rows = match first {
+            Value::Tensor(tensor) => Some(tensor.rows),
+            Value::LogicalArray(array) => Some(array.shape.first().copied().unwrap_or(1)),
+            Value::GpuTensor(handle) => Some(handle.shape().first().copied().unwrap_or(1)),
+            _ => None,
+        };
+        let len = shape
+            .iter()
+            .try_fold(1usize, |product, extent| product.checked_mul(*extent));
+        if let (Some(rows), Some(len)) = (rows, len) {
+            if rows != len {
+                return Err(fitctree_invalid(
+                    "fitctree: length(Y) must match the number of rows in X",
+                ));
+            }
+        }
     }
     Ok(())
 }

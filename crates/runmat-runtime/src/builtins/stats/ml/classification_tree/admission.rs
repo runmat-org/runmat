@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn build_fit_spec(
     first: Value,
     mut rest: Vec<Value>,
-    arguments: &FitctreeArguments,
+    arguments: FitctreeArguments,
 ) -> BuiltinResult<FitSpec> {
     if is_table_value(&first) {
         build_table_fit_spec(first, rest, arguments)
@@ -26,7 +26,7 @@ fn build_matrix_fit_spec(
     x_value: Value,
     y_value: Value,
     rest: Vec<Value>,
-    arguments: &FitctreeArguments,
+    arguments: FitctreeArguments,
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITCTREE_NAME, x_value)
         .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
@@ -41,7 +41,7 @@ fn build_matrix_fit_spec(
         ));
     }
     let mut options = FitOptions::default();
-    parse_fit_options(&rest, &arguments.options, 1, &mut options)?;
+    parse_fit_options(&rest, arguments.options, 1, &mut options)?;
     if let Some(WeightSpec::Variable(_)) = options.weights {
         return Err(fitctree_invalid(
             "fitctree: weights variable names require table input",
@@ -73,7 +73,7 @@ fn build_matrix_fit_spec(
 fn build_table_fit_spec(
     first: Value,
     rest: Vec<Value>,
-    arguments: &FitctreeArguments,
+    arguments: FitctreeArguments,
 ) -> BuiltinResult<FitSpec> {
     let object = match first {
         Value::Object(object) => object,
@@ -114,7 +114,7 @@ fn build_table_fit_spec(
             }
         }
     }
-    parse_fit_options(&rest, &arguments.options, 0, &mut options)?;
+    parse_fit_options(&rest, arguments.options, 0, &mut options)?;
     if external_y.is_none() {
         response_name = options.response_name.clone().unwrap_or(response_name);
     }

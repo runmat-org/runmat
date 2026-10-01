@@ -33,13 +33,15 @@ const MAX_TREE_DEPTH: usize = 4096;
 mod training;
 use training::fit_tree;
 mod header;
-use header::{preflight_matrix_rank, FitctreeArguments, HeaderInspection};
+use header::{
+    preflight_matrix_rank, preflight_response_shape, FitctreeArguments, HeaderInspection,
+};
 mod admission;
 mod options;
 mod prediction;
 mod projection;
 use admission::{build_fit_spec, is_table_value};
-use options::{parse_fit_options, parse_formula};
+use options::{decode_option, parse_fit_options, parse_formula, FitctreeAction};
 pub(crate) use prediction::predict_classification_tree_object;
 use projection::model_object;
 mod labels;
@@ -203,9 +205,11 @@ async fn fitctree_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
     ensure_fitctree_extensions(&first, &rest, &inspection)?;
     preflight_matrix_rank(&first)?;
     let arguments = inspection.validate(rest.len())?;
+    preflight_response_shape(&first, &rest, &arguments)?;
+    let arguments = arguments.preflight_values(&rest)?;
     let first = gather(first).await?;
     let rest = gather_all(rest, &arguments).await?;
-    let spec = build_fit_spec(first, rest, &arguments)?;
+    let spec = build_fit_spec(first, rest, arguments)?;
     let fit = fit_tree(&spec)?;
     model_object(spec, fit).map(Value::Object)
 }

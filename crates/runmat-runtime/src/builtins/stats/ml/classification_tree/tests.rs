@@ -27,4 +27,5 @@ fn tensor(value: &Value) -> &Tensor {
 
 mod fit;
 mod admission;
+mod provider_preflight;
 mod model;
