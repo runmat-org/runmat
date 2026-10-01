@@ -1,5 +1,9 @@
 //! Classification performance curve compatibility surface.
 
+mod options;
+
+use options::OptionName;
+
 use runmat_value::IntValue;
 use std::cmp::Ordering;
 
@@ -433,7 +437,8 @@ async fn perfcurve_builtin(
     posclass: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    gate_integer_inputs(&labels, &scores, &posclass, &rest).await?;
+    let inspected = options::inspect(&rest);
+    gate_integer_inputs(&labels, &scores, &posclass, &rest, &inspected).await?;
     let requested_outputs = output_count::current_output_count();
     if let Some(0) = requested_outputs {
         return Ok(Value::OutputList(Vec::new()));
@@ -441,13 +446,21 @@ async fn perfcurve_builtin(
     if matches!(requested_outputs, Some(count) if count > 7) {
         return Err(invalid("perfcurve: too many output arguments"));
     }
+    let names = options::validate(&rest, inspected)?;
 
     let labels = gather(labels).await?;
     let scores = gather(scores).await?;
     let posclass = gather(posclass).await?;
-    let rest = gather_values(rest).await?;
+    let values = rest.into_iter().skip(1).step_by(2).collect();
+    let values = gather_values(values).await?;
     let output_limit = requested_outputs.unwrap_or(1).max(1);
-    let outputs = perfcurve_compute(labels, scores, posclass, rest, output_limit)?;
+    let outputs = perfcurve_compute(
+        labels,
+        scores,
+        posclass,
+        names.into_iter().zip(values).collect(),
+        output_limit,
+    )?;
     match requested_outputs {
         None => Ok(outputs[0].clone()),
         Some(count) => Ok(output_count::output_list_with_padding(count, outputs)),
@@ -459,6 +472,7 @@ async fn gate_integer_inputs(
     scores: &Value,
     posclass: &Value,
     rest: &[Value],
+    inspected: &[options::OptionSlot],
 ) -> BuiltinResult<()> {
     for value in [labels, scores, posclass] {
         crate::builtins::common::validation::reject_typed_complex_integer(value, NAME)?;
@@ -481,13 +495,11 @@ async fn gate_integer_inputs(
         "score",
     )
     .await?;
-    for pair in rest.chunks_exact(2) {
-        let Ok(option) = scalar_text(&pair[0], "option name") else {
-            continue;
-        };
+    for (identity, pair) in options::identities(inspected).zip(rest.chunks_exact(2)) {
+        let Some(identity) = identity else { continue };
         let value = &pair[1];
-        match canonical(&option).as_str() {
-            "negclass" => {
+        match identity {
+            OptionName::NegClass => {
                 if crate::builtins::common::validation::value_has_native_integer_class(value) {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &PERFCURVE_INTEGER_LABELS_EXTENSION,
@@ -495,7 +507,11 @@ async fn gate_integer_inputs(
                     )?;
                 }
             }
-            "weights" | "prior" | "cost" | "tvals" | "xvals" => {
+            OptionName::Weights
+            | OptionName::Prior
+            | OptionName::Cost
+            | OptionName::TVals
+            | OptionName::XVals => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                     value,
                     &PERFCURVE_INTEGER_NUMERIC_OPTIONS_EXTENSION,
@@ -504,7 +520,7 @@ async fn gate_integer_inputs(
                 )
                 .await?;
             }
-            "usenearest"
+            OptionName::UseNearest
                 if crate::builtins::common::validation::value_has_native_integer_class(value) =>
             {
                 crate::compatibility::ensure_builtin_extension_enabled(
@@ -536,7 +552,7 @@ fn perfcurve_compute(
     labels: Value,
     scores: Value,
     posclass: Value,
-    rest: Vec<Value>,
+    rest: Vec<(OptionName, Value)>,
     output_limit: usize,
 ) -> BuiltinResult<Vec<Value>> {
     let labels = labels_from_value(labels, "labels")?;
@@ -629,10 +645,7 @@ fn perfcurve_compute(
     Ok(outputs)
 }
 
-fn parse_options(rest: Vec<Value>, label_kind: LabelKind) -> BuiltinResult<Options> {
-    if !rest.len().is_multiple_of(2) {
-        return Err(invalid("perfcurve: name-value options must be paired"));
-    }
+fn parse_options(rest: Vec<(OptionName, Value)>, label_kind: LabelKind) -> BuiltinResult<Options> {
     let mut options = Options {
         xcrit: Criterion::Fpr,
         ycrit: Criterion::Tpr,
@@ -645,14 +658,11 @@ fn parse_options(rest: Vec<Value>, label_kind: LabelKind) -> BuiltinResult<Optio
         use_nearest: true,
         process_nan: ProcessNaN::Ignore,
     };
-    let mut index = 0usize;
-    while index < rest.len() {
-        let name = canonical(&scalar_text(&rest[index], "option name")?);
-        let value = &rest[index + 1];
-        match name.as_str() {
-            "xcrit" => options.xcrit = parse_criterion(value, "XCrit")?,
-            "ycrit" => options.ycrit = parse_criterion(value, "YCrit")?,
-            "negclass" => {
+    for (name, value) in &rest {
+        match name {
+            OptionName::XCrit => options.xcrit = parse_criterion(value, "XCrit")?,
+            OptionName::YCrit => options.ycrit = parse_criterion(value, "YCrit")?,
+            OptionName::NegClass => {
                 let labels = labels_from_value(value.clone(), "NegClass")?;
                 let deduped = dedupe_labels(coerce_labels_to_kind(
                     labels.labels,
@@ -664,21 +674,19 @@ fn parse_options(rest: Vec<Value>, label_kind: LabelKind) -> BuiltinResult<Optio
                 }
                 options.neg_class = Some(deduped);
             }
-            "weights" => options.weights = Some(numeric_vector(value, "Weights")?),
-            "prior" => options.prior = parse_prior(value)?,
-            "cost" => options.cost = parse_cost(value)?,
-            "tvals" => options.tvals = Some(numeric_vector(value, "TVals")?),
-            "xvals" => options.xvals = Some(numeric_vector(value, "XVals")?),
-            "usenearest" => options.use_nearest = scalar_bool(value, "UseNearest")?,
-            "processnan" => options.process_nan = parse_process_nan(value)?,
-            "nboot" | "alpha" | "bootstrap" | "bootstraps" | "nbootstraps" => {
+            OptionName::Weights => options.weights = Some(numeric_vector(value, "Weights")?),
+            OptionName::Prior => options.prior = parse_prior(value)?,
+            OptionName::Cost => options.cost = parse_cost(value)?,
+            OptionName::TVals => options.tvals = Some(numeric_vector(value, "TVals")?),
+            OptionName::XVals => options.xvals = Some(numeric_vector(value, "XVals")?),
+            OptionName::UseNearest => options.use_nearest = scalar_bool(value, "UseNearest")?,
+            OptionName::ProcessNaN => options.process_nan = parse_process_nan(value)?,
+            OptionName::UnsupportedBootstrap => {
                 return Err(unsupported(
                     "perfcurve: confidence-bound and bootstrap modes are not implemented",
                 ))
             }
-            other => return Err(invalid(format!("perfcurve: unsupported option '{other}'"))),
         }
-        index += 2;
     }
     if let Some(tvals) = &options.tvals {
         if tvals.is_empty() || tvals.iter().any(|value| value.is_nan()) {
@@ -1736,7 +1744,46 @@ fn tensor_row(data: Vec<f64>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_value::{IntegerStorage, StringArray};
+
+    #[test]
+    fn perfcurve_rejects_bad_option_header_before_score_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let score = Tensor::new(vec![0.9, 0.8, 0.4, 0.1], vec![4, 1]).unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &score).unwrap();
+            let err = block_on(perfcurve_builtin(
+                tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
+                Value::GpuTensor(handle),
+                Value::Num(1.0),
+                vec![Value::from("UnknownOption"), Value::Num(1.0)],
+            ))
+            .expect_err("invalid option must be rejected before score download");
+            assert!(err.message().contains("unsupported option 'unknownoption'"));
+        });
+    }
+
+    #[test]
+    fn perfcurve_typed_option_identity_keeps_extension_position() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(perfcurve_builtin(
+            tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
+            tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
+            Value::Num(1.0),
+            vec![
+                Value::from("UnknownOption"),
+                Value::Num(1.0),
+                Value::from("Weights"),
+                int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), &[4, 1]),
+            ],
+        ))
+        .expect_err("known later option must retain integer extension gate");
+        assert_eq!(
+            err.identifier(),
+            PERFCURVE_INTEGER_NUMERIC_OPTIONS_EXTENSION.error_identifier
+        );
+    }
 
     #[test]
     fn perfcurve_scalar_text_preserves_exact_uint64() {
