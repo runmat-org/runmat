@@ -2,6 +2,7 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod confusionmat;
+mod crossvalidation;
 mod distance_errors;
 mod distance_geometry;
 mod fitclinear;
@@ -19,6 +20,7 @@ mod squareform;
 mod tsne;
 
 pub use self::confusionmat::*;
+pub use self::crossvalidation::*;
 pub use self::distance_errors::*;
 pub use self::distance_geometry::*;
 pub use self::fitclinear::*;
@@ -37,6 +39,7 @@ pub use self::tsne::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(confusionmat::ENTRIES.iter().copied());
+    values.extend(crossvalidation::ENTRIES.iter().copied());
     values.extend(fitclinear::ENTRIES.iter().copied());
     values.extend(fitctree::ENTRIES.iter().copied());
     values.extend(fitlm::ENTRIES.iter().copied());

@@ -18,6 +18,7 @@ pub mod lscov;
 pub mod mnrfit;
 pub mod optimizable_variable;
 mod pairwise_metric;
+mod partition_shared;
 pub mod perfcurve;
 pub mod predict;
 pub mod regress;
