@@ -33,10 +33,20 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 0,
             ));
         }
-        if x.shape.element_count() == Some(0) {
+        if x.shape.element_count() == Some(0)
+            || first_extent(&x.shape) == Some(0)
+            || second_extent(&x.shape) == Some(0)
+        {
             diagnostics.push(argument_error(
                 "RM-CATALOG-MNRFIT-X-EMPTY",
                 "X must be nonempty",
+                0,
+            ));
+        }
+        if definitely_has_component_axis(&x.shape) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-MNRFIT-X-SHAPE",
+                "X must be a 2-D predictor matrix",
                 0,
             ));
         }
@@ -62,6 +72,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             diagnostics.push(argument_error(
                 "RM-CATALOG-MNRFIT-Y",
                 "Y must be a numeric, logical, text, categorical, or cell-string response",
+                1,
+            ));
+        }
+        if request
+            .arguments
+            .first()
+            .and_then(|x| first_extent(&x.shape))
+            .is_some_and(|rows| definitely_invalid_response_shape(&y.kind, &y.shape, rows))
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-MNRFIT-Y-SHAPE",
+                "Y must have one response per row of X or valid grouped counts",
                 1,
             ));
         }
@@ -112,6 +134,68 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     result.diagnostics.extend(diagnostics);
     result
+}
+
+fn definitely_invalid_response_shape(kind: &ValueKindFact, shape: &ShapeFact, rows: usize) -> bool {
+    match kind {
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        }) => {
+            let grouped = first_two_extents(shape).is_some_and(|(y_rows, y_cols)| {
+                y_rows == rows && y_cols >= 2 && !definitely_has_component_axis(shape)
+            });
+            !grouped && definitely_invalid_vector_shape(shape, rows)
+        }
+        ValueKindFact::Logical | ValueKindFact::String | ValueKindFact::Cell(_) => {
+            definitely_invalid_vector_shape(shape, rows)
+        }
+        ValueKindFact::Character => first_extent(shape).is_some_and(|y_rows| y_rows != rows),
+        _ => false,
+    }
+}
+
+fn definitely_invalid_vector_shape(shape: &ShapeFact, rows: usize) -> bool {
+    shape.element_count().is_some_and(|count| count != rows)
+        || matches!(shape, ShapeFact::Shaped { dims } if dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(extent) if *extent > 1)).count() > 1)
+}
+
+fn definitely_has_component_axis(shape: &ShapeFact) -> bool {
+    matches!(shape, ShapeFact::Shaped { dims } if dims.iter().skip(2).any(|dim| matches!(dim, DimensionFact::Known(extent) if *extent != 1)))
+}
+
+fn first_extent(shape: &ShapeFact) -> Option<usize> {
+    match shape {
+        ShapeFact::Scalar => Some(1),
+        ShapeFact::Shaped { dims } => dims.first().map(known_extent).unwrap_or(Some(1)),
+        ShapeFact::Unknown | ShapeFact::Ranked { .. } => None,
+    }
+}
+
+fn second_extent(shape: &ShapeFact) -> Option<usize> {
+    match shape {
+        ShapeFact::Scalar => Some(1),
+        ShapeFact::Shaped { dims } => dims.get(1).map(known_extent).unwrap_or(Some(1)),
+        ShapeFact::Unknown | ShapeFact::Ranked { .. } => None,
+    }
+}
+
+fn first_two_extents(shape: &ShapeFact) -> Option<(usize, usize)> {
+    match shape {
+        ShapeFact::Scalar => Some((1, 1)),
+        ShapeFact::Shaped { dims } => Some((
+            dims.first().map(known_extent).unwrap_or(Some(1))?,
+            dims.get(1).map(known_extent).unwrap_or(Some(1))?,
+        )),
+        ShapeFact::Unknown | ShapeFact::Ranked { .. } => None,
+    }
+}
+
+fn known_extent(extent: &DimensionFact) -> Option<usize> {
+    match extent {
+        DimensionFact::Known(value) => Some(*value),
+        DimensionFact::Unknown | DimensionFact::Symbolic(_) => None,
+    }
 }
 
 fn grouped_response_shape(request: &CallRequest) -> Option<ShapeFact> {

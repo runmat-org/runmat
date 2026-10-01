@@ -52,6 +52,58 @@ fn vector_response_category_count_remains_dynamic() {
 }
 
 #[test]
+fn impossible_known_matrix_and_response_shapes_never_prove_success() {
+    let mut empty_x = numeric(4, 2);
+    empty_x.shape = ShapeFact::from(vec![Some(0), None]);
+    let mut component_x = numeric(4, 2);
+    component_x.shape = ShapeFact::from(vec![Some(4), Some(2), Some(2)]);
+    let cases = [
+        (empty_x, numeric(4, 1), "RM-CATALOG-MNRFIT-X-EMPTY"),
+        (component_x, numeric(4, 1), "RM-CATALOG-MNRFIT-X-SHAPE"),
+        (numeric(4, 1), numeric(2, 2), "RM-CATALOG-MNRFIT-Y-SHAPE"),
+        (
+            numeric(4, 1),
+            ValueFact::proven(
+                ValueKindFact::Logical,
+                ShapeFact::from(vec![Some(2), Some(2)]),
+                StorageFact::Dense,
+            ),
+            "RM-CATALOG-MNRFIT-Y-SHAPE",
+        ),
+        (
+            numeric(4, 1),
+            ValueFact::proven(
+                ValueKindFact::Character,
+                ShapeFact::from(vec![Some(3), Some(5)]),
+                StorageFact::Dense,
+            ),
+            "RM-CATALOG-MNRFIT-Y-SHAPE",
+        ),
+    ];
+    for (x, y, diagnostic) in cases {
+        let result = inference::infer(&request(x, y, 1), &MNRFIT_CATALOG_ENTRY);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|item| item.code == diagnostic));
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+}
+
+#[test]
+fn trailing_singletons_and_unknown_extents_remain_admissible() {
+    let mut x = numeric(4, 2);
+    x.shape = ShapeFact::from(vec![Some(4), Some(2), Some(1)]);
+    let result = inference::infer(&request(x, numeric(4, 3), 1), &MNRFIT_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty());
+
+    let mut y = numeric(4, 3);
+    y.shape = ShapeFact::from(vec![Some(4), Some(3), None]);
+    let result = inference::infer(&request(numeric(4, 2), y, 1), &MNRFIT_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty());
+}
+
+#[test]
 fn invalid_known_predictor_or_option_does_not_prove_success() {
     let mut call = request(ValueFact::scalar(ValueKindFact::String), numeric(4, 1), 1);
     call.arguments
