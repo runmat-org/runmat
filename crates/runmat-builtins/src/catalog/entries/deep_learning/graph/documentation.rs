@@ -58,12 +58,16 @@ pub(super) const ANALYZE_NETWORK: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Analysis result", paragraphs: &[
             "The analysis object reports the number and names of the supplied layers. Missing layer names receive deterministic `layer_1`, `layer_2`, and subsequent names. This is metadata inspection, not shape propagation, training, connection validation, or interactive visualization.",
+            "An internal output list of layer objects is also accepted as a layer collection. Numeric arrays are not layer collections.",
         ] },
         BuiltinDocumentationSection { heading: "Placement and current limits", paragraphs: &[
             "The operation reads host layer metadata and returns a new host object. Direct resident numeric input is invalid and rejects without provider access; nested resident properties not used by the analysis remain with their owning objects. There is no GPU analysis kernel, UI effect, or fusion route; the call can throw but does not suspend.",
         ] },
     ],
-    examples: &[BuiltinExample { id: "one-layer", title: "Inspect one layer", program: "a = analyzeNetwork({reluLayer()}); fprintf('%d\\n', a.NumLayers);", display_output: Some("1"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(a.NumLayers == 1); assert(numel(a.LayerNames) == 1);" } }],
+    examples: &[
+        BuiltinExample { id: "one-layer", title: "Inspect one layer", program: "a = analyzeNetwork({reluLayer()}); fprintf('%d\\n', a.NumLayers);", display_output: Some("1"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(a.NumLayers == 1); assert(numel(a.LayerNames) == 1);" } },
+        BuiltinExample { id: "layer-collection", title: "Inspect a feature input and activation", program: "analysis = analyzeNetwork({featureInputLayer(4), reluLayer()}); disp(analysis.NumLayers);", display_output: Some("2"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(analysis.NumLayers == 2); assert(numel(analysis.LayerNames) == 2);" } },
+    ],
     example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Does analyzeNetwork open an interactive analyzer?", answer: "No. This RunMat implementation returns a metadata object and does not open a UI." },
