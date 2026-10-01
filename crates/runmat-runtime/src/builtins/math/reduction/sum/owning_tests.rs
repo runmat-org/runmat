@@ -110,6 +110,7 @@ fn omitnan_sum_retires_cleaned_owner_on_cancel_and_failure_without_gathering() {
 
 struct OutputProvider {
     owner: TestAllocationOwner,
+    precision: ProviderPrecision,
     calls: AtomicUsize,
     results: Mutex<Vec<RetirementProbe>>,
     malformed_map: bool,
@@ -120,6 +121,7 @@ impl OutputProvider {
     fn new(malformed_map: bool, malformed_second_reduction: bool) -> Self {
         Self {
             owner: TestAllocationOwner::new(),
+            precision: ProviderPrecision::F32,
             calls: AtomicUsize::new(0),
             results: Mutex::new(Vec::new()),
             malformed_map,
@@ -145,7 +147,7 @@ impl AccelProvider for OutputProvider {
         "sum typed output fixture".into()
     }
     fn precision(&self) -> ProviderPrecision {
-        ProviderPrecision::F32
+        self.precision
     }
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         anyhow::bail!("unexpected legacy upload")
@@ -179,9 +181,13 @@ impl AccelProvider for OutputProvider {
         Ok(self.output(
             input.shape().to_vec(),
             if self.malformed_map {
-                NumericElementType::F64
+                match input.physical().element_type() {
+                    NumericElementType::F64 => NumericElementType::F32,
+                    NumericElementType::F32 => NumericElementType::F64,
+                    other => anyhow::bail!("unexpected NaN-map element type: {other:?}"),
+                }
             } else {
-                NumericElementType::F32
+                input.physical().element_type()
             },
         ))
     }
@@ -236,11 +242,14 @@ fn partial_vecdim_rejects_second_result_and_retires_first_without_touching_input
 
 #[test]
 fn malformed_nan_map_fails_before_reduction_and_retires_result() {
-    let provider = Box::leak(Box::new(OutputProvider::new(true, false)));
+    let provider = Box::leak(Box::new(OutputProvider {
+        precision: ProviderPrecision::F64,
+        ..OutputProvider::new(true, false)
+    }));
     let _selected = ThreadProviderGuard::set(Some(provider));
     let input = provider
         .owner
-        .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let parsed = ParsedArguments {
         selection: DimSelection::Dim(1),
@@ -254,8 +263,11 @@ fn malformed_nan_map_fails_before_reduction_and_retires_result() {
     .unwrap_err();
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
-    assert_eq!(provider.results.lock().unwrap()[0].retirements(), 1);
+    let results = provider.results.lock().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].retirements(), 1);
     assert_eq!(input.probe.retirements(), 0);
+    input.handle.allocation_lease().validate_live().unwrap();
 }
 
 #[test]
