@@ -105,9 +105,7 @@ pub(super) fn validate(
     let floating = match (profile, operation) {
         (
             HookProfile::InProcess,
-            Operation::Cast
-            | Operation::Binary(_)
-            | Operation::Compare(RelationalOperator::Equal | RelationalOperator::NotEqual),
+            Operation::Cast | Operation::Binary(_) | Operation::Compare(_),
         ) => query.inputs.iter().all(|value| {
             matches!(
                 value.element_type,
@@ -134,8 +132,7 @@ pub(super) fn validate(
     #[cfg(not(feature = "wgpu"))]
     let integer = false;
     if !floating && !integer {
-        // The remaining in-process relational hooks still use an F64-only
-        // implementation. Logical class alone does not prove physical storage.
+        // Logical class alone does not prove physical floating storage.
         return reject(
             ProviderRejectionCode::UnsupportedElementType,
             "logical.input_type.unsupported",

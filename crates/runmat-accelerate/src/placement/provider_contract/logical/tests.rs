@@ -175,6 +175,10 @@ fn native_single_feasibility_matches_supported_in_process_hooks() {
         Operation::Binary(LogicalBinaryOperator::Xor),
         Operation::Compare(RelationalOperator::Equal),
         Operation::Compare(RelationalOperator::NotEqual),
+        Operation::Compare(RelationalOperator::LessThan),
+        Operation::Compare(RelationalOperator::LessThanOrEqual),
+        Operation::Compare(RelationalOperator::GreaterThan),
+        Operation::Compare(RelationalOperator::GreaterThanOrEqual),
     ] {
         let mut request = query(operation);
         request.inputs = vec![input(&[1, 3], ProviderElementType::F32); operation.arity()];
@@ -203,24 +207,22 @@ fn native_single_feasibility_matches_supported_in_process_hooks() {
             Operation::Compare(RelationalOperator::NotEqual) => {
                 block_on(provider.elem_ne(&left, &right)).unwrap()
             }
+            Operation::Compare(RelationalOperator::LessThan) => {
+                block_on(provider.elem_lt(&left, &right)).unwrap()
+            }
+            Operation::Compare(RelationalOperator::LessThanOrEqual) => {
+                block_on(provider.elem_le(&left, &right)).unwrap()
+            }
+            Operation::Compare(RelationalOperator::GreaterThan) => {
+                block_on(provider.elem_gt(&left, &right)).unwrap()
+            }
+            Operation::Compare(RelationalOperator::GreaterThanOrEqual) => {
+                block_on(provider.elem_ge(&left, &right)).unwrap()
+            }
             _ => unreachable!("only reviewed native F32 hooks"),
         };
         assert!(output.view().is_logical());
         assert_eq!(output.shape(), &[1, 3]);
-    }
-    for operation in [
-        Operation::Compare(RelationalOperator::LessThan),
-        Operation::Compare(RelationalOperator::LessThanOrEqual),
-        Operation::Compare(RelationalOperator::GreaterThan),
-        Operation::Compare(RelationalOperator::GreaterThanOrEqual),
-    ] {
-        let mut request = query(operation);
-        request.inputs = vec![input(&[1, 3], ProviderElementType::F32); 2];
-        assert!(
-            !provider.query_feasibility(&request).is_supported(),
-            "{}",
-            operation.identity()
-        );
     }
 }
 

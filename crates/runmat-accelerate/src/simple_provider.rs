@@ -6068,49 +6068,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let (adata, bdata) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let a_vec = guard
-                    .get(a)
-                    .ok_or_else(|| anyhow!("elem_ge: unknown buffer {}", a.buffer_id()))?
-                    .clone();
-                let b_vec = guard
-                    .get(b)
-                    .ok_or_else(|| anyhow!("elem_ge: unknown buffer {}", b.buffer_id()))?
-                    .clone();
-                (a_vec, b_vec)
-            };
-
-            let shape =
-                runtime_broadcast_shapes("ge", a.shape(), b.shape()).map_err(|e| anyhow!(e))?;
-            let total: usize = shape.iter().copied().product();
-            if total == 0 {
-                return self.allocate_logical_tensor(Vec::new(), shape);
-            }
-
-            let strides_a = runtime_compute_strides(a.shape());
-            let strides_b = runtime_compute_strides(b.shape());
-            let len_a = adata.len();
-            let len_b = bdata.len();
-
-            let mut out = Vec::with_capacity(total);
-            for idx in 0..total {
-                let lhs = if len_a == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                    *adata.get(offset).unwrap_or(&0.0)
-                };
-                let rhs = if len_b == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                    *bdata.get(offset).unwrap_or(&0.0)
-                };
-                out.push(if lhs >= rhs { 1.0 } else { 0.0 });
-            }
-
-            self.allocate_logical_tensor(out, shape)
+            self.binary_predicate_impl(a, b, logical::BinaryPredicate::GreaterThanOrEqual)
         })
     }
 
@@ -6120,49 +6078,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let (adata, bdata) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let a_vec = guard
-                    .get(a)
-                    .ok_or_else(|| anyhow!("elem_le: unknown buffer {}", a.buffer_id()))?
-                    .clone();
-                let b_vec = guard
-                    .get(b)
-                    .ok_or_else(|| anyhow!("elem_le: unknown buffer {}", b.buffer_id()))?
-                    .clone();
-                (a_vec, b_vec)
-            };
-
-            let shape =
-                runtime_broadcast_shapes("le", a.shape(), b.shape()).map_err(|e| anyhow!(e))?;
-            let total: usize = shape.iter().copied().product();
-            if total == 0 {
-                return self.allocate_logical_tensor(Vec::new(), shape);
-            }
-
-            let strides_a = runtime_compute_strides(a.shape());
-            let strides_b = runtime_compute_strides(b.shape());
-            let len_a = adata.len();
-            let len_b = bdata.len();
-
-            let mut out = Vec::with_capacity(total);
-            for idx in 0..total {
-                let lhs = if len_a == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                    *adata.get(offset).unwrap_or(&0.0)
-                };
-                let rhs = if len_b == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                    *bdata.get(offset).unwrap_or(&0.0)
-                };
-                out.push(if lhs <= rhs { 1.0 } else { 0.0 });
-            }
-
-            self.allocate_logical_tensor(out, shape)
+            self.binary_predicate_impl(a, b, logical::BinaryPredicate::LessThanOrEqual)
         })
     }
 
@@ -6171,51 +6087,9 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let (adata, bdata) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let a_vec = guard
-                    .get(a)
-                    .ok_or_else(|| anyhow!("elem_lt: unknown buffer {}", a.buffer_id()))?
-                    .clone();
-                let b_vec = guard
-                    .get(b)
-                    .ok_or_else(|| anyhow!("elem_lt: unknown buffer {}", b.buffer_id()))?
-                    .clone();
-                (a_vec, b_vec)
-            };
-
-            let shape =
-                runtime_broadcast_shapes("lt", a.shape(), b.shape()).map_err(|e| anyhow!(e))?;
-            let total: usize = shape.iter().copied().product();
-            if total == 0 {
-                return self.allocate_logical_tensor(Vec::new(), shape);
-            }
-
-            let strides_a = runtime_compute_strides(a.shape());
-            let strides_b = runtime_compute_strides(b.shape());
-            let len_a = adata.len();
-            let len_b = bdata.len();
-
-            let mut out = Vec::with_capacity(total);
-            for idx in 0..total {
-                let lhs = if len_a == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                    *adata.get(offset).unwrap_or(&0.0)
-                };
-                let rhs = if len_b == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                    *bdata.get(offset).unwrap_or(&0.0)
-                };
-                out.push(if lhs < rhs { 1.0 } else { 0.0 });
-            }
-
-            self.allocate_logical_tensor(out, shape)
-        })
+        Box::pin(
+            async move { self.binary_predicate_impl(a, b, logical::BinaryPredicate::LessThan) },
+        )
     }
 
     fn elem_gt<'a>(
@@ -6223,51 +6097,9 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let (adata, bdata) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let a_vec = guard
-                    .get(a)
-                    .ok_or_else(|| anyhow!("elem_gt: unknown buffer {}", a.buffer_id()))?
-                    .clone();
-                let b_vec = guard
-                    .get(b)
-                    .ok_or_else(|| anyhow!("elem_gt: unknown buffer {}", b.buffer_id()))?
-                    .clone();
-                (a_vec, b_vec)
-            };
-
-            let shape =
-                runtime_broadcast_shapes("gt", a.shape(), b.shape()).map_err(|e| anyhow!(e))?;
-            let total: usize = shape.iter().copied().product();
-            if total == 0 {
-                return self.allocate_logical_tensor(Vec::new(), shape);
-            }
-
-            let strides_a = runtime_compute_strides(a.shape());
-            let strides_b = runtime_compute_strides(b.shape());
-            let len_a = adata.len();
-            let len_b = bdata.len();
-
-            let mut out = Vec::with_capacity(total);
-            for idx in 0..total {
-                let lhs = if len_a == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                    *adata.get(offset).unwrap_or(&0.0)
-                };
-                let rhs = if len_b == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                    *bdata.get(offset).unwrap_or(&0.0)
-                };
-                out.push(if lhs > rhs { 1.0 } else { 0.0 });
-            }
-
-            self.allocate_logical_tensor(out, shape)
-        })
+        Box::pin(
+            async move { self.binary_predicate_impl(a, b, logical::BinaryPredicate::GreaterThan) },
+        )
     }
 
     fn elem_eq<'a>(

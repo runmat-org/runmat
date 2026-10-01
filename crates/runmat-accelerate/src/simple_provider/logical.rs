@@ -8,6 +8,10 @@ pub(super) enum BinaryPredicate {
     Xor,
     Equal,
     NotEqual,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
 }
 
 #[derive(Clone, Copy)]
@@ -61,12 +65,27 @@ impl<'a> FloatingView<'a> {
         }
     }
 
-    fn equal(self, index: usize, other: Self, other_index: usize) -> bool {
+    fn compare(
+        self,
+        index: usize,
+        other: Self,
+        other_index: usize,
+        predicate: BinaryPredicate,
+    ) -> bool {
+        let test = |a: f64, b: f64| match predicate {
+            BinaryPredicate::Equal => a == b,
+            BinaryPredicate::NotEqual => a != b,
+            BinaryPredicate::LessThan => a < b,
+            BinaryPredicate::LessThanOrEqual => a <= b,
+            BinaryPredicate::GreaterThan => a > b,
+            BinaryPredicate::GreaterThanOrEqual => a >= b,
+            _ => unreachable!("a numerical comparison predicate is required"),
+        };
         match (self, other) {
-            (Self::F32(a), Self::F32(b)) => a[index] == b[other_index],
-            (Self::F64(a), Self::F64(b)) => a[index] == b[other_index],
-            (Self::F32(a), Self::F64(b)) => f64::from(a[index]) == b[other_index],
-            (Self::F64(a), Self::F32(b)) => a[index] == f64::from(b[other_index]),
+            (Self::F32(a), Self::F32(b)) => test(f64::from(a[index]), f64::from(b[other_index])),
+            (Self::F64(a), Self::F64(b)) => test(a[index], b[other_index]),
+            (Self::F32(a), Self::F64(b)) => test(f64::from(a[index]), b[other_index]),
+            (Self::F64(a), Self::F32(b)) => test(a[index], f64::from(b[other_index])),
         }
     }
 }
@@ -162,8 +181,14 @@ impl InProcessProvider {
                     BinaryPredicate::And => a_data.nonzero(left) && b_data.nonzero(right),
                     BinaryPredicate::Or => a_data.nonzero(left) || b_data.nonzero(right),
                     BinaryPredicate::Xor => a_data.nonzero(left) ^ b_data.nonzero(right),
-                    BinaryPredicate::Equal => a_data.equal(left, b_data, right),
-                    BinaryPredicate::NotEqual => !a_data.equal(left, b_data, right),
+                    BinaryPredicate::Equal
+                    | BinaryPredicate::NotEqual
+                    | BinaryPredicate::LessThan
+                    | BinaryPredicate::LessThanOrEqual
+                    | BinaryPredicate::GreaterThan
+                    | BinaryPredicate::GreaterThanOrEqual => {
+                        a_data.compare(left, b_data, right, predicate)
+                    }
                 };
                 output.push(if truth { 1.0 } else { 0.0 });
             }
@@ -270,6 +295,69 @@ mod tests {
             assert!(selected.view().is_logical());
             assert!(!selected.shares_allocation_with(&data));
         }
+    }
+
+    #[test]
+    fn native_relational_predicates_respect_nan_infinity_signed_zero_and_broadcast() {
+        let provider = InProcessProvider::new();
+        for (left, right) in [
+            (
+                HostNumericDataView::F32(&[f32::NAN, f32::INFINITY, -0.0, -2.0]),
+                HostNumericDataView::F32(&[0.0, 0.0, 0.0, -1.0]),
+            ),
+            (
+                HostNumericDataView::F64(&[f64::NAN, f64::INFINITY, -0.0, -2.0]),
+                HostNumericDataView::F64(&[0.0, 0.0, 0.0, -1.0]),
+            ),
+        ] {
+            let left = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: left,
+                    shape: &[2, 2],
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            let right = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: right,
+                    shape: &[2, 2],
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            for (predicate, expected) in [
+                (BinaryPredicate::LessThan, [0.0, 0.0, 0.0, 1.0]),
+                (BinaryPredicate::LessThanOrEqual, [0.0, 0.0, 1.0, 1.0]),
+                (BinaryPredicate::GreaterThan, [0.0, 1.0, 0.0, 0.0]),
+                (BinaryPredicate::GreaterThanOrEqual, [0.0, 1.0, 1.0, 0.0]),
+            ] {
+                let output = provider
+                    .binary_predicate_impl(&left, &right, predicate)
+                    .unwrap();
+                assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
+                assert!(output.view().is_logical());
+                assert!(!output.shares_allocation_with(&left));
+            }
+        }
+        let left = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[-1.0, 2.0]),
+                shape: &[2, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let right = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[0.0, 3.0, -2.0]),
+                shape: &[1, 3],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let output = block_on(provider.elem_lt(&left, &right)).unwrap();
+        assert_eq!(output.shape(), &[2, 3]);
+        assert_eq!(
+            block_on(provider.download(&output)).unwrap().data,
+            [1.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+        );
     }
 
     #[test]
