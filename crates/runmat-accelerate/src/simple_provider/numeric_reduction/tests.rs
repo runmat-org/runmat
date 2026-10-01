@@ -43,16 +43,18 @@ fn ordinary_complex_single_and_double_sum_both_components_and_preserve_storage()
             })
             .unwrap();
         provider.reset_telemetry();
-        for output in [
+        let outputs = [
             block_on(provider.reduce_sum(&input)).unwrap(),
             block_on(provider.reduce_sum_dim(&input, 0)).unwrap(),
-        ] {
+        ];
+        // Observe reduction transfers before the oracle downloads its results.
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        for output in outputs {
             assert_eq!(
                 output.physical().storage(),
                 GpuTensorStorage::ComplexInterleaved
             );
             assert_eq!(output.physical().element_type(), NumericElementType::F64);
-            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             assert_eq!(
                 block_on(provider.download_numeric(&output)).unwrap().data,
                 HostNumericDataOwned::F64(vec![1.0, 12.0])
