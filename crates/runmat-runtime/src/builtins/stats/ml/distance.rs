@@ -395,9 +395,6 @@ struct KnnOptions {
 
 #[runtime_builtin(
     name = "pdist",
-    category = "stats/ml",
-    summary = "Compute pairwise distances between rows of an observation matrix.",
-    keywords = "pdist,pairwise,distance,statistics,machine learning,clustering",
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
@@ -413,9 +410,6 @@ async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "pdist2",
-    category = "stats/ml",
-    summary = "Compute pairwise distances between two sets of observations.",
-    keywords = "pdist2,pairwise,distance,nearest neighbor,statistics,machine learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
@@ -767,9 +761,6 @@ async fn ensure_knn_exact_f64(value: &Value, role: &str) -> BuiltinResult<()> {
 
 #[runtime_builtin(
     name = "squareform",
-    category = "stats/ml",
-    summary = "Convert between condensed distance vectors and square distance matrices.",
-    keywords = "squareform,distance,condensed,symmetric,statistics,machine learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]

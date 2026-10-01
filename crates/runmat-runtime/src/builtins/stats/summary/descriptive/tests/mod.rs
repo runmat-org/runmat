@@ -1,5 +1,7 @@
 use super::super::statistical_means::{geomean, harmmean, rms, rmse};
 use super::*;
+use super::flagged::{kurtosis, mad, skewness};
+use super::tabulation::tabulate;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};

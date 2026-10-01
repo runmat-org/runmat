@@ -6,9 +6,6 @@ pub(crate) mod tabulation;
 #[cfg(test)]
 mod tests;
 
-pub use flagged::{kurtosis, mad, skewness};
-pub use tabulation::tabulate;
-
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_value::Value;
 
