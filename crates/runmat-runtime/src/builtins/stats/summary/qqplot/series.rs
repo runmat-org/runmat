@@ -52,7 +52,7 @@ pub(super) fn two_sample_series_from_tensors(
             .iter()
             .map(|p| quantile_from_sorted(&y, *p))
             .collect::<Vec<_>>();
-        out.push(series_from_pairs(theoretical, observed));
+        out.push(series_from_pairs(theoretical, observed)?);
     }
     if out.is_empty() {
         return Err(invalid("qqplot: both samples must contain finite values"));
@@ -75,20 +75,20 @@ fn normal_series(sorted: Vec<f64>, pvec: Option<Vec<f64>>) -> BuiltinResult<Seri
     } else {
         sorted
     };
-    Ok(series_from_pairs(theoretical, observed))
+    series_from_pairs(theoretical, observed)
 }
 
-fn series_from_pairs(theoretical: Vec<f64>, observed: Vec<f64>) -> Series {
+fn series_from_pairs(theoretical: Vec<f64>, observed: Vec<f64>) -> BuiltinResult<Series> {
     let (reference_x, reference_y, quartile_x, quartile_y) =
-        reference_lines(&theoretical, &observed);
-    Series {
+        reference_lines(&theoretical, &observed)?;
+    Ok(Series {
         theoretical,
         observed,
         reference_x,
         reference_y,
         quartile_x,
         quartile_y,
-    }
+    })
 }
 
 pub(super) fn columns_from_tensor(tensor: Tensor, shape: &[usize]) -> BuiltinResult<Vec<Vec<f64>>> {
@@ -196,31 +196,67 @@ fn convex_interpolate(lo: f64, hi: f64, weight: f64) -> f64 {
     scale * ((lo / scale) * (1.0 - weight) + (hi / scale) * weight)
 }
 
-fn quartile_slope(x25: f64, x75: f64, y25: f64, y75: f64) -> f64 {
+fn quartile_slope(x25: f64, x75: f64, y25: f64, y75: f64) -> BuiltinResult<f64> {
     if x25 == x75 {
-        return 0.0;
+        return Ok(0.0);
     }
-    let x_scale = x25.abs().max(x75.abs());
-    let y_scale = y25.abs().max(y75.abs());
-    if y_scale == 0.0 {
-        return 0.0;
+    let raw_dx = x75 - x25;
+    let raw_dy = y75 - y25;
+    if raw_dy == 0.0 {
+        return Ok(0.0);
     }
-    let dx = x75 / x_scale - x25 / x_scale;
-    let dy = y75 / y_scale - y25 / y_scale;
+    if raw_dx.is_finite() && raw_dy.is_finite() {
+        let slope = raw_dy / raw_dx;
+        return if slope.is_finite() {
+            Ok(slope)
+        } else {
+            Err(invalid("qqplot: reference-line slope must be finite"))
+        };
+    }
+    let x_scale = if raw_dx.is_finite() {
+        1.0
+    } else {
+        x25.abs().max(x75.abs())
+    };
+    let y_scale = if raw_dy.is_finite() {
+        1.0
+    } else {
+        y25.abs().max(y75.abs())
+    };
+    let dx = if raw_dx.is_finite() {
+        raw_dx
+    } else {
+        x75 / x_scale - x25 / x_scale
+    };
+    let dy = if raw_dy.is_finite() {
+        raw_dy
+    } else {
+        y75 / y_scale - y25 / y_scale
+    };
     if dx == 0.0 {
-        return 0.0;
+        return Err(invalid(
+            "qqplot: distinct reference quartiles lost numerical separation",
+        ));
     }
     let (dy_fraction, dy_exponent) = libm::frexp(dy);
     let (y_fraction, y_exponent) = libm::frexp(y_scale);
     let (dx_fraction, dx_exponent) = libm::frexp(dx);
     let (x_fraction, x_exponent) = libm::frexp(x_scale);
-    libm::ldexp(
+    let slope = libm::ldexp(
         (dy_fraction * y_fraction) / (dx_fraction * x_fraction),
         dy_exponent + y_exponent - dx_exponent - x_exponent,
-    )
+    );
+    if slope.is_finite() {
+        Ok(slope)
+    } else {
+        Err(invalid("qqplot: reference-line slope must be finite"))
+    }
 }
 
-fn reference_lines(x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+fn reference_lines(
+    x: &[f64],
+    y: &[f64],
+) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> {
     let mut finite = x
         .iter()
         .copied()
@@ -228,7 +264,7 @@ fn reference_lines(x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f
         .filter(|(x, y)| x.is_finite() && y.is_finite())
         .collect::<Vec<_>>();
     if finite.is_empty() {
-        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
     }
     finite.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
     let xs = finite.iter().map(|(x, _)| *x).collect::<Vec<_>>();
@@ -238,8 +274,11 @@ fn reference_lines(x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f
     let x75 = quantile_from_sorted(&xs, 0.75);
     let y25 = quantile_from_sorted(&ys, 0.25);
     let y75 = quantile_from_sorted(&ys, 0.75);
-    let slope = quartile_slope(x25, x75, y25, y75);
+    let slope = quartile_slope(x25, x75, y25, y75)?;
     let intercept = (-slope).mul_add(x25, y25);
+    if !intercept.is_finite() {
+        return Err(invalid("qqplot: reference-line intercept must be finite"));
+    }
     let min_x = *xs.first().unwrap();
     let max_x = *xs.last().unwrap();
     let reference_x = if min_x < max_x {
@@ -258,9 +297,12 @@ fn reference_lines(x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f
         .iter()
         .map(|x| slope.mul_add(*x, intercept))
         .collect::<Vec<_>>();
+    if reference_y.iter().any(|value| !value.is_finite()) {
+        return Err(invalid("qqplot: reference-line coordinates must be finite"));
+    }
     let quartile_x = vec![x25, x75];
     let quartile_y = vec![y25, y75];
-    (reference_x, reference_y, quartile_x, quartile_y)
+    Ok((reference_x, reference_y, quartile_x, quartile_y))
 }
 
 #[cfg(test)]
@@ -272,7 +314,8 @@ mod reference_geometry_tests {
         let (x, y, qx, qy) = reference_lines(
             &[1.0e-300, 2.0e-300, 3.0e-300, 4.0e-300],
             &[2.0, 4.0, 6.0, 8.0],
-        );
+        )
+        .unwrap();
         assert_eq!(x, vec![1.0e-300, 4.0e-300]);
         assert!((y[0] - 2.0).abs() < 1.0e-12);
         assert!((y[1] - 8.0).abs() < 1.0e-12);
@@ -283,7 +326,7 @@ mod reference_geometry_tests {
     #[test]
     fn finite_opposite_sign_quartiles_do_not_overflow_difference() {
         let data = [-1.7e308, -1.6e308, 1.6e308, 1.7e308];
-        let (x, y, _, _) = reference_lines(&data, &data);
+        let (x, y, _, _) = reference_lines(&data, &data).unwrap();
         assert_eq!(x, data.iter().copied().step_by(3).collect::<Vec<_>>());
         assert!(y.iter().all(|value| value.is_finite()));
         for (actual, expected) in y.iter().zip(x.iter()) {
@@ -293,7 +336,8 @@ mod reference_geometry_tests {
 
     #[test]
     fn y_quartiles_use_marginal_order_not_x_pair_order() {
-        let (_, _, _, y_quartiles) = reference_lines(&[1.0, 2.0, 3.0, 4.0], &[4.0, 3.0, 2.0, 1.0]);
+        let (_, _, _, y_quartiles) =
+            reference_lines(&[1.0, 2.0, 3.0, 4.0], &[4.0, 3.0, 2.0, 1.0]).unwrap();
         assert_eq!(y_quartiles, vec![1.75, 3.25]);
     }
 
@@ -303,5 +347,32 @@ mod reference_geometry_tests {
         let middle = quantile_from_sorted(&values, 0.5);
         assert!(middle.is_finite());
         assert!((middle / 1.65e308 - 1.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn adjacent_high_and_subnormal_quartiles_keep_their_finite_slope() {
+        let high = 1.0e308;
+        let adjacent = f64::from_bits(high.to_bits() + 1);
+        let high_slope = quartile_slope(high, adjacent, 1.0, 2.0).unwrap();
+        assert!(high_slope.is_finite() && high_slope > 0.0);
+        let tiny = f64::from_bits(1);
+        assert_eq!(
+            quartile_slope(tiny, tiny * 2.0, tiny, tiny * 2.0).unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn unrepresentable_true_reference_slope_is_an_owned_error() {
+        let tiny = f64::from_bits(1);
+        let err = quartile_slope(0.0, tiny, 0.0, 1.0e308)
+            .expect_err("unrepresentable finite-input secant slope");
+        assert!(err.message().contains("slope must be finite"));
+        let err = reference_lines(
+            &[0.0, tiny, tiny * 2.0, tiny * 3.0],
+            &[0.0, 1.0e308, 1.0e308, 1.0e308],
+        )
+        .expect_err("invalid line must not reach renderer");
+        assert!(err.message().contains("slope must be finite"));
     }
 }
