@@ -1,4 +1,5 @@
 //! Typed chart option evaluation and exact structural controls.
+use super::input::ensure_vector_tensor;
 use super::*;
 use runmat_accelerate_api::GpuTensorStorage;
 

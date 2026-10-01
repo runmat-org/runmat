@@ -217,7 +217,7 @@ pub(super) fn numeric_data_from_value(value: Value, context: &str) -> BuiltinRes
     Ok(tensor)
 }
 
-fn ensure_vector_tensor(tensor: &Tensor, context: &str) -> BuiltinResult<()> {
+pub(super) fn ensure_vector_tensor(tensor: &Tensor, context: &str) -> BuiltinResult<()> {
     if tensor.shape.iter().filter(|&&dim| dim > 1).count() > 1 {
         return Err(invalid(format!(
             "binscatter: {context} must be a real numeric vector"
