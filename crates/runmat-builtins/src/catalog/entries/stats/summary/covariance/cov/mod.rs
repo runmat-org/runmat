@@ -13,3 +13,5 @@ pub use entry::COV_CATALOG_ENTRY;
 pub use extensions::*;
 pub use integer::COV_INTEGER_CAPABILITIES;
 pub use options::CovRowsOption;
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&COV_CATALOG_ENTRY];

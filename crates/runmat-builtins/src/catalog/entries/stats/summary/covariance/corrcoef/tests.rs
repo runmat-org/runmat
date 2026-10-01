@@ -10,7 +10,7 @@ fn matrix(class: NumericClass, domain: NumericDomain, rows: usize, columns: usiz
 }
 
 fn call(arguments: Vec<ValueFact>, literals: LiteralContext, requested: usize) -> CallInference {
-    infer(
+    inference::infer(
         &CallRequest {
             arguments,
             literals,
@@ -22,8 +22,8 @@ fn call(arguments: Vec<ValueFact>, literals: LiteralContext, requested: usize) -
 
 #[test]
 fn matrix_vector_and_paired_shapes_are_distinct() {
-    let matrix = matrix(NumericClass::Double, NumericDomain::Real, 5, 3);
-    let result = call(vec![matrix.clone()], LiteralContext::default(), 4);
+    let input_matrix = matrix(NumericClass::Double, NumericDomain::Real, 5, 3);
+    let result = call(vec![input_matrix.clone()], LiteralContext::default(), 4);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(result.outputs.len(), 4);
     assert!(result
@@ -41,8 +41,24 @@ fn matrix_vector_and_paired_shapes_are_distinct() {
         ShapeFact::from(vec![Some(1), Some(1)])
     );
     assert_eq!(
-        call(vec![matrix.clone(), matrix], LiteralContext::default(), 1).outputs[0].shape,
+        call(
+            vec![input_matrix.clone(), input_matrix],
+            LiteralContext::default(),
+            1
+        )
+        .outputs[0]
+            .shape,
         ShapeFact::from(vec![Some(2), Some(2)])
+    );
+    let scalar = matrix(NumericClass::Single, NumericDomain::Real, 1, 1);
+    let paired_scalar = call(vec![scalar.clone(), scalar], LiteralContext::default(), 1);
+    assert_eq!(
+        paired_scalar.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(1)])
+    );
+    assert_eq!(
+        paired_scalar.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
     );
 }
 
@@ -65,7 +81,48 @@ fn resident_output_choice_stays_dynamic() {
     input.residency = ResidencyFact::Device { provider: None };
     let result = call(vec![input], LiteralContext::default(), 1);
     assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
-    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
+}
+
+#[test]
+fn paired_observation_precision_is_promoted_without_control_promotion() {
+    let single = matrix(NumericClass::Single, NumericDomain::Real, 5, 2);
+    let double = matrix(NumericClass::Double, NumericDomain::Real, 5, 2);
+    assert_eq!(
+        call(vec![single.clone()], LiteralContext::default(), 1).outputs[0]
+            .numeric()
+            .unwrap()
+            .class,
+        NumericClass::Single
+    );
+    assert_eq!(
+        call(vec![single.clone(), double], LiteralContext::default(), 1).outputs[0]
+            .numeric()
+            .unwrap()
+            .class,
+        NumericClass::Double
+    );
+    let control = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let text = ValueFact::scalar(ValueKindFact::String);
+    let result = call(
+        vec![single, text, control],
+        LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Alpha".into()),
+            LiteralValue::Number(0.05),
+        ]),
+        1,
+    );
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
 }
 
 #[test]

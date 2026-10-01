@@ -15,8 +15,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`all` retains non-finite observations and propagates missing results. `omitrows` filters a whole row if any variable is non-finite. `partialrows` selects finite observations separately for each covariance entry.",
         ]},
         BuiltinDocumentationSection { heading: "Classes and execution", paragraphs: &[
-            "Real typed-integer observations, logical observations, typed-integer/logical normalization flags, and observation weight vectors are RunMat extensions. Host covariance is computed in double precision. Complex observations are rejected by this implementation.",
-            "For `Rows=all`, a compatible resident input can use a provider covariance hook; supported weighted forms can remain resident when provider ownership and weight-domain conditions hold. Row filtering or an unsupported hook uses the admitted host materialization path. Provider choice, precision, and output residency are dynamic.",
+            "Real typed-integer observations, logical observations, typed-integer/logical normalization flags, and observation weight vectors are RunMat extensions. RunMat returns single covariance for single observations and double if any observation data are double, integer, or logical; controls and weights do not promote the output. The host calculation may accumulate in double precision. Complex observations are rejected by this implementation.",
+            "For `Rows=all`, a compatible resident input can use a provider covariance hook; supported weighted forms can remain resident when provider ownership and weight-domain conditions hold. Row filtering or an unsupported hook uses the admitted host materialization path. Provider choice and output residency are dynamic; the output class follows the observation data.",
             "This is a fusion boundary with a portable runtime binding usable by the interpreter, JIT, native compilation, and browser execution. Device execution is provider-specific.",
         ]},
     ],
@@ -97,6 +97,19 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
                 source: "assert(isequal(size(C),[2 2])); assert(max(abs(C(:)-[1;2;2;4]))<1e-5);",
+            },
+        },
+        BuiltinExample {
+            id: "single-precision",
+            title: "Preserve single observation precision",
+            program: "X = single([1 2; 2 3; 3 5]); C = cov(X)",
+            display_output: Some("C is single precision."),
+            compatibility: BuiltinExampleCompatibility::RunMat,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions {
+                source: "assert(strcmp(class(C),'single')); assert(isequal(size(C),[2 2]));",
             },
         },
     ],

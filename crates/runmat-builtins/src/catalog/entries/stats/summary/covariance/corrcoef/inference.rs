@@ -148,7 +148,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 ));
             }
         }
-        DimensionFact::Known(2)
+        if first.shape.element_count() == Some(1) && second.shape.element_count() == Some(1) {
+            DimensionFact::Known(1)
+        } else {
+            DimensionFact::Known(2)
+        }
     } else if second_unknown {
         DimensionFact::Unknown
     } else {
@@ -174,6 +178,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     } else {
         NumericDomain::Real
     };
+    let class = if second_unknown {
+        None
+    } else if let Some(second) = second.filter(|_| paired) {
+        super::super::geometry::output_class(&[&first, second])
+    } else {
+        super::super::geometry::output_class(&[&first])
+    };
     let mut input = first;
     if second.is_some_and(|value| !matches!(&value.residency, ResidencyFact::Host)) {
         input.residency = ResidencyFact::Unknown;
@@ -183,7 +194,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let shape = super::super::geometry::square_shape(width);
     let outputs = (0..4)
-        .map(|_| super::super::geometry::numeric_output(&input, shape.clone(), domain))
+        .map(|_| super::super::geometry::numeric_output(&input, shape.clone(), domain, class))
         .collect();
     let mut contract = CallContract::fixed(outputs);
     contract.effects = entry.contract.effect_set();

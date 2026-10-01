@@ -13,7 +13,7 @@ fn matrix(rows: usize, columns: usize) -> ValueFact {
 }
 
 fn call(arguments: Vec<ValueFact>, requested: usize) -> CallInference {
-    infer(
+    inference::infer(
         &CallRequest {
             arguments,
             literals: LiteralContext::default(),
@@ -69,7 +69,40 @@ fn resident_output_class_and_placement_are_not_guessed() {
     input.residency = ResidencyFact::Device { provider: None };
     let result = call(vec![input], 1);
     assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
-    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+}
+
+#[test]
+fn output_precision_comes_from_observations_not_weights() {
+    let mut single = matrix(5, 2);
+    single.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    });
+    assert_eq!(
+        call(vec![single.clone()], 1).outputs[0]
+            .numeric()
+            .unwrap()
+            .class,
+        NumericClass::Single
+    );
+    assert_eq!(
+        call(vec![single.clone(), matrix(5, 2)], 1).outputs[0]
+            .numeric()
+            .unwrap()
+            .class,
+        NumericClass::Double
+    );
+    assert_eq!(
+        call(vec![single, matrix(5, 1)], 1).outputs[0]
+            .numeric()
+            .unwrap()
+            .class,
+        NumericClass::Single
+    );
 }
 
 #[test]
@@ -84,7 +117,7 @@ fn typed_row_option_and_wide_normalization_are_checked() {
         class: NumericClass::UInt64,
         domain: NumericDomain::Real,
     }));
-    let result = infer(
+    let result = inference::infer(
         &CallRequest {
             arguments: vec![input, flag],
             literals: LiteralContext::new(vec![

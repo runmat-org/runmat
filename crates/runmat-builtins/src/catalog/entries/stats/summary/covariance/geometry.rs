@@ -83,10 +83,31 @@ pub(super) fn square_shape(width: DimensionFact) -> ShapeFact {
     }
 }
 
+pub(super) fn output_class(observations: &[&ValueFact]) -> Option<NumericClass> {
+    let mut all_single = true;
+    for observation in observations {
+        match &observation.kind {
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                ..
+            }) => {}
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical => all_single = false,
+            ValueKindFact::Unknown => return None,
+            _ => return None,
+        }
+    }
+    Some(if all_single {
+        NumericClass::Single
+    } else {
+        NumericClass::Double
+    })
+}
+
 pub(super) fn numeric_output(
     input: &ValueFact,
     shape: ShapeFact,
     domain: NumericDomain,
+    class: Option<NumericClass>,
 ) -> ValueFact {
     let storage = match shape.element_count() {
         Some(1) => StorageFact::Scalar,
@@ -94,21 +115,18 @@ pub(super) fn numeric_output(
         None => StorageFact::Unknown,
     };
     let mut output = ValueFact::proven(
-        ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
-            domain,
+        class.map_or(ValueKindFact::Unknown, |class| {
+            ValueKindFact::Numeric(NumericFact { class, domain })
         }),
         shape,
         storage,
     );
-    if matches!(&input.kind, ValueKindFact::Unknown) {
-        output.kind = ValueKindFact::Unknown;
+    if class.is_none() || output.shape.element_count().is_none() {
         output.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
     }
     if !matches!(&input.residency, ResidencyFact::Host) {
         // Both dedicated provider kernels and host materialization exist.
-        // Covariance provider output precision can be single or double.
-        output.kind = ValueKindFact::Unknown;
+        // Placement is dynamic, but output class follows the observation data.
         output.residency = ResidencyFact::Unknown;
         output.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
     }

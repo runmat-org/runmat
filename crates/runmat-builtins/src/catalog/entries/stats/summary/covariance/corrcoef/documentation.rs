@@ -16,7 +16,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ]},
         BuiltinDocumentationSection { heading: "Missing values and execution", paragraphs: &[
             "`Rows` accepts `all`, `complete`, or `pairwise`. Complete removes observations missing from any variable; pairwise filters separately for each pair. The default is `all`.",
-            "Real typed-integer and logical observations are RunMat extensions and compute double results. Host outputs use double precision; a supported provider may retain a GPU-resident result for `Rows=all` and one output. Other admitted forms use the host reference path. A provider choice or output residency is not promised statically.",
+            "Real typed-integer and logical observations are RunMat extensions and return double results. RunMat returns single numerical outputs for single observations and double if any observation data are double, integer, or logical; `Alpha` does not promote the output. The host calculation may accumulate in double precision. A supported provider may retain a GPU-resident result for `Rows=all` and one output. Other admitted forms use the host reference path. A provider choice or output residency is not promised statically.",
             "The call is a fusion boundary. Its portable runtime binding applies in interpreted, JIT, native compiled, and browser execution; GPU availability is provider-specific.",
         ]},
     ],
@@ -97,6 +97,19 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
                 source: "assert(isequal(size(R_host),[3 3])); assert(abs(R_host(1,2)-1)<1e-5);",
+            },
+        },
+        BuiltinExample {
+            id: "single-precision-statistics",
+            title: "Preserve single precision across statistical outputs",
+            program: "X = single([1 2; 2 3; 3 1; 4 5]); [R,P,RL,RU] = corrcoef(X,'Alpha',0.1)",
+            display_output: Some("All four outputs have the single class."),
+            compatibility: BuiltinExampleCompatibility::RunMat,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions {
+                source: "assert(strcmp(class(R),'single')); assert(strcmp(class(P),'single')); assert(strcmp(class(RL),'single')); assert(strcmp(class(RU),'single'));",
             },
         },
     ],

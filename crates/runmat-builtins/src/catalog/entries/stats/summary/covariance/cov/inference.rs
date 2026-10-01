@@ -30,10 +30,12 @@ fn valid_normalization(request: &CallRequest, index: usize) -> Option<bool> {
                 return Some(matches!(text.parse::<i128>(), Ok(0 | 1)));
             }
             LiteralValue::Number(_) | LiteralValue::Real { .. } => {
-                return request
-                    .literals
-                    .numeric_at(index)
-                    .map(|value| value == 0.0 || value == 1.0);
+                return request.literals.numeric_at(index).map(|value| {
+                    let rounded = value.round();
+                    value.is_finite()
+                        && (rounded - value).abs() <= 1.0e-12
+                        && (rounded == 0.0 || rounded == 1.0)
+                });
             }
             LiteralValue::Bool(_) => return Some(true),
             _ => {}
@@ -188,6 +190,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     let mut width = geometry.variables;
+    let mut paired_observations = None;
+    let mut precision_ambiguous = false;
     if let Some((index, second)) = arrays.first() {
         let second_geometry =
             super::super::geometry::observations(second, *index, false, &mut diagnostics);
@@ -201,6 +205,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 if let (DimensionFact::Known(rows), Some(length)) =
                     (&geometry.rows, second.shape.element_count())
                 {
+                    if length == 0 {
+                        diagnostics.push(diagnostic(
+                            "RM-CATALOG-COV-WEIGHTS",
+                            "weight vector cannot be empty",
+                            *index,
+                        ));
+                    }
                     if *rows != length {
                         diagnostics.push(diagnostic(
                             "RM-CATALOG-COV-WEIGHTS",
@@ -211,6 +222,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 }
             }
             Some(false) => {
+                paired_observations = Some(second);
                 width = DimensionFact::Known(2);
                 if same_known_size(first, second) == Some(false) {
                     diagnostics.push(diagnostic(
@@ -220,7 +232,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     ));
                 }
             }
-            None => width = DimensionFact::Unknown,
+            None => {
+                width = DimensionFact::Unknown;
+                precision_ambiguous = true;
+            }
         }
         if arrays.len() > 1 {
             let (weight_index, weights) = arrays[1];
@@ -233,6 +248,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             if let (DimensionFact::Known(rows), Some(length)) =
                 (&geometry.rows, weights.shape.element_count())
             {
+                if length == 0 {
+                    diagnostics.push(diagnostic(
+                        "RM-CATALOG-COV-WEIGHTS",
+                        "weight vector cannot be empty",
+                        weight_index,
+                    ));
+                }
                 if *rows != length {
                     diagnostics.push(diagnostic(
                         "RM-CATALOG-COV-WEIGHTS",
@@ -255,12 +277,20 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         width = DimensionFact::Unknown;
     }
     let shape = super::super::geometry::square_shape(width);
-    let mut output = super::super::geometry::numeric_output(first, shape, NumericDomain::Real);
+    let class = if unknown || precision_ambiguous {
+        None
+    } else {
+        paired_observations.map_or_else(
+            || super::super::geometry::output_class(&[first]),
+            |second| super::super::geometry::output_class(&[first, second]),
+        )
+    };
+    let mut output =
+        super::super::geometry::numeric_output(first, shape, NumericDomain::Real, class);
     if arrays
         .iter()
         .any(|(_, value)| !matches!(&value.residency, ResidencyFact::Host))
     {
-        output.kind = ValueKindFact::Unknown;
         output.residency = ResidencyFact::Unknown;
         output.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
     }
