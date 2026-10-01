@@ -261,39 +261,43 @@ fn ensure_kmeans_extensions(x: &Value, k: &Value, options: &[OptionHeader]) -> B
         )?;
     }
     for option in options {
-        match option.kind {
-            KmeansOption::Start if typed_integer(&option.value) => {
+        match option {
+            OptionHeader::Argument {
+                kind: KmeansOption::Start,
+                value,
+            } if typed_integer(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &KMEANS_INTEGER_START_EXTENSION,
                     NAME,
                 )?;
             }
-            KmeansOption::MaxIter | KmeansOption::Replicates if typed_integer(&option.value) => {
+            OptionHeader::Argument {
+                kind: KmeansOption::MaxIter | KmeansOption::Replicates,
+                value,
+            } if typed_integer(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION,
                     NAME,
                 )?;
             }
-            KmeansOption::Options => {
-                if let Some(fields) = &option.statset_fields {
-                    for field in fields {
-                        match field.kind {
-                            KmeansStatsetField::MaxIter if typed_integer(&field.value) => {
-                                crate::compatibility::ensure_builtin_extension_enabled(
-                                    &KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION,
-                                    NAME,
-                                )?;
-                            }
-                            KmeansStatsetField::UseParallel | KmeansStatsetField::UseSubstreams
-                                if typed_integer(&field.value) =>
-                            {
-                                crate::compatibility::ensure_builtin_extension_enabled(
-                                    &KMEANS_INTEGER_PARALLEL_TOGGLE_EXTENSION,
-                                    NAME,
-                                )?;
-                            }
-                            _ => {}
+            OptionHeader::Statset(fields) => {
+                for field in fields {
+                    match field.kind {
+                        KmeansStatsetField::MaxIter if typed_integer(&field.value) => {
+                            crate::compatibility::ensure_builtin_extension_enabled(
+                                &KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION,
+                                NAME,
+                            )?;
                         }
+                        KmeansStatsetField::UseParallel | KmeansStatsetField::UseSubstreams
+                            if typed_integer(&field.value) =>
+                        {
+                            crate::compatibility::ensure_builtin_extension_enabled(
+                                &KMEANS_INTEGER_PARALLEL_TOGGLE_EXTENSION,
+                                NAME,
+                            )?;
+                        }
+                        _ => {}
                     }
                 }
             }

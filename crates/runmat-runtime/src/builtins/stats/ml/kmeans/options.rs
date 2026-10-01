@@ -30,7 +30,7 @@ pub(super) async fn parse_options(
                 if !super::admission::numeric_value_is_exact(&value) {
                     return Err(invalid("kmeans: typed-integer Start values must be exactly representable as double"));
                 }
-                options.start = parse_numeric_start(&value)?;
+                options.start = parse_numeric_start(value)?;
             }
             OptionInput::Display => {}
             OptionInput::OnlinePhase(toggle) => {
@@ -50,8 +50,8 @@ async fn materialize(value: Value, borrowed: &mut BorrowedOperands) -> BuiltinRe
     gather(value).await
 }
 
-pub(super) fn parse_numeric_start(value: &Value) -> BuiltinResult<StartSpec> {
-    let tensor = tensor::value_into_tensor_for(NAME, value.clone())
+pub(super) fn parse_numeric_start(value: Value) -> BuiltinResult<StartSpec> {
+    let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|err| invalid(format!("kmeans: {err}")))?;
     if tensor.shape.len() > 3 {
         return Err(invalid(

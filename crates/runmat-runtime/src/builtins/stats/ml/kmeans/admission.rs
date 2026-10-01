@@ -7,10 +7,9 @@ use crate::BuiltinResult;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
 
-pub(super) struct OptionHeader {
-    pub(super) kind: KmeansOption,
-    pub(super) value: Value,
-    pub(super) statset_fields: Option<Vec<StatsetHeader>>,
+pub(super) enum OptionHeader {
+    Argument { kind: KmeansOption, value: Value },
+    Statset(Vec<StatsetHeader>),
 }
 
 pub(super) struct StatsetHeader {
@@ -62,25 +61,21 @@ pub(super) fn parse_option_headers(args: Vec<Value>) -> BuiltinResult<Vec<Option
         let value = values
             .next()
             .ok_or_else(|| invalid("kmeans: options must be name-value pairs"))?;
-        let statset_fields = match (&kind, &value) {
-            (KmeansOption::Options, Value::Struct(value)) => Some(
+        let header = match (kind, value) {
+            (KmeansOption::Options, Value::Struct(value)) => OptionHeader::Statset(
                 value
                     .fields
-                    .iter()
+                    .into_iter()
                     .filter(|(_, value)| !is_empty_option_value(value))
                     .map(|(name, value)| StatsetHeader {
-                        kind: KmeansStatsetField::from_keyword(name),
-                        value: value.clone(),
+                        kind: KmeansStatsetField::from_keyword(&name),
+                        value,
                     })
                     .collect(),
             ),
-            _ => None,
+            (kind, value) => OptionHeader::Argument { kind, value },
         };
-        headers.push(OptionHeader {
-            kind,
-            value,
-            statset_fields,
-        });
+        headers.push(header);
     }
     Ok(headers)
 }
@@ -91,11 +86,12 @@ pub(super) fn admit_option_values(headers: Vec<OptionHeader>) -> BuiltinResult<V
     headers
         .into_iter()
         .map(|header| {
-            let OptionHeader {
-                kind,
-                value,
-                statset_fields,
-            } = header;
+            let (kind, value) = match header {
+                OptionHeader::Argument { kind, value } => (kind, value),
+                OptionHeader::Statset(fields) => {
+                    return Ok(OptionInput::Statset(parse_statset(fields)?));
+                }
+            };
             let input = match kind {
                 KmeansOption::Distance => OptionInput::Distance(
                     Distance::from_keyword(&required_text(&value, "Distance")?)
@@ -128,7 +124,7 @@ pub(super) fn admit_option_values(headers: Vec<OptionHeader>) -> BuiltinResult<V
                             if !numeric_value_is_exact(&value) {
                                 return Err(invalid("kmeans: typed-integer Start values must be exactly representable as double"));
                             }
-                            OptionInput::Start(StartInput::Prepared(super::options::parse_numeric_start(&value)?))
+                            OptionInput::Start(StartInput::Prepared(super::options::parse_numeric_start(value)?))
                         }
                     }
                 }
@@ -141,17 +137,8 @@ pub(super) fn admit_option_values(headers: Vec<OptionHeader>) -> BuiltinResult<V
                     KmeansToggle::from_keyword(&required_text(&value, "OnlinePhase")?)
                         .ok_or_else(|| invalid("kmeans: unsupported OnlinePhase"))?,
                 ),
-                KmeansOption::Options => match value {
-                    Value::Struct(_) => OptionInput::Statset(parse_statset(
-                        statset_fields.ok_or_else(|| invalid("kmeans: missing statset fields"))?,
-                    )?),
-                    _ if is_empty_numeric(&value) => OptionInput::EmptyStatset,
-                    _ => {
-                        return Err(invalid(
-                            "kmeans: Options must be [] or a statset options struct",
-                        ))
-                    }
-                },
+                KmeansOption::Options if is_empty_numeric(&value) => OptionInput::EmptyStatset,
+                KmeansOption::Options => return Err(invalid("kmeans: Options must be [] or a statset options struct")),
             };
             match &input {
                 OptionInput::MaxIter(value) => validate_host_positive(value, "MaxIter")?,
