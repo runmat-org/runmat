@@ -5,7 +5,7 @@ fn infer(
     request: &runmat_types::CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> runmat_types::CallInference {
-    super::inference::infer(request, entry, super::inference::MeanKind::Harmonic)
+    super::inference::infer(request, entry, super::StatisticalMeanKind::Harmonic)
 }
 
 const INPUT_X: BuiltinParamDescriptor = BuiltinParamDescriptor {

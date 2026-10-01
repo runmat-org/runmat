@@ -8,7 +8,7 @@ fn infer(
     super::inference::infer(
         request,
         entry,
-        super::inference::MeanKind::RootMeanSquaredError,
+        super::StatisticalMeanKind::RootMeanSquaredError,
     )
 }
 

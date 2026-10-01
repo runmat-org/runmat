@@ -91,6 +91,16 @@ fn rmse_scales_residual_components_before_subtraction_overflows() {
 }
 
 #[test]
+fn mixed_wide_integer_and_exact_floating_observation_keep_unit_residual() {
+    let wide = Value::Int(IntValue::U64(9_007_199_254_740_993));
+    let nearby = Value::Num(9_007_199_254_740_992.0);
+    let result = block_on(rmse::rmse_builtin(wide.clone(), nearby.clone(), vec![])).unwrap();
+    assert_eq!(scalar(result), 1.0);
+    let reversed = block_on(rmse::rmse_builtin(nearby, wide, vec![])).unwrap();
+    assert_eq!(scalar(reversed), 1.0);
+}
+
+#[test]
 fn weighted_rmse_broadcasts_weights_from_unexpanded_forecast() {
     let forecast = tensor(vec![1.0, 2.0], vec![2, 1], NumericDType::F64);
     let actual = tensor(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2], NumericDType::F64);

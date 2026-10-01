@@ -2,20 +2,13 @@
 //! Text is decoded only at the source-language option boundary; the rest of
 //! inference uses a closed selector and missing-value mode.
 
+use super::StatisticalMeanKind as MeanKind;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
     LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact,
     ValueFact, ValueKindFact,
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum MeanKind {
-    Geometric,
-    Harmonic,
-    RootMeanSquare,
-    RootMeanSquaredError,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Selector {
@@ -37,11 +30,7 @@ pub(super) fn infer(
     kind: MeanKind,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
-    let data_count = if kind == MeanKind::RootMeanSquaredError {
-        2
-    } else {
-        1
-    };
+    let data_count = kind.data_arity();
     if request.arguments.len() < data_count {
         diagnostics.push(error("ARITY", "missing required numerical input"));
     }
@@ -144,6 +133,7 @@ fn parse_options(
 ) -> (Selector, MissingMode) {
     let mut selector = None;
     let mut missing = None;
+    let mut seen_weights = false;
     let mut index = start;
     while index < request.arguments.len() {
         let literal = request
@@ -161,24 +151,28 @@ fn parse_options(
                     "all" => {
                         diagnostics.push(error("OPTIONS", "only one dimension selector is allowed"))
                     }
-                    "includenan" | "includemissing" if missing.is_none() => {
+                    "includenan" if missing.is_none() => missing = Some(MissingMode::Include),
+                    "omitnan" if missing.is_none() => missing = Some(MissingMode::Omit),
+                    "includemissing" if kind.allows_missing_synonyms() && missing.is_none() => {
                         missing = Some(MissingMode::Include)
                     }
-                    "omitnan" | "omitmissing" if missing.is_none() => {
+                    "omitmissing" if kind.allows_missing_synonyms() && missing.is_none() => {
                         missing = Some(MissingMode::Omit)
                     }
-                    "includenan" | "includemissing" | "omitnan" | "omitmissing" => {
+                    "includenan" | "omitnan" => {
                         diagnostics.push(error("OPTIONS", "only one missing-value flag is allowed"))
                     }
-                    "weights" if kind == MeanKind::RootMeanSquaredError => {
+                    "includemissing" | "omitmissing" if kind.allows_missing_synonyms() => {
+                        diagnostics.push(error("OPTIONS", "only one missing-value flag is allowed"))
+                    }
+                    "weights" if kind.allows_weights() => {
+                        if seen_weights {
+                            diagnostics
+                                .push(error("WEIGHTS", "Weights may be specified only once"));
+                        }
+                        seen_weights = true;
                         if request.arguments.get(index + 1).is_none() {
                             diagnostics.push(error("WEIGHTS", "Weights requires a value"));
-                        }
-                        if matches!(selector, Some(Selector::All))
-                            || matches!(&selector, Some(Selector::Dimensions(dims)) if dims.len() > 1)
-                        {
-                            diagnostics
-                                .push(error("WEIGHTS", "Weights does not support all or vecdim"));
                         }
                         index += 1;
                     }
@@ -203,6 +197,12 @@ fn parse_options(
             _ => diagnostics.push(error("OPTIONS", "unsupported reduction control")),
         }
         index += 1;
+    }
+    if seen_weights
+        && (matches!(selector, Some(Selector::All))
+            || matches!(&selector, Some(Selector::Dimensions(dims)) if dims.len() > 1))
+    {
+        diagnostics.push(error("WEIGHTS", "Weights does not support all or vecdim"));
     }
     (
         selector.unwrap_or(Selector::Default),
@@ -337,6 +337,25 @@ fn error(code: &'static str, message: impl Into<String>) -> InferenceDiagnostic 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_types::{OutputSelection, RequestedOutputCount};
+
+    fn option_diagnostics(kind: MeanKind, options: &[&str]) -> Vec<InferenceDiagnostic> {
+        let arity = kind.data_arity();
+        let mut literals = vec![LiteralValue::Unknown; arity];
+        literals.extend(
+            options
+                .iter()
+                .map(|option| LiteralValue::String((*option).to_owned())),
+        );
+        let request = CallRequest {
+            arguments: vec![ValueFact::unknown(DynamicReason::RuntimeValue); literals.len()],
+            literals: LiteralContext::new(literals),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let mut diagnostics = Vec::new();
+        parse_options(&request, arity, kind, &mut diagnostics);
+        diagnostics
+    }
 
     #[test]
     fn symbolic_ranks_never_expand_into_dimension_vectors() {
@@ -347,5 +366,18 @@ mod tests {
         assert_eq!(reduced_shape(&huge, &Selector::Default), huge);
         assert_eq!(reduced_shape(&huge, &Selector::Dimensions(vec![1])), huge);
         assert_eq!(reduced_shape(&huge, &Selector::All), ShapeFact::Scalar);
+    }
+
+    #[test]
+    fn static_missing_aliases_follow_the_shared_typed_policy() {
+        for kind in [MeanKind::Geometric, MeanKind::Harmonic] {
+            assert!(!option_diagnostics(kind, &["omitmissing"]).is_empty());
+            assert!(!option_diagnostics(kind, &["includemissing"]).is_empty());
+            assert!(option_diagnostics(kind, &["omitnan"]).is_empty());
+        }
+        for kind in [MeanKind::RootMeanSquare, MeanKind::RootMeanSquaredError] {
+            assert!(option_diagnostics(kind, &["omitmissing"]).is_empty());
+            assert!(option_diagnostics(kind, &["includemissing"]).is_empty());
+        }
     }
 }

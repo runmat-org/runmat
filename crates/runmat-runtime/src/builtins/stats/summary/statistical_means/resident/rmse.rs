@@ -33,7 +33,6 @@ async fn absolute_components(
             validate_output(kind, provider, input, &imaginary, input.shape(), precision)?;
             (real, Some(imaginary))
         }
-        _ => return Err(Failure::Unsupported),
     };
     let absolute_real = provider
         .unary_abs(&real)
@@ -239,14 +238,20 @@ async fn run(
     Ok(result)
 }
 
-pub(super) async fn try_rmse(
+pub(in crate::builtins::stats::summary::statistical_means) async fn try_rmse(
     forecast: &GpuTensorHandle,
     actual: &GpuTensorHandle,
     options: &Options,
 ) -> BuiltinResult<Option<Value>> {
     let kind = ReductionKind::RootMeanSquaredError;
-    let provider = gpu_helpers::exact_provider_for_binary_inputs(forecast, actual)
-        .map_err(|source| invalid(kind, &source))?;
+    if forecast.allocation_lease().validate_live().is_err()
+        || actual.allocation_lease().validate_live().is_err()
+    {
+        return Err(invalid(kind, "resident RMSE input allocation is not live"));
+    }
+    let Ok(provider) = gpu_helpers::exact_provider_for_binary_inputs(forecast, actual) else {
+        return Ok(None);
+    };
     let precision = runmat_accelerate_api::handle_precision(forecast);
     let storage = runmat_accelerate_api::handle_storage(forecast);
     let supported = options.weights.is_none()
@@ -264,14 +269,6 @@ pub(super) async fn try_rmse(
         && !forecast.shape().contains(&0)
         && !actual.shape().contains(&0);
     if !supported {
-        if runmat_accelerate_api::handle_is_explicit(forecast)
-            || runmat_accelerate_api::handle_is_explicit(actual)
-        {
-            return Err(invalid(
-                kind,
-                "explicit GPU RMSE requires a supported resident precision and weight route",
-            ));
-        }
         return Ok(None);
     }
     let plan = BroadcastPlan::new(forecast.shape(), actual.shape())
@@ -294,16 +291,7 @@ pub(super) async fn try_rmse(
             gpu_helpers::propagate_output_provenance(&mut output, [forecast, actual])?;
             gpu_helpers::resident_gpu_value(output).map(Some)
         }
-        Err(Failure::Unsupported)
-            if !runmat_accelerate_api::handle_is_explicit(forecast)
-                && !runmat_accelerate_api::handle_is_explicit(actual) =>
-        {
-            Ok(None)
-        }
-        Err(Failure::Unsupported) => Err(invalid(
-            kind,
-            "explicit GPU RMSE requires a supported resident provider route",
-        )),
+        Err(Failure::Unsupported) => Ok(None),
         Err(Failure::Execution(error)) => Err(*error),
     }
 }

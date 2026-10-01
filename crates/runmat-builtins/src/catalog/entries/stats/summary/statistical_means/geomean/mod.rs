@@ -6,7 +6,7 @@ fn infer(
     request: &runmat_types::CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> runmat_types::CallInference {
-    super::inference::infer(request, entry, super::inference::MeanKind::Geometric)
+    super::inference::infer(request, entry, super::StatisticalMeanKind::Geometric)
 }
 
 const INPUT_X: BuiltinParamDescriptor = BuiltinParamDescriptor {

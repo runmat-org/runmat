@@ -1,13 +1,14 @@
 //! Resident reductions use the input's exact owner and retain all intermediates
-//! on that provider. A typed unsupported hook may fall back only for automatic
-//! residency; execution failures and explicit device intent remain visible.
+//! on that provider. These four functions already documented host
+//! materialization of GPU inputs; an unsupported hook preserves that admitted
+//! boundary, while an execution failure remains visible.
 mod numerics;
 mod reduction;
 mod rmse;
 
 pub(super) use rmse::try_rmse;
 
-use super::options::{Axes, MissingMode, Options, ReductionKind};
+use super::options::{Axes, Options, ReductionKind};
 use crate::builtins::common::gpu_helpers;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
@@ -66,6 +67,7 @@ fn validate_output(
 ) -> Result<(), Failure> {
     let owner = gpu_helpers::exact_provider_for_handle(output);
     if owner.is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
+        || output.allocation_lease().validate_live().is_err()
         || output.device_id() != input.device_id()
         || !equivalent_shape(output.shape(), expected)
         || runmat_accelerate_api::handle_storage(output) != GpuTensorStorage::Real
@@ -88,6 +90,7 @@ async fn scalar_summary(
     input: &GpuTensorHandle,
 ) -> Result<f64, Failure> {
     if !input.shape().iter().all(|extent| *extent == 1)
+        || input.allocation_lease().validate_live().is_err()
         || gpu_helpers::exact_provider_for_handle(input)
             .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
     {
@@ -100,6 +103,7 @@ async fn scalar_summary(
         .await
         .map_err(|error| Failure::Execution(Box::new(error)))?;
     if summary.len() != 1
+        || input.allocation_lease().validate_live().is_err()
         || gpu_helpers::exact_provider_for_handle(input)
             .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
     {
@@ -130,6 +134,7 @@ async fn usable_scale(
 ) -> Result<GpuTensorHandle, Failure> {
     let owner = gpu_helpers::exact_provider_for_handle(&scale);
     if owner.is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
+        || scale.allocation_lease().validate_live().is_err()
         || scale.device_id() != input.device_id()
         || runmat_accelerate_api::handle_storage(&scale) != GpuTensorStorage::Real
         || runmat_accelerate_api::handle_precision(&scale)
@@ -173,6 +178,12 @@ pub(super) async fn try_reduce(
     input: &GpuTensorHandle,
     options: &Options,
 ) -> BuiltinResult<Option<Value>> {
+    if input.allocation_lease().validate_live().is_err() {
+        return Err(super::options::invalid(
+            kind,
+            "resident input allocation is not live",
+        ));
+    }
     let Some(provider) = gpu_helpers::exact_provider_for_handle(input) else {
         return Err(super::options::invalid(
             kind,
@@ -207,11 +218,10 @@ pub(super) async fn try_reduce(
             gpu_helpers::propagate_output_provenance(&mut output, [input])?;
             gpu_helpers::resident_gpu_value(output).map(Some)
         }
-        Err(Failure::Unsupported) if !runmat_accelerate_api::handle_is_explicit(input) => Ok(None),
-        Err(Failure::Unsupported) => Err(super::options::invalid(
-            kind,
-            "explicit GPU input requires a supported resident provider route",
-        )),
+        // These four APIs historically admit host materialization for GPU
+        // inputs, including explicit gpuArray values. Unsupported provider
+        // hooks preserve that documented boundary; execution faults do not.
+        Err(Failure::Unsupported) => Ok(None),
         Err(Failure::Execution(error)) => Err(*error),
     }
 }

@@ -1,5 +1,6 @@
 //! Canonical contracts for four related, but independently callable, means.
 mod inference;
+mod policy;
 mod geomean;
 mod harmmean;
 mod rms;
@@ -7,6 +8,7 @@ mod rmse;
 
 pub use geomean::*;
 pub use harmmean::*;
+pub use policy::*;
 pub use rms::*;
 pub use rmse::*;
 

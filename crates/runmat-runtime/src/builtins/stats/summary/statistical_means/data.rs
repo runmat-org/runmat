@@ -23,9 +23,35 @@ impl Component {
     fn normalized_difference(self, other: Self, scale: f64) -> f64 {
         match (self, other) {
             (Self::Integer(left), Self::Integer(right)) => (left - right) as f64 / scale,
+            (Self::Integer(left), Self::Floating(right)) => {
+                if let Some(right) = integral_i128(right) {
+                    if let Some(difference) = left.checked_sub(right) {
+                        return difference as f64 / scale;
+                    }
+                }
+                self.value() / scale - other.value() / scale
+            }
+            (Self::Floating(left), Self::Integer(right)) => {
+                if let Some(left) = integral_i128(left) {
+                    if let Some(difference) = left.checked_sub(right) {
+                        return difference as f64 / scale;
+                    }
+                }
+                self.value() / scale - other.value() / scale
+            }
             _ => self.value() / scale - other.value() / scale,
         }
     }
+}
+
+fn integral_i128(value: f64) -> Option<i128> {
+    // The exclusive upper bound avoids Rust's saturating float-to-int cast at
+    // 2^127, while the lower bound itself is exactly representable.
+    (value.is_finite()
+        && value.fract() == 0.0
+        && value >= i128::MIN as f64
+        && value < 2.0_f64.powi(127))
+    .then_some(value as i128)
 }
 
 impl From<NumericScalar> for Component {

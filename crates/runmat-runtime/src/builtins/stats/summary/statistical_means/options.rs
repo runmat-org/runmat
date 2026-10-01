@@ -1,6 +1,7 @@
 //! Decode public reduction syntax exactly once, before materializing data.
 use crate::builtins::common::{random_args::keyword_of, tensor};
 use crate::{BuiltinResult, RuntimeError};
+pub(super) use runmat_builtins::StatisticalMeanKind as ReductionKind;
 use runmat_value::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,33 +15,6 @@ pub(super) enum Axes {
 pub(super) enum MissingMode {
     Include,
     Omit,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ReductionKind {
-    Geometric,
-    Harmonic,
-    RootMeanSquare,
-    RootMeanSquaredError,
-}
-
-impl ReductionKind {
-    pub(super) const fn name(self) -> &'static str {
-        match self {
-            Self::Geometric => "geomean",
-            Self::Harmonic => "harmmean",
-            Self::RootMeanSquare => "rms",
-            Self::RootMeanSquaredError => "rmse",
-        }
-    }
-
-    const fn allows_missing_synonyms(self) -> bool {
-        matches!(self, Self::RootMeanSquare | Self::RootMeanSquaredError)
-    }
-
-    const fn allows_weights(self) -> bool {
-        matches!(self, Self::RootMeanSquaredError)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,5 +153,21 @@ mod tests {
             vec![axes, Value::from("Weights"), Value::Num(1.0)],
         ));
         assert!(outcome.is_err());
+    }
+
+    #[test]
+    fn missing_aliases_follow_the_shared_typed_policy() {
+        for kind in [ReductionKind::Geometric, ReductionKind::Harmonic] {
+            assert!(block_on(parse(kind, vec![Value::from("omitmissing")])).is_err());
+            assert!(block_on(parse(kind, vec![Value::from("includemissing")])).is_err());
+            assert!(block_on(parse(kind, vec![Value::from("omitnan")])).is_ok());
+        }
+        for kind in [
+            ReductionKind::RootMeanSquare,
+            ReductionKind::RootMeanSquaredError,
+        ] {
+            assert!(block_on(parse(kind, vec![Value::from("omitmissing")])).is_ok());
+            assert!(block_on(parse(kind, vec![Value::from("includemissing")])).is_ok());
+        }
     }
 }
