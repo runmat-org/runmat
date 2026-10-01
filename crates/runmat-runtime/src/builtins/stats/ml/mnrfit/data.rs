@@ -1,6 +1,6 @@
 use super::*;
 use crate::builtins::common::tensor;
-use runmat_value::{CellArray, Tensor};
+use runmat_value::{CellArray, CharArray, Tensor};
 use std::borrow::Cow;
 
 #[derive(Clone, Debug)]
@@ -44,16 +44,17 @@ impl ClassNames {
     }
 }
 
-pub(super) fn prepare_data(
+pub(super) async fn prepare_data(
     x: &Tensor,
     response: ResponseOutcomes,
     options: &Options,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<PreparedData> {
     check()?;
     let rows = x.rows();
-    let values = predictor_values(x, check)?;
-    let mut design = design_matrix(x, &values, options.constant, check)?;
+    let values = predictor_values(x, check, cooperation).await?;
+    let mut design = design_matrix(x, &values, options.constant, check, cooperation).await?;
     let cols = if options.constant {
         x.cols()
             .checked_add(1)
@@ -78,6 +79,7 @@ pub(super) fn prepare_data(
         {
             if index.is_multiple_of(4096) {
                 check()?;
+                cooperation.completed(4096).await?;
             }
             *weight *= *option_weight;
             if !weight.is_finite() {
@@ -95,7 +97,9 @@ pub(super) fn prepare_data(
         &mut outcomes,
         &mut weights,
         check,
-    )?;
+        cooperation,
+    )
+    .await?;
     if kept_rows == 0 {
         return Err(invalid("mnrfit: no complete observations remain"));
     }
@@ -133,9 +137,10 @@ fn invalid_weights(weights: &[f64], check: &impl Fn() -> BuiltinResult<()>) -> B
     Ok(false)
 }
 
-fn predictor_values<'a>(
+async fn predictor_values<'a>(
     x: &'a Tensor,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<Cow<'a, [f64]>> {
     check()?;
     if let Some(values) = x.as_f64_slice() {
@@ -145,6 +150,7 @@ fn predictor_values<'a>(
     for index in 0..x.len() {
         if index.is_multiple_of(16_384) {
             check()?;
+            cooperation.completed(16_384).await?;
         }
         values.push(tensor::tensor_value_f64(x, index));
     }
@@ -177,11 +183,12 @@ fn checked_finite_add(total: f64, value: f64, role: &str) -> BuiltinResult<f64> 
     }
 }
 
-fn design_matrix(
+async fn design_matrix(
     x: &Tensor,
     values: &[f64],
     constant: bool,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<Vec<f64>> {
     check()?;
     let rows = x.rows();
@@ -194,12 +201,13 @@ fn design_matrix(
         x_cols
     };
     let len = checked_elements(rows, cols, "design matrix")?;
-    let mut design = filled(len, 0.0, "design matrix")?;
+    let mut design = filled_cooperatively(len, 0.0, "design matrix", check, cooperation).await?;
     let mut out_col = 0usize;
     if constant {
         for row in 0..rows {
             if row.is_multiple_of(16_384) {
                 check()?;
+                cooperation.completed(16_384).await?;
             }
             design[row] = 1.0;
         }
@@ -211,12 +219,13 @@ fn design_matrix(
         for (to, from) in destination.chunks_mut(16_384).zip(source.chunks(16_384)) {
             check()?;
             to.copy_from_slice(from);
+            cooperation.completed(to.len() as u64).await?;
         }
     }
     Ok(design)
 }
 
-fn compact_complete_cases(
+async fn compact_complete_cases(
     x: &Tensor,
     values: &[f64],
     cols: usize,
@@ -224,6 +233,7 @@ fn compact_complete_cases(
     outcomes: &mut [Vec<f64>],
     weights: &mut Vec<f64>,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<usize> {
     check()?;
     let rows = x.rows();
@@ -233,6 +243,7 @@ fn compact_complete_cases(
     for row in 0..rows {
         if row.is_multiple_of(4096) {
             check()?;
+            cooperation.completed(4096).await?;
         }
         let x_complete = (0..x.cols()).all(|col| values[row + col * rows].is_finite());
         let y_complete = weights[row].is_finite()
@@ -246,30 +257,36 @@ fn compact_complete_cases(
         return Ok(rows);
     }
     let new_len = checked_elements(keep.len(), cols, "compacted design matrix")?;
-    let mut new_design = filled(new_len, 0.0, "compacted design matrix")?;
+    let mut new_design =
+        filled_cooperatively(new_len, 0.0, "compacted design matrix", check, cooperation).await?;
     for col in 0..cols {
         for (new_row, old_row) in keep.iter().enumerate() {
             if new_row.is_multiple_of(4096) {
                 check()?;
+                cooperation.completed(4096).await?;
             }
             new_design[new_row + col * keep.len()] = design[old_row + col * rows];
         }
     }
     for outcome in outcomes.iter_mut() {
         check()?;
-        let mut compacted = filled(keep.len(), 0.0, "compacted outcomes")?;
+        let mut compacted =
+            filled_cooperatively(keep.len(), 0.0, "compacted outcomes", check, cooperation).await?;
         for (new_row, old_row) in keep.iter().enumerate() {
             if new_row.is_multiple_of(4096) {
                 check()?;
+                cooperation.completed(4096).await?;
             }
             compacted[new_row] = outcome[*old_row];
         }
         *outcome = compacted;
     }
-    let mut compacted_weights = filled(keep.len(), 0.0, "compacted weights")?;
+    let mut compacted_weights =
+        filled_cooperatively(keep.len(), 0.0, "compacted weights", check, cooperation).await?;
     for (new_row, old_row) in keep.iter().enumerate() {
         if new_row.is_multiple_of(4096) {
             check()?;
+            cooperation.completed(4096).await?;
         }
         compacted_weights[new_row] = weights[*old_row];
     }
@@ -278,36 +295,54 @@ fn compact_complete_cases(
     Ok(keep.len())
 }
 
-pub(super) fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<ResponseOutcomes> {
+pub(super) async fn response_outcomes(
+    value: Value,
+    rows: usize,
+    cooperation: &mut FitCooperation<'_>,
+) -> BuiltinResult<ResponseOutcomes> {
     match value {
         Value::Tensor(tensor) if tensor.cols() >= 2 && tensor.rows() == rows => {
             ensure_exact_integer_tensor(&tensor, "Y")?;
-            count_outcomes(&tensor)
+            count_outcomes(&tensor, cooperation).await
         }
         Value::Tensor(tensor) => {
             ensure_exact_integer_tensor(&tensor, "Y")?;
             let shape = tensor.shape.clone();
-            numeric_outcomes(tensor::tensor_values_f64(&tensor), shape, rows)
+            let mut values = reserved(tensor.len(), "numeric responses")?;
+            for index in 0..tensor.len() {
+                values.push(tensor::tensor_value_f64(&tensor, index));
+                if (index + 1).is_multiple_of(16_384) {
+                    cooperation.completed(16_384).await?;
+                }
+            }
+            cooperation.completed((tensor.len() % 16_384) as u64).await?;
+            numeric_outcomes(values, shape, rows, cooperation).await
         }
-        Value::LogicalArray(logical) => categorical_outcomes(
-            logical.data.iter().map(|value| f64::from(*value != 0)).collect(),
-            logical.shape,
-            rows,
-        ),
-        Value::StringArray(array) => text_outcomes(array.data, array.shape, rows),
-        Value::String(text) if rows == 1 => text_outcomes(vec![text], vec![1, 1], rows),
+        Value::LogicalArray(logical) => {
+            let mut values = reserved(logical.data.len(), "logical responses")?;
+            for (index, value) in logical.data.iter().enumerate() {
+                values.push(f64::from(*value != 0));
+                if (index + 1).is_multiple_of(16_384) {
+                    cooperation.completed(16_384).await?;
+                }
+            }
+            cooperation.completed((logical.data.len() % 16_384) as u64).await?;
+            numeric_outcomes(values, logical.shape, rows, cooperation).await
+        }
+        Value::StringArray(array) => text_outcomes(array.data, array.shape, rows, cooperation).await,
+        Value::String(text) if rows == 1 => text_outcomes(vec![text], vec![1, 1], rows, cooperation).await,
         Value::CharArray(array) => {
             let shape = vec![array.rows, 1];
-            text_outcomes(char_rows(&array), shape, rows)
+            text_outcomes(char_rows_cooperatively(&array, cooperation).await?, shape, rows, cooperation).await
         }
-        Value::Cell(cell) => cellstr_outcomes(&cell, rows),
+        Value::Cell(cell) => cellstr_outcomes(&cell, rows, cooperation).await,
         Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             let labels = crate::builtins::table::categorical_labels(&Value::Object(object))?;
-            text_outcomes(labels, vec![rows, 1], rows)
+            text_outcomes(labels, vec![rows, 1], rows, cooperation).await
         }
-        Value::Num(value) if rows == 1 => numeric_outcomes(vec![value], vec![1, 1], rows),
+        Value::Num(value) if rows == 1 => numeric_outcomes(vec![value], vec![1, 1], rows, cooperation).await,
         Value::Bool(value) if rows == 1 => {
-            categorical_outcomes(vec![f64::from(value)], vec![1, 1], rows)
+            numeric_outcomes(vec![f64::from(value)], vec![1, 1], rows, cooperation).await
         }
         other => Err(invalid(format!(
             "mnrfit: Y must be a numeric, logical, text, categorical, cellstr, or grouped counts response, got {other:?}"
@@ -315,32 +350,51 @@ pub(super) fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<Resp
     }
 }
 
-fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
+async fn count_outcomes(
+    tensor: &Tensor,
+    cooperation: &mut FitCooperation<'_>,
+) -> BuiltinResult<ResponseOutcomes> {
     let rows = tensor.rows();
     let cols = tensor.cols();
-    let data = tensor::tensor_values_f64(tensor);
     let logits = cols - 1;
-    let mut outcomes = columns(logits, rows, "grouped outcomes")?;
-    let mut weights = filled(rows, 0.0, "grouped weights")?;
+    let mut outcomes = columns(logits, rows, "grouped outcomes", &|| Ok(()), cooperation).await?;
+    let mut weights =
+        filled_cooperatively(rows, 0.0, "grouped weights", &|| Ok(()), cooperation).await?;
     let mut observations = 0.0;
     for row in 0..rows {
-        if (0..cols).any(|col| data[row + col * rows].is_nan()) {
+        let mut missing = false;
+        for col in 0..cols {
+            missing |= tensor::tensor_value_f64(tensor, row + col * rows).is_nan();
+            if (col + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
+        }
+        cooperation.completed((cols % 16_384) as u64).await?;
+        if missing {
             continue;
         }
         let mut total = 0.0;
         for col in 0..cols {
-            let count = data[row + col * rows];
+            let count = tensor::tensor_value_f64(tensor, row + col * rows);
             if !count.is_finite() || count < 0.0 {
                 return Err(invalid(
                     "mnrfit: grouped counts must be nonnegative finite values",
                 ));
             }
             total = checked_finite_add(total, count, "grouped count")?;
+            if (col + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
+        cooperation.completed((cols % 16_384) as u64).await?;
         if total > 0.0 {
             for (col, outcome) in outcomes.iter_mut().enumerate().take(logits) {
-                outcome[row] = data[row + col * rows] / total;
+                outcome[row] = tensor::tensor_value_f64(tensor, row + col * rows) / total;
+                if (col + 1).is_multiple_of(16_384) {
+                    cooperation.completed(16_384).await?;
+                }
             }
+            cooperation.completed((logits % 16_384) as u64).await?;
             weights[row] = total;
             observations = checked_finite_add(observations, total, "grouped count")?;
         }
@@ -348,7 +402,8 @@ fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
     if observations <= 0.0 {
         return Err(invalid("mnrfit: grouped counts must contain observations"));
     }
-    let mut classes = filled(cols, 0.0, "grouped class labels")?;
+    let mut classes =
+        filled_cooperatively(cols, 0.0, "grouped class labels", &|| Ok(()), cooperation).await?;
     for (index, class) in classes.iter_mut().enumerate() {
         *class = (index + 1) as f64;
     }
@@ -359,10 +414,11 @@ fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
     })
 }
 
-fn numeric_outcomes(
+async fn numeric_outcomes(
     values: Vec<f64>,
     shape: Vec<usize>,
     rows: usize,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<ResponseOutcomes> {
     if values.len() != rows || shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid(
@@ -373,16 +429,35 @@ fn numeric_outcomes(
     classes
         .try_reserve_exact(values.len())
         .map_err(|_| invalid("mnrfit: class census exceeds available host resources"))?;
-    classes.extend(values.iter().copied().filter(|value| value.is_finite()));
+    for (index, value) in values.iter().copied().enumerate() {
+        if value.is_finite() {
+            classes.push(value);
+        }
+        if (index + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
+    }
+    cooperation
+        .completed((values.len() % 16_384) as u64)
+        .await?;
     classes.sort_by(f64::total_cmp);
     classes.dedup_by(|a, b| *a == *b);
     if classes.len() < 2 {
         return Err(invalid("mnrfit: Y must contain at least two classes"));
     }
     let logits = classes.len() - 1;
-    let mut outcomes = columns(logits, rows, "categorical outcomes")?;
-    let mut weights = filled(rows, 1.0, "categorical weights")?;
+    let mut outcomes = columns(
+        logits,
+        rows,
+        "categorical outcomes",
+        &|| Ok(()),
+        cooperation,
+    )
+    .await?;
+    let mut weights =
+        filled_cooperatively(rows, 1.0, "categorical weights", &|| Ok(()), cooperation).await?;
     for (row, value) in values.iter().enumerate() {
+        cooperation.completed(1).await?;
         if value.is_nan() {
             weights[row] = 0.0;
             continue;
@@ -408,18 +483,11 @@ fn numeric_outcomes(
     })
 }
 
-fn categorical_outcomes(
-    values: Vec<f64>,
-    shape: Vec<usize>,
-    rows: usize,
-) -> BuiltinResult<ResponseOutcomes> {
-    numeric_outcomes(values, shape, rows)
-}
-
-fn text_outcomes(
+async fn text_outcomes(
     values: Vec<String>,
     shape: Vec<usize>,
     rows: usize,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<ResponseOutcomes> {
     if values.len() != rows || shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid(
@@ -436,8 +504,9 @@ fn text_outcomes(
         return Err(invalid("mnrfit: Y must contain at least two classes"));
     }
     let logits = classes.len() - 1;
-    let mut outcomes = columns(logits, rows, "text outcomes")?;
+    let mut outcomes = columns(logits, rows, "text outcomes", &|| Ok(()), cooperation).await?;
     for (row, value) in values.iter().enumerate() {
+        cooperation.completed(1).await?;
         let class_idx = classes
             .binary_search(value)
             .map_err(|_| internal("mnrfit: failed to map response class"))?;
@@ -448,11 +517,15 @@ fn text_outcomes(
     Ok(ResponseOutcomes {
         outcomes,
         classes: ClassNames::Text(classes),
-        weights: filled(rows, 1.0, "text weights")?,
+        weights: filled_cooperatively(rows, 1.0, "text weights", &|| Ok(()), cooperation).await?,
     })
 }
 
-fn cellstr_outcomes(cell: &CellArray, rows: usize) -> BuiltinResult<ResponseOutcomes> {
+async fn cellstr_outcomes(
+    cell: &CellArray,
+    rows: usize,
+    cooperation: &mut FitCooperation<'_>,
+) -> BuiltinResult<ResponseOutcomes> {
     let labels = cell
         .data
         .iter()
@@ -460,7 +533,31 @@ fn cellstr_outcomes(cell: &CellArray, rows: usize) -> BuiltinResult<ResponseOutc
             scalar_text(value).ok_or_else(|| invalid("mnrfit: Y cell entries must be text"))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    text_outcomes(labels, cell.shape.clone(), rows)
+    text_outcomes(labels, cell.shape.clone(), rows, cooperation).await
+}
+
+async fn char_rows_cooperatively(
+    array: &CharArray,
+    cooperation: &mut FitCooperation<'_>,
+) -> BuiltinResult<Vec<String>> {
+    let mut rows = Vec::new();
+    rows.try_reserve_exact(array.rows)
+        .map_err(|_| invalid("mnrfit: text response rows exceed available host resources"))?;
+    for row in 0..array.rows {
+        let start = row * array.cols;
+        let mut text = String::new();
+        text.try_reserve(array.cols)
+            .map_err(|_| invalid("mnrfit: text response row exceeds available host resources"))?;
+        for (index, character) in array.data[start..start + array.cols].iter().enumerate() {
+            text.push(*character);
+            if (index + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
+        }
+        cooperation.completed((array.cols % 16_384) as u64).await?;
+        rows.push(text);
+    }
+    Ok(rows)
 }
 
 #[cfg(test)]

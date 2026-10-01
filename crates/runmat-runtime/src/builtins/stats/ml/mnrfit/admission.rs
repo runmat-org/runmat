@@ -1,7 +1,7 @@
 //! Host-visible matrix and response admission before provider materialization.
 use super::{
     ensure_exact_integer_tensor, exact_integer_as_f64, gather_value, invalid, response_outcomes,
-    scalar_text, ResponseOutcomes,
+    scalar_text, FitCooperation, ResponseOutcomes,
 };
 use crate::BuiltinResult;
 use runmat_accelerate_api::GpuTensorStorage;
@@ -24,13 +24,17 @@ pub(super) enum PreparedResponse {
     },
 }
 
-pub(super) fn prepare(x: &Value, y: Value) -> BuiltinResult<PreparedResponse> {
+pub(super) async fn prepare(
+    x: &Value,
+    y: Value,
+    cooperation: &mut FitCooperation<'_>,
+) -> BuiltinResult<PreparedResponse> {
     let rows = preflight(x, &y)?;
     if crate::dispatcher::value_contains_gpu(&y) {
         Ok(PreparedResponse::Resident { value: y, rows })
     } else {
         Ok(PreparedResponse::Host {
-            response: response_outcomes(y, rows)?,
+            response: response_outcomes(y, rows, cooperation).await?,
             rows,
         })
     }
@@ -43,10 +47,15 @@ impl PreparedResponse {
         }
     }
 
-    pub(super) async fn materialize(self) -> BuiltinResult<ResponseOutcomes> {
+    pub(super) async fn materialize(
+        self,
+        cooperation: &mut FitCooperation<'_>,
+    ) -> BuiltinResult<ResponseOutcomes> {
         match self {
             Self::Host { response, .. } => Ok(response),
-            Self::Resident { value, rows } => response_outcomes(gather_value(value).await?, rows),
+            Self::Resident { value, rows } => {
+                response_outcomes(gather_value(value).await?, rows, cooperation).await
+            }
         }
     }
 }

@@ -50,13 +50,21 @@ fn mnrfit_rejects_sparse_predictors_and_responses_at_admission() {
         Value::SparseTensor(SparseTensor::new(4, 3, vec![0, 1, 1, 1], vec![0], vec![1.0]).unwrap());
     let dense_x = tensor_value(vec![0.0; 8], 4, 2);
     let dense_y = tensor_value(vec![1.0, 1.0, 2.0, 2.0], 4, 1);
-    let x_error = admission::prepare(&sparse_x, dense_y)
-        .err()
-        .expect("sparse X is not an admitted predictor matrix");
+    let x_error = block_on(admission::prepare(
+        &sparse_x,
+        dense_y,
+        &mut FitCooperation::new(None),
+    ))
+    .err()
+    .expect("sparse X is not an admitted predictor matrix");
     assert!(x_error.message().contains("X must be numeric"));
-    let y_error = admission::prepare(&dense_x, sparse_y)
-        .err()
-        .expect("sparse Y is not an admitted response");
+    let y_error = block_on(admission::prepare(
+        &dense_x,
+        sparse_y,
+        &mut FitCooperation::new(None),
+    ))
+    .err()
+    .expect("sparse Y is not an admitted response");
     assert!(y_error.message().contains("Y must be"));
 }
 
@@ -231,6 +239,28 @@ fn mnrfit_grouped_multinomial_counts() {
         panic!("expected numeric class names");
     };
     assert_eq!(class_names.materialize_f64(), vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn constant_grouped_odds_have_known_intercept_zero_slope_and_zero_deviance() {
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let values = output_list(
+        block_on(mnrfit_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
+            tensor_value(vec![2.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0], 4, 2),
+            vec![Value::from("Tolerance"), Value::Num(1.0e-9)],
+        ))
+        .expect("constant grouped odds have a finite nominal fit"),
+    );
+    assert_eq!(values.len(), 2);
+    let Value::Tensor(beta) = &values[0] else {
+        panic!("grouped fit must return a coefficient matrix");
+    };
+    assert_eq!(beta.shape, vec![2, 1]);
+    let coefficients = beta.materialize_f64();
+    assert!((coefficients[0] + 3.0f64.ln()).abs() < 1.0e-6);
+    assert!(coefficients[1].abs() < 1.0e-6);
+    assert!(matches!(&values[1], Value::Num(dev) if dev.abs() < 1.0e-6));
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use futures::executor::block_on;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
 use std::cell::Cell;
@@ -21,10 +22,16 @@ fn cancellation_during_large_coefficient_copy_prevents_publication() {
     );
     let probes = Cell::new(0);
     let coefficients = vec![1.0; 40_000];
-    let error = coefficients_value(&coefficients, 40_000, 1, &|| {
-        cancellation_after(&probes, &source, 3);
-        check_cancellation(Some(&runtime))
-    })
+    let error = block_on(coefficients_value(
+        &coefficients,
+        40_000,
+        1,
+        &|| {
+            cancellation_after(&probes, &source, 3);
+            check_cancellation(Some(&runtime))
+        },
+        &mut FitCooperation::new(None),
+    ))
     .expect_err("cancelled output copy cannot return coefficients");
     assert!(probes.get() >= 3);
     assert!(error
@@ -43,10 +50,15 @@ fn cancellation_during_correlation_output_prevents_stats_publication() {
     let dim = 64;
     let covariance = vec![1.0; dim * dim];
     let errors = vec![1.0; dim];
-    let error = coeffcorr_value(&covariance, &errors, &|| {
-        cancellation_after(&probes, &source, 4);
-        check_cancellation(Some(&runtime))
-    })
+    let error = block_on(coeffcorr_value(
+        &covariance,
+        &errors,
+        &|| {
+            cancellation_after(&probes, &source, 4);
+            check_cancellation(Some(&runtime))
+        },
+        &mut FitCooperation::new(None),
+    ))
     .expect_err("cancelled correlation matrix cannot be published");
     assert!(probes.get() >= 4);
     assert!(error

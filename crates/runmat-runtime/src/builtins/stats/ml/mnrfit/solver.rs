@@ -17,34 +17,49 @@ pub(super) struct NominalFit {
     pub(super) dfe: f64,
 }
 
-pub(super) fn fit_nominal_logit(
+pub(super) async fn fit_nominal_logit(
     data: &PreparedData,
     max_iter: usize,
     tol_x: f64,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<NominalFit> {
     check()?;
     let cols = data.cols;
     let logits = data.outcomes.len();
     let dim = checked_elements(cols, logits, "coefficients")?;
     let matrix_len = checked_elements(dim, dim, "information matrix")?;
-    let mut beta = filled(dim, 0.0, "coefficients")?;
-    let mut information = filled(matrix_len, 0.0, "information matrix")?;
-    let mut gradient = filled(dim, 0.0, "gradient")?;
+    let mut beta = filled_cooperatively(dim, 0.0, "coefficients", check, cooperation).await?;
+    let mut information =
+        filled_cooperatively(matrix_len, 0.0, "information matrix", check, cooperation).await?;
+    let mut gradient = filled_cooperatively(dim, 0.0, "gradient", check, cooperation).await?;
     for _ in 0..max_iter {
         check()?;
-        information.fill(0.0);
-        gradient.fill(0.0);
+        for chunk in information.chunks_mut(16_384) {
+            chunk.fill(0.0);
+            cooperation.completed(chunk.len() as u64).await?;
+        }
+        for chunk in gradient.chunks_mut(16_384) {
+            chunk.fill(0.0);
+            cooperation.completed(chunk.len() as u64).await?;
+        }
         for row in 0..data.rows {
             check()?;
-            let probs = row_probabilities(&data.design, row, cols, &beta, logits, check)?;
+            cooperation.completed(1).await?;
+            let probs =
+                row_probabilities(&data.design, row, cols, &beta, logits, check, cooperation)
+                    .await?;
             let weight = data.weights[row];
             for j in 0..logits {
                 check()?;
                 let residual = weight * (data.outcomes[j][row] - probs[j]);
                 for a in 0..cols {
                     gradient[j * cols + a] += residual * data.design[row + a * data.rows];
+                    if (a + 1).is_multiple_of(16_384) {
+                        cooperation.completed(16_384).await?;
+                    }
                 }
+                cooperation.completed((cols % 16_384) as u64).await?;
             }
             for j in 0..logits {
                 for l in 0..logits {
@@ -56,7 +71,11 @@ pub(super) fn fit_nominal_logit(
                         for b in 0..cols {
                             let zb = data.design[row + b * data.rows];
                             information[(j * cols + a) * dim + (l * cols + b)] += block * za * zb;
+                            if (b + 1).is_multiple_of(16_384) {
+                                cooperation.completed(16_384).await?;
+                            }
                         }
+                        cooperation.completed((cols % 16_384) as u64).await?;
                     }
                 }
             }
@@ -65,11 +84,13 @@ pub(super) fn fit_nominal_logit(
             information[idx * dim + idx] += RIDGE;
         }
         let delta = solve_linear(
-            copy_checked(&information, "information solve copy", check)?,
-            copy_checked(&gradient, "gradient solve copy", check)?,
+            copy_cooperatively(&information, "information solve copy", check, cooperation).await?,
+            copy_cooperatively(&gradient, "gradient solve copy", check, cooperation).await?,
             dim,
             check,
-        )?;
+            cooperation,
+        )
+        .await?;
         let max_step = delta.iter().map(|value| value.abs()).fold(0.0, f64::max);
         for (coef, step) in beta.iter_mut().zip(delta.iter()) {
             *coef += *step;
@@ -83,10 +104,15 @@ pub(super) fn fit_nominal_logit(
             "mnrfit: solver produced non-finite coefficients",
         ));
     }
-    information.fill(0.0);
+    for chunk in information.chunks_mut(16_384) {
+        chunk.fill(0.0);
+        cooperation.completed(chunk.len() as u64).await?;
+    }
     for row in 0..data.rows {
         check()?;
-        let probs = row_probabilities(&data.design, row, cols, &beta, logits, check)?;
+        cooperation.completed(1).await?;
+        let probs =
+            row_probabilities(&data.design, row, cols, &beta, logits, check, cooperation).await?;
         let weight = data.weights[row];
         for j in 0..logits {
             check()?;
@@ -99,7 +125,11 @@ pub(super) fn fit_nominal_logit(
                     for b in 0..cols {
                         let zb = data.design[row + b * data.rows];
                         information[(j * cols + a) * dim + (l * cols + b)] += block * za * zb;
+                        if (b + 1).is_multiple_of(16_384) {
+                            cooperation.completed(16_384).await?;
+                        }
                     }
+                    cooperation.completed((cols % 16_384) as u64).await?;
                 }
             }
         }
@@ -107,7 +137,7 @@ pub(super) fn fit_nominal_logit(
     for idx in 0..dim {
         information[idx * dim + idx] += RIDGE;
     }
-    let covb = invert_matrix(information, dim, check)?;
+    let covb = invert_matrix(information, dim, check, cooperation).await?;
     let se = (0..dim)
         .map(|idx| covb[idx * dim + idx].max(0.0).sqrt())
         .collect::<Vec<_>>();
@@ -126,8 +156,8 @@ pub(super) fn fit_nominal_logit(
             }
         })
         .collect::<Vec<_>>();
-    let loglik = log_likelihood(data, &beta, check)?;
-    let saturated = saturated_log_likelihood(data, check)?;
+    let loglik = log_likelihood(data, &beta, check, cooperation).await?;
+    let saturated = saturated_log_likelihood(data, check, cooperation).await?;
     check()?;
     let dfe = (data.observations - dim as f64).max(0.0);
     Ok(NominalFit {
@@ -141,13 +171,14 @@ pub(super) fn fit_nominal_logit(
     })
 }
 
-fn row_probabilities(
+async fn row_probabilities(
     design: &[f64],
     row: usize,
     cols: usize,
     beta: &[f64],
     logits: usize,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<Vec<f64>> {
     let rows = design.len() / cols;
     let mut eta = reserved(logits, "row scores")?;
@@ -157,7 +188,11 @@ fn row_probabilities(
         let mut value = 0.0;
         for col in 0..cols {
             value += design[row + col * rows] * beta[j * cols + col];
+            if (col + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
+        cooperation.completed((cols % 16_384) as u64).await?;
         max_eta = max_eta.max(value);
         eta.push(value);
     }
@@ -175,16 +210,27 @@ fn row_probabilities(
     Ok(exp_eta)
 }
 
-fn log_likelihood(
+async fn log_likelihood(
     data: &PreparedData,
     beta: &[f64],
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<f64> {
     let logits = data.outcomes.len();
     let mut ll = 0.0;
     for row in 0..data.rows {
         check()?;
-        let probs = row_probabilities(&data.design, row, data.cols, beta, logits, check)?;
+        let probs = row_probabilities(
+            &data.design,
+            row,
+            data.cols,
+            beta,
+            logits,
+            check,
+            cooperation,
+        )
+        .await?;
+        cooperation.completed(1).await?;
         let mut baseline = 1.0 - probs.iter().sum::<f64>();
         baseline = baseline.max(EPS);
         for (j, prob) in probs.iter().enumerate() {
@@ -202,14 +248,16 @@ fn log_likelihood(
     Ok(ll)
 }
 
-fn saturated_log_likelihood(
+async fn saturated_log_likelihood(
     data: &PreparedData,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<f64> {
     let logits = data.outcomes.len();
     let mut ll = 0.0;
     for row in 0..data.rows {
         check()?;
+        cooperation.completed(1).await?;
         let weight = data.weights[row];
         for j in 0..logits {
             let p = data.outcomes[j][row];
@@ -225,18 +273,21 @@ fn saturated_log_likelihood(
     Ok(ll)
 }
 
-fn solve_linear(
+async fn solve_linear(
     mut a: Vec<f64>,
     mut b: Vec<f64>,
     n: usize,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<Vec<f64>> {
     for col in 0..n {
         check()?;
+        cooperation.completed(1).await?;
         let mut pivot = col;
         let mut best = a[col * n + col].abs();
         for row in col + 1..n {
             check()?;
+            cooperation.completed(1).await?;
             let value = a[row * n + col].abs();
             if value > best {
                 best = value;
@@ -251,7 +302,11 @@ fn solve_linear(
         if pivot != col {
             for j in 0..n {
                 a.swap(col * n + j, pivot * n + j);
+                if (j + 1).is_multiple_of(16_384) {
+                    cooperation.completed(16_384).await?;
+                }
             }
+            cooperation.completed((n % 16_384) as u64).await?;
             b.swap(col, pivot);
         }
         let diag = a[col * n + col];
@@ -260,45 +315,67 @@ fn solve_linear(
             a[row * n + col] = 0.0;
             for j in col + 1..n {
                 a[row * n + j] -= factor * a[col * n + j];
+                if (j + 1).is_multiple_of(16_384) {
+                    cooperation.completed(16_384).await?;
+                }
             }
+            cooperation
+                .completed(((n - col - 1) % 16_384) as u64)
+                .await?;
             b[row] -= factor * b[col];
         }
     }
-    let mut x = filled(n, 0.0, "solver result")?;
+    let mut x = filled_cooperatively(n, 0.0, "solver result", check, cooperation).await?;
     for row in (0..n).rev() {
         check()?;
         let mut rhs = b[row];
         for col in row + 1..n {
             rhs -= a[row * n + col] * x[col];
+            if (col + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
+        cooperation
+            .completed(((n - row - 1) % 16_384) as u64)
+            .await?;
         x[row] = rhs / a[row * n + row];
     }
     Ok(x)
 }
 
-fn invert_matrix(
+async fn invert_matrix(
     a: Vec<f64>,
     n: usize,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<Vec<f64>> {
-    let mut out = filled(
+    let mut out = filled_cooperatively(
         checked_elements(n, n, "covariance matrix")?,
         0.0,
         "covariance matrix",
-    )?;
+        check,
+        cooperation,
+    )
+    .await?;
     for col in 0..n {
         check()?;
-        let mut rhs = filled(n, 0.0, "covariance solve")?;
+        let mut rhs = filled_cooperatively(n, 0.0, "covariance solve", check, cooperation).await?;
         rhs[col] = 1.0;
         let solved = solve_linear(
-            copy_checked(&a, "covariance solve copy", check)?,
+            copy_cooperatively(&a, "covariance solve copy", check, cooperation).await?,
             rhs,
             n,
             check,
-        )?;
+            cooperation,
+        )
+        .await?;
         for row in 0..n {
             out[row + col * n] = solved[row];
+            if (row + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
+        cooperation.completed((n % 16_384) as u64).await?;
     }
     Ok(out)
 }
