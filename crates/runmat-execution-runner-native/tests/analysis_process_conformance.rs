@@ -103,6 +103,10 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--signal-layout-only") {
+        signal::run().await;
+        return;
+    }
     let directory = tempfile::tempdir().unwrap();
     let (host, program, input_objects, resource_plan) =
         fixture(revision(), "analysis-process-conformance");

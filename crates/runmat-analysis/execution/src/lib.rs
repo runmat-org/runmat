@@ -46,6 +46,8 @@ pub use runmat_analysis_fea::results::publication::validate_result_publication_r
 mod semantic_state_object_access;
 mod serial;
 mod signal_input;
+mod signal_layout;
+pub use signal_layout::CanonicalGeneratorValueLayout;
 mod signal_materialization;
 mod signal_program;
 mod signal_topology;

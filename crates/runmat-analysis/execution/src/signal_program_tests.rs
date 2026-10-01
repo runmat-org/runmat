@@ -33,6 +33,7 @@ fn revision() -> ProgramRevision {
 
 fn admitted() -> AdmittedSignalGenerator {
     AdmittedSignalGenerator {
+        value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: revision(),
         callable: BundleCallable {
             owner_identity: "package@1".into(),

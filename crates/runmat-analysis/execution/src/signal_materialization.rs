@@ -562,7 +562,22 @@ fn decode_chunk(
         shape,
         topology_entity_count,
     )?;
-    reorder_sample_major(output.values, sample_count, component_count)
+    let field_extents = [
+        topology_entity_count.unwrap_or(0),
+        match shape {
+            SignalShape::TopologyField {
+                component_count, ..
+            } => *component_count,
+            _ => 0,
+        },
+    ];
+    let extents: &[usize] = match shape {
+        SignalShape::Scalar => &[],
+        SignalShape::Vector3 => &[3],
+        SignalShape::Tensor(extents) => extents,
+        SignalShape::TopologyField { .. } => &field_extents,
+    };
+    crate::signal_layout::canonical_sample_layout(output.values, sample_count, extents)
 }
 
 pub(crate) struct DecodedNumericOutput {
@@ -642,39 +657,6 @@ fn validate_result_shape(
         )));
     }
     Ok(())
-}
-
-pub(crate) fn reorder_sample_major(
-    values: NumericValues,
-    sample_count: usize,
-    component_count: usize,
-) -> AnalysisBridgeResult<NumericValues> {
-    let expected = sample_count.checked_mul(component_count).ok_or_else(|| {
-        AnalysisBridgeError::Invalid("signal result element count overflows".into())
-    })?;
-    match values {
-        NumericValues::Real(values) if values.len() == expected => Ok(NumericValues::Real(
-            (0..sample_count)
-                .flat_map(|sample| {
-                    let values = &values;
-                    (0..component_count)
-                        .map(move |component| values[sample + component * sample_count])
-                })
-                .collect(),
-        )),
-        NumericValues::Complex(values) if values.len() == expected => Ok(NumericValues::Complex(
-            (0..sample_count)
-                .flat_map(|sample| {
-                    let values = &values;
-                    (0..component_count)
-                        .map(move |component| values[sample + component * sample_count])
-                })
-                .collect(),
-        )),
-        _ => Err(AnalysisBridgeError::Invalid(
-            "signal generator output byte count differs from its shape".into(),
-        )),
-    }
 }
 
 pub(crate) fn decode_dense(value: &DenseValue) -> AnalysisBridgeResult<NumericValues> {

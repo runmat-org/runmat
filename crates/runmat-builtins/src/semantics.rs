@@ -209,6 +209,9 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         return Some(pure(BuiltinSemanticKind::General));
     }
     Some(match name {
+        // All supported values, including GPU handles, expose element counts in
+        // resident metadata. This reads no workspace or device data and never suspends.
+        "numel" => pure(BuiltinSemanticKind::General),
         "ones" | "zeros" => pure(BuiltinSemanticKind::ArrayConstructor),
         "empty" => pure(BuiltinSemanticKind::EmptyConstructor),
         "range" | "colon" | "linspace" => pure(BuiltinSemanticKind::RangeConstructor),
@@ -562,6 +565,20 @@ fn host_callback() -> BuiltinSemantics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn element_count_is_pure_metadata_without_authorizing_unknown_calls() {
+        let semantics = builtin_semantics_for_name("numel").unwrap();
+        assert_eq!(semantics.purity, BuiltinPurity::Pure);
+        assert_eq!(
+            semantics.async_behavior,
+            BuiltinAsyncBehavior::NeverSuspends
+        );
+        assert_eq!(semantics.effects, BuiltinEffects::none());
+        assert_eq!(semantics.workspace_effect, None);
+        assert_eq!(semantics.environment_effect, None);
+        assert!(builtin_semantics_for_name("unresolved_callable").is_none());
+    }
 
     #[test]
     fn generated_geometry_builders_are_pure_and_non_suspending() {

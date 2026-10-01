@@ -29,6 +29,7 @@ const ADMISSION_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdmittedSignalGenerator {
+    pub value_layout: crate::CanonicalGeneratorValueLayout,
     pub program_revision: ProgramRevision,
     pub callable: BundleCallable,
     pub executable_source_digest: Digest,
@@ -378,6 +379,7 @@ fn admit_signal_generator(
     let realization_policy_digest = contract_digest(
         "realization-policy",
         &(
+            crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
             &generator.domain,
             &generator.sampling,
             generator.interpolation,
@@ -390,6 +392,7 @@ fn admit_signal_generator(
         realization_policy_digest,
     )?;
     Ok(AdmittedSignalGenerator {
+        value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: admitted.program_revision,
         callable: admitted.callable,
         executable_source_digest: admitted.executable_source_digest,

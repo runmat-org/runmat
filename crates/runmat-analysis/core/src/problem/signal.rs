@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 mod shape;
+mod value;
+pub use value::SignalValue;
 
 use super::{
     coordinate_frame::CoordinateFrame,
@@ -325,14 +327,6 @@ pub enum SignalRepresentation<Q> {
     Waveform(StandardWaveform<Q>),
     Artifact(SignalArtifactRef),
     Generator(SignalGenerator),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignalValue<Q> {
-    Scalar(Q),
-    Vector3([Q; 3]),
-    Tensor { shape: Vec<usize>, values: Vec<Q> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

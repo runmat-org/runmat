@@ -71,6 +71,7 @@ fn admitted() -> AdmittedSignalGenerator {
     )
     .unwrap();
     AdmittedSignalGenerator {
+        value_layout: crate::CanonicalGeneratorValueLayout::SampleMajorRowMajor,
         program_revision: revision,
         callable: BundleCallable {
             owner_identity: "project:loads".into(),
@@ -100,6 +101,16 @@ fn admitted() -> AdmittedSignalGenerator {
             frozen_input_digest: "input-digest".into(),
         },
     }
+}
+
+#[test]
+fn frozen_admission_requires_explicit_canonical_value_layout() {
+    let mut wire = serde_json::to_value(admitted()).unwrap();
+    assert_eq!(wire["value_layout"], "sample_major_row_major");
+    wire.as_object_mut().unwrap().remove("value_layout");
+    assert!(serde_json::from_value::<AdmittedSignalGenerator>(wire.clone()).is_err());
+    wire["value_layout"] = serde_json::Value::String("sample_major_column_major".into());
+    assert!(serde_json::from_value::<AdmittedSignalGenerator>(wire).is_err());
 }
 
 fn dense_f64(shape: Vec<u64>, values: &[f64]) -> ValuePayload {
@@ -332,6 +343,81 @@ fn topology_expectation_authenticates_mesh_and_reopened_realization_rows() {
             let mut wrong = reopened;
             wrong.topology_entity_count = Some(binding.entity_count() as u64 + 1);
             assert!(reopened_expected.validate_realization(&wrong).is_err());
+        }
+    }
+}
+
+#[test]
+fn generated_nodal_vectors_preserve_each_node_component_and_sample() {
+    use runmat_analysis_core::FieldLocation;
+    use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let nodes = mesh.topology.nodes.len();
+        let authored = signal(
+            SignalShape::TopologyField {
+                topology_id: Digest::from_bytes(*mesh.canonical_digest.bytes()).to_string(),
+                location: FieldLocation::Node,
+                component_count: 3,
+            },
+            SignalPrecision::Real64,
+        );
+        let mut admitted = admitted();
+        admitted.sample_points = vec![0.0, 1.0];
+        let chunks = plan_signal_generator_chunks(
+            &authored,
+            &admitted,
+            Some(nodes),
+            RESULT_ENVELOPE_BYTES + 2 * nodes * 3 * 16,
+            |_| panic!("no artifact argument expected"),
+        )
+        .unwrap()
+        .chunks;
+        // Literal MATLAB storage: sample varies fastest, then node, then component.
+        let mut matlab = Vec::new();
+        for component in 0..3 {
+            for node in 0..nodes {
+                for sample in 0..2 {
+                    matlab.push((1000 * sample + 10 * node + component) as f64);
+                }
+            }
+        }
+        let outputs = [output(
+            &chunks[0],
+            dense_f64(vec![2, nodes as u64, 3], &matlab),
+        )];
+        let realized = canonicalize_signal_generator_outputs(
+            &authored,
+            &admitted,
+            Some(nodes),
+            &[],
+            &chunks,
+            &outputs,
+        )
+        .unwrap();
+        let materialized = materialize_signal_for_solver(&authored, &admitted, &realized).unwrap();
+        let PhysicalSignal::Force(value) = materialized else {
+            unreachable!()
+        };
+        let SignalRepresentation::Tabulated(table) = value.representation else {
+            unreachable!()
+        };
+        for (sample, knot) in table.knots.iter().enumerate() {
+            let runmat_analysis_core::SignalKnotValue::Continuous(SignalOrdinate::Real(
+                runmat_analysis_core::SignalValue::Tensor { shape, values },
+            )) = &knot.value
+            else {
+                unreachable!()
+            };
+            assert_eq!(shape, &vec![nodes, 3]);
+            for node in 0..nodes {
+                for component in 0..3 {
+                    assert_eq!(
+                        values[3 * node + component].newtons,
+                        (1000 * sample + 10 * node + component) as f64
+                    );
+                }
+            }
         }
     }
 }

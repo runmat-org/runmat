@@ -6,7 +6,8 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_execution_artifact::{ArtifactAccess, ProgramExecutionObject};
 
-use crate::signal_materialization::{decode_numeric_output, reorder_sample_major, NumericValues};
+use crate::signal_layout::canonical_sample_layout;
+use crate::signal_materialization::{decode_numeric_output, NumericValues};
 use crate::signal_program::{
     rebind_generator_inputs, validate_closed_generator_inputs, validate_prepared_generator_program,
 };
@@ -184,7 +185,7 @@ pub fn materialize_response_spectrum(
     for (chunk, output) in chunks.iter().zip(outputs) {
         let decoded = decode_numeric_output(&output.value)?;
         validate_vector_shape(&decoded.dimensions, chunk.sample_points.len())?;
-        let values = reorder_sample_major(decoded.values, chunk.sample_points.len(), 1)?;
+        let values = canonical_sample_layout(decoded.values, chunk.sample_points.len(), &[])?;
         match values {
             NumericValues::Real(values) => ordinates.extend(values),
             NumericValues::Complex(_) => {
@@ -218,15 +219,12 @@ pub fn materialize_random_spectrum(
     let invocation = matching_random_generator(authored, admitted)?;
     validate_outputs(invocation, admitted, chunks, outputs)?;
     let width = authored.channels.len();
-    let values_per_sample = width.checked_mul(width).ok_or_else(|| {
-        AnalysisBridgeError::Invalid("random-spectrum matrix width overflows".into())
-    })?;
     let mut matrices = Vec::with_capacity(admitted.sample_points.len());
     for (chunk, output) in chunks.iter().zip(outputs) {
         let sample_count = chunk.sample_points.len();
         let decoded = decode_numeric_output(&output.value)?;
         validate_matrix_shape(&decoded.dimensions, sample_count, width)?;
-        let values = reorder_sample_major(decoded.values, sample_count, values_per_sample)?;
+        let values = canonical_sample_layout(decoded.values, sample_count, &[width, width])?;
         append_spectral_matrices(&mut matrices, values, sample_count, width)?;
     }
     validate_input_admission_inventory(invocation, input_admissions)?;
@@ -441,13 +439,9 @@ fn append_spectral_matrices(
     })?;
     for sample in 0..sample_count {
         let sample_values = &values[sample * matrix_size..(sample + 1) * matrix_size];
-        let mut row_major = Vec::with_capacity(matrix_size);
-        for row in 0..width {
-            for column in 0..width {
-                row_major.push(sample_values[column * width + row]);
-            }
-        }
-        target.push(CrossPowerSpectralDensity { values: row_major });
+        target.push(CrossPowerSpectralDensity {
+            values: sample_values.to_vec(),
+        });
     }
     Ok(())
 }

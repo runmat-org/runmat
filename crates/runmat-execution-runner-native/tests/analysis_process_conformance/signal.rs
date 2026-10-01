@@ -32,6 +32,9 @@ use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlay
 
 use super::analysis_resources;
 
+#[path = "signal/fields.rs"]
+mod fields;
+
 pub(super) async fn run() {
     let fixture = SignalFixture::new().await;
     let expected = canonical_tabulated_signal_content_digest(&fixture.explicit).unwrap();
@@ -47,6 +50,7 @@ pub(super) async fn run() {
 
     let remote = fixture.encrypted_remote().await;
     assert_realization(&fixture, &remote, expected, "encrypted remote");
+    fields::run().await;
 }
 
 struct SignalFixture {
@@ -59,6 +63,21 @@ struct SignalFixture {
 
 impl SignalFixture {
     async fn new() -> Self {
+        Self::prepare(
+            generated_signal(),
+            explicit_signal(),
+            vec![1.0, -2.0, 3.0],
+            None,
+        )
+        .await
+    }
+
+    async fn prepare(
+        mut authored: PhysicalSignal,
+        explicit: PhysicalSignal,
+        scale: Vec<f64>,
+        mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
+    ) -> Self {
         let project_root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project_root.path().join("src")).unwrap();
         std::fs::write(
@@ -66,9 +85,19 @@ impl SignalFixture {
             "[package]\nname = \"signal-placement-conformance\"\n[sources]\nroots = [\"src\"]\n",
         )
         .unwrap();
-        let source = "function pulse = makePulse()\nscale = [1, -2, 3];\npulse = @sample;\n    function y = sample(t)\n    arguments\n        t (:,1) double\n    end\n    y = t * scale;\n    end\nend\n";
+        let reshape = match authored.shape() {
+            SignalShape::TopologyField {
+                component_count, ..
+            } => format!(
+                "reshape(t * scale, numel(t), {}, {component_count})",
+                mesh.unwrap().topology.nodes.len()
+            ),
+            _ => "t * scale".into(),
+        };
+        let source = format!("function pulse = makePulse()\nscale = [{}];\npulse = @sample;\n    function y = sample(t)\n    arguments\n        t (:,1) double\n    end\n    y = {reshape};\n    end\nend\n",
+            scale.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "));
         let source_path = project_root.path().join("src/pulse.m");
-        std::fs::write(&source_path, source).unwrap();
+        std::fs::write(&source_path, &source).unwrap();
         let project = runmat_package::build_frozen_project(
             &project_root.path().join("runmat.toml"),
             BTreeSet::new(),
@@ -81,7 +110,6 @@ impl SignalFixture {
             runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap();
-        let mut authored = generated_signal();
         let symbols = runmat_package::source_symbols_from_frozen(&project, &source_path);
         let definition = symbols
             .definitions
@@ -100,7 +128,7 @@ impl SignalFixture {
                     owner_identity.clone(),
                     source_id.relative_path.as_str(),
                     source_path.to_string_lossy(),
-                    source,
+                    &source,
                 ),
                 Some(revision.clone()),
             )
@@ -118,22 +146,28 @@ impl SignalFixture {
             .function_analysis(executable.manifest.identity.entrypoint_function)
             .cloned()
             .unwrap();
-        let PhysicalSignal::Force(signal) = &mut authored else {
-            unreachable!("the conformance fixture authors a force signal")
-        };
-        let SignalRepresentation::Generator(generator) = &mut signal.representation else {
-            unreachable!("the conformance fixture authors a generated signal")
-        };
-        generator.invocation.callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
+        let callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
             function: function.function,
             display_name: "loads.pulse".into(),
         };
+        fn bind<Q>(signal: &mut Signal<Q>, callable: runmat_analysis_core::GeneratorCallable) {
+            let SignalRepresentation::Generator(generator) = &mut signal.representation else {
+                unreachable!()
+            };
+            generator.invocation.callable = callable;
+        }
+        match &mut authored {
+            PhysicalSignal::Force(signal) => bind(signal, callable),
+            PhysicalSignal::BodyForceDensity(signal) => bind(signal, callable),
+            PhysicalSignal::Temperature(signal) => bind(signal, callable),
+            _ => unreachable!("only the declared fixture quantities"),
+        }
         let capture = ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Dense(
             DenseValue {
                 element_type: ElementType::F64,
-                shape: vec![1, 3],
-                little_endian_data: [1.0_f64, -2.0, 3.0]
-                    .into_iter()
+                shape: vec![1, scale.len() as u64],
+                little_endian_data: scale
+                    .iter()
                     .flat_map(|value| value.to_bits().to_le_bytes())
                     .collect(),
             },
@@ -154,7 +188,7 @@ impl SignalFixture {
             BundleCallable {
                 owner_identity,
                 qualified_name: "loads.pulse".into(),
-                source_digest: Digest::sha256(source),
+                source_digest: Digest::sha256(&source),
             },
             unit.revision().source_digest.parse::<Digest>().unwrap(),
             &function,
@@ -165,9 +199,24 @@ impl SignalFixture {
         let chunks = plan_signal_generator_chunks(
             &authored,
             &admitted,
-            None,
-            usize::try_from(runmat_execution::value::ValueLimits::default().max_inline_bytes)
-                .unwrap(),
+            mesh.map(|mesh| mesh.topology.nodes.len()),
+            mesh.map_or_else(
+                || {
+                    usize::try_from(
+                        runmat_execution::value::ValueLimits::default().max_inline_bytes,
+                    )
+                    .unwrap()
+                },
+                |mesh| {
+                    let SignalShape::TopologyField {
+                        component_count, ..
+                    } = authored.shape()
+                    else {
+                        unreachable!()
+                    };
+                    4096 + 2 * mesh.topology.nodes.len() * component_count * 16
+                },
+            ),
             |_| panic!("fixture has no artifact arguments"),
         )
         .unwrap();
@@ -178,7 +227,7 @@ impl SignalFixture {
             chunks.chunks,
             Vec::new(),
             chunks.input_admissions,
-            None,
+            mesh,
         )
         .unwrap();
         Self {
@@ -186,7 +235,7 @@ impl SignalFixture {
             project,
             revision,
             prepared,
-            explicit: explicit_signal(),
+            explicit,
         }
     }
 
@@ -406,7 +455,10 @@ impl SignalFixture {
         canonicalize_signal_generator_outputs(
             &self.prepared.authored,
             &self.prepared.admitted,
-            None,
+            self.prepared
+                .topology_binding
+                .as_ref()
+                .map(|binding| binding.entity_count()),
             &self.prepared.input_admissions,
             &self
                 .prepared
