@@ -21,7 +21,11 @@ fn singleton_dimension_retains_following_selector_and_missing_policy() {
         vec![Value::Num(1.0), Value::from("all")],
     ))
     .unwrap();
-    assert_eq!(tensor_values(result), tensor_values(expected));
+    let (values, shape) = tensor_values(result);
+    assert_eq!(shape, vec![1, 1]);
+    // Five nonmissing observations have second moment2.96 and fourth17.4752.
+    assert_close(values[0], 17.4752 / (2.96 * 2.96));
+    assert_eq!((values, shape), tensor_values(expected));
 
     let along_second = block_on(kurtosis::kurtosis_builtin(
         input(),
@@ -32,6 +36,32 @@ fn singleton_dimension_retains_following_selector_and_missing_policy() {
     ))
     .unwrap();
     assert_eq!(tensor_values(along_second).1, vec![2, 1]);
+}
+
+#[test]
+fn floating_dimensions_and_small_scalar_flags_keep_distinct_tolerances() {
+    let input = || Value::Tensor(Tensor::new(vec![1.0, 2.0, 10.0], vec![1, 3]).unwrap());
+    let empty = || Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap());
+    let mut dimensions = vec![1.0 + f64::EPSILON];
+    if usize::BITS < 64 {
+        dimensions.push(usize::MAX as f64);
+    }
+    for dimension in dimensions {
+        let output = block_on(mad::mad_builtin(
+            input(),
+            vec![empty(), Value::Num(dimension)],
+        ))
+        .unwrap();
+        let (values, shape) = tensor_values(output);
+        assert_eq!(shape, vec![1, 3]);
+        assert_eq!(values, vec![0.0; 3]);
+    }
+    let output = block_on(mad::mad_builtin(
+        input(),
+        vec![Value::Num(1e-13), Value::from("all")],
+    ))
+    .unwrap();
+    assert_close(tensor_values(output).0[0], 34.0 / 9.0);
 }
 
 #[test]

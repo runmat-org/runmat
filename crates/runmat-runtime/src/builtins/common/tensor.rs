@@ -534,24 +534,18 @@ fn parse_integer_shape_dimension(value: &IntValue) -> Result<usize, DimensionDec
 }
 
 fn parse_numeric_dimension(value: f64) -> Result<usize, DimensionDecodeError> {
-    if !value.is_finite() {
-        return Err(DimensionDecodeError::NonFinite);
-    }
-    if value < 0.0 {
-        return Err(DimensionDecodeError::Negative);
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return Err(DimensionDecodeError::Fractional);
-    }
-    if !fits_platform_usize(rounded) {
-        return Err(DimensionDecodeError::OutOfPlatformRange);
-    }
-    Ok(rounded as usize)
+    runmat_types::decode_shape_dimension(value).map_err(|cause| match cause {
+        runmat_types::DimensionValueError::NonFinite => DimensionDecodeError::NonFinite,
+        runmat_types::DimensionValueError::Negative => DimensionDecodeError::Negative,
+        runmat_types::DimensionValueError::Fractional => DimensionDecodeError::Fractional,
+        runmat_types::DimensionValueError::OutsidePlatformRange => {
+            DimensionDecodeError::OutOfPlatformRange
+        }
+    })
 }
 
 fn fits_platform_usize(value: f64) -> bool {
-    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
+    runmat_types::dimension_fits_platform(value)
 }
 
 fn dims_from_tensor_values(
