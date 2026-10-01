@@ -1704,6 +1704,14 @@ fn accel_test_lock() -> std::sync::MutexGuard<'static, ()> {
     guard
 }
 
+struct RejectFusion(&'static TestProvider);
+
+impl Drop for RejectFusion {
+    fn drop(&mut self) {
+        self.0.reject_fusion.store(false, Ordering::Relaxed);
+    }
+}
+
 #[path = "fusion_gpu/observation.rs"]
 mod observation;
 #[path = "fusion_gpu/suspension.rs"]
@@ -1714,7 +1722,7 @@ mod consumed_values;
 mod completion;
 
 #[test]
-fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {
+fn fusion_feasibility_rejection_resumes_shared_runtime_before_provider_side_effects() {
     gc_test_context(|| {
         let _guard = accel_test_lock();
         ensure_provider_registered();
@@ -1726,7 +1734,19 @@ fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {
         });
         let provider = PROVIDER.get().expect("test provider");
         provider.reject_fusion.store(true, Ordering::Relaxed);
+        let _reject = RejectFusion(provider);
         runmat_accelerate::placement::reset();
+
+        let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default()
+                .with_placement(placement.clone()),
+        );
+        let allocations_before = provider.next_id.load(Ordering::Relaxed);
+        let dispatches_before = provider.fused_dispatches.load(Ordering::Relaxed);
 
         let bytecode = compile_semantic(
             r#"
@@ -1734,8 +1754,41 @@ fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {
             y = sin(x) .* x + 2;
             "#,
         );
-        interpret(&bytecode).expect("shared-runtime fusion fallback");
-        provider.reject_fusion.store(false, Ordering::Relaxed);
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        block_on(runmat_vm::interpret_with_vars_in_context(
+            &bytecode, &mut vars, None, runtime,
+        ))
+        .expect("shared-runtime fusion after provider rejection");
+        let output_slot = *bytecode
+            .var_names
+            .iter()
+            .find(|(_, name)| name.as_str() == "y")
+            .expect("y output slot")
+            .0;
+        let Value::Tensor(output) = &vars[output_slot] else {
+            panic!(
+                "shared runtime must return a host tensor: {:?}",
+                vars[output_slot]
+            );
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        for (actual, input) in output
+            .materialize_f64()
+            .into_iter()
+            .zip([0.25_f64, 0.5, 0.75])
+        {
+            assert!((actual - (input.sin() * input + 2.0)).abs() < 1e-12);
+        }
+        assert_eq!(provider.next_id.load(Ordering::Relaxed), allocations_before);
+        assert_eq!(
+            provider.fused_dispatches.load(Ordering::Relaxed),
+            dispatches_before
+        );
+        let feedback = placement.profile_snapshot().feedback;
+        assert_eq!(feedback.len(), 1, "one complete shared-runtime region");
+        assert_eq!(feedback[0].candidate, "cpu.shared.fusion.elementwise");
+        assert_eq!(feedback[0].samples, 1);
+        assert_eq!(feedback[0].failures, 0);
 
         let report = runmat_accelerate::placement_report();
         let trace = report
@@ -1750,7 +1803,7 @@ fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {
                     == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
                 && event.reason.as_deref() == Some("provider_operation_unsupported")
         }));
-        assert!(trace.events.iter().any(|event| {
+        assert!(!trace.events.iter().any(|event| {
             event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
                 && event.reason.as_deref() == Some("fusion_execution_failed")
         }));

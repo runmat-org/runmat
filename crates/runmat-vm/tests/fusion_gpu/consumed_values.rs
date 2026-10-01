@@ -10,13 +10,6 @@ pub(super) fn compile_borrowed_x(source: &str) -> runmat_vm::Bytecode {
     runmat_vm::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).unwrap()
 }
 
-struct RejectFusion(&'static TestProvider);
-impl Drop for RejectFusion {
-    fn drop(&mut self) {
-        self.0.reject_fusion.store(false, Ordering::Relaxed);
-    }
-}
-
 struct InspectRootsOnFree(&'static TestProvider);
 impl Drop for InspectRootsOnFree {
     fn drop(&mut self) {

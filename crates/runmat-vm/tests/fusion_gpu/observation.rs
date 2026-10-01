@@ -304,7 +304,7 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
     });
 }
 
-fn assert_cpu_fusion_was_selected_without_completion() {
+fn assert_cpu_fusion_was_selected_without_completion(reason: &str) {
     use runmat_accelerate::placement::{PlacementEventKind, PlacementVariant};
     let report = runmat_accelerate::placement_report();
     assert!(
@@ -317,7 +317,7 @@ fn assert_cpu_fusion_was_selected_without_completion() {
                     .iter()
                     .any(|event| event.kind == PlacementEventKind::Selected
                         && event.variant == Some(PlacementVariant::SharedRuntime)
-                        && event.reason.as_deref() == Some("complete_cost"))
+                        && event.reason.as_deref() == Some(reason))
                 && !trace
                     .events
                     .iter()
@@ -413,10 +413,24 @@ impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelec
 
 #[test]
 fn fusion_cpu_region_cancellation_records_failure_not_completion() {
+    cancellation_after_cpu_fusion_selection(false);
+}
+
+#[test]
+fn rejected_provider_cpu_region_cancellation_records_failure_not_completion() {
+    cancellation_after_cpu_fusion_selection(true);
+}
+
+fn cancellation_after_cpu_fusion_selection(reject_provider: bool) {
     gc_test_context(|| {
         let _guard = accel_test_lock();
         ensure_provider_registered();
         runmat_accelerate::placement::reset();
+        let provider = PROVIDER.get().expect("test provider");
+        provider
+            .reject_fusion
+            .store(reject_provider, Ordering::Relaxed);
+        let _reject = reject_provider.then(|| RejectFusion(provider));
         // The same host fixture as the successful CPU witness. Injecting a
         // pending resident download instead would suspend before any fusion
         // trace, not inside an observed CPU region. This test proves runner
@@ -448,6 +462,10 @@ fn fusion_cpu_region_cancellation_records_failure_not_completion() {
         );
         assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
         assert_cpu_region_failed_without_success(&placement);
-        assert_cpu_fusion_was_selected_without_completion();
+        assert_cpu_fusion_was_selected_without_completion(if reject_provider {
+            "provider_operation_unsupported"
+        } else {
+            "complete_cost"
+        });
     });
 }
