@@ -9,7 +9,7 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Type,
+    BuiltinSignatureDescriptor, SumControl, SumOutputClass as OutputTemplate, Type,
 };
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 const NAME: &str = "sum";
@@ -20,7 +20,6 @@ fn sum_type(args: &[Type], ctx: &ResolveContext) -> Type {
     reduce_numeric_type(args, ctx)
 }
 
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -451,12 +450,6 @@ struct ResolvedDims {
     dims_in_bounds: Vec<usize>,
 }
 
-#[derive(Clone)]
-enum OutputTemplate {
-    Double,
-    Native,
-}
-
 struct ParsedArguments {
     selection: DimSelection,
     nan_mode: ReductionNaN,
@@ -597,50 +590,17 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut nan_mode = ReductionNaN::Include;
     let mut output = OutputTemplate::Double;
     let mut output_set = false;
-    let tokens = tokens_from_values(args);
-
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            match text.as_str() {
-                "omitmissing" | "omitnan" => {
-                    nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includemissing" | "includenan" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
-                    if selection_set && !matches!(selection, DimSelection::Auto) {
-                        return Err(sum_invalid_argument(
-                            "sum: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                    selection = DimSelection::All;
-                    selection_set = true;
-                    idx += 1;
-                    continue;
-                }
-                _ => {}
-            }
-        }
         if let Some(keyword) = keyword_of(arg) {
-            match keyword.as_str() {
-                "omitmissing" | "omitnan" => {
-                    nan_mode = ReductionNaN::Omit;
+            match SumControl::from_public_option(&keyword) {
+                Some(SumControl::Missing(mode)) => {
+                    nan_mode = mode;
                     idx += 1;
                     continue;
                 }
-                "includemissing" | "includenan" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
+                Some(SumControl::All) => {
                     if selection_set && !matches!(selection, DimSelection::Auto) {
                         return Err(sum_invalid_argument(
                             "sum: 'all' cannot be combined with an explicit dimension",
@@ -651,29 +611,18 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 1;
                     continue;
                 }
-                "double" | "default" => {
+                Some(SumControl::Output(class)) => {
                     if output_set {
                         return Err(sum_invalid_argument(
                             "sum: multiple output class specifications provided",
                         ));
                     }
-                    output = OutputTemplate::Double;
+                    output = class;
                     output_set = true;
                     idx += 1;
                     continue;
                 }
-                "native" => {
-                    if output_set {
-                        return Err(sum_invalid_argument(
-                            "sum: multiple output class specifications provided",
-                        ));
-                    }
-                    output = OutputTemplate::Native;
-                    output_set = true;
-                    idx += 1;
-                    continue;
-                }
-                _ => {}
+                None => {}
             }
         }
 
@@ -1825,6 +1774,30 @@ pub(crate) mod tests {
         )
         .expect_err("expected error");
         assert_eq!(err.identifier(), SUM_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn sum_typed_option_admission_retains_output_conflict_and_axis_order() {
+        let input = || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let result = sum_builtin(
+            input(),
+            vec![Value::from("NATIVE"), Value::from("OMITMISSING")],
+        )
+        .expect("case-insensitive options remain admitted");
+        assert_eq!(result, Value::Num(3.0));
+
+        let conflict = sum_builtin(input(), vec![Value::from("default"), Value::from("native")])
+            .expect_err("two output classes must conflict");
+        assert_eq!(conflict.identifier(), SUM_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(conflict.message().contains("multiple output class"));
+
+        let axis_conflict = sum_builtin(input(), vec![Value::Num(1.0), Value::from("all")])
+            .expect_err("all after an explicit axis must conflict");
+        assert_eq!(
+            axis_conflict.identifier(),
+            SUM_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(axis_conflict.message().contains("'all' cannot be combined"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
