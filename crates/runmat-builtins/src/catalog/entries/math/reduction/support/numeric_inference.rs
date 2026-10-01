@@ -1,0 +1,167 @@
+use crate::{ResolveContext, Type};
+use runmat_types::LiteralValue;
+
+/// Semantic control categories shared by numerical reduction inference. Each
+/// owner maps its own public option identity here after decoding the literal.
+pub(super) enum LiteralReductionControl {
+    All,
+    Missing,
+    Output { native: bool },
+    RequiresRuntimeValue,
+}
+
+#[derive(Clone)]
+enum KnownAxes {
+    Default,
+    Dim(usize),
+    Vec(Vec<usize>),
+    All,
+}
+
+struct KnownControls {
+    axes: KnownAxes,
+    native_output: bool,
+}
+
+/// Prove only class and shape facts supported by a complete, ordered literal
+/// grammar. Unknown controls, conflicting axes/classes, and value-dependent
+/// options leave facts dynamic rather than guessing from any-position text.
+pub(super) fn infer_numeric_reduction_type(
+    args: &[Type],
+    context: &ResolveContext,
+    decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
+) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    let controls = admitted_literal_controls(args.len(), context, decode_control);
+    match input {
+        Type::Tensor { shape } | Type::Logical { shape } => Type::Tensor {
+            shape: shape.as_ref().and_then(|dims| {
+                controls
+                    .as_ref()
+                    .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
+            }),
+        },
+        Type::Int
+            if controls
+                .as_ref()
+                .is_some_and(|controls| controls.native_output) =>
+        {
+            Type::Int
+        }
+        Type::Num | Type::Int | Type::Bool if controls.is_some() => Type::Num,
+        _ => Type::Unknown,
+    }
+}
+
+fn admitted_literal_controls(
+    argument_count: usize,
+    context: &ResolveContext,
+    decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
+) -> Option<KnownControls> {
+    let mut axes = KnownAxes::Default;
+    let mut axes_set = false;
+    let mut output_set = false;
+    let mut native_output = false;
+    for index in 1..argument_count {
+        let literal = context.literal_args.get(index)?;
+        if let Some(control) = decode_control(literal) {
+            match control {
+                LiteralReductionControl::All => {
+                    if axes_set && !matches!(axes, KnownAxes::Default) {
+                        return None;
+                    }
+                    axes = KnownAxes::All;
+                    axes_set = true;
+                }
+                LiteralReductionControl::Missing => {}
+                LiteralReductionControl::Output { native } => {
+                    if output_set {
+                        return None;
+                    }
+                    native_output = native;
+                    output_set = true;
+                }
+                LiteralReductionControl::RequiresRuntimeValue => return None,
+            }
+            continue;
+        }
+        let selection = axes_literal(literal)?;
+        if axes_set && !matches!(axes, KnownAxes::Default) {
+            return None;
+        }
+        axes = selection;
+        axes_set = true;
+    }
+    Some(KnownControls {
+        axes,
+        native_output,
+    })
+}
+
+fn axes_literal(literal: &LiteralValue) -> Option<KnownAxes> {
+    match literal {
+        LiteralValue::Empty => Some(KnownAxes::Default),
+        LiteralValue::Vector(values) if values.is_empty() => Some(KnownAxes::Default),
+        LiteralValue::Vector(values) => Some(KnownAxes::Vec(
+            values
+                .iter()
+                .map(positive_dimension)
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        other => positive_dimension(other).map(KnownAxes::Dim),
+    }
+}
+
+fn positive_dimension(literal: &LiteralValue) -> Option<usize> {
+    if let LiteralValue::Integer { text, .. } = literal {
+        return text
+            .parse::<usize>()
+            .ok()
+            .filter(|dimension| *dimension > 0);
+    }
+    let number = ResolveContext::numeric_from_literal(literal)?;
+    if !number.is_finite() || number < 1.0 || number >= usize::MAX as f64 || number.fract() != 0.0 {
+        return None;
+    }
+    let dimension = number as usize;
+    (dimension as f64 == number).then_some(dimension)
+}
+
+fn inferred_shape(source: &[Option<usize>], axes: KnownAxes) -> Option<Vec<Option<usize>>> {
+    match axes {
+        KnownAxes::All => Some(vec![Some(1), Some(1)]),
+        KnownAxes::Dim(dimension) => reduce_known_dimensions(source, &[dimension]),
+        KnownAxes::Vec(dimensions) => reduce_known_dimensions(source, &dimensions),
+        KnownAxes::Default => {
+            let mut shape = source.to_vec();
+            for (index, dimension) in source.iter().enumerate() {
+                match dimension {
+                    Some(1) => continue,
+                    Some(_) => {
+                        shape[index] = Some(1);
+                        return Some(shape);
+                    }
+                    None => return None,
+                }
+            }
+            if shape.is_empty() {
+                return Some(vec![Some(1), Some(1)]);
+            }
+            Some(shape)
+        }
+    }
+}
+
+fn reduce_known_dimensions(
+    source: &[Option<usize>],
+    dimensions: &[usize],
+) -> Option<Vec<Option<usize>>> {
+    let mut shape = source.to_vec();
+    for dimension in dimensions {
+        let index = dimension.checked_sub(1)?;
+        *shape.get_mut(index)? = Some(1);
+    }
+    Some(shape)
+}

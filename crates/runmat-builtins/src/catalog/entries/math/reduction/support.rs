@@ -1,11 +1,14 @@
 mod mean_inference;
 mod mean_options;
 mod missing_policy;
+mod numeric_inference;
+mod sum_inference;
 mod sum_options;
 
 pub use mean_inference::infer_mean_type;
 pub use mean_options::{MeanControl, MeanOutputClass};
 pub use missing_policy::ReductionNaN;
+pub use sum_inference::infer_sum_type;
 pub use sum_options::{SumControl, SumOutputClass};
 
 macro_rules! define_logical_reduction_entry {
