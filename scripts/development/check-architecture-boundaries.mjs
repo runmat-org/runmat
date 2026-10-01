@@ -6,6 +6,8 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { parseHandwrittenComposition } from "./builtin-migration/module-composition/handwritten-parser.mjs";
+import { companionDefinitions } from "./builtin-migration/module-composition/companions.mjs";
+import { expandComposedSource } from "./builtin-migration/module-composition/composed-source.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 let failed = false;
@@ -17,6 +19,17 @@ function fail(message) {
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repo, relativePath), "utf8");
+}
+
+function parseObservedComposition(parentId, sourcePath) {
+  const companions = new Map(companionDefinitions()
+    .filter((entry) => entry.parent_id === parentId && fs.existsSync(path.join(repo, entry.path)))
+    .map((entry) => [entry.path, read(entry.path)]));
+  const observed = expandComposedSource(parentId, read(sourcePath), companions);
+  return {
+    surface: parseHandwrittenComposition(observed.expanded, sourcePath),
+    active: observed.active,
+  };
 }
 
 function enforceAtomicEvidenceWriters() {
@@ -381,10 +394,8 @@ if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/definition
 
 const catalogEntriesRootPath = "crates/runmat-builtins/src/catalog/entries/mod.rs";
 const catalogEntriesRoot = read(catalogEntriesRootPath);
-const catalogEntriesComposition = parseHandwrittenComposition(
-  catalogEntriesRoot,
-  catalogEntriesRootPath,
-);
+const catalogEntriesObserved = parseObservedComposition("catalog-root", catalogEntriesRootPath);
+const catalogEntriesComposition = catalogEntriesObserved.surface;
 const catalogEntriesRootLines = catalogEntriesRoot.split("\n").length;
 if (catalogEntriesRootLines > 80) {
   fail(`${catalogEntriesRootPath} must remain a domain-only composition root (found ${catalogEntriesRootLines} lines; maximum 80)`);
@@ -395,6 +406,9 @@ if (/::(?:ENTRIES|ENTRY_GROUPS)\b/.test(catalogEntriesRoot)) {
 const catalogSupportModules = new Set(catalogEntriesComposition.reexports
   .filter((entry) => entry.visibility === "private" && entry.reexport.kind === "named")
   .map((entry) => entry.module));
+for (const companion of catalogEntriesObserved.active) {
+  if (companion.section === "reexports") catalogSupportModules.add(companion.module);
+}
 const declaredCatalogDomains = catalogEntriesComposition.declarations
   .map((entry) => entry.module)
   .filter((module) => !catalogSupportModules.has(module))
@@ -1617,6 +1631,13 @@ for (const obsolete of [
     fail(`${obsolete} duplicates the domain-owned IO inference router`);
   }
 }
+const replFsCompositionPath = "crates/runmat-builtins/src/catalog/entries/io/repl_fs/mod.rs";
+const replFsCompanion = companionDefinitions().find((entry) =>
+  entry.parent_id === "catalog-io-repl-fs" && entry.section === "declarations");
+if (read(replFsCompositionPath).includes('include!("declarations.rs");')
+  || fs.existsSync(path.join(repo, replFsCompanion.path))) {
+  parseObservedComposition("catalog-io-repl-fs", replFsCompositionPath);
+}
 
 enforceMigratedBuiltinFamily({
   name: "installation-root identity",
@@ -1949,6 +1970,7 @@ for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry/groups.rs",
 ]) {
   if (/"what"/.test(read(sourcePath))) {
     fail(`${sourcePath} must route source-inventory inference by typed rules, not builtin names`);
@@ -1964,6 +1986,7 @@ for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry/groups.rs",
 ]) {
   if (/"(?:dir|ls)"/.test(read(sourcePath))) {
     fail(`${sourcePath} must route directory-listing inference by typed rules, not builtin names`);
@@ -1991,6 +2014,7 @@ for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry/groups.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_predicate/inference.rs",
 ]) {
   if (/"(?:isfile|isfolder)"/.test(read(sourcePath))) {
@@ -2011,6 +2035,7 @@ for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry/groups.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/inference.rs",
 ]) {
@@ -2033,6 +2058,7 @@ for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry/groups.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/inference.rs",
 ]) {
@@ -2070,6 +2096,7 @@ for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry/groups.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/inference.rs",
 ]) {
@@ -2093,6 +2120,7 @@ for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry/groups.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path/inference.rs",
 ]) {
@@ -2116,6 +2144,7 @@ for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry/groups.rs",
 ]) {
   const source = read(sourcePath);
   if (/"(?:getenv|setenv|isenv|unsetenv)"/.test(source)) {

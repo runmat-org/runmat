@@ -7,7 +7,9 @@ import test from "node:test";
 
 import { evidenceDigest } from "../../evidence.mjs";
 import { moduleCompositionProductRegistry } from "../registry.mjs";
+import { derivedCompanionProducts } from "../companions.mjs";
 import { inspectMaterializationTargets } from "../repository-state.mjs";
+import { materializationChildKey } from "../repository-state.mjs";
 import {
   installCompositionSet, recoverCompositionAfterStoppedOwner, renderCompositionSetTwice,
   withCompositionTransaction,
@@ -24,6 +26,82 @@ import {
   clearStoppedOwnerRecoveryReservation, withStoppedOwnerRecovery,
 } from "../transaction-lock-recovery.mjs";
 import { claimRecoveryReservation } from "../transaction-recovery-reservation.mjs";
+
+test("companion activation and deactivation publish and recover one parent transition", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-composition-companion-"));
+  const product = companionRootProduct();
+  const companion = derivedCompanionProducts(product).find((entry) => entry.state === "present");
+  try {
+    write(root, product.children[0].source_path, "pub const VALUE: usize = 1;\n");
+    const pending = new Set([materializationChildKey(product.product_id, companion.path)]);
+    const rendered = renderCompositionSetTwice([companion, product]);
+    withCompositionTransaction(root, (lock) => {
+      const before = inspectMaterializationTargets(root, [companion, product], {
+        authorizedPendingChildKeys: pending,
+      });
+      assert.throws(() => installCompositionSet(root, rendered, before, lock, {
+        beforeInstall({ product: { product_id } }) {
+          if (product_id === product.product_id) throw new Error("interrupt after companion publication");
+        },
+      }), /interrupt after companion publication/);
+      assert.equal(fs.existsSync(path.join(root, companion.path)), false);
+      assert.equal(fs.existsSync(path.join(root, product.path)), false);
+    });
+    withCompositionTransaction(root, (lock) => {
+      const before = inspectMaterializationTargets(root, [companion, product], {
+        authorizedPendingChildKeys: pending,
+      });
+      installCompositionSet(root, rendered, before, lock, {
+        beforeInstall({ product: { product_id } }) {
+          if (product_id === product.product_id) {
+            assert.equal(fs.existsSync(path.join(root, companion.path)), true);
+          }
+        },
+      });
+      assert.equal(fs.readFileSync(path.join(root, companion.path), "utf8"), rendered[0].content);
+      assert.equal(fs.readFileSync(path.join(root, product.path), "utf8"), rendered[1].content);
+    });
+    const absent = { ...product, state: "absent", children: [] };
+    const absentCompanion = derivedCompanionProducts(absent)[0];
+    withCompositionTransaction(root, (lock) => {
+      const before = inspectMaterializationTargets(root, [absent]);
+      assert.throws(() => installCompositionSet(root, [
+        { product: absent, content: null },
+      ], before, lock), /prior companion must be included/);
+      assert.equal(fs.readFileSync(path.join(root, product.path), "utf8"), rendered[1].content);
+      assert.equal(fs.readFileSync(path.join(root, companion.path), "utf8"), rendered[0].content);
+    });
+    withCompositionTransaction(root, (lock) => {
+      const before = inspectMaterializationTargets(root, [absent, absentCompanion]);
+      assert.throws(() => installCompositionSet(root, [
+        { product: absent, content: null }, { product: absentCompanion, content: null },
+      ], before, lock, {
+        beforeInstall({ product: { product_id } }) {
+          if (product_id === absentCompanion.product_id) {
+            assert.equal(fs.existsSync(path.join(root, product.path)), false);
+            throw new Error("interrupt after parent deletion");
+          }
+        },
+      }), /interrupt after parent deletion/);
+      assert.equal(fs.readFileSync(path.join(root, product.path), "utf8"), rendered[1].content);
+      assert.equal(fs.readFileSync(path.join(root, companion.path), "utf8"), rendered[0].content);
+    });
+    withCompositionTransaction(root, (lock) => {
+      const before = inspectMaterializationTargets(root, [absent, absentCompanion]);
+      installCompositionSet(root, [
+        { product: absent, content: null }, { product: absentCompanion, content: null },
+      ], before, lock, {
+        beforeInstall({ product: { product_id } }) {
+          if (product_id === absentCompanion.product_id) {
+            assert.equal(fs.existsSync(path.join(root, product.path)), false);
+          }
+        },
+      });
+      assert.equal(fs.existsSync(path.join(root, product.path)), false);
+      assert.equal(fs.existsSync(path.join(root, companion.path)), false);
+    });
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 test("installation persists its complete journal before creating stage artifacts", () => withRepository((root, product) => {
   withCompositionTransaction(root, (lock) => {
@@ -427,6 +505,32 @@ function withRepository(run) {
     write(root, product.children[0].source_path, "pub fn value() {}\n");
     return run(root, product);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
+function companionRootProduct() {
+  return {
+    product_id: "catalog-root", crate_role: "catalog",
+    path: "crates/runmat-builtins/src/catalog/entries/mod.rs",
+    module_path: "crate::catalog::entries", state: "present",
+    aggregations: ["entries"], aggregation_exports: [],
+    children: [
+      {
+        module: "alpha", source_kind: "directory",
+        source_path: "crates/runmat-builtins/src/catalog/entries/alpha/mod.rs",
+        role: "group", visibility: "catalog", declaration_condition: { kind: "always" },
+        declaration_order: 0, macro_use: false,
+        reexports: [{ kind: "glob", visibility: "public", condition: { kind: "always" }, doc_hidden: false }],
+        aggregation_sources: [{ role: "entries", kind: "slice", order: 0, condition: { kind: "always" } }],
+      },
+      {
+        module: "exports", source_kind: "file",
+        source_path: "crates/runmat-builtins/src/catalog/entries/exports.rs",
+        role: "support", visibility: "private", declaration_condition: { kind: "always" },
+        declaration_order: 1, macro_use: false, reexports: [], aggregation_sources: [],
+        companion_section: "reexports",
+      },
+    ],
+  };
 }
 
 function transactionJournal(token, relative, existed, before, replacement, stat) {

@@ -1,16 +1,15 @@
-import { compareCodePoint } from "../constants.mjs";
 import { contentDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { assertActiveLease } from "../lease.mjs";
 import { validateReviewedModuleCompositionAuthority } from "./authority.mjs";
+import { derivedCompanionProducts } from "./companions.mjs";
+import { deriveAuthorizedPendingChildKeys, selectMaterializationProducts } from "./materialization-selection.mjs";
 import {
   assertEffectiveChildStatesUnchanged, inspectEffectiveChildStates,
 } from "./child-state.mjs";
 import { deriveModuleCompositionMaterializationState } from "./effective-state.mjs";
 import { inspectCanonicalMaterializationTargets } from "./prior-state.mjs";
-import {
-  inspectMaterializationTargets, materializationChildKey,
-} from "./repository-state.mjs";
+import { inspectMaterializationTargets } from "./repository-state.mjs";
 import { renewCompositionRepositoryLock } from "./transaction-lock.mjs";
 import { installCompositionSet, renderCompositionSetTwice, withCompositionTransaction } from "./transaction.mjs";
 
@@ -32,30 +31,39 @@ export function materializeEffectiveModuleComposition({
     .map((product) => [product.product_id, product]));
   const priorById = new Map(state.prior.products
     .map((product) => [product.product_id, product]));
-  const products = productIds.map((id) => {
+  const selectedProducts = productIds.map((id) => {
     const product = effectiveById.get(id);
     if (!product) throw new Error(`${id}: active integration product is absent from effective composition`);
     return product;
   });
-  const priorProducts = productIds.map((id) => {
+  const selectedPriorProducts = productIds.map((id) => {
     const product = priorById.get(id);
     if (!product) throw new Error(`${id}: integration product is absent from prior composition`);
     return product;
   });
+  const products = selectedProducts.flatMap((product) => {
+    const companions = derivedCompanionProducts(product);
+    return [...companions.filter((entry) => entry.state === "present"), product,
+      ...companions.filter((entry) => entry.state === "absent")];
+  });
+  const priorProducts = selectedPriorProducts.flatMap((product) => [product, ...derivedCompanionProducts(product)]);
+  const selectedPriorById = new Map(selectedPriorProducts.map((product) => [product.product_id, product]));
+  const priorProductById = new Map(priorProducts.map((product) => [product.product_id, product]));
   const authorizedPendingChildKeys = deriveAuthorizedPendingChildKeys(
-    products, priorById,
+    selectedProducts, selectedPriorById,
   );
   return withCompositionTransaction(repository, (lock, recovery) => {
     const priorPresent = priorProducts.filter((product) => product.state === "present");
     const renderedPriorIds = new Set(state.priorRenderedProductIds);
     const priorRendered = renderCompositionSetTwice(
-      priorPresent.filter((product) => renderedPriorIds.has(product.product_id)),
+      priorPresent.filter((product) => product.companion_parent || renderedPriorIds.has(product.product_id)),
     );
     renewCompositionRepositoryLock(lock);
     const priorDigests = new Map(priorRendered
       .map((entry) => [entry.product.product_id, contentDigest(entry.content)]));
     for (const product of priorPresent) {
       if (priorDigests.has(product.product_id)) continue;
+      if (product.companion_parent) throw new Error(`${product.product_id}: prior companion was not rendered`);
       const reviewed = control.integrationProducts.get(product.product_id);
       if (!reviewed || reviewed.baseline_digest === null) {
         throw new Error(`${product.product_id}: present baseline product lacks its frozen digest`);
@@ -88,7 +96,7 @@ export function materializeEffectiveModuleComposition({
     const { inventory } = initialAuthority;
     options.afterAudit?.({ inventory, lock });
     const affectedIds = new Set(products.filter((product) => {
-      const prior = priorById.get(product.product_id);
+      const prior = priorProductById.get(product.product_id);
       return prior.state === "present" || product.state === "present";
     }).map((product) => product.product_id));
     const affected = products.filter((product) => affectedIds.has(product.product_id));
@@ -117,66 +125,4 @@ export function materializeEffectiveModuleComposition({
       },
     };
   });
-}
-
-function deriveAuthorizedPendingChildKeys(products, priorById) {
-  const activatedPaths = new Set(products
-    .filter((product) => product.state === "present"
-      && priorById.get(product.product_id)?.state === "absent")
-    .map((product) => product.path));
-  const keys = new Set();
-  for (const product of products) {
-    const priorChildren = new Set((priorById.get(product.product_id)?.children ?? [])
-      .map((child) => child.source_path));
-    for (const child of product.children) {
-      if (activatedPaths.has(child.source_path) && !priorChildren.has(child.source_path)) {
-        keys.add(materializationChildKey(product.product_id, child.source_path));
-      }
-    }
-  }
-  return keys;
-}
-
-function selectMaterializationProducts(control, bundle, requestedProductIds = null) {
-  if (requestedProductIds === null) {
-    const implicit = new Set([...control.integrationProducts.values()]
-      .filter((product) => product.verification.kind === "rust_module_composition"
-        && product.lifecycle.kind === "reviewed-baseline-only")
-      .map((product) => product.product_id));
-    for (const output of bundle.integration_outputs) {
-      const product = control.integrationProducts.get(output.product_id);
-      if (!product) throw new Error(`${bundle.id}: active bundle references unknown integration product ${output.product_id}`);
-      if (product.verification.kind === "rust_module_composition") {
-        implicit.add(product.product_id);
-      }
-    }
-    const compositionProductIds = [...implicit].sort(compareCodePoint);
-    return {
-      selectedProductIds: compositionProductIds,
-      compositionProductIds,
-    };
-  }
-  const integrationProductIds = [];
-  for (const output of bundle.integration_outputs) {
-    const product = control.integrationProducts.get(output.product_id);
-    if (!product) throw new Error(`${bundle.id}: active bundle references unknown integration product ${output.product_id}`);
-    integrationProductIds.push(product.product_id);
-  }
-  const expected = [...integrationProductIds].sort(compareCodePoint);
-  const requested = [...requestedProductIds];
-  if (new Set(requested).size !== requested.length) {
-    throw new Error("materialization product selection contains duplicates");
-  }
-  if (JSON.stringify(requested) !== JSON.stringify([...requested].sort(compareCodePoint))) {
-    throw new Error("materialization product selection must use canonical product-id order");
-  }
-  if (JSON.stringify(requested) !== JSON.stringify(expected)) {
-    throw new Error(`${bundle.id}: materialization product selection must exactly match the active lease integration products`);
-  }
-  const compositionProductIds = requested.filter((id) =>
-    control.integrationProducts.get(id).verification.kind === "rust_module_composition");
-  return {
-    selectedProductIds: requested,
-    compositionProductIds,
-  };
 }

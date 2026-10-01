@@ -2,9 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { compareCodePoint } from "../constants.mjs";
-import { contentDigest, evidenceDigest } from "../evidence.mjs";
+import { evidenceDigest } from "../evidence.mjs";
 import { repositoryPath } from "../schema.mjs";
+import { fileEvidence, lstat, resolve, uniqueEvidence } from "./baseline-observation-files.mjs";
 import { parseHandwrittenComposition } from "./handwritten-parser.mjs";
+import { companionDefinitions } from "./companions.mjs";
+import { expandComposedSource } from "./composed-source.mjs";
 import { moduleCompositionProductRegistry } from "./registry.mjs";
 import { canonicalGitRepository, observeSignedCleanHead, verifySignedHeadFiles } from "./baseline-source-head.mjs";
 import { conditionKey } from "./condition.mjs";
@@ -42,8 +45,20 @@ export function observeModuleCompositionBaseline(repository, trustedSignerFinger
 }
 
 export function observeWorkingTreeModuleCompositionProducts(repository) {
+  return observeSelectedWorkingTreeModuleCompositionProducts(repository,
+    moduleCompositionProductRegistry().map((entry) => entry.product_id));
+}
+
+export function observeSelectedWorkingTreeModuleCompositionProducts(repository, productIds) {
   const root = fs.realpathSync(repository);
-  return moduleCompositionProductRegistry().map((definition) => observeProduct(root, definition));
+  const selected = new Set(productIds);
+  if (selected.size !== productIds.length) throw new Error("selected composition product ids repeat");
+  const definitions = moduleCompositionProductRegistry();
+  if (selected.size !== definitions.filter((entry) => selected.has(entry.product_id)).length) {
+    throw new Error("selected composition product id is not registered");
+  }
+  return definitions.filter((entry) => selected.has(entry.product_id))
+    .map((definition) => observeProduct(root, definition));
 }
 
 function observeProduct(root, definition) {
@@ -53,12 +68,21 @@ function observeProduct(root, definition) {
     ...definition, aggregation_exports: [], state: "absent", parent_evidence: null, children: [],
   };
   const parentEvidence = fileEvidence(root, definition.path);
-  const parsed = parseHandwrittenComposition(fs.readFileSync(target, "utf8"), definition.product_id);
+  const companionSources = new Map(companionDefinitions()
+    .filter((entry) => entry.parent_id === definition.product_id)
+    .filter((entry) => lstat(resolve(root, entry.path)) !== null)
+    .map((entry) => [entry.path, fs.readFileSync(resolve(root, entry.path), "utf8")]));
+  const composed = expandComposedSource(
+    definition.product_id, fs.readFileSync(target, "utf8"), companionSources,
+  );
+  const parsed = parseHandwrittenComposition(composed.expanded, definition.product_id);
   validateAggregationExports(parsed.aggregation_exports, definition);
   const contributions = aggregationIndex(parsed.aggregations, definition);
   const exports = reexportIndex(parsed.reexports, definition.product_id);
   const children = parsed.declarations.map((declaration, declarationOrder) => {
     const storage = resolveChild(root, definition, declaration);
+    const companion = composed.active.find((entry) => entry.module === declaration.module
+      && entry.path === storage.source_path);
     return {
       module: declaration.module,
       source_kind: storage.source_kind,
@@ -71,8 +95,18 @@ function observeProduct(root, definition) {
       macro_use: declaration.macro_use,
       reexports: exports.get(declaration.module) ?? [],
       aggregation_sources: contributions.get(declaration.module) ?? [],
+      ...(companion ? { companion_section: companion.section } : {}),
     };
-  }).sort((left, right) => compareCodePoint(left.module, right.module));
+  });
+  for (const companion of composed.active.filter((entry) => entry.section === "declarations")) {
+    children.push({
+      module: companion.module, source_kind: "file", source_path: companion.path,
+      source_evidence: fileEvidence(root, companion.path), role: null, visibility: "private",
+      declaration_condition: { kind: "always" }, declaration_order: children.length,
+      macro_use: false, reexports: [], aggregation_sources: [], companion_section: companion.section,
+    });
+  }
+  children.sort((left, right) => compareCodePoint(left.module, right.module));
   rejectOrphans(parsed, new Set(children.map((child) => child.module)), definition.product_id);
   return { ...definition, state: "present", parent_evidence: parentEvidence, children };
 }
@@ -152,40 +186,3 @@ function resolveChild(root, product, declaration) {
   fileEvidence(root, candidates[0].source_path);
   return candidates[0];
 }
-
-function fileEvidence(root, sourcePath) {
-  const target = resolve(root, sourcePath);
-  const stat = fs.lstatSync(target);
-  if (!stat.isFile() || fs.realpathSync(target) !== target) throw new Error(`${sourcePath}: source must be a canonical regular file`);
-  return {
-    path: sourcePath,
-    working_executable: Boolean(stat.mode & 0o111),
-    content_digest: contentDigest(fs.readFileSync(target)),
-  };
-}
-
-function resolve(root, sourcePath) {
-  const target = path.resolve(root, ...repositoryPath(sourcePath, "module composition source path").split("/"));
-  const relative = path.relative(root, target);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error(`${sourcePath}: source escapes repository`);
-  const existing = nearestExisting(target);
-  const canonical = fs.realpathSync(existing);
-  const canonicalRelative = path.relative(root, canonical);
-  if (canonicalRelative === ".." || canonicalRelative.startsWith(`..${path.sep}`) || path.isAbsolute(canonicalRelative)) {
-    throw new Error(`${sourcePath}: source escapes repository through a symbolic link`);
-  }
-  if (canonical !== existing) throw new Error(`${sourcePath}: source has a noncanonical repository ancestor`);
-  return target;
-}
-
-function uniqueEvidence(values) {
-  const byPath = new Map();
-  for (const value of values) {
-    const prior = byPath.get(value.path);
-    if (prior && JSON.stringify(prior) !== JSON.stringify(value)) throw new Error(`${value.path}: conflicting source evidence`);
-    byPath.set(value.path, value);
-  }
-  return [...byPath.values()].sort((left, right) => compareCodePoint(left.path, right.path));
-}
-function lstat(target) { try { return fs.lstatSync(target); } catch (error) { if (["ENOENT", "ENOTDIR"].includes(error?.code)) return null; throw error; } }
-function nearestExisting(target) { let current = target; while (!fs.existsSync(current)) { const parent = path.dirname(current); if (parent === current) throw new Error(`no existing ancestor for ${target}`); current = parent; } return current; }

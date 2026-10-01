@@ -26,31 +26,11 @@ pub(in crate::catalog) mod structs;
 mod table;
 mod testing;
 mod value_distribution;
+mod exports;
 
-pub use self::acceleration::*;
 use self::aggregation::extend_groups;
-pub use self::argument_validation::*;
-pub use self::array::*;
-pub use self::cells::*;
-pub use self::comms::*;
-pub use self::containers::*;
-pub use self::control::*;
-pub use self::datetime::*;
-pub use self::deep_learning::*;
-pub use self::finance::*;
-pub use self::graph::*;
-pub use self::introspection::*;
-pub use self::io::*;
-pub use self::logical::*;
-pub use self::math::*;
-pub use self::parallel::*;
-pub use self::plotting::*;
-pub use self::stats::*;
-pub use self::strings::*;
-pub use self::structs::*;
-pub use self::table::*;
-pub use self::testing::*;
-pub use self::value_distribution::*;
+
+pub use self::exports::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     acceleration::extend_entries(values);

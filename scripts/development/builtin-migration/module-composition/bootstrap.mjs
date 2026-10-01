@@ -3,6 +3,7 @@ import {
   validateReviewedModuleCompositionBaseline,
 } from "./baseline-authority.mjs";
 import { inspectCompositionRepository } from "./repository-state.mjs";
+import { derivedCompanionProducts } from "./companions.mjs";
 import { renewCompositionRepositoryLock } from "./transaction-lock.mjs";
 import { installCompositionSet, renderCompositionSetTwice, withCompositionTransaction } from "./transaction.mjs";
 
@@ -24,16 +25,19 @@ export function bootstrapModuleComposition({
     const baseline = validateBaseline();
     renewCompositionRepositoryLock(lock);
     const reviewed = baseline.projection;
-    const inventory = inspectCompositionRepository(lock.repository, reviewed.products);
+    const reviewedProducts = reviewed.products.flatMap((product) => [
+      product, ...derivedCompanionProducts(product),
+    ]);
+    const inventory = inspectCompositionRepository(lock.repository, reviewedProducts);
     renewCompositionRepositoryLock(lock);
     options.afterAudit?.({ inventory, lock });
     for (const observed of inventory.products) {
-      const expected = reviewed.products.find((product) => product.product_id === observed.product_id);
+      const expected = reviewedProducts.find((product) => product.product_id === observed.product_id);
       if (observed.state !== expected.state) {
         throw new Error(`${observed.product_id}: repository presence differs from the reviewed baseline`);
       }
     }
-    const products = reviewed.products.filter((product) => product.state === "present");
+    const products = reviewedProducts.filter((product) => product.state === "present");
     const rendered = renderCompositionSetTwice(products, options.render);
     renewCompositionRepositoryLock(lock);
     const before = inventory.products.filter((entry) => entry.state === "present");

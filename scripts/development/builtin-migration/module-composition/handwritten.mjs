@@ -1,10 +1,16 @@
 import { parseHandwrittenComposition } from "./handwritten-parser.mjs";
+import { activeCompanions } from "./companions.mjs";
+import { expandComposedSource } from "./composed-source.mjs";
 import { childPathAttribute, declaredChildSourcePath } from "./rust-schema.mjs";
 import { expectedCompositionSurface } from "./surface.mjs";
 
-export function auditHandwrittenComposition(source, product) {
+export function auditHandwrittenComposition(source, product, companionSources = new Map()) {
+  const composed = expandComposedSource(product.product_id, source, companionSources);
+  if (JSON.stringify(composed.active) !== JSON.stringify(activeCompanions(product))) {
+    throw new Error(`${product.product_id}: companion sections differ from review`);
+  }
   const observed = normalizeDeclarationPaths(
-    parseHandwrittenComposition(source, product.product_id), product,
+    parseHandwrittenComposition(composed.expanded, product.product_id), product,
   );
   const expected = expectedCompositionSurface(product);
   rejectDuplicateDeclarations(observed.declarations, product.product_id);
@@ -15,7 +21,7 @@ export function auditHandwrittenComposition(source, product) {
   return observed.declarations;
 }
 
-function normalizeDeclarationPaths(surface, product) {
+export function normalizeDeclarationPaths(surface, product) {
   const children = new Map(product.children.map((child) => [child.module, child]));
   return {
     ...surface,

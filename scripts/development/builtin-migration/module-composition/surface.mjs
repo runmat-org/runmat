@@ -2,7 +2,8 @@ import { childPathAttribute } from "./schema.mjs";
 
 export function expectedCompositionSurface(product) {
   return {
-    declarations: [...product.children].sort((left, right) => left.declaration_order - right.declaration_order).map((entry) => ({
+    declarations: [...product.children].filter((entry) => entry.companion_section !== "declarations")
+      .sort((left, right) => left.declaration_order - right.declaration_order).map((entry) => ({
       module: entry.module,
       visibility: entry.visibility,
       declaration_condition: entry.declaration_condition,

@@ -3,7 +3,7 @@ import { conditionKey, parseConditionAttribute } from "./condition.mjs";
 import { parseHandwrittenAggregation } from "./handwritten-aggregation.mjs";
 
 const IDENTIFIER = "(?:r#)?[A-Za-z_][A-Za-z0-9_]*";
-const DECLARATION = new RegExp(`^(?:(pub\\(super\\)|pub\\(crate\\)|pub\\(in crate::catalog\\)|pub)\\s+)?mod\\s+(${IDENTIFIER})\\s*;$`);
+const DECLARATION = new RegExp(`^(?:(pub\\(super\\)|pub\\(crate\\)|pub\\(in crate::catalog(?:\\::entries\\::io)?\\)|pub)\\s+)?mod\\s+(${IDENTIFIER})\\s*;$`);
 const USE = /^(?:(pub(?:\([^)]*\))?)\s+)?use\s+([\s\S]+);$/;
 const AGGREGATION_EXPORTS = Object.freeze({
   extend_entries: "entries", extend_aliases: "aliases", extend_constants: "constants",
@@ -180,5 +180,5 @@ function stripComments(source, productId) {
   return output;
 }
 
-function visibility(value) { return { undefined: "private", "pub(super)": "super", "pub(crate)": "crate", "pub(in crate::catalog)": "catalog", pub: "public" }[String(value)]; }
+function visibility(value) { return { undefined: "private", "pub(super)": "super", "pub(crate)": "crate", "pub(in crate::catalog)": "catalog", "pub(in crate::catalog::entries::io)": "catalog_io", pub: "public" }[String(value)]; }
 function take(items, value) { if (value.trim()) items.push(value.trim()); }

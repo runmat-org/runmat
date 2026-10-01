@@ -9,4 +9,4 @@ use crate::BuiltinCatalogEntry;
 pub use matlabroot::*;
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&MATLABROOT_CATALOG_ENTRY];
-pub(super) use inference::infer;
+pub(super) use self::inference::infer;

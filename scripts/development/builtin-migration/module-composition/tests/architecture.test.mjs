@@ -6,16 +6,16 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const productionFiles = [
-  "authority.mjs", "baseline-authority.mjs", "baseline-candidate.mjs", "baseline-observation.mjs",
-  "baseline-review.mjs", "baseline-schema.mjs", "baseline-source-head.mjs", "binding.mjs", "bootstrap.mjs", "child-state.mjs", "condition.mjs", "control-child-overlap.mjs", "control.mjs", "durability.mjs",
-  "effective-state.mjs", "generate.mjs", "handwritten-aggregation.mjs", "handwritten-parser.mjs", "handwritten.mjs", "index.mjs", "materialize.mjs",
-  "prior-state.mjs", "projection.mjs", "registry.mjs", "repository-state.mjs", "rust-schema.mjs", "schema.mjs", "surface.mjs",
-  "transaction-journal-schema.mjs", "transaction-journal.mjs", "transaction-lock-fence-worker.mjs", "transaction-lock-fence.mjs", "transaction-lock-recovery.mjs", "transaction-recovery-reservation.mjs",
+  "authority.mjs", "baseline-authority.mjs", "baseline-candidate.mjs", "baseline-observation.mjs", "baseline-observation-files.mjs",
+  "baseline-review.mjs", "baseline-schema.mjs", "baseline-source-head.mjs", "binding.mjs", "bootstrap.mjs", "child-state.mjs", "companions.mjs", "composed-source.mjs", "condition.mjs", "control-child-overlap.mjs", "control.mjs", "durability.mjs",
+  "effective-state.mjs", "generate.mjs", "handwritten-aggregation.mjs", "handwritten-parser.mjs", "handwritten.mjs", "index.mjs", "materialize.mjs", "materialization-selection.mjs",
+  "prior-state.mjs", "projection.mjs", "registry.mjs", "repository-state.mjs", "rust-schema.mjs", "schema.mjs", "schema-order.mjs", "surface.mjs",
+  "transaction-install.mjs", "transaction-journal-schema.mjs", "transaction-journal.mjs", "transaction-lock-fence-worker.mjs", "transaction-lock-fence.mjs", "transaction-lock-recovery.mjs", "transaction-recovery-reservation.mjs",
   "transaction-lock-owner.mjs", "transaction-lock.mjs", "transaction-plan.mjs", "transaction.mjs", "verify.mjs",
 ];
 const filesystemLeaves = new Set([
-  "baseline-observation.mjs", "baseline-source-head.mjs", "child-state.mjs", "durability.mjs", "repository-state.mjs",
-  "transaction-journal.mjs", "transaction-lock-owner.mjs", "transaction-lock-recovery.mjs", "transaction-lock.mjs", "transaction-recovery-reservation.mjs", "transaction.mjs",
+  "baseline-observation.mjs", "baseline-observation-files.mjs", "baseline-source-head.mjs", "child-state.mjs", "durability.mjs", "repository-state.mjs",
+  "transaction-install.mjs", "transaction-journal.mjs", "transaction-lock-owner.mjs", "transaction-lock-recovery.mjs", "transaction-lock.mjs", "transaction-recovery-reservation.mjs", "transaction.mjs",
 ]);
 
 test("module composition stays bounded and cannot discover source from the filesystem", () => {

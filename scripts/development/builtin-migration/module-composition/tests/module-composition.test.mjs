@@ -7,6 +7,66 @@ import {
   parseModuleCompositionTransition, renderModuleCompositionProduct,
   validateModuleCompositionControl, verifyModuleCompositionProduct,
 } from "../index.mjs";
+import { derivedCompanionProducts } from "../companions.mjs";
+import { renderCompositionSetTwice } from "../transaction.mjs";
+
+test("fixed companion sections retain one independently observed parent surface", () => {
+  for (const product of [companionRootFixture(), companionDeclarationsFixture()]) {
+    const parsed = parseModuleCompositionProjection({
+      schema_version: 6, kind: "runmat-builtin-module-composition-projection", products: [product],
+    }).products[0];
+    const companions = derivedCompanionProducts(parsed).filter((entry) => entry.state === "present");
+    const rendered = renderCompositionSetTwice([...companions, parsed]);
+    const parent = rendered.find((entry) => entry.product.product_id === parsed.product_id);
+    const sources = new Map(rendered.filter((entry) => entry.product.companion_parent)
+      .map((entry) => [entry.product.path, entry.content]));
+    assert.doesNotThrow(() => verifyModuleCompositionProduct(parsed, parent.content, sources));
+    assert.throws(() => verifyModuleCompositionProduct(parsed, parent.content), /missing .* companion source/);
+    assert.throws(() => verifyModuleCompositionProduct(parsed, parent.content,
+      new Map([[[...sources.keys()][0], [...sources.values()][0].replace("mod alpha;", "mod altered;").replace("alpha::*", "altered::*")]])),
+    /topology differs|bytes differ/);
+    if (parsed.product_id === "catalog-root") {
+      const companion = [...sources.values()][0];
+      assert.throws(() => verifyModuleCompositionProduct(parsed, parent.content,
+        new Map([[[...sources.keys()][0], companion.replace("pub use super::beta::*;", "")]])),
+      /topology differs/);
+      assert.throws(() => verifyModuleCompositionProduct(parsed,
+        parent.content.replace("pub use self::exports::*;", ""), sources),
+      /companion sections differ|unreferenced/);
+    } else {
+      assert.match([...sources.values()][0], /pub\(in crate::catalog::entries::io\) mod alpha;/);
+      assert.throws(() => verifyModuleCompositionProduct(parsed, parent.content,
+        new Map([[[...sources.keys()][0], [...sources.values()][0].replace(
+          "pub(in crate::catalog::entries::io)", "pub(in crate::catalog::entries::math)",
+        )]])), /unsupported handwritten Rust syntax/);
+    }
+    assert.throws(() => renderCompositionSetTwice([parsed]), /companion is missing/);
+    const forged = { ...companions[0], path: "crates/runmat-builtins/src/catalog/entries/forged.rs" };
+    assert.throws(() => renderCompositionSetTwice([forged, parsed]), /fixed parent section\/path\/state/);
+  }
+});
+
+test("an empty active companion keeps its explicit generated envelope", () => {
+  const product = companionDeclarationsFixture();
+  product.children = [{ ...product.children[1], declaration_order: 0 }];
+  const parsed = parseModuleCompositionProjection({
+    schema_version: 6, kind: "runmat-builtin-module-composition-projection", products: [product],
+  }).products[0];
+  const rendered = renderCompositionSetTwice([
+    ...derivedCompanionProducts(parsed).filter((entry) => entry.state === "present"), parsed,
+  ]);
+  assert.equal(rendered[0].content, `${generatedHeader()}\n`);
+  assert.doesNotThrow(() => verifyModuleCompositionProduct(parsed, rendered[1].content,
+    new Map([[rendered[0].product.path, rendered[0].content]])));
+});
+
+test("catalog IO visibility cannot escape its exact ancestor", () => {
+  const outside = companionRootFixture();
+  outside.children[0].visibility = "catalog_io";
+  assert.throws(() => parseModuleCompositionProjection({
+    schema_version: 6, kind: "runmat-builtin-module-composition-projection", products: [outside],
+  }), /requires a descendant of the catalog IO module/);
+});
 
 test("renders and independently verifies the closed catalog and runtime grammar", () => {
   const projection = fixtureProjection();
@@ -911,6 +971,46 @@ function fixtureProjection() {
           role: "group", visibility: "public",
         })],
       },
+    ],
+  };
+}
+
+function companionRootFixture() {
+  const alpha = child({
+    module: "alpha", source_path: "crates/runmat-builtins/src/catalog/entries/alpha/mod.rs",
+    role: "group", visibility: "catalog", declarationOrder: 0, aggregations: ["entries"],
+  });
+  alpha.reexports = [{ kind: "glob", visibility: "public", condition: { kind: "always" }, doc_hidden: false }];
+  const beta = child({
+    module: "beta", source_path: "crates/runmat-builtins/src/catalog/entries/beta/mod.rs",
+    role: "group", visibility: "catalog", declarationOrder: 1, aggregations: ["entries"],
+  });
+  beta.aggregation_sources[0].order = 1;
+  beta.reexports = [{ kind: "glob", visibility: "public", condition: { kind: "always" }, doc_hidden: false }];
+  return {
+    product_id: "catalog-root", crate_role: "catalog",
+    path: "crates/runmat-builtins/src/catalog/entries/mod.rs",
+    module_path: "crate::catalog::entries", state: "present",
+    aggregations: ["entries"], aggregation_exports: [],
+    children: [alpha, beta, {
+      ...child({ module: "exports", source_path: "crates/runmat-builtins/src/catalog/entries/exports.rs",
+        sourceKind: "file", role: "support", declarationOrder: 2 }),
+      companion_section: "reexports",
+    }],
+  };
+}
+
+function companionDeclarationsFixture() {
+  return {
+    product_id: "catalog-io-repl-fs", crate_role: "catalog",
+    path: "crates/runmat-builtins/src/catalog/entries/io/repl_fs/mod.rs",
+    module_path: "crate::catalog::entries::io::repl_fs", state: "present",
+    aggregations: [], aggregation_exports: [],
+    children: [
+      child({ module: "alpha", source_path: "crates/runmat-builtins/src/catalog/entries/io/repl_fs/alpha.rs",
+        sourceKind: "file", role: "identity", visibility: "catalog_io", declarationOrder: 0 }),
+      { ...child({ module: "declarations", source_path: "crates/runmat-builtins/src/catalog/entries/io/repl_fs/declarations.rs",
+        sourceKind: "file", role: "support", declarationOrder: 1 }), companion_section: "declarations" },
     ],
   };
 }

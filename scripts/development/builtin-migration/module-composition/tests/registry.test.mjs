@@ -8,7 +8,7 @@ import {
   MODULE_COMPOSITION_SUFFIXES, moduleCompositionProductRegistry,
 } from "../index.mjs";
 import {
-  observeWorkingTreeModuleCompositionProducts,
+  observeSelectedWorkingTreeModuleCompositionProducts, observeWorkingTreeModuleCompositionProducts,
 } from "../baseline-observation.mjs";
 
 const REPOSITORY = path.resolve(
@@ -174,6 +174,18 @@ test("registry values are deeply immutable and never discover the filesystem", (
   const source = fs.readFileSync(path.join(root, "registry.mjs"), "utf8");
   assert.doesNotMatch(source,
     /node:fs|node:child_process|\breaddir(?:Sync)?\s*\(|\bglob(?:Sync)?\s*\(|\bwalk(?:Dir|Sync)?\s*\(/);
+});
+
+test("selected observation still uses registered products and exact source inventory", () => {
+  const selected = observeSelectedWorkingTreeModuleCompositionProducts(REPOSITORY,
+    ["catalog-root", "catalog-io-repl-fs"]);
+  assert.deepEqual(selected.map((product) => product.product_id),
+    ["catalog-io-repl-fs", "catalog-root"]);
+  assert.ok(selected.every((product) => product.state === "present" && product.parent_evidence));
+  assert.throws(() => observeSelectedWorkingTreeModuleCompositionProducts(REPOSITORY,
+    ["catalog-root", "catalog-root"]), /repeat/);
+  assert.throws(() => observeSelectedWorkingTreeModuleCompositionProducts(REPOSITORY,
+    ["catalog-root", "unregistered"]), /not registered/);
 });
 
 test("every present registered parent is composition-only and fully representable", () => {

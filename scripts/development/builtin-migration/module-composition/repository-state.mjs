@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { auditHandwrittenComposition } from "./handwritten.mjs";
+import { activeCompanions } from "./companions.mjs";
 import { childPathAttribute } from "./schema.mjs";
 
 export function inspectCompositionRepository(repository, products) {
@@ -77,8 +78,15 @@ function inspectProduct(root, product) {
     return { ...observedProductState(root, product), children: [] };
   }
   if (fs.realpathSync(target) !== target) throw new Error(`${product.product_id}: product path is not canonical`);
+  if (Object.hasOwn(product, "companion_parent")) {
+    return { ...observedProductState(root, product), children: [] };
+  }
   const source = readRegularNoFollow(target, `${product.product_id}: product`).bytes.toString("utf8");
-  const declarations = auditHandwrittenComposition(source, product);
+  const companionSources = new Map(activeCompanions(product).map((entry) => [
+    entry.path, readRegularNoFollow(resolveRepositoryProduct(root, entry.path),
+      `${product.product_id}: companion`).bytes.toString("utf8"),
+  ]));
+  const declarations = auditHandwrittenComposition(source, product, companionSources);
   validateChildStorage(root, product, declarations);
   return { ...observedProductState(root, product), children: declarations };
 }

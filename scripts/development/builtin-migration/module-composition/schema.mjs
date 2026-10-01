@@ -1,16 +1,20 @@
-import { compareCodePoint } from "../constants.mjs";
 import { array, boolean, enumValue, exact, kind, repositoryPath, stableId } from "../schema.mjs";
+import { companionDefinition } from "./companions.mjs";
 import { conditionImplies, conditionKey, parseCompositionCondition } from "./condition.mjs";
+import {
+  AGGREGATION_ROLES, aggregationRoleOrder, canonicalUnique, caseFoldUnique,
+  validateAggregationOrders, validateDeclarationOrders,
+} from "./schema-order.mjs";
 import {
   canonicalChildSourcePath, childPathAttribute, rustItemIdentifier,
   rustModuleIdentifier, rustParentModule, validateChildPath, validateParentPath,
 } from "./rust-schema.mjs";
 
 export { canonicalChildSourcePath, childPathAttribute, rustItemIdentifier, rustModuleIdentifier } from "./rust-schema.mjs";
+export { AGGREGATION_ROLES } from "./schema-order.mjs";
 export const CRATE_ROLES = Object.freeze(["catalog", "runtime"]);
 export const CHILD_ROLES = Object.freeze(["group", "identity", "support"]);
-export const VISIBILITIES = Object.freeze(["private", "super", "crate", "catalog", "public"]);
-export const AGGREGATION_ROLES = Object.freeze(["entries", "aliases", "constants"]);
+export const VISIBILITIES = Object.freeze(["private", "super", "crate", "catalog", "catalog_io", "public"]);
 export const AGGREGATION_SOURCES = Object.freeze(["slice", "groups", "function"]);
 export const PRODUCT_STATES = Object.freeze(["absent", "present"]);
 
@@ -34,13 +38,17 @@ export function parseCompositionProduct(value) {
   const aggregations = array(value.aggregations, `${productId} aggregations`, { empty: true }).map((entry) => enumValue(entry, AGGREGATION_ROLES, `${productId} aggregation`));
   aggregationRoleOrder(aggregations, `${productId} aggregations`);
   if (crateRole === "runtime" && aggregations.length) throw new Error(`${productId}: runtime products cannot declare catalog aggregation`);
-  const aggregationExports = array(value.aggregation_exports, `${productId} aggregation exports`, { empty: true }).map((entry) => parseAggregationExport(entry, crateRole, productId, aggregations));
+  const aggregationExports = array(value.aggregation_exports, `${productId} aggregation exports`, { empty: true }).map((entry) => parseAggregationExport(entry, crateRole, modulePath, productId, aggregations));
   aggregationRoleOrder(aggregationExports.map((entry) => entry.role), `${productId} aggregation exports`);
   const localAggregations = aggregations.filter((role) => !aggregationExports.some((entry) => entry.role === role));
   const children = array(value.children, `${productId} children`, { empty: true }).map((entry) => parseCompositionChild(entry, { productId, crateRole, productPath, modulePath, aggregations: localAggregations }));
   canonicalUnique(children, (entry) => entry.module, `${productId} child modules`, true);
   caseFoldUnique(children, (entry) => entry.source_path, `${productId} child source paths`);
   validateDeclarationOrders(children, productId);
+  for (const child of children) if (child.companion_section === "declarations"
+    && child.declaration_order !== children.length - 1) {
+    throw new Error(`${productId}: declaration companion must follow observed Rust declarations`);
+  }
   if (state === "present") validateAggregationExports(aggregationExports, children, productId);
   validateAggregationOrders(children, localAggregations, productId);
   return { ...value, product_id: productId, crate_role: crateRole, path: productPath, module_path: modulePath, state, aggregations, aggregation_exports: aggregationExports, children };
@@ -55,23 +63,34 @@ export function parseModuleCompositionContract(value, productPath, productId) {
   return { kind: value.kind, crate_role: crateRole, module_path: modulePath };
 }
 export function parseCompositionChild(value, parent) {
-  exact(value, ["module", "source_kind", "source_path", "role", "visibility", "declaration_condition", "declaration_order", "macro_use", "reexports", "aggregation_sources"], `${parent.productId} child`);
+  const fields = ["module", "source_kind", "source_path", "role", "visibility", "declaration_condition", "declaration_order", "macro_use", "reexports", "aggregation_sources"];
+  const companionSection = value?.companion_section === undefined ? null
+    : enumValue(value.companion_section, ["reexports", "declarations"], `${parent.productId} companion section`);
+  exact(value, companionSection === null ? fields : [...fields, "companion_section"], `${parent.productId} child`);
   const module = rustModuleIdentifier(value.module, `${parent.productId} child module`);
   const sourceKind = enumValue(value.source_kind, ["file", "directory"], `${module} source kind`);
   const sourcePath = repositoryPath(value.source_path, `${module} source path`);
   const role = enumValue(value.role, CHILD_ROLES, `${module} child role`);
-  const visibility = parseVisibility(value.visibility, parent.crateRole, `${module} visibility`);
+  const visibility = parseVisibility(value.visibility, parent.crateRole, `${module} visibility`, parent.modulePath);
   const declarationCondition = parseCompositionCondition(value.declaration_condition, `${module} declaration condition`);
   if (!Number.isSafeInteger(value.declaration_order) || value.declaration_order < 0) throw new Error(`${module} declaration order must be a nonnegative integer`);
   const macroUse = boolean(value.macro_use, `${module} macro use`);
   const reexports = array(value.reexports, `${module} reexports`, { empty: true })
-    .map((entry) => parseCompositionReexport(entry, parent.crateRole, module));
+    .map((entry) => parseCompositionReexport(entry, parent.crateRole, module, parent.modulePath));
   canonicalUnique(reexports, compositionReexportKey, `${module} reexports`);
   const aggregationSources = array(value.aggregation_sources, `${module} aggregation sources`, { empty: true }).map((entry) => parseAggregationSource(entry, module, parent.aggregations));
   aggregationRoleOrder(aggregationSources.map((entry) => entry.role), `${module} aggregation sources`);
   validateChildPath(sourcePath, sourceKind, module, parent.productPath);
   if (parent.crateRole === "runtime" && aggregationSources.length) throw new Error(`${module}: runtime children cannot declare catalog aggregation`);
   if (role === "support" && aggregationSources.length) throw new Error(`${module}: support children cannot contribute catalog aggregation`);
+  if (companionSection !== null) {
+    const companion = companionDefinition(parent.productId, companionSection);
+    if (!companion || module !== companion.module || sourcePath !== companion.path
+      || sourceKind !== "file" || role !== "support" || visibility !== "private"
+      || declarationCondition.kind !== "always" || macroUse || reexports.length || aggregationSources.length) {
+      throw new Error(`${parent.productId}/${module}: companion section differs from its fixed support-child contract`);
+    }
+  }
   for (const reexport of reexports) if (!conditionImplies(reexport.condition, declarationCondition)) {
     throw new Error(`${module}: reexport condition must imply its declaration condition`);
   }
@@ -91,32 +110,39 @@ function parseAggregationSource(value, module, parentAggregations) {
   return { role, kind: sourceKind, order: value.order, condition };
 }
 
-function parseAggregationExport(value, crateRole, productId, parentAggregations) {
+function parseAggregationExport(value, crateRole, modulePath, productId, parentAggregations) {
   exact(value, ["role", "module", "visibility", "condition", "doc_hidden"], `${productId} aggregation export`);
   const role = enumValue(value.role, AGGREGATION_ROLES, `${productId} aggregation export role`);
   if (!parentAggregations.includes(role)) throw new Error(`${productId}: ${role} aggregation export is not declared by its parent`);
   return {
     role,
     module: rustModuleIdentifier(value.module, `${productId} aggregation export module`),
-    visibility: parseVisibility(value.visibility, crateRole, `${productId} aggregation export visibility`),
+    visibility: parseVisibility(value.visibility, crateRole, `${productId} aggregation export visibility`, modulePath),
     condition: parseCompositionCondition(value.condition, `${productId} aggregation export condition`),
     doc_hidden: boolean(value.doc_hidden, `${productId} aggregation export doc-hidden`),
   };
 }
 
-function parseVisibility(value, crateRole, label) {
+function parseVisibility(value, crateRole, label, modulePath) {
   const visibility = enumValue(value, VISIBILITIES, label);
-  if (crateRole === "runtime" && visibility === "catalog") throw new Error(`${label} cannot use catalog visibility in the runtime crate`);
+  if (crateRole === "runtime" && ["catalog", "catalog_io"].includes(visibility)) {
+    throw new Error(`${label} cannot use catalog visibility in the runtime crate`);
+  }
+  if (visibility === "catalog_io"
+    && modulePath !== "crate::catalog::entries::io"
+    && !modulePath?.startsWith("crate::catalog::entries::io::")) {
+    throw new Error(`${label} requires a descendant of the catalog IO module`);
+  }
   return visibility;
 }
 
-export function parseCompositionReexport(value, crateRole, module) {
+export function parseCompositionReexport(value, crateRole, module, modulePath) {
   const fields = value?.kind === "glob" ? ["kind", "visibility", "condition", "doc_hidden"]
     : value?.kind === "module" ? ["kind", "visibility", "condition", "doc_hidden", "alias"]
       : ["kind", "visibility", "condition", "doc_hidden", "items"];
   exact(value, fields, `${module} reexport`);
   if (!["glob", "module", "named"].includes(value.kind)) throw new Error(`${module} reexport has an unsupported kind`);
-  const visibility = parseVisibility(value.visibility, crateRole, `${module} reexport visibility`);
+  const visibility = parseVisibility(value.visibility, crateRole, `${module} reexport visibility`, modulePath);
   const condition = parseCompositionCondition(value.condition, `${module} reexport condition`);
   const docHidden = boolean(value.doc_hidden, `${module} reexport doc-hidden`);
   if (value.kind === "glob") return { kind: "glob", visibility, condition, doc_hidden: docHidden };
@@ -145,22 +171,6 @@ export function compositionReexportKey(value) {
   return `${conditionKey(value.condition)}\0${value.visibility}\0${value.doc_hidden ? 1 : 0}\0${value.kind}\0${payload}`;
 }
 
-function validateAggregationOrders(children, roles, productId) {
-  for (const role of roles) {
-    const orders = children.flatMap((child) => child.aggregation_sources.filter((source) => source.role === role).map((source) => source.order));
-    const expected = Array.from({ length: orders.length }, (_, index) => index);
-    if (new Set(orders).size !== orders.length || JSON.stringify([...orders].sort((a, b) => a - b)) !== JSON.stringify(expected)) throw new Error(`${productId} ${role} aggregation orders must be unique and contiguous from zero`);
-  }
-}
-
-function validateDeclarationOrders(children, productId) {
-  const orders = children.map((child) => child.declaration_order);
-  const expected = Array.from({ length: orders.length }, (_, index) => index);
-  if (new Set(orders).size !== orders.length || JSON.stringify([...orders].sort((a, b) => a - b)) !== JSON.stringify(expected)) {
-    throw new Error(`${productId} declaration orders must be unique and contiguous from zero`);
-  }
-}
-
 function validateAggregationExports(exports, children, productId) {
   const byModule = new Map(children.map((child) => [child.module, child]));
   for (const entry of exports) {
@@ -170,22 +180,4 @@ function validateAggregationExports(exports, children, productId) {
       throw new Error(`${productId}: ${entry.role} aggregation export condition must imply ${entry.module}'s declaration condition`);
     }
   }
-}
-
-function canonicalUnique(values, key, label, caseFold = false) {
-  const keys = values.map(key);
-  if (new Set(keys).size !== keys.length) throw new Error(`${label} must be unique`);
-  if (caseFold && new Set(keys.map((entry) => entry.toLowerCase())).size !== keys.length) throw new Error(`${label} collide case-insensitively`);
-  if (JSON.stringify(keys) !== JSON.stringify([...keys].sort(compareCodePoint))) throw new Error(`${label} must use canonical code-point order`);
-}
-
-function caseFoldUnique(values, key, label) {
-  const keys = values.map(key).map((entry) => entry.toLowerCase());
-  if (new Set(keys).size !== keys.length) throw new Error(`${label} collide case-insensitively`);
-}
-
-function aggregationRoleOrder(roles, label) {
-  if (new Set(roles).size !== roles.length) throw new Error(`${label} must be unique`);
-  const expected = AGGREGATION_ROLES.filter((role) => roles.includes(role));
-  if (JSON.stringify(roles) !== JSON.stringify(expected)) throw new Error(`${label} must use entries, aliases, constants order`);
 }
