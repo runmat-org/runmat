@@ -11,12 +11,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Inputs and estimators", paragraphs: &[
             "With one matrix, each column is a variable. A vector produces a scalar variance. Two compatible arrays are vectorized into two variables and produce a 2-by-2 result; they are not concatenated as all of their original columns.",
-            "Normalization `0` (default) divides by the sample adjustment; `1` uses the population normalization. A row- or column-vector of nonnegative observation weights is a RunMat extension; ambiguity between a second vector variable and weights is resolved by the argument context.",
+            "Normalization `0` (default) divides the unweighted covariance by `N-1`; `1` divides by `N`. A row- or column-vector of nonnegative observation weights is a RunMat extension and uses frequency-weighted covariance; ambiguity between a second vector variable and weights is resolved by the argument context.",
             "`all` retains non-finite observations and propagates missing results. `omitrows` filters a whole row if any variable is non-finite. `partialrows` selects finite observations separately for each covariance entry.",
         ]},
         BuiltinDocumentationSection { heading: "Classes and execution", paragraphs: &[
             "Real typed-integer observations, logical observations, typed-integer/logical normalization flags, and observation weight vectors are RunMat extensions. RunMat returns single covariance for single observations and double if any observation data are double, integer, or logical; controls and weights do not promote the output. The host calculation may accumulate in double precision. Complex observations are rejected by this implementation.",
-            "For `Rows=all`, a compatible resident input can use a provider covariance hook; supported weighted forms can remain resident when provider ownership and weight-domain conditions hold. Row filtering or an unsupported hook uses the admitted host materialization path, then restores output placement according to resident-input intent. Provider choice is dynamic; the output class follows the observation data.",
+            "For `Rows=all`, a compatible resident input can use a provider covariance hook; supported weighted forms can remain resident when provider ownership and weight-domain conditions hold. An upstream resident expression can supply the input without an explicit `gpuArray` call; `gpuArray` is still available to request device residency. Row filtering or an unsupported hook uses the admitted host materialization path, then restores output placement according to resident-input intent. Provider ownership and live-allocation checks precede transfer. Provider choice is dynamic; the output class follows the observation data.",
             "This is a fusion boundary with a portable runtime binding usable by the interpreter, JIT, native compilation, and browser execution. Device execution is provider-specific.",
         ]},
     ],
@@ -117,7 +117,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq { question: "Which normalization is used?", answer: "The default flag is zero (sample normalization); flag one selects population normalization." },
         BuiltinDocumentationFaq { question: "How do I provide observation weights?", answer: "Pass a vector with one nonnegative finite weight per observation. This is a RunMat extension and can use a supported provider hook." },
-        BuiltinDocumentationFaq { question: "What happens to constant columns?", answer: "Their variance is zero and their covariance with other variables is zero, subject to floating-point arithmetic." },
+        BuiltinDocumentationFaq { question: "What happens to constant columns?", answer: "Their variance and covariance with other variables are zero, subject to floating-point arithmetic. Tiny negative diagonal variance caused by roundoff is clamped to zero; off-diagonal covariance is not clamped." },
         BuiltinDocumentationFaq { question: "How do non-finite values behave?", answer: "Default `all` propagates them; `omitrows` removes entire affected observations; `partialrows` filters for each variable pair." },
         BuiltinDocumentationFaq { question: "Can logical observations be used?", answer: "Yes in RunMat mode. Logical observations are converted at the covariance calculation boundary and host results are double." },
     ],
@@ -130,7 +130,19 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/cov.rs") },
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Covariance forms and resident execution", location: "builtins::stats::summary::cov::tests" }], notes: &["Legacy examples, FAQ topics, links, and GPU guidance retained; paired inputs and extension forms clarified. Sidecar retained until export-field parity is verified."] },
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Covariance options and input admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/cov/admission.rs") },
+            BuiltinDocumentationLink { label: "Resident provider selection", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/cov/provider.rs") },
+            BuiltinDocumentationLink { label: "Covariance computation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/cov/domain/compute.rs") },
+            BuiltinDocumentationLink { label: "Host materialization", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/cov/host.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Covariance forms and resident execution", location: "builtins::stats::summary::cov::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident covariance round trip", location: "builtins::stats::summary::cov::tests::cov_gpu_roundtrip" },
+        ],
+        notes: &[],
+    },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

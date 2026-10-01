@@ -17,7 +17,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Missing values and execution", paragraphs: &[
             "`Rows` accepts `all`, `complete`, or `pairwise`. Complete removes observations missing from any variable; pairwise filters separately for each pair. The default is `all`.",
             "Real typed-integer and logical observations are RunMat extensions and return double results. RunMat returns single numerical outputs for single observations and double if any observation data are double, integer, or logical; `Alpha` does not promote the output. The host calculation may accumulate in double precision. A supported provider may retain a GPU-resident result for `Rows=all` and one output. Other admitted forms gather resident inputs and return a dense host result from the reference path; unlike `cov`, this fallback does not restore device placement. A provider choice or output residency is not promised statically.",
-            "The call is a fusion boundary. Its portable runtime binding applies in interpreted, JIT, native compiled, and browser execution; GPU availability is provider-specific.",
+            "The call is a fusion boundary. An upstream expression can already have a resident result, so an explicit `gpuArray` call is not required solely to make a supported correlation eligible for the provider hook. An explicit `gpuArray` remains useful when device residency is intended. The resident hook requires all observation inputs on the same provider, `Rows=all`, one output, supported real precision, and the provider's correlation operation; otherwise the admitted host path returns a dense host result. Its portable runtime binding applies in interpreted, JIT, native compiled, and browser execution; GPU availability is provider-specific.",
         ]},
     ],
     examples: &[
@@ -96,7 +96,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
-                source: "assert(isequal(size(R_host),[3 3])); assert(abs(R_host(1,2)-1)<1e-5);",
+                source: "assert(isequal(size(R_host),[3 3])); assert(max(abs(R_host(:)-[1;1;-7/sqrt(70);1;1;-7/sqrt(70);-7/sqrt(70);-7/sqrt(70);1]))<1e-5);",
             },
         },
         BuiltinExample {
@@ -121,6 +121,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Which observations do complete and pairwise use?", answer: "Complete keeps only rows finite in every variable; pairwise chooses finite rows separately for each variable pair." },
         BuiltinDocumentationFaq { question: "Can logical and typed-integer observations be used?", answer: "Yes in RunMat compatibility mode. They are converted at the statistical calculation boundary and produce double host outputs." },
         BuiltinDocumentationFaq { question: "How does corrcoef differ from cov?", answer: "Covariance remains in the variables' squared units; correlation divides covariance by the product of standard deviations." },
+        BuiltinDocumentationFaq { question: "Can I correlate two vectors?", answer: "Yes. `corrcoef(x,y)` vectorizes equally sized inputs into two variables and returns a 2-by-2 matrix; the off-diagonal value is their Pearson correlation. Paired matrices are also vectorized, not concatenated column-wise as independent variables." },
+        BuiltinDocumentationFaq { question: "How do I omit missing observations?", answer: "Use `Rows='complete'` to remove an observation containing `NaN` or `Inf` in any variable, or `Rows='pairwise'` to select finite observations separately for each variable pair." },
     ],
     links: &[
         BuiltinDocumentationLink { label: "mean", target: BuiltinDocumentationLinkTarget::Builtin("mean") },
@@ -132,7 +134,20 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/corrcoef.rs") },
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Correlation semantics and resident execution", location: "builtins::stats::summary::corrcoef::tests" }], notes: &["Legacy examples, FAQ topics, links, and GPU guidance retained with corrected statistical outputs and unsupported normalization claim. Sidecar retained until export-field parity is verified."] },
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Argument and option admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/corrcoef/admission.rs") },
+            BuiltinDocumentationLink { label: "Resident provider selection", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/corrcoef/provider.rs") },
+            BuiltinDocumentationLink { label: "Correlation calculations", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/corrcoef/domain.rs") },
+            BuiltinDocumentationLink { label: "Host output path", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/corrcoef/host.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Correlation semantics and resident execution", location: "builtins::stats::summary::corrcoef::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident correlation round trip", location: "builtins::stats::summary::corrcoef::tests::corrcoef_gpu_roundtrip" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "WGPU correlation compared with host", location: "builtins::stats::summary::corrcoef::tests::corrcoef_wgpu_matches_cpu" },
+        ],
+        notes: &[],
+    },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };
