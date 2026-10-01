@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
     ThreadProviderGuard,
 };
-use runmat_value::{CellArray, StructValue};
+use runmat_value::{CellArray, LogicalArray, StringArray, StructValue};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct RejectingDownloadProvider {
@@ -123,6 +123,69 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         .owner
         .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
+    for invalid_group in [
+        Value::LogicalArray(LogicalArray::new(vec![0, 0, 1, 1], vec![2, 2]).unwrap()),
+        Value::StringArray(
+            StringArray::new(
+                vec!["left".into(), "left".into(), "right".into(), "right".into()],
+                vec![2, 2],
+            )
+            .unwrap(),
+        ),
+        Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::from("left"),
+                    Value::from("left"),
+                    Value::from("right"),
+                    Value::from("right"),
+                ],
+                2,
+                2,
+            )
+            .unwrap(),
+        ),
+    ] {
+        let err = classify_builtin(
+            Value::GpuTensor(resident.handle.clone()),
+            training.clone(),
+            invalid_group,
+            Vec::new(),
+        )
+        .await
+        .expect_err("matrix-shaped group must reject before sample download");
+        assert!(err.message().contains("group must be a vector"));
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+    for (role, control) in [
+        (
+            "type",
+            vec![Value::StringArray(
+                StringArray::new(vec!["linear".into(), "quadratic".into()], vec![1, 2]).unwrap(),
+            )],
+        ),
+        (
+            "prior",
+            vec![
+                Value::from("linear"),
+                Value::StringArray(
+                    StringArray::new(vec!["empirical".into(), "empirical".into()], vec![1, 2])
+                        .unwrap(),
+                ),
+            ],
+        ),
+    ] {
+        let err = classify_builtin(
+            Value::GpuTensor(resident.handle.clone()),
+            training.clone(),
+            group.clone(),
+            control,
+        )
+        .await
+        .expect_err("nonscalar text control must reject before sample download");
+        assert!(err.message().contains(role));
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
     for invalid_sample in [
         Value::String("bad".into()),
         tensor(vec![f64::NAN, 1.0], vec![2, 1]),

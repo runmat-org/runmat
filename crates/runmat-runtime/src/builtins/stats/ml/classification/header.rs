@@ -202,20 +202,19 @@ fn predictor_geometry(value: &Value, role: &str) -> BuiltinResult<(usize, usize)
 pub(super) fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
     let count = match value {
         Value::Tensor(tensor) => {
-            if tensor
-                .shape
-                .iter()
-                .filter(|dimension| **dimension > 1)
-                .count()
-                > 1
-            {
-                return Err(invalid_argument("classify: group must be a vector"));
-            }
+            ensure_group_vector(&tensor.shape)?;
             Some(tensor.len())
         }
-        Value::LogicalArray(array) => Some(array.data.len()),
-        Value::StringArray(array) => Some(array.data.len()),
+        Value::LogicalArray(array) => {
+            ensure_group_vector(&array.shape)?;
+            Some(array.data.len())
+        }
+        Value::StringArray(array) => {
+            ensure_group_vector(&array.shape)?;
+            Some(array.data.len())
+        }
         Value::Cell(array) => {
+            ensure_group_vector(&array.shape)?;
             if array.data.iter().any(crate::dispatcher::value_contains_gpu) {
                 return Err(invalid_argument(
                     "classify: group cell entries must be text",
@@ -230,15 +229,7 @@ pub(super) fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
                     "classify: group must be numeric, logical, string, character, or cellstr labels",
                 ));
             }
-            if handle
-                .shape()
-                .iter()
-                .filter(|dimension| **dimension > 1)
-                .count()
-                > 1
-            {
-                return Err(invalid_argument("classify: group must be a vector"));
-            }
+            ensure_group_vector(handle.shape())?;
             Some(
                 handle
                     .shape()
@@ -251,4 +242,11 @@ pub(super) fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
         _ => None,
     };
     Ok(count)
+}
+
+fn ensure_group_vector(shape: &[usize]) -> BuiltinResult<()> {
+    if shape.iter().filter(|dimension| **dimension > 1).count() > 1 {
+        return Err(invalid_argument("classify: group must be a vector"));
+    }
+    Ok(())
 }

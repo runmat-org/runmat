@@ -2,6 +2,40 @@ use super::*;
 use runmat_value::{CellArray, CharArray, StringArray, StructValue};
 
 #[test]
+fn classify_group_geometry_accepts_row_and_column_label_vectors() {
+    for (rows, cols) in [(1, 4), (4, 1)] {
+        let groups = [
+            Value::LogicalArray(
+                runmat_value::LogicalArray::new(vec![0, 0, 1, 1], vec![rows, cols]).unwrap(),
+            ),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["left".into(), "left".into(), "right".into(), "right".into()],
+                    vec![rows, cols],
+                )
+                .unwrap(),
+            ),
+            Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::from("left"),
+                        Value::from("left"),
+                        Value::from("right"),
+                        Value::from("right"),
+                    ],
+                    rows,
+                    cols,
+                )
+                .unwrap(),
+            ),
+        ];
+        for group in groups {
+            assert_eq!(header::group_count(&group).unwrap(), Some(4));
+        }
+    }
+}
+
+#[test]
 fn classify_quadratic_preserves_text_labels() {
     with_outputs(5, || {
         let groups = Value::StringArray(

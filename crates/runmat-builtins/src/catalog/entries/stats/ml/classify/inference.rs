@@ -82,7 +82,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             }
         }
         if matches!(&group.shape, ShapeFact::Shaped { dims } if dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(value) if *value > 1)).count() > 1)
-            && matches!(group.kind, ValueKindFact::Numeric(_))
+            && matches!(
+                group.kind,
+                ValueKindFact::Numeric(_)
+                    | ValueKindFact::Logical
+                    | ValueKindFact::String
+                    | ValueKindFact::Cell(_)
+            )
         {
             diagnostics.push(InferenceDiagnostic::error(
                 "RM.CLASSIFY.GROUP",
@@ -122,6 +128,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 "discriminant type must be text",
             ));
         }
+    }
+    if request.arguments.get(3).is_some_and(|fact| {
+        matches!(fact.kind, ValueKindFact::String)
+            && fact.shape.element_count().is_some_and(|count| count != 1)
+    }) {
+        diagnostics.push(InferenceDiagnostic::error(
+            "RM.CLASSIFY.TYPE",
+            "discriminant type must be scalar text",
+        ));
     }
     if let Some(prior) = request.arguments.get(4) {
         diagnose_prior(
@@ -186,14 +201,19 @@ fn diagnose_prior(
                 || matches!(&prior.shape, ShapeFact::Shaped { dims } if dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(value) if *value > 1)).count() > 1)
                 || literal.is_some_and(known_invalid_probability)
         }
-        ValueKindFact::String | ValueKindFact::Character => match literal {
-            Some(
-                LiteralValue::String(text)
-                | LiteralValue::Character(text)
-                | LiteralValue::Keyword(text),
-            ) => PriorKeyword::from_public(text).is_none(),
-            _ => false,
-        },
+        ValueKindFact::String | ValueKindFact::Character => {
+            let nonscalar_string = matches!(prior.kind, ValueKindFact::String)
+                && prior.shape.element_count().is_some_and(|count| count != 1);
+            nonscalar_string
+                || match literal {
+                    Some(
+                        LiteralValue::String(text)
+                        | LiteralValue::Character(text)
+                        | LiteralValue::Keyword(text),
+                    ) => PriorKeyword::from_public(text).is_none(),
+                    _ => false,
+                }
+        }
         ValueKindFact::Struct(structure) => {
             let groups = structure
                 .fields

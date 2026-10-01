@@ -1,8 +1,8 @@
 use super::*;
 use runmat_types::{
-    CallRequest, DynamicReason, LiteralContext, LiteralValue, NumericClass, NumericDomain,
-    NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, StructFact,
-    ValueFact, ValueKindFact,
+    CallRequest, CellFact, DynamicReason, LiteralContext, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
+    StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -99,6 +99,84 @@ fn character_group_rows_count_labels_not_characters() {
         result.outputs[0].shape,
         ShapeFact::from(vec![Some(2), None])
     );
+}
+
+#[test]
+fn label_array_families_require_vectors_but_admit_row_and_column_forms() {
+    let families = [
+        ValueKindFact::Logical,
+        ValueKindFact::String,
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::scalar(ValueKindFact::String)),
+            elements: Vec::new(),
+            elements_complete: false,
+        }),
+    ];
+    for family in families {
+        for shape in [[1, 4], [4, 1]] {
+            let result = inference::infer(
+                &request(
+                    numeric(NumericClass::Double, 2, 1),
+                    numeric(NumericClass::Double, 4, 1),
+                    ValueFact::proven(
+                        family.clone(),
+                        ShapeFact::from(shape.map(Some).to_vec()),
+                        StorageFact::Dense,
+                    ),
+                    1,
+                ),
+                &CLASSIFY_CATALOG_ENTRY,
+            );
+            assert!(result.diagnostics.is_empty(), "{family:?} {shape:?}");
+        }
+        let result = inference::infer(
+            &request(
+                numeric(NumericClass::Double, 2, 1),
+                numeric(NumericClass::Double, 4, 1),
+                ValueFact::proven(
+                    family.clone(),
+                    ShapeFact::from(vec![Some(2), Some(2)]),
+                    StorageFact::Dense,
+                ),
+                1,
+            ),
+            &CLASSIFY_CATALOG_ENTRY,
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM.CLASSIFY.GROUP"));
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+}
+
+#[test]
+fn nonscalar_string_controls_do_not_prove_outputs() {
+    let base = request(
+        numeric(NumericClass::Double, 2, 1),
+        numeric(NumericClass::Double, 4, 1),
+        numeric(NumericClass::Double, 4, 1),
+        1,
+    );
+    for control_index in [3, 4] {
+        let mut call = base.clone();
+        call.arguments
+            .resize_with(5, || ValueFact::scalar(ValueKindFact::String));
+        call.literals.literal_args.resize(5, LiteralValue::Unknown);
+        call.arguments[control_index] = ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::from(vec![Some(1), Some(2)]),
+            StorageFact::Dense,
+        );
+        let result = inference::infer(&call, &CLASSIFY_CATALOG_ENTRY);
+        let expected = if control_index == 3 {
+            "RM.CLASSIFY.TYPE"
+        } else {
+            "RM.CLASSIFY.PRIOR"
+        };
+        assert!(result.diagnostics.iter().any(|item| item.code == expected));
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
 }
 
 #[test]
