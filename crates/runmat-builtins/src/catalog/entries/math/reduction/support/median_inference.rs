@@ -13,6 +13,7 @@ pub fn infer_median_type(args: &[Type], context: &ResolveContext) -> Type {
         context,
         median_literal_control,
         ScalarResultClass::Preserved,
+        None,
     )
 }
 

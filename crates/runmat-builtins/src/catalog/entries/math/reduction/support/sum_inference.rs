@@ -13,6 +13,7 @@ pub fn infer_sum_type(args: &[Type], context: &ResolveContext) -> Type {
         context,
         sum_literal_control,
         ScalarResultClass::Promoted,
+        None,
     )
 }
 

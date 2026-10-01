@@ -9,6 +9,72 @@ pub enum DispersionNormalization {
     Population,
 }
 
+impl DispersionNormalization {
+    pub fn from_finite_flag(value: f64) -> Option<Self> {
+        if (value - 0.0).abs() < f64::EPSILON {
+            Some(Self::Sample)
+        } else if (value - 1.0).abs() < f64::EPSILON {
+            Some(Self::Population)
+        } else {
+            None
+        }
+    }
+}
+
+/// Literal projection of the owners' value-level normalization admission.
+/// `Unmatched` may still be an axis; `Invalid` must not prove output facts.
+pub(super) enum NormalizationLiteral {
+    Value,
+    Placeholder,
+    Unmatched,
+    Invalid,
+}
+
+pub(super) fn std_normalization_literal(literal: &LiteralValue) -> NormalizationLiteral {
+    normalization_literal(literal, false)
+}
+
+pub(super) fn var_normalization_literal(literal: &LiteralValue) -> NormalizationLiteral {
+    normalization_literal(literal, true)
+}
+
+fn normalization_literal(literal: &LiteralValue, strict: bool) -> NormalizationLiteral {
+    match literal {
+        LiteralValue::Empty => NormalizationLiteral::Placeholder,
+        LiteralValue::Vector(values) if values.is_empty() => NormalizationLiteral::Placeholder,
+        LiteralValue::Vector(values) if values.len() == 1 => {
+            normalization_literal(&values[0], strict)
+        }
+        LiteralValue::Vector(_) if strict => NormalizationLiteral::Invalid,
+        LiteralValue::Bool(_) => NormalizationLiteral::Value,
+        LiteralValue::Number(value) => floating_normalization(*value, strict),
+        LiteralValue::Real { text, .. } => text
+            .parse::<f64>()
+            .map(|value| floating_normalization(value, strict))
+            .unwrap_or(NormalizationLiteral::Invalid),
+        LiteralValue::Integer { text, .. } => {
+            let value = text.parse::<u128>().ok();
+            match value {
+                Some(0 | 1) => NormalizationLiteral::Value,
+                _ if strict => NormalizationLiteral::Invalid,
+                _ => NormalizationLiteral::Unmatched,
+            }
+        }
+        _ => NormalizationLiteral::Unmatched,
+    }
+}
+
+fn floating_normalization(value: f64, strict: bool) -> NormalizationLiteral {
+    if !value.is_finite() {
+        return NormalizationLiteral::Invalid;
+    }
+    match DispersionNormalization::from_finite_flag(value) {
+        Some(_) => NormalizationLiteral::Value,
+        None if strict => NormalizationLiteral::Invalid,
+        None => NormalizationLiteral::Unmatched,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DispersionControl {
     All,

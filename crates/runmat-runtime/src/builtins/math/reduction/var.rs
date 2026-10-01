@@ -3,13 +3,14 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderNanMode, ProviderStdNormalization,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    DispersionControl, DispersionNormalization as VarNormalization, Type,
+    infer_var_type, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, DispersionControl, DispersionNormalization as VarNormalization,
+    Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -24,7 +25,6 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::ResolveContext;
 
@@ -41,7 +41,7 @@ const TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExten
 pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TYPED_INTEGER_CONTROL_EXTENSION];
 
 fn var_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    reduce_numeric_type(args, ctx)
+    infer_var_type(args, ctx)
 }
 
 const VAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -520,15 +520,9 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
             "var: normalisation flag must be finite",
         ));
     }
-    if (value - 0.0).abs() < f64::EPSILON {
-        return Ok(NormParse::Value(VarNormalization::Sample));
-    }
-    if (value - 1.0).abs() < f64::EPSILON {
-        return Ok(NormParse::Value(VarNormalization::Population));
-    }
-    Err(var_invalid_argument(
-        "var: normalisation flag must be 0, 1, or []",
-    ))
+    VarNormalization::from_finite_flag(value)
+        .map(NormParse::Value)
+        .ok_or_else(|| var_invalid_argument("var: normalisation flag must be 0, 1, or []"))
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {

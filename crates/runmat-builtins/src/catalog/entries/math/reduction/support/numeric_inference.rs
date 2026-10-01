@@ -1,3 +1,4 @@
+use super::dispersion_options::NormalizationLiteral;
 use crate::{ResolveContext, Type};
 use runmat_types::LiteralValue;
 
@@ -12,9 +13,11 @@ pub(super) enum LiteralReductionControl {
 
 /// The scalar result boundary differs between owners. `mean` and `sum`
 /// promote by default; `median` preserves exact integer and logical scalars.
+/// `std` and `var` reject integer data rather than silently promoting it.
 pub(super) enum ScalarResultClass {
     Promoted,
     Preserved,
+    FloatingOnly,
 }
 
 #[derive(Clone)]
@@ -38,11 +41,13 @@ pub(super) fn infer_numeric_reduction_type(
     context: &ResolveContext,
     decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
     scalar_class: ScalarResultClass,
+    decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
 ) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
-    let controls = admitted_literal_controls(args.len(), context, decode_control);
+    let controls =
+        admitted_literal_controls(args.len(), context, decode_control, decode_normalization);
     match input {
         Type::Tensor { shape } => Type::Tensor {
             shape: shape.as_ref().and_then(|dims| {
@@ -51,7 +56,7 @@ pub(super) fn infer_numeric_reduction_type(
                     .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
             }),
         },
-        Type::Logical { shape } if matches!(scalar_class, ScalarResultClass::Promoted) => {
+        Type::Logical { shape } if !matches!(scalar_class, ScalarResultClass::Preserved) => {
             Type::Tensor {
                 shape: shape.as_ref().and_then(|dims| {
                     controls
@@ -71,6 +76,7 @@ pub(super) fn infer_numeric_reduction_type(
         {
             Type::Bool
         }
+        Type::Int if matches!(scalar_class, ScalarResultClass::FloatingOnly) => Type::Unknown,
         Type::Int
             if controls
                 .as_ref()
@@ -87,11 +93,13 @@ fn admitted_literal_controls(
     argument_count: usize,
     context: &ResolveContext,
     decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
+    decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
 ) -> Option<KnownControls> {
     let mut axes = KnownAxes::Default;
     let mut axes_set = false;
     let mut output_set = false;
     let mut native_output = false;
+    let mut normalization_consumed = false;
     for index in 1..argument_count {
         let literal = context.literal_args.get(index)?;
         if let Some(control) = decode_control(literal) {
@@ -114,6 +122,18 @@ fn admitted_literal_controls(
                 LiteralReductionControl::RequiresRuntimeValue => return None,
             }
             continue;
+        }
+        if let Some(decode_normalization) = decode_normalization {
+            if !normalization_consumed {
+                match decode_normalization(literal) {
+                    NormalizationLiteral::Value | NormalizationLiteral::Placeholder => {
+                        normalization_consumed = true;
+                        continue;
+                    }
+                    NormalizationLiteral::Unmatched => {}
+                    NormalizationLiteral::Invalid => return None,
+                }
+            }
         }
         let selection = axes_literal(literal)?;
         if axes_set && !matches!(axes, KnownAxes::Default) {

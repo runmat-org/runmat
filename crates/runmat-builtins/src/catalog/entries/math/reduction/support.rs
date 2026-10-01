@@ -1,3 +1,4 @@
+mod dispersion_inference;
 mod dispersion_options;
 mod mean_inference;
 mod mean_options;
@@ -8,6 +9,7 @@ mod numeric_inference;
 mod sum_inference;
 mod sum_options;
 
+pub use dispersion_inference::{infer_std_type, infer_var_type};
 pub use dispersion_options::{DispersionControl, DispersionNormalization};
 pub use mean_inference::infer_mean_type;
 pub use mean_options::{MeanControl, MeanOutputClass};

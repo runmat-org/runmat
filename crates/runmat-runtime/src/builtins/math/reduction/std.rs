@@ -3,13 +3,14 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderNanMode, ProviderStdNormalization,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    DispersionControl, DispersionNormalization as StdNormalization, Type,
+    infer_std_type, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, DispersionControl, DispersionNormalization as StdNormalization,
+    Type,
 };
 use runmat_value::{Tensor, Value};
 const NAME: &str = "std";
@@ -27,7 +28,7 @@ pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TYPED_INTEGER_CONTROL_E
 use runmat_builtins::ResolveContext;
 
 fn std_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    reduce_numeric_type(args, ctx)
+    infer_std_type(args, ctx)
 }
 
 const STD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -229,7 +230,6 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::std")]
@@ -503,13 +503,9 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
             "std: normalisation flag must be finite",
         ));
     }
-    if (value - 0.0).abs() < f64::EPSILON {
-        return Ok(NormParse::Value(StdNormalization::Sample));
-    }
-    if (value - 1.0).abs() < f64::EPSILON {
-        return Ok(NormParse::Value(StdNormalization::Population));
-    }
-    Ok(NormParse::NotMatched)
+    Ok(StdNormalization::from_finite_flag(value)
+        .map(NormParse::Value)
+        .unwrap_or(NormParse::NotMatched))
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
