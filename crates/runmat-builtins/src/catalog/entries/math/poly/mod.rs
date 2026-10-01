@@ -1,6 +1,12 @@
+mod polyder;
 mod polyint;
 mod roots;
 
+pub use polyder::{
+    POLYDER_CATALOG_ENTRY, POLYDER_DESCRIPTOR, POLYDER_ERROR_INTERNAL,
+    POLYDER_ERROR_INVALID_ARGUMENT, POLYDER_ERROR_INVALID_INPUT, POLYDER_EXTENSIONS,
+    POLYDER_INTEGER_CAPABILITIES, POLYDER_INTEGER_COEFFICIENTS_EXTENSION,
+};
 pub use polyint::{
     POLYINT_CATALOG_ENTRY, POLYINT_DESCRIPTOR, POLYINT_ERROR_INVALID_ARGUMENT,
     POLYINT_ERROR_INVALID_INPUT, POLYINT_INTEGER_CAPABILITIES,
@@ -11,6 +17,7 @@ pub use roots::{
 };
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(polyder::ENTRIES.iter().copied());
     values.extend(polyint::ENTRIES.iter().copied());
     values.extend(roots::ENTRIES.iter().copied());
 }
