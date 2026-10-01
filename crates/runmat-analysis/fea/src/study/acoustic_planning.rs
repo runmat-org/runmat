@@ -157,6 +157,7 @@ pub fn plan_acoustic_study(
         .filter(|value| open_unit_interval(*value))
         .ok_or(AcousticStudyPlanningError::MissingRelativeAlgebraicTarget)?;
     let solver = AcousticHarmonicPolicy {
+        preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
         relative_tolerance,
         restart: policy.krylov_restart,
         maximum_iterations: policy.maximum_iterations,

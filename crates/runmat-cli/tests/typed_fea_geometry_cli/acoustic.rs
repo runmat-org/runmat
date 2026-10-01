@@ -1,6 +1,9 @@
 //! Actual authored CAD/process execution and post-exit shared artifact reopening.
 use super::*;
 
+#[path = "acoustic/duct.rs"]
+mod duct;
+
 #[test]
 fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog() {
     for quadratic in [false, true] {

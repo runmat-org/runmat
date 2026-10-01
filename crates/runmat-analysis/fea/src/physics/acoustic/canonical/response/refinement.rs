@@ -11,6 +11,7 @@ pub(super) fn solve(
             "power closure tolerance".into(),
         ));
     }
+    let prepared = reduced::PreparedReduced::new(assembly, policy)?;
     let mut initial = None;
     let mut tolerance = policy.relative_tolerance;
     let mut iterations = 0_u32;
@@ -20,7 +21,7 @@ pub(super) fn solve(
             .checked_sub(iterations as usize)
             .filter(|remaining| *remaining > 0)
             .ok_or(AcousticHarmonicError::NotConverged)?;
-        let mut solution = reduced::solve(
+        let mut solution = prepared.solve(
             assembly,
             AcousticHarmonicPolicy {
                 relative_tolerance: tolerance,

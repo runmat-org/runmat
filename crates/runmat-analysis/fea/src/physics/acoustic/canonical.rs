@@ -31,6 +31,7 @@ pub use response::CanonicalAcousticResponse;
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcousticHarmonicPolicy {
+    pub preconditioner: crate::contracts::SolverPreconditioner,
     pub relative_tolerance: f64,
     pub restart: usize,
     pub maximum_iterations: usize,
@@ -39,6 +40,7 @@ pub struct AcousticHarmonicPolicy {
 impl Default for AcousticHarmonicPolicy {
     fn default() -> Self {
         Self {
+            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-9,
             restart: 64,
             maximum_iterations: 4096,
@@ -51,6 +53,11 @@ impl AcousticHarmonicPolicy {
         let frequency_hz = frequency.hertz;
         let omega = std::f64::consts::TAU * frequency_hz;
         if !frequency_hz.is_finite()
+            || !matches!(
+                self.preconditioner,
+                crate::contracts::SolverPreconditioner::None
+                    | crate::contracts::SolverPreconditioner::Ilu0
+            )
             || frequency_hz <= 0.0
             || !omega.is_finite()
             || !(omega * omega).is_finite()

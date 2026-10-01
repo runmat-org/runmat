@@ -7,6 +7,12 @@ pub(super) fn build_acoustic_plan(
     input: FeaResourcePlanningInput,
     demand: &AcousticHarmonicResourceDemand,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let sparse_bound = crate::planning::resource::acoustic::sparse_workspace_bound(
+        demand.operator_nonzeros_upper_bound.0,
+        demand.block_dimension_upper_bound.0,
+        demand.recovery_row_support_upper_bound.0,
+        demand.preconditioner,
+    )?;
     if demand.node_count.0 == 0
         || demand.element_count.0 == 0
         || demand.block_dimension_upper_bound.0
@@ -14,6 +20,8 @@ pub(super) fn build_acoustic_plan(
         || demand.krylov_restart_upper_bound.0 == 0
         || demand.krylov_restart_upper_bound.0 > demand.block_dimension_upper_bound.0
         || demand.numerical_reservation_bytes.0 == 0
+        || demand.sparse_solve_reservation_bytes.0 != sparse_bound
+        || demand.numerical_reservation_bytes < demand.sparse_solve_reservation_bytes
         || demand.state_profiles_resident_bytes.0 == 0
         || demand.receipt_output.encoded_payload_bytes_upper_bound.0 != crate::execution::ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES
         || demand.receipt_output.construction_resident_bytes_admission_budget

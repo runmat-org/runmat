@@ -23,6 +23,10 @@ fn periodic_graph_workspace_is_admitted_without_raising_the_authored_ceiling() {
             }));
         let prepared = facts(&periodic, &mesh);
         let plan = build_acoustic_resource_plan(&periodic, &mesh, prepared.clone()).unwrap();
+        let FeaResourceDemand::AcousticHarmonic(demand) = &plan.input.demand else {
+            panic!("acoustic demand")
+        };
+        assert_eq!(demand.recovery_row_support_upper_bound.0, 2);
         assert!(plan.breakdown.workspace_bytes > base_plan.breakdown.workspace_bytes);
         assert_eq!(
             periodic.model.sequence.steps[0].accuracy.resources,

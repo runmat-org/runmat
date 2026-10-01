@@ -118,7 +118,7 @@ impl AcousticHarmonicSolverResult {
         validate_solver_formulation_compatibility(
             &d.formulation,
             SolverMethod::AcousticCanonicalHelmholtzGmres,
-            SolverPreconditioner::None,
+            d.solver.preconditioner,
         )
         .map_err(invalid)?;
         if d.formulation.family() != PhysicsFamily::Acoustic

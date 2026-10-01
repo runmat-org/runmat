@@ -3,6 +3,7 @@
 use crate::{algebra::ScopedSpmvError, planning::resource::LocalExecutionPlan};
 
 pub(crate) mod right_diagonal;
+pub(crate) mod right_ilu;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GmresPolicy {

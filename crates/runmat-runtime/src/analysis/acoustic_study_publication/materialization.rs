@@ -2,7 +2,7 @@
 use super::*;
 use crate::analysis::*;
 use runmat_analysis_fea::{
-    contracts::{ExecutionBackend, SolverMethod, SolverPreconditioner},
+    contracts::{ExecutionBackend, SolverMethod},
     planning::resource::FeaResourcePhase,
     solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend, FeaRunResult,
@@ -47,7 +47,7 @@ pub(super) fn admit(
         solver_backend: LinearAlgebraBackendKind::CpuReference,
         solver_device_apply_k_ratio: 0.0,
         solver_method: SolverMethod::AcousticCanonicalHelmholtzGmres,
-        preconditioner: SolverPreconditioner::None,
+        preconditioner: completed.workload.solver.preconditioner,
         solver_host_sync_count: 0,
         accelerator_evidence: Vec::new(),
         diagnostics: Vec::new(),

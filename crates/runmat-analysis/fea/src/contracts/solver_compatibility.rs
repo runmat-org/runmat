@@ -221,10 +221,13 @@ const fn preconditioner_is_compatible(
         | SolverMethod::StructuralModalHarmonicDenseDirect
         | SolverMethod::StructuralModalResponseSpectrumCombination
         | SolverMethod::StructuralRandomResponseIntegration
-        | SolverMethod::AcousticDomainGraphHelmholtzHarmonic
-        | SolverMethod::AcousticCanonicalHelmholtzGmres => {
+        | SolverMethod::AcousticDomainGraphHelmholtzHarmonic => {
             matches!(preconditioner, SolverPreconditioner::None)
         }
+        SolverMethod::AcousticCanonicalHelmholtzGmres => matches!(
+            preconditioner,
+            SolverPreconditioner::None | SolverPreconditioner::Ilu0
+        ),
         SolverMethod::StructuralDirectHarmonicGmres => {
             matches!(preconditioner, SolverPreconditioner::Jacobi)
         }

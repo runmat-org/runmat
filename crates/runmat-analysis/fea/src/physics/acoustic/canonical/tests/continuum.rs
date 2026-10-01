@@ -44,6 +44,7 @@ fn solve_duct(
         "acoustic",
         Frequency::new(frequency),
         AcousticHarmonicPolicy {
+            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-11,
             restart: 128,
             maximum_iterations: 8192,

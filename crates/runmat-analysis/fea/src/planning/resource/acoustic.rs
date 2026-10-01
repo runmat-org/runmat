@@ -16,8 +16,10 @@ use runmat_canonical_codec::{profile_serialized, CanonicalLimits, SerializedCano
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
+mod sparse_workspace;
 #[cfg(test)]
 mod tests;
+pub(crate) use sparse_workspace::sparse_workspace_bound;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedAcousticResourceFacts {
@@ -250,6 +252,15 @@ pub fn build_acoustic_resource_plan(
                     | runmat_analysis_core::AcousticConstraintKind::PhaseShiftedPeriodic(_), ..
             }))
     }).count())?;
+    // Without an active periodic relation, recovery rows are identity or
+    // prescribed (one or zero entries), not general two-entry phase rows.
+    let recovery_row_support = if periodic_count == 0 { 1 } else { 2 };
+    let sparse_solve = sparse_workspace_bound(
+        support,
+        block,
+        recovery_row_support,
+        workload.solver.preconditioner,
+    )?;
     let phase_constraints = add(mul(nodes, 512)?, mul(mul(nodes, periodic_count)?, 128)?)?;
     let evidence = evidence_profile(workload)?;
     // Workload clone/source realization metadata is profiled from the complete authored input;
@@ -263,6 +274,7 @@ pub fn build_acoustic_resource_plan(
         mul(projection, 2)?,
         properties,
         operators,
+        sparse_solve,
         krylov,
         vectors,
         boundaries,
@@ -284,6 +296,9 @@ pub fn build_acoustic_resource_plan(
             operator_nonzeros_upper_bound: Count(support),
             block_dimension_upper_bound: Count(block),
             krylov_restart_upper_bound: Count(restart),
+            recovery_row_support_upper_bound: Count(recovery_row_support),
+            preconditioner: workload.solver.preconditioner,
+            sparse_solve_reservation_bytes: ByteCount(sparse_solve),
             numerical_reservation_bytes: ByteCount(reservation),
             inputs: prepared.inputs,
             result_output: prepared.result_output,

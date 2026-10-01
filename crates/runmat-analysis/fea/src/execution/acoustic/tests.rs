@@ -1,6 +1,8 @@
 use super::*;
 mod periodic;
+mod preconditioning;
 use crate::{
+    contracts::SolverPreconditioner,
     fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
     topology::test_meshes::{quadratic_slab_mesh, slab_mesh},
 };

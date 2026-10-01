@@ -11,6 +11,9 @@ pub struct AcousticHarmonicResourceDemand {
     pub operator_nonzeros_upper_bound: Count,
     pub block_dimension_upper_bound: Count,
     pub krylov_restart_upper_bound: Count,
+    pub recovery_row_support_upper_bound: Count,
+    pub preconditioner: crate::contracts::SolverPreconditioner,
+    pub sparse_solve_reservation_bytes: ByteCount,
     /// Requested-heap admission estimate, not measured peak/RSS or an allocator guarantee.
     pub numerical_reservation_bytes: ByteCount,
     pub inputs: PreparedInputResourceFacts,

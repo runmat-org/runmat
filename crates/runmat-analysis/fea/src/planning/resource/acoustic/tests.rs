@@ -7,6 +7,7 @@ use crate::{
 };
 use runmat_analysis_core::*;
 mod periodic;
+mod preconditioning;
 mod source;
 
 #[test]

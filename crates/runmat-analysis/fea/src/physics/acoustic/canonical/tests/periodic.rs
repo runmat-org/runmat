@@ -63,6 +63,7 @@ fn solve(
         "acoustic",
         Frequency::new(0.2),
         AcousticHarmonicPolicy {
+            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-11,
             restart: 128,
             maximum_iterations: 8192,

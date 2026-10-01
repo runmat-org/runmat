@@ -2,7 +2,7 @@
 use super::{AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity};
 use crate::{
     admission::AnalysisRunIdentity,
-    contracts::{validate_solver_formulation_compatibility, SolverMethod, SolverPreconditioner},
+    contracts::{validate_solver_formulation_compatibility, SolverMethod},
     physics::acoustic::{
         solve_canonical_harmonic, validate_canonical_input, AcousticHarmonicPolicy,
     },
@@ -122,7 +122,7 @@ impl AcousticHarmonicWorkload {
         validate_solver_formulation_compatibility(
             &identity,
             SolverMethod::AcousticCanonicalHelmholtzGmres,
-            SolverPreconditioner::None,
+            self.solver.preconditioner,
         )
         .map_err(invalid)?;
         Ok(identity)
