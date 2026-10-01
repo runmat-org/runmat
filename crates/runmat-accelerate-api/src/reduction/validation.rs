@@ -4,7 +4,7 @@ use super::{types::width, *};
 use anyhow::{anyhow, ensure, Result};
 use runmat_types::{
     FusionReductionCount, FusionReductionEmpty, FusionReductionOperation, FusionReductionTies,
-    NumericClass,
+    NumericClass, ReductionNaN,
 };
 
 pub(super) fn elements(shape: &[usize]) -> Result<u64> {
@@ -146,26 +146,20 @@ fn semantic(d: &ReductionRecipeDescriptor) -> Result<()> {
             reduced[axis] = true;
         }
     }
-    let reduced_elements = contract
+    let reduce_shape = contract
         .input_shape
         .iter()
         .zip(&reduced)
         .filter_map(|(&extent, &selected)| selected.then_some(extent))
-        .try_fold(1u64, |count, extent| {
-            count
-                .checked_mul(u64::try_from(extent)?)
-                .ok_or_else(|| anyhow!("reduction axis product overflow"))
-        })?;
-    let slices = contract
+        .collect::<Vec<_>>();
+    let slice_shape = contract
         .input_shape
         .iter()
         .zip(&reduced)
         .filter_map(|(&extent, &selected)| (!selected).then_some(extent))
-        .try_fold(1u64, |count, extent| {
-            count
-                .checked_mul(u64::try_from(extent)?)
-                .ok_or_else(|| anyhow!("reduction slice product overflow"))
-        })?;
+        .collect::<Vec<_>>();
+    let reduced_elements = elements(&reduce_shape)?;
+    let slices = elements(&slice_shape)?;
     ensure!(
         reduced_elements == u64::from(d.geometry.reduce_elements)
             && slices == u64::from(d.geometry.slices),
@@ -173,24 +167,32 @@ fn semantic(d: &ReductionRecipeDescriptor) -> Result<()> {
     );
     let valid_policy = match contract.operation {
         FusionReductionOperation::Sum => {
-            contract.count == FusionReductionCount::None
+            contract.accumulator_class == NumericClass::Double
+                && contract.count == FusionReductionCount::None
                 && contract.empty == FusionReductionEmpty::PositiveZero
                 && contract.ties == FusionReductionTies::NotApplicable
         }
         FusionReductionOperation::Mean => {
-            matches!(
-                contract.count,
-                FusionReductionCount::SliceLength | FusionReductionCount::NonNan
-            ) && contract.empty == FusionReductionEmpty::NaN
+            contract.accumulator_class == NumericClass::Double
+                && contract.count
+                    == match contract.nan_mode {
+                        ReductionNaN::Include => FusionReductionCount::SliceLength,
+                        ReductionNaN::Omit => FusionReductionCount::NonNan,
+                    }
+                && contract.empty == FusionReductionEmpty::NaN
                 && contract.ties == FusionReductionTies::NotApplicable
         }
         FusionReductionOperation::Minimum => {
-            contract.count == FusionReductionCount::None
+            contract.accumulator_class == contract.input_class
+                && contract.output_class == contract.input_class
+                && contract.count == FusionReductionCount::None
                 && contract.empty == FusionReductionEmpty::NaN
                 && contract.ties == FusionReductionTies::FirstWithNegativeZero
         }
         FusionReductionOperation::Maximum => {
-            contract.count == FusionReductionCount::None
+            contract.accumulator_class == contract.input_class
+                && contract.output_class == contract.input_class
+                && contract.count == FusionReductionCount::None
                 && contract.empty == FusionReductionEmpty::NaN
                 && contract.ties == FusionReductionTies::FirstWithPositiveZero
         }

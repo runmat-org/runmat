@@ -146,6 +146,20 @@ fn owner_contract_axes_and_classes_must_match_physical_recipe() {
     assert!(
         ProviderReductionRecipe::new(Digest::sha256(b"source"), wrong_policy, sources()).is_err()
     );
+    let mut wrong_accumulator = descriptor();
+    wrong_accumulator.contract.accumulator_class = NumericClass::Single;
+    assert!(
+        ProviderReductionRecipe::new(Digest::sha256(b"source"), wrong_accumulator, sources())
+            .is_err()
+    );
+    let mut wrong_mean_count = descriptor();
+    wrong_mean_count.contract.operation = FusionReductionOperation::Mean;
+    wrong_mean_count.contract.empty = FusionReductionEmpty::NaN;
+    wrong_mean_count.contract.count = FusionReductionCount::NonNan;
+    assert!(
+        ProviderReductionRecipe::new(Digest::sha256(b"source"), wrong_mean_count, sources())
+            .is_err()
+    );
 }
 
 #[test]
