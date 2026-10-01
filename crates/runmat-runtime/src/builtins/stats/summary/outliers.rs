@@ -3,14 +3,17 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, FILLOUTLIERS_INTEGER_DATA_EXTENSION,
+    FILLOUTLIERS_INTEGER_FILL_EXTENSION, FILLOUTLIERS_NUMERIC_MASK_EXTENSION,
+    FILLOUTLIERS_RESIDENT_INPUT_EXTENSION, ISOUTLIER_GPU_DATA_VARIABLES_EXTENSION,
+    ISOUTLIER_GPU_MOVMEDIAN_EXTENSION, ISOUTLIER_GPU_SAMPLE_POINTS_EXTENSION,
+    ISOUTLIER_INTEGER_DATA_EXTENSION, ISOUTLIER_INTEGER_DIMENSION_EXTENSION,
+    ISOUTLIER_INTEGER_THRESHOLD_EXTENSION, ISOUTLIER_INTEGER_WINDOW_EXTENSION,
+    OUTLIER_ERROR_INTERNAL, OUTLIER_ERROR_INVALID_ARGUMENT, OUTLIER_ERROR_TOO_MANY_OUTPUTS,
+    OUTLIER_ERROR_UNSUPPORTED,
 };
+#[cfg(test)]
+use runmat_builtins::{ISOUTLIER_EXTENSIONS, ISOUTLIER_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
@@ -23,418 +26,19 @@ const FILLOUTLIERS_NAME: &str = "filloutliers";
 const MAD_SCALE: f64 = 1.4826;
 const MAX_EXACT_INTEGER_F64: u128 = 1_u128 << 53;
 
-const PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input numeric array.",
-};
-
-const PARAM_FILL: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "fillmethod",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Replacement method or constant value.",
-};
-
-const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Detection method, dimension, and name-value options.",
-};
-
-const OUTPUT_MASK: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "TF",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical mask of detected outliers.",
-};
-
-const OUTPUT_VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Array with outliers filled.",
-};
-
-const OUTPUT_LOWER: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "L",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Lower threshold.",
-};
-
-const OUTPUT_UPPER: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "U",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Upper threshold.",
-};
-
-const OUTPUT_CENTER: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Center value used by the detection method.",
-};
-
-const INPUT_A: [BuiltinParamDescriptor; 1] = [PARAM_A];
-const INPUT_A_OPTIONS: [BuiltinParamDescriptor; 2] = [PARAM_A, PARAM_OPTIONS];
-const INPUT_A_FILL: [BuiltinParamDescriptor; 2] = [PARAM_A, PARAM_FILL];
-const INPUT_A_FILL_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_A, PARAM_FILL, PARAM_OPTIONS];
-const OUT_MASK: [BuiltinParamDescriptor; 1] = [OUTPUT_MASK];
-const OUT_MASK_THRESHOLDS: [BuiltinParamDescriptor; 4] =
-    [OUTPUT_MASK, OUTPUT_LOWER, OUTPUT_UPPER, OUTPUT_CENTER];
-const OUT_VALUE: [BuiltinParamDescriptor; 1] = [OUTPUT_VALUE];
-const OUT_VALUE_MASK: [BuiltinParamDescriptor; 2] = [OUTPUT_VALUE, OUTPUT_MASK];
-const OUT_VALUE_THRESHOLDS: [BuiltinParamDescriptor; 5] = [
-    OUTPUT_VALUE,
-    OUTPUT_MASK,
-    OUTPUT_LOWER,
-    OUTPUT_UPPER,
-    OUTPUT_CENTER,
-];
-
-const ISOUTLIER_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "TF = isoutlier(A)",
-        inputs: &INPUT_A,
-        outputs: &OUT_MASK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "TF = isoutlier(A, method)",
-        inputs: &INPUT_A_OPTIONS,
-        outputs: &OUT_MASK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "TF = isoutlier(A, ___, dim)",
-        inputs: &INPUT_A_OPTIONS,
-        outputs: &OUT_MASK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[TF, L, U, C] = isoutlier(___)",
-        inputs: &INPUT_A_OPTIONS,
-        outputs: &OUT_MASK_THRESHOLDS,
-    },
-];
-
-const FILLOUTLIERS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "B = filloutliers(A, fillmethod)",
-        inputs: &INPUT_A_FILL,
-        outputs: &OUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = filloutliers(A, fillmethod, findmethod)",
-        inputs: &INPUT_A_FILL_OPTIONS,
-        outputs: &OUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = filloutliers(A, ___, dim)",
-        inputs: &INPUT_A_FILL_OPTIONS,
-        outputs: &OUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, TF] = filloutliers(___)",
-        inputs: &INPUT_A_FILL_OPTIONS,
-        outputs: &OUT_VALUE_MASK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, TF, L, U, C] = filloutliers(___)",
-        inputs: &INPUT_A_FILL_OPTIONS,
-        outputs: &OUT_VALUE_THRESHOLDS,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OUTLIERS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:outliers:InvalidArgument"),
-    when: "Inputs, methods, dimensions, or name-value options are malformed.",
-    message: "outlier builtin: invalid argument",
-};
-
-const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OUTLIERS.UNSUPPORTED",
-    identifier: Some("RunMat:outliers:Unsupported"),
-    when: "A table/timetable or advanced smoothing/interpolation form is requested.",
-    message: "outlier builtin: unsupported form",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OUTLIERS.INTERNAL",
-    identifier: Some("RunMat:outliers:Internal"),
-    when: "Internal tensor or logical array materialization fails.",
-    message: "outlier builtin: internal error",
-};
-
-const ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OUTLIERS.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:outliers:TooManyOutputs"),
-    when: "More outputs are requested than the builtin can return.",
-    message: "outlier builtin: too many outputs",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ERROR_INVALID_ARGUMENT,
-    ERROR_UNSUPPORTED,
-    ERROR_INTERNAL,
-    ERROR_TOO_MANY_OUTPUTS,
-];
-
-pub const ISOUTLIER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISOUTLIER_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const ISOUTLIER_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "isoutlier-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "isoutlier with typed-integer input data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IsoutlierIntegerDataExtension"),
-};
-const ISOUTLIER_INTEGER_DIMENSION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "isoutlier-integer-dimension",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "isoutlier with a typed-integer dimension is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IsoutlierIntegerDimensionExtension"),
-    };
-const ISOUTLIER_INTEGER_WINDOW_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "isoutlier-integer-window",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "isoutlier with a typed-integer moving window is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IsoutlierIntegerWindowExtension"),
-};
-const ISOUTLIER_INTEGER_THRESHOLD_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "isoutlier-integer-threshold",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "isoutlier with typed-integer percentile or ThresholdFactor values is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IsoutlierIntegerThresholdExtension"),
-    };
-const ISOUTLIER_GPU_MOVMEDIAN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "isoutlier-gpu-movmedian",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "an explicit GPU isoutlier call using movmedian is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IsoutlierGpuMovmedianExtension"),
-};
-const ISOUTLIER_GPU_SAMPLE_POINTS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "isoutlier-gpu-sample-points",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "an explicit GPU isoutlier call using SamplePoints is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IsoutlierGpuSamplePointsExtension"),
-    };
-const ISOUTLIER_GPU_DATA_VARIABLES_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "isoutlier-gpu-data-variables",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "an explicit GPU isoutlier call using DataVariables is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IsoutlierGpuDataVariablesExtension"),
-    };
-
-pub const ISOUTLIER_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
-    ISOUTLIER_INTEGER_DATA_EXTENSION,
-    ISOUTLIER_INTEGER_DIMENSION_EXTENSION,
-    ISOUTLIER_INTEGER_WINDOW_EXTENSION,
-    ISOUTLIER_INTEGER_THRESHOLD_EXTENSION,
-    ISOUTLIER_GPU_MOVMEDIAN_EXTENSION,
-    ISOUTLIER_GPU_SAMPLE_POINTS_EXTENSION,
-    ISOUTLIER_GPU_DATA_VARIABLES_EXTENSION,
-];
-
-const ISOUTLIER_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented numeric data classes are single and double. Each RunMat-only typed value must be exactly representable at the binary64 statistics boundary.",
-    }];
-const ISOUTLIER_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public documentation specifies a positive integer value domain but does not enumerate native integer storage classes, so typed storage remains conservatively RunMat-only.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "window",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Count-form moving windows are decoded exactly; duration windows are a separate, currently unsupported surface.",
-    },
-];
-const ISOUTLIER_INTEGER_THRESHOLD_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "threshold",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed percentile bounds are not publicly class-enumerated and must be exactly representable at the floating percentile boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "ThresholdFactor",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed threshold factors are not publicly class-enumerated and must be exactly representable at the floating statistics boundary.",
-    },
-];
-
-pub const ISOUTLIER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[TF, L, U, C] = isoutlier(integer_A, ...)",
-        inputs: &ISOUTLIER_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "TF is logical; threshold outputs are floating. Compatibility and exactness are checked before provider access, and the current CPU fallback may restore supported outputs to the source provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "isoutlier(A, ..., integer_dim/window)",
-        inputs: &ISOUTLIER_INTEGER_STRUCTURAL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "These ambiguous public storage-class forms stay independently RunMat-gated rather than being overclaimed as documented native-integer support.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "isoutlier(A, percentiles, integer_threshold / ThresholdFactor=integer_factor)",
-        inputs: &ISOUTLIER_INTEGER_THRESHOLD_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Ambiguous typed storage is admitted only in RunMat mode and only when every value is exact in binary64.",
-    },
-];
-
-pub const FILLOUTLIERS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FILLOUTLIERS_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const FILLOUTLIERS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "filloutliers-integer-data",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "filloutliers with typed-integer input data is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:FilloutliersIntegerDataExtension"),
-    };
-const FILLOUTLIERS_INTEGER_FILL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "filloutliers-integer-fill-scalar",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "filloutliers with a typed-integer constant fill scalar is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:FilloutliersIntegerFillExtension"),
-    };
-const FILLOUTLIERS_NUMERIC_MASK_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "filloutliers-numeric-outlier-locations",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "filloutliers with numeric rather than logical OutlierLocations is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:FilloutliersNumericMaskExtension"),
-    };
-const FILLOUTLIERS_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "filloutliers-resident-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "filloutliers with a direct provider-resident input or argument is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:FilloutliersResidentInputExtension"),
-    };
-pub const FILLOUTLIERS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    FILLOUTLIERS_INTEGER_DATA_EXTENSION,
-    FILLOUTLIERS_INTEGER_FILL_EXTENSION,
-    FILLOUTLIERS_NUMERIC_MASK_EXTENSION,
-    FILLOUTLIERS_RESIDENT_INPUT_EXTENSION,
-];
-
-const FILLOUTLIERS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight classes are admitted only when the exact input span is at most 2^53. Wider spans are rejected before statistics rather than collapsing distinct observations at the double boundary.",
-    }];
-const FILLOUTLIERS_INTEGER_FILL_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fillmethod",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A typed-integer scalar constant is decoded from authoritative storage and converted once to the output computation domain.",
-    }];
-const FILLOUTLIERS_INTEGER_MASK_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "OutlierLocations",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Documented masks are logical; numeric masks are accepted only in RunMat mode and must exactly match A's shape.",
-    }];
-pub const FILLOUTLIERS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[B, TF, L, U, C] = filloutliers(integer_A, ...)",
-        inputs: &FILLOUTLIERS_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "For admitted inputs, exact anchored integer differences are representable in binary64. Inputs spanning more than 2^53 are rejected; B, L, U, and C deliberately cross to double, while TF is logical.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "filloutliers(A, integer_fill_scalar, ...)",
-        inputs: &FILLOUTLIERS_INTEGER_FILL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The typed-integer constant-fill role is independently mode-gated.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "filloutliers(A, ..., OutlierLocations=integer_mask)",
-        inputs: &FILLOUTLIERS_INTEGER_MASK_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Zero is false and nonzero is true after the independently gated numeric-mask extension is admitted.",
-    },
-];
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutlierOperation {
+    Detect,
+    Fill,
 }
 
-fn logical_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Logical { shape: None }
+impl OutlierOperation {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Detect => ISOUTLIER_NAME,
+            Self::Fill => FILLOUTLIERS_NAME,
+        }
+    }
 }
 
 fn outlier_error(
@@ -451,21 +55,21 @@ fn outlier_error(
 }
 
 fn invalid_argument(builtin: &'static str, detail: impl Into<String>) -> RuntimeError {
-    outlier_error(builtin, &ERROR_INVALID_ARGUMENT, detail)
+    outlier_error(builtin, &OUTLIER_ERROR_INVALID_ARGUMENT, detail)
 }
 
 fn unsupported(builtin: &'static str, detail: impl Into<String>) -> RuntimeError {
-    outlier_error(builtin, &ERROR_UNSUPPORTED, detail)
+    outlier_error(builtin, &OUTLIER_ERROR_UNSUPPORTED, detail)
 }
 
 fn internal_error(builtin: &'static str, detail: impl Into<String>) -> RuntimeError {
-    outlier_error(builtin, &ERROR_INTERNAL, detail)
+    outlier_error(builtin, &OUTLIER_ERROR_INTERNAL, detail)
 }
 
 fn too_many_outputs(builtin: &'static str, max_outputs: usize) -> RuntimeError {
     outlier_error(
         builtin,
-        &ERROR_TOO_MANY_OUTPUTS,
+        &OUTLIER_ERROR_TOO_MANY_OUTPUTS,
         format!("{builtin}: requested more than {max_outputs} outputs"),
     )
 }
@@ -527,16 +131,7 @@ struct DetectionResult {
 
 #[runtime_builtin(
     name = "isoutlier",
-    category = "stats/summary",
-    summary = "Detect outliers in numeric arrays.",
-    keywords = "isoutlier,outlier,median,quartiles,mean,statistics",
-    accel = "cpu",
-    type_resolver(logical_type),
-    descriptor(crate::builtins::stats::summary::outliers::ISOUTLIER_DESCRIPTOR),
-    extensions(crate::builtins::stats::summary::outliers::ISOUTLIER_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::stats::summary::outliers::ISOUTLIER_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::outliers"
 )]
 pub(crate) async fn isoutlier_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -544,7 +139,7 @@ pub(crate) async fn isoutlier_builtin(value: Value, rest: Vec<Value>) -> Builtin
     ensure_isoutlier_exact_boundaries(&value, &rest).await?;
     let output_source = isoutlier_gpu_source(&value);
     let tensor = value_to_tensor(ISOUTLIER_NAME, value).await?;
-    let options = parse_detection_options(ISOUTLIER_NAME, rest).await?;
+    let options = parse_detection_options(OutlierOperation::Detect, rest).await?;
     let result = detect_outliers(&tensor, &options, ISOUTLIER_NAME)?;
     let value = outlier_outputs(ISOUTLIER_NAME, None, result)?;
     restore_isoutlier_value(value, output_source.as_ref())
@@ -705,16 +300,7 @@ async fn ensure_isoutlier_exact_f64(value: &Value, role: &str) -> BuiltinResult<
 
 #[runtime_builtin(
     name = "filloutliers",
-    category = "stats/summary",
-    summary = "Fill outliers in numeric arrays.",
-    keywords = "filloutliers,outlier,fill,median,quartiles,mean,statistics",
-    accel = "cpu",
-    type_resolver(any_type),
-    descriptor(crate::builtins::stats::summary::outliers::FILLOUTLIERS_DESCRIPTOR),
-    extensions(crate::builtins::stats::summary::outliers::FILLOUTLIERS_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::stats::summary::outliers::FILLOUTLIERS_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::outliers"
 )]
 pub(crate) async fn filloutliers_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -728,7 +314,7 @@ pub(crate) async fn filloutliers_builtin(value: Value, rest: Vec<Value>) -> Buil
         ));
     }
     let fill_method = parse_fill_method(&mut rest)?;
-    let options = parse_detection_options(FILLOUTLIERS_NAME, rest).await?;
+    let options = parse_detection_options(OutlierOperation::Fill, rest).await?;
     let mut result = detect_outliers(&tensor, &options, FILLOUTLIERS_NAME)?;
     let (filled, filled_mask) = fill_outlier_tensor(&tensor, &result, &options, &fill_method)?;
     result.mask = filled_mask;
@@ -808,9 +394,10 @@ async fn value_to_tensor(builtin: &'static str, value: Value) -> BuiltinResult<T
 }
 
 async fn parse_detection_options(
-    builtin: &'static str,
+    operation: OutlierOperation,
     rest: Vec<Value>,
 ) -> BuiltinResult<DetectionOptions> {
+    let builtin = operation.name();
     let rest = gather_values(rest).await?;
     let mut options = DetectionOptions::default();
     let mut idx = 0usize;
@@ -894,7 +481,7 @@ async fn parse_detection_options(
                     }
                     options.threshold_factor = Some(factor);
                 }
-                "outlierlocations" if builtin == FILLOUTLIERS_NAME => {
+                "outlierlocations" if operation == OutlierOperation::Fill => {
                     idx += 1;
                     if idx >= rest.len() {
                         return Err(invalid_argument(
