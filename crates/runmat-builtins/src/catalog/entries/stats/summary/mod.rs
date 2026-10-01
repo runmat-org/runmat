@@ -18,6 +18,7 @@ mod outlier_detection;
 mod pdf;
 mod random;
 mod statistical_means;
+mod ttest2;
 
 pub use self::cdf::*;
 pub use self::corr::*;
@@ -34,6 +35,7 @@ pub use self::outlier_detection::*;
 pub use self::pdf::*;
 pub use self::random::*;
 pub use self::statistical_means::*;
+pub use self::ttest2::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(cdf::ENTRIES.iter().copied());
@@ -51,4 +53,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(pdf::ENTRIES.iter().copied());
     values.extend(random::ENTRIES.iter().copied());
     values.extend(statistical_means::ENTRIES.iter().copied());
+    values.extend(ttest2::ENTRIES.iter().copied());
 }
