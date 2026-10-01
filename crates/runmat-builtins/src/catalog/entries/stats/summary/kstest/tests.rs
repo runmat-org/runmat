@@ -44,7 +44,7 @@ fn admitted_vector_and_named_cdf_have_scalar_host_output_facts() {
         assert_eq!(output.numeric().unwrap().class, NumericClass::Double);
     }
     assert!(result.outputs.iter().all(|output| {
-        output.shape == ShapeFact::from(vec![Some(1), Some(1)])
+        output.shape.is_proven_equivalent(&ShapeFact::Scalar)
             && output.residency == ResidencyFact::Host
     }));
 }

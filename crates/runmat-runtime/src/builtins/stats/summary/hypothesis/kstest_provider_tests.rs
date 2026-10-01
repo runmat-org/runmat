@@ -100,11 +100,15 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
 
     {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let valid_cdf = provider
+            .owner
+            .allocate_zeroed(vec![3, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
         let error = block_on(kstest_builtin(
             resident(),
             vec![
                 Value::from("CDF"),
-                resident(),
+                Value::GpuTensor(valid_cdf.handle.clone()),
                 Value::from("Tail"),
                 Value::from("sideways"),
             ],
@@ -112,6 +116,8 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
         .unwrap_err();
         assert!(error.message().contains("unsupported Tail"), "{error}");
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        valid_cdf.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(valid_cdf.probe.retirements(), 0);
 
         let error = block_on(kstest_builtin(
             resident(),
@@ -287,9 +293,19 @@ fn provider_failures_retain_sources_and_borrowed_allocations() {
     assert_eq!(allocation.probe.retirements(), 0);
 
     let sample = Value::Tensor(Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap());
-    let error = block_on(kstest_builtin(sample, vec![Value::from("CDF"), resident()])).unwrap_err();
+    let cdf = provider
+        .owner
+        .allocate_zeroed(vec![3, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let error = block_on(kstest_builtin(
+        sample,
+        vec![Value::from("CDF"), Value::GpuTensor(cdf.handle.clone())],
+    ))
+    .unwrap_err();
     assert_owner_cause(&error);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 2);
+    cdf.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(cdf.probe.retirements(), 0);
     allocation
         .handle
         .allocation_lease()
