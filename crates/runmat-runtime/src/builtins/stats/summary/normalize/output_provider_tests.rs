@@ -80,6 +80,11 @@ fn sibling_alias_is_rejected_before_any_output_is_published() {
         })
         .unwrap_err();
     assert!(error.message().contains("alias"));
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::NORMALIZE_ERROR_INTERNAL.identifier
+    );
+    assert_eq!(error.context.builtin.as_deref(), Some("normalize"));
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     source.handle.allocation_lease().validate_live().unwrap();
     assert_eq!(source.probe.retirements(), 0);

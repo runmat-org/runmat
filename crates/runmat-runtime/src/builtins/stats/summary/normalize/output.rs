@@ -60,7 +60,8 @@ impl NormalizeOutputPlan {
                 _ => None,
             }),
             "normalize",
-        )?;
+        )
+        .map_err(output_error)?;
         Ok(Self {
             single,
             source,
@@ -87,7 +88,8 @@ impl NormalizeOutputPlan {
                     value,
                     "normalize",
                     protected,
-                )?;
+                )
+                .map_err(output_error)?;
                 if runmat_accelerate_api::handle_is_explicit(source)
                     && !matches!(restored, Value::GpuTensor(_))
                 {
@@ -100,6 +102,20 @@ impl NormalizeOutputPlan {
             None => Ok(value),
         }
     }
+}
+
+fn output_error(mut error: RuntimeError) -> RuntimeError {
+    // Preserve nested semantic identifiers, provider causes, spans and retry
+    // policy while adding the owning boundary's presentation when absent.
+    if error.identifier.is_none() {
+        error.identifier = runmat_builtins::NORMALIZE_ERROR_INTERNAL
+            .identifier
+            .map(str::to_owned);
+    }
+    if error.context.builtin.is_none() {
+        error.context.builtin = Some("normalize".into());
+    }
+    error
 }
 
 fn finish_selected(
@@ -223,6 +239,47 @@ mod tests {
         assert_eq!(source.probe.retirements(), 0);
         drop(source.handle);
         assert_eq!(source.probe.retirements(), 1);
+    }
+
+    #[test]
+    fn late_failure_retains_provider_cause_and_cleanup_failure() {
+        let owner = TestAllocationOwner::new();
+        let produced = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        produced
+            .probe
+            .fail_retirement("normalization output cleanup fixture");
+        let mut first = Some(produced.handle);
+        let error = finish_selected(RequestedOutputs::Explicit(2), eval(), |_, _| {
+            if let Some(handle) = first.take() {
+                Ok(Value::GpuTensor(handle))
+            } else {
+                Err(output_error(
+                    crate::build_runtime_error("provider restoration failed")
+                        .with_source(std::io::Error::other("provider fixture cause"))
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build(),
+                ))
+            }
+        })
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::NORMALIZE_ERROR_INTERNAL.identifier
+        );
+        assert_eq!(error.context.builtin.as_deref(), Some("normalize"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(error.message().contains("provider restoration failed"));
+        assert!(error
+            .message()
+            .contains("normalization output cleanup fixture"));
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        while !cause.is::<std::io::Error>() {
+            cause = cause.source().expect("retained provider cause");
+        }
+        assert_eq!(cause.to_string(), "provider fixture cause");
+        assert_eq!(produced.probe.retirements(), 1);
     }
 }
 
