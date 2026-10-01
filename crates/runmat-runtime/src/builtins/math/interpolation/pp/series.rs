@@ -178,7 +178,7 @@ fn series_from_data(
         ));
     }
 
-    let (series, trailing_shape, sample_axis) = if y_len == n && is_vector_shape(&y_shape) {
+    let (series, component_shape, sample_axis) = if y_len == n && is_vector_shape(&y_shape) {
         (1, Vec::new(), axis)
     } else if axis == SampleAxis::First && y_shape.first().copied() == Some(n) {
         let series = y_len / n;
@@ -230,7 +230,7 @@ fn series_from_data(
         x,
         y,
         series,
-        trailing_shape,
+        component_shape,
         sample_axis,
     })
 }

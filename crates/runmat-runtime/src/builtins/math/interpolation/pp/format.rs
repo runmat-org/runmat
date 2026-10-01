@@ -21,6 +21,7 @@ impl PiecewiseForm {
 }
 
 pub fn pp_to_value(pp: PiecewisePolynomial, name: &'static str) -> BuiltinResult<Value> {
+    pp.validate_layout(name)?;
     let PiecewisePolynomial {
         breaks,
         coefs,
@@ -101,39 +102,9 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
     let pieces = scalar_field(&st, "pieces", name).await?;
     let order = scalar_field(&st, "order", name).await?;
     let component_shape = component_shape_field(&st, name).await?;
-    let dim = component_shape
-        .iter()
-        .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
-        .ok_or_else(|| interp_error(name, format!("{name}: malformed pp dimensions")))?;
-    if pieces.checked_add(1) != Some(breaks.len()) {
-        return Err(interp_error(name, format!("{name}: malformed pp breaks")));
-    }
-    if order == 0 || dim == 0 {
-        return Err(interp_error(
-            name,
-            format!("{name}: malformed pp dimensions"),
-        ));
-    }
-    let coefs_len = tensor_len(&coefs_tensor);
-    if pieces
-        .checked_mul(dim)
-        .and_then(|count| count.checked_mul(order))
-        != Some(coefs_len)
-    {
-        return Err(interp_error(
-            name,
-            format!("{name}: malformed pp coefficients"),
-        ));
-    }
+    let dim = PiecewisePolynomial::component_dim(&component_shape, name)?;
     let coefs = tensor::tensor_into_values_f64(coefs_tensor);
-    Ok(PiecewisePolynomial {
-        breaks,
-        coefs,
-        pieces,
-        order,
-        dim,
-        component_shape,
-    })
+    PiecewisePolynomial::from_parts(breaks, coefs, pieces, order, dim, component_shape, name)
 }
 
 async fn component_shape_field(st: &StructValue, name: &'static str) -> BuiltinResult<Vec<usize>> {

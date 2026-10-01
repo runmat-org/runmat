@@ -318,10 +318,10 @@ fn reshape_matrix_output(
         return Ok(result);
     };
     let mut shape = vec![query.values.len()];
-    if series.trailing_shape.is_empty() {
+    if series.component_shape.is_empty() {
         shape.push(series.series);
     } else {
-        shape.extend(series.trailing_shape.iter().copied());
+        shape.extend(series.component_shape.iter().copied());
     }
     let storage = tensor.into_numeric_storage().map_err(|err| {
         build_runtime_error(format!("interp1q: {err}"))

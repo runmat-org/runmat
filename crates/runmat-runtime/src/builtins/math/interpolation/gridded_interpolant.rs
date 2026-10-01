@@ -1200,7 +1200,7 @@ fn evaluate_piecewise_interpolant(
             x: x.clone(),
             y,
             series: 1,
-            trailing_shape: Vec::new(),
+            component_shape: Vec::new(),
             sample_axis: super::pp::SampleAxis::First,
         };
         let pp = match spec.method {

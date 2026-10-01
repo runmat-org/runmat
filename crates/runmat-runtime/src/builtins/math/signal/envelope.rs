@@ -22,7 +22,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::interpolation::pp::{
-    build_spline_pp, evaluate_pp, Extrapolation, NumericSeries, QueryPoints,
+    build_spline_pp, evaluate_pp, Extrapolation, NumericSeries, PpOutputLayout, QueryPoints,
+    SampleAxis,
 };
 use crate::builtins::math::signal::common::{keyword, parse_nonnegative_integer};
 use crate::builtins::math::signal::type_resolvers::envelope_type;
@@ -970,7 +971,8 @@ fn spline_interpolate(points: &[(usize, f64)], query: &[f64]) -> BuiltinResult<V
             .collect::<Vec<_>>(),
         y: points.iter().map(|(_, value)| *value).collect::<Vec<_>>(),
         series: 1,
-        trailing_shape: Vec::new(),
+        component_shape: Vec::new(),
+        sample_axis: SampleAxis::First,
     };
     let query = QueryPoints {
         values: query.to_vec(),
@@ -978,8 +980,14 @@ fn spline_interpolate(points: &[(usize, f64)], query: &[f64]) -> BuiltinResult<V
     };
     let pp = build_spline_pp(&series, BUILTIN_NAME)
         .map_err(|err| envelope_error_with_detail(&ENVELOPE_ERROR_INTERNAL, err.message()))?;
-    let value = evaluate_pp(&pp, &query, &Extrapolation::Extrapolate, BUILTIN_NAME)
-        .map_err(|err| envelope_error_with_detail(&ENVELOPE_ERROR_INTERNAL, err.message()))?;
+    let value = evaluate_pp(
+        &pp,
+        &query,
+        &Extrapolation::Extrapolate,
+        PpOutputLayout::QueryLeading,
+        BUILTIN_NAME,
+    )
+    .map_err(|err| envelope_error_with_detail(&ENVELOPE_ERROR_INTERNAL, err.message()))?;
     match value {
         Value::Tensor(tensor) => Ok(tensor::tensor_into_values_f64(tensor)),
         Value::Num(value) => Ok(vec![value]),

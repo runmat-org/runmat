@@ -99,7 +99,7 @@ mod tests {
             x: vec![1.0, 2.0, 3.0],
             y: vec![1.0, 4.0, 9.0],
             series: 1,
-            trailing_shape: Vec::new(),
+            component_shape: Vec::new(),
             sample_axis: super::super::pp::SampleAxis::Last,
         };
         let pp = pp_to_value(

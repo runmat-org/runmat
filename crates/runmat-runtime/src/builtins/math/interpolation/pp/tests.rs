@@ -6,7 +6,7 @@ fn scalar_series(y: &[f64]) -> NumericSeries {
         x: (1..=y.len()).map(|v| v as f64).collect(),
         y: y.to_vec(),
         series: 1,
-        trailing_shape: Vec::new(),
+        component_shape: Vec::new(),
         sample_axis: SampleAxis::Last,
     }
 }
@@ -40,7 +40,7 @@ fn implicit_series_reads_typed_integer_storage_length_and_values() {
     assert_eq!(series.x, vec![1.0, 2.0, 3.0]);
     assert_eq!(series.y, vec![1.0, 4.0, 9.0, 10.0, 40.0, 90.0]);
     assert_eq!(series.series, 2);
-    assert_eq!(series.trailing_shape, vec![2]);
+    assert_eq!(series.component_shape, vec![2]);
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn ppval_multiseries_places_component_dimension_before_queries() {
         x: vec![1.0, 2.0, 3.0],
         y: vec![1.0, 4.0, 9.0, 100.0, 400.0, 900.0],
         series: 2,
-        trailing_shape: vec![2],
+        component_shape: vec![2],
         sample_axis: SampleAxis::Last,
     };
     let pp = build_spline_pp(&series, "spline").expect("spline");
@@ -181,7 +181,7 @@ fn final_sample_axis_roundtrips_nonsquare_component_and_query_dimensions() {
     ))
     .unwrap();
     assert_eq!(series.series, 6);
-    assert_eq!(series.trailing_shape, vec![2, 3]);
+    assert_eq!(series.component_shape, vec![2, 3]);
     assert_eq!(&series.y[..4], &[0.0, 1.0, 2.0, 3.0]);
 
     let pp = build_pchip_pp(&series, "pchip").unwrap();
@@ -260,7 +260,7 @@ fn square_sample_matrix_uses_documented_last_axis_for_pchip_and_spline() {
     ))
     .unwrap();
     assert_eq!(series.sample_axis, SampleAxis::Last);
-    assert_eq!(series.trailing_shape, vec![3]);
+    assert_eq!(series.component_shape, vec![3]);
     assert_eq!(&series.y[..3], &[1.0, 2.0, 3.0]);
     assert_eq!(&series.y[3..6], &[10.0, 20.0, 30.0]);
 }
