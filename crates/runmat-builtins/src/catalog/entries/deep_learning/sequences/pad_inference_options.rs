@@ -81,20 +81,37 @@ pub(super) fn validate_options(
     // The runtime keeps the final value for a repeated spelling, then admits
     // options in key order. Inference must not diagnose an overwritten value.
     let mut options = BTreeMap::new();
+    let mut unsupported = Vec::new();
     for index in (2..request.arguments.len()).step_by(2) {
         let Some(name) = request.literals.literal_string_at(index) else {
-            unknown_name = true;
+            match request.literals.literal_args.get(index) {
+                Some(LiteralValue::Unknown) | None => unknown_name = true,
+                Some(_) => diagnostics.push(argument_error(
+                    "RM-DL-PADSEQUENCES-OPTION",
+                    "option name must be text",
+                    index,
+                )),
+            }
             continue;
         };
         let Some(option) = PadOptionKey::parse(&name) else {
-            diagnostics.push(argument_error(
-                "RM-DL-PADSEQUENCES-OPTION",
-                "unsupported padsequences option",
-                index,
-            ));
+            unsupported.push(index);
             continue;
         };
         options.insert(option, index);
+    }
+    // A later dynamic spelling may replace an earlier known one in the
+    // runtime's last-wins map. Do not turn either into a proven diagnosis or
+    // output class before that spelling is known.
+    if unknown_name {
+        return None;
+    }
+    for index in unsupported {
+        diagnostics.push(argument_error(
+            "RM-DL-PADSEQUENCES-OPTION",
+            "unsupported padsequences option",
+            index,
+        ));
     }
     for (option, index) in &options {
         let value = request.literals.literal_args.get(*index + 1);
@@ -173,9 +190,5 @@ pub(super) fn validate_options(
             2,
         ));
     }
-    if unknown_name {
-        None
-    } else {
-        uniform
-    }
+    uniform
 }

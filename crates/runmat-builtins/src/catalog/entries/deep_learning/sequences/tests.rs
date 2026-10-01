@@ -350,6 +350,49 @@ fn padsequences_known_option_values_and_integer_controls_are_sound() {
         ValueKindFact::Cell(_)
     ));
 
+    let dynamic_override = call(
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(2.0),
+            LiteralValue::String("UniformOutput".into()),
+            LiteralValue::String("invalid".into()),
+            LiteralValue::Unknown,
+            LiteralValue::String("off".into()),
+        ],
+        vec![
+            cell.clone(),
+            dimension.clone(),
+            option_name.clone(),
+            option_value.clone(),
+            option_name.clone(),
+            option_value.clone(),
+        ],
+    );
+    assert!(dynamic_override.diagnostics.is_empty());
+    assert!(matches!(
+        dynamic_override.outputs[0].kind,
+        ValueKindFact::Unknown
+    ));
+
+    let nontext_name = call(
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(2.0),
+            LiteralValue::Number(1.0),
+            LiteralValue::String("off".into()),
+        ],
+        vec![
+            cell.clone(),
+            dimension.clone(),
+            numeric(ShapeFact::Scalar),
+            option_value.clone(),
+        ],
+    );
+    assert!(nontext_name
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-DL-PADSEQUENCES-OPTION"));
+
     for invalid in [
         LiteralValue::Integer {
             text: "-1".into(),
