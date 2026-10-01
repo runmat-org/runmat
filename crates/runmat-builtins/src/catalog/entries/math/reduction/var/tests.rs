@@ -114,7 +114,7 @@ fn proven_double_shape_and_invalid_controls_remain_conservative() {
         ],
         vec![
             LiteralValue::Number(0.0),
-            LiteralValue::Vector(vec![2.0, 2.0]),
+            LiteralValue::Vector(vec![LiteralValue::Number(2.0), LiteralValue::Number(2.0)]),
         ],
         vec![LiteralValue::Empty, LiteralValue::Empty],
     ] {
