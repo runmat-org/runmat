@@ -52,7 +52,7 @@ mod tests {
     #[cfg(not(feature = "gui"))]
     #[test]
     fn interactive_entry_reports_typed_no_gui_unavailability() {
-        let error = crate::render_interactive_with_handle(1, crate::plots::Figure::new())
+        let error = crate::present_interactive_with_handle(1, crate::plots::Figure::new())
             .expect_err("no GUI build cannot present interactively");
         assert_eq!(error.kind(), PresentationFailureKind::Unavailable);
     }

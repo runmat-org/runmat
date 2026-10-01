@@ -446,7 +446,10 @@ fn map_plot_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    plot_error_with_detail(&PLOT_ERROR_INTERNAL, err.message)
+    crate::builtins::plotting::state::with_render_cause(
+        plot_error_with_detail(&PLOT_ERROR_INTERNAL, err.message().to_string()),
+        err,
+    )
 }
 
 #[runtime_builtin(
@@ -1133,6 +1136,25 @@ pub(crate) mod tests {
             crate::builtins::plotting::state::current_figure_handle(),
         )
         .is_some());
+    }
+
+    #[test]
+    fn plot_owner_internal_wrapper_preserves_render_cause_and_retry() {
+        let cause = crate::build_runtime_error("render operational failure")
+            .with_source(runmat_plot::PlotPresentationError::InteractiveBackend(
+                "native setup failed".into(),
+            ))
+            .with_span((7usize, 2usize).into())
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build();
+        let mapped = map_plot_internal(cause);
+        assert_eq!(mapped.identifier(), PLOT_ERROR_INTERNAL.identifier);
+        assert_eq!(mapped.span, Some((7usize, 2usize).into()));
+        assert_eq!(mapped.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert_eq!(
+            crate::builtins::plotting::state::presentation_failure_kind(&mapped),
+            Some(runmat_plot::PresentationFailureKind::InteractiveBackend)
+        );
     }
 
     #[test]

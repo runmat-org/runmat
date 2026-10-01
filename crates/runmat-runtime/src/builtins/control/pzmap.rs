@@ -237,9 +237,12 @@ async fn render_pole_zero_map_args(args: Vec<Value>) -> BuiltinResult<()> {
         if presentation_failure_kind(&err).is_some() {
             return Ok(());
         }
-        return Err(pzmap_error(
-            format!("pzmap: plotting failed: {}", err.message()),
-            &PZMAP_ERROR_PLOT_FAILED,
+        return Err(crate::builtins::plotting::state::with_render_cause(
+            pzmap_error(
+                format!("pzmap: plotting failed: {}", err.message()),
+                &PZMAP_ERROR_PLOT_FAILED,
+            ),
+            err,
         ));
     }
     let _ = crate::call_builtin_async("title", &[Value::from("Pole-Zero Map")]).await;

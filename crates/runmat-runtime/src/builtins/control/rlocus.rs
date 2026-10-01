@@ -709,9 +709,12 @@ async fn render_root_locus_plot(eval: &RootLocus, style: Option<&Value>) -> Buil
         if presentation_failure_kind(&err).is_some() {
             return Ok(());
         }
-        return Err(rlocus_error(
-            format!("rlocus: plotting failed: {}", err.message()),
-            &RLOCUS_ERROR_PLOT_FAILED,
+        return Err(crate::builtins::plotting::state::with_render_cause(
+            rlocus_error(
+                format!("rlocus: plotting failed: {}", err.message()),
+                &RLOCUS_ERROR_PLOT_FAILED,
+            ),
+            err,
         ));
     }
     let _ = crate::call_builtin_async("title", &[Value::from("Root Locus")]).await;

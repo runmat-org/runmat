@@ -118,7 +118,7 @@ pub fn show_plot_unified(
             // Static export: Render using same GPU pipeline and save to file
             render_figure_to_file(figure, path)
         }
-        None => render_interactive_with_handle(0, figure).map_err(|error| error.to_string()),
+        None => present_interactive_with_handle(0, figure).map_err(|error| error.to_string()),
     }
 }
 
@@ -294,17 +294,24 @@ pub fn plot_histogram(
 // ===== MAIN INTERACTIVE API =====
 
 /// Show an interactive plot with optimal platform compatibility
-/// This is the main entry point used by the runtime
-pub fn show_interactive_platform_optimal(
-    figure: plots::Figure,
-) -> Result<String, PlotPresentationError> {
-    render_interactive_with_handle(0, figure)
+/// Preserves the existing public string-error contract.
+pub fn show_interactive_platform_optimal(figure: plots::Figure) -> Result<String, String> {
+    present_interactive_with_handle(0, figure).map_err(|error| error.to_string())
 }
 
 /// Show an interactive plot that is tied to a specific MATLAB figure handle.
 /// This allows embedding runtimes to request that a window close when the
 /// corresponding figure lifecycle event fires.
 pub fn render_interactive_with_handle(
+    handle: u32,
+    figure: plots::Figure,
+) -> Result<String, String> {
+    present_interactive_with_handle(handle, figure).map_err(|error| error.to_string())
+}
+
+/// Typed interactive presentation boundary used by the runtime. Public
+/// string-returning entrypoints delegate here to preserve their existing API.
+pub fn present_interactive_with_handle(
     handle: u32,
     figure: plots::Figure,
 ) -> Result<String, PlotPresentationError> {

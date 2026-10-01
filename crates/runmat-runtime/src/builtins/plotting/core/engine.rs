@@ -662,7 +662,7 @@ pub(crate) mod native {
 
     fn interactive_export(handle: FigureHandle, figure: &mut Figure) -> BuiltinResult<String> {
         let figure_clone = figure.clone();
-        runmat_plot::render_interactive_with_handle(handle.as_u32(), figure_clone).map_err(|err| {
+        runmat_plot::present_interactive_with_handle(handle.as_u32(), figure_clone).map_err(|err| {
             engine_error_with_source(
                 "Interactive plotting failed. Please check GPU/GUI system setup.",
                 err,

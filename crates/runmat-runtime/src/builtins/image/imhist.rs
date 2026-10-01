@@ -936,7 +936,10 @@ fn render_imhist_plot(counts: &Tensor, locations: &Tensor) -> BuiltinResult<()> 
         if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(());
         }
-        return Err(plot_failed(err.message()));
+        return Err(crate::builtins::plotting::state::with_render_cause(
+            plot_failed(err.message().to_string()),
+            err,
+        ));
     }
     Ok(())
 }

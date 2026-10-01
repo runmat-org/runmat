@@ -1251,7 +1251,10 @@ fn render_binscatter(
         if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
-        return Err(internal(err.message));
+        return Err(crate::builtins::plotting::state::with_render_cause(
+            internal(err.message().to_string()),
+            err,
+        ));
     }
     Ok(handle)
 }

@@ -1001,7 +1001,10 @@ fn render_boxplot(boxes: &[BoxStats], options: &BoxplotOptions) -> BuiltinResult
         if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handles);
         }
-        return Err(internal(err.message));
+        return Err(crate::builtins::plotting::state::with_render_cause(
+            internal(err.message().to_string()),
+            err,
+        ));
     }
     Ok(handles)
 }

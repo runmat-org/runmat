@@ -1390,7 +1390,10 @@ fn handle_plot_render_result(result: BuiltinResult<String>) -> BuiltinResult<()>
             if crate::builtins::plotting::state::presentation_unavailable(&err) {
                 Ok(())
             } else {
-                Err(internal(err.message))
+                Err(crate::builtins::plotting::state::with_render_cause(
+                    internal(err.message().to_string()),
+                    err,
+                ))
             }
         }
     }

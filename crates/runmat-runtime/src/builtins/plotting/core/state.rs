@@ -17,7 +17,9 @@ use thiserror::Error;
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
 #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 use super::engine::render_figure;
-pub(crate) use super::error::{presentation_failure_kind, presentation_unavailable};
+pub(crate) use super::error::{
+    presentation_failure_kind, presentation_unavailable, with_render_cause,
+};
 use super::web::current_plot_theme_config;
 use super::{plotting_error, plotting_error_with_source};
 

@@ -41,6 +41,20 @@ pub(crate) fn presentation_unavailable(error: &crate::RuntimeError) -> bool {
     )
 }
 
+/// Keep an owner's public wording and identifier while retaining the original
+/// rendering failure for diagnostics and typed presentation classification.
+pub(crate) fn with_render_cause(
+    mut mapped: crate::RuntimeError,
+    cause: crate::RuntimeError,
+) -> crate::RuntimeError {
+    if mapped.span.is_none() {
+        mapped.span = cause.span;
+    }
+    mapped.gpu_gather_retry = cause.gpu_gather_retry;
+    mapped.source = Some(Box::new(cause));
+    mapped
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +85,33 @@ mod tests {
             presentation_failure_kind(&backend),
             Some(runmat_plot::PresentationFailureKind::InteractiveBackend),
             "control plots retain their broader nonfatal setup policy"
+        );
+    }
+
+    #[test]
+    fn owner_wrapper_retains_identity_and_nested_typed_cause() {
+        let cause = plotting_error_with_source(
+            "plot",
+            "native presentation failed",
+            runmat_plot::PlotPresentationError::InteractiveBackend("setup failed".into()),
+        );
+        let cause = crate::build_runtime_error(cause.message().to_string())
+            .with_source(cause)
+            .with_span((11usize, 4usize).into())
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build();
+        let owner = crate::build_runtime_error("owner-specific public wording")
+            .with_builtin("boxplot")
+            .with_identifier("RunMat:boxplot:InternalError")
+            .build();
+        let wrapped = with_render_cause(owner, cause);
+        assert_eq!(wrapped.message(), "owner-specific public wording");
+        assert_eq!(wrapped.identifier(), Some("RunMat:boxplot:InternalError"));
+        assert_eq!(wrapped.span, Some((11usize, 4usize).into()));
+        assert_eq!(wrapped.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert_eq!(
+            presentation_failure_kind(&wrapped),
+            Some(runmat_plot::PresentationFailureKind::InteractiveBackend)
         );
     }
 }

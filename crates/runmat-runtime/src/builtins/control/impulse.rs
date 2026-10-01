@@ -215,7 +215,7 @@ async fn emit_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<()> {
 }
 
 fn impulse_plot_error(source: RuntimeError) -> RuntimeError {
-    build_runtime_error(format!(
+    let mapped = build_runtime_error(format!(
         "{}: {}",
         IMPULSE_ERROR_PLOT_FAILED.message,
         source.message()
@@ -226,8 +226,8 @@ fn impulse_plot_error(source: RuntimeError) -> RuntimeError {
             .identifier
             .expect("plot failure has a stable identifier"),
     )
-    .with_source(source)
-    .build()
+    .build();
+    crate::builtins::plotting::state::with_render_cause(mapped, source)
 }
 
 #[derive(Clone, Debug)]

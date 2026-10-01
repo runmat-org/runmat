@@ -302,9 +302,9 @@ async fn plot_response_with_style(eval: &StepResponse, style: Option<&Value>) ->
         if presentation_failure_kind(&err).is_some() {
             return Ok(());
         }
-        return Err(step_error_with_detail(
-            &STEP_ERROR_PLOT_FAILED,
-            err.message(),
+        return Err(crate::builtins::plotting::state::with_render_cause(
+            step_error_with_detail(&STEP_ERROR_PLOT_FAILED, err.message()),
+            err,
         ));
     }
     let _ = crate::call_builtin_async("title", &[Value::from("Step Response")]).await;

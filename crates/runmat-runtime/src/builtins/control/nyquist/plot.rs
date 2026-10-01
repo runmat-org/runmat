@@ -37,7 +37,7 @@ pub(super) async fn render(response: &NyquistResponse) -> BuiltinResult<()> {
 }
 
 pub(super) fn plot_error(source: crate::RuntimeError) -> crate::RuntimeError {
-    crate::build_runtime_error(format!(
+    let mapped = crate::build_runtime_error(format!(
         "{}: {}",
         NYQUIST_ERROR_PLOT_FAILED.message,
         source.message()
@@ -48,6 +48,6 @@ pub(super) fn plot_error(source: crate::RuntimeError) -> crate::RuntimeError {
             .identifier
             .expect("plot failure has a stable identifier"),
     )
-    .with_source(source)
-    .build()
+    .build();
+    crate::builtins::plotting::state::with_render_cause(mapped, source)
 }
