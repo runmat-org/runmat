@@ -1,8 +1,15 @@
 //! MATLAB-compatible `ode45` builtin.
 
+#[cfg(test)]
+use runmat_builtins::ODE45_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ODE45_ERROR_INTERNAL, ODE45_ERROR_INVALID_ARGUMENT,
+    ODE45_ERROR_INVALID_INPUT, ODE45_INTEGER_CALLBACK_EXTENSION as INTEGER_CALLBACK_EXTENSION,
+    ODE45_INTEGER_OPTION_EXTENSION as INTEGER_OPTION_EXTENSION,
+    ODE45_INTEGER_TSPAN_EXTENSION as INTEGER_TSPAN_EXTENSION,
+    ODE45_INTEGER_Y0_EXTENSION as INTEGER_Y0_EXTENSION,
+    ODE45_LOGICAL_NUMERIC_EXTENSION as LOGICAL_NUMERIC_EXTENSION,
+    ODE45_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -12,152 +19,23 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::ode::common::{
-    build_ode_output, define_ode_integer_contract, ode_options_from_struct, parse_ode_input,
-    parse_options, prepare_ode_options, solve_ode, OdeMethod,
+    build_ode_output, check_cancellation, parse_ode_input, OdeCompatibilityExtensions, OdeMethod,
 };
-use crate::builtins::math::ode::type_resolvers::ode_solution_type;
+use crate::builtins::math::ode::options;
+use crate::builtins::math::ode::solver::solve_ode;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "ode45";
 
-define_ode_integer_contract!("ode45", "Ode45");
-
-const ODE45_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Solution states evaluated over tspan.",
-}];
-
-const ODE45_OUTPUT_TY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time points selected by solver.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Solution states at each returned time point.",
-    },
-];
-
-const ODE45_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "odefun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "ODE right-hand-side callback f(t,y).",
-    },
-    BuiltinParamDescriptor {
-        name: "tspan",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time interval or monotonic time vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "y0",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Initial state vector/value.",
-    },
-];
-
-const ODE45_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "odefun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "ODE right-hand-side callback f(t,y).",
-    },
-    BuiltinParamDescriptor {
-        name: "tspan",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time interval or monotonic time vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "y0",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Initial state vector/value.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional struct with tolerances and step controls.",
-    },
-];
-
-const ODE45_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "y = ode45(odefun, tspan, y0)",
-        inputs: &ODE45_INPUTS_CORE,
-        outputs: &ODE45_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = ode45(odefun, tspan, y0, options)",
-        inputs: &ODE45_INPUTS_WITH_OPTIONS,
-        outputs: &ODE45_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[t, y] = ode45(odefun, tspan, y0)",
-        inputs: &ODE45_INPUTS_CORE,
-        outputs: &ODE45_OUTPUT_TY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[t, y] = ode45(odefun, tspan, y0, options)",
-        inputs: &ODE45_INPUTS_WITH_OPTIONS,
-        outputs: &ODE45_OUTPUT_TY,
-    },
-];
-
-const ODE45_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE45.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ode45:InvalidArgument"),
-    when: "Input argument count/options struct grammar is invalid.",
-    message: "ode45: invalid argument",
-};
-
-const ODE45_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE45.INVALID_INPUT",
-    identifier: Some("RunMat:ode45:InvalidInput"),
-    when: "ODE input/state/callback semantics are invalid for integration.",
-    message: "ode45: invalid input",
-};
-
-const ODE45_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE45.INTERNAL",
-    identifier: Some("RunMat:ode45:Internal"),
-    when: "Internal output materialization fails.",
-    message: "ode45: internal runtime failure",
-};
-
-const ODE45_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ODE45_ERROR_INVALID_ARGUMENT,
-    ODE45_ERROR_INVALID_INPUT,
-    ODE45_ERROR_INTERNAL,
-];
-
-pub const ODE45_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ODE45_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ODE45_ERRORS,
-};
+pub(crate) const ODE_COMPATIBILITY_EXTENSIONS: OdeCompatibilityExtensions =
+    OdeCompatibilityExtensions {
+        integer_tspan: &INTEGER_TSPAN_EXTENSION,
+        integer_y0: &INTEGER_Y0_EXTENSION,
+        integer_option: &INTEGER_OPTION_EXTENSION,
+        integer_callback: &INTEGER_CALLBACK_EXTENSION,
+        logical_numeric: &LOGICAL_NUMERIC_EXTENSION,
+        resident_input: &RESIDENT_INPUT_EXTENSION,
+    };
 
 fn ode45_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -213,42 +91,57 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "ode45",
-    execution_stack = "process",
-    category = "math/ode",
-    summary = "Solve nonstiff ODE systems using adaptive Dormand-Prince 5(4) integration.",
-    keywords = "ode45,ode,nonstiff,dormand-prince,adaptive step",
-    accel = "sink",
-    type_resolver(ode_solution_type),
-    descriptor(crate::builtins::math::ode::ode45::ODE45_DESCRIPTOR),
-    extensions(crate::builtins::math::ode::ode45::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::ode::ode45::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::ode::ode45"
 )]
+async fn ode45_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    function: Value,
+    tspan: Value,
+    y0: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    ode45_in_runtime(runtime.as_ref(), function, tspan, y0, rest).await
+}
+
+#[cfg(test)]
 async fn ode45_builtin(
     function: Value,
     tspan: Value,
     y0: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    ode45_in_runtime(None, function, tspan, y0, rest).await
+}
+
+async fn ode45_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: Value,
+    tspan: Value,
+    y0: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    check_cancellation(NAME, runtime)?;
     if rest.len() > 1 {
         return Err(ode45_error_with_detail(
             &ODE45_ERROR_INVALID_ARGUMENT,
             "too many input arguments",
         ));
     }
-    let options = parse_options(NAME, rest.first())
+    let options = options::parse(NAME, rest.into_iter().next())
         .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_ARGUMENT))?;
-    let options = prepare_ode_options(NAME, options, ODE_COMPATIBILITY_EXTENSIONS)
+    let opts = options::admit(NAME, options, ODE_COMPATIBILITY_EXTENSIONS)
         .await
         .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_ARGUMENT))?;
-    let opts = ode_options_from_struct(NAME, options.as_ref())
-        .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_ARGUMENT))?;
-    let input = parse_ode_input(NAME, tspan, y0, ODE_COMPATIBILITY_EXTENSIONS)
+    check_cancellation(NAME, runtime)?;
+    let input = parse_ode_input(NAME, tspan, y0, ODE_COMPATIBILITY_EXTENSIONS, runtime)
         .await
         .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_INPUT))?;
     let result = solve_ode(NAME, OdeMethod::Ode45, &function, &input, &opts)
         .await
         .map_err(|err| ode45_map_error(err, &ODE45_ERROR_INVALID_INPUT))?;
+    check_cancellation(NAME, runtime)?;
     build_ode_output(NAME, result).map_err(|err| ode45_map_error(err, &ODE45_ERROR_INTERNAL))
 }
 
@@ -258,9 +151,33 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
     use runmat_value::Tensor;
     use runmat_value::{IntValue, IntegerStorage};
+    use std::rc::Rc;
     use std::sync::Arc;
+
+    #[test]
+    fn cancelled_invocation_stops_before_derivative_or_provider_work() {
+        let source = CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(CancellationReason::User);
+        let error = block_on(ode45_in_runtime(
+            Some(&runtime),
+            Value::FunctionHandle("unused".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect_err("cancelled invocation cannot reach derivative");
+        assert!(error
+            .identifier()
+            .is_some_and(|identifier| identifier.ends_with(":Cancelled")));
+    }
 
     #[test]
     fn ode45_scalar_decay_returns_reasonable_final_value() {
