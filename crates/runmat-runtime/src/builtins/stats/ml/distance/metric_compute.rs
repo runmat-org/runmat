@@ -63,14 +63,7 @@ pub(super) fn row_distance(
         return Ok(f64::NAN);
     }
     match metric {
-        DistanceMetric::Euclidean => {
-            let mut sum = 0.0;
-            for col in 0..x.cols {
-                let diff = row_value(x, xi, col) - row_value(y, yi, col);
-                sum += diff * diff;
-            }
-            Ok(sum.sqrt())
-        }
+        DistanceMetric::Euclidean => Ok(scaled_lp_distance(x, xi, y, yi, 2.0)),
         DistanceMetric::SquareEuclidean => {
             let mut sum = 0.0;
             for col in 0..x.cols {
@@ -96,15 +89,7 @@ pub(super) fn row_distance(
             }
             Ok(max)
         }
-        DistanceMetric::Minkowski(p) => {
-            let mut sum = 0.0;
-            for col in 0..x.cols {
-                sum += (row_value(x, xi, col) - row_value(y, yi, col))
-                    .abs()
-                    .powf(*p);
-            }
-            Ok(sum.powf(1.0 / p))
-        }
+        DistanceMetric::Minkowski(p) => Ok(scaled_lp_distance(x, xi, y, yi, *p)),
         DistanceMetric::Seuclidean(scale) => {
             let mut sum = 0.0;
             for (col, scale_value) in scale.iter().enumerate().take(x.cols) {
@@ -179,6 +164,28 @@ pub(super) fn row_distance(
         }
         DistanceMetric::Spearman => spearman_distance(x, xi, y, yi),
     }
+}
+
+/// Accumulate a positive-order Lp distance without overflowing intermediate
+/// powers when the representable final distance is finite.
+fn scaled_lp_distance(x: &Tensor, xi: usize, y: &Tensor, yi: usize, p: f64) -> f64 {
+    let mut scale = 0.0_f64;
+    for col in 0..x.cols {
+        let difference = (row_value(x, xi, col) - row_value(y, yi, col)).abs();
+        if difference.is_nan() {
+            return f64::NAN;
+        }
+        scale = scale.max(difference);
+    }
+    if scale == 0.0 || scale.is_infinite() {
+        return scale;
+    }
+    let mut normalized_sum = 0.0;
+    for col in 0..x.cols {
+        let difference = (row_value(x, xi, col) - row_value(y, yi, col)).abs();
+        normalized_sum += (difference / scale).powf(p);
+    }
+    scale * normalized_sum.powf(1.0 / p)
 }
 
 pub(super) fn row_value(tensor: &Tensor, row: usize, col: usize) -> f64 {

@@ -389,13 +389,25 @@ fn restore_knnsearch_value(
     let Some(source) = source else {
         return Ok(value);
     };
+    let mut protected_outputs = Vec::new();
+    restore_knnsearch_value_protecting(value, source, &mut protected_outputs)
+}
+
+fn restore_knnsearch_value_protecting(
+    value: Value,
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    protected_outputs: &mut Vec<runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let restored = crate::builtins::common::gpu_helpers::restore_class_preserving_value(
-                source,
-                Value::Tensor(tensor),
-                KNNSEARCH_NAME,
-            )?;
+            let protected = protected_outputs.iter().collect::<Vec<_>>();
+            let restored =
+                crate::builtins::common::gpu_helpers::restore_class_preserving_value_protecting(
+                    source,
+                    Value::Tensor(tensor),
+                    KNNSEARCH_NAME,
+                    &protected,
+                )?;
             if runmat_accelerate_api::handle_is_explicit(source)
                 && !matches!(restored, Value::GpuTensor(_))
             {
@@ -404,6 +416,9 @@ fn restore_knnsearch_value(
                     "knnsearch: provider cannot preserve explicit gpuArray output residency",
                 ));
             }
+            if let Value::GpuTensor(handle) = &restored {
+                protected_outputs.push(handle.clone());
+            }
             Ok(restored)
         }
         Value::Cell(cell) => {
@@ -411,7 +426,7 @@ fn restore_knnsearch_value(
             let values = cell
                 .data
                 .into_iter()
-                .map(|value| restore_knnsearch_value(value, Some(source)))
+                .map(|value| restore_knnsearch_value_protecting(value, source, protected_outputs))
                 .collect::<BuiltinResult<Vec<_>>>()?;
             CellArray::new_with_shape(values, shape)
                 .map(Value::Cell)
@@ -419,7 +434,7 @@ fn restore_knnsearch_value(
         }
         Value::OutputList(values) => values
             .into_iter()
-            .map(|value| restore_knnsearch_value(value, Some(source)))
+            .map(|value| restore_knnsearch_value_protecting(value, source, protected_outputs))
             .collect::<BuiltinResult<Vec<_>>>()
             .map(Value::OutputList),
         other => Ok(other),

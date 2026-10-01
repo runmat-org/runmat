@@ -49,6 +49,60 @@ fn knnsearch_documented_floating_gpu_fallback_preserves_explicit_residency() {
 }
 
 #[test]
+fn knnsearch_requested_outputs_preserve_padding_and_distinct_resident_allocations() {
+    {
+        let _requested = crate::output_count::push_output_count(Some(0));
+        let output = block_on(knnsearch_builtin(
+            tensor(vec![0.0, 2.0], 2, 1),
+            tensor(vec![1.0], 1, 1),
+            Vec::new(),
+        ))
+        .unwrap();
+        assert!(matches!(output, Value::OutputList(values) if values.is_empty()));
+    }
+    {
+        let _requested = crate::output_count::push_output_count(Some(3));
+        let output = block_on(knnsearch_builtin(
+            tensor(vec![0.0, 2.0], 2, 1),
+            tensor(vec![1.0], 1, 1),
+            Vec::new(),
+        ))
+        .unwrap();
+        let Value::OutputList(values) = output else {
+            panic!("expected padded outputs");
+        };
+        assert_eq!(values.len(), 3);
+        assert!(matches!(values[2], Value::Num(0.0)));
+    }
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let source = crate::builtins::common::gpu_helpers::upload_tensor(
+            provider,
+            &Tensor::new(vec![0.0, 2.0], vec![2, 1]).unwrap(),
+        )
+        .expect("upload observations")
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .expect("explicit provenance");
+        let _requested = crate::output_count::push_output_count(Some(2));
+        let output = block_on(knnsearch_builtin(
+            Value::GpuTensor(source.clone()),
+            tensor(vec![1.0], 1, 1),
+            Vec::new(),
+        ))
+        .expect("resident outputs");
+        let Value::OutputList(values) = output else {
+            panic!("expected two resident outputs");
+        };
+        let (Value::GpuTensor(indices), Value::GpuTensor(distances)) = (&values[0], &values[1])
+        else {
+            panic!("expected two resident tensors");
+        };
+        assert!(!indices.shares_allocation_with(&source));
+        assert!(!distances.shares_allocation_with(&source));
+        assert!(!indices.shares_allocation_with(distances));
+    });
+}
+
+#[test]
 #[cfg(feature = "wgpu")]
 fn knnsearch_wgpu_fallback_enforces_explicit_residency_contract() {
     let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
@@ -126,6 +180,44 @@ fn pdist_supports_parameterized_metrics() {
     ))
     .unwrap();
     assert!((tensor_out(out).materialize_f64()[0] - 4.5_f64.sqrt()).abs() < 1.0e-10);
+}
+
+#[test]
+fn euclidean_and_minkowski_keep_representable_large_distances_finite() {
+    let observations = tensor(vec![0.0, 1.0e200, 0.0, 1.0e200], 2, 2);
+    let expected = 2.0_f64.sqrt() * 1.0e200;
+    for options in [
+        vec![Value::from("euclidean")],
+        vec![Value::from("minkowski"), Value::Num(2.0)],
+    ] {
+        let distance =
+            tensor_out(block_on(pdist_builtin(observations.clone(), options.clone())).unwrap())
+                .materialize_f64()[0];
+        assert!(distance.is_finite());
+        assert!((distance / expected - 1.0).abs() < 1.0e-12);
+
+        let distance = tensor_out(
+            block_on(pdist2_builtin(
+                tensor(vec![0.0, 0.0], 1, 2),
+                tensor(vec![1.0e200, 1.0e200], 1, 2),
+                options,
+            ))
+            .unwrap(),
+        )
+        .materialize_f64()[0];
+        assert!(distance.is_finite());
+        assert!((distance / expected - 1.0).abs() < 1.0e-12);
+    }
+
+    let neighbor = tensor_out(
+        block_on(knnsearch_builtin(
+            tensor(vec![1.0e200, 2.0e200], 2, 1),
+            tensor(vec![0.0], 1, 1),
+            Vec::new(),
+        ))
+        .unwrap(),
+    );
+    assert_eq!(neighbor.materialize_f64(), vec![1.0]);
 }
 
 #[test]
@@ -319,6 +411,47 @@ fn knnsearch_supports_metrics_and_ties() {
     };
     assert_eq!(tied.shape, vec![1, 3]);
     assert_eq!(tied.materialize_f64(), vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn knnsearch_ties_require_equal_distances_including_infinity() {
+    let inf = block_on(knnsearch_builtin(
+        tensor(vec![f64::INFINITY; 3], 3, 1),
+        tensor(vec![0.0], 1, 1),
+        vec![
+            Value::from("K"),
+            Value::Num(1.0),
+            Value::from("IncludeTies"),
+            Value::Bool(true),
+        ],
+    ))
+    .expect("infinite distances remain exact ties");
+    let Value::Cell(cells) = inf else {
+        panic!("expected tied-neighbor cells");
+    };
+    let Value::Tensor(indices) = &cells.data[0] else {
+        panic!("expected index tensor");
+    };
+    assert_eq!(indices.materialize_f64(), vec![1.0, 2.0, 3.0]);
+
+    let near = block_on(knnsearch_builtin(
+        tensor(vec![1.0, 1.0 + 5.0e-13], 2, 1),
+        tensor(vec![0.0], 1, 1),
+        vec![
+            Value::from("K"),
+            Value::Num(1.0),
+            Value::from("IncludeTies"),
+            Value::Bool(true),
+        ],
+    ))
+    .expect("near but unequal distances are not ties");
+    let Value::Cell(cells) = near else {
+        panic!("expected tied-neighbor cells");
+    };
+    let Value::Tensor(indices) = &cells.data[0] else {
+        panic!("expected index tensor");
+    };
+    assert_eq!(indices.materialize_f64(), vec![1.0]);
 }
 
 #[test]

@@ -154,3 +154,28 @@ fn logical_observation_fact_matches_runtime_admission() {
     let result = inference::infer(&request, &KNNSEARCH_CATALOG_ENTRY);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
 }
+
+#[test]
+fn rank_one_observations_have_one_feature_in_static_geometry() {
+    let mut request = CallRequest {
+        arguments: vec![data(4, 1), data(3, 1)],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    request.arguments[0].shape = ShapeFact::from(vec![Some(4)]);
+    request.arguments[1].shape = ShapeFact::from(vec![Some(3)]);
+    let shaped = inference::infer(&request, &KNNSEARCH_CATALOG_ENTRY);
+    assert!(shaped.diagnostics.is_empty(), "{:?}", shaped.diagnostics);
+    assert_eq!(
+        shaped.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), Some(1)])
+    );
+
+    request.arguments[1].shape = ShapeFact::Ranked { rank: 1 };
+    let ranked = inference::infer(&request, &KNNSEARCH_CATALOG_ENTRY);
+    assert!(ranked.diagnostics.is_empty(), "{:?}", ranked.diagnostics);
+    assert_eq!(
+        ranked.outputs[0].shape,
+        ShapeFact::from(vec![None, Some(1)])
+    );
+}

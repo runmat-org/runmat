@@ -5,9 +5,7 @@ use std::cmp::Ordering;
 use runmat_value::{CellArray, Tensor, Value};
 
 use super::metric_compute::{row_distance, row_value};
-use super::{
-    internal_error, DistanceMetric, KnnOptions, Selection, EPS, KNNSEARCH_NAME, PDIST2_NAME,
-};
+use super::{internal_error, DistanceMetric, KnnOptions, Selection, KNNSEARCH_NAME, PDIST2_NAME};
 use crate::BuiltinResult;
 
 pub(super) fn selected_distance_outputs(
@@ -73,25 +71,38 @@ pub(super) fn knnsearch_outputs(
     metric: &DistanceMetric,
     options: KnnOptions,
 ) -> BuiltinResult<Value> {
+    let requested = crate::output_count::current_output_count();
+    if requested == Some(0) {
+        for query in 0..y.rows {
+            sorted_neighbors(x, y, metric, query)?;
+        }
+        return Ok(Value::OutputList(Vec::new()));
+    }
+    let include_distances = requested.is_some_and(|count| count >= 2);
     if options.include_ties {
-        let (indices, distances) = knnsearch_tie_cells(x, y, metric, options.k)?;
-        return match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(out_count) => Ok(crate::output_count::output_list_with_padding(
-                out_count,
-                vec![Value::Cell(indices), Value::Cell(distances)],
-            )),
+        let (indices, distances) = knnsearch_tie_cells(x, y, metric, options.k, include_distances)?;
+        return match requested {
+            Some(out_count) => {
+                let mut values = vec![Value::Cell(indices)];
+                values.extend(distances.map(Value::Cell));
+                Ok(crate::output_count::output_list_with_padding(
+                    out_count, values,
+                ))
+            }
             None => Ok(Value::Cell(indices)),
         };
     }
 
-    let (indices, distances) = knnsearch_numeric_outputs(x, y, metric, options.k)?;
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![Value::Tensor(indices), Value::Tensor(distances)],
-        )),
+    let (indices, distances) =
+        knnsearch_numeric_outputs(x, y, metric, options.k, include_distances)?;
+    match requested {
+        Some(out_count) => {
+            let mut values = vec![Value::Tensor(indices)];
+            values.extend(distances.map(Value::Tensor));
+            Ok(crate::output_count::output_list_with_padding(
+                out_count, values,
+            ))
+        }
         None => Ok(Value::Tensor(indices)),
     }
 }
@@ -101,32 +112,39 @@ fn knnsearch_numeric_outputs(
     y: &Tensor,
     metric: &DistanceMetric,
     k: usize,
-) -> BuiltinResult<(Tensor, Tensor)> {
+    include_distances: bool,
+) -> BuiltinResult<(Tensor, Option<Tensor>)> {
     let len = y
         .rows
         .checked_mul(k)
         .ok_or_else(|| internal_error(KNNSEARCH_NAME, "knnsearch: output size overflow"))?;
     let mut indices = Vec::new();
-    let mut distances = Vec::new();
+    let mut distances = include_distances.then(Vec::new);
     indices
         .try_reserve(len)
         .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: index allocation failed"))?;
-    distances
-        .try_reserve(len)
-        .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: distance allocation failed"))?;
+    if let Some(distances) = &mut distances {
+        distances
+            .try_reserve(len)
+            .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: distance allocation failed"))?;
+        distances.resize(len, 0.0);
+    }
     indices.resize(len, 0.0);
-    distances.resize(len, 0.0);
     for query in 0..y.rows {
         let values = sorted_neighbors(x, y, metric, query)?;
         for (rank, (distance, index)) in values.iter().take(k).enumerate() {
             let pos = rank * y.rows + query;
             indices[pos] = *index as f64;
-            distances[pos] = *distance;
+            if let Some(distances) = &mut distances {
+                distances[pos] = *distance;
+            }
         }
     }
     let index_tensor = Tensor::new(indices, vec![y.rows, k])
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
-    let distance_tensor = Tensor::new(distances, vec![y.rows, k])
+    let distance_tensor = distances
+        .map(|distances| Tensor::new(distances, vec![y.rows, k]))
+        .transpose()
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
     Ok((index_tensor, distance_tensor))
 }
@@ -136,15 +154,18 @@ fn knnsearch_tie_cells(
     y: &Tensor,
     metric: &DistanceMetric,
     k: usize,
-) -> BuiltinResult<(CellArray, CellArray)> {
+    include_distances: bool,
+) -> BuiltinResult<(CellArray, Option<CellArray>)> {
     let mut index_cells = Vec::new();
-    let mut distance_cells = Vec::new();
+    let mut distance_cells = include_distances.then(Vec::new);
     index_cells
         .try_reserve(y.rows)
         .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: cell allocation failed"))?;
-    distance_cells
-        .try_reserve(y.rows)
-        .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: cell allocation failed"))?;
+    if let Some(distance_cells) = &mut distance_cells {
+        distance_cells
+            .try_reserve(y.rows)
+            .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: cell allocation failed"))?;
+    }
     for query in 0..y.rows {
         let values = sorted_neighbors(x, y, metric, query)?;
         let cutoff = values[k - 1].0;
@@ -153,7 +174,7 @@ fn knnsearch_tie_cells(
             let include = if cutoff.is_nan() {
                 distance.is_nan()
             } else {
-                !distance.is_nan() && (distance - cutoff).abs() <= EPS
+                distance == cutoff
             };
             if include || selected.len() < k {
                 selected.push((distance, index));
@@ -168,17 +189,21 @@ fn knnsearch_tie_cells(
             vec![1, len],
         )
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
-        let dist_tensor = Tensor::new(
-            selected.iter().map(|(distance, _)| *distance).collect(),
-            vec![1, len],
-        )
-        .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
         index_cells.push(Value::Tensor(idx_tensor));
-        distance_cells.push(Value::Tensor(dist_tensor));
+        if let Some(distance_cells) = &mut distance_cells {
+            let dist_tensor = Tensor::new(
+                selected.iter().map(|(distance, _)| *distance).collect(),
+                vec![1, len],
+            )
+            .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
+            distance_cells.push(Value::Tensor(dist_tensor));
+        }
     }
     let indices = CellArray::new(index_cells, y.rows, 1)
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
-    let distances = CellArray::new(distance_cells, y.rows, 1)
+    let distances = distance_cells
+        .map(|cells| CellArray::new(cells, y.rows, 1))
+        .transpose()
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
     Ok((indices, distances))
 }

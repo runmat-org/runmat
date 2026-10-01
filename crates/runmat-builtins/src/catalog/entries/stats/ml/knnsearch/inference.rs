@@ -125,6 +125,13 @@ fn observations(
     }
     match &value.shape {
         ShapeFact::Scalar => [Some(1), Some(1)],
+        ShapeFact::Shaped { dims } if dims.len() == 1 => [
+            match dims[0] {
+                DimensionFact::Known(value) => Some(value),
+                _ => None,
+            },
+            Some(1),
+        ],
         ShapeFact::Shaped { dims } if dims.len() == 2 => [
             match dims[0] {
                 DimensionFact::Known(value) => Some(value),
@@ -143,6 +150,7 @@ fn observations(
             ));
             [None, None]
         }
+        ShapeFact::Ranked { rank: 1 } => [None, Some(1)],
         ShapeFact::Ranked { .. } | ShapeFact::Unknown => [None, None],
     }
 }
