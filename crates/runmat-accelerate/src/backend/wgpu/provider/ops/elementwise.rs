@@ -1939,7 +1939,17 @@ impl WgpuProvider {
         let uniform_state = if broadcast_mode {
             let rank = output_shape.len();
             let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
-            let mut bytes: Vec<u8> = Vec::with_capacity(4 * 4 + (max_rank * 4 * 4));
+            let uniform_bytes = crate::backend::wgpu_geometry::fusion_broadcast_uniform_bytes(
+                inputs.len(),
+                max_rank,
+            )
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .ok_or_else(|| anyhow!("fused broadcast uniform size overflow"))?;
+            ensure!(
+                uniform_bytes <= self.adapter_limits.max_uniform_buffer_binding_size as usize,
+                "fused broadcast uniform exceeds adapter limit"
+            );
+            let mut bytes: Vec<u8> = Vec::with_capacity(uniform_bytes);
             let write_u32 = |buf: &mut Vec<u8>, v: u32| buf.extend_from_slice(&v.to_ne_bytes());
             write_u32(&mut bytes, 0); // len placeholder
             write_u32(&mut bytes, 0); // offset placeholder

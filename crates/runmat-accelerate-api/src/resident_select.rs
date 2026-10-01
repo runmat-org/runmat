@@ -68,6 +68,10 @@ impl ResidentSelectPlan {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn element_type(&self) -> NumericElementType {
         self.element_type
     }

@@ -2,6 +2,7 @@ use super::*;
 use runmat_accelerate_api::{
     ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationIdentity,
     ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
+    RESIDENT_SELECT_OPERATION_IDENTITY,
 };
 
 fn query(element: ProviderElementType, elements: u64, units: Option<u64>) -> ProviderCostQuery {
@@ -158,4 +159,50 @@ fn weighted_work_is_total_across_chunks_and_empty_work_stays_zero() {
     assert_eq!(empty.components.synchronization_ns, 0);
     assert_eq!(empty.components.downstream_ns, 0);
     assert_eq!(empty.scratch_bytes, Some(0));
+}
+
+#[test]
+fn resident_select_cost_uses_its_three_input_physical_route() {
+    let provider =
+        crate::placement::provider_contract::fusion_elementwise::fixture::GeometryProvider::new();
+    let representation = |element_type, shape: Vec<u64>| ProviderRepresentation {
+        element_type,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape,
+        residency: ProviderResidency::Device,
+    };
+    let query = ProviderCostQuery {
+        operation: ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new(RESIDENT_SELECT_OPERATION_IDENTITY),
+            family: ProviderOperationFamily::Elementwise,
+            inputs: vec![
+                representation(ProviderElementType::Logical, vec![2, 1]),
+                representation(ProviderElementType::F64, vec![1, 3]),
+                representation(ProviderElementType::F64, vec![1, 3]),
+            ],
+            outputs: vec![representation(ProviderElementType::F64, vec![2, 3])],
+            workload: ProviderWorkload {
+                elements: Some(6),
+                ..Default::default()
+            },
+        },
+        preparation: CandidatePreparationState::Warm,
+        context: Default::default(),
+        required_upload_bytes: 0,
+        required_download_bytes: 0,
+        downstream_materialization: false,
+    };
+    let cost = wgpu_cost_estimate(&provider, &query).cost;
+    let uniform_bytes = crate::backend::wgpu_geometry::fusion_broadcast_uniform_bytes(
+        3,
+        crate::backend::wgpu::params::BCAST_MAX_RANK,
+    )
+    .unwrap();
+    assert_eq!(cost.components.execution_ns, 12);
+    assert_eq!(cost.components.queue_ns, 20_000);
+    assert_eq!(cost.components.allocation_ns, 10_000);
+    assert_eq!(cost.components.upload_ns, transfer_prior_ns(uniform_bytes));
+    assert_eq!(cost.scratch_bytes, Some(uniform_bytes));
+    assert_eq!(cost.source, EstimateSource::StaticPrior);
 }

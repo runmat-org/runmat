@@ -52,6 +52,8 @@ mod placement;
 mod power;
 mod resident_select;
 pub use resident_select::ResidentSelectPlan;
+/// Exact feasibility identity of the provider-owned resident selection hook.
+pub const RESIDENT_SELECT_OPERATION_IDENTITY: &str = "provider.resident_select";
 mod numerical_domain;
 pub mod reduction;
 #[cfg(feature = "wgpu")]

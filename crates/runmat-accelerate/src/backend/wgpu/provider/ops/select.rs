@@ -28,6 +28,24 @@ impl WgpuProvider {
                     .all(|&extent| extent <= u32::MAX as usize),
             "select output exceeds GPU broadcast limits"
         );
+        let uniform_bytes = crate::backend::wgpu_geometry::fusion_broadcast_uniform_bytes(
+            3,
+            crate::backend::wgpu::params::BCAST_MAX_RANK,
+        )
+        .ok_or_else(|| anyhow!("select broadcast uniform size overflow"))?;
+        ensure!(
+            uniform_bytes <= u64::from(self.adapter_limits.max_uniform_buffer_binding_size),
+            "select broadcast uniform exceeds adapter limit"
+        );
+        let output_bytes = u64::try_from(plan.len().max(1))
+            .ok()
+            .and_then(|len| len.checked_mul(expected.element_size() as u64))
+            .ok_or_else(|| anyhow!("select output byte count overflow"))?;
+        ensure!(
+            output_bytes <= self.adapter_limits.max_buffer_size
+                && output_bytes <= u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+            "select output exceeds adapter storage limits"
+        );
         // Authenticate all three physical records before allocation or submission.
         // The fused dispatcher performs the same check when it binds the records.
         for handle in [mask, then_value, else_value] {
@@ -35,7 +53,6 @@ impl WgpuProvider {
             ensure!(
                 entry.element_type == expected
                     && entry.storage == GpuTensorStorage::Real
-                    && entry.shape == handle.shape()
                     && entry.len
                         == handle
                             .shape()
@@ -73,6 +90,7 @@ mod tests {
     };
 
     #[test]
+    #[ignore = "requires provisioned WGPU adapter; run explicitly with --ignored"]
     fn actual_wgpu_selects_selected_bits_with_broadcast_and_no_input_alias() {
         let provider = crate::backend::wgpu::provider::register_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -142,11 +160,18 @@ mod tests {
             }
             _ => panic!("selection changed output class"),
         }
-        drop((mask, then_value, else_value));
+        let reshaped_then = provider.reshape(&then_value, &[1, 1, 3]).unwrap();
+        let reshaped_else = provider.reshape(&else_value, &[1, 1, 3]).unwrap();
+        let reshaped = block_on(provider.select(&mask, &reshaped_then, &reshaped_else)).unwrap();
+        assert_eq!(reshaped.shape(), &[2, 1, 3]);
+        assert!(!reshaped.shares_allocation_with(&reshaped_then));
+        drop((mask, then_value, else_value, reshaped_then, reshaped_else));
         assert!(block_on(provider.download_numeric(&output)).is_ok());
+        assert!(block_on(provider.download_numeric(&reshaped)).is_ok());
     }
 
     #[test]
+    #[ignore = "requires provisioned WGPU adapter; run explicitly with --ignored"]
     fn actual_wgpu_empty_select_preserves_shape() {
         let provider = crate::backend::wgpu::provider::register_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
