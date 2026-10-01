@@ -34,7 +34,8 @@ fn fitdist_normal_fits_and_evaluates_object_methods() {
     .unwrap();
     assert!(matches!(upper, Value::Num(value) if value > 0.0 && value < 1.0e-20));
 
-    let x = block_on(icdf_probability_distribution(pd, Value::Num(0.5), None)).unwrap();
+    let fitted = admit_icdf_probability_distribution(&pd).unwrap();
+    let x = block_on(icdf_probability_distribution(fitted, Value::Num(0.5), None)).unwrap();
     assert_eq!(x, Value::Num(2.0));
 }
 

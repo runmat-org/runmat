@@ -51,14 +51,16 @@ async fn icdf_in_runtime(
                 "icdf: fitted distribution object form accepts exactly two inputs",
             ));
         }
-        crate::builtins::stats::summary::fitted_distribution::validate_icdf_probability_distribution(&name)?;
+        let fitted = crate::builtins::stats::summary::fitted_distribution::admit_icdf_probability_distribution(&name)?;
         super::numeric_inputs("icdf", &[&p], super::NumericShapePolicy::Broadcast)?;
         let admission = IcdfAdmission::new(&p, &[])?;
         let p = gather_input(p).await?;
         ensure_exact_integer_boundary(&p, "p")?;
         let output =
-            crate::builtins::stats::summary::fitted_distribution::icdf_probability_distribution(name, p, runtime)
-                .await?;
+            crate::builtins::stats::summary::fitted_distribution::icdf_probability_distribution(
+                fitted, p, runtime,
+            )
+            .await?;
         check_cancellation(runtime)?;
         return admission.finish(output);
     }

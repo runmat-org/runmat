@@ -1,12 +1,22 @@
 use super::*;
 
+/// Validated fitted-object state carried across the caller's probability
+/// admission and provider gather without reparsing serialized properties.
+pub(crate) struct FittedDistributionAdmission(FittedDistribution);
+
+pub(crate) fn admit_icdf_probability_distribution(
+    value: &Value,
+) -> BuiltinResult<FittedDistributionAdmission> {
+    distribution_from_value_for(FittedOperation::Inverse, value).map(FittedDistributionAdmission)
+}
+
 pub(crate) async fn icdf_probability_distribution(
-    distribution: Value,
+    admitted: FittedDistributionAdmission,
     p: Value,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     check_fitted_cancellation(runtime, FittedOperation::Inverse)?;
-    let fit = distribution_from_value_for(FittedOperation::Inverse, &distribution)?;
+    let fit = admitted.0;
     let x = value_to_tensor("icdf", p).await?;
     let shape = x.shape.clone();
     let data = tensor::tensor_into_values_f64(x)
@@ -18,10 +28,4 @@ pub(crate) async fn icdf_probability_distribution(
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     finish_for("icdf", shape, data)
-}
-
-/// Authenticate a fitted distribution before an `icdf` caller accesses a
-/// resident probability input. Parsing remains owned by this domain.
-pub(crate) fn validate_icdf_probability_distribution(value: &Value) -> BuiltinResult<()> {
-    distribution_from_value_for(FittedOperation::Inverse, value).map(|_| ())
 }

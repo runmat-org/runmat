@@ -24,7 +24,7 @@ use cdf::{
 use evaluation::*;
 pub(super) use fit::fit_sample_distribution;
 use fitting::*;
-pub(crate) use icdf::{icdf_probability_distribution, validate_icdf_probability_distribution};
+pub(crate) use icdf::{admit_icdf_probability_distribution, icdf_probability_distribution};
 use object::*;
 pub(super) use pdf::evaluate_pdf_entry;
 use sampling::*;
