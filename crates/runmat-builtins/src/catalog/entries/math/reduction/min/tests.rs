@@ -283,7 +283,10 @@ fn same_class_single_pairwise_preserves_class_with_unknown_or_scalar_shape() {
             outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
         };
         let result = inference::infer(&request, &MIN_CATALOG_ENTRY);
-        assert_eq!(result.outputs[0].numeric().unwrap().class, NumericClass::Single);
+        assert_eq!(
+            result.outputs[0].numeric().unwrap().class,
+            NumericClass::Single
+        );
         assert_eq!(result.outputs[0].shape, left_shape);
     }
 }

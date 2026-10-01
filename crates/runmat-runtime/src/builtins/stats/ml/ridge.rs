@@ -39,9 +39,6 @@ use admission::{parse_resident_scaled, preflight_data, preflight_scaled, value_t
 #[runtime_builtin(
     name = "ridge",
     binding_variant = "default",
-    descriptor(crate::builtins::stats::ml::ridge::RIDGE_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::ridge::RIDGE_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::ridge::RIDGE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::ridge"
 )]
 async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
