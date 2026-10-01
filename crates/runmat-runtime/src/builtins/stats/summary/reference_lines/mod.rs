@@ -3,6 +3,8 @@ mod admission;
 mod errors;
 mod fit;
 mod plot;
+#[cfg(test)]
+mod provider_tests;
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::apply_axes_target;

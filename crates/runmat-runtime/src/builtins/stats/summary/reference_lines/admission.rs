@@ -57,10 +57,11 @@ pub(super) async fn normalize_refline_coefficients(
     coefficient_count: usize,
 ) -> BuiltinResult<()> {
     use crate::builtins::common::validation::{
-        native_integer_value_is_exact_f64_async, value_has_logical_class,
-        value_has_native_integer_class,
+        native_integer_value_is_exact_f64, value_has_logical_class, value_has_native_integer_class,
     };
-    for value in args.iter_mut().take(coefficient_count) {
+    // Compatibility admission retains its precedence, and every host-visible
+    // coefficient is then checked before provider work begins.
+    for value in args.iter().take(coefficient_count) {
         if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
         {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -79,13 +80,16 @@ pub(super) async fn normalize_refline_coefficients(
                 &REFLINE_INTEGER_COEFFICIENT_EXTENSION,
                 owner.name(),
             )?;
-            if !native_integer_value_is_exact_f64_async(value).await? {
+            if !matches!(value, Value::GpuTensor(_)) && !native_integer_value_is_exact_f64(value) {
                 return Err(owner.invalid(format!(
                     "{}: integer coefficients must be exactly representable as double",
                     owner.name()
                 )));
             }
         }
+    }
+    preflight_host_coefficients(args, coefficient_count, owner)?;
+    for value in args.iter_mut().take(coefficient_count) {
         if matches!(value, Value::GpuTensor(_)) {
             *value = crate::dispatcher::gather_if_needed_async(value)
                 .await
@@ -94,6 +98,31 @@ pub(super) async fn normalize_refline_coefficients(
                     owner.invalid_with_source(message, err)
                 })?;
         }
+        if value_has_native_integer_class(value) && !native_integer_value_is_exact_f64(value) {
+            return Err(owner.invalid(format!(
+                "{}: integer coefficients must be exactly representable as double",
+                owner.name()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn preflight_host_coefficients(
+    args: &[Value],
+    coefficient_count: usize,
+    owner: ReferenceLineOwner,
+) -> BuiltinResult<()> {
+    if coefficient_count == 0 {
+        return Ok(());
+    }
+    if !matches!(args[0], Value::GpuTensor(_)) {
+        if coefficient_pair(&args[0], owner)?.is_none() {
+            finite_scalar(&args[0], "slope", owner)?;
+        }
+    }
+    if coefficient_count == 2 && !matches!(args[1], Value::GpuTensor(_)) {
+        finite_scalar(&args[1], "intercept", owner)?;
     }
     Ok(())
 }
