@@ -17,7 +17,7 @@ mod tests;
 
 use arguments::*;
 pub(super) use cdf::evaluate_cdf_entry;
-use cdf::{cdf_output_precision, first_gpu_source, is_typed_integer_value, CdfOutputPrecision};
+use cdf::{cdf_output_precision, is_typed_integer_value, CdfOutputPrecision};
 use evaluation::*;
 pub(super) use fit::fit_sample_distribution;
 use fitting::*;

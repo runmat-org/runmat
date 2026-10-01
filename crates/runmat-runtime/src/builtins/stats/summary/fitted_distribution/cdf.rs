@@ -35,7 +35,7 @@ pub(super) async fn evaluate_cdf(
         DistributionSelection::Fitted(fit) => {
             ensure_cdf_extensions(&input, &[])?;
             let precision = cdf_output_precision(&[&input]);
-            let gpu_source = first_gpu_source(&[&input]);
+            let residency = EvaluationResidency::capture(&[&input]);
             let x = cdf_value_to_tensor(input).await?;
             ensure_exact_cdf_integer_boundary(&x, "x")?;
             let shape = x.shape.clone();
@@ -43,7 +43,7 @@ pub(super) async fn evaluate_cdf(
                 .into_iter()
                 .map(|value| cdf_scalar_with_tail(&fit, value, tail))
                 .collect();
-            return finish_cdf(shape, data, precision, gpu_source);
+            return finish_cdf(shape, data, precision, residency);
         }
         DistributionSelection::Named(kind) => kind,
     };
@@ -52,7 +52,7 @@ pub(super) async fn evaluate_cdf(
     original_inputs.push(&input);
     original_inputs.extend(rest.iter());
     let precision = cdf_output_precision(&original_inputs);
-    let gpu_source = first_gpu_source(&original_inputs);
+    let residency = EvaluationResidency::capture(&original_inputs);
     let x = cdf_value_to_tensor(input).await?;
     ensure_exact_cdf_integer_boundary(&x, "x")?;
     let parameters = parse_cdf_parameter_tensors(kind, rest).await?;
@@ -74,7 +74,7 @@ pub(super) async fn evaluate_cdf(
         };
         data.push(cdf_scalar_with_tail(&fit, x_values[index], tail));
     }
-    finish_cdf(shape, data, precision, gpu_source)
+    finish_cdf(shape, data, precision, residency)
 }
 
 pub(super) fn ensure_cdf_extensions(input: &Value, parameters: &[Value]) -> BuiltinResult<()> {
@@ -121,13 +121,6 @@ pub(super) fn cdf_output_precision(inputs: &[&Value]) -> CdfOutputPrecision {
     } else {
         CdfOutputPrecision::Double
     }
-}
-
-pub(super) fn first_gpu_source(inputs: &[&Value]) -> Option<GpuTensorHandle> {
-    inputs.iter().find_map(|value| match value {
-        Value::GpuTensor(handle) => Some(handle.clone()),
-        _ => None,
-    })
 }
 
 pub(super) async fn cdf_value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
@@ -214,7 +207,7 @@ pub(super) fn finish_cdf(
     shape: Vec<usize>,
     data: Vec<f64>,
     precision: CdfOutputPrecision,
-    gpu_source: Option<GpuTensorHandle>,
+    residency: EvaluationResidency,
 ) -> BuiltinResult<Value> {
     let tensor = match precision {
         CdfOutputPrecision::Double => Tensor::new(data, shape),
@@ -223,22 +216,25 @@ pub(super) fn finish_cdf(
         }
     }
     .map_err(|err| internal_for(CDF_NAME, format!("cdf: {err}")))?;
-    if let Some(source) = gpu_source {
+    if let Some(source) = residency.source() {
+        let protected = residency.protected();
         let provider = runmat_accelerate_api::provider_for_handle(&source).ok_or_else(|| {
             invalid_for(
                 CDF_NAME,
                 "cdf: no acceleration provider registered for GPU output",
             )
         })?;
-        let mut handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[&source])
+        let mut handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &protected)
             .map_err(|err| {
                 crate::runtime_error::with_provider_execution_source(
                     invalid_for(CDF_NAME, format!("cdf: {err}")),
                     runmat_accelerate_api::ProviderExecutionError::from_source(err),
                 )
             })?;
-        gpu_helpers::propagate_output_provenance(&mut handle, [&source])?;
-        return gpu_helpers::resident_gpu_value(handle);
+        gpu_helpers::propagate_output_provenance(&mut handle, protected.iter().copied())
+            .map_err(|error| with_fitted_context(CDF_NAME, error))?;
+        return gpu_helpers::resident_gpu_value(handle)
+            .map_err(|error| with_fitted_context(CDF_NAME, error));
     }
     match precision {
         CdfOutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),

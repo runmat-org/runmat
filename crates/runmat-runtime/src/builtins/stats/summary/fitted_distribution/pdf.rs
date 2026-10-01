@@ -55,14 +55,14 @@ pub(super) async fn evaluate_pdf(
     let kind = match selection {
         DistributionSelection::Fitted(fit) => {
             let precision = cdf_output_precision(&[&input]);
-            let gpu_source = first_gpu_source(&[&input]);
+            let residency = EvaluationResidency::capture(&[&input]);
             let x = value_to_tensor(PDF_NAME, input).await?;
             let shape = x.shape.clone();
             let data = tensor::tensor_into_values_f64(x)
                 .into_iter()
                 .map(|value| pdf_scalar(&fit, value))
                 .collect();
-            return finish_pdf(shape, data, precision, gpu_source);
+            return finish_pdf(shape, data, precision, residency);
         }
         DistributionSelection::Named(kind) => kind,
     };
@@ -70,7 +70,7 @@ pub(super) async fn evaluate_pdf(
     original_inputs.push(&input);
     original_inputs.extend(rest.iter());
     let precision = cdf_output_precision(&original_inputs);
-    let gpu_source = first_gpu_source(&original_inputs);
+    let residency = EvaluationResidency::capture(&original_inputs);
     let x = value_to_tensor(PDF_NAME, input).await?;
     let parameters = parse_parameter_tensors(PDF_NAME, kind, rest).await?;
     let mut tensors = Vec::with_capacity(parameters.len() + 1);
@@ -88,14 +88,14 @@ pub(super) async fn evaluate_pdf(
         };
         data.push(pdf_scalar(&fit, x_values[index]));
     }
-    finish_pdf(shape, data, precision, gpu_source)
+    finish_pdf(shape, data, precision, residency)
 }
 
 pub(super) fn finish_pdf(
     shape: Vec<usize>,
     data: Vec<f64>,
     precision: CdfOutputPrecision,
-    gpu_source: Option<GpuTensorHandle>,
+    residency: EvaluationResidency,
 ) -> BuiltinResult<Value> {
     let tensor = match precision {
         CdfOutputPrecision::Double => Tensor::new(data, shape),
@@ -108,10 +108,14 @@ pub(super) fn finish_pdf(
         CdfOutputPrecision::Double => tensor::tensor_into_value(tensor),
         CdfOutputPrecision::Single => Value::Tensor(tensor),
     };
-    let Some(source) = gpu_source else {
+    let Some(source) = residency.source() else {
         return Ok(output);
     };
-    let restored = gpu_helpers::restore_class_preserving_value(&source, output, PDF_NAME)?;
+    let protected = residency.protected();
+    let restored = gpu_helpers::restore_class_preserving_value_protecting(
+        source, output, PDF_NAME, &protected,
+    )
+    .map_err(|error| with_fitted_context(PDF_NAME, error))?;
     if runmat_accelerate_api::handle_is_explicit(&source)
         && !matches!(restored, Value::GpuTensor(_))
     {

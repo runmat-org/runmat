@@ -69,6 +69,7 @@ fn object(value: Value) -> ObjectInstance {
 mod cdf;
 mod fit;
 mod generic;
+mod ownership;
 mod pdf;
 mod random;
 #[cfg(feature = "wgpu")]

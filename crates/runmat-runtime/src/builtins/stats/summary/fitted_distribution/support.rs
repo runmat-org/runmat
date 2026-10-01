@@ -14,6 +14,34 @@ pub(super) enum CdfTail {
     Upper,
 }
 
+/// Retain every caller-owned resident evaluation operand until result adoption
+/// completes. The first operand selects the existing output owner; the full set
+/// is protected against a provider returning any borrowed allocation.
+pub(super) struct EvaluationResidency {
+    borrowed: Vec<GpuTensorHandle>,
+}
+
+impl EvaluationResidency {
+    pub(super) fn capture(inputs: &[&Value]) -> Self {
+        let borrowed = inputs
+            .iter()
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            })
+            .collect();
+        Self { borrowed }
+    }
+
+    pub(super) fn source(&self) -> Option<&GpuTensorHandle> {
+        self.borrowed.first()
+    }
+
+    pub(super) fn protected(&self) -> Vec<&GpuTensorHandle> {
+        self.borrowed.iter().collect()
+    }
+}
+
 pub(super) enum DistributionSelection {
     Fitted(FittedDistribution),
     Named(DistributionKind),
