@@ -939,6 +939,26 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn empty_axis_after_normalization_has_owner_specific_admission() {
+        let input =
+            Value::Tensor(Tensor::new((1..=12).map(f64::from).collect(), vec![3, 4]).unwrap());
+        let empty = Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap());
+        let error = var_builtin(input.clone(), vec![empty.clone(), empty.clone()])
+            .expect_err("var rejects an empty dimension vector");
+        assert_eq!(error.identifier(), VAR_ERROR_INVALID_ARGUMENT.identifier);
+        let std = block_on(super::super::std::std_builtin(
+            input,
+            vec![empty.clone(), empty],
+        ))
+        .expect("std accepts a default-axis placeholder");
+        let Value::Tensor(std) = std else {
+            panic!("expected row of standard deviations");
+        };
+        assert_eq!(std.shape, vec![1, 4]);
+        assert_eq!(std.materialize_f64(), vec![1.0; 4]);
+    }
+
+    #[test]
     fn var_typed_integer_tensor_normalization_reads_exact_storage() {
         let normalization =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("normalization");

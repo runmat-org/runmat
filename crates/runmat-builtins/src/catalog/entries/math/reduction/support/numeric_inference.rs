@@ -177,10 +177,12 @@ pub(super) fn admitted_literal_controls(
 
 fn axes_literal(literal: &LiteralValue, empty_axes: EmptyAxesPolicy) -> Option<KnownAxes> {
     match literal {
-        LiteralValue::Empty => matches!(empty_axes, EmptyAxesPolicy::Default)
-            .then_some(KnownAxes::Default),
-        LiteralValue::Vector(values) if values.is_empty() =>
-            matches!(empty_axes, EmptyAxesPolicy::Default).then_some(KnownAxes::Default),
+        LiteralValue::Empty => {
+            matches!(empty_axes, EmptyAxesPolicy::Default).then_some(KnownAxes::Default)
+        }
+        LiteralValue::Vector(values) if values.is_empty() => {
+            matches!(empty_axes, EmptyAxesPolicy::Default).then_some(KnownAxes::Default)
+        }
         LiteralValue::Vector(values) => Some(KnownAxes::Vec(
             values
                 .iter()
@@ -199,11 +201,9 @@ fn positive_dimension(literal: &LiteralValue) -> Option<usize> {
             .filter(|dimension| *dimension > 0);
     }
     let number = ResolveContext::numeric_from_literal(literal)?;
-    if !number.is_finite() || number < 1.0 || number >= usize::MAX as f64 || number.fract() != 0.0 {
-        return None;
-    }
-    let dimension = number as usize;
-    (dimension as f64 == number).then_some(dimension)
+    runmat_types::decode_shape_dimension(number)
+        .ok()
+        .filter(|dimension| *dimension > 0)
 }
 
 fn inferred_shape(source: &[Option<usize>], axes: KnownAxes) -> Option<Vec<Option<usize>>> {
@@ -267,4 +267,28 @@ pub(super) fn inferred_shape_fact(
         },
         ShapeFact::from,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::positive_dimension;
+    use runmat_types::LiteralValue;
+
+    #[test]
+    fn literal_axes_share_shape_tolerance_and_platform_range() {
+        assert_eq!(
+            positive_dimension(&LiteralValue::Number(1.0 + f64::EPSILON)),
+            Some(1)
+        );
+        assert_eq!(
+            positive_dimension(&LiteralValue::Number(1.0 + 2.0 * f64::EPSILON)),
+            None
+        );
+        assert_eq!(positive_dimension(&LiteralValue::Number(0.0)), None);
+        let expected = (usize::BITS < 64).then_some(usize::MAX);
+        assert_eq!(
+            positive_dimension(&LiteralValue::Number(usize::MAX as f64)),
+            expected
+        );
+    }
 }
