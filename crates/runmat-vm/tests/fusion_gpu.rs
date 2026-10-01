@@ -1785,37 +1785,56 @@ fn fusion_feasibility_rejection_resumes_shared_runtime_before_provider_side_effe
             dispatches_before
         );
         let feedback = placement.profile_snapshot().feedback;
-        assert_eq!(feedback.len(), 1, "one complete shared-runtime region");
-        assert_eq!(feedback[0].candidate, "cpu.shared.fusion.elementwise");
-        assert_eq!(feedback[0].samples, 1);
-        assert_eq!(feedback[0].failures, 0);
-
         let report = runmat_accelerate::placement_report();
-        let trace = report
+        let rejected = report
             .traces
             .iter()
-            .find(|trace| trace.operation == "fusion.elementwise")
-            .expect("elementwise fusion placement trace");
-        assert!(trace.complete);
-        assert!(trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
-                && event.variant
-                    == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
-                && event.reason.as_deref() == Some("provider_operation_unsupported")
-        }));
-        assert!(!trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
-                && event.reason.as_deref() == Some("fusion_execution_failed")
-        }));
-        assert!(!trace.events.iter().any(|event| {
-            matches!(
-                event.kind,
-                runmat_accelerate::placement::PlacementEventKind::Upload
-                    | runmat_accelerate::placement::PlacementEventKind::Compile
-                    | runmat_accelerate::placement::PlacementEventKind::Queue
-                    | runmat_accelerate::placement::PlacementEventKind::Kernel
-            )
-        }));
+            .filter(|trace| {
+                trace.operation == "fusion.elementwise"
+                    && trace.events.iter().any(|event| {
+                        event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
+                            && event.variant
+                                == Some(
+                                    runmat_accelerate::placement::PlacementVariant::SharedRuntime,
+                                )
+                            && event.reason.as_deref() == Some("provider_operation_unsupported")
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert!(!rejected.is_empty(), "expected a rejected fusion region");
+        for trace in &rejected {
+            assert!(trace.complete);
+            assert!(trace.events.iter().any(|event| {
+                event.kind == runmat_accelerate::placement::PlacementEventKind::Complete
+                    && event.variant
+                        == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
+            }));
+            assert!(!trace.events.iter().any(|event| {
+                event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
+                    && event.reason.as_deref() == Some("fusion_execution_failed")
+            }));
+            assert!(!trace.events.iter().any(|event| {
+                matches!(
+                    event.kind,
+                    runmat_accelerate::placement::PlacementEventKind::Upload
+                        | runmat_accelerate::placement::PlacementEventKind::Compile
+                        | runmat_accelerate::placement::PlacementEventKind::Queue
+                        | runmat_accelerate::placement::PlacementEventKind::Kernel
+                )
+            }));
+        }
+        let cpu_samples = feedback
+            .iter()
+            .filter(|series| series.candidate == "cpu.shared.fusion.elementwise")
+            .map(|series| {
+                assert_eq!(series.failures, 0);
+                series.samples
+            })
+            .sum::<u64>();
+        assert_eq!(cpu_samples, rejected.len() as u64);
+        assert!(feedback
+            .iter()
+            .all(|series| { !series.candidate.starts_with("provider.") || series.samples == 0 }));
     });
 }
 

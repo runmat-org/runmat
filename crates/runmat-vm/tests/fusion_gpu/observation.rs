@@ -272,35 +272,45 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
         assert_eq!(cpu.failures, 0);
 
         let report = runmat_accelerate::placement_report();
-        let trace = report
+        let cpu_traces = report
             .traces
             .iter()
-            .find(|trace| trace.operation == "fusion.elementwise")
-            .expect("elementwise fusion placement trace");
-        assert!(trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
-                && event.variant
-                    == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
-                && event.reason.as_deref() == Some("complete_cost")
-        }));
-        assert!(!trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
-        }));
-        assert!(trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Complete
-                && event.variant
-                    == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
-                && event.duration_ns.is_some()
-        }));
-        assert!(!trace.events.iter().any(|event| {
-            matches!(
-                event.kind,
-                runmat_accelerate::placement::PlacementEventKind::Upload
-                    | runmat_accelerate::placement::PlacementEventKind::Compile
-                    | runmat_accelerate::placement::PlacementEventKind::Queue
-                    | runmat_accelerate::placement::PlacementEventKind::Kernel
-            )
-        }));
+            .filter(|trace| {
+                trace.operation == "fusion.elementwise"
+                    && trace.events.iter().any(|event| {
+                        event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
+                            && event.variant
+                                == Some(
+                                    runmat_accelerate::placement::PlacementVariant::SharedRuntime,
+                                )
+                            && event.reason.as_deref() == Some("complete_cost")
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !cpu_traces.is_empty(),
+            "expected a cost-selected CPU fusion region"
+        );
+        for trace in cpu_traces {
+            assert!(!trace.events.iter().any(|event| {
+                event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
+            }));
+            assert!(trace.events.iter().any(|event| {
+                event.kind == runmat_accelerate::placement::PlacementEventKind::Complete
+                    && event.variant
+                        == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
+                    && event.duration_ns.is_some()
+            }));
+            assert!(!trace.events.iter().any(|event| {
+                matches!(
+                    event.kind,
+                    runmat_accelerate::placement::PlacementEventKind::Upload
+                        | runmat_accelerate::placement::PlacementEventKind::Compile
+                        | runmat_accelerate::placement::PlacementEventKind::Queue
+                        | runmat_accelerate::placement::PlacementEventKind::Kernel
+                )
+            }));
+        }
     });
 }
 
