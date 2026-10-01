@@ -4,8 +4,8 @@ use super::super::support::{
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact,
-    ValueFact, ValueKindFact,
+    LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact,
+    ValueKindFact,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
