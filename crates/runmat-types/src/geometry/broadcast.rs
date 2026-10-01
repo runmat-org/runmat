@@ -80,7 +80,7 @@ mod tests {
         assert_eq!(broadcast_concrete_shape(&[3], &[2, 3]).unwrap(), [2, 3]);
         assert_eq!(broadcast_concrete_shape(&[0, 2], &[1, 2]).unwrap(), [0, 2]);
         assert_eq!(broadcast_concrete_shape(&[], &[2, 3]).unwrap(), [2, 3]);
-        assert_eq!(broadcast_concrete_shape(&[], &[]).unwrap(), []);
+        assert!(broadcast_concrete_shape(&[], &[]).unwrap().is_empty());
         assert_eq!(
             broadcast_concrete_shape(&[2, 2], &[3, 2]).unwrap_err(),
             ConcreteBroadcastError::IncompatibleAxis {
