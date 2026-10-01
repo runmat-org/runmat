@@ -3,7 +3,10 @@ use super::*;
 
 #[path = "provider_execution/admission.rs"]
 mod admission;
-use admission::{adapt_output_class, admit_double_omitnan_stage, admit_result, desired_precision};
+use admission::{
+    adapt_output_class, admit_double_omitnan_stage, admit_omitnan_preparation, admit_result,
+    desired_precision, OmitNanStageAlias,
+};
 
 #[cfg(test)]
 #[path = "result_tests.rs"]
@@ -326,7 +329,9 @@ async fn mean_gpu_omitnan(
     let cleaned = provider
         .map_nan_to_zero(handle)
         .map_err(mean_provider_error)?;
+    let cleaned = admit_omitnan_preparation(provider, handle, cleaned, &[])?;
     let mask = provider.not_nan_mask(handle).map_err(mean_provider_error)?;
+    let mask = admit_omitnan_preparation(provider, handle, mask, &[&cleaned])?;
 
     // Reduce cleaned (sum) and mask (count) along the requested dims
     let mut sum_h = cleaned.clone();
@@ -343,6 +348,7 @@ async fn mean_gpu_omitnan(
             handle,
             next_sum,
             &shape,
+            OmitNanStageAlias::for_reduction(&sum_h, dim),
             &[&sum_h, &cnt_h, &cleaned, &mask],
         )?;
         let next_count = provider
@@ -354,6 +360,7 @@ async fn mean_gpu_omitnan(
             handle,
             next_count,
             &shape,
+            OmitNanStageAlias::for_reduction(&cnt_h, dim),
             &[&cnt_h, &sum_h, &cleaned, &mask],
         )?;
     }
@@ -368,6 +375,7 @@ async fn mean_gpu_omitnan(
         handle,
         out,
         sum_h.shape(),
+        OmitNanStageAlias::Fresh,
         &[&sum_h, &cnt_h, &cleaned, &mask],
     )
 }

@@ -26,6 +26,9 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 mod resident;
 use resident::trace_gpu;
 
+#[cfg(test)]
+mod resident_tests;
+
 const NAME: &str = "trace";
 
 const INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {

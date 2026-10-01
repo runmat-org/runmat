@@ -1,8 +1,9 @@
 use super::*;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelDownloadFuture, GpuTensorStorage, HostTensorView,
-    NumericElementType, ThreadProviderGuard,
+    NumericElementType, ProviderExecutionFuture, ThreadProviderGuard,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Provider(TestAllocationOwner);
 impl AccelProvider for Provider {
@@ -179,6 +180,7 @@ fn omitnan_stage_rejects_wrong_precision_and_borrowed_alias_before_division() {
         &original.handle,
         wrong.handle,
         &[1, 1],
+        OmitNanStageAlias::Fresh,
         &[&original.handle],
     )
     .is_err());
@@ -193,10 +195,172 @@ fn omitnan_stage_rejects_wrong_precision_and_borrowed_alias_before_division() {
         &original.handle,
         borrowed.handle.clone(),
         &[1, 1],
+        OmitNanStageAlias::Fresh,
         &[&borrowed.handle],
     )
     .is_err());
     assert_eq!(borrowed.probe.retirements(), 0);
     original.handle.allocation_lease().validate_live().unwrap();
     borrowed.handle.allocation_lease().validate_live().unwrap();
+}
+
+#[test]
+fn omitnan_singleton_double_stage_accepts_only_its_current_identity_view() {
+    let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let original = provider
+        .0
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let current = provider
+        .0
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let earlier_same_branch = current.handle.clone();
+    let accepted = admit_double_omitnan_stage(
+        provider,
+        &original.handle,
+        current.handle.clone(),
+        &[1, 1],
+        OmitNanStageAlias::SingletonIdentity(&current.handle),
+        &[&current.handle, &earlier_same_branch],
+    )
+    .unwrap();
+    assert!(accepted.shares_allocation_with(&current.handle));
+    assert_eq!(current.probe.retirements(), 0);
+
+    let sibling = provider
+        .0
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let sibling_alias = admit_double_omitnan_stage(
+        provider,
+        &original.handle,
+        sibling.handle.clone(),
+        &[1, 1],
+        OmitNanStageAlias::SingletonIdentity(&current.handle),
+        &[&current.handle, &sibling.handle],
+    );
+    assert!(matches!(
+        sibling_alias,
+        Err(MeanProviderFailure::Execution(_))
+    ));
+    assert_eq!(sibling.probe.retirements(), 0);
+
+    let rejected = admit_double_omitnan_stage(
+        provider,
+        &original.handle,
+        original.handle.clone(),
+        &[1, 1],
+        OmitNanStageAlias::SingletonIdentity(&current.handle),
+        &[&original.handle, &current.handle],
+    );
+    assert!(matches!(rejected, Err(MeanProviderFailure::Execution(_))));
+    assert_eq!(original.probe.retirements(), 0);
+    original.handle.allocation_lease().validate_live().unwrap();
+}
+
+#[derive(Clone, Copy)]
+enum MalformedPreparation {
+    AliasedMap,
+    WrongMaskClass,
+}
+
+struct PreparationProvider {
+    owner: TestAllocationOwner,
+    mode: MalformedPreparation,
+    mask_calls: AtomicUsize,
+    reduction_calls: AtomicUsize,
+}
+
+impl AccelProvider for PreparationProvider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+
+    fn device_info(&self) -> String {
+        "mean preparation admission fixture".into()
+    }
+
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unexpected upload")
+    }
+
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("unexpected download") })
+    }
+
+    fn map_nan_to_zero(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        match self.mode {
+            MalformedPreparation::AliasedMap => Ok(input.clone()),
+            MalformedPreparation::WrongMaskClass => Ok(self
+                .owner
+                .allocate_zeroed(
+                    input.shape().to_vec(),
+                    NumericElementType::F32,
+                    GpuTensorStorage::Real,
+                )?
+                .handle),
+        }
+    }
+
+    fn not_nan_mask(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        self.mask_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self
+            .owner
+            .allocate_zeroed(
+                input.shape().to_vec(),
+                NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )?
+            .handle)
+    }
+
+    fn reduce_sum_dim<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: usize,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduction_calls.fetch_add(1, Ordering::SeqCst);
+            Err(
+                runmat_accelerate_api::unsupported_provider_operation("unexpected reduction")
+                    .into(),
+            )
+        })
+    }
+}
+
+#[test]
+fn malformed_nan_preparation_stops_before_reduction_or_later_provider_hooks() {
+    for mode in [
+        MalformedPreparation::AliasedMap,
+        MalformedPreparation::WrongMaskClass,
+    ] {
+        let provider: &'static PreparationProvider = Box::leak(Box::new(PreparationProvider {
+            owner: TestAllocationOwner::new(),
+            mode,
+            mask_calls: AtomicUsize::new(0),
+            reduction_calls: AtomicUsize::new(0),
+        }));
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider
+            .owner
+            .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let result = futures::executor::block_on(execute(
+            provider,
+            &input.handle,
+            &MeanAxes::Dim(1),
+            ReductionNaN::Omit,
+            &OutputTemplate::Default,
+        ));
+        assert!(result.is_err());
+        assert_eq!(provider.reduction_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            provider.mask_calls.load(Ordering::SeqCst),
+            usize::from(matches!(mode, MalformedPreparation::WrongMaskClass))
+        );
+        input.handle.allocation_lease().validate_live().unwrap();
+    }
 }

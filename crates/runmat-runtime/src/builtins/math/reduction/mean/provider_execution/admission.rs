@@ -3,6 +3,24 @@ use super::*;
 use gpu_helpers::{GpuOutputAliasPolicy, UnaryGpuOutputContract};
 use runmat_accelerate_api::GpuTensorStorage;
 
+#[derive(Clone, Copy)]
+pub(super) enum OmitNanStageAlias<'a> {
+    Fresh,
+    SingletonIdentity(&'a GpuTensorHandle),
+}
+
+impl<'a> OmitNanStageAlias<'a> {
+    pub(super) fn for_reduction(current: &'a GpuTensorHandle, dim: usize) -> Self {
+        if current.shape()[dim] == 1
+            && runmat_accelerate_api::handle_precision(current) == Some(ProviderPrecision::F64)
+        {
+            Self::SingletonIdentity(current)
+        } else {
+            Self::Fresh
+        }
+    }
+}
+
 fn exact_execution_owner(
     provider: &dyn AccelProvider,
     input: &GpuTensorHandle,
@@ -128,13 +146,56 @@ pub(super) fn admit_result(
     }
 }
 
+pub(super) fn admit_omitnan_preparation(
+    provider: &dyn AccelProvider,
+    original: &GpuTensorHandle,
+    output: GpuTensorHandle,
+    borrowed: &[&GpuTensorHandle],
+) -> Result<GpuTensorHandle, MeanProviderFailure> {
+    let valid = runmat_accelerate_api::handle_precision(original).is_some()
+        && exact_execution_owner(provider, original).is_some_and(|owner| {
+            gpu_helpers::unary_gpu_output_matches_shape(
+                &output,
+                original,
+                owner,
+                original.shape(),
+                UnaryGpuOutputContract {
+                    storage: GpuTensorStorage::Real,
+                    precision: runmat_accelerate_api::handle_precision(original),
+                    integer: None,
+                    logical: false,
+                    alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
+                },
+            )
+        })
+        && output.allocation_lease().validate_live().is_ok()
+        && gpu_helpers::expected_handle_numeric_element_type(&output).is_ok()
+        && borrowed
+            .iter()
+            .all(|operand| !output.shares_allocation_with(operand));
+    if valid {
+        Ok(output)
+    } else {
+        let mut error = mean_internal_error("mean: provider returned malformed NaN preparation");
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        Err(MeanProviderFailure::Execution(Box::new(
+            gpu_helpers::reject_gpu_output(output, error),
+        )))
+    }
+}
+
 pub(super) fn admit_double_omitnan_stage(
     provider: &dyn AccelProvider,
     original: &GpuTensorHandle,
     output: GpuTensorHandle,
     shape: &[usize],
+    alias: OmitNanStageAlias<'_>,
     borrowed: &[&GpuTensorHandle],
 ) -> Result<GpuTensorHandle, MeanProviderFailure> {
+    let current = match alias {
+        OmitNanStageAlias::Fresh => None,
+        OmitNanStageAlias::SingletonIdentity(current) => Some(current),
+    };
     let valid = exact_execution_owner(provider, original).is_some_and(|owner| {
         gpu_helpers::unary_gpu_output_matches_shape(
             &output,
@@ -146,14 +207,30 @@ pub(super) fn admit_double_omitnan_stage(
                 precision: Some(ProviderPrecision::F64),
                 integer: None,
                 logical: false,
-                alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
+                alias: if current.is_some() {
+                    GpuOutputAliasPolicy::AllowInput
+                } else {
+                    GpuOutputAliasPolicy::RequireDistinctAllocation
+                },
             },
         )
     }) && output.allocation_lease().validate_live().is_ok()
         && gpu_helpers::expected_handle_numeric_element_type(&output).is_ok()
-        && borrowed
-            .iter()
-            .all(|input| !output.shares_allocation_with(input));
+        && !output.shares_allocation_with(original)
+        && current.is_none_or(|current| {
+            runmat_accelerate_api::handle_precision(current) == Some(ProviderPrecision::F64)
+                && current.shape() == shape
+                && current.allocation_lease().validate_live().is_ok()
+                && (!output.shares_allocation_with(current)
+                    || gpu_helpers::same_gpu_handle(&output, current))
+        })
+        && borrowed.iter().all(|operand| {
+            !output.shares_allocation_with(operand)
+                || current.is_some_and(|current| {
+                    gpu_helpers::same_gpu_handle(&output, current)
+                        && current.shares_allocation_with(operand)
+                })
+        });
     if valid {
         Ok(output)
     } else {
