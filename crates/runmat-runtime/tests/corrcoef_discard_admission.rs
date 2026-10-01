@@ -117,6 +117,18 @@ fn zero_outputs_reject_invalid_resident_ownership_or_lease_without_provider_work
     .unwrap();
     assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
     assert!(valid.handle.allocation_lease().validate_live().is_ok());
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let logical = provider
+        .owner
+        .allocate_logical(vec![1, 0, 1, 1], vec![2, 2])
+        .unwrap();
+    let discarded_logical = block_on(call_builtin_async_with_outputs(
+        "corrcoef",
+        &[Value::GpuTensor(logical.handle.clone())],
+        0,
+    ));
+    assert!(matches!(discarded_logical, Ok(Value::OutputList(values)) if values.is_empty()));
+    assert!(logical.handle.allocation_lease().validate_live().is_ok());
 
     let foreign_owner = TestAllocationOwner::new();
     let foreign = foreign_owner
@@ -148,4 +160,25 @@ fn zero_outputs_reject_invalid_resident_ownership_or_lease_without_provider_work
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
     assert_eq!(valid.probe.retirements(), 0);
     assert_eq!(foreign.probe.retirements(), 0);
+}
+
+#[test]
+fn malformed_physical_views_cannot_become_operational_zero_output_inputs() {
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    assert!(input
+        .handle
+        .with_view(GpuTensorView::contiguous(vec![3, 2]))
+        .is_err());
+    let integer = owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::I32, GpuTensorStorage::Real)
+        .unwrap();
+    assert!(integer
+        .handle
+        .with_view(GpuTensorView::contiguous(vec![2, 2]).with_logical(true))
+        .is_err());
+    assert!(input.handle.allocation_lease().validate_live().is_ok());
+    assert!(integer.handle.allocation_lease().validate_live().is_ok());
 }

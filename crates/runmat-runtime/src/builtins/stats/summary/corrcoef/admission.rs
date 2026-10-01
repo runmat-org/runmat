@@ -155,6 +155,26 @@ pub(super) fn admit_corrcoef_inputs(args: &CorrcoefArgs) -> BuiltinResult<()> {
                 error,
             ))
         })?;
+        let element =
+            gpu_helpers::expected_handle_numeric_element_type(handle).map_err(|error| {
+                let mut fault = corrcoef_internal_error(format!(
+                    "corrcoef: invalid resident physical element type: {error}"
+                ));
+                fault.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                fault
+            })?;
+        let storage = runmat_accelerate_api::handle_storage(handle);
+        let precision = runmat_accelerate_api::handle_precision(handle);
+        let integer = runmat_accelerate_api::handle_integer_type(handle);
+        let logical = runmat_accelerate_api::handle_is_logical(handle);
+        if handle.view().validate(handle.physical()).is_err()
+            || !gpu_helpers::numeric_descriptor_matches(handle, element, storage)
+            || !gpu_helpers::gpu_class_metadata_matches(handle, precision, integer, logical)
+        {
+            let mut error = corrcoef_internal_error("corrcoef: invalid resident descriptor");
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
     }
     let first_shape = admissible_shape(&args.first)?;
     if first_shape.len() > 2 {
