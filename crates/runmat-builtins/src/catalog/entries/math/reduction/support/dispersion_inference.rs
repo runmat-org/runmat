@@ -17,6 +17,7 @@ pub fn infer_std_type(args: &[Type], context: &ResolveContext) -> Type {
         std_literal_control,
         ScalarResultClass::FloatingOnly,
         Some(std_normalization_literal as fn(&LiteralValue) -> NormalizationLiteral),
+        1,
     )
 }
 
@@ -27,6 +28,7 @@ pub fn infer_var_type(args: &[Type], context: &ResolveContext) -> Type {
         var_literal_control,
         ScalarResultClass::FloatingOnly,
         Some(var_normalization_literal as fn(&LiteralValue) -> NormalizationLiteral),
+        1,
     )
 }
 

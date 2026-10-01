@@ -15,6 +15,7 @@ pub fn infer_mean_type(args: &[Type], context: &ResolveContext) -> Type {
         mean_literal_control,
         ScalarResultClass::Promoted,
         None,
+        1,
     )
 }
 

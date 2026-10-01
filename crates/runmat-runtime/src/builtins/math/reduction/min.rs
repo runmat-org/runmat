@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    infer_min_type, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
@@ -21,7 +21,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const NAME: &str = "min";
 
 fn min_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    min_max_type(args, ctx)
+    infer_min_type(args, ctx)
 }
 
 const MIN_OUTPUT_M: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -370,7 +370,6 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::min_max_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::min")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

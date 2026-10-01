@@ -60,6 +60,15 @@ impl MinComparisonMethod {
             None
         }
     }
+
+    pub fn from_literal(literal: &LiteralValue) -> Option<Self> {
+        match literal {
+            LiteralValue::String(text)
+            | LiteralValue::Character(text)
+            | LiteralValue::Keyword(text) => Self::from_public_option(text),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

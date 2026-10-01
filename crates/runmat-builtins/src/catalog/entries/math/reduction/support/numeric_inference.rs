@@ -14,9 +14,11 @@ pub(super) enum LiteralReductionControl {
 /// The scalar result boundary differs between owners. `mean` and `sum`
 /// promote by default; `median` preserves exact integer and logical scalars.
 /// `std` and `var` reject integer data rather than silently promoting it.
+#[derive(Clone, Copy)]
 pub(super) enum ScalarResultClass {
     Promoted,
     Preserved,
+    PreserveInteger,
     FloatingOnly,
 }
 
@@ -42,12 +44,18 @@ pub(super) fn infer_numeric_reduction_type(
     decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
     scalar_class: ScalarResultClass,
     decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
+    option_start: usize,
 ) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
-    let controls =
-        admitted_literal_controls(args.len(), context, decode_control, decode_normalization);
+    let controls = admitted_literal_controls(
+        args.len(),
+        context,
+        decode_control,
+        decode_normalization,
+        option_start,
+    );
     match input {
         Type::Tensor { shape } => Type::Tensor {
             shape: shape.as_ref().and_then(|dims| {
@@ -68,7 +76,12 @@ pub(super) fn infer_numeric_reduction_type(
         // A logical median can collapse to Bool or retain LogicalArray; the
         // legacy Type cannot safely express both without an admitted extent.
         Type::Logical { .. } => Type::Unknown,
-        Type::Int if matches!(scalar_class, ScalarResultClass::Preserved) && controls.is_some() => {
+        Type::Int
+            if matches!(
+                scalar_class,
+                ScalarResultClass::Preserved | ScalarResultClass::PreserveInteger
+            ) && controls.is_some() =>
+        {
             Type::Int
         }
         Type::Bool
@@ -94,13 +107,14 @@ fn admitted_literal_controls(
     context: &ResolveContext,
     decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
     decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
+    option_start: usize,
 ) -> Option<KnownControls> {
     let mut axes = KnownAxes::Default;
     let mut axes_set = false;
     let mut output_set = false;
     let mut native_output = false;
     let mut normalization_consumed = false;
-    for index in 1..argument_count {
+    for index in option_start..argument_count {
         let literal = context.literal_args.get(index)?;
         if let Some(control) = decode_control(literal) {
             match control {
