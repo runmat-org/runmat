@@ -1783,7 +1783,9 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.get_entry_raw(a)?.integer_type().is_some() {
-                self.integer_reduce_sum_prod_dim_exec(false, dim, "sum", a)
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "ordinary integer sum requires a floating integer reduction kernel",
+                ))
             } else {
                 self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
             }
@@ -1943,7 +1945,9 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.get_entry_raw(a)?.integer_type().is_some() {
-                self.integer_reduce_sum_prod_global_exec(false, "sum", a)
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "ordinary integer sum requires a floating integer reduction kernel",
+                ))
             } else {
                 self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
             }

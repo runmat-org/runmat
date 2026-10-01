@@ -19,7 +19,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`sum` does not support a 'like' prototype option. Use 'native' or 'double' to select the output class.",
         ]},
         BuiltinDocumentationSection { heading: "GPU and fused execution", paragraphs: &[
-            "Eligible resident reductions use provider `reduce_sum_dim` or `reduce_sum` operations. NaN omission and unsupported provider forms can gather through the exact owner; supported native integer reductions have resident operations rather than a blanket host fallback. Output-class adaptation restores through the input's provider when that provider supports the class, and may return a host value for an automatically placed result when it does not.",
+            "Eligible resident reductions use provider `reduce_sum_dim` or `reduce_sum` operations. NaN omission and unsupported provider forms can gather through the exact owner; native integer reductions use distinct resident operations. Ordinary integer sums compute in double, so a provider without a floating integer reduction gathers through its exact owner instead of accumulating with native integer saturation. Output-class adaptation restores through the input's provider when that provider supports the class, and may return a host value for an automatically placed result when it does not.",
             "The shared fusion planner can prepare an eligible real floating sum as a reduction kernel. The catalog marks sum as a fusion candidate, not as an always-fused operation. Automatic placement can choose a GPU when beneficial, and explicit `gpuArray` remains available.",
         ]},
     ],

@@ -15,6 +15,7 @@ mod median;
 mod dot;
 mod matmul;
 mod numeric_reduction;
+mod integer_floating_sum;
 mod deep_learning_activation;
 mod imfilter;
 #[cfg(test)]
@@ -7848,7 +7849,7 @@ impl AccelProvider for InProcessProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
-                return self.reduce_integer_sum_native(a).await;
+                return self.floating_integer_sum(a, None);
             }
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
@@ -7867,7 +7868,10 @@ impl AccelProvider for InProcessProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
-                return self.reduce_integer_sum_native_dim(a, dim).await;
+                return self.floating_integer_sum(a, Some(dim));
+            }
+            if a.shape().len() != 2 {
+                return self.floating_sum_dim_nd(a, dim);
             }
             self.native_sum_dim(a, dim)
         })
@@ -9962,7 +9966,7 @@ mod tests {
     }
 
     #[test]
-    fn inprocess_public_reductions_route_native_wide_integers() {
+    fn inprocess_ordinary_sum_is_floating_while_native_integer_sum_saturates() {
         let provider = InProcessProvider::new();
         let input = provider
             .upload_integer(&HostIntegerTensorView {
@@ -9971,12 +9975,15 @@ mod tests {
             })
             .expect("upload uint64");
 
-        let sum = block_on(provider.reduce_sum(&input)).expect("public uint64 sum");
+        let sum = block_on(provider.reduce_sum(&input)).expect("ordinary uint64 sum");
+        let native_sum =
+            block_on(provider.reduce_integer_sum_native(&input)).expect("native uint64 sum");
         let product = block_on(provider.reduce_prod(&input)).expect("public uint64 product");
         let mean = block_on(provider.reduce_mean_dim(&input, 0)).expect("public uint64 mean");
 
+        assert_eq!(runmat_accelerate_api::handle_integer_type(&sum), None);
         assert_eq!(
-            runmat_accelerate_api::handle_integer_type(&sum),
+            runmat_accelerate_api::handle_integer_type(&native_sum),
             Some(IntegerElementType::U64)
         );
         assert_eq!(
@@ -9988,8 +9995,14 @@ mod tests {
             Some(IntegerElementType::U64)
         );
         assert_eq!(
-            block_on(provider.download_integer(&sum))
-                .expect("download uint64 sum")
+            block_on(provider.download_numeric(&sum))
+                .expect("download ordinary uint64 sum")
+                .data,
+            HostNumericDataOwned::F64(vec![2.0 * ((1_u64 << 63) as f64)])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&native_sum))
+                .expect("download native uint64 sum")
                 .data,
             HostIntegerDataOwned::U64(vec![u64::MAX])
         );

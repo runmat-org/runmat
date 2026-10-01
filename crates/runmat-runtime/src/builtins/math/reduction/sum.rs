@@ -76,6 +76,9 @@ fn sum_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 #[path = "sum/fusion_contract.rs"]
 mod fusion_contract;
 
+#[path = "sum/provider_output.rs"]
+mod provider_output;
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::sum", reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sum",
@@ -163,11 +166,13 @@ fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
         Value::Tensor(t) => Some(t.numeric_dtype()),
         Value::ComplexTensor(t) => Some(t.numeric_dtype()),
         Value::GpuTensor(handle) => {
-            let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
-                runmat_accelerate_api::provider_for_handle(handle)
-                    .map(|provider| provider.precision())
-            });
-            precision.map(precision_to_dtype)
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                // Logical storage may be U8 or floating, but sum's numerical
+                // class is double in both default and native modes.
+                Some(NumericDType::F64)
+            } else {
+                runmat_accelerate_api::handle_precision(handle).map(precision_to_dtype)
+            }
         }
         Value::Num(_) => Some(NumericDType::F64),
         Value::LogicalArray(_) => Some(NumericDType::F64),
@@ -238,10 +243,19 @@ impl InputMeta {
             Value::Tensor(tensor) => IntClass::from_numeric_dtype(tensor.numeric_dtype())
                 .map(InputClass::Integer)
                 .unwrap_or(InputClass::Double),
-            Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle)
-                .map(IntClass::from_integer_element_type)
-                .map(InputClass::Integer)
-                .unwrap_or(InputClass::Double),
+            Value::GpuTensor(handle) => {
+                if runmat_accelerate_api::handle_is_logical(handle) {
+                    InputClass::Logical
+                } else if let Some(integer) = runmat_accelerate_api::handle_integer_type(handle) {
+                    InputClass::Integer(IntClass::from_integer_element_type(integer))
+                } else if runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                {
+                    InputClass::Complex
+                } else {
+                    InputClass::Double
+                }
+            }
             _ => InputClass::Double,
         };
         let source = match value {
@@ -479,7 +493,13 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
     if matches!(parsed.nan_mode, ReductionNaN::Omit) {
         return sum_gpu_with_omitnan(handle, parsed).await;
     }
+    sum_gpu_include(handle, parsed).await
+}
 
+async fn sum_gpu_include(
+    handle: GpuTensorHandle,
+    parsed: &ParsedArguments,
+) -> BuiltinResult<Value> {
     let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
         return sum_gpu_fallback(&handle, parsed).await;
     };
@@ -490,32 +510,59 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
     }
     if matches!(parsed.output, OutputTemplate::Native)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
     {
         if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape())
         {
-            let mut output = provider
+            let output = provider
                 .reduce_integer_sum_native(&handle)
                 .await
                 .map_err(sum_provider_error)?;
-            gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
-            return gpu_helpers::resident_gpu_value(output);
+            let output = provider_output::admit_reduction(
+                provider,
+                &handle,
+                &handle,
+                output,
+                None,
+                parsed.output,
+            )?;
+            return provider_output::publish(output, &handle);
         }
         let mut current = handle.clone();
         for &dim in &resolved.dims_in_bounds {
-            current = provider
-                .reduce_integer_sum_native_dim(&current, dim)
-                .await
-                .map_err(sum_provider_error)?;
+            let next = match provider.reduce_integer_sum_native_dim(&current, dim).await {
+                Ok(next) => next,
+                Err(error) => {
+                    return Err(provider_output::fail_stage(
+                        current,
+                        sum_provider_error(error),
+                    ))
+                }
+            };
+            current = provider_output::advance_reduction(
+                provider,
+                &handle,
+                current,
+                next,
+                dim,
+                parsed.output,
+            )?;
         }
-        gpu_helpers::propagate_output_provenance(&mut current, [&handle])?;
-        return gpu_helpers::resident_gpu_value(current);
+        return provider_output::publish(current, &handle);
     }
 
     if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape()) {
         match provider.reduce_sum(&handle).await {
-            Ok(mut reduced) => {
-                gpu_helpers::propagate_output_provenance(&mut reduced, [&handle])?;
-                return gpu_helpers::resident_gpu_value(reduced);
+            Ok(reduced) => {
+                let reduced = provider_output::admit_reduction(
+                    provider,
+                    &handle,
+                    &handle,
+                    reduced,
+                    None,
+                    parsed.output,
+                )?;
+                return provider_output::publish(reduced, &handle);
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => return Err(sum_provider_error(error)),
@@ -526,23 +573,47 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
     for &dim in &resolved.dims_in_bounds {
         match provider.reduce_sum_dim(&current, dim).await {
             Ok(next) => {
-                current = next;
+                current = provider_output::advance_reduction(
+                    provider,
+                    &handle,
+                    current,
+                    next,
+                    dim,
+                    parsed.output,
+                )?;
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                drop(current);
+                provider_output::retire_before_fallback(current)?;
                 return sum_gpu_fallback(&handle, parsed).await;
             }
-            Err(error) => return Err(sum_provider_error(error)),
+            Err(error) => {
+                return Err(provider_output::fail_stage(
+                    current,
+                    sum_provider_error(error),
+                ))
+            }
         }
     }
-    gpu_helpers::propagate_output_provenance(&mut current, [&handle])?;
-    gpu_helpers::resident_gpu_value(current)
+    provider_output::publish(current, &handle)
 }
 
 async fn sum_gpu_with_omitnan(
     handle: GpuTensorHandle,
     parsed: &ParsedArguments,
 ) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        || (matches!(parsed.output, OutputTemplate::Native)
+            && runmat_accelerate_api::handle_integer_type(&handle).is_some())
+    {
+        // Logical and integer values cannot contain NaN. Native integer sums
+        // retain exact storage; logical sums use their ordinary numeric route.
+        let include = ParsedArguments {
+            selection: parsed.selection.clone(),
+            nan_mode: ReductionNaN::Include,
+            output: parsed.output,
+        };
+        return sum_gpu_include(handle, &include).await;
+    }
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id() != 0 {
@@ -561,7 +632,7 @@ async fn sum_gpu_with_omitnan(
 
     // Replace NaNs with 0 on device, then reduce along requested dims.
     let cleaned = match provider.map_nan_to_zero(&handle) {
-        Ok(cleaned) => cleaned,
+        Ok(cleaned) => provider_output::admit_nan_map(provider, &handle, cleaned)?,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             return sum_gpu_fallback(&handle, parsed).await;
         }
@@ -573,17 +644,28 @@ async fn sum_gpu_with_omitnan(
     for &dim in &resolved.dims_in_bounds {
         match provider.reduce_sum_dim(&current, dim).await {
             Ok(next) => {
-                current = next;
+                current = provider_output::advance_reduction(
+                    provider,
+                    &handle,
+                    current,
+                    next,
+                    dim,
+                    parsed.output,
+                )?;
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                drop(current);
+                provider_output::retire_before_fallback(current)?;
                 return sum_gpu_fallback(&handle, parsed).await;
             }
-            Err(error) => return Err(sum_provider_error(error)),
+            Err(error) => {
+                return Err(provider_output::fail_stage(
+                    current,
+                    sum_provider_error(error),
+                ))
+            }
         }
     }
-    gpu_helpers::propagate_output_provenance(&mut current, [&handle])?;
-    gpu_helpers::resident_gpu_value(current)
+    provider_output::publish(current, &handle)
 }
 
 fn sum_provider_error(source: anyhow::Error) -> RuntimeError {
@@ -980,6 +1062,9 @@ async fn apply_output_template(
         OutputTemplate::Default | OutputTemplate::Double => {
             apply_double_template(value, meta).await
         }
+        OutputTemplate::Native if matches!(meta.class, InputClass::Logical | InputClass::Bool) => {
+            apply_double_template(value, meta).await
+        }
         OutputTemplate::Native => {
             let value = apply_native_template(value, meta).await?;
             ensure_device(value, meta).await
@@ -1120,7 +1205,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostLogicalTensorView,
+        IntegerElementType,
     };
     use runmat_value::{IntValue, IntegerStorage};
 
@@ -1710,6 +1796,88 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
             assert_eq!(values(&gathered), vec![4.0, 12.0]);
+        });
+    }
+
+    #[test]
+    fn sum_integer_gpu_default_accumulates_double_before_native_saturation() {
+        test_support::with_test_provider(|provider| {
+            let upload = || {
+                provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::I8(&[100, 100, 100, 100]),
+                        shape: &[2, 2],
+                    })
+                    .expect("upload int8 gpuArray")
+            };
+            for options in [vec![], vec![Value::from("double")]] {
+                let result =
+                    sum_builtin(Value::GpuTensor(upload()), options).expect("ordinary integer sum");
+                let gathered = test_support::gather(result).expect("gather double sum");
+                assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
+                assert_eq!(values(&gathered), vec![200.0, 200.0]);
+            }
+            let native = sum_builtin(Value::GpuTensor(upload()), vec![Value::from("native")])
+                .expect("native integer sum");
+            let Value::GpuTensor(native) = native else {
+                panic!("native result should remain resident");
+            };
+            assert_eq!(
+                block_on(provider.download_integer(&native))
+                    .expect("native int8 sum")
+                    .data,
+                HostIntegerDataOwned::I8(vec![127, 127])
+            );
+        });
+    }
+
+    #[test]
+    fn native_sum_of_resident_logical_u8_is_numeric_double_not_integer() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload_logical(&HostLogicalTensorView {
+                    data: &[1, 1, 0, 1],
+                    shape: &[2, 2],
+                })
+                .expect("upload logical gpuArray");
+            assert!(runmat_accelerate_api::handle_is_logical(&input));
+            let result = sum_builtin(Value::GpuTensor(input), vec![Value::from("native")])
+                .expect("logical native sum");
+            let Value::GpuTensor(output) = &result else {
+                panic!("logical sum should remain resident on the F64 owner");
+            };
+            assert!(!runmat_accelerate_api::handle_is_logical(output));
+            assert_eq!(runmat_accelerate_api::handle_integer_type(output), None);
+            let gathered = test_support::gather(result).expect("gather logical sum");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
+            assert_eq!(values(&gathered), vec![2.0, 1.0]);
+        });
+    }
+
+    #[test]
+    fn resident_native_integer_omitnan_keeps_wide_exact_payload() {
+        test_support::with_test_provider(|provider| {
+            let wide = (1_u64 << 53) + 1;
+            let input = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[wide, 0]),
+                    shape: &[2, 1],
+                })
+                .expect("upload wide uint64");
+            let result = sum_builtin(
+                Value::GpuTensor(input),
+                vec![Value::from("omitnan"), Value::from("native")],
+            )
+            .expect("native integer omitnan");
+            let Value::GpuTensor(result) = result else {
+                panic!("native integer result should remain resident");
+            };
+            assert_eq!(
+                block_on(provider.download_integer(&result))
+                    .expect("exact native result")
+                    .data,
+                HostIntegerDataOwned::U64(vec![wide])
+            );
         });
     }
 

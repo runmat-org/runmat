@@ -235,7 +235,7 @@ pub const SUM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Default and explicit-double integer sums compute and return double; omitted dimensions and all share the same rule, and resident results remain resident.",
+        notes: "Default and explicit-double integer sums compute and return double; omitted dimensions and all share the same rule. Providers with a floating integer reduction keep the calculation resident; other providers use the exact-owner gather and class-preserving restoration policy.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "S = sum(A, dim_or_vecdim, nanflag, \"native\")",
