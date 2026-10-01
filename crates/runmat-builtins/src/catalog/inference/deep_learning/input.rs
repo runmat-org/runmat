@@ -7,7 +7,7 @@ pub(super) struct NetworkInputFacts {
     pub data: Option<ValueFact>,
     pub dlarray: bool,
     pub unsupported_storage: bool,
-    pub unsupported_resident_dlarray: bool,
+    pub unsupported_resident_data: bool,
 }
 
 pub(super) fn project(input: Option<&ValueFact>) -> NetworkInputFacts {
@@ -33,21 +33,21 @@ pub(super) fn project(input: Option<&ValueFact>) -> NetworkInputFacts {
     let unsupported_storage = data
         .as_ref()
         .is_some_and(|fact| fact.storage == StorageFact::Sparse);
-    let unsupported_resident_dlarray = dlarray
-        && data.as_ref().is_some_and(|fact| {
-            matches!(&fact.residency, ResidencyFact::Device { .. })
-                && !matches!(
-                    &fact.kind,
-                    ValueKindFact::Numeric(NumericFact {
-                        class: NumericClass::Single | NumericClass::Double,
-                        domain: NumericDomain::Real
-                    })
-                )
-        });
+    let unsupported_resident_data = data.as_ref().is_some_and(|fact| {
+        matches!(&fact.residency, ResidencyFact::Device { .. })
+            && match &fact.kind {
+                ValueKindFact::Numeric(NumericFact { class, domain }) => {
+                    *domain != NumericDomain::Real
+                        || !matches!(class, NumericClass::Single | NumericClass::Double)
+                }
+                ValueKindFact::Unknown => false,
+                _ => true,
+            }
+    });
     NetworkInputFacts {
         data,
         dlarray,
         unsupported_storage,
-        unsupported_resident_dlarray,
+        unsupported_resident_data,
     }
 }

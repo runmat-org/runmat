@@ -3,7 +3,7 @@ use runmat_types::{ObjectFact, ValueFact, ValueKindFact};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ComplexLayerSupport {
-    Supported,
+    HostOnly,
     Unsupported,
     Unknown,
 }
@@ -19,7 +19,7 @@ pub(super) fn complex_layer_support(
             || *kind == DeepLearningLayerKind::GlobalAveragePooling1D
             || kind.is_output()
     }) {
-        ComplexLayerSupport::Supported
+        ComplexLayerSupport::HostOnly
     } else {
         ComplexLayerSupport::Unsupported
     }

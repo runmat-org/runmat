@@ -10,7 +10,7 @@ pub(in crate::catalog) enum NetworkInferenceCaller {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum NetworkInputIssue {
     UnsupportedStorage,
-    UnsupportedResidentDlarray,
+    UnsupportedResidentData,
     UnsupportedComplexLayers,
     InvalidRawGeometry,
     InvalidData,
@@ -24,9 +24,9 @@ impl NetworkInputIssue {
         };
         let (suffix, message) = match self {
             Self::UnsupportedStorage => ("STORAGE", "requires dense numeric or logical input storage"),
-            Self::UnsupportedResidentDlarray => (
+            Self::UnsupportedResidentData => (
                 "RESIDENT-CLASS",
-                "provider-resident dlarray Data must have real single or double storage",
+                "provider-resident input data must have real single or double storage",
             ),
             Self::UnsupportedComplexLayers => (
                 "COMPLEX-LAYER",

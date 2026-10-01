@@ -8,6 +8,9 @@ use crate::builtins::deep_learning::layers::{
 };
 use crate::builtins::deep_learning::model::dlnetwork_builtin;
 
+#[path = "tests/complex.rs"]
+mod complex;
+
 fn network() -> Value {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(

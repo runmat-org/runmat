@@ -191,7 +191,7 @@ fn network_domain_and_residency_follow_canonical_forward_inference() {
         supported.outputs[0].numeric().map(|number| number.domain),
         Some(NumericDomain::Complex)
     );
-    assert_eq!(supported.outputs[0].residency, ResidencyFact::Unknown);
+    assert_eq!(supported.outputs[0].residency, ResidencyFact::Host);
     let unknown = infer(
         model(runmat_types::standard::DL_NETWORK),
         complex.clone(),

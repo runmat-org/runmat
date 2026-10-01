@@ -30,7 +30,7 @@ fn numeric_result(
     output_shape: ShapeFact,
     complex_layers: ComplexLayerSupport,
 ) -> Option<ValueFact> {
-    let (class, domain) = match &input.kind {
+    let (class, domain, residency) = match &input.kind {
         ValueKindFact::Numeric(number) if number.domain == NumericDomain::Real => (
             if number.class == NumericClass::Single {
                 NumericClass::Single
@@ -38,20 +38,27 @@ fn numeric_result(
                 NumericClass::Double
             },
             NumericDomain::Real,
+            ResidencyFact::Unknown,
         ),
         ValueKindFact::Numeric(number)
             if number.domain == NumericDomain::Complex
                 && matches!(number.class, NumericClass::Single | NumericClass::Double) =>
         {
             match complex_layers {
-                ComplexLayerSupport::Supported => (number.class, NumericDomain::Complex),
+                ComplexLayerSupport::HostOnly => {
+                    (number.class, NumericDomain::Complex, ResidencyFact::Host)
+                }
                 ComplexLayerSupport::Unknown => {
                     return Some(ValueFact::unknown(DynamicReason::RuntimeValue))
                 }
                 ComplexLayerSupport::Unsupported => return None,
             }
         }
-        ValueKindFact::Logical => (NumericClass::Double, NumericDomain::Real),
+        ValueKindFact::Logical => (
+            NumericClass::Double,
+            NumericDomain::Real,
+            ResidencyFact::Unknown,
+        ),
         ValueKindFact::Unknown => return Some(ValueFact::unknown(DynamicReason::RuntimeValue)),
         _ => return None,
     };
@@ -59,17 +66,16 @@ fn numeric_result(
     result.kind = ValueKindFact::Numeric(NumericFact { class, domain });
     result.shape = output_shape;
     result.storage = StorageFact::Dense;
-    // Host-origin data does not prove host execution: explicit resident
-    // learnables can require a provider route for the same input.
-    result.residency = ResidencyFact::Unknown;
+    // Real host-origin data can still use resident learnables. Only the
+    // admitted complex input/pooling/output topology has a host-only route.
+    result.residency = residency;
     result.view = ViewFact::Unknown;
     result.layout = LayoutFact::Unknown;
     result.contiguity = ContiguityFact::Unknown;
     Some(result)
 }
 
-fn dlarray_result(mut data: ValueFact) -> ValueFact {
-    data.residency = ResidencyFact::Unknown;
+fn dlarray_result(data: ValueFact) -> ValueFact {
     let shape = data.shape.clone();
     let mut wrapper = ValueFact::unknown(DynamicReason::RuntimeValue);
     wrapper.kind = ValueKindFact::Object(ObjectFact {
@@ -108,8 +114,8 @@ pub(in crate::catalog) fn infer_network_output(
     if input_facts.unsupported_storage {
         issues.push(NetworkInputIssue::UnsupportedStorage);
     }
-    if input_facts.unsupported_resident_dlarray {
-        issues.push(NetworkInputIssue::UnsupportedResidentDlarray);
+    if input_facts.unsupported_resident_data {
+        issues.push(NetworkInputIssue::UnsupportedResidentData);
     }
     let layers = network::known_layers(network);
     let complex_layers = network::complex_layer_support(layers.as_deref());
@@ -122,7 +128,7 @@ pub(in crate::catalog) fn infer_network_output(
             })
         ) && complex_layers == ComplexLayerSupport::Unsupported
     });
-    if unsupported_complex_layers && !input_facts.unsupported_resident_dlarray {
+    if unsupported_complex_layers && !input_facts.unsupported_resident_data {
         issues.push(NetworkInputIssue::UnsupportedComplexLayers);
     }
     if !input_facts.dlarray
@@ -134,7 +140,7 @@ pub(in crate::catalog) fn infer_network_output(
         shape::output_shape(data, input_facts.dlarray, layers.as_deref())
     });
     let mut output = match data.and_then(|data| {
-        (!input_facts.unsupported_storage && !input_facts.unsupported_resident_dlarray)
+        (!input_facts.unsupported_storage && !input_facts.unsupported_resident_data)
             .then(|| numeric_result(data, shape, complex_layers))
             .flatten()
     }) {
@@ -143,7 +149,7 @@ pub(in crate::catalog) fn infer_network_output(
         None => {
             if input.is_some()
                 && !input_facts.unsupported_storage
-                && !input_facts.unsupported_resident_dlarray
+                && !input_facts.unsupported_resident_data
                 && !unsupported_complex_layers
             {
                 issues.push(NetworkInputIssue::InvalidData);
@@ -161,15 +167,11 @@ pub(in crate::catalog) fn infer_network_output(
             {
                 if let Some(data) = object.properties.get_mut(crate::DLARRAY_DATA_PROPERTY) {
                     data.shape = predict_shape(&data.shape);
-                    data.residency = ResidencyFact::Unknown;
                     output.shape = data.shape.clone();
                 }
             }
             _ => {
                 output.shape = predict_shape(&output.shape);
-                // Explicit resident learnables may select a provider even
-                // for predictor data that originates on the host.
-                output.residency = ResidencyFact::Unknown;
             }
         }
     }

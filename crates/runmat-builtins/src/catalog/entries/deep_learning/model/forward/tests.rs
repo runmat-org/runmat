@@ -365,3 +365,4 @@ fn forward_diagnoses_known_sparse_and_unsupported_resident_dlarray_classes() {
 
 mod geometry;
 mod complex;
+mod residency;
