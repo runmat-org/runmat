@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn parse_options(rest: Vec<OptionInput>) -> BuiltinResult<LassoOptions> {
+pub(super) fn parse_options<'a>(
+    rest: impl IntoIterator<Item = &'a OptionInput>,
+) -> BuiltinResult<LassoOptions> {
     let mut options = LassoOptions::default();
     for input in rest {
         let value = &input.value;

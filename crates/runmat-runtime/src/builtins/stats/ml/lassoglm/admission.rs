@@ -122,6 +122,9 @@ pub(super) fn ensure_extensions(
 }
 
 pub(super) async fn gathered(value: Value) -> BuiltinResult<Value> {
+    if !crate::dispatcher::value_contains_gpu(&value) {
+        return Ok(value);
+    }
     gather_if_needed_async(&value).await.map_err(|mut error| {
         if error.context.builtin.is_none() {
             error.context = error.context.with_builtin(NAME);

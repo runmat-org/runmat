@@ -1,4 +1,22 @@
-//! Numerical primitives shared by the linear and generalized-linear regularization paths.
+//! Shared admission geometry and numerical primitives for regularized regression.
+
+use runmat_value::Value;
+
+/// Admission checks visible shape before any operand is downloaded.
+/// Both solvers consume the first two dimensions as a column-major matrix,
+/// with only singleton trailing dimensions allowed.
+pub(super) fn predictor_matrix_dimensions(value: &Value) -> Result<(usize, usize), String> {
+    let shape = match value {
+        Value::Tensor(tensor) => &tensor.shape,
+        Value::LogicalArray(array) => &array.shape,
+        Value::GpuTensor(handle) => {
+            return crate::builtins::common::linalg::matrix_dimensions_for("X", handle.shape())
+        }
+        Value::Num(_) | Value::Int(_) => return Ok((1, 1)),
+        _ => return Err("X must be a real numeric predictor matrix".into()),
+    };
+    crate::builtins::common::linalg::matrix_dimensions_for("X", shape)
+}
 
 pub(super) fn geometric_sequence(max_value: f64, ratio: f64, count: usize) -> Vec<f64> {
     let min_value = max_value * ratio;

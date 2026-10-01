@@ -7,8 +7,8 @@ pub(super) fn lassoglm_compute(
     options: Options,
 ) -> BuiltinResult<FitResult> {
     let x = value_to_real_tensor("X", x)?;
-    let rows = x.rows();
-    let cols = x.cols();
+    let (rows, cols) = crate::builtins::common::linalg::matrix_dimensions_for("X", &x.shape)
+        .map_err(|detail| invalid(format!("lassoglm: {detail}")))?;
     if rows == 0 || cols == 0 {
         return Err(invalid("lassoglm: X must be a nonempty numeric matrix"));
     }

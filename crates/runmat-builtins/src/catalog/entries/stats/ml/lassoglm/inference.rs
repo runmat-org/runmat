@@ -32,15 +32,32 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
         match &x.shape {
-            ShapeFact::Shaped { dims } if dims.len() == 2 => dims.get(1).and_then(known),
-            ShapeFact::Shaped { .. } | ShapeFact::Ranked { rank: 3.. } => {
+            ShapeFact::Shaped { dims }
+                if dims
+                    .iter()
+                    .skip(2)
+                    .any(|dim| matches!(dim, DimensionFact::Known(value) if *value != 1)) =>
+            {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-LASSOGLM-X-RANK",
-                    "X must be two-dimensional",
+                    "X must be a matrix with only singleton trailing dimensions",
                     0,
                 ));
                 None
             }
+            ShapeFact::Shaped { dims }
+                if dims
+                    .iter()
+                    .skip(2)
+                    .all(|dim| matches!(dim, DimensionFact::Known(1))) =>
+            {
+                if dims.len() < 2 {
+                    Some(1)
+                } else {
+                    dims.get(1).and_then(known)
+                }
+            }
+            ShapeFact::Ranked { rank: 0 | 1 } => Some(1),
             _ => None,
         }
     });

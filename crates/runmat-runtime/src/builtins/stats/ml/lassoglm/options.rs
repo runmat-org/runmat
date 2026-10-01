@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn parse_options(rest: Vec<OptionInput>) -> BuiltinResult<Options> {
+pub(super) fn parse_options<'a>(
+    rest: impl IntoIterator<Item = &'a OptionInput>,
+) -> BuiltinResult<Options> {
     let mut options = Options::default();
     for input in rest {
         let value = &input.value;

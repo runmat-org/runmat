@@ -192,6 +192,52 @@ fn rejects_unsupported_link_and_excessive_resource_options() {
 }
 
 #[test]
+fn predictor_geometry_rejects_nonsingleton_tail_and_keeps_singleton_tail() {
+    let rejected = block_on(lassoglm_builtin(
+        tensor(vec![1.0; 8], vec![2, 2, 2]),
+        tensor(vec![1.0, 2.0], vec![2, 1]),
+        Value::from("normal"),
+        Vec::new(),
+    ));
+    assert_eq!(
+        rejected
+            .expect_err("third predictor axis must not be ignored")
+            .identifier(),
+        Some("RunMat:lassoglm:InvalidArgument")
+    );
+    let accepted = block_on(lassoglm_builtin(
+        tensor(vec![0.0, 1.0, 2.0, 3.0, 1.0, 0.0, 1.0, 0.0], vec![4, 2, 1]),
+        tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]),
+        Value::from("normal"),
+        vec![Value::from("Lambda"), Value::Num(0.1)],
+    ));
+    assert!(
+        accepted.is_ok(),
+        "singleton tail retains matrix geometry: {accepted:?}"
+    );
+}
+
+#[test]
+fn invalid_host_option_precedes_unregistered_predictor_download() {
+    let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("unregistered resident fixture")
+        .handle;
+    let error = block_on(lassoglm_builtin(
+        Value::GpuTensor(resident),
+        tensor(vec![1.0, 2.0], vec![2, 1]),
+        Value::from("normal"),
+        vec![Value::from("Alpha"), Value::Num(2.0)],
+    ))
+    .expect_err("host option must reject before provider access");
+    assert_eq!(error.identifier(), Some("RunMat:lassoglm:InvalidArgument"));
+}
+
+#[test]
 fn validates_binomial_counts_and_predictor_names() {
     let err = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0], vec![2, 1]),

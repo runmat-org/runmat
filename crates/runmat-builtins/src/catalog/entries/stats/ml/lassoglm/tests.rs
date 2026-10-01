@@ -60,6 +60,40 @@ fn known_distribution_and_requested_fitinfo_infer_double_matrix_and_struct() {
 }
 
 #[test]
+fn predictor_shape_inference_accepts_singleton_tail_but_not_a_third_axis() {
+    let mut request = CallRequest {
+        arguments: vec![
+            numeric(6, 3),
+            numeric(6, 1),
+            ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("normal".into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    request.arguments[0].shape = ShapeFact::from(vec![Some(6), Some(3), Some(1)]);
+    let accepted = inference::infer(&request, &LASSOGLM_CATALOG_ENTRY);
+    assert!(accepted.diagnostics.is_empty());
+    assert_eq!(
+        accepted.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), None])
+    );
+    request.arguments[0].shape = ShapeFact::from(vec![Some(6), Some(3), Some(2)]);
+    let rejected = inference::infer(&request, &LASSOGLM_CATALOG_ENTRY);
+    assert!(!rejected.diagnostics.is_empty());
+    request.arguments[0].shape = ShapeFact::from(vec![Some(6), Some(3), None]);
+    let uncertain = inference::infer(&request, &LASSOGLM_CATALOG_ENTRY);
+    assert!(uncertain.diagnostics.is_empty());
+    assert_eq!(
+        uncertain.outputs[0].shape,
+        ShapeFact::from(vec![None, None])
+    );
+}
+
+#[test]
 fn dynamic_option_name_can_replace_visible_scalar_lambda() {
     let request = CallRequest {
         arguments: vec![

@@ -28,7 +28,9 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::stats::ml::regularized::{geometric_sequence, soft_threshold};
+use crate::builtins::stats::ml::regularized::{
+    geometric_sequence, predictor_matrix_dimensions, soft_threshold,
+};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "lasso";
@@ -143,10 +145,28 @@ struct OptionInput {
 pub(crate) async fn lasso_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let rest = admit_options(rest)?;
     ensure_extensions(&x, &y, &rest)?;
+    let (rows, cols) = predictor_matrix_dimensions(&x)
+        .map_err(|detail| invalid_argument(format!("lasso: {detail}")))?;
+    if rows == 0 || cols == 0 {
+        return Err(invalid_argument(
+            "lasso: X must be a nonempty numeric matrix",
+        ));
+    }
+    let all_host_options = rest
+        .iter()
+        .all(|input| !crate::dispatcher::value_contains_gpu(&input.value));
+    let host_options = parse_options(
+        rest.iter()
+            .filter(|input| !crate::dispatcher::value_contains_gpu(&input.value)),
+    )?;
+    let options = if all_host_options {
+        host_options
+    } else {
+        let rest = gather_options(rest).await?;
+        parse_options(rest.iter())?
+    };
     let x = gathered(x).await?;
     let y = gathered(y).await?;
-    let rest = gather_options(rest).await?;
-    let options = parse_options(rest)?;
     let result = lasso_compute(x, y, options)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),

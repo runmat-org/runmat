@@ -75,6 +75,29 @@ fn output_count_and_lambda_dedup_uncertainty_are_sound() {
 }
 
 #[test]
+fn predictor_shape_inference_accepts_singleton_tail_but_not_a_third_axis() {
+    let mut request = call(None, 1);
+    request.arguments[0].shape = ShapeFact::from(vec![Some(6), Some(3), Some(1)]);
+    let accepted = inference::infer(&request, &LASSO_CATALOG_ENTRY);
+    assert!(accepted.diagnostics.is_empty());
+    assert_eq!(
+        accepted.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), None])
+    );
+
+    request.arguments[0].shape = ShapeFact::from(vec![Some(6), Some(3), Some(2)]);
+    let rejected = inference::infer(&request, &LASSO_CATALOG_ENTRY);
+    assert!(!rejected.diagnostics.is_empty());
+    request.arguments[0].shape = ShapeFact::from(vec![Some(6), Some(3), None]);
+    let uncertain = inference::infer(&request, &LASSO_CATALOG_ENTRY);
+    assert!(uncertain.diagnostics.is_empty());
+    assert_eq!(
+        uncertain.outputs[0].shape,
+        ShapeFact::from(vec![None, None])
+    );
+}
+
+#[test]
 fn dfmax_and_dynamic_option_names_do_not_prove_lambda_path_width() {
     let mut request = call(Some((numeric(1, 1), LiteralValue::Number(0.1))), 1);
     request.arguments.extend([
