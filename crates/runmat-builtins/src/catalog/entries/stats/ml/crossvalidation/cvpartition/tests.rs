@@ -148,7 +148,10 @@ fn independent_kfold_lower_bound_and_known_invalid_options_do_not_prove_object()
     assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
 
     let custom_scalar = request(
-        vec![ValueFact::scalar(ValueKindFact::Character), numeric()],
+        vec![
+            ValueFact::scalar(ValueKindFact::Character),
+            ValueFact::scalar(numeric().kind),
+        ],
         vec![
             LiteralValue::Character("CustomPartition".into()),
             LiteralValue::Number(1.0),
@@ -157,6 +160,19 @@ fn independent_kfold_lower_bound_and_known_invalid_options_do_not_prove_object()
     let result = inference::infer_constructor(&custom_scalar, &CVPARTITION_CATALOG_ENTRY);
     assert!(!result.diagnostics.is_empty());
     assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+
+    // A dense singleton is a numeric array, unlike a numeric scalar value.
+    // CustomPartition accepts that array representation at runtime.
+    let custom_singleton_array = request(
+        vec![ValueFact::scalar(ValueKindFact::Character), numeric()],
+        vec![
+            LiteralValue::Character("CustomPartition".into()),
+            LiteralValue::Unknown,
+        ],
+    );
+    let result = inference::infer_constructor(&custom_singleton_array, &CVPARTITION_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Object(_)));
 
     let stratify_two = request(
         vec![
