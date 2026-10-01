@@ -35,7 +35,7 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
 mod compute;
 use compute::ridge_compute;
 mod admission;
-use admission::{parse_scaled, value_to_tensor};
+use admission::{parse_resident_scaled, preflight_data, preflight_scaled, value_to_tensor};
 #[runtime_builtin(
     name = "ridge",
     binding_variant = "default",
@@ -79,13 +79,15 @@ async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> Builti
             )?;
         }
     }
+    preflight_data(&y, &x, &k)?;
+    let scaled = rest.first().map(preflight_scaled).transpose()?;
     let y = value_to_tensor(y).await?;
     let x = value_to_tensor(x).await?;
     let k = value_to_tensor(k).await?;
-    let scaled = if let Some(value) = rest.first() {
-        parse_scaled(value).await?
-    } else {
-        RidgeScaling::Standardized
+    let scaled = match scaled {
+        Some(Some(scaled)) => scaled,
+        Some(None) => parse_resident_scaled(&rest[0]).await?,
+        None => RidgeScaling::Standardized,
     };
     ridge_compute(y, x, k, scaled == RidgeScaling::Standardized).map(Value::Tensor)
 }

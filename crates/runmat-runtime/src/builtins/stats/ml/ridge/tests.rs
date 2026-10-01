@@ -105,6 +105,20 @@ fn wide_integer_scaled_flag_does_not_round_into_an_admitted_value() {
 }
 
 #[test]
+fn host_visible_geometry_and_flag_are_rejected_at_admission() {
+    let y = tensor(vec![1.0, 3.0, 5.0], 3, 1);
+    let x = tensor(vec![0.0, 1.0], 2, 1);
+    assert!(super::admission::preflight_data(&y, &x, &Value::Num(0.0)).is_err());
+    assert!(super::admission::preflight_scaled(&Value::Num(2.0)).is_err());
+    assert!(super::admission::preflight_data(
+        &y,
+        &tensor(vec![0.0, 1.0, 2.0], 3, 1),
+        &Value::Num(-1.0)
+    )
+    .is_err());
+}
+
+#[test]
 fn rank_deficient_k_zero_uses_minimum_norm_solution() {
     let y = tensor(vec![2.0, 4.0, 6.0], 3, 1);
     let x = tensor(vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0], 3, 2);
