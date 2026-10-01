@@ -1,12 +1,39 @@
 //! Host-visible matrix and response admission before provider materialization.
-use super::{ensure_exact_integer_tensor, exact_integer_as_f64, invalid, scalar_text};
+use super::{
+    ensure_exact_integer_tensor, exact_integer_as_f64, gather_value, invalid, response_outcomes,
+    scalar_text, ResponseOutcomes,
+};
 use crate::BuiltinResult;
 use runmat_accelerate_api::GpuTensorStorage;
 use runmat_value::Value;
 
-pub(super) fn preflight(x: &Value, y: &Value) -> BuiltinResult<()> {
+pub(super) fn preflight(x: &Value, y: &Value) -> BuiltinResult<usize> {
     let rows = predictor_rows(x)?;
-    response_geometry(y, rows)
+    response_geometry(y, rows)?;
+    Ok(rows)
+}
+
+pub(super) enum PreparedResponse {
+    Host(ResponseOutcomes),
+    Resident { value: Value, rows: usize },
+}
+
+pub(super) fn prepare(x: &Value, y: Value) -> BuiltinResult<PreparedResponse> {
+    let rows = preflight(x, &y)?;
+    if crate::dispatcher::value_contains_gpu(&y) {
+        Ok(PreparedResponse::Resident { value: y, rows })
+    } else {
+        Ok(PreparedResponse::Host(response_outcomes(y, rows)?))
+    }
+}
+
+impl PreparedResponse {
+    pub(super) async fn materialize(self) -> BuiltinResult<ResponseOutcomes> {
+        match self {
+            Self::Host(response) => Ok(response),
+            Self::Resident { value, rows } => response_outcomes(gather_value(value).await?, rows),
+        }
+    }
 }
 
 fn predictor_rows(x: &Value) -> BuiltinResult<usize> {

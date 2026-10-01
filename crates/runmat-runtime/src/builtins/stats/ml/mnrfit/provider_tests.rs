@@ -166,6 +166,22 @@ async fn mnrfit_rejects_host_visible_x_and_y_before_other_operand_download() {
         .expect_err("known-invalid Y must reject before X download");
         assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
     }
+    for invalid_y in [
+        Value::Tensor(Tensor::new(vec![-1.0, 1.0, 1.0, 1.0], vec![2, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap()),
+        Value::StringArray(
+            StringArray::new(vec!["".into(), "class-b".into()], vec![2, 1]).unwrap(),
+        ),
+    ] {
+        mnrfit_builtin(
+            Value::GpuTensor(resident.handle.clone()),
+            invalid_y,
+            Vec::new(),
+        )
+        .await
+        .expect_err("invalid host Y payload must reject before X download");
+        assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
+    }
     for invalid_x in [
         Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 1, 2]).unwrap()),
         Value::Int(runmat_value::IntValue::I64((1_i64 << 53) + 1)),

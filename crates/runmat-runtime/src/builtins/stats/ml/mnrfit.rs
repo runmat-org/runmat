@@ -69,13 +69,13 @@ pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
     let inspected = options::inspect(&rest);
     ensure_extensions(&x, &y, &rest, &inspected)?;
     let names = options::validate(&rest, inspected)?;
-    admission::preflight(&x, &y)?;
+    let response = admission::prepare(&x, y)?;
     let values = rest.into_iter().skip(1).step_by(2).collect();
     let prepared = prepare_values(names.into_iter().zip(values).collect())?;
     let x = gather_value(x).await?;
-    let y = gather_value(y).await?;
+    let response = response.materialize().await?;
     let options = prepared.materialize().await?;
-    let result = fit(x, y, options)?;
+    let result = fit(x, response, options)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![result.b])),
@@ -197,12 +197,12 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
     })
 }
 
-fn fit(x: Value, y: Value, options: Options) -> BuiltinResult<FitResult> {
+fn fit(x: Value, response: ResponseOutcomes, options: Options) -> BuiltinResult<FitResult> {
     let x = numeric_tensor("X", x)?;
     if x.rows() == 0 || x.cols() == 0 {
         return Err(invalid("mnrfit: X must be a nonempty numeric matrix"));
     }
-    let data = prepare_data(&x, y, &options)?;
+    let data = prepare_data(&x, response, &options)?;
     let fit = fit_nominal_logit(&data, options.max_iter, options.tol_x)?;
     let b = coefficients_value(&fit.beta, data.cols, data.outcomes.len())?;
     let stats = stats_value(&fit, &data)?;

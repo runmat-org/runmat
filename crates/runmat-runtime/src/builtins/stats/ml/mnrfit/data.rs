@@ -14,7 +14,11 @@ pub(super) struct PreparedData {
     pub(super) observations: f64,
 }
 
-type ResponseOutcomes = (Vec<Vec<f64>>, ClassNames, Vec<f64>, f64);
+pub(super) struct ResponseOutcomes {
+    outcomes: Vec<Vec<f64>>,
+    classes: ClassNames,
+    weights: Vec<f64>,
+}
 
 #[derive(Clone, Debug)]
 pub(super) enum ClassNames {
@@ -31,7 +35,11 @@ impl ClassNames {
     }
 }
 
-pub(super) fn prepare_data(x: &Tensor, y: Value, options: &Options) -> BuiltinResult<PreparedData> {
+pub(super) fn prepare_data(
+    x: &Tensor,
+    response: ResponseOutcomes,
+    options: &Options,
+) -> BuiltinResult<PreparedData> {
     let rows = x.rows();
     let mut design = design_matrix(x, options.constant)?;
     let cols = if options.constant {
@@ -41,7 +49,11 @@ pub(super) fn prepare_data(x: &Tensor, y: Value, options: &Options) -> BuiltinRe
     } else {
         x.cols()
     };
-    let (mut outcomes, classes, mut weights, _) = response_outcomes(y, rows)?;
+    let ResponseOutcomes {
+        mut outcomes,
+        classes,
+        mut weights,
+    } = response;
     if let Some(option_weights) = &options.weights {
         if option_weights.len() != rows {
             return Err(invalid(
@@ -146,7 +158,7 @@ fn compact_complete_cases(
     Ok(keep.len())
 }
 
-fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<ResponseOutcomes> {
+pub(super) fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<ResponseOutcomes> {
     match value {
         Value::Tensor(tensor) if tensor.cols() >= 2 && tensor.rows() == rows => {
             ensure_exact_integer_tensor(&tensor, "Y")?;
@@ -221,12 +233,11 @@ fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
         return Err(invalid("mnrfit: grouped counts must contain observations"));
     }
     let classes = (1..=cols).map(|idx| idx as f64).collect::<Vec<_>>();
-    Ok((
+    Ok(ResponseOutcomes {
         outcomes,
-        ClassNames::Numeric(classes),
+        classes: ClassNames::Numeric(classes),
         weights,
-        observations,
-    ))
+    })
 }
 
 fn numeric_outcomes(
@@ -268,13 +279,11 @@ fn numeric_outcomes(
             outcomes[class_idx][row] = 1.0;
         }
     }
-    let observations = weights.iter().sum::<f64>();
-    Ok((
+    Ok(ResponseOutcomes {
         outcomes,
-        ClassNames::Numeric(classes),
+        classes: ClassNames::Numeric(classes),
         weights,
-        observations,
-    ))
+    })
 }
 
 fn categorical_outcomes(
@@ -315,12 +324,11 @@ fn text_outcomes(
             outcomes[class_idx][row] = 1.0;
         }
     }
-    Ok((
+    Ok(ResponseOutcomes {
         outcomes,
-        ClassNames::Text(classes),
-        vec![1.0; rows],
-        rows as f64,
-    ))
+        classes: ClassNames::Text(classes),
+        weights: vec![1.0; rows],
+    })
 }
 
 fn cellstr_outcomes(cell: &CellArray, rows: usize) -> BuiltinResult<ResponseOutcomes> {
