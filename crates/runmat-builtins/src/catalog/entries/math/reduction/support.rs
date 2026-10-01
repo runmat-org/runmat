@@ -21,7 +21,7 @@ pub use min_inference::infer_min_type;
 pub use min_options::{MinComparisonMethod, MinControl};
 pub use missing_policy::ReductionNaN;
 pub(super) use numeric_inference::LiteralReductionOutput;
-pub use sum_inference::infer_sum_type;
+pub(super) use sum_inference::{admitted_sum_controls, inferred_sum_shape};
 pub use sum_options::{SumControl, SumOutputClass};
 
 macro_rules! define_logical_reduction_entry {

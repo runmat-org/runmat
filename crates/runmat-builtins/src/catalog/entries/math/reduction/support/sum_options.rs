@@ -12,6 +12,7 @@ pub enum SumControl {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SumOutputClass {
+    Default,
     Double,
     Native,
 }
@@ -25,7 +26,10 @@ impl SumControl {
         if option.eq_ignore_ascii_case("all") {
             return Some(Self::All);
         }
-        if option.eq_ignore_ascii_case("double") || option.eq_ignore_ascii_case("default") {
+        if option.eq_ignore_ascii_case("default") {
+            return Some(Self::Output(SumOutputClass::Default));
+        }
+        if option.eq_ignore_ascii_case("double") {
             return Some(Self::Output(SumOutputClass::Double));
         }
         if option.eq_ignore_ascii_case("native") {
@@ -59,7 +63,7 @@ mod tests {
         );
         assert_eq!(
             SumControl::from_public_option("default"),
-            Some(SumControl::Output(SumOutputClass::Double))
+            Some(SumControl::Output(SumOutputClass::Default))
         );
         assert_eq!(
             SumControl::from_literal(&LiteralValue::Character("native".into())),
