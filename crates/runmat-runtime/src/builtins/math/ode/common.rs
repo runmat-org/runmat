@@ -166,7 +166,7 @@ pub(crate) async fn parse_ode_input(
 
 fn validate_host_operand(name: &str, role: OdeInputRole, value: &Value) -> BuiltinResult<()> {
     match value {
-        Value::GpuTensor(_) => return Ok(()),
+        Value::GpuTensor(_) => Ok(()),
         Value::Num(number) => validate_host_series(name, role, 1, |_| *number),
         Value::Int(integer) => validate_host_series(name, role, 1, |_| integer.to_f64()),
         Value::Bool(boolean) => {
@@ -272,18 +272,16 @@ async fn prepare_ode_numeric_value(
 ) -> BuiltinResult<Value> {
     if matches!(value, Value::GpuTensor(_))
         && crate::builtins::common::validation::value_contains_native_integer_class(&value)
-    {
-        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
             .await?
-        {
-            return Err(ode_error(
-                name,
-                format!(
-                    "{name}: integer {} must be exactly representable as double",
-                    role.label()
-                ),
-            ));
-        }
+    {
+        return Err(ode_error(
+            name,
+            format!(
+                "{name}: integer {} must be exactly representable as double",
+                role.label()
+            ),
+        ));
     }
     match value {
         Value::GpuTensor(handle) => {

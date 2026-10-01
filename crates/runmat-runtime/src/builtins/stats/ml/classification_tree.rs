@@ -236,10 +236,8 @@ fn ensure_fitctree_extensions(
     }
     if is_table_value(first) {
         ensure_table_integer_extensions(first, rest, inspection)?;
-    } else {
-        if typed_integer_value(first) {
-            enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
-        }
+    } else if typed_integer_value(first) {
+        enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
     }
     for (index, identity) in inspection.known_options() {
         if rest.get(index + 1).is_some_and(typed_integer_value)

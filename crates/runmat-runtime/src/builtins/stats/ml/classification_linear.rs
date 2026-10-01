@@ -306,10 +306,8 @@ fn ensure_fitclinear_extensions(
     }
     if is_table_value(first) {
         ensure_table_integer_extensions(first, rest, inspection)?;
-    } else {
-        if typed_integer_value(first) {
-            enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
-        }
+    } else if typed_integer_value(first) {
+        enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
     }
     for (index, identity) in inspection.known_options() {
         if rest.get(index + 1).is_some_and(typed_integer_value)
@@ -407,13 +405,13 @@ async fn gather_all(
 ) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
     for (index, value) in values.into_iter().enumerate() {
-        if index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2) {
-            out.push(value);
-        } else if arguments
+        let is_option_name =
+            index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2);
+        let is_ignored_value = arguments
             .options
             .iter()
-            .any(|option| option.name.index + 1 == index && option.name.identity.ignored())
-        {
+            .any(|option| option.name.index + 1 == index && option.name.identity.ignored());
+        if is_option_name || is_ignored_value {
             out.push(value);
         } else {
             out.push(gather(value).await?);
