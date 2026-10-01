@@ -1,6 +1,51 @@
 use super::*;
 use futures::executor::block_on;
+use runmat_accelerate_api::{
+    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
+    HostNumericTensorView, HostTensorView,
+};
 use runmat_value::IntegerStorage;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct CountingProvider {
+    inner: runmat_accelerate::simple_provider::InProcessProvider,
+    downloads: AtomicUsize,
+}
+
+impl CountingProvider {
+    fn new() -> &'static Self {
+        Box::leak(Box::new(Self {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            downloads: AtomicUsize::new(0),
+        }))
+    }
+}
+
+impl AccelProvider for CountingProvider {
+    fn device_id(&self) -> u32 {
+        self.inner.device_id()
+    }
+    fn device_info(&self) -> String {
+        self.inner.device_info()
+    }
+    fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload(host)
+    }
+    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.inner.download(handle)
+    }
+    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload_numeric_raw(host)
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.inner.download_numeric(handle)
+    }
+}
 use runmat_value::Tensor;
 
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
@@ -116,6 +161,26 @@ fn host_visible_geometry_and_flag_are_rejected_at_admission() {
         &Value::Num(-1.0)
     )
     .is_err());
+}
+
+#[test]
+fn invalid_host_flag_precedes_resident_integer_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    let y = Tensor::new_integer(IntegerStorage::U64(vec![0, 1, 2]), vec![3, 1]).unwrap();
+    let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &y).unwrap();
+    let x = tensor(vec![0.0, 1.0, 2.0], 3, 1);
+    let error = block_on(ridge_builtin(
+        Value::GpuTensor(resident),
+        x,
+        Value::Num(0.0),
+        vec![Value::Num(2.0)],
+    ))
+    .expect_err("invalid host flag");
+    assert!(error.message().contains("scaled"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }
 
 #[test]

@@ -50,6 +50,8 @@ async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> Builti
             "ridge: accepts at most one scaled argument",
         ));
     }
+    preflight_data(&y, &x, &k)?;
+    let scaled = rest.first().map(preflight_scaled).transpose()?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &y,
         &RIDGE_INTEGER_DATA_EXTENSION,
@@ -79,8 +81,6 @@ async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> Builti
             )?;
         }
     }
-    preflight_data(&y, &x, &k)?;
-    let scaled = rest.first().map(preflight_scaled).transpose()?;
     let y = value_to_tensor(y).await?;
     let x = value_to_tensor(x).await?;
     let k = value_to_tensor(k).await?;
