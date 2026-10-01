@@ -152,6 +152,79 @@ fn in_process_nd_broadcast_is_preserved() {
 }
 
 #[test]
+fn native_single_feasibility_matches_supported_in_process_hooks() {
+    let provider = InProcessProvider::new();
+    let left = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[f32::NAN, 0.0, 3.0]),
+            shape: &[1, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let right = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[0.0, 0.0, 2.0]),
+            shape: &[1, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    for operation in [
+        Operation::Cast,
+        Operation::Binary(LogicalBinaryOperator::And),
+        Operation::Binary(LogicalBinaryOperator::Or),
+        Operation::Binary(LogicalBinaryOperator::Xor),
+        Operation::Compare(RelationalOperator::Equal),
+        Operation::Compare(RelationalOperator::NotEqual),
+    ] {
+        let mut request = query(operation);
+        request.inputs = vec![input(&[1, 3], ProviderElementType::F32); operation.arity()];
+        assert!(
+            provider.query_feasibility(&request).is_supported(),
+            "{}",
+            operation.identity()
+        );
+        let output = match operation {
+            Operation::Cast => {
+                let zero = provider.zeros_like(&left, left.shape()).unwrap();
+                block_on(provider.elem_ne(&left, &zero)).unwrap()
+            }
+            Operation::Binary(LogicalBinaryOperator::And) => {
+                provider.logical_and(&left, &right).unwrap()
+            }
+            Operation::Binary(LogicalBinaryOperator::Or) => {
+                provider.logical_or(&left, &right).unwrap()
+            }
+            Operation::Binary(LogicalBinaryOperator::Xor) => {
+                provider.logical_xor(&left, &right).unwrap()
+            }
+            Operation::Compare(RelationalOperator::Equal) => {
+                block_on(provider.elem_eq(&left, &right)).unwrap()
+            }
+            Operation::Compare(RelationalOperator::NotEqual) => {
+                block_on(provider.elem_ne(&left, &right)).unwrap()
+            }
+            _ => unreachable!("only reviewed native F32 hooks"),
+        };
+        assert!(output.view().is_logical());
+        assert_eq!(output.shape(), &[1, 3]);
+    }
+    for operation in [
+        Operation::Compare(RelationalOperator::LessThan),
+        Operation::Compare(RelationalOperator::LessThanOrEqual),
+        Operation::Compare(RelationalOperator::GreaterThan),
+        Operation::Compare(RelationalOperator::GreaterThanOrEqual),
+    ] {
+        let mut request = query(operation);
+        request.inputs = vec![input(&[1, 3], ProviderElementType::F32); 2];
+        assert!(
+            !provider.query_feasibility(&request).is_supported(),
+            "{}",
+            operation.identity()
+        );
+    }
+}
+
+#[test]
 fn unknown_id_wrong_family_type_and_shape_are_not_admitted() {
     let provider = InProcessProvider::new();
     let baseline = query(Operation::Binary(LogicalBinaryOperator::And));
@@ -170,7 +243,6 @@ fn unknown_id_wrong_family_type_and_shape_are_not_admitted() {
     query.family = ProviderOperationFamily::Reduction;
     reject(&query);
     for element_type in [
-        ProviderElementType::F32,
         ProviderElementType::I64,
         ProviderElementType::ComplexF64,
         ProviderElementType::Logical,

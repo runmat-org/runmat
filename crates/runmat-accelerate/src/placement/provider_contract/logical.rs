@@ -102,7 +102,20 @@ pub(super) fn validate(
         );
     }
     let float = ProviderElementType::from(precision);
-    let floating = query.inputs.iter().all(|value| value.element_type == float);
+    let floating = match (profile, operation) {
+        (
+            HookProfile::InProcess,
+            Operation::Cast
+            | Operation::Binary(_)
+            | Operation::Compare(RelationalOperator::Equal | RelationalOperator::NotEqual),
+        ) => query.inputs.iter().all(|value| {
+            matches!(
+                value.element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        }),
+        _ => query.inputs.iter().all(|value| value.element_type == float),
+    };
     #[cfg(feature = "wgpu")]
     let integer = matches!(profile, HookProfile::Wgpu)
         && matches!(operation, Operation::Compare(_))
@@ -121,8 +134,8 @@ pub(super) fn validate(
     #[cfg(not(feature = "wgpu"))]
     let integer = false;
     if !floating && !integer {
-        // InProcess's F64Registry view excludes F32 and native integer buffers.
-        // Logical class alone does not prove physical floating precision.
+        // The remaining in-process relational hooks still use an F64-only
+        // implementation. Logical class alone does not prove physical storage.
         return reject(
             ProviderRejectionCode::UnsupportedElementType,
             "logical.input_type.unsupported",
@@ -162,23 +175,35 @@ pub(super) fn validate(
             #[cfg(feature = "wgpu")]
             HookProfile::Wgpu => {}
         }
-        let mut shape = Vec::with_capacity(left.len().max(right.len()));
-        for axis in 0..left.len().max(right.len()) {
-            let a = left.get(axis).copied().unwrap_or(1);
-            let b = right.get(axis).copied().unwrap_or(1);
-            shape.push(if a == b {
-                a
-            } else if a == 1 {
-                b
-            } else if b == 1 {
-                a
-            } else {
-                return reject(
-                    ProviderRejectionCode::InvalidShape,
-                    "logical.broadcast.invalid",
-                );
-            });
-        }
+        let convert = |shape: &[u64]| {
+            shape
+                .iter()
+                .copied()
+                .map(usize::try_from)
+                .collect::<Result<Vec<_>, _>>()
+        };
+        let (Ok(left), Ok(right)) = (convert(left), convert(right)) else {
+            return reject(
+                ProviderRejectionCode::InvalidShape,
+                "logical.broadcast.dimension_overflow",
+            );
+        };
+        let Ok(shape) = runmat_types::geometry::broadcast_concrete_shape(&left, &right) else {
+            return reject(
+                ProviderRejectionCode::InvalidShape,
+                "logical.broadcast.invalid",
+            );
+        };
+        let Ok(shape) = shape
+            .into_iter()
+            .map(u64::try_from)
+            .collect::<Result<Vec<_>, _>>()
+        else {
+            return reject(
+                ProviderRejectionCode::InvalidShape,
+                "logical.broadcast.dimension_overflow",
+            );
+        };
         shape
     };
     if query
