@@ -16,6 +16,11 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::{MessageChannel, MessageEvent, MessagePort};
 
+#[cfg(test)]
+thread_local! {
+    static TEST_POSTED_TURNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Default)]
 struct TurnState {
     ready: bool,
@@ -76,6 +81,8 @@ impl Future for BrowserTaskTurn {
             if let Err(error) = self.send.post_message(&JsValue::UNDEFINED) {
                 return Poll::Ready(Err(schedule_error(error)));
             }
+            #[cfg(test)]
+            TEST_POSTED_TURNS.with(|count| count.set(count.get() + 1));
         }
         Poll::Pending
     }
@@ -114,6 +121,7 @@ fn schedule_error(error: JsValue) -> ExecutionServiceError {
 mod tests {
     use super::*;
     use futures::task::noop_waker;
+    use serde_json::json;
     use std::future::Future;
     use std::task::{Context, Poll};
     use wasm_bindgen_test::wasm_bindgen_test;
@@ -130,5 +138,66 @@ mod tests {
             .is_pending());
         assert!(!turn.as_ref().get_ref().state.borrow().ready);
         assert!(matches!(turn.await, Ok(())));
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn same_worker_cancel_execution_interrupts_a_running_multinomial_fit() {
+        let runtime = Rc::new(
+            crate::init_runmat(JsValue::NULL)
+                .await
+                .expect("initialize browser runtime"),
+        );
+        let request = serde_wasm_bindgen::to_value(&json!({
+            "source": {
+                "kind": "text",
+                "name": "mnrfit-browser-cancel.m",
+                "text": "X = (1:65536)'; Y = mod(X,2)+1; B = mnrfit(X,Y,'IterationLimit',100000);"
+            },
+            "compatibility": "runmat"
+        }))
+        .expect("encode execution request");
+        let turns_before = TEST_POSTED_TURNS.with(std::cell::Cell::get);
+        let mut execution = Box::pin(runtime.execute_request_js(request));
+        let waker = noop_waker();
+        assert!(execution
+            .as_mut()
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending());
+        assert!(
+            TEST_POSTED_TURNS.with(std::cell::Cell::get) > turns_before,
+            "the fit must post a browser task turn before cancellation"
+        );
+        let cancel_channel = MessageChannel::new().expect("browser cancellation task channel");
+        let cancel_receive = cancel_channel.port1();
+        let cancel_send = cancel_channel.port2();
+        let (canceled_tx, canceled_rx) = futures::channel::oneshot::channel();
+        let canceled_tx = Rc::new(RefCell::new(Some(canceled_tx)));
+        let cancel_runtime = Rc::clone(&runtime);
+        let cancel_callback = Closure::wrap(Box::new(move |_event: MessageEvent| {
+            cancel_runtime.cancel_execution();
+            if let Some(sender) = canceled_tx.borrow_mut().take() {
+                let _ = sender.send(());
+            }
+        }) as Box<dyn FnMut(MessageEvent)>);
+        cancel_receive.set_onmessage(Some(cancel_callback.as_ref().unchecked_ref()));
+        cancel_receive.start();
+        cancel_send
+            .post_message(&JsValue::UNDEFINED)
+            .expect("queue same-worker cancellation task");
+        canceled_rx
+            .await
+            .expect("the same-worker cancellation task must run");
+        cancel_receive.set_onmessage(None);
+        cancel_receive.close();
+        cancel_send.close();
+        drop(cancel_callback);
+        let payload = execution
+            .await
+            .expect("execution returns a structured result");
+        let error =
+            Reflect::get(&payload, &JsValue::from_str("error")).expect("execution error field");
+        let identifier = Reflect::get(&error, &JsValue::from_str("identifier"))
+            .expect("structured cancellation identifier");
+        assert_eq!(identifier.as_string().as_deref(), Some("RunMat:Cancelled"));
     }
 }
