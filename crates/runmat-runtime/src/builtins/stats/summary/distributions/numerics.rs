@@ -181,58 +181,12 @@ pub(super) fn binoinv_scalar(
     if probability == 1.0 || success_probability == 1.0 {
         return Ok(n);
     }
-    first_representable_discrete_quantile(
+    distribution_math::first_representable_discrete_quantile(
         probability,
         n,
         |x| binocdf_scalar(x, n, success_probability, DistributionTail::Lower),
         &poll,
     )
-}
-
-/// Find the first nonnegative integer-valued `f64` whose CDF reaches the
-/// requested probability. Above the consecutive-integer range this selects
-/// among representable integer values, without fabricating an exact integer
-/// that the public double result cannot carry. The ordered positive `f64`
-/// encoding makes every bisection strictly shrink the representable interval.
-fn first_representable_discrete_quantile(
-    probability: f64,
-    mut hi: f64,
-    mut cdf: impl FnMut(f64) -> f64,
-    poll: &impl Fn() -> BuiltinResult<()>,
-) -> BuiltinResult<f64> {
-    let mut lo = 0.0;
-    poll()?;
-    if cdf(lo) >= probability {
-        return Ok(lo);
-    }
-    while lo < hi {
-        poll()?;
-        let low_bits = lo.to_bits();
-        let high_bits = hi.to_bits();
-        if high_bits - low_bits <= 1 {
-            return Ok(hi);
-        }
-        let candidate = f64::from_bits(low_bits + (high_bits - low_bits) / 2).ceil();
-        let next = if lo < 9_007_199_254_740_992.0 {
-            lo + 1.0
-        } else {
-            f64::from_bits(low_bits + 1)
-        };
-        let mid = if candidate <= lo || candidate >= hi {
-            next
-        } else {
-            candidate
-        };
-        if mid >= hi {
-            return Ok(hi);
-        }
-        if cdf(mid) >= probability {
-            hi = mid;
-        } else {
-            lo = mid;
-        }
-    }
-    Ok(hi)
 }
 
 pub(super) fn expinv_scalar(p: f64, mu: f64) -> f64 {
@@ -333,27 +287,7 @@ pub(super) fn poissinv_scalar(
     lambda: f64,
     poll: impl Fn() -> BuiltinResult<()>,
 ) -> BuiltinResult<f64> {
-    poll()?;
-    if p.is_nan() || lambda.is_nan() || lambda < 0.0 || !(0.0..=1.0).contains(&p) {
-        return Ok(f64::NAN);
-    }
-    if p == 1.0 {
-        return Ok(f64::INFINITY);
-    }
-    if p == 0.0 || lambda == 0.0 {
-        return Ok(0.0);
-    }
-    let mut hi = lambda.ceil().max(1.0);
-    let mut iterations = 0;
-    while poisscdf_scalar(hi, lambda) < p {
-        poll()?;
-        hi *= 2.0;
-        iterations += 1;
-        if !hi.is_finite() || iterations > 2048 {
-            return Ok(f64::INFINITY);
-        }
-    }
-    first_representable_discrete_quantile(p, hi, |x| poisscdf_scalar(x, lambda), &poll)
+    distribution_math::poisson_inverse(p, lambda, poll)
 }
 
 pub(super) fn poisscdf_scalar(k: f64, lambda: f64) -> f64 {
@@ -422,7 +356,7 @@ mod discrete_search_tests {
     fn wide_representable_threshold_progresses_and_polls() {
         let threshold = f64::from_bits(((1_u64 << 54) as f64).to_bits() + 3);
         let polls = Cell::new(0);
-        let result = first_representable_discrete_quantile(
+        let result = distribution_math::first_representable_discrete_quantile(
             0.5,
             threshold * 2.0,
             |value| if value >= threshold { 1.0 } else { 0.0 },
@@ -443,7 +377,7 @@ mod discrete_search_tests {
     #[test]
     fn discrete_search_propagates_cooperative_cancellation() {
         let polls = Cell::new(0);
-        let error = first_representable_discrete_quantile(
+        let error = distribution_math::first_representable_discrete_quantile(
             0.5,
             1.0e18,
             |value| if value >= 1.0e16 { 1.0 } else { 0.0 },

@@ -1,5 +1,9 @@
 //! Shared numerical helpers for probability distribution builtins.
 
+#[path = "distribution_math/discrete_quantiles.rs"]
+mod discrete_quantiles;
+pub(crate) use discrete_quantiles::{first_representable_discrete_quantile, poisson_inverse};
+
 use crate::builtins::math::elementwise::error_functions::erfcinv::erfcinv_scalar;
 use crate::builtins::math::elementwise::gamma_functions::gammaln::gammaln_nonnegative_scalar;
 
