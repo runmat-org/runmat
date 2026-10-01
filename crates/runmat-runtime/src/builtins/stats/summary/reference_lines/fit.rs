@@ -16,20 +16,50 @@ pub(super) fn least_squares_coefficients(
         )));
     }
     let mut count = 0usize;
+    let mut anchor = None;
     let mut x_scale = 0.0_f64;
     let mut y_scale = 0.0_f64;
+    let mut x_needs_absolute_scale = false;
+    let mut y_needs_absolute_scale = false;
     for (&x, &y) in x.iter().zip(y.iter()) {
         if x.is_finite() && y.is_finite() {
             count += 1;
-            x_scale = x_scale.max(x.abs());
-            y_scale = y_scale.max(y.abs());
+            let (anchor_x, anchor_y) = *anchor.get_or_insert((x, y));
+            let delta_x = x - anchor_x;
+            let delta_y = y - anchor_y;
+            if delta_x.is_finite() {
+                x_scale = x_scale.max(delta_x.abs());
+            } else {
+                x_needs_absolute_scale = true;
+            }
+            if delta_y.is_finite() {
+                y_scale = y_scale.max(delta_y.abs());
+            } else {
+                y_needs_absolute_scale = true;
+            }
         }
     }
     if count == 0 {
         return Ok(None);
     }
-    // Scaling prevents a finite plot from overflowing its sums. Centered
-    // moments avoid subtracting large, nearly equal uncentered sums.
+    let (anchor_x, anchor_y) = anchor.expect("a finite observation was counted");
+    // Center before scaling so adjacent large finite values retain their
+    // representable differences. If subtraction itself overflows, normalized
+    // absolute values keep the opposite-sign range finite instead.
+    if x_needs_absolute_scale {
+        x_scale = x
+            .iter()
+            .zip(y)
+            .filter(|(x, y)| x.is_finite() && y.is_finite())
+            .fold(anchor_x.abs(), |scale, (x, _)| scale.max(x.abs()));
+    }
+    if y_needs_absolute_scale {
+        y_scale = y
+            .iter()
+            .zip(x)
+            .filter(|(y, x)| x.is_finite() && y.is_finite())
+            .fold(anchor_y.abs(), |scale, (y, _)| scale.max(y.abs()));
+    }
     let x_scale = if x_scale == 0.0 { 1.0 } else { x_scale };
     let y_scale = if y_scale == 0.0 { 1.0 } else { y_scale };
     let mut n = 0usize;
@@ -42,8 +72,16 @@ pub(super) fn least_squares_coefficients(
             continue;
         }
         n += 1;
-        let x = x / x_scale;
-        let y = y / y_scale;
+        let x = if x_needs_absolute_scale {
+            x / x_scale - anchor_x / x_scale
+        } else {
+            (x - anchor_x) / x_scale
+        };
+        let y = if y_needs_absolute_scale {
+            y / y_scale - anchor_y / y_scale
+        } else {
+            (y - anchor_y) / y_scale
+        };
         let delta_x = x - mean_x;
         mean_x += delta_x / n as f64;
         let delta_y = y - mean_y;
@@ -56,7 +94,9 @@ pub(super) fn least_squares_coefficients(
     } else {
         0.0
     };
-    let intercept = (-slope).mul_add(mean_x * x_scale, mean_y * y_scale);
+    let x_mean = mean_x.mul_add(x_scale, anchor_x);
+    let y_mean = mean_y.mul_add(y_scale, anchor_y);
+    let intercept = (-slope).mul_add(x_mean, y_mean);
     if !slope.is_finite() || !intercept.is_finite() {
         return Err(owner.invalid(format!(
             "{}: least-squares coefficients must be finite",
@@ -123,6 +163,25 @@ mod tests {
         .unwrap();
         assert!((slope - 3.0).abs() < 1.0e-12);
         assert!((intercept / -1.2e308 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn adjacent_large_finite_x_values_retain_their_spacing() {
+        let base = 1.0e308_f64;
+        let next = f64::from_bits(base.to_bits() + 1);
+        let spacing = next - base;
+        let x = [
+            base,
+            next,
+            f64::from_bits(base.to_bits() + 2),
+            f64::from_bits(base.to_bits() + 3),
+        ];
+        let (slope, intercept) =
+            least_squares_coefficients(&x, &[0.0, 1.0, 2.0, 3.0], ReferenceLineOwner::Lsline)
+                .unwrap()
+                .unwrap();
+        assert!((slope * spacing - 1.0).abs() < 1.0e-12);
+        assert!(intercept.is_finite());
     }
 
     #[test]
