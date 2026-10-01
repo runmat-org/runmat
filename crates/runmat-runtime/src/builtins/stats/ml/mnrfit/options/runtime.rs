@@ -1,112 +1,178 @@
-use super::super::{invalid, numeric_vector, positive_integer, positive_scalar, scalar_text};
+use super::super::{
+    gather_value, invalid, numeric_vector, positive_integer, positive_scalar, scalar_text,
+};
 use super::{OptionName, Options};
 use crate::BuiltinResult;
+use runmat_builtins::MnrfitStatsetField;
 use runmat_value::Value;
 
-pub(in crate::builtins::stats::ml::mnrfit) fn parse_options(
-    values: Vec<(OptionName, Value)>,
-) -> BuiltinResult<Options> {
-    let mut options = Options::default();
-    for (name, value) in &values {
-        match name {
-            OptionName::Model => {
-                let model = scalar_text(value)
-                    .ok_or_else(|| invalid("mnrfit: Model option must be text"))?;
-                match model.to_ascii_lowercase().as_str() {
-                    "nominal" => {}
-                    other => {
-                        return Err(invalid(format!(
-                            "mnrfit: Model '{other}' is not supported yet"
-                        )));
-                    }
-                }
-            }
-            OptionName::Link => {
-                let link = scalar_text(value)
-                    .ok_or_else(|| invalid("mnrfit: Link option must be text"))?;
-                match link.to_ascii_lowercase().as_str() {
-                    "logit" => {}
-                    other => {
-                        return Err(invalid(format!(
-                            "mnrfit: Link '{other}' is not supported yet"
-                        )));
-                    }
-                }
-            }
-            OptionName::Constant => {
-                options.constant = match text_or_logical(value, "Constant")? {
-                    BoolOrText::Bool(flag) => flag,
-                    BoolOrText::Text(text) => match text.to_ascii_lowercase().as_str() {
-                        "on" => true,
-                        "off" => false,
-                        other => {
-                            return Err(invalid(format!(
-                                "mnrfit: Constant must be 'on' or 'off', got '{other}'"
-                            )));
-                        }
-                    },
-                };
-            }
-            OptionName::Interactions => {
-                let text = scalar_text(value)
-                    .ok_or_else(|| invalid("mnrfit: Interactions option must be text"))?;
-                if !text.eq_ignore_ascii_case("off") {
-                    return Err(invalid(
-                        "mnrfit: Interactions values other than 'off' are not supported yet",
-                    ));
-                }
-            }
-            OptionName::Weights => {
-                options.weights = Some(numeric_vector(value.clone(), "Weights")?)
-            }
-            OptionName::MaxIter | OptionName::IterationLimit => {
-                options.max_iter = positive_integer(value, "IterationLimit")?
-            }
-            OptionName::TolX | OptionName::Tolerance => {
-                options.tol_x = positive_scalar(value, "Tolerance")?
-            }
-            OptionName::Options => apply_statset_options(value, &mut options)?,
-            OptionName::Display => {
-                let _ = scalar_text(value)
-                    .ok_or_else(|| invalid("mnrfit: Display option must be text"))?;
-            }
-            OptionName::EstDisp => {
-                let text = scalar_text(value)
-                    .ok_or_else(|| invalid("mnrfit: EstDisp option must be text"))?;
-                if !text.eq_ignore_ascii_case("off") {
-                    return Err(invalid(
-                        "mnrfit: overdispersion estimation is not supported yet",
-                    ));
-                }
-            }
-        }
-    }
-    if options.max_iter == 0 {
-        return Err(invalid("mnrfit: IterationLimit must be positive"));
-    }
-    if !options.tol_x.is_finite() || options.tol_x <= 0.0 {
-        return Err(invalid("mnrfit: Tolerance must be positive and finite"));
-    }
-    Ok(options)
+/// Public controls are decoded once. Only values that actually carry a resident
+/// operand cross the provider boundary, and they retain their typed identity.
+pub(in crate::builtins::stats::ml::mnrfit) struct PreparedOptions {
+    actions: Vec<PreparedAction>,
 }
 
-fn apply_statset_options(value: &Value, options: &mut Options) -> BuiltinResult<()> {
-    let Value::Struct(st) = value else {
-        return Err(invalid("mnrfit: Options must be a struct"));
+enum PreparedAction {
+    Host(OptionValue),
+    Resident(OptionName, Value),
+    ResidentStatset(MnrfitStatsetField, Value),
+}
+
+enum OptionValue {
+    Accepted,
+    Constant(bool),
+    Weights(Vec<f64>),
+    IterationLimit(usize),
+    Tolerance(f64),
+}
+
+pub(in crate::builtins::stats::ml::mnrfit) fn prepare_values(
+    values: Vec<(OptionName, Value)>,
+) -> BuiltinResult<PreparedOptions> {
+    let mut actions = Vec::new();
+    for (name, value) in values {
+        if name == OptionName::Options {
+            let Value::Struct(mut statset) = value else {
+                return Err(invalid("mnrfit: Options must be a struct"));
+            };
+            for field in MnrfitStatsetField::ALL {
+                let Some(value) = statset.fields.remove(field.public_name()) else {
+                    continue;
+                };
+                if crate::dispatcher::value_contains_gpu(&value) {
+                    actions.push(PreparedAction::ResidentStatset(field, value));
+                } else {
+                    actions.push(PreparedAction::Host(decode_statset(field, value)?));
+                }
+            }
+        } else if crate::dispatcher::value_contains_gpu(&value) {
+            actions.push(PreparedAction::Resident(name, value));
+        } else {
+            actions.push(PreparedAction::Host(decode(name, value)?));
+        }
+    }
+    Ok(PreparedOptions { actions })
+}
+
+impl PreparedOptions {
+    pub(in crate::builtins::stats::ml::mnrfit) async fn materialize(
+        self,
+    ) -> BuiltinResult<Options> {
+        let mut options = Options::default();
+        for action in self.actions {
+            let decoded = match action {
+                PreparedAction::Host(value) => value,
+                PreparedAction::Resident(name, value) => decode(name, gather_value(value).await?)?,
+                PreparedAction::ResidentStatset(field, value) => {
+                    decode_statset(field, gather_value(value).await?)?
+                }
+            };
+            match decoded {
+                OptionValue::Accepted => {}
+                OptionValue::Constant(value) => options.constant = value,
+                OptionValue::Weights(value) => options.weights = Some(value),
+                OptionValue::IterationLimit(value) => options.max_iter = value,
+                OptionValue::Tolerance(value) => options.tol_x = value,
+            }
+        }
+        if options.max_iter == 0 {
+            return Err(invalid("mnrfit: IterationLimit must be positive"));
+        }
+        if !options.tol_x.is_finite() || options.tol_x <= 0.0 {
+            return Err(invalid("mnrfit: Tolerance must be positive and finite"));
+        }
+        Ok(options)
+    }
+}
+
+fn decode(name: OptionName, value: Value) -> BuiltinResult<OptionValue> {
+    match name {
+        OptionName::Model => {
+            let model =
+                scalar_text(&value).ok_or_else(|| invalid("mnrfit: Model option must be text"))?;
+            match model.to_ascii_lowercase().as_str() {
+                "nominal" => Ok(OptionValue::Accepted),
+                other => Err(invalid(format!(
+                    "mnrfit: Model '{other}' is not supported yet"
+                ))),
+            }
+        }
+        OptionName::Link => {
+            let link =
+                scalar_text(&value).ok_or_else(|| invalid("mnrfit: Link option must be text"))?;
+            match link.to_ascii_lowercase().as_str() {
+                "logit" => Ok(OptionValue::Accepted),
+                other => Err(invalid(format!(
+                    "mnrfit: Link '{other}' is not supported yet"
+                ))),
+            }
+        }
+        OptionName::Constant => {
+            let constant = match text_or_logical(&value, "Constant")? {
+                BoolOrText::Bool(flag) => flag,
+                BoolOrText::Text(text) => match text.to_ascii_lowercase().as_str() {
+                    "on" => true,
+                    "off" => false,
+                    other => {
+                        return Err(invalid(format!(
+                            "mnrfit: Constant must be 'on' or 'off', got '{other}'"
+                        )));
+                    }
+                },
+            };
+            Ok(OptionValue::Constant(constant))
+        }
+        OptionName::Interactions => {
+            let text = scalar_text(&value)
+                .ok_or_else(|| invalid("mnrfit: Interactions option must be text"))?;
+            if !text.eq_ignore_ascii_case("off") {
+                return Err(invalid(
+                    "mnrfit: Interactions values other than 'off' are not supported yet",
+                ));
+            }
+            Ok(OptionValue::Accepted)
+        }
+        OptionName::Weights => Ok(OptionValue::Weights(numeric_vector(value, "Weights")?)),
+        OptionName::MaxIter | OptionName::IterationLimit => Ok(OptionValue::IterationLimit(
+            positive_integer(&value, "IterationLimit")?,
+        )),
+        OptionName::TolX | OptionName::Tolerance => Ok(OptionValue::Tolerance(positive_scalar(
+            &value,
+            "Tolerance",
+        )?)),
+        OptionName::Options => Err(invalid("mnrfit: Options must be a struct")),
+        OptionName::Display => {
+            let _ = scalar_text(&value)
+                .ok_or_else(|| invalid("mnrfit: Display option must be text"))?;
+            Ok(OptionValue::Accepted)
+        }
+        OptionName::EstDisp => {
+            let text = scalar_text(&value)
+                .ok_or_else(|| invalid("mnrfit: EstDisp option must be text"))?;
+            if !text.eq_ignore_ascii_case("off") {
+                return Err(invalid(
+                    "mnrfit: overdispersion estimation is not supported yet",
+                ));
+            }
+            Ok(OptionValue::Accepted)
+        }
+    }
+}
+
+fn decode_statset(field: MnrfitStatsetField, value: Value) -> BuiltinResult<OptionValue> {
+    let label = match field {
+        MnrfitStatsetField::MaxIter => "Options.MaxIter",
+        MnrfitStatsetField::IterationLimit => "Options.IterationLimit",
+        MnrfitStatsetField::TolX => "Options.TolX",
+        MnrfitStatsetField::Tolerance => "Options.Tolerance",
     };
-    if let Some(value) = st.fields.get("MaxIter") {
-        options.max_iter = positive_integer(value, "Options.MaxIter")?;
+    if field.is_iteration_limit() {
+        Ok(OptionValue::IterationLimit(positive_integer(
+            &value, label,
+        )?))
+    } else {
+        Ok(OptionValue::Tolerance(positive_scalar(&value, label)?))
     }
-    if let Some(value) = st.fields.get("IterationLimit") {
-        options.max_iter = positive_integer(value, "Options.IterationLimit")?;
-    }
-    if let Some(value) = st.fields.get("TolX") {
-        options.tol_x = positive_scalar(value, "Options.TolX")?;
-    }
-    if let Some(value) = st.fields.get("Tolerance") {
-        options.tol_x = positive_scalar(value, "Options.Tolerance")?;
-    }
-    Ok(())
 }
 
 enum BoolOrText {

@@ -8,12 +8,12 @@ mod solver;
 
 use data::*;
 use numeric::*;
-use options::{parse_options, OptionName, Options};
+use options::{prepare_values, OptionName, Options};
 use output::*;
 use solver::*;
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, MnrfitStatsetField,
     MNRFIT_ERROR_CONVERGENCE as ERROR_CONVERGENCE, MNRFIT_ERROR_INTERNAL as ERROR_INTERNAL,
     MNRFIT_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
     MNRFIT_INTEGER_CONTROL_EXTENSION as INTEGER_CONTROL_EXTENSION,
@@ -68,11 +68,11 @@ pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
     let inspected = options::inspect(&rest);
     ensure_extensions(&x, &y, &rest, &inspected)?;
     let names = options::validate(&rest, inspected)?;
+    let values = rest.into_iter().skip(1).step_by(2).collect();
+    let prepared = prepare_values(names.into_iter().zip(values).collect())?;
     let x = gather_value(x).await?;
     let y = gather_value(y).await?;
-    let values = rest.into_iter().skip(1).step_by(2).collect();
-    let values = gather_values(values).await?;
-    let options = parse_options(names.into_iter().zip(values).collect())?;
+    let options = prepared.materialize().await?;
     let result = fit(x, y, options)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
@@ -152,14 +152,14 @@ fn ensure_nested_option_integers(value: &Value) -> BuiltinResult<()> {
     let Value::Struct(st) = value else {
         return Ok(());
     };
-    for field in ["MaxIter", "IterationLimit"] {
-        if let Some(value) = st.fields.get(field) {
-            ensure_integer_option(value, &INTEGER_CONTROL_EXTENSION)?;
-        }
-    }
-    for field in ["TolX", "Tolerance"] {
-        if let Some(value) = st.fields.get(field) {
-            ensure_integer_option(value, &INTEGER_PARAMETER_EXTENSION)?;
+    for field in MnrfitStatsetField::ALL {
+        if let Some(value) = st.fields.get(field.public_name()) {
+            let extension = if field.is_iteration_limit() {
+                &INTEGER_CONTROL_EXTENSION
+            } else {
+                &INTEGER_PARAMETER_EXTENSION
+            };
+            ensure_integer_option(value, extension)?;
         }
     }
     Ok(())
@@ -193,14 +193,6 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
         error.source = Some(Box::new(cause));
         error
     })
-}
-
-async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather_value(value).await?);
-    }
-    Ok(out)
 }
 
 fn fit(x: Value, y: Value, options: Options) -> BuiltinResult<FitResult> {

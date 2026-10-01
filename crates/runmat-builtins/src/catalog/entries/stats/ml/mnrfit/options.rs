@@ -34,3 +34,37 @@ impl MnrfitOption {
         })
     }
 }
+
+/// Recognized fields of a public `statset`-style Options struct.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MnrfitStatsetField {
+    MaxIter,
+    IterationLimit,
+    TolX,
+    Tolerance,
+}
+
+impl MnrfitStatsetField {
+    pub const ALL: [Self; 4] = [
+        Self::MaxIter,
+        Self::IterationLimit,
+        Self::TolX,
+        Self::Tolerance,
+    ];
+
+    pub const fn public_name(self) -> &'static str {
+        match self {
+            Self::MaxIter => "MaxIter",
+            Self::IterationLimit => "IterationLimit",
+            Self::TolX => "TolX",
+            Self::Tolerance => "Tolerance",
+        }
+    }
+
+    pub const fn is_iteration_limit(self) -> bool {
+        match self {
+            Self::MaxIter | Self::IterationLimit => true,
+            Self::TolX | Self::Tolerance => false,
+        }
+    }
+}

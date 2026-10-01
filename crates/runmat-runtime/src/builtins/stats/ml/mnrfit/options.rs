@@ -2,7 +2,7 @@
 
 mod runtime;
 
-pub(super) use runtime::parse_options;
+pub(super) use runtime::prepare_values;
 
 #[derive(Clone, Debug)]
 pub(super) struct Options {

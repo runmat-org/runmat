@@ -21,7 +21,7 @@ pub use contract::{
     LOGICAL_X_EXTENSION as MNRFIT_LOGICAL_X_EXTENSION, MNRFIT_DESCRIPTOR,
     RESIDENT_INPUT_EXTENSION as MNRFIT_RESIDENT_INPUT_EXTENSION,
 };
-pub use options::MnrfitOption;
+pub use options::{MnrfitOption, MnrfitStatsetField};
 
 pub const MNRFIT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
