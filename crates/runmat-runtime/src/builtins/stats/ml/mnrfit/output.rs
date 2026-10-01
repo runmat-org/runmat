@@ -1,5 +1,5 @@
 use super::*;
-use runmat_value::{StringArray, StructValue};
+use runmat_value::{StringArray, StructValue, Tensor};
 
 pub(super) fn coefficients_value(beta: &[f64], rows: usize, cols: usize) -> BuiltinResult<Value> {
     Tensor::new(beta.to_vec(), vec![rows, cols])

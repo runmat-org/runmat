@@ -1,5 +1,6 @@
 use super::*;
-use runmat_value::CellArray;
+use crate::builtins::common::tensor;
+use runmat_value::{CellArray, Tensor};
 use std::cmp::Ordering;
 
 #[derive(Clone, Debug)]
