@@ -1156,7 +1156,7 @@ impl RunMatSession {
         }
 
         for instr in &mut bytecode.instructions {
-            remap_semantic_function_instr(instr, &remap);
+            super::semantic_definition::remap_semantic_function_instr(instr, &remap);
         }
         let name_remaps: Vec<(String, runmat_hir::FunctionId)> = current_registry
             .names
@@ -1199,7 +1199,7 @@ impl RunMatSession {
             function.rebind_identity(new_id, program_function);
             function.source_id = function.source_id.or(bytecode.source_id);
             for instr in &mut function.instructions {
-                remap_semantic_function_instr(instr, &remap);
+                super::semantic_definition::remap_semantic_function_instr(instr, &remap);
             }
             let persist_function =
                 !private_companion_function_names.contains(&function.display_name);
@@ -1349,33 +1349,6 @@ fn executable_source_identity(
         }
     }
     (root.owner_identity.clone(), display_name.replace('\\', "/"))
-}
-
-pub(super) fn remap_semantic_function_instr(
-    instr: &mut runmat_vm::Instr,
-    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
-) {
-    match instr {
-        runmat_vm::Instr::CreateSemanticClosure(function, _, _)
-        | runmat_vm::Instr::CreateBoundFunctionHandle(function, _)
-        | runmat_vm::Instr::CreateSemanticFuture(function, _, _)
-        | runmat_vm::Instr::CreateSemanticFutureExpandMultiOutput(function, _, _)
-        | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
-        | runmat_vm::Instr::CallSemanticFunctionMultiUsingOutputSlot(function, _, _)
-        | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
-            if let Some(new_id) = remap.get(function).copied() {
-                *function = new_id;
-            }
-        }
-        runmat_vm::Instr::CallSemanticNestedFunctionMulti { function, .. }
-        | runmat_vm::Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { function, .. }
-        | runmat_vm::Instr::CallSemanticNestedFunctionExpandMultiOutput { function, .. } => {
-            if let Some(new_id) = remap.get(function).copied() {
-                *function = new_id;
-            }
-        }
-        _ => {}
-    }
 }
 
 fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {

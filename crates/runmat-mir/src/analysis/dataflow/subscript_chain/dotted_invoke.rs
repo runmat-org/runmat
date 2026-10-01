@@ -1,9 +1,10 @@
-use crate::{MirCallArg, MirDottedInvokeArgument};
+use crate::{MirCallArg, MirCallArgumentRegion, MirDottedInvokeArgument, MirExpressionStep};
 use runmat_hir::{IndexKind, IndexResultContext};
 use runmat_types::{
     DynamicReason, SequenceFactInference, ValueFact, ValueKindFact, ValueSequenceFact,
 };
 
+use super::super::{index_selector_for_operand, simple_rvalue_fact};
 use super::simple_operand_fact;
 
 /// Compatibility adapter for value-only inference callers. New sequence-aware
@@ -70,9 +71,17 @@ pub(super) fn infer_sequence(
                 .iter()
                 .map(|argument| match argument {
                     MirDottedInvokeArgument::Colon => runmat_types::IndexSelectorFact::Colon,
-                    MirDottedInvokeArgument::Contextual(_) | MirDottedInvokeArgument::Call(_) => {
+                    MirDottedInvokeArgument::Call(region) => match &region.argument {
+                        MirCallArg::Single(_) => prepared_selector_fact(region, facts),
+                        MirCallArg::Expansion(_) | MirCallArg::CapturedSequence(_) => {
+                            runmat_types::IndexSelectorFact::Numeric(ValueFact::unknown(
+                                DynamicReason::DynamicDispatch,
+                            ))
+                        }
+                    },
+                    MirDottedInvokeArgument::Contextual(_) => {
                         runmat_types::IndexSelectorFact::Numeric(ValueFact::unknown(
-                            DynamicReason::DynamicDispatch,
+                            DynamicReason::Unspecified,
                         ))
                     }
                 })
@@ -115,6 +124,29 @@ pub(super) fn infer_sequence(
         inferred.effects,
         inferred.capabilities,
     )
+}
+
+fn prepared_selector_fact(
+    region: &MirCallArgumentRegion,
+    facts: &[Option<ValueFact>],
+) -> runmat_types::IndexSelectorFact {
+    let mut prepared = facts.to_vec();
+    for step in &region.steps {
+        if let MirExpressionStep::Let { local, value, .. } = step {
+            if local.0 >= prepared.len() {
+                prepared.resize(local.0 + 1, None);
+            }
+            prepared[local.0] = Some(simple_rvalue_fact(value, &prepared));
+        }
+    }
+    match &region.argument {
+        MirCallArg::Single(operand) => index_selector_for_operand(operand, &prepared),
+        MirCallArg::Expansion(_) | MirCallArg::CapturedSequence(_) => {
+            runmat_types::IndexSelectorFact::Numeric(ValueFact::unknown(
+                DynamicReason::DynamicDispatch,
+            ))
+        }
+    }
 }
 
 fn legacy_selected_fact(

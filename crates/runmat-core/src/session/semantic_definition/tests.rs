@@ -88,6 +88,50 @@ fn aliases_must_match_in_both_directions() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn repeated_source_reuses_remapped_dotted_local_function_during_hot_native_execution() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = super::super::RunMatSession::with_options(true, false).unwrap();
+        session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+            generic_hot_threshold: 1,
+            specialized_hot_threshold: 100,
+            deterministic: true,
+            ..Default::default()
+        });
+        let setup = "seed_value = seed(1);\nfunction out = seed(x)\nout = x + 1;\nend";
+        let outcome = crate::execute_text_request_for_testing(&mut session, setup).unwrap();
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let seed = session.function_registry.resolve_name("seed").unwrap();
+
+        let source = "obj = 2; result = obj.bump(3);\nfunction out = bump(receiver, value)\nout = receiver + value;\nend";
+        let mut published_bump = None;
+        let mut native_calls = 0;
+        for _ in 0..5 {
+            let outcome = crate::execute_text_request_for_testing(&mut session, source).unwrap();
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+            native_calls += usize::from(outcome.used_jit);
+            assert_eq!(
+                session.get_variables().get("result"),
+                Some(&runmat_value::Value::Num(5.0))
+            );
+            let bump = session.function_registry.resolve_name("bump").unwrap();
+            assert_ne!(bump, seed);
+            if let Some(previous) = published_bump {
+                assert_eq!(
+                    bump, previous,
+                    "unchanged local definition must retain its session identity"
+                );
+            }
+            published_bump = Some(bump);
+        }
+        assert!(
+            native_calls >= 2,
+            "recompiled dotted call must run natively"
+        );
+    });
+}
+
 #[test]
 fn unrelated_published_source_does_not_prevent_reuse() {
     let incoming = group(1);

@@ -281,6 +281,23 @@ async fn call_builtin_async_impl(
     output_count: Option<usize>,
     context: Option<crate::context::RuntimeContext>,
 ) -> Result<Value, RuntimeError> {
+    try_call_builtin_async_impl(name, args, output_count, context)
+        .await?
+        .ok_or_else(|| {
+            let resolved_name = ResolvedBuiltinName::resolve(name);
+            build_runtime_error(format!("Undefined function: {}", resolved_name.requested))
+                .with_identifier("RunMat:UndefinedFunction")
+                .build()
+        })
+}
+
+#[async_recursion::async_recursion(?Send)]
+async fn try_call_builtin_async_impl(
+    name: &str,
+    args: &[Value],
+    output_count: Option<usize>,
+    context: Option<crate::context::RuntimeContext>,
+) -> Result<Option<Value>, RuntimeError> {
     ensure_wasm_builtins_registered();
 
     let resolved_name = ResolvedBuiltinName::resolve(name);
@@ -290,7 +307,7 @@ async fn call_builtin_async_impl(
     if let Some(result) =
         try_distributed_builtin(name, args, output_count, context.as_ref()).await?
     {
-        return Ok(result);
+        return Ok(Some(result));
     }
     let scoped_builtin_service = context
         .as_ref()
@@ -322,12 +339,12 @@ async fn call_builtin_async_impl(
         if let Some(result) =
             try_call_registered_instance_method(name, args, output_count, context.as_ref()).await?
         {
-            return compatibility_checked_builtin_result(name, args, result);
+            return compatibility_checked_builtin_result(name, args, result).map(Some);
         }
         if let Some(result) =
             try_call_registered_static_method(name, args, output_count, context.as_ref()).await?
         {
-            return compatibility_checked_builtin_result(name, args, result);
+            return compatibility_checked_builtin_result(name, args, result).map(Some);
         }
         // Fallback: treat as class constructor if class is registered.
         if ClassIdentity::new(name)
@@ -338,20 +355,15 @@ async fn call_builtin_async_impl(
             let result =
                 call_registered_class_constructor(name, args, output_count, context.as_ref())
                     .await?;
-            return compatibility_checked_builtin_result(name, args, result);
+            return compatibility_checked_builtin_result(name, args, result).map(Some);
         }
-        return Err(build_runtime_error(format!(
-            "Undefined function: {}",
-            resolved_name.requested
-        ))
-        .with_identifier("RunMat:UndefinedFunction")
-        .build());
+        return Ok(None);
     }
 
     if let Some(result) =
         try_call_registered_instance_method(name, args, output_count, context.as_ref()).await?
     {
-        return compatibility_checked_builtin_result(name, args, result);
+        return compatibility_checked_builtin_result(name, args, result).map(Some);
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -402,7 +414,29 @@ async fn call_builtin_async_impl(
         output_count,
     )
     .await?;
-    compatibility_checked_builtin_result(name, args, result)
+    compatibility_checked_builtin_result(name, args, result).map(Some)
+}
+
+pub(crate) async fn try_call_builtin_async_with_outputs(
+    name: &str,
+    args: &[Value],
+    output_count: usize,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<Option<Value>, RuntimeError> {
+    let context = context.cloned();
+    match &context {
+        Some(context) => {
+            context
+                .scope(try_call_builtin_async_impl(
+                    name,
+                    args,
+                    Some(output_count),
+                    Some(context.clone()),
+                ))
+                .await
+        }
+        None => try_call_builtin_async_impl(name, args, Some(output_count), None).await,
+    }
 }
 
 async fn try_distributed_builtin(

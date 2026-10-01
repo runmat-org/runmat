@@ -70,7 +70,7 @@ pub(in crate::session) fn unchanged_unit_remap(
         );
         normalized.source_id = normalized.source_id.or(bytecode.source_id);
         for instruction in &mut normalized.instructions {
-            super::super::compile::remap_semantic_function_instr(instruction, &remap);
+            super::remap_semantic_function_instr(instruction, &remap);
         }
         if super::fingerprint(&normalized).ok()?
             != super::fingerprint(published.get(target)?).ok()?

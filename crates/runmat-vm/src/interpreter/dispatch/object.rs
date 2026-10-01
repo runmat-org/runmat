@@ -653,61 +653,66 @@ async fn execute_subscript_path(
     state: &mut super::SequenceState,
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut argument_roots = Vec::new();
-    let (root, path, _roots) =
-        if let [crate::bytecode::BytecodeSubscriptStep::DottedInvoke { member, arguments }] = steps
-        {
-            use crate::bytecode::BytecodeDottedInvokeArgument as Argument;
-            use runmat_runtime::object::indexing::{
-                ObjectIndexComponent, ObjectSubscript, ObjectSubscriptPath,
-            };
-            let mut groups = Vec::with_capacity(arguments.len());
-            for argument in arguments.iter().rev() {
-                match argument {
-                    Argument::Colon => groups.push(vec![ObjectIndexComponent::Colon]),
-                    Argument::Call(spec) => {
-                        let values = crate::call::shared::build_expanded_args_from_specs(
-                            stack,
-                            std::slice::from_ref(spec),
-                            state,
-                            runtime,
-                        )
-                        .await?;
-                        argument_roots.push(crate::call::root_values(&values)?);
-                        groups.push(
-                            values
-                                .into_iter()
-                                .map(ObjectIndexComponent::Value)
-                                .collect(),
-                        );
-                    }
+    let (root, path, _roots) = if let [crate::bytecode::BytecodeSubscriptStep::DottedInvoke {
+        member,
+        arguments,
+        semantic_fallback,
+    }] = steps
+    {
+        use crate::bytecode::BytecodeDottedInvokeArgument as Argument;
+        use runmat_runtime::object::indexing::{
+            ObjectIndexComponent, ObjectSubscript, ObjectSubscriptPath,
+        };
+        let mut groups = Vec::with_capacity(arguments.len());
+        for argument in arguments.iter().rev() {
+            match argument {
+                Argument::Colon => groups.push(vec![ObjectIndexComponent::Colon]),
+                Argument::Call(spec) => {
+                    let values = crate::call::shared::build_expanded_args_from_specs(
+                        stack,
+                        std::slice::from_ref(spec),
+                        state,
+                        runtime,
+                    )
+                    .await?;
+                    argument_roots.push(crate::call::root_values(&values)?);
+                    groups.push(
+                        values
+                            .into_iter()
+                            .map(ObjectIndexComponent::Value)
+                            .collect(),
+                    );
                 }
             }
-            groups.reverse();
-            let root = stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "dotted invocation has no receiver",
-                )
-            })?;
-            let components = groups.into_iter().flatten().collect();
-            let path = ObjectSubscriptPath::new(
-                ObjectSubscript::dotted_invoke_components(member.clone(), components).into(),
-            )?;
-            let roots = crate::call::root_values(std::iter::once(&root))?;
-            (root, Some(path), roots)
-        } else {
-            let operand_count = steps
-                .iter()
-                .map(crate::bytecode::BytecodeSubscriptStep::operand_count)
-                .sum::<usize>();
-            let start = stack.len().checked_sub(operand_count + 1).ok_or_else(|| {
-                crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
-            })?;
-            let operands = stack.split_off(start);
-            let roots = crate::call::root_values(&operands)?;
-            let (root, path) = materialize_subscript_path(operands, steps)?;
-            (root, path, roots)
-        };
+        }
+        groups.reverse();
+        let root = stack.pop().ok_or_else(|| {
+            crate::interpreter::errors::mex("StackUnderflow", "dotted invocation has no receiver")
+        })?;
+        let components = groups.into_iter().flatten().collect();
+        let path = ObjectSubscriptPath::new(
+            ObjectSubscript::dotted_invoke_components_with_fallback(
+                member.clone(),
+                components,
+                semantic_fallback.clone(),
+            )
+            .into(),
+        )?;
+        let roots = crate::call::root_values(std::iter::once(&root))?;
+        (root, Some(path), roots)
+    } else {
+        let operand_count = steps
+            .iter()
+            .map(crate::bytecode::BytecodeSubscriptStep::operand_count)
+            .sum::<usize>();
+        let start = stack.len().checked_sub(operand_count + 1).ok_or_else(|| {
+            crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
+        })?;
+        let operands = stack.split_off(start);
+        let roots = crate::call::root_values(&operands)?;
+        let (root, path) = materialize_subscript_path(operands, steps)?;
+        (root, path, roots)
+    };
     let path = path.ok_or_else(|| {
         crate::interpreter::errors::mex(
             "RunMat:InvalidObjectSubscriptPath",

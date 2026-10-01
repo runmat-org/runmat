@@ -239,45 +239,44 @@ fn lower_subscript_chain(
                     await_replacements,
                 )?)
             }
-            runmat_hir::HirSubscriptStep::DottedInvoke { member, arguments } => {
-                crate::MirSubscriptStep::DottedInvoke {
-                    member: member.clone(),
-                    arguments: arguments
-                        .iter()
-                        .map(|argument| match argument {
-                            runmat_hir::HirDottedInvokeArgument::Colon => {
-                                Ok(crate::MirDottedInvokeArgument::Colon)
-                            }
-                            runmat_hir::HirDottedInvokeArgument::End { offset } => {
-                                let MirIndexComponent::ContextualExpr(region) =
-                                    lower_contextual_end(ctx, *offset)
-                                else {
-                                    unreachable!("contextual end always lowers to a region")
-                                };
-                                Ok(crate::MirDottedInvokeArgument::Contextual(region))
-                            }
-                            runmat_hir::HirDottedInvokeArgument::Value(value) => {
-                                let mut preparation = Vec::new();
-                                let argument = lower_call_arg(
-                                    ctx,
-                                    value,
-                                    &mut preparation,
-                                    await_replacements,
-                                )?;
-                                Ok(crate::MirDottedInvokeArgument::Call(
-                                    crate::MirCallArgumentRegion {
-                                        steps: crate::MirExpressionRegion::steps_from_lowered(
-                                            preparation,
-                                        )?,
-                                        argument,
-                                        span: value.span,
-                                    },
-                                ))
-                            }
-                        })
-                        .collect::<Result<_, HirError>>()?,
-                }
-            }
+            runmat_hir::HirSubscriptStep::DottedInvoke {
+                member,
+                arguments,
+                semantic_fallback,
+            } => crate::MirSubscriptStep::DottedInvoke {
+                member: member.clone(),
+                semantic_fallback: semantic_fallback.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|argument| match argument {
+                        runmat_hir::HirDottedInvokeArgument::Colon => {
+                            Ok(crate::MirDottedInvokeArgument::Colon)
+                        }
+                        runmat_hir::HirDottedInvokeArgument::End { offset } => {
+                            let MirIndexComponent::ContextualExpr(region) =
+                                lower_contextual_end(ctx, *offset)
+                            else {
+                                unreachable!("contextual end always lowers to a region")
+                            };
+                            Ok(crate::MirDottedInvokeArgument::Contextual(region))
+                        }
+                        runmat_hir::HirDottedInvokeArgument::Value(value) => {
+                            let mut preparation = Vec::new();
+                            let argument =
+                                lower_call_arg(ctx, value, &mut preparation, await_replacements)?;
+                            Ok(crate::MirDottedInvokeArgument::Call(
+                                crate::MirCallArgumentRegion {
+                                    steps: crate::MirExpressionRegion::steps_from_lowered(
+                                        preparation,
+                                    )?,
+                                    argument,
+                                    span: value.span,
+                                },
+                            ))
+                        }
+                    })
+                    .collect::<Result<_, HirError>>()?,
+            },
         });
     }
     Ok(crate::MirSubscriptChain {

@@ -116,6 +116,40 @@ fn function_remap_moves_local_program_identity_without_collapsing_external_ident
     assert!(analysis.function(ProgramFunctionId(0)).is_none());
 }
 
+#[test]
+fn function_remap_moves_dotted_semantic_fallback_identity() {
+    let ast = runmat_parser::parse(
+        "obj = 2; y = obj.bump(3);\nfunction out = bump(receiver, value)\n out = receiver + value;\nend",
+    )
+    .expect("parse");
+    let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+    let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+    let bump = mir
+        .functions
+        .iter()
+        .find_map(|(id, metadata)| (metadata.name.0 == "bump").then_some(*id))
+        .expect("bump identity");
+    let moved = runmat_hir::FunctionId(bump.0 + 100);
+    runmat_mir::remap_function_ids(&mut mir, &HashMap::from([(bump, moved)]))
+        .expect("remap all references");
+    assert!(mir
+        .bodies
+        .values()
+        .flat_map(|body| &body.blocks)
+        .flat_map(|block| { block.statements.iter() })
+        .any(|statement| matches!(
+            &statement.kind,
+            runmat_mir::MirStmtKind::Assign {
+                value: MirRvalue::SubscriptChain(chain), ..
+            } if chain.steps.iter().any(|step| matches!(
+                step,
+                runmat_mir::MirSubscriptStep::DottedInvoke {
+                    semantic_fallback: Some(CallableIdentity::BoundFunction(id)), ..
+                } if *id == moved
+            ))
+        )));
+}
+
 fn first_indexing(body: &MirBody) -> &runmat_mir::MirIndexing {
     body.blocks
         .iter()
@@ -811,6 +845,9 @@ fn subscript_chain_analysis_preserves_default_facts_and_defers_at_objects() {
         .0
         .contains(&runmat_types::EffectKind::Unknown));
 }
+
+#[path = "lowering/subscript_selector_parity.rs"]
+mod subscript_selector_parity;
 
 #[test]
 fn analyze_body_records_binary_op_as_unknown_scalar_fact() {
@@ -3923,7 +3960,7 @@ fn ordinary_dotted_indexing_lowers_as_one_ordered_mir_path() {
     assert!(matches!(
         chain.steps.as_slice(),
         [
-            runmat_mir::MirSubscriptStep::DottedInvoke { member: method, arguments },
+            runmat_mir::MirSubscriptStep::DottedInvoke { member: method, arguments, .. },
             runmat_mir::MirSubscriptStep::Member(field),
             runmat_mir::MirSubscriptStep::Index(brace),
         ] if method.0 == "method"

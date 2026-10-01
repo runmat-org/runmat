@@ -3,7 +3,6 @@ use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_types::ObjectIndexingContext as IndexingContext;
 use runmat_value::{NumericScalar, Value};
-use std::sync::OnceLock;
 
 pub(crate) const NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD: runmat_types::StaticMethodName =
     crate::OBJECT_NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD;
@@ -15,8 +14,6 @@ const INDEXING_CONTEXT_STATEMENT: &str = "Statement";
 const INDEXING_CONTEXT_EXPRESSION: &str = "Expression";
 const INDEXING_CONTEXT_ASSIGNMENT: &str = "Assignment";
 const ENUM_MEMBER_PROPERTY: &str = "__enum_member__";
-
-static INDEXING_CONTEXT_REGISTERED: OnceLock<()> = OnceLock::new();
 
 #[derive(Clone)]
 struct SubscriptLevel {

@@ -138,7 +138,14 @@ fn remap_chain(
     for step in &mut chain.steps {
         match step {
             crate::MirSubscriptStep::Index(indexing) => remap_indexing(indexing, remap)?,
-            crate::MirSubscriptStep::DottedInvoke { arguments, .. } => {
+            crate::MirSubscriptStep::DottedInvoke {
+                arguments,
+                semantic_fallback,
+                ..
+            } => {
+                if let Some(identity) = semantic_fallback {
+                    remap_identity(identity, remap);
+                }
                 for argument in arguments {
                     match argument {
                         crate::MirDottedInvokeArgument::Colon => {}

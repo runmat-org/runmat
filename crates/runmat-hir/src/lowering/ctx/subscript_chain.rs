@@ -52,6 +52,17 @@ impl LoweringCtx {
                     crate::HirSubscriptStep::DottedInvoke {
                         member: MemberName(member.to_owned()),
                         arguments: self.lower_dotted_invoke_arguments(indices)?,
+                        semantic_fallback: self
+                            .resolve_scoped_function_name(member)
+                            .map(runmat_types::CallableIdentity::BoundFunction)
+                            .or_else(|| {
+                                self.external_function_names.get(member).map(|function| {
+                                    runmat_types::CallableIdentity::ExternalFunction {
+                                        function: *function,
+                                        display_name: member.to_owned(),
+                                    }
+                                })
+                            }),
                     }
                 }
             });

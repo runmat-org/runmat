@@ -79,7 +79,11 @@ impl Compiler {
                         runmat_hir::IndexKind::Brace => BytecodeSubscriptStep::Braces { selectors },
                     });
                 }
-                MirSubscriptStep::DottedInvoke { member, arguments } => {
+                MirSubscriptStep::DottedInvoke {
+                    member,
+                    arguments,
+                    semantic_fallback,
+                } => {
                     // Preparing the prefix is an execution boundary: the next
                     // invocation's arguments must not run before this receiver
                     // has been evaluated. The existing prepared receiver also
@@ -128,6 +132,7 @@ impl Compiler {
                     let path = vec![BytecodeSubscriptStep::DottedInvoke {
                         member: member.clone(),
                         arguments: compiled,
+                        semantic_fallback: semantic_fallback.clone(),
                     }];
                     if position + 1 == chain.steps.len() {
                         self.emit_terminal_subscript_path(

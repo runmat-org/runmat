@@ -749,6 +749,35 @@ fn overidx_expect_object(
     }
 }
 
+fn overidx_binary_operands(
+    lhs: Value,
+    rhs: Value,
+    method: &str,
+) -> crate::BuiltinResult<(f64, f64)> {
+    fn object_value(object: runmat_value::ObjectInstance) -> f64 {
+        match object.properties.get("k") {
+            Some(Value::Num(value)) => *value,
+            _ => 0.0,
+        }
+    }
+
+    match (lhs, rhs) {
+        (Value::Object(object), rhs) => {
+            let rhs: f64 = (&rhs).try_into()?;
+            Ok((object_value(object), rhs))
+        }
+        (lhs, Value::Object(object)) => {
+            let lhs: f64 = (&lhs).try_into()?;
+            Ok((lhs, object_value(object)))
+        }
+        (lhs, _) => Err(runtime_descriptor_error_with_detail(
+            "OverIdx",
+            &OVERIDX_ERROR_RECEIVER_INVALID,
+            format!("{method}: got {lhs:?}"),
+        )),
+    }
+}
+
 // --- Operator overloading methods for OverIdx (test scaffolding) ---
 const OVERIDX_BINARY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -981,14 +1010,8 @@ pub const OVERIDX_XOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.plus")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k + r))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.plus")?;
+    Ok(Value::Num(lhs + rhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -997,14 +1020,8 @@ pub(crate) async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.times")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k * r))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.times")?;
+    Ok(Value::Num(lhs * rhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1013,14 +1030,8 @@ pub(crate) async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResul
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.mtimes")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k * r))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.mtimes")?;
+    Ok(Value::Num(lhs * rhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1029,14 +1040,8 @@ pub(crate) async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResu
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.lt")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if k < r { 1.0 } else { 0.0 }))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.lt")?;
+    Ok(Value::Num(if lhs < rhs { 1.0 } else { 0.0 }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1045,14 +1050,8 @@ pub(crate) async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<V
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.gt")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if k > r { 1.0 } else { 0.0 }))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.gt")?;
+    Ok(Value::Num(if lhs > rhs { 1.0 } else { 0.0 }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1061,14 +1060,12 @@ pub(crate) async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<V
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_eq(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.eq")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.eq")?;
+    Ok(Value::Num(if (lhs - rhs).abs() < 1e-12 {
+        1.0
     } else {
         0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k - r).abs() < 1e-12 { 1.0 } else { 0.0 }))
+    }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1087,14 +1084,8 @@ pub(crate) async fn overidx_uplus(obj: Value) -> crate::BuiltinResult<Value> {
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.rdivide")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k / r))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.rdivide")?;
+    Ok(Value::Num(lhs / rhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1112,14 +1103,8 @@ pub(crate) async fn overidx_mrdivide(obj: Value, rhs: Value) -> crate::BuiltinRe
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.ldivide")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(r / k))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.ldivide")?;
+    Ok(Value::Num(rhs / lhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1137,14 +1122,12 @@ pub(crate) async fn overidx_mldivide(obj: Value, rhs: Value) -> crate::BuiltinRe
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.and")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.and")?;
+    Ok(Value::Num(if (lhs != 0.0) && (rhs != 0.0) {
+        1.0
     } else {
         0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k != 0.0) && (r != 0.0) { 1.0 } else { 0.0 }))
+    }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1153,14 +1136,12 @@ pub(crate) async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.or")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.or")?;
+    Ok(Value::Num(if (lhs != 0.0) || (rhs != 0.0) {
+        1.0
     } else {
         0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k != 0.0) || (r != 0.0) { 1.0 } else { 0.0 }))
+    }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1169,14 +1150,8 @@ pub(crate) async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<V
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.xor")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    let a = k != 0.0;
-    let b = r != 0.0;
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.xor")?;
+    let a = lhs != 0.0;
+    let b = rhs != 0.0;
     Ok(Value::Num(if a ^ b { 1.0 } else { 0.0 }))
 }

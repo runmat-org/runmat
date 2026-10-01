@@ -50,6 +50,24 @@ end
 }
 
 #[test]
+fn dotted_semantic_fallback_is_a_reachable_alternative_not_a_definite_call() {
+    let assembly = lower_mir(
+        "obj = 2; y = obj.bump(3);\nfunction out = bump(receiver, value)\n out = receiver + value;\nend",
+    );
+    let report = analyze_reachability(&assembly, &ReachabilityNames::default());
+    let bump = report
+        .nodes
+        .iter()
+        .find(|node| node.kind == ReachabilityNodeKind::Function && node.symbol == "bump")
+        .expect("method-style fallback function is retained");
+    assert!(report.edges.iter().any(|edge| {
+        edge.to == bump.id
+            && edge.reason == ReachabilityReason::MethodDispatch
+            && edge.certainty == ReachabilityCertainty::FiniteDynamic
+    }));
+}
+
+#[test]
 fn reports_unbounded_dynamic_calls_explicitly() {
     let mut assembly = lower_mir("out = abs(1);");
     let call = assembly

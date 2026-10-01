@@ -1,7 +1,13 @@
 use super::*;
 pub(crate) fn ensure_indexing_context_classes_registered() {
-    INDEXING_CONTEXT_REGISTERED.get_or_init(|| {
+    static INDEXING_CONTEXT_REGISTRATION: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(INDEXING_CONTEXT_CLASS);
+    static LEGACY_INDEXING_CONTEXT_REGISTRATION: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(LEGACY_INDEXING_CONTEXT_CLASS);
+    INDEXING_CONTEXT_REGISTRATION.ensure(|| {
         register_indexing_context_class(INDEXING_CONTEXT_CLASS);
+    });
+    LEGACY_INDEXING_CONTEXT_REGISTRATION.ensure(|| {
         register_indexing_context_class(LEGACY_INDEXING_CONTEXT_CLASS);
     });
 }

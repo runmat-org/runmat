@@ -6138,6 +6138,7 @@ y = x^[1 2; 3 4];\n",
                     [crate::bytecode::BytecodeSubscriptStep::DottedInvoke {
                         member,
                         arguments,
+                        ..
                     }] if member.0 == "method"
                         && arguments
                             == &[crate::bytecode::BytecodeDottedInvokeArgument::Call(
@@ -6300,7 +6301,7 @@ y = x^[1 2; 3 4];\n",
         assert_eq!(*paths[1].1, runmat_types::SequenceUse::RequireSingle);
         assert!(matches!(
             paths[0].0.as_slice(),
-                [crate::bytecode::BytecodeSubscriptStep::DottedInvoke { member, arguments }]
+                [crate::bytecode::BytecodeSubscriptStep::DottedInvoke { member, arguments, .. }]
                     if member.0 == "method"
                         && arguments == &[crate::bytecode::BytecodeDottedInvokeArgument::Call(
                             runmat_runtime::call::arguments::ArgumentSpec::Single,

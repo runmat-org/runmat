@@ -122,6 +122,35 @@ pub(super) async fn store_handle(
     rhs: Value,
     caller: Option<&str>,
 ) -> Result<Value, RuntimeError> {
+    if handle
+        .class_name
+        .is(crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_CLASS)
+    {
+        // Metadata assignment also edits the owning object's dynamic-property
+        // definition. Never hold a mutable GC borrow of the metadata handle
+        // while that shared domain owner enters the target object.
+        let mut metadata = runmat_gc::gc_with_value(&handle.target, |target| {
+            target_object(&handle, target).cloned()
+        })
+        .map_err(|_| invalid_handle())??;
+        if !crate::builtins::introspection::dynamicprops::metadata_assignment(
+            &mut metadata,
+            &field,
+            rhs,
+        )? {
+            return Err(invalid_handle());
+        }
+        let replacement = Value::Object(metadata);
+        let old = runmat_gc::gc_with_value_mut(&handle.target, |target| {
+            target_object(&handle, target)?;
+            runmat_gc::gc_record_handle_write(&handle.target, &replacement);
+            Ok::<_, RuntimeError>(std::mem::replace(target, replacement))
+        })
+        .map_err(|_| invalid_handle())??;
+        // Destruction can reenter GC and other owners.
+        drop(old);
+        return Ok(Value::HandleObject(handle));
+    }
     let action = runmat_gc::gc_with_value(&handle.target, |target| {
         admit(target_object(&handle, target)?, &field, caller)
     })

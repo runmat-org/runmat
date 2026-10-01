@@ -87,6 +87,7 @@ fn dotted_invocation_requires_matching_immediate_execution_segment() {
     let path = Instr::ReadSubscriptPath {
         steps: vec![crate::bytecode::BytecodeSubscriptStep::DottedInvoke {
             member: runmat_types::MemberName::from("method"),
+            semantic_fallback: None,
             arguments: vec![crate::bytecode::BytecodeDottedInvokeArgument::Call(
                 runmat_runtime::call::arguments::ArgumentSpec::Single,
             )],

@@ -27,6 +27,7 @@ fn subscript_chain_rejects_invalid_contextual_dotted_argument() {
     let chain = crate::MirSubscriptChain {
         root: MirOperand::Local(MirLocalId(0)),
         steps: vec![crate::MirSubscriptStep::DottedInvoke {
+            semantic_fallback: None,
             member: runmat_hir::MemberName("method".to_owned()),
             arguments: vec![crate::MirDottedInvokeArgument::Contextual(invalid)],
         }],

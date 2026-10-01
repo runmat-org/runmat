@@ -22,6 +22,9 @@ const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
 
 #[path = "resolve/property_store.rs"]
 mod property_store;
+#[path = "resolve/member_presence.rs"]
+mod member_presence;
+pub(crate) use member_presence::{has_stored_member, MemberPresence};
 
 fn mex(identifier: &str, message: &str) -> RuntimeError {
     crate::runtime_error::semantic_error(identifier, message)

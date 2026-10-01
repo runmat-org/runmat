@@ -17,7 +17,7 @@ pub(super) async fn try_execute(
     request: &SubscriptReadRequest,
     caller_function_name: Option<&str>,
 ) -> Result<Option<ValueSequence>, RuntimeError> {
-    let Some((member, components)) = prefix(steps) else {
+    let Some((member, components, semantic_fallback)) = prefix(steps) else {
         return Ok(None);
     };
     steps.pop_front();
@@ -45,6 +45,24 @@ pub(super) async fn try_execute(
             &method,
             call_arguments,
             requested_outputs,
+        )
+        .await?
+    } else if crate::object::resolve::has_stored_member(&base, &member)?
+        == crate::object::resolve::MemberPresence::Absent
+        && (matches!(
+            &base,
+            Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_) | Value::ClassRef(_)
+        ) || semantic_fallback.is_some())
+    {
+        // This is a structural decision, not an exception-driven retry: a
+        // missing member may use the established method-style callable route.
+        crate::object::dispatch::call_method_or_member_index_with_fallback(
+            base,
+            member.0,
+            call_arguments(components)?,
+            requested_outputs,
+            caller_function_name,
+            semantic_fallback,
         )
         .await?
     } else {
@@ -83,7 +101,11 @@ pub(super) async fn try_execute(
 
 fn prefix(
     steps: &VecDeque<ObjectSubscript>,
-) -> Option<(runmat_types::MemberName, Vec<ObjectIndexComponent>)> {
+) -> Option<(
+    runmat_types::MemberName,
+    Vec<ObjectIndexComponent>,
+    Option<runmat_types::CallableIdentity>,
+)> {
     let (Some(member_step), Some(paren_step)) = (steps.front(), steps.get(1)) else {
         return None;
     };
@@ -99,7 +121,11 @@ fn prefix(
     {
         return None;
     }
-    Some((member.clone(), components.clone()))
+    Some((
+        member.clone(),
+        components.clone(),
+        member_step.semantic_fallback().cloned(),
+    ))
 }
 
 // The syntax is ambiguous until member resolution: `obj.data(:)` indexes a

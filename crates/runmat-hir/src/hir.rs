@@ -551,6 +551,9 @@ pub enum HirSubscriptStep {
     DottedInvoke {
         member: MemberName,
         arguments: Vec<HirDottedInvokeArgument>,
+        /// A lexically resolved function is eligible only after receiver
+        /// method/member dispatch. Never re-resolve its name at execution.
+        semantic_fallback: Option<runmat_types::CallableIdentity>,
     },
 }
 

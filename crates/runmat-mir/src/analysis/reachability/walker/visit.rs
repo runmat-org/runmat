@@ -197,7 +197,27 @@ impl Walker<'_> {
                 for step in &chain.steps {
                     match step {
                         crate::MirSubscriptStep::Index(indexing) => self.indexing(from, indexing),
-                        crate::MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                        crate::MirSubscriptStep::DottedInvoke {
+                            arguments,
+                            semantic_fallback,
+                            ..
+                        } => {
+                            if let Some(identity) = semantic_fallback {
+                                match identity {
+                                    CallableIdentity::BoundFunction(function)
+                                    | CallableIdentity::AnonymousFunction(function)
+                                    | CallableIdentity::ExternalFunction { function, .. } => {
+                                        self.retain_function(
+                                            *function,
+                                            Certainty::FiniteDynamic,
+                                            Some(from.into()),
+                                            Reason::MethodDispatch,
+                                            identity.display_name(),
+                                        );
+                                    }
+                                    other => self.identity(from, other, Reason::MethodDispatch),
+                                }
+                            }
                             for argument in arguments {
                                 match argument {
                                     crate::MirDottedInvokeArgument::Colon => {}

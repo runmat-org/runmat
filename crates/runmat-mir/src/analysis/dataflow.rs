@@ -421,25 +421,30 @@ pub(crate) fn index_selectors(
         .iter()
         .map(|component| match component {
             MirIndexComponent::Colon => IndexSelectorFact::Colon,
-            MirIndexComponent::Expr(operand) => {
-                if let Some(index) =
-                    numeric_operand(operand).filter(|index| *index >= 1.0 && index.fract() == 0.0)
-                {
-                    IndexSelectorFact::KnownOneBasedIndex(index as usize)
-                } else {
-                    let fact = simple_operand_fact(operand, facts);
-                    if matches!(fact.kind, ValueKindFact::Logical) {
-                        IndexSelectorFact::Logical(fact)
-                    } else {
-                        IndexSelectorFact::Numeric(fact)
-                    }
-                }
-            }
+            MirIndexComponent::Expr(operand) => index_selector_for_operand(operand, facts),
             MirIndexComponent::ContextualExpr(_) => {
                 IndexSelectorFact::Numeric(ValueFact::unknown(DynamicReason::Unspecified))
             }
         })
         .collect()
+}
+
+fn index_selector_for_operand(
+    operand: &MirOperand,
+    facts: &[Option<ValueFact>],
+) -> IndexSelectorFact {
+    if let Some(index) =
+        numeric_operand(operand).filter(|index| *index >= 1.0 && index.fract() == 0.0)
+    {
+        IndexSelectorFact::KnownOneBasedIndex(index as usize)
+    } else {
+        let fact = simple_operand_fact(operand, facts);
+        if matches!(fact.kind, ValueKindFact::Logical) {
+            IndexSelectorFact::Logical(fact)
+        } else {
+            IndexSelectorFact::Numeric(fact)
+        }
+    }
 }
 
 fn scalar_fact(kind: ValueKindFact) -> ValueFact {

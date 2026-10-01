@@ -25,6 +25,7 @@ pub enum BytecodeSubscriptStep {
     DottedInvoke {
         member: runmat_types::MemberName,
         arguments: Vec<BytecodeDottedInvokeArgument>,
+        semantic_fallback: Option<runmat_types::CallableIdentity>,
     },
 }
 

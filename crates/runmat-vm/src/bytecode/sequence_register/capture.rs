@@ -155,6 +155,7 @@ mod tests {
         Instr::ReadSubscriptPath {
             steps: vec![BytecodeSubscriptStep::DottedInvoke {
                 member: MemberName::from("method"),
+                semantic_fallback: None,
                 arguments: slots
                     .iter()
                     .map(|slot| {

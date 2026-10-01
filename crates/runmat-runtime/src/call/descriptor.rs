@@ -446,44 +446,19 @@ async fn forward_named_fallback(
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> Result<ValueSequence, RuntimeError> {
-    let call = match runtime {
-        Some(runtime) => {
-            crate::call_builtin_async_with_outputs_in_context(
-                runtime,
-                &name,
-                &args,
-                requested_outputs,
-            )
-            .await
-        }
-        None => crate::call_builtin_async_with_outputs(&name, &args, requested_outputs).await,
-    };
-    match call {
-        Ok(value) => crate::call::arguments::adapt_legacy_builtin_result(value),
-        Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {
-            let value = match runtime {
-                Some(runtime) => {
-                    crate::call_feval_async_with_outputs_in_context(
-                        runtime,
-                        Value::FunctionHandle(name),
-                        &args,
-                        requested_outputs,
-                    )
-                    .await?
-                }
-                None => {
-                    crate::call_feval_async_with_outputs(
-                        Value::FunctionHandle(name),
-                        &args,
-                        requested_outputs,
-                    )
-                    .await?
-                }
-            };
-            crate::call::arguments::adapt_legacy_builtin_result(value)
-        }
-        Err(err) => Err(err),
-    }
+    let value = crate::dispatcher::try_call_builtin_async_with_outputs(
+        &name,
+        &args,
+        requested_outputs,
+        runtime,
+    )
+    .await?
+    .ok_or_else(|| {
+        crate::build_runtime_error(format!("Undefined function: {name}"))
+            .with_identifier("RunMat:UndefinedFunction")
+            .build()
+    })?;
+    crate::call::arguments::adapt_legacy_builtin_result(value)
 }
 
 async fn execute_resolved_callable(
@@ -626,11 +601,16 @@ async fn try_execute_resolved_callable(
             let Some(name) = fallback_policy.vm_fallback_name_for(&other) else {
                 return Ok(None);
             };
-            match forward_named_fallback(runtime, name, args, requested_outputs).await {
-                Ok(value) => Ok(Some(value)),
-                Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => Ok(None),
-                Err(err) => Err(err),
-            }
+            let value = crate::dispatcher::try_call_builtin_async_with_outputs(
+                &name,
+                &args,
+                requested_outputs,
+                runtime,
+            )
+            .await?;
+            value
+                .map(crate::call::arguments::adapt_legacy_builtin_result)
+                .transpose()
         }
     }
 }
@@ -698,6 +678,10 @@ async fn execute_callable_descriptor_with_runtime(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "descriptor/tests.rs"]
+mod tests;
 
 pub async fn try_execute_callable_descriptor(
     descriptor: CallableDescriptor,

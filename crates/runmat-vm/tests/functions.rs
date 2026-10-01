@@ -4,7 +4,11 @@ mod test_helpers;
 #[path = "support/captured_arguments.rs"]
 mod captured_arguments;
 
+#[path = "support/dotted_calls.rs"]
+mod dotted_calls;
+
 use captured_arguments::{has_captured_cell_dotted_call, is_expand_all_cell_contents};
+use dotted_calls::has_single_value_dotted_call;
 
 use std::convert::TryFrom;
 use test_helpers::compile_source;
@@ -2984,7 +2988,7 @@ fn dynamic_member_read_executes() {
 
 #[test]
 fn indexed_dynamic_member_read_executes() {
-    let vars = execute_source("s = struct('x', {1, 2, 3}); f = 'x'; y = s.(f){2};");
+    let vars = execute_source("s = struct('x', {{1, 2, 3}}); f = 'x'; y = s.(f){2};");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
@@ -3310,7 +3314,7 @@ fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
 
 #[test]
 fn dotted_invoke_preserves_object_method_dispatch() {
-    let input = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = obj.move(1,2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
+    let input = "__register_test_classes(); obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = obj.move(1,2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
     let vars = execute_source_with_extensions(input);
     assert!(vars
         .iter()
@@ -3655,14 +3659,49 @@ fn unresolved_external_function_handle_expand_index_multi_output_errors_with_ide
 fn method_syntax_with_semantic_function_callee_executes_directly() {
     let source = "obj = 2; y = obj.bump(3);\nfunction out = bump(receiver, value)\n  out = receiver + value;\nend";
     let bytecode = compile_source(source).expect("semantic method-style call compiles");
-    assert!(bytecode
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 2, 1))));
+    let function = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|entry| entry.display_name == "bump")
+        .expect("local bump has a semantic function identity")
+        .function;
+    assert!(has_single_value_dotted_call(
+        &bytecode.instructions,
+        &runmat_types::MemberName::from("bump"),
+        1,
+        1,
+    ));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::ReadSubscriptPath { steps, .. }
+            if matches!(steps.as_slice(), [runmat_vm::BytecodeSubscriptStep::DottedInvoke {
+                member,
+                semantic_fallback: Some(runmat_types::CallableIdentity::BoundFunction(id)),
+                ..
+            }] if member.0 == "bump" && *id == function)
+    )));
     let vars = interpret(&bytecode).expect("semantic method-style call executes");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+}
+
+#[test]
+fn dotted_stored_member_precedes_same_named_semantic_function() {
+    let source = "obj = struct('bump', [10, 20]); y = obj.bump(2);\nfunction out = bump(receiver, index)\n  out = 999;\nend";
+    let vars = execute_source(source);
+    assert!(numeric_workspace_value(&vars, 20.0));
+    assert!(!numeric_workspace_value(&vars, 999.0));
+}
+
+#[cfg(any(feature = "test-classes", test))]
+#[test]
+fn declared_method_precedes_same_named_semantic_fallback() {
+    let source = "__register_test_classes(); obj = new_object('Point'); moved = obj.move(3, 4); x = moved.x;\nfunction out = move(receiver, dx, dy)\n out = 999;\nend";
+    let vars = execute_source(source);
+    assert!(numeric_workspace_value(&vars, 3.0));
+    assert!(!numeric_workspace_value(&vars, 999.0));
 }
 
 #[test]
@@ -4730,7 +4769,8 @@ fn num_arguments_from_subscript_script_surface() {
         S3.subs = 'field';
         n3 = numArgumentsFromSubscript(o, S3, 'Expression');
     "#;
-    let vars = execute_source(program);
+    // This fixture intentionally uses the RunMat-only object setfield form.
+    let vars = execute_source_with_extensions(program);
     assert!(has_num(&vars, 2.0), "expected two brace outputs: {vars:?}");
     assert!(
         has_num(&vars, 3.0),
@@ -5109,16 +5149,22 @@ fn builtin_single_output_uses_typed_instruction() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_multi_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); [a,b,c] = obj.deal(7,3); s = b;";
+    let source =
+        "__register_test_classes(); obj = new_object('Point'); [a,b,c] = obj.deal(7,3); s = b;";
     let bytecode = compile_source(source).expect("compile method multi-output");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexMulti {
-            arg_count,
-            out_count,
-            ..
-        } if *arg_count == 2 && *out_count == 3
-    )));
+    let member = runmat_types::MemberName::from("deal");
+    assert!(has_single_value_dotted_call(
+        &bytecode.instructions,
+        &member,
+        2,
+        3
+    ));
+    assert!(!has_single_value_dotted_call(
+        &bytecode.instructions,
+        &member,
+        2,
+        1
+    ));
 
     let vars = interpret(&bytecode).expect("execute method multi-output");
     assert!(vars
@@ -5129,16 +5175,21 @@ fn method_multi_output_uses_typed_instruction() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_single_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); a = obj.deal();";
+    let source = "__register_test_classes(); obj = new_object('Point'); a = obj.deal();";
     let bytecode = compile_source(source).expect("compile method single-output");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexMulti {
-            arg_count,
-            out_count,
-            ..
-        } if *arg_count == 0 && *out_count == 1
-    )));
+    let member = runmat_types::MemberName::from("deal");
+    assert!(has_single_value_dotted_call(
+        &bytecode.instructions,
+        &member,
+        0,
+        1
+    ));
+    assert!(!has_single_value_dotted_call(
+        &bytecode.instructions,
+        &member,
+        0,
+        3
+    ));
     interpret(&bytecode).expect("execute valid method single-output fallback");
 }
 
@@ -5804,6 +5855,19 @@ fn operator_overloading_numeric_results_and_bitwise_arrays() {
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-5.0).abs()<1e-9)));
+}
+
+#[test]
+fn right_hand_object_overloads_keep_original_operand_order() {
+    let program = "__register_test_classes(); o = new_object('OverIdx'); \
+        o = call_method(o,'subsasgn',struct('type', '.', 'subs', 'k'),5); \
+        quotient = 2 ./ o; inverse = o ./ 2; \
+        leftLess = 2 < o; rightLess = o < 2;";
+    let vars = execute_source(program);
+    assert!(has_num(&vars, 0.4), "2 ./ o must evaluate 2/5");
+    assert!(has_num(&vars, 2.5), "o ./ 2 must evaluate 5/2");
+    assert!(has_num(&vars, 1.0), "2 < o must be true");
+    assert!(has_num(&vars, 0.0), "o < 2 must be false");
 }
 
 #[test]

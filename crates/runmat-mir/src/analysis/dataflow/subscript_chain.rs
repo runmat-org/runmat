@@ -57,7 +57,16 @@ pub(crate) fn infer(
                     terminal_use,
                 )
             }
-            MirSubscriptStep::DottedInvoke { member, arguments } => {
+            MirSubscriptStep::DottedInvoke {
+                member,
+                arguments,
+                semantic_fallback,
+            } => {
+                if semantic_fallback.is_some() {
+                    effects.0.insert(runmat_types::EffectKind::Unknown);
+                    effects.0.insert(runmat_types::EffectKind::MayThrow);
+                    return dynamic_dispatch(position, diagnostics, effects, capabilities);
+                }
                 let member_inference = runmat_types::infer_member_read(
                     &current,
                     member,
@@ -127,7 +136,17 @@ pub(crate) fn infer_sequence(
                     };
                     runmat_types::infer_member_sequence(&current, &runmat_types::MemberName(name))
                 }
-                MirSubscriptStep::DottedInvoke { member, arguments } => {
+                MirSubscriptStep::DottedInvoke {
+                    member,
+                    arguments,
+                    semantic_fallback,
+                } => {
+                    if semantic_fallback.is_some() {
+                        return runmat_types::SequenceFactInference {
+                            sequence: runmat_types::ValueSequenceFact::dynamic(),
+                            diagnostics,
+                        };
+                    }
                     let member_inference = runmat_types::infer_member_read(
                         &current,
                         member,
@@ -173,7 +192,17 @@ pub(crate) fn infer_sequence(
                     runmat_types::SequenceUse::RequireSingle,
                 )
             }
-            MirSubscriptStep::DottedInvoke { member, arguments } => {
+            MirSubscriptStep::DottedInvoke {
+                member,
+                arguments,
+                semantic_fallback,
+            } => {
+                if semantic_fallback.is_some() {
+                    return runmat_types::SequenceFactInference {
+                        sequence: runmat_types::ValueSequenceFact::dynamic(),
+                        diagnostics,
+                    };
+                }
                 let member_inference = runmat_types::infer_member_read(
                     &current,
                     member,

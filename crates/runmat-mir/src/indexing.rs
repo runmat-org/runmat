@@ -22,6 +22,7 @@ pub enum MirSubscriptStep {
     DottedInvoke {
         member: runmat_hir::MemberName,
         arguments: Vec<MirDottedInvokeArgument>,
+        semantic_fallback: Option<runmat_types::CallableIdentity>,
     },
 }
 

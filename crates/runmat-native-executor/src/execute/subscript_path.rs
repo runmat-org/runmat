@@ -79,7 +79,11 @@ fn read_inner(
                     runmat_hir::IndexKind::Brace => ObjectSubscript::braces(selector),
                 });
             }
-            MirSubscriptStep::DottedInvoke { member, arguments } => {
+            MirSubscriptStep::DottedInvoke {
+                member,
+                arguments,
+                semantic_fallback,
+            } => {
                 // Resolve the preceding path before evaluating this call's
                 // arguments. The cached prepared receiver survives suspension
                 // and prevents replay of earlier invocation effects.
@@ -97,9 +101,10 @@ fn read_inner(
                 )?;
                 root = prepared.receiver().clone();
                 let components = arguments::materialize(state, arguments, &prepared)?;
-                steps.extend(ObjectSubscript::dotted_invoke_components(
+                steps.extend(ObjectSubscript::dotted_invoke_components_with_fallback(
                     member.clone(),
                     components,
+                    semantic_fallback.clone(),
                 ));
             }
         }

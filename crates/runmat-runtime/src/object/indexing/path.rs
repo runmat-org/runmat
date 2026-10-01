@@ -8,6 +8,7 @@ pub struct ObjectSubscript {
     pub(super) kind: ObjectIndexKind,
     pub(super) selector: ObjectIndexSelector,
     pub(super) origin: ObjectSubscriptOrigin,
+    pub(super) semantic_fallback: Option<runmat_types::CallableIdentity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +24,7 @@ impl ObjectSubscript {
             kind: ObjectIndexKind::Paren,
             selector,
             origin: ObjectSubscriptOrigin::Ordinary,
+            semantic_fallback: None,
         }
     }
 
@@ -31,6 +33,7 @@ impl ObjectSubscript {
             kind: ObjectIndexKind::Brace,
             selector,
             origin: ObjectSubscriptOrigin::Ordinary,
+            semantic_fallback: None,
         }
     }
 
@@ -39,6 +42,7 @@ impl ObjectSubscript {
             kind: ObjectIndexKind::Member,
             selector: ObjectIndexSelector::Member(name.into()),
             origin: ObjectSubscriptOrigin::Ordinary,
+            semantic_fallback: None,
         }
     }
 
@@ -55,11 +59,20 @@ impl ObjectSubscript {
         name: impl Into<runmat_types::MemberName>,
         arguments: Vec<super::ObjectIndexComponent>,
     ) -> [Self; 2] {
+        Self::dotted_invoke_components_with_fallback(name, arguments, None)
+    }
+
+    pub fn dotted_invoke_components_with_fallback(
+        name: impl Into<runmat_types::MemberName>,
+        arguments: Vec<super::ObjectIndexComponent>,
+        semantic_fallback: Option<runmat_types::CallableIdentity>,
+    ) -> [Self; 2] {
         [
             Self {
                 kind: ObjectIndexKind::Member,
                 selector: ObjectIndexSelector::Member(name.into()),
                 origin: ObjectSubscriptOrigin::DottedInvokeMember,
+                semantic_fallback,
             },
             Self {
                 kind: ObjectIndexKind::Paren,
@@ -67,6 +80,7 @@ impl ObjectSubscript {
                     components: arguments,
                 },
                 origin: ObjectSubscriptOrigin::DottedInvokeArguments,
+                semantic_fallback: None,
             },
         ]
     }
@@ -79,6 +93,10 @@ impl ObjectSubscript {
     }
     pub const fn origin(&self) -> ObjectSubscriptOrigin {
         self.origin
+    }
+
+    pub fn semantic_fallback(&self) -> Option<&runmat_types::CallableIdentity> {
+        self.semantic_fallback.as_ref()
     }
 }
 

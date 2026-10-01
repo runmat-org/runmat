@@ -47,6 +47,27 @@ fn native_public_subscript_numeric_defaults_preserve_values() {
 }
 
 #[test]
+fn native_dotted_semantic_fallback_uses_bound_local_function() {
+    assert_hot(
+        "",
+        "obj = 2; result = obj.bump(3);\nfunction out = bump(receiver, value)\n out = receiver + value;\nend",
+        &[("result", Value::Num(5.0))],
+    );
+}
+
+#[test]
+fn native_class_reference_method_errors_keep_their_owning_identifiers() {
+    assert_hot(
+        "__register_test_classes();",
+        "missing = ''; nonstatic = '';\ntry\nclassref('Point').definitely_missing(1);\ncatch err\nmissing = err.identifier;\nend\ntry\nclassref('Point').move(1, 2);\ncatch err\nnonstatic = err.identifier;\nend",
+        &[
+            ("missing", Value::String("RunMat:UndefinedFunction".into())),
+            ("nonstatic", Value::String("RunMat:MethodNotStatic".into())),
+        ],
+    );
+}
+
+#[test]
 fn native_public_subscript_object_growth_uses_canonical_scatter() {
     assert_hot(
         "__register_test_classes();",

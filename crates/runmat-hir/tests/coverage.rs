@@ -185,7 +185,7 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
                         if matches!(&chain.root.kind, HirExprKind::Binding(_))
                             && matches!(
                                 chain.steps.as_slice(),
-                                [HirSubscriptStep::DottedInvoke { member, arguments }]
+                                [HirSubscriptStep::DottedInvoke { member, arguments, .. }]
                                     if member.0 == "method"
                                         && arguments.len() == 1
                             )

@@ -235,6 +235,7 @@ mod dotted_argument_tests {
         let chain = MirSubscriptChain {
             root: MirOperand::Local(MirLocalId(0)),
             steps: vec![MirSubscriptStep::DottedInvoke {
+                semantic_fallback: None,
                 member: runmat_hir::MemberName("invoke".to_owned()),
                 arguments: vec![MirDottedInvokeArgument::Call(MirCallArgumentRegion {
                     steps: vec![MirExpressionStep::Let {

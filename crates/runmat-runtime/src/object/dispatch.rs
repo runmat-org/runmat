@@ -12,6 +12,9 @@ use runmat_types::{
 };
 use runmat_value::Value;
 
+#[cfg(test)]
+mod tests;
+
 fn method_member_name(identity: &CallableIdentity) -> Option<String> {
     match identity {
         CallableIdentity::DynamicName(runmat_types::SymbolName(name)) => {
@@ -62,11 +65,6 @@ fn is_operator_overload_method(name: &runmat_types::MethodName) -> bool {
     runmat_types::OperatorOverloadMethod::from_name(name).is_some()
 }
 
-fn is_receiver_validation_error(err: &RuntimeError) -> bool {
-    err.identifier()
-        .is_some_and(|identifier| identifier.ends_with("ReceiverInvalid"))
-}
-
 async fn call_identity_with_policy(
     identity: CallableIdentity,
     args: Vec<Value>,
@@ -108,6 +106,7 @@ async fn call_member_index_on_object_like(
     args: Vec<Value>,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
+    semantic_fallback: Option<CallableIdentity>,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
     if args.is_empty() {
         let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
@@ -186,7 +185,9 @@ async fn call_member_index_on_object_like(
         .await;
     }
 
-    let (name_identity, name_fallback) = runtime_named_identity(&name);
+    let (name_identity, name_fallback) = semantic_fallback
+        .map(|identity| (identity, CallableFallbackPolicy::None))
+        .unwrap_or_else(|| runtime_named_identity(&name));
     if let Some(v) = try_call_identity_with_policy(
         name_identity.clone(),
         method_args.clone(),
@@ -196,27 +197,6 @@ async fn call_member_index_on_object_like(
     .await?
     {
         return Ok(v);
-    }
-
-    match call_identity_with_policy(
-        qualified_identity,
-        method_args.clone(),
-        requested_outputs,
-        CallableFallbackPolicy::ExternalBoundary,
-    )
-    .await
-    {
-        Ok(v) => return Ok(v),
-        Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
-        Err(err) => return Err(err),
-    }
-
-    match call_identity_with_policy(name_identity, method_args, requested_outputs, name_fallback)
-        .await
-    {
-        Ok(v) => return Ok(v),
-        Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
-        Err(err) => return Err(err),
     }
 
     if name == crate::OBJECT_INDEX_PAREN || name == crate::OBJECT_INDEX_BRACE {
@@ -252,7 +232,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
         }
     };
 
-    let method_args = vec![lhs.clone(), rhs.clone()];
+    let method_args = vec![lhs, rhs];
     let method_name = runmat_types::MethodName::from(name.as_str());
     if let Some(bound) = crate::class_registry::lookup_bound_method(&class_name, &method_name) {
         let m = &bound.declaration;
@@ -271,63 +251,23 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
                 format!("Method '{}' is private", name),
             ));
         }
-        let identity = bound.callable;
-        let fallback_policy = bound.fallback;
-        return match call_identity_with_policy(
-            identity.clone(),
+        return call_identity_with_policy(
+            bound.callable,
             method_args,
             requested_outputs,
-            fallback_policy,
+            bound.fallback,
         )
-        .await
-        {
-            Ok(v) => Ok(v),
-            Err(err)
-                if is_receiver_validation_error(&err)
-                    && is_operator_overload_method(&method_name) =>
-            {
-                call_identity_with_policy(
-                    identity,
-                    vec![rhs.clone(), lhs.clone()],
-                    requested_outputs,
-                    fallback_policy,
-                )
-                .await
-            }
-            Err(err) => Err(err),
-        };
+        .await;
     }
 
     let qualified_identity = external_qualified_identity(class_name.display_name(), &name);
-    let ordered_result = call_identity_with_policy(
-        qualified_identity.clone(),
-        method_args.clone(),
+    call_identity_with_policy(
+        qualified_identity,
+        method_args,
         requested_outputs,
         CallableFallbackPolicy::ExternalBoundary,
     )
-    .await;
-    match ordered_result {
-        Ok(v) => Ok(v),
-        Err(ordered_err) => {
-            if ordered_err.identifier() != Some("RunMat:UndefinedFunction")
-                && !is_receiver_validation_error(&ordered_err)
-            {
-                return Err(ordered_err);
-            }
-            let receiver_first_args = vec![rhs.clone(), lhs.clone()];
-            match call_identity_with_policy(
-                qualified_identity.clone(),
-                receiver_first_args,
-                requested_outputs,
-                CallableFallbackPolicy::ExternalBoundary,
-            )
-            .await
-            {
-                Ok(v) => Ok(v),
-                Err(receiver_err) => Err(receiver_err),
-            }
-        }
-    }
+    .await
 }
 
 pub async fn call_getfield_with_indices(
@@ -532,6 +472,27 @@ pub async fn call_method_or_member_index_named_with_outputs(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    call_method_or_member_index_with_fallback(
+        base,
+        name,
+        args,
+        requested_outputs,
+        caller_function_name,
+        None,
+    )
+    .await
+}
+
+/// A semantic function identity is a fallback after receiver method dispatch,
+/// never a replacement for a declared method or stored member.
+pub async fn call_method_or_member_index_with_fallback(
+    base: Value,
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+    semantic_fallback: Option<CallableIdentity>,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     match base {
         Value::Object(obj) => {
             let class_name = obj.class_name.clone();
@@ -542,6 +503,20 @@ pub async fn call_method_or_member_index_named_with_outputs(
                 args,
                 requested_outputs,
                 caller_function_name,
+                semantic_fallback,
+            ))
+            .await
+        }
+        Value::ObjectArray(array) => {
+            let class_name = array.class_name().clone();
+            Box::pin(call_member_index_on_object_like(
+                Value::ObjectArray(array),
+                &class_name,
+                name,
+                args,
+                requested_outputs,
+                caller_function_name,
+                semantic_fallback,
             ))
             .await
         }
@@ -554,6 +529,7 @@ pub async fn call_method_or_member_index_named_with_outputs(
                 args,
                 requested_outputs,
                 caller_function_name,
+                semantic_fallback,
             ))
             .await
         }
@@ -600,12 +576,26 @@ pub async fn call_method_or_member_index_named_with_outputs(
         Value::Foreign(reference) => {
             crate::foreign::invoke_foreign_method(reference, name, args, requested_outputs).await
         }
-        other => call_getfield_with_indices(other, name, args, requested_outputs)
-            .await
-            .and_then(|value| {
-                runmat_value::ValueSequence::single(value)
-                    .map_err(crate::sequence::sequence_error_to_runtime)
-            }),
+        other => {
+            if let Some(identity) = semantic_fallback {
+                let mut full_args = Vec::with_capacity(1 + args.len());
+                full_args.push(other);
+                full_args.extend(args);
+                return call_identity_with_policy(
+                    identity,
+                    full_args,
+                    requested_outputs,
+                    CallableFallbackPolicy::None,
+                )
+                .await;
+            }
+            call_getfield_with_indices(other, name, args, requested_outputs)
+                .await
+                .and_then(|value| {
+                    runmat_value::ValueSequence::single(value)
+                        .map_err(crate::sequence::sequence_error_to_runtime)
+                })
+        }
     }
 }
 

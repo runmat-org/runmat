@@ -36,3 +36,4 @@ mod validation;
 mod cutover;
 mod shape_cardinality;
 mod overload_outputs;
+mod session_registration;
