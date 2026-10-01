@@ -2,130 +2,21 @@
 use super::{descriptive_error, gathered, is_real_typed_integer_value};
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::{TABULATE_GPU_INPUT_EXTENSION, TABULATE_INTEGER_DATA_EXTENSION};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, IntValue, StringArray, Tensor, Value};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 
-const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input data array.",
-};
+// Existing frequency-table expansion policy. It bounds the dense enumeration
+// of unobserved positive levels, not the number of observed input elements.
+const MAX_EXPANDED_LEVELS: u128 = 1_000_000;
 
-const OUTPUT_TABLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tbl",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Frequency table.",
-}];
-
-const INPUTS_X: [BuiltinParamDescriptor; 1] = [PARAM_X];
-
-const TABULATE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tabulate-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "tabulate with typed-integer input data and exact cell output is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TabulateIntegerDataExtension"),
-};
-
-const TABULATE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tabulate-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tabulate with a GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TabulateGpuInputExtension"),
-};
-
-const TABULATE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    TABULATE_INTEGER_DATA_EXTENSION,
-    TABULATE_GPU_INPUT_EXTENSION,
-];
-
-const TABULATE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented numeric input domain is single or double; RunMat mode additionally accepts all eight integer classes and returns a heterogeneous cell table so exact wide values are not coerced through binary64.",
-    }];
-
-const TABULATE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "tbl = tabulate(integer_X)",
-        inputs: &TABULATE_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer observations group and sort in exact same-class storage; the cell table preserves integer values in column one and uses double counts and percentages, while positive-gap expansion is bounded to avoid unrepresentable allocation.",
-    }];
-
-const TABULATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tbl = tabulate(X)",
-    inputs: &INPUTS_X,
-    outputs: &OUTPUT_TABLE,
-}];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DESCRIPTIVE.INVALID_ARGUMENT",
-    identifier: None,
-    when: "Inputs, flags, dimensions, or options are malformed.",
-    message: "descriptive statistics: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DESCRIPTIVE.INTERNAL",
-    identifier: None,
-    when: "Internal tensor conversion or allocation fails.",
-    message: "descriptive statistics: internal error",
-};
-
-macro_rules! descriptive_descriptor {
-    ($name:literal, $signatures:expr) => {
-        const ERRORS: [BuiltinErrorDescriptor; 2] = [
-            BuiltinErrorDescriptor {
-                code: concat!("RM.", $name, ".INVALID_ARGUMENT"),
-                identifier: Some(concat!("RunMat:", $name, ":InvalidArgument")),
-                when: ERROR_INVALID_ARGUMENT.when,
-                message: ERROR_INVALID_ARGUMENT.message,
-            },
-            BuiltinErrorDescriptor {
-                code: concat!("RM.", $name, ".INTERNAL"),
-                identifier: Some(concat!("RunMat:", $name, ":Internal")),
-                when: ERROR_INTERNAL.when,
-                message: ERROR_INTERNAL.message,
-            },
-        ];
-
-        pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
+pub(super) fn expanded_level_count(maximum: u128) -> Option<usize> {
+    (maximum <= MAX_EXPANDED_LEVELS)
+        .then(|| usize::try_from(maximum).ok())
+        .flatten()
 }
-
-fn descriptive_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-const MAX_EXACT_TABULATE_ROWS: u128 = 1_000_000;
 
 fn compare_same_class_integers(left: &IntValue, right: &IntValue) -> Ordering {
     match (left, right) {
@@ -180,7 +71,7 @@ fn exact_integer_tabulate(name: &str, mut values: Vec<IntValue>) -> BuiltinResul
         .map(positive_integer_magnitude)
         .collect::<Option<Vec<_>>>()
         .and_then(|values| values.into_iter().max());
-    let rows = if let Some(max) = positive_max.filter(|max| *max <= MAX_EXACT_TABULATE_ROWS) {
+    let rows = if let Some(max) = positive_max.and_then(expanded_level_count) {
         let prototype = values[0].clone();
         let counts =
             values
@@ -191,7 +82,7 @@ fn exact_integer_tabulate(name: &str, mut values: Vec<IntValue>) -> BuiltinResul
                 });
         (1..=max)
             .map(|value| {
-                let value = positive_integer_like(&prototype, value);
+                let value = positive_integer_like(&prototype, value as u128);
                 let count = counts.get(&value).copied().unwrap_or(0);
                 (value, count)
             })
@@ -212,7 +103,12 @@ fn exact_integer_tabulate(name: &str, mut values: Vec<IntValue>) -> BuiltinResul
         rows
     };
     let row_count = rows.len();
-    let mut data = Vec::with_capacity(row_count * 3);
+    let cells = row_count
+        .checked_mul(3)
+        .ok_or_else(|| descriptive_error(name, format!("{name}: table size overflowed")))?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(cells)
+        .map_err(|err| descriptive_error(name, format!("{name}: cannot allocate table: {err}")))?;
     for (value, count) in rows {
         data.push(Value::Int(value));
         data.push(Value::Num(count as f64));
@@ -244,8 +140,27 @@ fn numeric_tabulate(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
             .all(|value| value.is_finite() && *value >= 1.0 && value.fract().abs() <= 1e-12);
     let mut rows = Vec::<(f64, f64)>::new();
     if positive_integers {
-        let max_value = values.last().copied().unwrap_or(0.0).round().max(0.0) as usize;
-        let mut counts = vec![0usize; max_value + 1];
+        let maximum = values.last().copied().unwrap_or(0.0).round();
+        if maximum > MAX_EXPANDED_LEVELS as f64 {
+            return Err(descriptive_error(
+                name,
+                format!("{name}: positive-level expansion exceeds the supported table size"),
+            ));
+        }
+        let max_value = expanded_level_count(maximum as u128).ok_or_else(|| {
+            descriptive_error(
+                name,
+                format!("{name}: positive-level expansion exceeds the supported table size"),
+            )
+        })?;
+        let count_len = max_value
+            .checked_add(1)
+            .ok_or_else(|| descriptive_error(name, format!("{name}: table size overflowed")))?;
+        let mut counts = Vec::new();
+        counts.try_reserve_exact(count_len).map_err(|err| {
+            descriptive_error(name, format!("{name}: cannot allocate frequencies: {err}"))
+        })?;
+        counts.resize(count_len, 0usize);
         for value in values {
             counts[value.round() as usize] += 1;
         }
@@ -265,7 +180,12 @@ fn numeric_tabulate(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
         }
     }
     let rows_len = rows.len();
-    let mut data = Vec::with_capacity(rows_len * 3);
+    let cells = rows_len
+        .checked_mul(3)
+        .ok_or_else(|| descriptive_error(name, format!("{name}: table size overflowed")))?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(cells)
+        .map_err(|err| descriptive_error(name, format!("{name}: cannot allocate table: {err}")))?;
     data.extend(rows.iter().map(|(value, _)| *value));
     data.extend(rows.iter().map(|(_, count)| *count));
     data.extend(rows.iter().map(|(_, count)| {
@@ -379,17 +299,10 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
 
 pub mod tabulate {
     use super::*;
-    descriptive_descriptor!("tabulate", TABULATE_SIGNATURES);
 
     #[runtime_builtin(
         name = "tabulate",
-        category = "stats/summary",
-        summary = "Create a frequency table.",
-        keywords = "tabulate,frequency,count,percent,statistics",
-        type_resolver(super::descriptive_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::TABULATE_EXTENSIONS),
-        integer_capabilities(super::TABULATE_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::summary::descriptive::tabulation::tabulate"
     )]
     pub(crate) async fn tabulate_builtin(value: Value) -> BuiltinResult<Value> {

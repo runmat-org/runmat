@@ -14,6 +14,35 @@ fn tabulate_expands_positive_integer_levels() {
 }
 
 #[test]
+fn tabulate_rejects_unbounded_positive_floating_levels_before_expansion() {
+    assert_eq!(
+        super::super::tabulation::expanded_level_count(1_000_000),
+        Some(1_000_000)
+    );
+    assert_eq!(
+        super::super::tabulation::expanded_level_count(1_000_001),
+        None
+    );
+    assert_eq!(
+        super::super::tabulation::expanded_level_count(u128::MAX),
+        None
+    );
+    for level in [1.0e300, usize::MAX as f64, u64::MAX as f64] {
+        let x = Value::Tensor(Tensor::new(vec![1.0, level], vec![1, 2]).unwrap());
+        let error = block_on(tabulate::tabulate_builtin(x)).expect_err("huge gap rejected");
+        assert!(error.message().contains("positive-level expansion"));
+    }
+}
+
+#[test]
+fn tabulate_empty_numeric_input_has_three_columns() {
+    let input = Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap());
+    let (data, shape) = tensor_values(block_on(tabulate::tabulate_builtin(input)).unwrap());
+    assert!(data.is_empty());
+    assert_eq!(shape, vec![0, 3]);
+}
+
+#[test]
 fn tabulate_numeric_reads_typed_integer_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let x = int_tensor(IntegerStorage::U8(vec![1, 3, 3]), vec![1, 3]);
