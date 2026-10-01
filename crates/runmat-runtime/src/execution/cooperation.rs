@@ -72,6 +72,20 @@ impl CpuCooperationBudget {
         }
         Ok(())
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_turn(
+        policy: CpuCooperationPolicy,
+        cancellation: CancellationToken,
+        turn: impl Fn() -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> + 'static,
+    ) -> Self {
+        Self {
+            turn: Some(Rc::new(turn)),
+            cancellation,
+            policy,
+            pending_work: 0,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -85,25 +99,16 @@ mod tests {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
-    fn budget(
-        policy: CpuCooperationPolicy,
-        token: CancellationToken,
-        turn: impl Fn() -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> + 'static,
-    ) -> CpuCooperationBudget {
-        CpuCooperationBudget {
-            turn: Some(Rc::new(turn)),
-            cancellation: token,
-            policy,
-            pending_work: 0,
-        }
-    }
-
     #[test]
     fn native_policy_never_calls_turn_and_quantum_accounts_exactly() {
         let source = CancellationSource::new();
+        let serial = Rc::new(super::super::RuntimeExecutionService::new());
+        let mut actual_native = CpuCooperationBudget::new(serial, source.token());
+        assert!(actual_native.turn.is_none());
+        futures::executor::block_on(actual_native.checkpoint(u64::MAX)).unwrap();
         let calls = Rc::new(Cell::new(0));
         let count = calls.clone();
-        let mut never = budget(
+        let mut never = CpuCooperationBudget::with_test_turn(
             CpuCooperationPolicy::NeverYield,
             source.token(),
             move || {
@@ -115,7 +120,7 @@ mod tests {
         assert_eq!(calls.get(), 0);
 
         let count = calls.clone();
-        let mut quantum = budget(
+        let mut quantum = CpuCooperationBudget::with_test_turn(
             CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(7).unwrap()),
             source.token(),
             move || {
@@ -157,7 +162,7 @@ mod tests {
             }
         }
         let dropped_turn = dropped.clone();
-        let mut budget = budget(
+        let mut budget = CpuCooperationBudget::with_test_turn(
             CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
             source.token(),
             move || Box::pin(PendingTurn(dropped_turn.clone())),
@@ -178,7 +183,7 @@ mod tests {
     #[test]
     fn turn_failure_and_preexisting_cancel_are_not_success() {
         let source = CancellationSource::new();
-        let mut failing = budget(
+        let mut failing = CpuCooperationBudget::with_test_turn(
             CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
             source.token(),
             || Box::pin(async { Err(ExecutionServiceError::Infrastructure("lost turn".into())) }),
@@ -195,7 +200,7 @@ mod tests {
 
         let after = CancellationSource::new();
         let cancel_during_turn = after.clone();
-        let mut budget = budget(
+        let mut budget = CpuCooperationBudget::with_test_turn(
             CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
             after.token(),
             move || {

@@ -9,6 +9,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
+use js_sys::Reflect;
 use runmat_runtime::execution::ExecutionServiceError;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -24,7 +25,7 @@ struct TurnState {
 pub(super) struct BrowserTaskTurn {
     receive: MessagePort,
     send: MessagePort,
-    callback: Closure<dyn FnMut(MessageEvent)>,
+    _callback: Closure<dyn FnMut(MessageEvent)>,
     state: Rc<RefCell<TurnState>>,
     posted: bool,
 }
@@ -51,7 +52,7 @@ impl BrowserTaskTurn {
         Ok(Self {
             receive,
             send,
-            callback,
+            _callback: callback,
             state,
             posted: false,
         })
@@ -86,13 +87,25 @@ impl Drop for BrowserTaskTurn {
         self.receive.close();
         self.send.close();
         self.state.borrow_mut().waker = None;
-        // Retain the callback until after removing the event listener.
-        let _ = &self.callback;
+        // The closure is retained as a field until after this listener is removed.
     }
 }
 
 fn schedule_error(error: JsValue) -> ExecutionServiceError {
+    let name = Reflect::get(&error, &JsValue::from_str("name"))
+        .ok()
+        .and_then(|value| value.as_string());
+    let message = error.as_string().or_else(|| {
+        Reflect::get(&error, &JsValue::from_str("message"))
+            .ok()
+            .and_then(|value| value.as_string())
+    });
+    let cause = match (name, message) {
+        (Some(name), Some(message)) => format!("{name}: {message}"),
+        (None, Some(message)) => message,
+        _ => format!("{error:?}"),
+    };
     ExecutionServiceError::Infrastructure(format!(
-        "browser CPU task-turn scheduling failed: {error:?}"
+        "browser CPU task-turn scheduling failed: {cause}"
     ))
 }

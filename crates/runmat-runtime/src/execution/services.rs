@@ -157,7 +157,11 @@ pub trait RuntimeExecutionServices {
     fn cooperate_cpu(
         &self,
     ) -> crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
-        Box::pin(async { Ok(()) })
+        Box::pin(async {
+            Err(ExecutionServiceError::Infrastructure(
+                "CPU task-turn scheduling is unavailable in this execution adapter".into(),
+            ))
+        })
     }
 
     /// Complete process-local values retained by this service. `None` means
