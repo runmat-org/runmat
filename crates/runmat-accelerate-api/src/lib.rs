@@ -50,6 +50,8 @@ pub use provider_execution::{
 };
 mod placement;
 mod power;
+mod resident_select;
+pub use resident_select::ResidentSelectPlan;
 mod numerical_domain;
 pub mod reduction;
 #[cfg(feature = "wgpu")]
@@ -2431,6 +2433,18 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("elem_max not supported by provider")
+    }
+    /// Select between resident real tensors using a resident logical mask.
+    /// Selection does not perform arithmetic blending, so an unselected NaN or
+    /// infinity cannot contaminate the result. Providers must not download
+    /// operands to the host to implement this hook.
+    fn select<'a>(
+        &'a self,
+        _mask: &'a GpuTensorHandle,
+        _then_value: &'a GpuTensorHandle,
+        _else_value: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("select not supported by provider")
     }
     fn elem_min<'a>(
         &'a self,

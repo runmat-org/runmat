@@ -618,6 +618,15 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn select<'a>(
+        &'a self,
+        mask: &'a GpuTensorHandle,
+        then_value: &'a GpuTensorHandle,
+        else_value: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.select_exec(mask, then_value, else_value) })
+    }
+
     fn elem_min<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

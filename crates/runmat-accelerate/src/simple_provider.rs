@@ -2,6 +2,7 @@ use crate::host_lu::{lu_factor_host, LuHostFactors};
 mod allocation_state;
 use allocation_state::{integer_registry, numeric_registry, registry};
 mod power;
+mod select;
 mod logarithms;
 mod remainder;
 mod unary;
@@ -5684,6 +5685,15 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Add) })
+    }
+
+    fn select<'a>(
+        &'a self,
+        mask: &'a GpuTensorHandle,
+        then_value: &'a GpuTensorHandle,
+        else_value: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.select_impl(mask, then_value, else_value) })
     }
 
     fn elem_mul<'a>(

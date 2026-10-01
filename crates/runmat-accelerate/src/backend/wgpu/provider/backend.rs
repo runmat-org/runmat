@@ -82,6 +82,8 @@ mod deep_learning_pooling;
 mod deep_learning_normalization;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
+#[path = "ops/select.rs"]
+mod select;
 #[path = "ops/remainder.rs"]
 mod remainder;
 #[path = "ops/floating_cast.rs"]
