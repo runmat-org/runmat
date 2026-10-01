@@ -29,7 +29,11 @@ impl FusionCpuObservation {
     /// Only the owner of the complete bytecode region may report success.
     /// Success means host bytecode exited, not that nested GPU queues drained.
     pub fn complete(mut self) {
-        self.observe(true);
+        let succeeded = self
+            .feedback
+            .as_ref()
+            .is_none_or(|feedback| !feedback.runtime.is_cancelled());
+        self.observe(succeeded);
     }
 
     fn observe(&mut self, succeeded: bool) {

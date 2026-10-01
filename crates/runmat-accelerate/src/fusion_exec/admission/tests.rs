@@ -8,6 +8,142 @@ use runmat_runtime::{
 };
 use std::{collections::HashMap, rc::Rc};
 
+struct RejectingProvider;
+
+impl runmat_accelerate_api::AccelProvider for RejectingProvider {
+    fn upload(
+        &self,
+        _: &runmat_accelerate_api::HostTensorView<'_>,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        panic!("rejected fusion must not upload")
+    }
+
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        panic!("rejected fusion must not download")
+    }
+
+    fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+        runmat_accelerate_api::ProviderPrecision::F64
+    }
+
+    fn device_info(&self) -> String {
+        "rejecting-fusion-fixture".into()
+    }
+
+    fn query_feasibility(
+        &self,
+        _: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        runmat_accelerate_api::ProviderFeasibility::rejected(
+            runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+            "fusion_fixture_rejected",
+        )
+    }
+}
+
+fn rejected_fusion(
+    cancellation: Option<runmat_execution::cancellation::CancellationToken>,
+) -> (FusionCpuObservation, Rc<crate::placement::PlacementSession>) {
+    let session = Rc::new(crate::placement::PlacementSession::default());
+    let bindings = runmat_runtime::builtin::runtime_builtin_bindings_by_name("sin");
+    let mut runtime = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default()
+            .with_builtin(Rc::new(Selected(bindings)))
+            .with_placement(session.clone()),
+    );
+    if let Some(token) = cancellation {
+        runtime = runtime.with_cancellation_token(token);
+    }
+    let plan = make_plan(vec![named("sin", FusionCallOrigin::named("sin"))]);
+    let mut invocation = request(&plan, &runtime);
+    invocation.placement = Some(crate::placement::PlacementCorrelationId(71));
+    let admitted = AdmittedBindings::new(&invocation).expect("canonical selected binding");
+    let outcome = select_fusion_provider(&invocation, &admitted, &RejectingProvider, &[vec![1, 1]])
+        .expect("correlated rejected provider resumes shared bytecode");
+    let FusionExecutionOutcome::SharedRuntime(ticket) = outcome else {
+        panic!("rejected provider must select the shared runtime")
+    };
+    (ticket, session)
+}
+
+#[test]
+fn provider_rejection_cpu_region_reports_only_completed_work() {
+    runmat_gc::gc_test_context(|| {
+        let (ticket, session) = rejected_fusion(None);
+        assert!(session.profile_snapshot().feedback.is_empty());
+        ticket.complete();
+        let feedback = session.profile_snapshot().feedback;
+        assert_eq!(feedback.len(), 1);
+        assert_eq!(
+            feedback[0].kind,
+            runmat_execution::ExecutionCandidateKind::SharedRuntime
+        );
+        assert_eq!(feedback[0].samples, 1);
+        assert_eq!(feedback[0].failures, 0);
+    });
+}
+
+#[test]
+fn provider_rejection_cpu_region_failure_abandonment_and_cancel_are_not_successes() {
+    runmat_gc::gc_test_context(|| {
+        let (ticket, session) = rejected_fusion(None);
+        let result: Result<(), &'static str> = (|| {
+            let _region_observation = ticket;
+            Err("shared bytecode failed")
+        })();
+        assert!(result.is_err());
+        assert_eq!(session.profile_snapshot().feedback[0].samples, 0);
+        assert_eq!(session.profile_snapshot().feedback[0].failures, 1);
+
+        let (ticket, session) = rejected_fusion(None);
+        let abandoned = async move {
+            std::future::pending::<()>().await;
+            ticket.complete();
+        };
+        drop(abandoned);
+        assert_eq!(session.profile_snapshot().feedback[0].samples, 0);
+        assert_eq!(session.profile_snapshot().feedback[0].failures, 1);
+
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let (ticket, session) = rejected_fusion(Some(cancellation.token()));
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        ticket.complete();
+        assert_eq!(session.profile_snapshot().feedback[0].samples, 0);
+        assert_eq!(session.profile_snapshot().feedback[0].failures, 1);
+    });
+}
+
+#[test]
+fn direct_provider_fusion_rejection_keeps_caller_intent() {
+    runmat_gc::gc_test_context(|| {
+        let session = Rc::new(crate::placement::PlacementSession::default());
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_builtin(Rc::new(Selected(
+                    runmat_runtime::builtin::runtime_builtin_bindings_by_name("sin"),
+                )))
+                .with_placement(session.clone()),
+        );
+        let plan = make_plan(vec![named("sin", FusionCallOrigin::named("sin"))]);
+        let invocation = request(&plan, &runtime);
+        let admitted = AdmittedBindings::new(&invocation).expect("canonical selected binding");
+        assert!(
+            select_fusion_provider(&invocation, &admitted, &RejectingProvider, &[vec![1, 1]])
+                .is_err()
+        );
+        assert!(session.profile_snapshot().feedback.is_empty());
+    });
+}
+
 struct Selected(Vec<RuntimeBuiltinBinding>);
 impl RuntimeBuiltinService for Selected {
     fn bindings_by_name(&self, name: &str) -> Vec<RuntimeBuiltinBinding> {

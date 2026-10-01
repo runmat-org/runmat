@@ -382,9 +382,11 @@ fn select_fusion_provider_with_contract(
     )
     .map_err(|error| ProviderExecutionError::from_source(*error))?
     {
-        LocalPlacementOutcome::ProviderRejected { code, .. } => {
+        LocalPlacementOutcome::ProviderRejected { code, feedback, .. } => {
             observer.provider_rejected(code);
-            Err(anyhow!("fusion provider rejected operation").into())
+            Ok(FusionExecutionOutcome::SharedRuntime(
+                FusionCpuObservation::new(feedback),
+            ))
         }
         LocalPlacementOutcome::Selected {
             selected,
