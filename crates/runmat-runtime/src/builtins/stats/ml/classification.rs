@@ -1,5 +1,7 @@
 //! Discriminant classification compatibility surface.
 
+mod header;
+
 use std::cmp::Ordering;
 
 use nalgebra::{DMatrix, DVector};
@@ -127,12 +129,23 @@ async fn classify_builtin(
         ));
     }
     ensure_compatibility_extensions(&sample, &training, &group, &rest)?;
+    let discriminant = header::admit(&sample, &training, &group, &rest)?;
     let sample = gathered(sample).await?;
     let training = gathered(training).await?;
     let group = gathered(group).await?;
-    let rest = gather_values(rest).await?;
+    let prior = match rest.into_iter().nth(1) {
+        Some(value) => Some(gathered(value).await?),
+        None => None,
+    };
     let output_limit = requested_outputs.unwrap_or(1).max(1);
-    let result = classify_compute(sample, training, group, rest, output_limit)?;
+    let result = classify_compute(
+        sample,
+        training,
+        group,
+        discriminant,
+        prior.as_ref(),
+        output_limit,
+    )?;
     match requested_outputs {
         Some(1) => Ok(Value::OutputList(vec![result[0].clone()])),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
@@ -216,26 +229,14 @@ async fn gathered(value: Value) -> BuiltinResult<Value> {
         .map_err(|err| invalid_argument(format!("classify: {err}")))
 }
 
-async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gathered(value).await?);
-    }
-    Ok(out)
-}
-
 fn classify_compute(
     sample: Value,
     training: Value,
     group: Value,
-    rest: Vec<Value>,
+    discriminant: DiscriminantType,
+    prior: Option<&Value>,
     output_limit: usize,
 ) -> BuiltinResult<Vec<Value>> {
-    if rest.len() > 2 {
-        return Err(invalid_argument(
-            "classify: accepts at most type and prior arguments",
-        ));
-    }
     let sample = numeric_matrix(sample, "sample")?;
     let training = numeric_matrix(training, "training")?;
     if sample.cols != training.cols {
@@ -261,12 +262,7 @@ fn classify_compute(
             "classify: group length must match the number of rows in training",
         ));
     }
-    let discriminant = if let Some(value) = rest.first() {
-        parse_type(value)?
-    } else {
-        DiscriminantType::Linear
-    };
-    let prepared = prepare_model(&training, labels, discriminant, rest.get(1))?;
+    let prepared = prepare_model(&training, labels, discriminant, prior)?;
     let predictions = predict_rows(&prepared, &sample)?;
     let class = labels_value(&prepared.classes, prepared.kind, &predictions.labels)?;
     if output_limit == 1 {

@@ -389,6 +389,45 @@ fn classify_resident_integer_gate_precedes_gather() {
 }
 
 #[test]
+fn classify_admits_known_geometry_and_type_before_resident_materialization() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let sample = Tensor::new(vec![0.2, 2.2], vec![2, 1]).unwrap();
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &sample).unwrap();
+        let (_, training, group) = valid_floating_inputs();
+        let err = block_on(classify_builtin(
+            Value::GpuTensor(handle.clone()),
+            training.clone(),
+            group.clone(),
+            vec![Value::from("unsupported")],
+        ))
+        .expect_err("invalid type must be rejected before materialization");
+        assert!(err.message().contains("unsupported discriminant type"));
+
+        let err = block_on(classify_builtin(
+            Value::GpuTensor(handle),
+            tensor(vec![0.0, 0.5, 2.0, 2.5, 0.0, 0.5, 2.0, 2.5], vec![4, 2]),
+            group,
+            Vec::new(),
+        ))
+        .expect_err("known mismatched columns must be rejected before materialization");
+        assert!(err.message().contains("same number of columns"));
+
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &sample).unwrap();
+        let err = block_on(classify_builtin(
+            Value::GpuTensor(handle),
+            training,
+            tensor(vec![1.0, 1.0, 2.0, 2.0], vec![2, 2]),
+            Vec::new(),
+        ))
+        .expect_err("known matrix labels must be rejected before materialization");
+        assert!(err.message().contains("group must be a vector"));
+    });
+}
+
+#[test]
 #[cfg(feature = "wgpu")]
 fn classify_wgpu_integer_sample_uses_checked_host_fallback() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
