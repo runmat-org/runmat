@@ -12,7 +12,7 @@ pub const ODE23_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         // Solution-structure and event forms remain an explicit interface gap.
         maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
-            super::inference::infer,
+            super::super::inference::infer,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

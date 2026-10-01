@@ -3,8 +3,8 @@ use crate::catalog::inference::argument_error;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, StructFact,
-    ValueFact, ValueKindFact,
+    NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, StructFact, ValueFact,
+    ValueKindFact,
 };
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
