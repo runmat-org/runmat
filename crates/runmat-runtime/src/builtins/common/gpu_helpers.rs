@@ -319,6 +319,7 @@ pub fn unary_gpu_output_matches(
 /// Validate a unary result whose operation changes logical shape, such as
 /// transpose or reshape. Ownership and numerical class checks are identical
 /// to shape-preserving unary operations.
+/// The output allocation must remain live; callers separately admit borrowed inputs.
 pub fn unary_gpu_output_matches_shape(
     output: &GpuTensorHandle,
     input: &GpuTensorHandle,
@@ -326,7 +327,8 @@ pub fn unary_gpu_output_matches_shape(
     shape: &[usize],
     contract: UnaryGpuOutputContract,
 ) -> bool {
-    output.shape() == shape
+    output.allocation_lease().validate_live().is_ok()
+        && output.shape() == shape
         && output.device_id() == input.device_id()
         && contract.alias.accepts(output, input)
         // Device namespace was checked above and by exact_provider_for_handle.
@@ -361,7 +363,8 @@ pub fn binary_gpu_output_matches(
     provider: &'static dyn AccelProvider,
     contract: &BinaryGpuOutputContract,
 ) -> bool {
-    output.shape() == contract.shape
+    output.allocation_lease().validate_live().is_ok()
+        && output.shape() == contract.shape
         && output.device_id() == provider.device_id()
         && contract.alias.accepts(output, left)
         && contract.alias.accepts(output, right)
@@ -860,6 +863,10 @@ pub fn upload_exact_integer_scalar_like(
 #[cfg(test)]
 #[path = "gpu_helpers/preserving_download_tests.rs"]
 mod preserving_download_tests;
+
+#[cfg(test)]
+#[path = "gpu_helpers/output_admission_tests.rs"]
+mod output_admission_tests;
 
 #[cfg(all(test, feature = "wgpu"))]
 #[path = "gpu_helpers/integer_upload_wgpu_tests.rs"]
