@@ -28,6 +28,9 @@ const SQRT_2: f64 = std::f64::consts::SQRT_2;
 #[path = "hypothesis/ttest2_options.rs"]
 mod ttest2_options;
 use ttest2_options::Ttest2OptionPlan;
+#[cfg(test)]
+#[path = "hypothesis/ttest2_provider_tests.rs"]
+mod ttest2_provider_tests;
 
 // kstest has not yet moved to the catalog; keep its output metadata owned
 // here rather than coupling that identity to ttest2's catalog package.
