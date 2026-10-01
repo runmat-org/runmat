@@ -3,13 +3,14 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, FitctreeOption,
+    FITCTREE_ERROR_INTERNAL as ERROR_FITCTREE_INTERNAL,
+    FITCTREE_ERROR_INVALID_ARGUMENT as ERROR_FITCTREE_INVALID_ARGUMENT,
+    FITCTREE_INTEGER_NUMERIC_ARGUMENT_EXTENSION as INTEGER_NUMERIC_ARGUMENT_EXTENSION,
+    FITCTREE_INTEGER_PREDICTOR_EXTENSION as INTEGER_PREDICTOR_EXTENSION,
+    FITCTREE_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
+    PREDICT_ERROR_INTERNAL as ERROR_PREDICT_INTERNAL,
+    PREDICT_ERROR_INVALID_ARGUMENT as ERROR_PREDICT_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::IntegerClass;
@@ -28,141 +29,6 @@ const FITCTREE_NAME: &str = "fitctree";
 const PREDICT_NAME: &str = "predict";
 const EPS: f64 = 1.0e-12;
 const MAX_TREE_DEPTH: usize = 4096;
-
-const INTEGER_PREDICTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitctree-integer-predictors",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitctree with typed-integer predictors is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitctreeIntegerPredictorExtension"),
-};
-const INTEGER_NUMERIC_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitctree-integer-numeric-arguments",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitctree with typed-integer weights or numeric controls is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitctreeIntegerNumericArgumentExtension"),
-};
-const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitctree-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitctree host fitting from provider-resident input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitctreeResidentInputExtension"),
-};
-pub const FITCTREE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    INTEGER_PREDICTOR_EXTENSION,
-    INTEGER_NUMERIC_ARGUMENT_EXTENSION,
-    RESIDENT_INPUT_EXTENSION,
-];
-
-const INTEGER_PREDICTOR_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Integer predictors must be exactly representable in binary64 before host fitting; values that would round are rejected." }];
-const INTEGER_LABEL_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "Y or ClassNames", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Grouping labels retain their exact integer class and identity through model storage and prediction, including above flintmax." }];
-const INTEGER_NUMERIC_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "Weights or numeric option", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Typed-integer statistical inputs are independently gated and must cross the binary64 boundary exactly." }];
-pub const FITCTREE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Mdl = fitctree(integer_X, Y, ___)", inputs: &INTEGER_PREDICTOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Matrix and table predictor roles share the same exact conversion boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "Mdl = fitctree(X, integer_Y, ClassNames=integer_names)", inputs: &INTEGER_LABEL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Class grouping never passes through floating point." },
-    BuiltinIntegerCapabilityDescriptor { form: "Mdl = fitctree(X, Y, Weights=integer_W, numericOption=integer_value)", inputs: &INTEGER_NUMERIC_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer weights and numeric controls are RunMat-only extensions and reject rather than round." },
-];
-
-const OUTPUT_TREE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Mdl",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "ClassificationTree object containing class names, split rules, and posterior probabilities.",
-}];
-
-const PARAM_TBL_OR_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "tblOrX",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input table or numeric predictor matrix.",
-};
-
-const PARAM_Y_OR_RESPONSE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "yOrResponse",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Response vector, response variable name, or table formula.",
-};
-
-const PARAM_REST: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name-value options such as ClassNames, PredictorNames, ResponseName, MaxNumSplits, MinLeafSize, MinParentSize, SplitCriterion, and Weights.",
-};
-
-const FITCTREE_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_TBL_OR_X, PARAM_Y_OR_RESPONSE];
-const FITCTREE_INPUTS_FULL: [BuiltinParamDescriptor; 3] =
-    [PARAM_TBL_OR_X, PARAM_Y_OR_RESPONSE, PARAM_REST];
-
-const FITCTREE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitctree(Tbl, ResponseVarName)",
-        inputs: &FITCTREE_INPUTS_X_Y,
-        outputs: &OUTPUT_TREE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitctree(Tbl, formula)",
-        inputs: &FITCTREE_INPUTS_X_Y,
-        outputs: &OUTPUT_TREE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitctree(X, Y)",
-        inputs: &FITCTREE_INPUTS_X_Y,
-        outputs: &OUTPUT_TREE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitctree(___, Name, Value)",
-        inputs: &FITCTREE_INPUTS_FULL,
-        outputs: &OUTPUT_TREE,
-    },
-];
-
-const ERROR_FITCTREE_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITCTREE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:fitctree:InvalidArgument"),
-    when:
-        "Inputs, response labels, dimensions, or name-value options are malformed or unsupported.",
-    message: "fitctree: invalid argument",
-};
-
-const ERROR_FITCTREE_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITCTREE.INTERNAL",
-    identifier: Some("RunMat:fitctree:Internal"),
-    when: "RunMat cannot construct the ClassificationTree result.",
-    message: "fitctree: internal error",
-};
-
-const ERROR_PREDICT_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PREDICT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:predict:InvalidArgument"),
-    when: "Classification-tree prediction inputs are malformed or incompatible with the model.",
-    message: "predict: invalid argument",
-};
-
-const ERROR_PREDICT_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PREDICT.INTERNAL",
-    identifier: Some("RunMat:predict:Internal"),
-    when: "Classification-tree prediction cannot construct its output.",
-    message: "predict: internal error",
-};
-
-const FITCTREE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ERROR_FITCTREE_INVALID_ARGUMENT, ERROR_FITCTREE_INTERNAL];
-
-pub const FITCTREE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FITCTREE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FITCTREE_ERRORS,
-};
-
-fn fitctree_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
 
 fn fitctree_error(
     message: impl Into<String>,
@@ -302,15 +168,7 @@ struct SplitCandidate {
 
 #[runtime_builtin(
     name = "fitctree",
-    category = "stats/ml",
-    summary = "Fit a binary decision tree for multiclass classification.",
-    keywords = "fitctree,classification tree,decision tree,machine learning,statistics",
-    type_resolver(fitctree_type),
-    descriptor(crate::builtins::stats::ml::classification_tree::FITCTREE_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::classification_tree::FITCTREE_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::stats::ml::classification_tree::FITCTREE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::classification_tree"
 )]
 async fn fitctree_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -355,7 +213,9 @@ fn ensure_fitctree_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()
         let Some(name) = scalar_text(&pair[0]) else {
             continue;
         };
-        if typed_integer_value(&pair[1]) && !name.eq_ignore_ascii_case("ClassNames") {
+        if typed_integer_value(&pair[1])
+            && FitctreeOption::from_public_name(&name) != Some(FitctreeOption::ClassNames)
+        {
             enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
         }
     }
@@ -398,14 +258,16 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
         let Some(name) = scalar_text(&pair[0]) else {
             continue;
         };
-        match name.to_ascii_lowercase().as_str() {
-            "responsename" if !external_y => {
+        match FitctreeOption::from_public_name(&name) {
+            Some(FitctreeOption::ResponseName) if !external_y => {
                 if let Some(value) = scalar_text(&pair[1]) {
                     response = value;
                 }
             }
-            "predictornames" => predictors = text_list(&pair[1], "PredictorNames").ok(),
-            "weights" => weight_variable = scalar_text(&pair[1]),
+            Some(FitctreeOption::PredictorNames) => {
+                predictors = text_list(&pair[1], "PredictorNames").ok()
+            }
+            Some(FitctreeOption::Weights) => weight_variable = scalar_text(&pair[1]),
             _ => {}
         }
     }
@@ -749,30 +611,30 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
         let name = scalar_text(&values[index])
             .ok_or_else(|| fitctree_invalid("fitctree: option name must be text"))?;
         let value = &values[index + 1];
-        match name.to_ascii_lowercase().as_str() {
-            "classnames" => {
+        match FitctreeOption::from_public_name(&name) {
+            Some(FitctreeOption::ClassNames) => {
                 let labels = label_vector(value.clone(), "ClassNames")?;
                 options.class_names = Some(labels.labels);
             }
-            "predictornames" => {
+            Some(FitctreeOption::PredictorNames) => {
                 options.predictor_names = Some(text_list(value, "PredictorNames")?);
             }
-            "responsename" => {
+            Some(FitctreeOption::ResponseName) => {
                 options.response_name = Some(
                     scalar_text(value)
                         .ok_or_else(|| fitctree_invalid("fitctree: ResponseName must be text"))?,
                 );
             }
-            "maxnumsplits" => {
+            Some(FitctreeOption::MaxNumSplits) => {
                 options.max_num_splits = Some(nonnegative_integer(value, "MaxNumSplits")?);
             }
-            "minleafsize" => {
+            Some(FitctreeOption::MinLeafSize) => {
                 options.min_leaf_size = positive_integer(value, "MinLeafSize")?;
             }
-            "minparentsize" => {
+            Some(FitctreeOption::MinParentSize) => {
                 options.min_parent_size = positive_integer(value, "MinParentSize")?;
             }
-            "splitcriterion" => {
+            Some(FitctreeOption::SplitCriterion) => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitctree_invalid("fitctree: SplitCriterion must be text"))?;
                 options.split_criterion = match text.to_ascii_lowercase().as_str() {
@@ -785,14 +647,14 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
                     }
                 };
             }
-            "weights" => {
+            Some(FitctreeOption::Weights) => {
                 options.weights = Some(if let Some(name) = scalar_text(value) {
                     WeightSpec::Variable(name)
                 } else {
                     WeightSpec::Values(numeric_vector(value, "Weights")?)
                 });
             }
-            "scoretransform" => {
+            Some(FitctreeOption::ScoreTransform) => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitctree_invalid("fitctree: ScoreTransform must be text"))?;
                 if !text.eq_ignore_ascii_case("none") {
@@ -801,33 +663,36 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
                     ));
                 }
             }
-            "algorithmforcategorical"
-            | "categoricalpredictors"
-            | "cost"
-            | "crossval"
-            | "cvpartition"
-            | "holdout"
-            | "kfold"
-            | "leaveout"
-            | "maxnumcategories"
-            | "mergeleaves"
-            | "numbins"
-            | "numvariablestosample"
-            | "optimizehyperparameters"
-            | "hyperparameteroptimizationoptions"
-            | "predictorselection"
-            | "prior"
-            | "prune"
-            | "prunecriterion"
-            | "reproducible"
-            | "surrogate" => {
+            Some(
+                FitctreeOption::AlgorithmForCategorical
+                | FitctreeOption::CategoricalPredictors
+                | FitctreeOption::Cost
+                | FitctreeOption::CrossVal
+                | FitctreeOption::CvPartition
+                | FitctreeOption::Holdout
+                | FitctreeOption::KFold
+                | FitctreeOption::Leaveout
+                | FitctreeOption::MaxNumCategories
+                | FitctreeOption::MergeLeaves
+                | FitctreeOption::NumBins
+                | FitctreeOption::NumVariablesToSample
+                | FitctreeOption::OptimizeHyperparameters
+                | FitctreeOption::HyperparameterOptimizationOptions
+                | FitctreeOption::PredictorSelection
+                | FitctreeOption::Prior
+                | FitctreeOption::Prune
+                | FitctreeOption::PruneCriterion
+                | FitctreeOption::Reproducible
+                | FitctreeOption::Surrogate,
+            ) => {
                 return Err(fitctree_invalid(format!(
                     "fitctree: option '{name}' is not supported yet"
                 )));
             }
-            other => {
+            None => {
                 return Err(fitctree_invalid(format!(
-                    "fitctree: unknown option '{other}'"
+                    "fitctree: unknown option '{}'",
+                    name.to_ascii_lowercase()
                 )))
             }
         }
@@ -1796,42 +1661,8 @@ fn ensure_int_exact_f64(value: &IntValue, name: &str) -> BuiltinResult<()> {
 }
 
 fn is_name_value_option(value: &Value) -> bool {
-    scalar_text(value).is_some_and(|text| {
-        matches!(
-            text.to_ascii_lowercase().as_str(),
-            "algorithmforcategorical"
-                | "categoricalpredictors"
-                | "classnames"
-                | "cost"
-                | "crossval"
-                | "cvpartition"
-                | "holdout"
-                | "hyperparameteroptimizationoptions"
-                | "kfold"
-                | "leaveout"
-                | "maxnumcategories"
-                | "maxnumsplits"
-                | "mergeleaves"
-                | "minleafsize"
-                | "minparentsize"
-                | "numbins"
-                | "numvariablestosample"
-                | "optimizehyperparameters"
-                | "predictornames"
-                | "predictorselection"
-                | "prior"
-                | "prune"
-                | "prunecriterion"
-                | "reproducible"
-                | "responsename"
-                | "scoretransform"
-                | "splitcriterion"
-                | "surrogate"
-                | "weights"
-        )
-    })
+    scalar_text(value).is_some_and(|text| FitctreeOption::from_public_name(&text).is_some())
 }
-
 fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
     if columns.is_empty() {
         return Err(fitctree_invalid("fitctree: no predictor columns"));
