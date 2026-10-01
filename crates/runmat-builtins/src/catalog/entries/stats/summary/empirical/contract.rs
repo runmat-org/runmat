@@ -252,21 +252,21 @@ const CDFPLOT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
-pub const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const ECDF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ECDF.INVALID_ARGUMENT",
     identifier: Some("RunMat:ecdf:InvalidArgument"),
     when: "Inputs, name-value options, censoring, frequency, or alpha values are malformed.",
     message: "ecdf: invalid argument",
 };
 
-pub const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const ECDF_ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ECDF.UNSUPPORTED",
     identifier: Some("RunMat:ecdf:Unsupported"),
     when: "A documented but not yet implemented interval or double-censored form is requested.",
     message: "ecdf: unsupported form",
 };
 
-pub const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const ECDF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ECDF.INTERNAL",
     identifier: Some("RunMat:ecdf:Internal"),
     when: "RunMat cannot construct ECDF outputs or plots.",
@@ -287,8 +287,11 @@ pub const CDFPLOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescripto
     message: "cdfplot: internal error",
 };
 
-const ECDF_ERRORS: [BuiltinErrorDescriptor; 3] =
-    [ERROR_INVALID_ARGUMENT, ERROR_UNSUPPORTED, ERROR_INTERNAL];
+const ECDF_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ECDF_ERROR_INVALID_ARGUMENT,
+    ECDF_ERROR_UNSUPPORTED,
+    ECDF_ERROR_INTERNAL,
+];
 const CDFPLOT_ERRORS: [BuiltinErrorDescriptor; 2] =
     [CDFPLOT_ERROR_INVALID_ARGUMENT, CDFPLOT_ERROR_INTERNAL];
 

@@ -6,9 +6,9 @@ use runmat_builtins::{
     BuiltinErrorDescriptor, BuiltinExtensionDescriptor, EcdfBounds, EcdfFunction as FunctionKind,
     EcdfOptionName, EmpiricalBuiltin, CDFPLOT_ERROR_INTERNAL, CDFPLOT_ERROR_INVALID_ARGUMENT,
     CDFPLOT_GPU_INPUT_EXTENSION, CDFPLOT_INTEGER_INPUT_EXTENSION, CDFPLOT_LOGICAL_INPUT_EXTENSION,
+    ECDF_ERROR_INTERNAL, ECDF_ERROR_INVALID_ARGUMENT, ECDF_ERROR_UNSUPPORTED,
     ECDF_INTEGER_CENSORING_EXTENSION, ECDF_INTEGER_FREQUENCY_EXTENSION, ECDF_INTEGER_Y_EXTENSION,
-    ECDF_LOGICAL_FREQUENCY_EXTENSION, ECDF_LOGICAL_Y_EXTENSION, ERROR_INTERNAL,
-    ERROR_INVALID_ARGUMENT, ERROR_UNSUPPORTED,
+    ECDF_LOGICAL_FREQUENCY_EXTENSION, ECDF_LOGICAL_Y_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle};
@@ -72,19 +72,19 @@ fn ecdf_error(
 
 fn invalid_argument(builtin: EmpiricalBuiltin, message: impl Into<String>) -> RuntimeError {
     let descriptor = match builtin {
-        EmpiricalBuiltin::Ecdf => &ERROR_INVALID_ARGUMENT,
+        EmpiricalBuiltin::Ecdf => &ECDF_ERROR_INVALID_ARGUMENT,
         EmpiricalBuiltin::Cdfplot => &CDFPLOT_ERROR_INVALID_ARGUMENT,
     };
     ecdf_error(builtin, message, descriptor)
 }
 
 fn unsupported(message: impl Into<String>) -> RuntimeError {
-    ecdf_error(ECDF_OWNER, message, &ERROR_UNSUPPORTED)
+    ecdf_error(ECDF_OWNER, message, &ECDF_ERROR_UNSUPPORTED)
 }
 
 fn internal_error(builtin: EmpiricalBuiltin, message: impl Into<String>) -> RuntimeError {
     let descriptor = match builtin {
-        EmpiricalBuiltin::Ecdf => &ERROR_INTERNAL,
+        EmpiricalBuiltin::Ecdf => &ECDF_ERROR_INTERNAL,
         EmpiricalBuiltin::Cdfplot => &CDFPLOT_ERROR_INTERNAL,
     };
     ecdf_error(builtin, message, descriptor)
