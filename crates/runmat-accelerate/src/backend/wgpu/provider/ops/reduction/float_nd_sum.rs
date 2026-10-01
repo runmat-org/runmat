@@ -67,6 +67,28 @@ impl WgpuProvider {
             product_checked(&entry.shape) == Some(entry.len),
             "N-D floating sum allocation shape mismatch"
         );
+        ensure!(
+            entry.precision == NumericPrecision::F64 && entry.integer_type().is_none(),
+            "N-D floating sum requires physical double elements"
+        );
+        u32::try_from(entry.len)
+            .map_err(|_| gpu_dispatch_length_limit_error("N-D floating sum input", entry.len))?;
+        let input_bytes = u64::try_from(entry.len)?
+            .checked_mul(8)
+            .ok_or_else(|| anyhow!("N-D floating sum input byte extent overflow"))?;
+        let output_bytes = u64::try_from(out_len)?
+            .checked_mul(8)
+            .ok_or_else(|| anyhow!("N-D floating sum output byte extent overflow"))?;
+        let binding_limit = u64::from(self.adapter_limits.max_storage_buffer_binding_size);
+        ensure!(
+            input_bytes <= binding_limit && output_bytes <= binding_limit,
+            "N-D floating sum storage binding exceeds this device's {binding_limit}-byte limit"
+        );
+        ensure!(
+            input_bytes <= self.adapter_limits.max_buffer_size
+                && output_bytes <= self.adapter_limits.max_buffer_size,
+            "N-D floating sum buffer exceeds this device's per-buffer limit"
+        );
         let before = u32::try_from(before)
             .map_err(|_| gpu_dispatch_length_limit_error("N-D floating sum", before))?;
         let reduce_len = u32::try_from(reduce_len)

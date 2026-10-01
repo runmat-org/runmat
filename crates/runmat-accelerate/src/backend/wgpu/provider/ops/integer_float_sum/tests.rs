@@ -1,9 +1,50 @@
 use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
-    AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostLogicalTensorView,
-    HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
+    test_support::TestAllocationOwner, AccelProvider, HostIntegerDataView, HostIntegerTensorView,
+    HostLogicalTensorView, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
 };
+
+#[test]
+fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
+    let owner = TestAllocationOwner::new();
+    let failed = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    failed.probe.fail_retirement("temporary retirement failed");
+    let error = finish_temporary(
+        Err(anyhow!("primary execution failed")),
+        failed.handle,
+        "sum",
+    )
+    .unwrap_err();
+    let carrier = error.downcast_ref::<TemporaryCompletionError>().unwrap();
+    assert_eq!(
+        carrier.primary.as_ref().unwrap().to_string(),
+        "primary execution failed"
+    );
+    assert_eq!(failed.probe.retirements(), 1);
+    assert!(carrier.output_cleanup.is_none());
+    assert!(carrier.temporary_cleanup.physical.is_err());
+
+    let temporary = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let output = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    temporary
+        .probe
+        .fail_retirement("temporary retirement failed");
+    output.probe.fail_retirement("output retirement failed");
+    let error = finish_temporary(Ok(output.handle), temporary.handle, "sum").unwrap_err();
+    let carrier = error.downcast_ref::<TemporaryCompletionError>().unwrap();
+    assert!(carrier.primary.is_none());
+    assert!(carrier.temporary_cleanup.physical.is_err());
+    assert!(carrier.output_cleanup.as_ref().unwrap().physical.is_err());
+    assert_eq!(temporary.probe.retirements(), 1);
+    assert_eq!(output.probe.retirements(), 1);
+}
 
 fn actual_adapter() -> &'static WgpuProvider {
     crate::backend::wgpu::provider::register_wgpu_provider(

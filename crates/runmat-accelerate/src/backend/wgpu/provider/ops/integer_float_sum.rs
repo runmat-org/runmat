@@ -1,7 +1,9 @@
 //! Prepare integer and single inputs for the ordinary sum's F64 accumulator.
 //! Native integer reductions remain in `integer.rs` and keep saturation.
 use super::*;
+use runmat_accelerate_api::allocation::GpuHandleReleaseError;
 use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
+use std::{error::Error, fmt};
 
 #[cfg(test)]
 #[path = "integer_float_sum/tests.rs"]
@@ -22,27 +24,67 @@ enum SumSelection {
     Dimension(usize),
 }
 
+/// Preserve the numerical/provider cause and both independent retirement
+/// failures without converting an owner-retaining release error into text.
+#[derive(Debug)]
+struct TemporaryCompletionError {
+    stage: &'static str,
+    primary: Option<anyhow::Error>,
+    temporary_cleanup: GpuHandleReleaseError,
+    output_cleanup: Option<GpuHandleReleaseError>,
+}
+
+impl fmt::Display for TemporaryCompletionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(primary) = &self.primary {
+            write!(formatter, "{} failed: {primary}; ", self.stage)?;
+        } else {
+            write!(formatter, "{}: ", self.stage)?;
+        }
+        write!(
+            formatter,
+            "temporary cleanup failed: {}",
+            self.temporary_cleanup
+        )?;
+        if let Some(output_cleanup) = &self.output_cleanup {
+            write!(formatter, "; output cleanup also failed: {output_cleanup}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error for TemporaryCompletionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.primary
+            .as_ref()
+            .map(|error| error.as_ref() as &(dyn Error + 'static))
+            .or(Some(&self.temporary_cleanup))
+    }
+}
+
 fn finish_temporary(
     result: Result<GpuTensorHandle>,
     temporary: GpuTensorHandle,
-    stage: &str,
+    stage: &'static str,
 ) -> Result<GpuTensorHandle> {
     let cleanup = temporary.release();
     match (result, cleanup) {
         (Ok(output), Ok(_)) => Ok(output),
         (Err(error), Ok(_)) => Err(error),
-        (Err(error), Err(cleanup)) => Err(anyhow!(
-            "{stage} failed: {error}; temporary cleanup also failed: {cleanup}"
-        )),
-        (Ok(output), Err(cleanup)) => {
-            let output_cleanup = output.release();
-            match output_cleanup {
-                Ok(_) => Err(anyhow!("{stage} temporary cleanup failed: {cleanup}")),
-                Err(output_cleanup) => Err(anyhow!(
-                    "{stage} temporary cleanup failed: {cleanup}; output cleanup also failed: {output_cleanup}"
-                )),
-            }
+        (Err(primary), Err(temporary_cleanup)) => Err(TemporaryCompletionError {
+            stage,
+            primary: Some(primary),
+            temporary_cleanup,
+            output_cleanup: None,
         }
+        .into()),
+        (Ok(output), Err(cleanup)) => Err(TemporaryCompletionError {
+            stage,
+            primary: None,
+            temporary_cleanup: cleanup,
+            output_cleanup: output.release().err(),
+        }
+        .into()),
     }
 }
 
