@@ -1,5 +1,6 @@
 //! One admission authority for public prior controls and deferred resident payloads.
 use super::*;
+use runmat_builtins::PriorKeyword;
 
 pub(super) enum PriorSpec {
     Uniform,
@@ -26,7 +27,11 @@ impl PriorSpec {
         let Some(value) = value else {
             return Ok(Self::Uniform);
         };
-        if string_matches(value, "empirical") {
+        if scalar_text(value, "prior")
+            .ok()
+            .and_then(|text| PriorKeyword::from_public(&text))
+            .is_some()
+        {
             return Ok(Self::Empirical);
         }
         if let Value::Struct(structure) = value {
@@ -121,9 +126,11 @@ impl PriorSpec {
                 "classify: prior must contain one probability per class",
             ));
         }
-        validate_probabilities(&raw)?;
-        let total = raw.iter().sum::<f64>();
-        Ok(raw.into_iter().map(|value| value / total).collect())
+        let (scale, scaled_total) = probability_scale(&raw)?;
+        Ok(raw
+            .into_iter()
+            .map(|value| (value / scale) / scaled_total)
+            .collect())
     }
 }
 
@@ -134,7 +141,7 @@ impl PriorValues {
             Value::GpuTensor(_) => Ok(Self::Resident(value.clone())),
             _ => {
                 let values = numeric_vector(value, role)?;
-                validate_probabilities(&values)?;
+                probability_scale(&values)?;
                 Ok(Self::Host(values))
             }
         }
@@ -209,7 +216,7 @@ impl PriorGroups {
     }
 }
 
-fn validate_probabilities(probabilities: &[f64]) -> BuiltinResult<()> {
+fn probability_scale(probabilities: &[f64]) -> BuiltinResult<(f64, f64)> {
     if probabilities
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
@@ -218,10 +225,12 @@ fn validate_probabilities(probabilities: &[f64]) -> BuiltinResult<()> {
             "classify: prior probabilities must be finite and nonnegative",
         ));
     }
-    if probabilities.iter().sum::<f64>() <= 0.0 {
+    let scale = probabilities.iter().copied().fold(0.0_f64, f64::max);
+    if scale <= 0.0 {
         return Err(invalid_argument(
             "classify: prior probabilities must have positive total",
         ));
     }
-    Ok(())
+    let scaled_total = probabilities.iter().map(|value| value / scale).sum::<f64>();
+    Ok((scale, scaled_total))
 }

@@ -346,12 +346,6 @@ pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
     }
 }
 
-pub(super) fn string_matches(value: &Value, expected: &str) -> bool {
-    scalar_text(value, "text")
-        .map(|text| text.eq_ignore_ascii_case(expected))
-        .unwrap_or(false)
-}
-
 pub(super) fn canonical(text: &str) -> String {
     text.chars()
         .filter(|ch| *ch != '_' && *ch != '-' && !ch.is_whitespace())

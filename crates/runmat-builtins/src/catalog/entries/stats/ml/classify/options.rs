@@ -8,6 +8,18 @@ pub enum DiscriminantType {
     Mahalanobis,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PriorKeyword {
+    Empirical,
+}
+
+impl PriorKeyword {
+    pub fn from_public(text: &str) -> Option<Self> {
+        text.eq_ignore_ascii_case("empirical")
+            .then_some(Self::Empirical)
+    }
+}
+
 impl DiscriminantType {
     pub fn from_public(text: &str) -> Option<Self> {
         if text.eq_ignore_ascii_case("linear") {

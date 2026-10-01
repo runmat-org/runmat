@@ -1,5 +1,5 @@
 //! Output facts preserve the label family; learned class count remains dynamic.
-use super::DiscriminantType;
+use super::{DiscriminantType, PriorKeyword};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, CellFact, DimensionFact, DynamicReason,
@@ -112,6 +112,24 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             _ => {}
         }
     }
+    if let Some(kind) = request.arguments.get(3).map(|fact| &fact.kind) {
+        if !matches!(
+            kind,
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+        ) {
+            diagnostics.push(InferenceDiagnostic::error(
+                "RM.CLASSIFY.TYPE",
+                "discriminant type must be text",
+            ));
+        }
+    }
+    if let Some(prior) = request.arguments.get(4) {
+        diagnose_prior(
+            prior,
+            request.literals.literal_args.get(4),
+            &mut diagnostics,
+        );
+    }
     let sample_rows = request.arguments.first().and_then(|fact| rows(&fact.shape));
     let label = request.arguments.get(2).map_or_else(
         || ValueFact::unknown(DynamicReason::RuntimeValue),
@@ -151,6 +169,88 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     result.diagnostics.extend(diagnostics);
     result
+}
+
+fn diagnose_prior(
+    prior: &ValueFact,
+    literal: Option<&LiteralValue>,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) {
+    let invalid = match &prior.kind {
+        ValueKindFact::Unknown => false,
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        }) => {
+            prior.shape.element_count() == Some(1)
+                || matches!(&prior.shape, ShapeFact::Shaped { dims } if dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(value) if *value > 1)).count() > 1)
+                || literal.is_some_and(known_invalid_probability)
+        }
+        ValueKindFact::String | ValueKindFact::Character => match literal {
+            Some(
+                LiteralValue::String(text)
+                | LiteralValue::Character(text)
+                | LiteralValue::Keyword(text),
+            ) => PriorKeyword::from_public(text).is_none(),
+            _ => false,
+        },
+        ValueKindFact::Struct(structure) => {
+            let groups = structure
+                .fields
+                .get("group")
+                .or_else(|| structure.fields.get("Group"));
+            let probabilities = structure
+                .fields
+                .get("prob")
+                .or_else(|| structure.fields.get("Prob"));
+            (structure.fields_complete && (groups.is_none() || probabilities.is_none()))
+                || groups.is_some_and(|value| definitely_invalid_prior_groups(&value.kind))
+                || probabilities.is_some_and(|value| definitely_invalid_prior_values(value))
+        }
+        _ => true,
+    };
+    if invalid {
+        diagnostics.push(InferenceDiagnostic::error(
+            "RM.CLASSIFY.PRIOR",
+            "prior must be empirical text, a numeric vector, or a group/prob struct",
+        ));
+    }
+}
+
+fn definitely_invalid_prior_groups(kind: &ValueKindFact) -> bool {
+    !matches!(
+        kind,
+        ValueKindFact::Unknown
+            | ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Real,
+                ..
+            })
+            | ValueKindFact::Logical
+            | ValueKindFact::String
+            | ValueKindFact::Character
+            | ValueKindFact::Cell(_)
+    )
+}
+
+fn definitely_invalid_prior_values(fact: &ValueFact) -> bool {
+    !matches!(
+        fact.kind,
+        ValueKindFact::Unknown
+            | ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Real,
+                ..
+            })
+    ) || matches!(&fact.shape, ShapeFact::Shaped { dims } if dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(value) if *value > 1)).count() > 1)
+}
+
+fn known_invalid_probability(literal: &LiteralValue) -> bool {
+    match literal {
+        LiteralValue::Number(value) => !value.is_finite() || *value <= 0.0,
+        LiteralValue::Real { text, .. } | LiteralValue::Integer { text, .. } => text
+            .parse::<f64>()
+            .is_ok_and(|value| !value.is_finite() || value <= 0.0),
+        _ => false,
+    }
 }
 
 fn rows(shape: &ShapeFact) -> Option<usize> {

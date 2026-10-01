@@ -76,3 +76,14 @@ fn classify_materializes_only_requested_prediction_outputs() {
     assert_eq!(complete.posterior.as_ref().unwrap().shape, vec![2, 2]);
     assert_eq!(complete.logp.as_ref().unwrap().shape, vec![2, 1]);
 }
+
+#[test]
+fn classify_normalizes_large_finite_prior_weights_without_overflow() {
+    let labels = labels_from_value(tensor(vec![1.0, 2.0], vec![2, 1]), "group").unwrap();
+    let prior =
+        prior::PriorSpec::prepare(Some(&tensor(vec![1.0e308, 1.0e308], vec![2, 1]))).unwrap();
+    let probabilities = prior
+        .resolve(&labels.labels, labels.kind, &[vec![0], vec![1]])
+        .unwrap();
+    assert_eq!(probabilities, vec![0.5, 0.5]);
+}

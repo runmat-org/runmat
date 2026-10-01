@@ -1,6 +1,7 @@
 //! Metadata admission before any resident input is downloaded.
 use super::{
-    gathered, invalid_argument, labels_from_value, parse_type, prior::PriorSpec, LabelVector,
+    ensure_exact_integer_scalar_boundary, gathered, invalid_argument, is_missing_label,
+    labels_from_value, parse_type, prior::PriorSpec, same_label, LabelVector,
 };
 use crate::BuiltinResult;
 use runmat_builtins::DiscriminantType;
@@ -14,27 +15,30 @@ pub(super) fn admit(
 ) -> BuiltinResult<AdmittedHeader> {
     let sample_geometry = predictor_geometry(sample, "sample")?;
     let training_geometry = predictor_geometry(training, "training")?;
-    if let (Some((_, sample_columns)), Some((_, training_columns))) =
-        (sample_geometry, training_geometry)
-    {
-        if sample_columns != training_columns {
-            return Err(invalid_argument(
-                "classify: sample and training must have the same number of columns",
-            ));
-        }
+    if sample_geometry.1 != training_geometry.1 {
+        return Err(invalid_argument(
+            "classify: sample and training must have the same number of columns",
+        ));
     }
-    if sample_geometry.is_some_and(|(_, columns)| columns == 0)
-        || training_geometry.is_some_and(|(rows, _)| rows == 0)
-    {
+    if sample_geometry.1 == 0 || training_geometry.0 == 0 {
         return Err(invalid_argument(
             "classify: sample and training must be nonempty numeric matrices",
         ));
     }
+    preflight_host_predictor(sample, "sample")?;
+    preflight_host_predictor(training, "training")?;
     let group = GroupSpec::prepare(group)?;
-    if let (Some((training_rows, _)), Some(group_count)) = (training_geometry, group.known_len()) {
-        if group_count != training_rows {
+    if let Some(group_count) = group.known_len() {
+        if group_count != training_geometry.0 {
             return Err(invalid_argument(
                 "classify: group length must match the number of rows in training",
+            ));
+        }
+    }
+    if let GroupSpec::Host(labels) = &group {
+        if !has_two_nonmissing_classes(labels) {
+            return Err(invalid_argument(
+                "classify: group must contain at least two nonmissing classes",
             ));
         }
     }
@@ -86,6 +90,57 @@ impl GroupSpec {
     }
 }
 
+fn has_two_nonmissing_classes(group: &LabelVector) -> bool {
+    let mut first = None;
+    for label in &group.labels {
+        if is_missing_label(label) {
+            continue;
+        }
+        match first {
+            None => first = Some(label),
+            Some(existing) if !same_label(existing, label) => return true,
+            Some(_) => {}
+        }
+    }
+    false
+}
+
+fn preflight_host_predictor(value: &Value, role: &str) -> BuiltinResult<()> {
+    match value {
+        Value::Tensor(tensor) => {
+            for index in 0..tensor.len() {
+                let scalar = tensor.numeric_value_at(index).ok_or_else(|| {
+                    invalid_argument(format!("classify: {role} numeric storage is invalid"))
+                })?;
+                ensure_exact_integer_scalar_boundary(scalar, role)?;
+                if !scalar.is_finite() {
+                    return Err(invalid_argument(
+                        "classify: sample and training must contain finite values",
+                    ));
+                }
+            }
+        }
+        Value::Num(number) if !number.is_finite() => {
+            return Err(invalid_argument(
+                "classify: sample and training must contain finite values",
+            ));
+        }
+        Value::Int(integer) => {
+            ensure_exact_integer_scalar_boundary(
+                runmat_value::NumericScalar::from(integer.clone()),
+                role,
+            )?;
+        }
+        Value::GpuTensor(_) | Value::Num(_) | Value::Bool(_) | Value::LogicalArray(_) => {}
+        _ => {
+            return Err(invalid_argument(format!(
+                "classify: {role} must be a 2-D numeric matrix"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn preflight_numeric_vector(value: &Value, role: &str) -> BuiltinResult<()> {
     let shape = match value {
         Value::Tensor(tensor) => tensor.shape.as_slice(),
@@ -114,33 +169,34 @@ pub(super) fn preflight_numeric_vector(value: &Value, role: &str) -> BuiltinResu
     Ok(())
 }
 
-fn predictor_geometry(value: &Value, role: &str) -> BuiltinResult<Option<(usize, usize)>> {
+fn predictor_geometry(value: &Value, role: &str) -> BuiltinResult<(usize, usize)> {
     let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
                 return Err(invalid_argument(format!(
                     "classify: {role} must be a 2-D numeric matrix"
                 )));
             }
-            Some(handle.shape())
+            handle.shape()
         }
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Ok(Some((1, 1))),
-        _ => None,
-    };
-    let Some(shape) = shape else {
-        return Ok(None);
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Ok((1, 1)),
+        _ => {
+            return Err(invalid_argument(format!(
+                "classify: {role} must be a 2-D numeric matrix"
+            )));
+        }
     };
     if shape.len() > 2 {
         return Err(invalid_argument(format!(
             "classify: {role} must be a 2-D numeric matrix"
         )));
     }
-    Ok(Some((
+    Ok((
         shape.first().copied().unwrap_or(1),
         shape.get(1).copied().unwrap_or(1),
-    )))
+    ))
 }
 
 pub(super) fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {

@@ -119,6 +119,51 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
     assert!(err.message().contains("group and prob lengths"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
+    let resident_training = provider
+        .owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    for invalid_sample in [
+        Value::String("bad".into()),
+        tensor(vec![f64::NAN, 1.0], vec![2, 1]),
+        Value::Int(runmat_value::IntValue::I64((1_i64 << 53) + 1)),
+    ] {
+        classify_builtin(
+            invalid_sample,
+            Value::GpuTensor(resident_training.handle.clone()),
+            group.clone(),
+            Vec::new(),
+        )
+        .await
+        .expect_err("known-invalid sample must reject before resident training download");
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+    for invalid_training in [
+        Value::String("bad".into()),
+        tensor(vec![0.0, f64::INFINITY, 2.0, 3.0], vec![4, 1]),
+        Value::Int(runmat_value::IntValue::I64((1_i64 << 53) + 1)),
+    ] {
+        classify_builtin(
+            Value::GpuTensor(resident.handle.clone()),
+            invalid_training,
+            group.clone(),
+            Vec::new(),
+        )
+        .await
+        .expect_err("known-invalid training must reject before resident sample download");
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+    classify_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        training.clone(),
+        tensor(vec![1.0; 4], vec![4, 1]),
+        Vec::new(),
+    )
+    .await
+    .expect_err("one known class must reject before resident sample download");
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(resident_training.probe.retirements(), 0);
+
     let valid_prior = tensor(vec![0.25, 0.75], vec![1, 2]);
     let err = classify_builtin(
         Value::GpuTensor(resident.handle.clone()),
@@ -165,7 +210,9 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 2);
     assert_eq!(complex.probe.retirements(), 0);
     drop(complex.handle);
+    drop(resident_training.handle);
     drop(resident.handle);
     assert_eq!(complex.probe.retirements(), 1);
+    assert_eq!(resident_training.probe.retirements(), 1);
     assert_eq!(resident.probe.retirements(), 1);
 }

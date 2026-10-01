@@ -18,7 +18,7 @@ pub use contract::{
     ERROR_INVALID_ARGUMENT as CLASSIFY_ERROR_INVALID_ARGUMENT,
     ERROR_NUMERICAL as CLASSIFY_ERROR_NUMERICAL,
 };
-pub use options::DiscriminantType;
+pub use options::{DiscriminantType, PriorKeyword};
 
 pub const CLASSIFY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

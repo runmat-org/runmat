@@ -1,9 +1,10 @@
 use super::*;
 use runmat_types::{
     CallRequest, DynamicReason, LiteralContext, LiteralValue, NumericClass, NumericDomain,
-    NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact,
-    ValueKindFact,
+    NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, StructFact,
+    ValueFact, ValueKindFact,
 };
+use std::collections::BTreeMap;
 
 fn numeric(class: NumericClass, rows: usize, cols: usize) -> ValueFact {
     ValueFact::proven(
@@ -145,4 +146,68 @@ fn public_discriminant_spellings_decode_to_one_typed_identity() {
         Some(DiscriminantType::Mahalanobis)
     );
     assert_eq!(DiscriminantType::from_public("bogus"), None);
+}
+
+#[test]
+fn invalid_known_prior_and_type_controls_do_not_prove_outputs() {
+    let base = request(
+        numeric(NumericClass::Double, 2, 1),
+        numeric(NumericClass::Double, 4, 1),
+        numeric(NumericClass::Double, 4, 1),
+        1,
+    );
+    let text = |literal: LiteralValue| {
+        let mut call = base.clone();
+        call.arguments
+            .push(ValueFact::scalar(ValueKindFact::String));
+        call.arguments
+            .push(ValueFact::scalar(ValueKindFact::String));
+        call.literals
+            .literal_args
+            .extend([LiteralValue::String("linear".into()), literal]);
+        call
+    };
+    let mut invalid = vec![text(LiteralValue::String("bogus".into()))];
+    for prior in [
+        ValueFact::scalar(ValueKindFact::Logical),
+        numeric(NumericClass::Double, 1, 1),
+        numeric(NumericClass::Double, 2, 2),
+        ValueFact::proven(
+            ValueKindFact::Struct(StructFact::scalar(BTreeMap::new(), true)),
+            ShapeFact::Scalar,
+            StorageFact::Opaque,
+        ),
+    ] {
+        let mut call = text(LiteralValue::Unknown);
+        call.arguments[4] = prior;
+        invalid.push(call);
+    }
+    for call in invalid {
+        let result = inference::infer(&call, &CLASSIFY_CATALOG_ENTRY);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM.CLASSIFY.PRIOR"));
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+
+    let mut unknown_literal_type = text(LiteralValue::String("empirical".into()));
+    unknown_literal_type.arguments[3] = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    unknown_literal_type.literals.literal_args[3] = LiteralValue::Unknown;
+    let result = inference::infer(&unknown_literal_type, &CLASSIFY_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM.CLASSIFY.TYPE"));
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+
+    let valid = inference::infer(
+        &text(LiteralValue::String("empirical".into())),
+        &CLASSIFY_CATALOG_ENTRY,
+    );
+    assert!(valid.diagnostics.is_empty());
+    assert!(matches!(valid.outputs[0].kind, ValueKindFact::Numeric(_)));
 }
