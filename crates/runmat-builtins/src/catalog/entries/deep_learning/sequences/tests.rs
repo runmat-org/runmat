@@ -247,3 +247,175 @@ fn padsequences_diagnoses_known_invalid_cells_dimensions_and_options() {
     .diagnostics
     .is_empty());
 }
+
+#[test]
+fn padsequences_structured_contract_retains_no_option_and_mask_forms() {
+    let labels = PADSEQUENCES_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|signature| signature.label)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        [
+            "Y = padsequences(sequences, paddingDim)",
+            "Y = padsequences(sequences, paddingDim, Name, Value)",
+            "[Y, mask] = padsequences(sequences, paddingDim)",
+            "[Y, mask] = padsequences(sequences, paddingDim, Name, Value)",
+        ]
+    );
+}
+
+#[test]
+fn padsequences_shared_option_tokens_preserve_alias_and_value_grammar() {
+    assert_eq!(
+        PadOptionKey::parse("DiReCtIoN"),
+        Some(PadOptionKey::DirectionAlias)
+    );
+    assert_eq!(
+        PadOptionKey::parse("PaddingDirection"),
+        Some(PadOptionKey::PaddingDirection)
+    );
+    assert_eq!(PadDirection::parse("BoTh"), Some(PadDirection::Both));
+    assert_eq!(
+        PadLengthKeyword::parse("shortest"),
+        Some(PadLengthKeyword::Shortest)
+    );
+    assert_eq!(
+        PadBooleanKeyword::parse("off").map(PadBooleanKeyword::value),
+        Some(false)
+    );
+    assert_eq!(PadOptionKey::parse("unknown"), None);
+    assert_eq!(PadDirection::parse("symmetric"), None);
+}
+
+#[test]
+fn padsequences_known_option_values_and_integer_controls_are_sound() {
+    let cell = sequences(ShapeFact::from(vec![Some(1), Some(2)]));
+    let dimension = numeric(ShapeFact::Scalar);
+    let option_name = ValueFact::scalar(ValueKindFact::String);
+    let option_value = ValueFact::scalar(ValueKindFact::String);
+    let call = |names: Vec<LiteralValue>, args: Vec<ValueFact>| {
+        infer(&PADSEQUENCES_CATALOG_ENTRY, args, names)
+    };
+    let valid = call(
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Integer {
+                text: "2".into(),
+                class: NumericClass::UInt64,
+            },
+            LiteralValue::String("Direction".into()),
+            LiteralValue::String("left".into()),
+            LiteralValue::String("UniformOutput".into()),
+            LiteralValue::String("off".into()),
+        ],
+        vec![
+            cell.clone(),
+            dimension.clone(),
+            option_name.clone(),
+            option_value.clone(),
+            option_name.clone(),
+            option_value.clone(),
+        ],
+    );
+    assert!(valid.diagnostics.is_empty(), "{:?}", valid.diagnostics);
+    assert!(matches!(valid.outputs[0].kind, ValueKindFact::Cell(_)));
+
+    let overwritten = call(
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(2.0),
+            LiteralValue::String("UniformOutput".into()),
+            LiteralValue::String("invalid".into()),
+            LiteralValue::String("uniformoutput".into()),
+            LiteralValue::String("off".into()),
+        ],
+        vec![
+            cell.clone(),
+            dimension.clone(),
+            option_name.clone(),
+            option_value.clone(),
+            option_name.clone(),
+            option_value.clone(),
+        ],
+    );
+    assert!(
+        overwritten.diagnostics.is_empty(),
+        "{:?}",
+        overwritten.diagnostics
+    );
+    assert!(matches!(
+        overwritten.outputs[0].kind,
+        ValueKindFact::Cell(_)
+    ));
+
+    for invalid in [
+        LiteralValue::Integer {
+            text: "-1".into(),
+            class: NumericClass::Int64,
+        },
+        LiteralValue::Integer {
+            text: "0".into(),
+            class: NumericClass::UInt64,
+        },
+    ] {
+        let result = call(
+            vec![LiteralValue::Unknown, invalid],
+            vec![cell.clone(), dimension.clone()],
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-DL-PADSEQUENCES-DIMENSION"));
+        assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+    }
+    let bad_direction = call(
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(2.0),
+            LiteralValue::String("Direction".into()),
+            LiteralValue::String("symmetric".into()),
+        ],
+        vec![
+            cell.clone(),
+            dimension.clone(),
+            option_name.clone(),
+            option_value.clone(),
+        ],
+    );
+    assert!(bad_direction
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-DL-PADSEQUENCES-OPTION"));
+    assert!(matches!(
+        bad_direction.outputs[0].kind,
+        ValueKindFact::Unknown
+    ));
+    let conflicting_aliases = call(
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(2.0),
+            LiteralValue::String("Direction".into()),
+            LiteralValue::String("left".into()),
+            LiteralValue::String("PaddingDirection".into()),
+            LiteralValue::String("right".into()),
+        ],
+        vec![
+            cell,
+            dimension,
+            option_name.clone(),
+            option_value.clone(),
+            option_name,
+            option_value,
+        ],
+    );
+    assert!(conflicting_aliases
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-DL-PADSEQUENCES-OPTION"));
+    assert!(matches!(
+        conflicting_aliases.outputs[0].kind,
+        ValueKindFact::Unknown
+    ));
+}

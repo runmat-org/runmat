@@ -29,6 +29,7 @@ const OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "PaddingValue, PaddingDirection/Direction, Length, or UniformOutput.",
 };
 const PAD_INPUTS: [BuiltinParamDescriptor; 3] = [SEQUENCES, DIMENSION, OPTIONS];
+const PAD_REQUIRED_INPUTS: [BuiltinParamDescriptor; 2] = [SEQUENCES, DIMENSION];
 const MATRIX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "M",
     ty: BuiltinParamType::NumericArray,
@@ -64,11 +65,21 @@ const COMBVEC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDes
     inputs: &MATRICES,
     outputs: &MATRIX,
 }];
-const PADSEQUENCES_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const PADSEQUENCES_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = padsequences(sequences, paddingDim)",
+        inputs: &PAD_REQUIRED_INPUTS,
+        outputs: &PAD_OUTPUT,
+    },
     BuiltinSignatureDescriptor {
         label: "Y = padsequences(sequences, paddingDim, Name, Value)",
         inputs: &PAD_INPUTS,
         outputs: &PAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Y, mask] = padsequences(sequences, paddingDim)",
+        inputs: &PAD_REQUIRED_INPUTS,
+        outputs: &PAD_OUTPUT_WITH_MASK,
     },
     BuiltinSignatureDescriptor {
         label: "[Y, mask] = padsequences(sequences, paddingDim, Name, Value)",

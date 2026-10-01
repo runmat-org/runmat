@@ -1,3 +1,4 @@
+use super::pad_inference_options;
 use crate::{
     catalog::inference::{argument_error, finish_fixed, finish_fixed_outputs},
     BuiltinCatalogEntry,
@@ -135,7 +136,11 @@ pub(super) fn padsequences(request: &CallRequest, entry: &BuiltinCatalogEntry) -
     if let Some(value) = request.arguments.get(1) {
         if !matches!(
             value.kind,
-            ValueKindFact::Unknown | ValueKindFact::Numeric(_)
+            ValueKindFact::Unknown
+                | ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                })
         ) || value.shape.element_count().is_some_and(|count| count != 1)
         {
             diagnostics.push(argument_error(
@@ -144,45 +149,9 @@ pub(super) fn padsequences(request: &CallRequest, entry: &BuiltinCatalogEntry) -
                 1,
             ));
         }
-        if request
-            .literals
-            .numeric_at(1)
-            .is_some_and(|number| !number.is_finite() || number < 1.0 || number.fract() != 0.0)
-        {
-            diagnostics.push(argument_error(
-                "RM-DL-PADSEQUENCES-DIMENSION",
-                "paddingDim must be a positive integer scalar",
-                1,
-            ));
-        }
+        pad_inference_options::validate_dimension(request, &mut diagnostics);
     }
-    let mut uniform = Some(true);
-    for index in (2..request.arguments.len()).step_by(2) {
-        let Some(name) = request.literals.literal_string_at(index) else {
-            uniform = None;
-            continue;
-        };
-        match name.to_ascii_lowercase().as_str() {
-            "uniformoutput" => {
-                uniform = request.literals.literal_bool_at(index + 1).or_else(|| {
-                    request
-                        .literals
-                        .numeric_at(index + 1)
-                        .and_then(|value| match value {
-                            0.0 => Some(false),
-                            1.0 => Some(true),
-                            _ => None,
-                        })
-                });
-            }
-            "paddingvalue" | "paddingdirection" | "direction" | "length" => {}
-            _ => diagnostics.push(argument_error(
-                "RM-DL-PADSEQUENCES-OPTION",
-                "unsupported padsequences option",
-                index,
-            )),
-        }
-    }
+    let uniform = pad_inference_options::validate_options(request, &mut diagnostics);
     let class = sequences.map_or(SequenceClass::Unknown, |value| match &value.kind {
         ValueKindFact::Cell(cell) => sequence_class(cell),
         _ => SequenceClass::Unknown,
@@ -240,5 +209,13 @@ pub(super) fn padsequences(request: &CallRequest, entry: &BuiltinCatalogEntry) -
         ),
         None => ValueFact::unknown(DynamicReason::RuntimeValue),
     };
-    finish_fixed_outputs(entry, request, vec![output, mask], diagnostics)
+    let outputs = if diagnostics.is_empty() {
+        vec![output, mask]
+    } else {
+        vec![
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+        ]
+    };
+    finish_fixed_outputs(entry, request, outputs, diagnostics)
 }

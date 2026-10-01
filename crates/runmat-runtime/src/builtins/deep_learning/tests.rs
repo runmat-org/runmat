@@ -3118,6 +3118,9 @@ fn padsequences_nested_resident_preflight_rejects_later_host_errors_without_down
     });
 }
 
+#[path = "tests/pad_options.rs"]
+mod pad_options;
+
 #[test]
 fn padsequences_rank_admission_bounds_metadata_without_allocating_distant_axes() {
     let sequences = Value::Cell(CellArray::new(vec![Value::Num(7.0)], 1, 1).unwrap());

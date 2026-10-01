@@ -1,22 +1,22 @@
+use runmat_builtins::PadOptionKey;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, LogicalArray, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::{gather_if_needed_async, BuiltinResult};
 
-use super::super::{deep_learning_error, parse_name_values, positive_usize, scalar_text};
+use super::super::{deep_learning_error, parse_name_values, positive_usize};
 
 mod admission;
 mod execution;
 mod options;
 
 use admission::{
-    admit_padding_rank, preflight_uniform_shapes, validate_pad_option,
-    validate_resident_pad_option, validate_resident_padding_dim, validate_resident_sequence,
-    SequenceInput,
+    admit_pad_option, admit_padding_rank, preflight_uniform_shapes, validate_resident_padding_dim,
+    validate_resident_sequence, SequenceInput,
 };
 use execution::{check_pad_elements, checked_numel, non_padding_dims_match, pad_sequence};
 pub(in crate::builtins::deep_learning) use options::SequenceLength;
-use options::{numeric_pad_value, parse_bool, PadOptions, PaddingDirection};
+use options::{AdmittedPadOption, AdmittedPadOptions, PadOptions};
 
 #[runtime_builtin(
     name = "padsequences",
@@ -46,22 +46,25 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
             "padsequences: expected a cell array of numeric sequences",
         ));
     };
-    let mut parsed = parse_name_values(rest[1..].to_vec(), "padsequences")?;
-    for (name, value) in &parsed {
-        if !matches!(
-            name.as_str(),
-            "paddingvalue" | "paddingdirection" | "direction" | "length" | "uniformoutput"
-        ) {
-            return Err(deep_learning_error(
+    let mut parsed = AdmittedPadOptions::new();
+    // Preserve the existing lowered-name sort and last-wins duplicate
+    // behavior while decoding each public spelling exactly once.
+    for (spelling, value) in parse_name_values(rest[1..].to_vec(), "padsequences")? {
+        let name = PadOptionKey::parse(&spelling).ok_or_else(|| {
+            deep_learning_error(
                 "padsequences",
-                format!("padsequences: unsupported option '{name}'"),
-            ));
-        }
-        if matches!(value, Value::GpuTensor(_)) {
-            validate_resident_pad_option(name, value)?;
-            continue;
-        }
-        validate_pad_option(name, value)?;
+                format!("padsequences: unsupported option '{spelling}'"),
+            )
+        })?;
+        parsed.insert(name, admit_pad_option(name, value)?);
+    }
+    if parsed.contains_key(&PadOptionKey::PaddingDirection)
+        && parsed.contains_key(&PadOptionKey::DirectionAlias)
+    {
+        return Err(deep_learning_error(
+            "padsequences",
+            "padsequences: unsupported option 'direction'",
+        ));
     }
     // Admit every host element and resident descriptor before the first
     // download. A malformed later host sequence must not download an earlier
@@ -121,29 +124,43 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
             seq.shape.push(1);
         }
     }
-    for value in parsed.values_mut() {
-        if matches!(value, Value::GpuTensor(_)) {
-            *value = gather_if_needed_async(value).await?;
+    for (&name, value) in &mut parsed {
+        if let AdmittedPadOption::Resident(resident) = value {
+            let gathered = gather_if_needed_async(resident).await?;
+            if matches!(gathered, Value::GpuTensor(_)) {
+                return Err(deep_learning_error(
+                    "padsequences",
+                    "padsequences: option gather left the value resident",
+                ));
+            }
+            *value = admit_pad_option(name, gathered)?;
         }
     }
     let mut options = PadOptions::default();
-    if let Some(value) = parsed.remove("paddingvalue") {
-        options.padding_value = numeric_pad_value(&value)?;
-    }
-    if let Some(value) = parsed
-        .remove("paddingdirection")
-        .or_else(|| parsed.remove("direction"))
+    if let Some(AdmittedPadOption::PaddingValue(value)) = parsed.remove(&PadOptionKey::PaddingValue)
     {
-        options.direction = PaddingDirection::parse(&scalar_text(&value, "padsequences")?)?;
+        options.padding_value = value;
     }
-    if let Some(value) = parsed.remove("length") {
-        options.length = SequenceLength::parse(&value)?;
+    if let Some(AdmittedPadOption::Direction(value)) = parsed
+        .remove(&PadOptionKey::PaddingDirection)
+        .or_else(|| parsed.remove(&PadOptionKey::DirectionAlias))
+    {
+        options.direction = value;
     }
-    if let Some(value) = parsed.remove("uniformoutput") {
-        options.uniform_output = parse_bool(&value, "padsequences", "UniformOutput")?;
+    if let Some(AdmittedPadOption::Length(value)) = parsed.remove(&PadOptionKey::Length) {
+        options.length = value;
+    }
+    if let Some(AdmittedPadOption::UniformOutput(value)) =
+        parsed.remove(&PadOptionKey::UniformOutput)
+    {
+        options.uniform_output = value;
     }
     if !parsed.is_empty() {
-        let first = parsed.keys().next().cloned().unwrap_or_default();
+        let first = parsed
+            .keys()
+            .next()
+            .map(|key| key.spelling())
+            .unwrap_or_default();
         return Err(deep_learning_error(
             "padsequences",
             format!("padsequences: unsupported option '{first}'"),

@@ -1,8 +1,9 @@
+use runmat_builtins::PadOptionKey;
 use runmat_value::{NumericScalar, NumericStorage, Tensor, Value};
 
 use crate::BuiltinResult;
 
-use super::super::super::{deep_learning_error, numeric_scalar, scalar_text};
+use super::super::super::deep_learning_error;
 
 // Metadata growth is charged against the same bounded work budget as the
 // padded result. Shape copies and strides must not become an unbounded
@@ -47,26 +48,28 @@ pub(super) fn admit_padding_rank(
 }
 use super::{
     execution::non_padding_dims_match,
-    options::{parse_bool, PaddingDirection, SequenceLength},
+    options::{parse_bool, parse_direction, AdmittedPadOption, AdmittedPadOptions, SequenceLength},
 };
 
-pub(super) fn validate_pad_option(name: &str, value: &Value) -> BuiltinResult<()> {
-    match name {
-        "paddingvalue" => {
-            numeric_scalar(value, "padsequences", "PaddingValue")?;
-        }
-        "paddingdirection" | "direction" => {
-            PaddingDirection::parse(&scalar_text(value, "padsequences")?)?;
-        }
-        "length" => {
-            SequenceLength::parse(value)?;
-        }
-        "uniformoutput" => {
-            parse_bool(value, "padsequences", "UniformOutput")?;
-        }
-        _ => unreachable!("option name admitted by caller"),
+pub(super) fn admit_pad_option(
+    name: PadOptionKey,
+    value: Value,
+) -> BuiltinResult<AdmittedPadOption> {
+    if matches!(value, Value::GpuTensor(_)) {
+        validate_resident_pad_option(name, &value)?;
+        return Ok(AdmittedPadOption::Resident(value));
     }
-    Ok(())
+    match name {
+        PadOptionKey::PaddingValue => {
+            super::options::numeric_pad_value(&value).map(AdmittedPadOption::PaddingValue)
+        }
+        PadOptionKey::PaddingDirection | PadOptionKey::DirectionAlias => {
+            parse_direction(&value).map(AdmittedPadOption::Direction)
+        }
+        PadOptionKey::Length => SequenceLength::parse(&value).map(AdmittedPadOption::Length),
+        PadOptionKey::UniformOutput => parse_bool(&value, "padsequences", "UniformOutput")
+            .map(AdmittedPadOption::UniformOutput),
+    }
 }
 
 pub(super) fn validate_resident_padding_dim(value: &Value) -> BuiltinResult<()> {
@@ -105,13 +108,14 @@ pub(super) fn validate_resident_sequence(
 pub(super) fn preflight_uniform_shapes(
     values: &[Value],
     prepared: &[Option<SequenceInput>],
-    options: &std::collections::BTreeMap<String, Value>,
+    options: &AdmittedPadOptions,
     padding_dim: usize,
 ) -> BuiltinResult<()> {
-    let uniform = match options.get("uniformoutput") {
+    let uniform = match options.get(&PadOptionKey::UniformOutput) {
         None => true,
-        Some(Value::GpuTensor(_)) => return Ok(()),
-        Some(value) => parse_bool(value, "padsequences", "UniformOutput")?,
+        Some(AdmittedPadOption::Resident(_)) => return Ok(()),
+        Some(AdmittedPadOption::UniformOutput(value)) => *value,
+        Some(_) => unreachable!("typed uniform output option"),
     };
     if !uniform {
         return Ok(());
@@ -149,7 +153,7 @@ pub(super) fn preflight_uniform_shapes(
     Ok(())
 }
 
-pub(super) fn validate_resident_pad_option(name: &str, value: &Value) -> BuiltinResult<()> {
+pub(super) fn validate_resident_pad_option(name: PadOptionKey, value: &Value) -> BuiltinResult<()> {
     let Value::GpuTensor(handle) = value else {
         unreachable!()
     };
@@ -157,20 +161,22 @@ pub(super) fn validate_resident_pad_option(name: &str, value: &Value) -> Builtin
         && runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::Real;
     let accepted = match name {
-        "paddingvalue" | "length" => {
+        PadOptionKey::PaddingValue | PadOptionKey::Length => {
             numeric_scalar && !runmat_accelerate_api::handle_is_logical(handle)
         }
-        "uniformoutput" => numeric_scalar,
+        PadOptionKey::UniformOutput => numeric_scalar,
         // A numeric device buffer cannot be a text direction token.
-        "paddingdirection" | "direction" => false,
-        _ => unreachable!("option name admitted by caller"),
+        PadOptionKey::PaddingDirection | PadOptionKey::DirectionAlias => false,
     };
     if accepted {
         Ok(())
     } else {
         Err(deep_learning_error(
             "padsequences",
-            format!("padsequences: {name} has an invalid resident type or shape"),
+            format!(
+                "padsequences: {} has an invalid resident type or shape",
+                name.spelling()
+            ),
         ))
     }
 }

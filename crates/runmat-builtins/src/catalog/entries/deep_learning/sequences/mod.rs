@@ -6,6 +6,8 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 mod contract;
 mod documentation;
 mod inference;
+mod options;
+mod pad_inference_options;
 #[cfg(test)]
 mod tests;
 
@@ -14,6 +16,7 @@ pub use contract::{
     COMBVEC_INTEGER_EXTENSION, PADSEQUENCES_DESCRIPTOR, PADSEQUENCES_INTEGER_CAPABILITIES,
     SEQUENCE_INVALID_INPUT,
 };
+pub use options::{PadBooleanKeyword, PadDirection, PadLengthKeyword, PadOptionKey};
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] =
     &[&COMBVEC_CATALOG_ENTRY, &PADSEQUENCES_CATALOG_ENTRY];

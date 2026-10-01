@@ -1,10 +1,23 @@
+use runmat_builtins::{PadBooleanKeyword, PadLengthKeyword, PadOptionKey};
 use runmat_value::{NumericScalar, Value};
+use std::collections::BTreeMap;
 
 use crate::BuiltinResult;
 
 use super::super::super::{
     deep_learning_error, logical_scalar, numeric_scalar, positive_usize, scalar_text,
 };
+pub(super) use runmat_builtins::PadDirection as PaddingDirection;
+
+pub(super) enum AdmittedPadOption {
+    PaddingValue(NumericScalar),
+    Direction(PaddingDirection),
+    Length(SequenceLength),
+    UniformOutput(bool),
+    Resident(Value),
+}
+
+pub(super) type AdmittedPadOptions = BTreeMap<PadOptionKey, AdmittedPadOption>;
 
 pub(super) fn numeric_pad_value(value: &Value) -> BuiltinResult<NumericScalar> {
     numeric_scalar(value, "padsequences", "PaddingValue")?;
@@ -37,27 +50,17 @@ impl Default for PadOptions {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum PaddingDirection {
-    Left,
-    Right,
-    Both,
-}
-
-impl PaddingDirection {
-    pub(super) fn parse(value: &str) -> BuiltinResult<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "left" => Ok(Self::Left),
-            "right" => Ok(Self::Right),
-            "both" => Ok(Self::Both),
-            other => Err(deep_learning_error(
-                "padsequences",
-                format!(
-                    "padsequences: PaddingDirection must be 'left', 'right', or 'both', got '{other}'"
-                ),
-            )),
-        }
-    }
+pub(super) fn parse_direction(value: &Value) -> BuiltinResult<PaddingDirection> {
+    let text = scalar_text(value, "padsequences")?;
+    PaddingDirection::parse(&text).ok_or_else(|| {
+        deep_learning_error(
+            "padsequences",
+            format!(
+                "padsequences: PaddingDirection must be 'left', 'right', or 'both', got '{}'",
+                text.to_ascii_lowercase()
+            ),
+        )
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -71,12 +74,13 @@ impl SequenceLength {
     pub(in crate::builtins::deep_learning) fn parse(value: &Value) -> BuiltinResult<Self> {
         match value {
             Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
-                match scalar_text(value, "padsequences")?.to_ascii_lowercase().as_str() {
-                    "longest" => Ok(Self::Longest),
-                    "shortest" => Ok(Self::Shortest),
-                    other => Err(deep_learning_error(
+                let text = scalar_text(value, "padsequences")?;
+                match PadLengthKeyword::parse(&text) {
+                    Some(PadLengthKeyword::Longest) => Ok(Self::Longest),
+                    Some(PadLengthKeyword::Shortest) => Ok(Self::Shortest),
+                    None => Err(deep_learning_error(
                         "padsequences",
-                        format!("padsequences: Length must be 'longest', 'shortest', or a positive integer, got '{other}'"),
+                        format!("padsequences: Length must be 'longest', 'shortest', or a positive integer, got '{}'", text.to_ascii_lowercase()),
                     )),
                 }
             }
@@ -92,12 +96,15 @@ pub(super) fn parse_bool(
 ) -> BuiltinResult<bool> {
     match value {
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
-            match scalar_text(value, function)?.to_ascii_lowercase().as_str() {
-                "true" | "on" | "yes" => Ok(true),
-                "false" | "off" | "no" => Ok(false),
-                other => Err(deep_learning_error(
+            let text = scalar_text(value, function)?;
+            match PadBooleanKeyword::parse(&text) {
+                Some(keyword) => Ok(keyword.value()),
+                None => Err(deep_learning_error(
                     function,
-                    format!("{function}: {label} must be logical, got '{other}'"),
+                    format!(
+                        "{function}: {label} must be logical, got '{}'",
+                        text.to_ascii_lowercase()
+                    ),
                 )),
             }
         }
