@@ -16,7 +16,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["mean", "median"],
     sections: &[
         BuiltinDocumentationSection { heading: "Deviation and dimensions", paragraphs: &[
-            "Flag `0` (the default) calculates `mean(abs(X-mean(X)))`; flag `1` calculates `median(abs(X-median(X)))`. This corrects the previous reference's reversed flag descriptions.",
+            "Flag `0` (the default) calculates `mean(abs(X-mean(X)))`; flag `1` calculates `median(abs(X-median(X)))`.",
             "By default, `mad` reduces the first nonsingleton dimension. A scalar dimension, dimension vector, or `\"all\"` selects another reduction. Each empty slice returns NaN; NaNs are omitted from each slice by default. `includenan` preserves their contribution as NaN.",
             "Real single inputs produce single outputs; double inputs produce double outputs. Real typed-integer data and typed-integer controls are separately gated RunMat extensions. Integer data enters a double calculation and returns double.",
         ] },
@@ -60,8 +60,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[SOURCE],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
             label: "Mean/median flags, class, dimension, integer boundary and missing-value tests",
-            location: "crates/runmat-runtime/src/builtins/stats/summary/descriptive/tests.rs" }],
-        notes: &["The legacy example and all substantive fields are retained; its reversed flag/FAQ prose is corrected against the existing runtime and public function documentation."],
+            location: "crates/runmat-runtime/src/builtins/stats/summary/descriptive/tests/moments.rs" }],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };

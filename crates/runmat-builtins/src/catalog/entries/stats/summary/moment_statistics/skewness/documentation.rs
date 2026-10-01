@@ -50,8 +50,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[SOURCE],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
             label: "Flag, shape, class and missing-value tests",
-            location: "crates/runmat-runtime/src/builtins/stats/summary/descriptive/tests.rs" }],
-        notes: &["Legacy reference behavior, links, example intent and source are retained; the example now supplies input data and an independent assertion."],
+            location: "crates/runmat-runtime/src/builtins/stats/summary/descriptive/tests/moments.rs" }],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
