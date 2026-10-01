@@ -200,7 +200,7 @@ pub(in crate::builtins::stats::summary::boxplot) fn char_rows(array: &CharArray)
     (0..array.rows)
         .map(|row| {
             (0..array.cols)
-                .filter_map(|col| array.data.get(row + col * array.rows).copied())
+                .filter_map(|col| array.data.get(row * array.cols + col).copied())
                 .collect::<String>()
                 .trim_end()
                 .to_string()

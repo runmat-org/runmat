@@ -39,6 +39,26 @@ fn heterogeneous_cell_group_keys_do_not_collapse_into_display_text() {
 }
 
 #[test]
+fn character_group_rows_follow_the_canonical_row_major_payload() {
+    let row_major = CharArray::new(vec!['A', '1', 'B', '2'], 2, 2).unwrap();
+    let column_major = CharArray::from_column_major(vec!['A', 'B', '1', '2'], vec![2, 2]).unwrap();
+    assert_eq!(groups::char_rows(&row_major), vec!["A1", "B2"]);
+    assert_eq!(groups::char_rows(&column_major), vec!["A1", "B2"]);
+    for group in [row_major, column_major] {
+        let boxes = build_box_stats(
+            tensor(vec![1.0, 2.0], vec![2, 1]),
+            Some(Value::CharArray(group)),
+            &BoxplotOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            boxes.iter().map(|b| b.label.as_str()).collect::<Vec<_>>(),
+            vec!["A1", "B2"]
+        );
+    }
+}
+
+#[test]
 fn categorical_group_length_uses_all_codes_not_only_sample_prefix() {
     let mut group =
         runmat_value::ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
