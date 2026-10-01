@@ -226,5 +226,19 @@ mod tests {
             reference_frequency: crate::Frequency::new(60.0),
         });
         assert!(b.validate().is_err());
+        b.electromagnetic = Some(ElectromagneticDomain::Magnetostatic {
+            formulation: crate::MagnetostaticFormulation::MagneticVectorPotential,
+        });
+        b.validate().unwrap();
+        for models in [[&a, &b], [&b, &a]] {
+            assert_eq!(
+                realize(&models),
+                Err(AnalysisModelRealizationError::ConflictingDomain(
+                    "electromagnetic"
+                ))
+            );
+        }
+        a.electromagnetic = b.electromagnetic.clone();
+        assert_eq!(realize(&[&a, &b]).unwrap().2, b.electromagnetic);
     }
 }

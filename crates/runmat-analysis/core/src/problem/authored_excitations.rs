@@ -49,6 +49,8 @@ pub enum AuthoredExcitationKind {
     ElectricCharge,
     ElectricChargeDensity,
     CurrentDensity,
+    /// Vector J in A/m² supported on a solid volume, not the surface-current action.
+    MagneticVolumeCurrentDensity,
     MagneticVectorPotential,
     AcousticPressure,
     NormalVelocity,
@@ -59,6 +61,9 @@ pub enum AuthoredExcitationKind {
 
 #[cfg(test)]
 mod charge_density_tests;
+
+#[cfg(test)]
+mod magnetic_volume_current_tests;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -91,6 +96,7 @@ impl AuthoredExcitationKind {
             Self::ElectricCharge => PhysicalQuantityKind::ElectricCharge,
             Self::ElectricChargeDensity => PhysicalQuantityKind::ElectricChargeDensity,
             Self::CurrentDensity => PhysicalQuantityKind::ElectricCurrentDensity,
+            Self::MagneticVolumeCurrentDensity => PhysicalQuantityKind::ElectricCurrentDensity,
             Self::MagneticVectorPotential => PhysicalQuantityKind::MagneticVectorPotential,
             Self::NormalVelocity | Self::InletVelocity | Self::WallMotion => {
                 PhysicalQuantityKind::Velocity
@@ -109,9 +115,10 @@ impl AuthoredExcitationKind {
             Self::Traction | Self::Pressure | Self::HeatFlux | Self::CurrentDensity => {
                 ExcitationDistribution::IntensityPerArea
             }
-            Self::BodyForce | Self::HeatGeneration | Self::ElectricChargeDensity => {
-                ExcitationDistribution::IntensityPerVolume
-            }
+            Self::BodyForce
+            | Self::HeatGeneration
+            | Self::ElectricChargeDensity
+            | Self::MagneticVolumeCurrentDensity => ExcitationDistribution::IntensityPerVolume,
             Self::TemperatureField
             | Self::AmbientTemperature
             | Self::TerminalVoltage
@@ -278,7 +285,8 @@ fn validate_excitation(
         AuthoredExcitationKind::Force | AuthoredExcitationKind::Moment => attachment,
         AuthoredExcitationKind::BodyForce
         | AuthoredExcitationKind::HeatGeneration
-        | AuthoredExcitationKind::ElectricChargeDensity => volume || role.is_none(),
+        | AuthoredExcitationKind::ElectricChargeDensity
+        | AuthoredExcitationKind::MagneticVolumeCurrentDensity => volume || role.is_none(),
         AuthoredExcitationKind::TemperatureField => volume,
         _ => surface,
     };
@@ -324,6 +332,7 @@ fn valid_shape_and_direction(
         AuthoredExcitationKind::Traction
         | AuthoredExcitationKind::BodyForce
         | AuthoredExcitationKind::CurrentDensity
+        | AuthoredExcitationKind::MagneticVolumeCurrentDensity
         | AuthoredExcitationKind::MagneticVectorPotential => vector && !has_direction,
         AuthoredExcitationKind::Pressure
         | AuthoredExcitationKind::HeatGeneration

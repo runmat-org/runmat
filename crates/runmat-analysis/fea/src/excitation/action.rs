@@ -139,6 +139,25 @@ pub(super) fn realize_kind(
                 sample
             )?)
         }
+        ExcitationAction::MagneticVolumeCurrentDensity(_) => {
+            let value = vector_action!(
+                signal,
+                PhysicalSignal::ElectricCurrentDensity,
+                amperes_per_square_meter,
+                sample
+            )?;
+            if value
+                .real
+                .iter()
+                .chain(&value.imaginary)
+                .any(|value| !value.is_finite())
+            {
+                return Err(RealizationError::new(
+                    "magnetic volume current density must be finite",
+                ));
+            }
+            RealizedExcitationKind::MagneticVolumeCurrentDensity(value)
+        }
         ExcitationAction::MagneticVectorPotential(_) => {
             RealizedExcitationKind::MagneticVectorPotential(vector_action!(
                 signal,

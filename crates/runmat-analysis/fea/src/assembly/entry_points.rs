@@ -148,6 +148,7 @@ fn assemble_with_mesh(
                             | RealizedExcitationKind::ElectricCharge(_)
                             | RealizedExcitationKind::ElectricChargeDensity(_)
                             | RealizedExcitationKind::CurrentDensity(_)
+                            | RealizedExcitationKind::MagneticVolumeCurrentDensity(_)
                             | RealizedExcitationKind::MagneticVectorPotential(_)
                     )
                 }) {

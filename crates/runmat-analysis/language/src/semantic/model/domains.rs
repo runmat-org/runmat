@@ -2,8 +2,8 @@
 use super::{diagnostic, properties};
 use crate::{CheckedFeaDeclaration, CheckedFeaStatementKind, FeaDiagnostic, PhysicalDimension};
 use runmat_analysis_core::{
-    ElectromagneticDomain, StaticElectricalEquation, Temperature, ThermalDomain,
-    ThermoMechanicalDomain,
+    ElectromagneticDomain, MagnetostaticFormulation, StaticElectricalEquation, Temperature,
+    ThermalDomain, ThermoMechanicalDomain,
 };
 use std::collections::BTreeSet;
 
@@ -58,20 +58,27 @@ pub(super) fn lower(
             else {
                 continue;
             };
-            let equation = match value {
-                "electrostatics" => StaticElectricalEquation::Electrostatics,
-                "steady_conduction" => StaticElectricalEquation::SteadyConduction,
+            let domain = match value {
+                "electrostatics" => ElectromagneticDomain::Static {
+                    equation: StaticElectricalEquation::Electrostatics,
+                },
+                "steady_conduction" => ElectromagneticDomain::Static {
+                    equation: StaticElectricalEquation::SteadyConduction,
+                },
+                "magnetostatics" => ElectromagneticDomain::Magnetostatic {
+                    formulation: MagnetostaticFormulation::MagneticVectorPotential,
+                },
                 _ => {
                     diagnostic(
                         declaration,
                         *header_span,
-                        "electromagnetic equation must be electrostatics or steady_conduction",
+                        "electromagnetic equation must be electrostatics, steady_conduction, or magnetostatics",
                         diagnostics,
                     );
                     continue;
                 }
             };
-            electromagnetic = Some(ElectromagneticDomain::Static { equation });
+            electromagnetic = Some(domain);
             continue;
         }
         properties::validate_assignments(

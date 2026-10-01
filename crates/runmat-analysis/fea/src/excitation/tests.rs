@@ -3,6 +3,7 @@ use crate::fixtures::{
 };
 
 mod charge_density;
+mod magnetic_volume_current;
 
 use super::{
     realize::{realize_excitations, realize_step_excitations, RealizationError},

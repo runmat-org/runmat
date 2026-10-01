@@ -246,6 +246,9 @@ fn realize_excitation(
         AuthoredExcitationKind::ElectricCharge => action!(ElectricCharge),
         AuthoredExcitationKind::ElectricChargeDensity => action!(ElectricChargeDensity),
         AuthoredExcitationKind::CurrentDensity => action!(CurrentDensity),
+        AuthoredExcitationKind::MagneticVolumeCurrentDensity => {
+            action!(MagneticVolumeCurrentDensity)
+        }
         AuthoredExcitationKind::MagneticVectorPotential => action!(MagneticVectorPotential),
         AuthoredExcitationKind::AcousticPressure => action!(AcousticPressure),
         AuthoredExcitationKind::NormalVelocity => action!(NormalVelocity),

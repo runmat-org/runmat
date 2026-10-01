@@ -4,5 +4,6 @@ pub mod cht;
 pub mod coupling;
 pub mod electrical;
 pub mod fsi;
+pub mod magnetic;
 pub mod structural;
 pub mod thermal;

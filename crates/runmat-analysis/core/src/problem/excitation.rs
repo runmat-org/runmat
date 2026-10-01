@@ -87,6 +87,9 @@ pub enum ExcitationAction {
     ElectricCharge(AnalysisExcitation),
     ElectricChargeDensity(AnalysisExcitation),
     CurrentDensity(AnalysisExcitation),
+    /// Volumetric magnetic source J in A/m², integrated over volume against
+    /// the vector-potential test basis. This is not surface current intensity.
+    MagneticVolumeCurrentDensity(AnalysisExcitation),
     MagneticVectorPotential(AnalysisExcitation),
     AcousticPressure(AnalysisExcitation),
     NormalVelocity(AnalysisExcitation),
@@ -112,6 +115,7 @@ impl ExcitationAction {
             | Self::ElectricCharge(value)
             | Self::ElectricChargeDensity(value)
             | Self::CurrentDensity(value)
+            | Self::MagneticVolumeCurrentDensity(value)
             | Self::MagneticVectorPotential(value)
             | Self::AcousticPressure(value)
             | Self::NormalVelocity(value)
@@ -141,6 +145,7 @@ impl ExcitationAction {
             Self::ElectricCharge(_) => PhysicalQuantityKind::ElectricCharge,
             Self::ElectricChargeDensity(_) => PhysicalQuantityKind::ElectricChargeDensity,
             Self::CurrentDensity(_) => PhysicalQuantityKind::ElectricCurrentDensity,
+            Self::MagneticVolumeCurrentDensity(_) => PhysicalQuantityKind::ElectricCurrentDensity,
             Self::MagneticVectorPotential(_) => PhysicalQuantityKind::MagneticVectorPotential,
             Self::MassFlow(_) => PhysicalQuantityKind::MassFlowRate,
         }
@@ -162,6 +167,7 @@ impl ExcitationAction {
             | Self::ElectricCharge(value)
             | Self::ElectricChargeDensity(value)
             | Self::CurrentDensity(value)
+            | Self::MagneticVolumeCurrentDensity(value)
             | Self::MagneticVectorPotential(value)
             | Self::AcousticPressure(value)
             | Self::NormalVelocity(value)

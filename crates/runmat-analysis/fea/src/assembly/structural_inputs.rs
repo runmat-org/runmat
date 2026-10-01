@@ -22,6 +22,7 @@ pub enum StructuralLoadKind {
     ElectricCharge,
     ElectricChargeDensity,
     CurrentDensity,
+    MagneticVolumeCurrentDensity,
     MagneticVectorPotential,
     AcousticPressure,
     NormalVelocity,
@@ -47,6 +48,7 @@ impl StructuralLoadKind {
             Self::ElectricCharge => "electric_charge",
             Self::ElectricChargeDensity => "electric_charge_density",
             Self::CurrentDensity => "current_density",
+            Self::MagneticVolumeCurrentDensity => "magnetic_volume_current_density",
             Self::MagneticVectorPotential => "magnetic_vector_potential",
             Self::AcousticPressure => "acoustic_pressure",
             Self::NormalVelocity => "normal_velocity",
@@ -275,6 +277,9 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::CurrentDensity(_), _) => {
                 (StructuralLoadKind::CurrentDensity, false)
             }
+            (RealizedExcitationKind::MagneticVolumeCurrentDensity(_), _) => {
+                (StructuralLoadKind::MagneticVolumeCurrentDensity, false)
+            }
             (RealizedExcitationKind::MagneticVectorPotential(_), _) => {
                 (StructuralLoadKind::MagneticVectorPotential, false)
             }
@@ -405,6 +410,9 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
             StructuralLoadKind::ElectricChargeDensity
         }
         RealizedExcitationKind::CurrentDensity(_) => StructuralLoadKind::CurrentDensity,
+        RealizedExcitationKind::MagneticVolumeCurrentDensity(_) => {
+            StructuralLoadKind::MagneticVolumeCurrentDensity
+        }
         RealizedExcitationKind::MagneticVectorPotential(_) => {
             StructuralLoadKind::MagneticVectorPotential
         }

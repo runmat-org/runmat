@@ -99,6 +99,7 @@ pub(crate) enum RealizedExcitationKind {
     ElectricCharge(ComplexScalar),
     ElectricChargeDensity(ComplexScalar),
     CurrentDensity(ComplexVector3),
+    MagneticVolumeCurrentDensity(ComplexVector3),
     MagneticVectorPotential(ComplexVector3),
     AcousticPressure(ComplexScalar),
     NormalVelocity(ComplexScalar),
@@ -206,6 +207,9 @@ impl RealizedExcitationKind {
                 Self::ElectricChargeDensity(value.component(component))
             }
             Self::CurrentDensity(value) => Self::CurrentDensity(value.component(component)),
+            Self::MagneticVolumeCurrentDensity(value) => {
+                Self::MagneticVolumeCurrentDensity(value.component(component))
+            }
             Self::MagneticVectorPotential(value) => {
                 Self::MagneticVectorPotential(value.component(component))
             }

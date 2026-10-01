@@ -132,16 +132,18 @@ impl AuthoredModel {
     pub fn validate(&self) -> Result<(), AuthoredModelError> {
         token("model module path", &self.module_path)?;
         token("model id", &self.model_id)?;
-        if matches!(
-            self.electromagnetic,
-            Some(super::domains::ElectromagneticDomain::Harmonic { .. })
-        ) {
-            return Err(AuthoredModelError::InvalidPhysics {
-                kind: "electromagnetic domain",
-                detail:
-                    "authored electromagnetic domains currently require an explicit static equation"
-                        .into(),
-            });
+        match &self.electromagnetic {
+            None
+            | Some(super::domains::ElectromagneticDomain::Static { .. })
+            | Some(super::domains::ElectromagneticDomain::Magnetostatic { .. }) => {}
+            Some(super::domains::ElectromagneticDomain::Harmonic { .. }) => {
+                return Err(AuthoredModelError::InvalidPhysics {
+                    kind: "electromagnetic domain",
+                    detail:
+                        "authored electromagnetic domains currently require explicit static electrical or magnetostatic intent"
+                            .into(),
+                });
+            }
         }
         for (domain, temperature) in [
             (

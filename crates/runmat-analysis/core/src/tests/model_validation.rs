@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn magnetostatic_domain_requires_positive_permeability_without_frequency_or_conductivity() {
+    let mut model = valid_model();
+    model.electromagnetic = Some(ElectromagneticDomain::Magnetostatic {
+        formulation: MagnetostaticFormulation::MagneticVectorPotential,
+    });
+    assert!(crate::validate_domains::validate_domains(&model).is_err());
+    model.materials[0].electrical = Some(MaterialElectricalModel {
+        reference_temperature_k: 293.15,
+        conductivity_s_per_m: 0.0,
+        resistive_heating_coefficient: 0.0,
+        relative_permittivity: 1.0,
+        relative_permeability: 1.0,
+        conductivity_frequency_response: Vec::new(),
+    });
+    crate::validate_domains::validate_domains(&model).unwrap();
+    for permeability in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        model.materials[0]
+            .electrical
+            .as_mut()
+            .unwrap()
+            .relative_permeability = permeability;
+        assert!(matches!(
+            crate::validate_domains::validate_domains(&model),
+            Err(AnalysisValidationError::InvalidMaterial { .. })
+        ));
+    }
+}
+
+#[test]
 fn static_electrical_domain_does_not_invent_frequency_and_conduction_requires_positive_sigma() {
     let mut model = valid_model();
     model.materials[0].electrical = Some(MaterialElectricalModel {

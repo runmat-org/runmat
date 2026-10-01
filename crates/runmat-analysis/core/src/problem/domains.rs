@@ -27,13 +27,28 @@ pub enum StaticElectricalEquation {
     SteadyConduction,
 }
 
-/// Static scalar-potential intent and harmonic electromagnetic intent are distinct
-/// physical contracts. Static analysis does not carry a fictitious frequency.
+/// Magnetostatic unknowns are distinct from scalar electrical potential and from
+/// harmonic electromagnetic fields. No frequency is implied by this formulation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MagnetostaticFormulation {
+    MagneticVectorPotential,
+}
+
+/// Static electrical, magnetostatic, and harmonic intent are distinct contracts.
+/// Neither static formulation carries a fictitious frequency.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ElectromagneticDomain {
-    Static { equation: StaticElectricalEquation },
-    Harmonic { reference_frequency: Frequency },
+    Static {
+        equation: StaticElectricalEquation,
+    },
+    Magnetostatic {
+        formulation: MagnetostaticFormulation,
+    },
+    Harmonic {
+        reference_frequency: Frequency,
+    },
 }
 
 #[cfg(test)]
@@ -51,6 +66,9 @@ mod tests {
             },
             ElectromagneticDomain::Harmonic {
                 reference_frequency: Frequency::new(60.0),
+            },
+            ElectromagneticDomain::Magnetostatic {
+                formulation: MagnetostaticFormulation::MagneticVectorPotential,
             },
         ];
         let mut encodings = std::collections::BTreeSet::new();
@@ -74,6 +92,13 @@ mod tests {
             r#"{"reference_frequency":{"hertz":60.0}}"#
         )
         .is_err());
+        for invalid in [
+            r#"{"magnetostatic":{"formulation":"magnetic_vector_potential","reference_frequency":{"hertz":0.0}}}"#,
+            r#"{"magnetostatic":{"formulation":"unknown"}}"#,
+            r#"{"magnetostatic":{}}"#,
+        ] {
+            assert!(serde_json::from_str::<ElectromagneticDomain>(invalid).is_err());
+        }
     }
 }
 

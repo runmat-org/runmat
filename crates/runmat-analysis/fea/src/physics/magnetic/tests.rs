@@ -1,0 +1,457 @@
+use super::*;
+use crate::topology::{
+    test_meshes::{quadratic_slab_mesh, slab_mesh},
+    AnalysisProjection,
+};
+use runmat_analysis_core::*;
+use runmat_meshing_core::ElementOrder;
+
+fn problem(
+    order: ElementOrder,
+    cells: usize,
+    mu: f64,
+    current: f64,
+) -> (AnalysisProjection, Vec<MagneticVolumeData>) {
+    let mesh = match order {
+        ElementOrder::Tet4 => slab_mesh(cells),
+        ElementOrder::Tet10 => quadratic_slab_mesh(cells),
+    };
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let data = projection
+        .elements
+        .iter()
+        .map(|element| MagneticVolumeData {
+            element_identity: element.stable_identity,
+            permeability_h_per_m: mu,
+            current_density_a_per_m2: [0.0, 0.0, current],
+        })
+        .collect();
+    (projection, data)
+}
+
+// Independent separated solution of -Δa=μJ on a unit square, a=0
+// on its perimeter, A=(0,0,a), extruded along z. These are continuous
+// Fourier/hyperbolic series, not values from RunMat's operator or another solve.
+// Stable ratios avoid cosh overflow. Uniform omitted-tail bounds:
+// |a_tail| <= 2μ|J|/(π³ N²), |grad_tail| <= 4μ|J|/(π² N).
+fn reference(x: f64, y: f64, mu_j: f64, maximum: usize) -> ([f64; 3], [f64; 3]) {
+    let pi = std::f64::consts::PI;
+    let mut a = 0.0;
+    let mut dx = 0.0;
+    let mut dy = 0.0;
+    for n in (1..=maximum).step_by(2) {
+        let k = n as f64 * pi;
+        let left = (-k * x).exp();
+        let right = (-k * (1.0 - x)).exp();
+        let denominator = 1.0 + (-k).exp();
+        let c = (left + right) / denominator;
+        let s = (right - left) / denominator;
+        a += 4.0 / k.powi(3) * (1.0 - c) * (k * y).sin();
+        dx -= 4.0 / k.powi(2) * s * (k * y).sin();
+        dy += 4.0 / k.powi(2) * (1.0 - c) * (k * y).cos();
+    }
+    ([0.0, 0.0, mu_j * a], [mu_j * dy, -mu_j * dx, 0.0])
+}
+
+fn reference_energy(mu_j2: f64, maximum: usize) -> f64 {
+    let pi = std::f64::consts::PI;
+    let mut sum = 0.0;
+    for m in (1..=maximum).step_by(2) {
+        for n in (1..=maximum).step_by(2) {
+            let mm = (m as f64).powi(2);
+            let nn = (n as f64).powi(2);
+            sum += 1.0 / (mm * nn * (mm + nn));
+        }
+    }
+    32.0 * mu_j2 / pi.powi(6) * sum
+}
+
+#[test]
+fn square_uniform_current_has_independent_potential_field_and_energy_convergence() {
+    let mut errors = Vec::new();
+    let exact_energy = reference_energy(1.0, 255);
+    // Energy-series tail <= 8/(3π⁴N³); verify a separate truncation agrees.
+    assert!(
+        (exact_energy - reference_energy(1.0, 511)).abs()
+            < 8.0 / (3.0 * std::f64::consts::PI.powi(4) * 255.0f64.powi(3))
+    );
+    for cells in [1, 2, 4] {
+        let (projection, data) = problem(ElementOrder::Tet4, cells, 1.0, 1.0);
+        let result = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+        let mut potential_error = 0.0;
+        let mut field_error = 0.0;
+        for sample in &result.samples {
+            let [x, y, _] = sample.position_m;
+            let (a, b) = reference(x, y, 1.0, 1023);
+            for axis in 0..3 {
+                potential_error += sample.volume_weight_m3
+                    * (sample.vector_potential_wb_per_m[axis] - a[axis]).powi(2);
+                field_error +=
+                    sample.volume_weight_m3 * (sample.flux_density_t[axis] - b[axis]).powi(2);
+            }
+        }
+        let error = (
+            potential_error.sqrt(),
+            field_error.sqrt(),
+            (result.magnetic_energy_j - exact_energy).abs() / exact_energy,
+        );
+        eprintln!(
+            "magnetic cells={cells} errors={error:?} iterations={}",
+            result.iterations
+        );
+        assert!(result.relative_physical_residual < 8e-10);
+        assert!(result.relative_gauge_residual < 8e-10);
+        assert!(result.relative_energy_work_error < 1.6e-9);
+        errors.push(error);
+    }
+    for pair in errors.windows(2) {
+        assert!(pair[1].0 < pair[0].0 / 1.4);
+        assert!(pair[1].1 < pair[0].1 / 1.4);
+        assert!(pair[1].2 < pair[0].2 / 1.4);
+    }
+    assert!(errors[2].0 < 0.02);
+    assert!(errors[2].1 < 0.10);
+    assert!(errors[2].2 < 0.25);
+}
+
+#[test]
+fn sign_permeability_and_affine_geometry_order_preserve_physical_scaling() {
+    let (projection, data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
+    let base = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+    for (order, mu, j) in [
+        (ElementOrder::Tet4, 1.25663706212e-6, -2.0),
+        (ElementOrder::Tet10, 1.0, 1.0),
+    ] {
+        let (projection, data) = problem(order, 2, mu, j);
+        let result = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+        for (sample, expected) in result.samples.iter().zip(&base.samples) {
+            for axis in 0..3 {
+                assert!(
+                    (sample.flux_density_t[axis] / (mu * j) - expected.flux_density_t[axis]).abs()
+                        < 1e-8
+                );
+                assert!(
+                    (sample.vector_potential_wb_per_m[axis] / (mu * j)
+                        - expected.vector_potential_wb_per_m[axis])
+                        .abs()
+                        < 1e-8
+                );
+                assert!(
+                    (sample.magnetic_field_a_per_m[axis] / j
+                        - expected.magnetic_field_a_per_m[axis])
+                        .abs()
+                        < 1e-8
+                );
+            }
+        }
+        assert!((result.magnetic_energy_j / (mu * j * j) - base.magnetic_energy_j).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn invalid_material_identity_current_and_gauge_source_compatibility_fail_closed() {
+    let (projection, mut data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
+    data[0].permeability_h_per_m = 0.0;
+    assert!(solve_full_grounded_volume(&projection, &data, 1e-10).is_err());
+    data[0].permeability_h_per_m = 1.0;
+    assert!(solve_full_grounded_volume(&projection, &data[..data.len() - 1], 1e-10).is_err());
+    data.push(data[0]);
+    assert!(solve_full_grounded_volume(&projection, &data, 1e-10).is_err());
+    data.pop();
+    for element in &mut data {
+        element.current_density_a_per_m2 = [0.0; 3];
+    }
+    // Interior element-owned discontinuous current with a nonzero weak divergence.
+    let interior = projection
+        .elements
+        .iter()
+        .position(|element| {
+            element
+                .node_indices
+                .iter()
+                .any(|&node| projection.nodes[node].coordinates_m == [0.5; 3])
+        })
+        .unwrap();
+    data[interior].current_density_a_per_m2 = [1.0, 2.0, 3.0];
+    assert!(matches!(
+        solve_full_grounded_volume(&projection, &data, 1e-10),
+        Err(MagnetostaticError::IncompatibleCurrent(_))
+    ));
+    data[interior].current_density_a_per_m2 = [0.0; 3];
+    let zero = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+    assert_eq!(zero.magnetic_energy_j, 0.0);
+    assert_eq!(zero.source_work_j, 0.0);
+    assert!(zero.edge_circulations_wb.iter().all(|&value| value == 0.0));
+}
+
+fn authored_model(current: f64) -> AnalysisModel {
+    let mut input =
+        crate::physics::electrical::tests::model(StaticElectricalEquation::Electrostatics);
+    input.electromagnetic = Some(ElectromagneticDomain::Magnetostatic {
+        formulation: MagnetostaticFormulation::MagneticVectorPotential,
+    });
+    for boundary in ["slab_left", "slab_right", "slab_insulated"] {
+        input
+            .constraints
+            .push(AnalysisConstraint::Magnetic(MagneticConstraint {
+                constraint_id: boundary.into(),
+                kind: MagneticConstraintKind::VectorPotentialGround {
+                    target: RegionTarget::boundary(boundary),
+                },
+            }));
+    }
+    input
+        .constraints
+        .push(AnalysisConstraint::Magnetic(MagneticConstraint {
+            constraint_id: "gauge".into(),
+            kind: MagneticConstraintKind::CoulombGauge {
+                target: RegionTarget::volume("slab"),
+            },
+        }));
+    input
+        .signals
+        .push(PhysicalSignal::ElectricCurrentDensity(Signal {
+            signal_id: SignalId("J".into()),
+            shape: SignalShape::Vector3,
+            frame: Some(CoordinateFrame::Global),
+            representation: SignalRepresentation::Constant(SignalValue::Vector3(
+                [0.0, 0.0, current].map(ElectricCurrentDensity::new),
+            )),
+            precision: SignalPrecision::Real64,
+            provenance: SignalProvenance::Authored,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: Some(0.0),
+                max_relative_error: Some(0.0),
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+        }));
+    input
+        .excitations
+        .push(ExcitationAction::MagneticVolumeCurrentDensity(
+            AnalysisExcitation {
+                excitation_id: ExcitationId("coil".into()),
+                target: ExcitationTarget::WholeModel,
+                frame: CoordinateFrame::Global,
+                direction: None,
+                distribution: ExcitationDistribution::IntensityPerVolume,
+                kinematics: ExcitationKinematics::FixedFrame,
+                signal_id: SignalId("J".into()),
+                active_step_ids: vec!["potential".into()],
+                combination_group: None,
+                projection: ProjectionRequirement {
+                    preserve_resultant: false,
+                    preserve_moment: false,
+                    relative_tolerance: 1e-12,
+                },
+            },
+        ));
+    input.excitation_cases.push(ExcitationCase {
+        case_id: ExcitationCaseId("coil".into()),
+        action_ids: vec![ExcitationId("coil".into())],
+        activation: ExcitationCaseActivation::Always,
+    });
+    input
+}
+
+#[test]
+fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = match order {
+            ElementOrder::Tet4 => slab_mesh(2),
+            ElementOrder::Tet10 => quadratic_slab_mesh(2),
+        };
+        let input = authored_model(-2.0);
+        let result = solve_canonical_static(
+            &input,
+            &mesh,
+            "potential",
+            FormulationRequirement::Experimental,
+            1e-10,
+        )
+        .unwrap();
+        assert!(result.magnetic_energy_j > 0.0);
+        assert!(result.relative_energy_work_error < 1.6e-9);
+        let (projection, data) = problem(order, 2, VACUUM_PERMEABILITY_H_PER_M, -2.0);
+        let reference = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+        assert!((result.magnetic_energy_j / reference.magnetic_energy_j - 1.0).abs() < 1e-8);
+        assert_eq!(result.edge_node_identities, reference.edge_node_identities);
+        for (a, b) in result
+            .edge_circulations_wb
+            .iter()
+            .zip(&reference.edge_circulations_wb)
+        {
+            assert!((a - b).abs() < 1e-14);
+        }
+        assert!(solve_canonical_static(
+            &input,
+            &mesh,
+            "potential",
+            FormulationRequirement::Production,
+            1e-10
+        )
+        .is_err());
+        let mut missing = input.clone();
+        missing.constraints.pop();
+        assert!(solve_canonical_static(
+            &missing,
+            &mesh,
+            "potential",
+            FormulationRequirement::Experimental,
+            1e-10
+        )
+        .is_err());
+        let mut surface = input.clone();
+        let excitation = surface.excitations[0].excitation().clone();
+        surface.excitations[0] = ExcitationAction::CurrentDensity(excitation);
+        assert!(solve_canonical_static(
+            &surface,
+            &mesh,
+            "potential",
+            FormulationRequirement::Experimental,
+            1e-10
+        )
+        .is_err());
+        let mut wrong_domain = input;
+        wrong_domain.electromagnetic = Some(ElectromagneticDomain::Static {
+            equation: StaticElectricalEquation::Electrostatics,
+        });
+        assert!(solve_canonical_static(
+            &wrong_domain,
+            &mesh,
+            "potential",
+            FormulationRequirement::Experimental,
+            1e-10
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed() {
+    let mesh = slab_mesh(2);
+    let base = authored_model(2.0);
+    let reference = solve_canonical_static(
+        &base,
+        &mesh,
+        "potential",
+        FormulationRequirement::Experimental,
+        1e-10,
+    )
+    .unwrap();
+    let mut summed = authored_model(3.0);
+    summed.materials[0]
+        .electrical
+        .as_mut()
+        .unwrap()
+        .conductivity_s_per_m = 0.0;
+    let PhysicalSignal::ElectricCurrentDensity(mut signal) = summed.signals[0].clone() else {
+        unreachable!()
+    };
+    signal.signal_id = SignalId("minus".into());
+    signal.representation = SignalRepresentation::Constant(SignalValue::Vector3(
+        [0.0, 0.0, -1.0].map(ElectricCurrentDensity::new),
+    ));
+    summed
+        .signals
+        .push(PhysicalSignal::ElectricCurrentDensity(signal));
+    let mut action = summed.excitations[0].excitation().clone();
+    action.excitation_id = ExcitationId("minus".into());
+    action.signal_id = SignalId("minus".into());
+    action.target = ExcitationTarget::Region(RegionTarget::volume("slab"));
+    summed
+        .excitations
+        .push(ExcitationAction::MagneticVolumeCurrentDensity(action));
+    summed.excitation_cases[0]
+        .action_ids
+        .push(ExcitationId("minus".into()));
+    let result = solve_canonical_static(
+        &summed,
+        &mesh,
+        "potential",
+        FormulationRequirement::Experimental,
+        1e-10,
+    )
+    .unwrap();
+    assert!((result.magnetic_energy_j / reference.magnetic_energy_j - 1.0).abs() < 1e-8);
+    for (a, b) in result
+        .edge_circulations_wb
+        .iter()
+        .zip(reference.edge_circulations_wb)
+    {
+        assert!((a - b).abs() < 1e-14);
+    }
+    summed.constraints.remove(0);
+    assert!(solve_canonical_static(
+        &summed,
+        &mesh,
+        "potential",
+        FormulationRequirement::Experimental,
+        1e-10
+    )
+    .is_err());
+    let (mut projection, data) = problem(ElementOrder::Tet10, 2, 1.0, 1.0);
+    let midside = projection.elements[0].node_indices[4];
+    projection.nodes[midside].coordinates_m[0] += 0.01;
+    assert!(matches!(
+        solve_full_grounded_volume(&projection, &data, 1e-10),
+        Err(MagnetostaticError::Unsupported(_))
+    ));
+    let (mut projection, data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
+    projection.boundary_faces.pop();
+    assert!(matches!(
+        solve_full_grounded_volume(&projection, &data, 1e-10),
+        Err(MagnetostaticError::Topology(_))
+    ));
+}
+
+#[test]
+fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure() {
+    let (projection, data) = problem(ElementOrder::Tet4, 3, 1.0, 1.0);
+    let response = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+    let field: std::collections::BTreeMap<_, _> = response
+        .samples
+        .iter()
+        .map(|sample| (sample.element_identity, sample.flux_density_t))
+        .collect();
+    let mut faces = std::collections::BTreeMap::<[usize; 3], Vec<[f64; 3]>>::new();
+    for element in &projection.elements {
+        for face in [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]] {
+            let mut nodes = face.map(|i| element.node_indices[i]);
+            nodes.sort_unstable();
+            faces
+                .entry(nodes)
+                .or_default()
+                .push(field[&element.stable_identity]);
+        }
+    }
+    for (nodes, fluxes) in faces.iter().filter(|(_, fields)| fields.len() == 2) {
+        let a = projection.nodes[nodes[0]].coordinates_m;
+        let b = projection.nodes[nodes[1]].coordinates_m;
+        let c = projection.nodes[nodes[2]].coordinates_m;
+        let u: [f64; 3] = std::array::from_fn(|axis| b[axis] - a[axis]);
+        let v: [f64; 3] = std::array::from_fn(|axis| c[axis] - a[axis]);
+        let normal = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let jump = (0..3)
+            .map(|axis| (fluxes[0][axis] - fluxes[1][axis]) * normal[axis])
+            .sum::<f64>();
+        assert!(jump.abs() < 1e-13);
+    }
+    let mut net = 0.0;
+    let mut absolute = 0.0;
+    for face in &projection.boundary_faces {
+        let owner = &projection.elements[face.adjacent_element_indices[0]];
+        let flux = field[&owner.stable_identity]
+            .iter()
+            .zip(face.oriented_area_vector_m2)
+            .map(|(b, n)| b * n)
+            .sum::<f64>();
+        net += flux;
+        absolute += flux.abs();
+    }
+    assert!(net.abs() <= 1e-12 * absolute);
+}

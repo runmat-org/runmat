@@ -469,6 +469,10 @@ fn kind_policy(
             AuthoredExcitationKind::CurrentDensity,
             "electric_current_density",
         ),
+        "magnetic_volume_current_density" => (
+            AuthoredExcitationKind::MagneticVolumeCurrentDensity,
+            "electric_current_density",
+        ),
         "magnetic_vector_potential" => (
             AuthoredExcitationKind::MagneticVectorPotential,
             "magnetic_vector_potential",

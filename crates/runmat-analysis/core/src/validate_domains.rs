@@ -29,6 +29,29 @@ pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisVali
     }
     if let Some(domain) = &model.electromagnetic {
         match domain {
+            crate::ElectromagneticDomain::Magnetostatic {
+                formulation: crate::MagnetostaticFormulation::MagneticVectorPotential,
+            } => {
+                for material in &model.materials {
+                    let Some(electrical) = &material.electrical else {
+                        return Err(AnalysisValidationError::InvalidMaterial {
+                            material_id: material.material_id.clone(),
+                            detail: "magnetostatics requires magnetic permeability properties"
+                                .into(),
+                        });
+                    };
+                    if !electrical.relative_permeability.is_finite()
+                        || electrical.relative_permeability <= 0.0
+                    {
+                        return Err(AnalysisValidationError::InvalidMaterial {
+                            material_id: material.material_id.clone(),
+                            detail:
+                                "magnetostatic relative permeability must be finite and positive"
+                                    .into(),
+                        });
+                    }
+                }
+            }
             crate::ElectromagneticDomain::Harmonic {
                 reference_frequency,
             } => {

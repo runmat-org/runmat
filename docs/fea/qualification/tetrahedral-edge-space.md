@@ -51,13 +51,13 @@ The tests use analytic references, not another RunMat solver as an oracle.
 
 ## Remaining vertical chain
 
-Next implement distinct magnetic intent, element-owned permeability, explicit
-volume-current semantics (do not reinterpret existing surface current density),
-tangential magnetic constraints and a rank-correct discrete gauge. Assemble the
-physical region-owned forms using this space; reject incompatible sources/nullspaces
-without silently modifying current. Verify the extruded-square uniform-current
-reference using an independently controlled sine series, field/energy convergence,
-work closure, sign and permeability scaling. Finish resource/peak accounting,
+The [physical magnetic numerical baseline](magnetostatic-volume-current.md) now
+implements distinct intent, element-owned permeability, explicit volume current,
+full-exterior tangential grounding and a weak Coulomb gauge using this space.
+Its independent square-current series, field/energy convergence, work/flux closure
+and signed permeability scaling tests pass within the documented affine envelope.
+It does not admit a native magnetic workload or close a formulation gate.
+Next finish resource/peak accounting,
 retained fields/state, source-bound cold validation and actual authored/native
 execution, then decide the formulation gate. Remove superseded reduced paths at
 the actual cutover. Maxwell loss, complex sources, ports and boundary forms require

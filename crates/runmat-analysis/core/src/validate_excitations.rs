@@ -208,6 +208,13 @@ fn validate_action_policy(
                 && signal.shape() == &SignalShape::Scalar
                 && excitation.direction.is_none()
         }
+        ExcitationAction::MagneticVolumeCurrentDensity(_) => {
+            excitation.distribution == ExcitationDistribution::IntensityPerVolume
+                && signal.shape() == &SignalShape::Vector3
+                && excitation.direction.is_none()
+                && !excitation.projection.preserve_resultant
+                && !excitation.projection.preserve_moment
+        }
         ExcitationAction::WallMotion(_) => {
             excitation.distribution == ExcitationDistribution::UniformKinematic
         }
@@ -294,7 +301,8 @@ fn validate_action_target(
         | ExcitationAction::AcousticPressure(_) => surface_target,
         ExcitationAction::BodyForce(_)
         | ExcitationAction::HeatGeneration(_)
-        | ExcitationAction::ElectricChargeDensity(_) => {
+        | ExcitationAction::ElectricChargeDensity(_)
+        | ExcitationAction::MagneticVolumeCurrentDensity(_) => {
             matches!(target, ExcitationTarget::WholeModel)
                 || region_dimension == Some(EntityDimension::Volume)
         }
