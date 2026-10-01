@@ -1,23 +1,13 @@
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    NumericClass, ShapeFact, ValueFact, ValueKindFact,
+    ShapeFact, ValueFact, ValueKindFact,
 };
 
 fn cannot_contain_standard_missing(input: &ValueFact) -> bool {
-    matches!(
-        input.numeric().map(|numeric| numeric.class),
-        Some(
-            NumericClass::Int8
-                | NumericClass::Int16
-                | NumericClass::Int32
-                | NumericClass::Int64
-                | NumericClass::UInt8
-                | NumericClass::UInt16
-                | NumericClass::UInt32
-                | NumericClass::UInt64
-        )
-    )
+    input
+        .numeric()
+        .is_some_and(|numeric| numeric.class.integer_class().is_some())
 }
 
 fn result_fact(input: &ValueFact) -> ValueFact {
@@ -28,7 +18,7 @@ fn result_fact(input: &ValueFact) -> ValueFact {
                 output.shape = input
                     .shape
                     .rank()
-                    .map_or(ShapeFact::Unknown, |rank| ShapeFact::from(vec![None; rank]));
+                    .map_or(ShapeFact::Unknown, |rank| ShapeFact::Ranked { rank });
                 output.certainty =
                     runmat_types::CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
             }

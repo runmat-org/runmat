@@ -27,10 +27,20 @@ fn floating_result_keeps_class_but_does_not_claim_a_removed_extent() {
         inferred.outputs[0].numeric().unwrap().class,
         NumericClass::Double
     );
-    assert_eq!(inferred.outputs[0].shape, ShapeFact::from(vec![None, None]));
+    assert_eq!(inferred.outputs[0].shape, ShapeFact::Ranked { rank: 2 });
     assert_eq!(inferred.outputs[0].residency, ResidencyFact::Unknown);
     assert_eq!(inferred.outputs[1].kind, ValueKindFact::Logical);
     assert_eq!(inferred.outputs[1].shape, ShapeFact::Unknown);
+}
+
+#[test]
+fn symbolic_rank_is_preserved_without_materializing_dimensions() {
+    let mut input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    input.shape = ShapeFact::Ranked { rank: usize::MAX };
+    assert_eq!(call(input.clone(), 1).outputs[0].shape, input.shape);
 }
 
 #[test]
