@@ -52,3 +52,5 @@ pub const MODE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&MODE_CATALOG_ENTRY];

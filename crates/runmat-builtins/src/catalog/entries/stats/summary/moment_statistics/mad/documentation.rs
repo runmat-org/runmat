@@ -3,7 +3,7 @@ use crate::*;
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Runtime implementation",
     target: BuiltinDocumentationLinkTarget::Source(
-        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs",
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive/flagged.rs",
     ),
 };
 
@@ -60,7 +60,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[SOURCE],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
             label: "Mean/median flags, class, dimension, integer boundary and missing-value tests",
-            location: "crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs" }],
+            location: "crates/runmat-runtime/src/builtins/stats/summary/descriptive/tests.rs" }],
         notes: &["The legacy example and all substantive fields are retained; its reversed flag/FAQ prose is corrected against the existing runtime and public function documentation."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
