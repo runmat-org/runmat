@@ -88,7 +88,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Argument admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/kmeans/admission.rs") },
+            BuiltinDocumentationLink { label: "Clustering solver", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/kmeans/compute.rs") },
+            BuiltinDocumentationLink { label: "Output ownership and restoration", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/kmeans/output.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Clustering and admission tests", location: "builtins::stats::ml::kmeans::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "VM ML integration", location: "crates/runmat-vm/tests/stats_ml.rs" },
