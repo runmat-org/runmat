@@ -254,7 +254,7 @@ pub(super) async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinRe
 pub(super) async fn nansum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_output_arity("nansum", 1)?;
     ensure_nan_integer_extension(&NANSUM_INTEGER_EXTENSION, "nansum", &value, &rest)?;
-    sum::sum_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
+    sum::sum_for_invocation(value, rest, None, runmat_types::SumInvocation::NanSum).await
 }
 
 #[runtime_builtin(

@@ -23,22 +23,40 @@ fn logical_request() -> AdmittedBuiltinPreparation {
 }
 
 fn sum_request(axes: Vec<usize>) -> AdmittedBuiltinPreparation {
-    let entry = &runmat_builtins::SUM_CATALOG_ENTRY;
+    sum_request_for(runmat_types::SumInvocation::Sum, axes)
+}
+
+fn sum_request_for(
+    invocation: runmat_types::SumInvocation,
+    axes: Vec<usize>,
+) -> AdmittedBuiltinPreparation {
+    let entry = runmat_builtins::sum_invocation_entry(invocation);
+    let runmat_builtins::BuiltinOperandPreparation::Forms([form]) = entry.placement.preparation
+    else {
+        panic!("one canonical sum preparation form")
+    };
+    let [signature] = form.signatures else {
+        panic!("one canonical variadic signature")
+    };
     AdmittedBuiltinPreparation::new(
         BuiltinPreparationAdmission {
             binding: runmat_builtins::BuiltinBindingIdentity {
                 builtin: entry.identity,
-                variant: "default",
+                variant: form.binding_variant,
             },
-            form: runmat_builtins::BuiltinPreparationFormId(0),
-            signature: 8,
-            input_count: 4,
+            form: form.id,
+            signature: *signature,
+            input_count: match invocation {
+                runmat_types::SumInvocation::Sum => 4,
+                runmat_types::SumInvocation::NanSum => 2,
+            },
             requested_outputs: Some(1),
         },
         vec![Value::Tensor(Tensor::new(vec![1.; 4], vec![2, 2]).unwrap())],
     )
     .unwrap()
     .with_sum_reduction(AdmittedSumReduction {
+        invocation,
         axes,
         missing: runmat_builtins::ReductionNaN::Omit,
         output: runmat_builtins::SumOutputClass::Double,
@@ -48,6 +66,23 @@ fn sum_request(axes: Vec<usize>) -> AdmittedBuiltinPreparation {
         publication_class: NumericClass::Double,
     })
     .unwrap()
+}
+
+#[test]
+fn nansum_admitted_identity_and_abandonment_use_the_same_session_owner() {
+    let probe = Rc::new(Probe::default());
+    let context = runtime(&probe);
+    let auto = NativeAutoOffload::new(&PROVIDER, ThresholdConfig::default());
+    let invocation = runmat_types::SumInvocation::NanSum;
+    let prepared =
+        super::super::admitted::prepare_with(&auto, &context, sum_request_for(invocation, vec![0]))
+            .unwrap();
+    assert_eq!(probe.requests.borrow().len(), 1);
+    assert_eq!(probe.requests.borrow()[0].signature.operation, "nansum");
+    assert!(probe.feedback.borrow().is_empty());
+    drop(prepared.execute(|_| async { Ok(Value::Num(4.0)) }));
+    assert_eq!(probe.feedback.borrow().len(), 1);
+    assert!(!probe.feedback.borrow()[0].succeeded);
 }
 
 #[test]
@@ -135,6 +170,24 @@ fn canonical_calls_are_not_speculatively_prepared_by_legacy_route() {
     ))
     .unwrap();
     assert_eq!(prepared.args(), request.operands());
+    assert!(probe.requests.borrow().is_empty());
+    assert!(probe.feedback.borrow().is_empty());
+}
+
+#[test]
+fn nansum_waits_for_its_typed_admission_instead_of_legacy_prepromotion() {
+    let probe = Rc::new(Probe::default());
+    let context = runtime(&probe);
+    let operands = [Value::Tensor(Tensor::new(vec![1.; 4], vec![2, 2]).unwrap())];
+    let prepared = futures::executor::block_on(prepare_builtin_call(
+        runmat_builtins::sum_invocation_entry(runmat_types::SumInvocation::NanSum)
+            .identity
+            .name,
+        &operands,
+        &context,
+    ))
+    .unwrap();
+    assert_eq!(prepared.args(), &operands);
     assert!(probe.requests.borrow().is_empty());
     assert!(probe.feedback.borrow().is_empty());
 }

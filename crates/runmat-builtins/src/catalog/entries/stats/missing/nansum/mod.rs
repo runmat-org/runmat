@@ -11,6 +11,15 @@ pub use contract::{
     NANSUM_DESCRIPTOR, NANSUM_EXTENSIONS, NANSUM_INTEGER_CAPABILITIES, NANSUM_INTEGER_EXTENSION,
 };
 
+const NANSUM_PREPARATION_FORMS: [BuiltinPreparationForm; 1] = [BuiltinPreparationForm {
+    id: BuiltinPreparationFormId(0),
+    binding_variant: "default",
+    signatures: &[0],
+    data_arguments: &[0],
+    operation: BuiltinPreparationOperation::Reduction(BuiltinPreparationReduction::Sum),
+    provider_requirement: BuiltinPreparationProviderRequirement::InputSupported,
+}];
+
 pub const NANSUM_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "nansum" },
@@ -32,7 +41,7 @@ pub const NANSUM_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
-        preparation: BuiltinOperandPreparation::RuntimeOwned,
+        preparation: BuiltinOperandPreparation::Forms(&NANSUM_PREPARATION_FORMS),
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,

@@ -15,23 +15,34 @@ use runmat_accelerate_api::{
 /// The reduction hook, rather than its caller, certifies the selected sum
 /// kernel. Host uploads and publication casts may also submit commands, so a
 /// submission observed only at the public binding cannot prove reduction work.
-fn sum_observation_identity() -> runmat_accelerate_api::ProviderOperationIdentity {
+fn sum_observation_identity(
+    invocation: runmat_types::SumInvocation,
+) -> runmat_accelerate_api::ProviderOperationIdentity {
     runmat_accelerate_api::ProviderOperationIdentity::new(
-        runmat_builtins::SUM_CATALOG_ENTRY.identity.name,
+        runmat_builtins::sum_invocation_entry(invocation)
+            .identity
+            .name,
     )
 }
 
 fn sum_submission_checkpoint() -> Option<(
     runmat_accelerate_api::observation::ProviderOperationRecorder,
     u64,
+    runmat_accelerate_api::ProviderOperationIdentity,
 )> {
     let recorder = runmat_accelerate_api::observation::current_provider_observation()?;
-    recorder
-        .expects_operation(&sum_observation_identity())
-        .then(|| {
+    [
+        runmat_types::SumInvocation::Sum,
+        runmat_types::SumInvocation::NanSum,
+    ]
+    .into_iter()
+    .find_map(|invocation| {
+        let identity = sum_observation_identity(invocation);
+        recorder.expects_operation(&identity).then(|| {
             let checkpoint = recorder.submission_checkpoint();
-            (recorder, checkpoint)
+            (recorder.clone(), checkpoint, identity)
         })
+    })
 }
 
 fn confirm_sum_kernel_submission(
@@ -39,12 +50,13 @@ fn confirm_sum_kernel_submission(
     checkpoint: Option<(
         runmat_accelerate_api::observation::ProviderOperationRecorder,
         u64,
+        runmat_accelerate_api::ProviderOperationIdentity,
     )>,
 ) {
-    if let Some((recorder, before)) = checkpoint {
+    if let Some((recorder, before, identity)) = checkpoint {
         recorder.confirm_submitted_provider_execution_after(
             provider.device_id_exec(),
-            &sum_observation_identity(),
+            &identity,
             before,
         );
     }

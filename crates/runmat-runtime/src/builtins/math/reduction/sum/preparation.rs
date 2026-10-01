@@ -6,9 +6,7 @@ use crate::context::preparation::{
 };
 use crate::BuiltinResult;
 use runmat_accelerate_api::{handle_integer_type, handle_is_logical, handle_precision};
-use runmat_builtins::{
-    BuiltinBindingIdentity, BuiltinPreparationFormId, SumOutputClass, SUM_CATALOG_ENTRY,
-};
+use runmat_builtins::{BuiltinBindingIdentity, BuiltinOperandPreparation, SumOutputClass};
 use runmat_types::{NumericClass, NumericDomain};
 use runmat_value::Value;
 
@@ -35,16 +33,21 @@ pub(super) async fn execute(
     input_count: usize,
 ) -> BuiltinResult<Value> {
     let controls = controls(&value, &parsed)?;
+    let entry = runmat_builtins::sum_invocation_entry(parsed.invocation);
+    let BuiltinOperandPreparation::Forms([form]) = entry.placement.preparation else {
+        unreachable!("sum invocation has one canonical data-only preparation form")
+    };
+    let [signature] = form.signatures else {
+        unreachable!("sum invocation form has one canonical variadic signature")
+    };
     let request = AdmittedBuiltinPreparation::new(
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
-                builtin: SUM_CATALOG_ENTRY.identity,
-                variant: "default",
+                builtin: entry.identity,
+                variant: form.binding_variant,
             },
-            form: BuiltinPreparationFormId(0),
-            // The final signature describes the parser's admitted, variadic
-            // option grammar. All earlier signatures remain public forms.
-            signature: 8,
+            form: form.id,
+            signature: *signature,
             input_count,
             requested_outputs: crate::output_count::current_output_count(),
         },
@@ -98,6 +101,7 @@ fn controls(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<AdmittedSu
             NumericClass::Double
         };
     Ok(AdmittedSumReduction {
+        invocation: parsed.invocation,
         axes: resolved.dims_in_bounds,
         missing: parsed.nan_mode,
         output: parsed.output,

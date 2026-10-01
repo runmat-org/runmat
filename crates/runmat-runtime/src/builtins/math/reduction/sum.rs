@@ -4,9 +4,10 @@ use std::collections::HashSet;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision, ReductionFlavor};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, SumControl, SumOutputClass as OutputTemplate, SUM_CATALOG_ENTRY,
-    SUM_ERROR_INTERNAL, SUM_ERROR_INVALID_ARGUMENT, SUM_ERROR_INVALID_INPUT,
+    BuiltinErrorDescriptor, SumControl, SumOutputClass as OutputTemplate, SUM_ERROR_INTERNAL,
+    SUM_ERROR_INVALID_ARGUMENT, SUM_ERROR_INVALID_INPUT,
 };
+use runmat_types::SumInvocation;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 const NAME: &str = "sum";
 
@@ -123,6 +124,15 @@ pub(crate) async fn sum_with_nan_policy(
     rest: Vec<Value>,
     imposed_nan_mode: Option<ReductionNaN>,
 ) -> crate::BuiltinResult<Value> {
+    sum_for_invocation(value, rest, imposed_nan_mode, SumInvocation::Sum).await
+}
+
+pub(crate) async fn sum_for_invocation(
+    value: Value,
+    rest: Vec<Value>,
+    imposed_nan_mode: Option<ReductionNaN>,
+    invocation: SumInvocation,
+) -> crate::BuiltinResult<Value> {
     let input_count = rest.len() + 1;
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(sum_invalid_input(
@@ -131,15 +141,17 @@ pub(crate) async fn sum_with_nan_policy(
     }
     let input_meta = InputMeta::from_value(&value);
     let mut parsed = parse_arguments(&rest).await?;
-    if let Some(mode) = imposed_nan_mode {
-        parsed.nan_mode = mode;
-    }
+    parsed.invocation = invocation;
+    parsed.nan_mode = match invocation {
+        SumInvocation::NanSum => ReductionNaN::Omit,
+        SumInvocation::Sum => imposed_nan_mode.unwrap_or(parsed.nan_mode),
+    };
     if matches!(parsed.output, OutputTemplate::Native) {
         if let Some(result) = sum_native_integer(&value, &parsed)? {
             return Ok(result);
         }
     }
-    if imposed_nan_mode.is_none() && preparation::eligible(&value) {
+    if preparation::eligible(&value) {
         return preparation::execute(value, parsed, input_meta, input_count).await;
     }
     let raw_result = execute_raw(value, &parsed).await?;
@@ -219,6 +231,7 @@ struct ResolvedDims {
 }
 
 struct ParsedArguments {
+    invocation: SumInvocation,
     selection: DimSelection,
     nan_mode: ReductionNaN,
     output: OutputTemplate,
@@ -412,6 +425,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     }
 
     Ok(ParsedArguments {
+        invocation: SumInvocation::Sum,
         selection,
         nan_mode,
         output,
@@ -615,8 +629,14 @@ async fn sum_gpu_include(
     publish_submitted_sum(provider, current, &handle)
 }
 
-fn sum_observation_identity() -> runmat_accelerate_api::ProviderOperationIdentity {
-    runmat_accelerate_api::ProviderOperationIdentity::new(SUM_CATALOG_ENTRY.identity.name)
+fn sum_observation_identity(
+    invocation: SumInvocation,
+) -> runmat_accelerate_api::ProviderOperationIdentity {
+    runmat_accelerate_api::ProviderOperationIdentity::new(
+        runmat_builtins::sum_invocation_entry(invocation)
+            .identity
+            .name,
+    )
 }
 
 fn publish_submitted_sum(
@@ -752,7 +772,7 @@ async fn sum_gpu_fallback(
     handle: &GpuTensorHandle,
     parsed: &ParsedArguments,
 ) -> BuiltinResult<Value> {
-    mark_sum_runtime_fallback();
+    mark_sum_runtime_fallback(parsed.invocation);
     match gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await? {
         Value::ComplexTensor(tensor) => sum_host_complex_tensor(tensor, parsed),
         Value::Complex(real, imaginary) => sum_host_complex_scalar(real, imaginary, parsed),
@@ -763,9 +783,9 @@ async fn sum_gpu_fallback(
     }
 }
 
-fn mark_sum_runtime_fallback() {
+fn mark_sum_runtime_fallback(invocation: SumInvocation) {
     if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation() {
-        if recorder.expects_operation(&sum_observation_identity()) {
+        if recorder.expects_operation(&sum_observation_identity(invocation)) {
             recorder.execution_disposition(
                 runmat_accelerate_api::observation::ProviderExecutionDisposition::SharedRuntimeFallback,
             );
@@ -2121,6 +2141,7 @@ pub(crate) mod tests {
         let cpu = sum_host(
             Value::Tensor(t.clone()),
             &ParsedArguments {
+                invocation: SumInvocation::Sum,
                 selection: DimSelection::Dim(1),
                 nan_mode: ReductionNaN::Include,
                 output: OutputTemplate::Double,
@@ -2131,6 +2152,7 @@ pub(crate) mod tests {
         let gpu = block_on(sum_gpu(
             h,
             &ParsedArguments {
+                invocation: SumInvocation::Sum,
                 selection: DimSelection::Dim(1),
                 nan_mode: ReductionNaN::Include,
                 output: OutputTemplate::Double,

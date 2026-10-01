@@ -1,6 +1,25 @@
 use super::*;
 use runmat_types::*;
 
+#[test]
+fn nansum_owns_a_data_only_sum_preparation_form() {
+    assert!(crate::validate_builtin_preparation(&NANSUM_CATALOG_ENTRY).is_empty());
+    let BuiltinOperandPreparation::Forms([form]) = NANSUM_CATALOG_ENTRY.placement.preparation
+    else {
+        panic!("nansum owns exactly one data-only preparation form")
+    };
+    assert_eq!(form.signatures, &[0]);
+    assert_eq!(form.data_arguments, &[0]);
+    assert_eq!(
+        form.operation,
+        BuiltinPreparationOperation::Reduction(BuiltinPreparationReduction::Sum)
+    );
+    assert_eq!(
+        crate::sum_invocation_entry(SumInvocation::NanSum).identity,
+        NANSUM_CATALOG_ENTRY.identity
+    );
+}
+
 fn call(input: ValueFact, outputs: usize) -> CallInference {
     inference::infer(
         &CallRequest {

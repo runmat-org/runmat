@@ -23,8 +23,18 @@ impl RuntimeAccelerationService for RecordingService {
         request: AdmittedBuiltinPreparation,
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
         assert_eq!(request.form().data_arguments, &[0]);
-        assert_eq!(request.admission().signature, 8);
-        assert_eq!(request.admission().input_count, 4);
+        let invocation = request
+            .sum_reduction()
+            .expect("typed sum controls")
+            .invocation;
+        let entry = runmat_builtins::sum_invocation_entry(invocation);
+        let runmat_builtins::BuiltinOperandPreparation::Forms([form]) = entry.placement.preparation
+        else {
+            panic!("sum invocation has exactly one canonical preparation form")
+        };
+        assert_eq!(request.admission().binding.builtin, entry.identity);
+        assert!(form.signatures.contains(&request.admission().signature));
+        assert!(matches!(request.admission().input_count, 1 | 2 | 4));
         assert_eq!(request.operands().len(), 1);
         self.0
             .borrow_mut()
@@ -35,6 +45,45 @@ impl RuntimeAccelerationService for RecordingService {
             ))
         })
     }
+}
+
+#[test]
+fn nansum_uses_its_own_catalog_binding_with_the_shared_typed_omit_route() {
+    let observed = Rc::new(RefCell::new(Vec::new()));
+    let context = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_acceleration(Rc::new(RecordingService(observed.clone()))),
+        );
+    let _context = RuntimeContextGuard::enter(context);
+    let data = Value::Tensor(Tensor::from_f32(vec![1.0, f32::NAN, 3.0, 4.0], vec![2, 2]).unwrap());
+    let output = block_on(super::super::sum_for_invocation(
+        data,
+        vec![Value::from("native")],
+        None,
+        runmat_types::SumInvocation::NanSum,
+    ))
+    .unwrap();
+    let Value::Tensor(output) = output else {
+        panic!("nansum result is a tensor")
+    };
+    assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(output.materialize_f64(), vec![1.0, 7.0]);
+    let admitted = observed.borrow();
+    assert_eq!(admitted.len(), 1);
+    assert_eq!(admitted[0].invocation, runmat_types::SumInvocation::NanSum);
+    assert_eq!(admitted[0].missing, ReductionNaN::Omit);
+    assert_eq!(admitted[0].publication_class, NumericClass::Single);
+    drop(admitted);
+    let invalid = block_on(super::super::sum_for_invocation(
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+        vec![Value::Num(0.0)],
+        None,
+        runmat_types::SumInvocation::NanSum,
+    ))
+    .expect_err("invalid alias controls must fail before provider admission");
+    assert_eq!(invalid.identifier(), Some("RunMat:sum:InvalidArgument"));
+    assert_eq!(observed.borrow().len(), 1);
 }
 
 #[test]
@@ -88,5 +137,5 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
     ))
     .unwrap();
     assert!(matches!(delegated, Value::Tensor(_)));
-    assert_eq!(observed.borrow().len(), 1);
+    assert_eq!(observed.borrow().len(), 2);
 }

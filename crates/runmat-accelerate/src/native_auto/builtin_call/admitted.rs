@@ -164,6 +164,7 @@ pub(super) fn prepare_with(
                 })?;
             ArgumentOperation::AdmittedSum {
                 route: runmat_accelerate_api::ProviderSumWorkload {
+                    invocation: controls.invocation,
                     axes,
                     missing: controls.missing,
                     output: controls.output,

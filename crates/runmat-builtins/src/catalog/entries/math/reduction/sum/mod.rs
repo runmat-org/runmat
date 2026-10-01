@@ -12,6 +12,17 @@ pub use contract::{
     SUM_INTEGER_CAPABILITIES,
 };
 
+/// Canonical public binding for either entrypoint of the shared numerical
+/// reduction. Consumers carry `SumInvocation` rather than reparsing a name.
+pub fn sum_invocation_entry(
+    invocation: runmat_types::SumInvocation,
+) -> &'static BuiltinCatalogEntry {
+    match invocation {
+        runmat_types::SumInvocation::Sum => &SUM_CATALOG_ENTRY,
+        runmat_types::SumInvocation::NanSum => &crate::NANSUM_CATALOG_ENTRY,
+    }
+}
+
 const SUM_PREPARATION_FORMS: [BuiltinPreparationForm; 1] = [BuiltinPreparationForm {
     id: BuiltinPreparationFormId(0),
     binding_variant: "default",

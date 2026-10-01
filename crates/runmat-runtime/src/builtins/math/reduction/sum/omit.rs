@@ -18,6 +18,7 @@ pub(super) async fn sum_gpu_with_omitnan(
         // Logical and integer values cannot contain NaN. Both ordinary
         // floating and native integer sums use their usual resident route.
         let include = ParsedArguments {
+            invocation: parsed.invocation,
             selection: parsed.selection.clone(),
             nan_mode: ReductionNaN::Include,
             output: parsed.output,

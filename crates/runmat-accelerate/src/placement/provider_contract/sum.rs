@@ -3,7 +3,7 @@
 //! direct resident hooks retain their own independently admitted behavior.
 use super::*;
 use runmat_accelerate_api::ProviderSumWorkload;
-use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
+use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumInvocation, SumOutputClass};
 
 #[cfg(test)]
 mod tests;
@@ -44,10 +44,16 @@ pub(crate) enum SumKernelRoute {
 }
 
 pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
-    snapshot.operations.push(ProviderCapabilityOperation {
-        identity: ProviderOperationIdentity::new(runmat_builtins::SUM_CATALOG_ENTRY.identity.name),
-        family: ProviderOperationFamily::Reduction,
-    });
+    for invocation in [SumInvocation::Sum, SumInvocation::NanSum] {
+        snapshot.operations.push(ProviderCapabilityOperation {
+            identity: ProviderOperationIdentity::new(
+                runmat_builtins::sum_invocation_entry(invocation)
+                    .identity
+                    .name,
+            ),
+            family: ProviderOperationFamily::Reduction,
+        });
+    }
 }
 
 pub(super) fn validate(
@@ -97,8 +103,28 @@ fn analyze(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<Result<SumWork, ProviderFeasibility>> {
-    if query.operation.0 != runmat_builtins::SUM_CATALOG_ENTRY.identity.name {
+    if ![SumInvocation::Sum, SumInvocation::NanSum]
+        .into_iter()
+        .any(|invocation| {
+            query.operation.0
+                == runmat_builtins::sum_invocation_entry(invocation)
+                    .identity
+                    .name
+        })
+    {
         return None;
+    }
+    if let Some(route) = query.workload.sum.as_ref() {
+        if query.operation.0
+            != runmat_builtins::sum_invocation_entry(route.invocation)
+                .identity
+                .name
+        {
+            return Some(Err(ProviderFeasibility::rejected(
+                ProviderRejectionCode::InvalidShape,
+                "sum.invocation_identity_mismatch",
+            )));
+        }
     }
     Some(work(provider, wgpu, query))
 }

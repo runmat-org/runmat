@@ -60,6 +60,7 @@ fn query(class: ProviderElementType, shape: &[u64], axes: &[u64]) -> ProviderFea
         workload: ProviderWorkload {
             elements: shape.iter().copied().reduce(|a, b| a * b),
             sum: Some(ProviderSumWorkload {
+                invocation: runmat_types::SumInvocation::Sum,
                 axes: axes.to_vec(),
                 missing: ReductionNaN::Include,
                 output: SumOutputClass::Double,
@@ -208,6 +209,33 @@ fn integer_cast_dispatches_use_integer_shader_geometry_not_floating_cast_geometr
     assert_eq!(work.estimate.dispatches, Some(4));
     #[cfg(feature = "wgpu")]
     assert_eq!(work.queue_submissions, 4);
+}
+
+#[test]
+fn nansum_binding_is_distinct_but_uses_the_same_typed_physical_route() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F64,
+    };
+    let mut alias = query(ProviderElementType::F64, &[2, 3], &[0]);
+    alias.operation =
+        ProviderOperationIdentity::new(runmat_builtins::NANSUM_CATALOG_ENTRY.identity.name);
+    let route = alias.workload.sum.as_mut().unwrap();
+    route.invocation = runmat_types::SumInvocation::NanSum;
+    route.missing = ReductionNaN::Omit;
+    assert!(matches!(
+        validate(&provider, true, &alias),
+        Some(ProviderFeasibility::Supported { .. })
+    ));
+    let sum = query(ProviderElementType::F64, &[2, 3], &[0]);
+    assert_ne!(
+        serde_json::to_vec(&alias.workload).unwrap(),
+        serde_json::to_vec(&sum.workload).unwrap()
+    );
+    alias.workload.sum.as_mut().unwrap().invocation = runmat_types::SumInvocation::Sum;
+    assert_eq!(
+        rejection_code(validate(&provider, true, &alias).unwrap()),
+        ProviderRejectionCode::InvalidShape
+    );
 }
 
 #[test]
@@ -422,8 +450,18 @@ fn legacy_workload_roundtrips_without_inventing_sum_controls() {
     assert!(!serde_json::to_string(&old).unwrap().contains("\"sum\""));
     let route = query(ProviderElementType::F64, &[2, 3], &[0]);
     let serialized = serde_json::to_string(&route).unwrap();
+    assert!(!serialized.contains("\"invocation\""));
     assert_eq!(
         serde_json::from_str::<ProviderFeasibilityQuery>(&serialized).unwrap(),
+        route
+    );
+    let mut prior = serde_json::to_value(&route).unwrap();
+    let admitted = prior["workload"]["sum"]
+        .as_object_mut()
+        .expect("sum workload object");
+    admitted.remove("invocation");
+    assert_eq!(
+        serde_json::from_value::<ProviderFeasibilityQuery>(prior).unwrap(),
         route
     );
 }

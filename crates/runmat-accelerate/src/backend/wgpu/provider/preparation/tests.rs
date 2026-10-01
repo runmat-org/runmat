@@ -32,6 +32,7 @@ fn actual_integer_sum_conversion_preparation_tracks_its_distinct_pipeline() {
         workload: ProviderWorkload {
             elements: Some(6),
             sum: Some(ProviderSumWorkload {
+                invocation: runmat_types::SumInvocation::Sum,
                 axes: vec![0],
                 missing: ReductionNaN::Include,
                 output: SumOutputClass::Double,
@@ -95,6 +96,7 @@ fn actual_omit_sum_preparation_covers_map_and_reduction_pipelines() {
         workload: ProviderWorkload {
             elements: Some(6),
             sum: Some(ProviderSumWorkload {
+                invocation: runmat_types::SumInvocation::Sum,
                 axes: vec![0],
                 missing: ReductionNaN::Omit,
                 output: SumOutputClass::Double,
@@ -156,6 +158,7 @@ fn actual_single_omit_sum_keeps_exact_class_and_value_across_all_stages() {
         workload: ProviderWorkload {
             elements: Some(6),
             sum: Some(ProviderSumWorkload {
+                invocation: runmat_types::SumInvocation::Sum,
                 axes: vec![0],
                 missing: ReductionNaN::Omit,
                 output: SumOutputClass::Native,

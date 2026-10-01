@@ -8,6 +8,21 @@ pub enum ReductionNaN {
     Omit,
 }
 
+/// Public entrypoint whose already-admitted numerical work uses the sum
+/// reduction. The alias retains its own binding, errors and feedback identity.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SumInvocation {
+    #[default]
+    Sum,
+    NanSum,
+}
+
+impl SumInvocation {
+    pub fn is_sum(&self) -> bool {
+        matches!(self, Self::Sum)
+    }
+}
+
 /// Requested output-class policy for the ordinary numerical sum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SumOutputClass {

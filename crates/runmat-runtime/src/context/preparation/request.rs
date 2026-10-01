@@ -4,7 +4,7 @@ use runmat_builtins::{
     BuiltinPreparationForm, BuiltinPreparationFormId, BuiltinPreparationOperation,
     BuiltinPreparationReduction, ReductionNaN, SumOutputClass,
 };
-use runmat_types::{NumericClass, NumericDomain};
+use runmat_types::{NumericClass, NumericDomain, SumInvocation};
 use runmat_value::Value;
 
 /// The domain supplies this only after its existing output, compatibility,
@@ -34,6 +34,7 @@ pub struct AdmittedBuiltinPreparation {
 /// Axes are zero-based, in-bounds and ordered as the owning reduction executes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmittedSumReduction {
+    pub invocation: SumInvocation,
     pub axes: Vec<usize>,
     pub missing: ReductionNaN,
     pub output: SumOutputClass,
@@ -53,6 +54,13 @@ impl AdmittedBuiltinPreparation {
         {
             return Err(invalid(
                 "sum controls do not belong to preparation operation",
+            ));
+        }
+        if self.admission.binding.builtin
+            != runmat_builtins::sum_invocation_entry(controls.invocation).identity
+        {
+            return Err(invalid(
+                "sum invocation and admitted catalog binding disagree",
             ));
         }
         self.sum_reduction = Some(controls);

@@ -73,6 +73,7 @@ fn omitnan_sum_retires_cleaned_owner_on_cancel_and_failure_without_gathering() {
             .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
             .unwrap();
         let parsed = ParsedArguments {
+            invocation: SumInvocation::Sum,
             selection: DimSelection::Dim(1),
             nan_mode: ReductionNaN::Omit,
             output: OutputTemplate::Double,
@@ -226,6 +227,7 @@ fn partial_vecdim_rejects_second_result_and_retires_first_without_touching_input
         )
         .unwrap();
     let parsed = ParsedArguments {
+        invocation: SumInvocation::Sum,
         selection: DimSelection::Vec(vec![1, 2]),
         nan_mode: ReductionNaN::Include,
         output: OutputTemplate::Default,
@@ -252,6 +254,7 @@ fn malformed_nan_map_fails_before_reduction_and_retires_result() {
         .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let parsed = ParsedArguments {
+        invocation: SumInvocation::Sum,
         selection: DimSelection::Dim(1),
         nan_mode: ReductionNaN::Omit,
         output: OutputTemplate::Default,

@@ -1,12 +1,14 @@
 //! Resolved numerical sum controls supplied by the owning language runtime.
 //! Provider implementations derive their physical recipe from these controls
 //! and the input representation; this is not an option parser or scheduler.
-use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
+use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumInvocation, SumOutputClass};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderSumWorkload {
+    #[serde(default, skip_serializing_if = "SumInvocation::is_sum")]
+    pub invocation: SumInvocation,
     /// Zero-based in-bounds axes in execution order. An empty list is a
     /// publication-only conversion, not a reduction dispatch.
     pub axes: Vec<u64>,

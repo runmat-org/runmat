@@ -28,7 +28,7 @@ pub use fact::*;
 pub use identity::*;
 pub use integer_literal::{IntegerClass, IntegerLiteral, IntegerLiteralClass};
 pub use real_unary::{RealUnaryClassification, RealUnaryPredicate};
-pub use reduction::{ReductionNaN, SumOutputClass};
+pub use reduction::{ReductionNaN, SumInvocation, SumOutputClass};
 mod floating_remainder;
 pub use floating_remainder::FloatingRemainderKind;
 pub use rules::*;

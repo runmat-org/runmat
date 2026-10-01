@@ -252,6 +252,7 @@ fn admitted_sum_does_not_turn_unknown_peak_bytes_into_a_sixteen_byte_bound() {
             outputs: vec![],
             workload: ProviderWorkload {
                 sum: Some(ProviderSumWorkload {
+                    invocation: runmat_types::SumInvocation::Sum,
                     axes: vec![0],
                     missing: ReductionNaN::Include,
                     output: SumOutputClass::Double,
