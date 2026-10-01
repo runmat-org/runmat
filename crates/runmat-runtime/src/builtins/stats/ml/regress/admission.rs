@@ -5,21 +5,35 @@ pub(super) async fn gather_tensor(value: Value) -> BuiltinResult<Tensor> {
     tensor::value_into_tensor_for(NAME, gathered).map_err(|err| invalid(format!("regress: {err}")))
 }
 
-pub(super) enum AlphaInput {
-    Prepared { value: f64, source: Value },
+pub(super) enum AlphaHeader {
+    Host(Value),
     Resident(Value),
 }
 
-impl AlphaInput {
+pub(super) enum PreparedAlpha {
+    Host(f64),
+    Resident(Value),
+}
+
+impl AlphaHeader {
     pub(super) fn source(&self) -> &Value {
         match self {
-            Self::Prepared { source, .. } | Self::Resident(source) => source,
+            Self::Host(source) | Self::Resident(source) => source,
         }
     }
 
+    pub(super) fn after_integer_boundary(self) -> BuiltinResult<PreparedAlpha> {
+        match self {
+            Self::Host(source) => parse_alpha_host(&source).map(PreparedAlpha::Host),
+            Self::Resident(source) => Ok(PreparedAlpha::Resident(source)),
+        }
+    }
+}
+
+impl PreparedAlpha {
     pub(super) async fn finish(self) -> BuiltinResult<f64> {
         match self {
-            Self::Prepared { value, .. } => Ok(value),
+            Self::Host(value) => Ok(value),
             Self::Resident(source) => {
                 let gathered = gather_if_needed_async(&source).await?;
                 parse_alpha_host(&gathered)
@@ -72,10 +86,15 @@ pub(super) fn preflight_data(y: &Value, x: &Value, outputs: Option<usize>) -> Bu
     if x_columns == 0 {
         return Err(invalid("regress: X must contain at least one column"));
     }
+    if y_count == 0 {
+        return Err(invalid(
+            "regress: at least one complete observation is required",
+        ));
+    }
     ensure_input_budget(x_rows, x_columns)
 }
 
-pub(super) fn prepare_alpha(source: Value) -> BuiltinResult<AlphaInput> {
+pub(super) fn prepare_alpha(source: Value) -> BuiltinResult<AlphaHeader> {
     match &source {
         Value::GpuTensor(handle) => {
             let count = handle
@@ -89,12 +108,13 @@ pub(super) fn prepare_alpha(source: Value) -> BuiltinResult<AlphaInput> {
             {
                 return Err(invalid("regress: alpha must be a numeric scalar"));
             }
-            Ok(AlphaInput::Resident(source))
+            Ok(AlphaHeader::Resident(source))
         }
-        _ => Ok(AlphaInput::Prepared {
-            value: parse_alpha_host(&source)?,
-            source,
-        }),
+        Value::Num(_) | Value::Int(_) => Ok(AlphaHeader::Host(source)),
+        Value::Tensor(tensor) if tensor.len() == 1 => Ok(AlphaHeader::Host(source)),
+        _ => Err(invalid(format!(
+            "regress: alpha must be a numeric scalar, got {source:?}"
+        ))),
     }
 }
 

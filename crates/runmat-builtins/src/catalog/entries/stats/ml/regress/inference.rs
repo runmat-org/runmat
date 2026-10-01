@@ -119,6 +119,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             1,
         ));
     }
+    if response == Some(0) || rows == Some(0) {
+        errors.push(argument_error(
+            "RM-CATALOG-REGRESS-EMPTY",
+            "at least one complete observation is required",
+            0,
+        ));
+    }
     if let Some(alpha) = request.arguments.get(2) {
         if !matches!(
             alpha.kind,

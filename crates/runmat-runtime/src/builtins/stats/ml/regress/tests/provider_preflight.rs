@@ -78,3 +78,40 @@ fn known_invalid_response_geometry_precedes_resident_design_download() {
     assert!(error.message().contains("length(y)"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn integer_alpha_extension_gate_precedes_resident_design_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let y = tensor(vec![1.0, 3.0, 5.0], 3, 1);
+    let alpha =
+        Value::Tensor(Tensor::new_integer(IntegerStorage::I64(vec![1]), vec![1, 1]).unwrap());
+    let error = block_on(regress_builtin(y, resident_design(provider), vec![alpha]))
+        .expect_err("integer alpha is extension-only");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:RegressIntegerAlphaExtension")
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn empty_observations_precede_resident_alpha_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let alpha = Tensor::new(vec![0.05], vec![1, 1]).unwrap();
+    let alpha = crate::builtins::common::gpu_helpers::upload_tensor(provider, &alpha).unwrap();
+    let response = tensor(Vec::new(), 0, 1);
+    let design = tensor(Vec::new(), 0, 2);
+    let error = block_on(regress_builtin(
+        response,
+        design,
+        vec![Value::GpuTensor(alpha)],
+    ))
+    .expect_err("empty observations");
+    assert!(error.message().contains("complete observation"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+}

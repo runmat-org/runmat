@@ -127,3 +127,23 @@ fn rank_one_response_matches_runtime_row_vector_representation() {
         ShapeFact::from(vec![Some(2), Some(1)])
     );
 }
+
+#[test]
+fn empty_observations_cannot_prove_a_successful_fit() {
+    let inferred = inference::infer(
+        &request(
+            numeric(ShapeFact::from(vec![Some(0), Some(1)])),
+            numeric(ShapeFact::from(vec![Some(0), Some(2)])),
+            1,
+        ),
+        &REGRESS_CATALOG_ENTRY,
+    );
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-CATALOG-REGRESS-EMPTY"));
+    assert!(!matches!(
+        inferred.outputs[0].kind,
+        ValueKindFact::Numeric(_)
+    ));
+}

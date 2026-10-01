@@ -17,6 +17,39 @@ fn rank_one_response_is_admitted_as_a_vector() {
     assert_close(beta.materialize_f64()[1], 2.0);
 }
 
+#[test]
+fn empty_observations_reject_before_a_fit() {
+    let y = tensor(Vec::new(), 0, 1);
+    let x = tensor(Vec::new(), 0, 2);
+    let error = block_on(regress_builtin(y, x, Vec::new())).unwrap_err();
+    assert!(error
+        .message()
+        .contains("at least one complete observation"));
+}
+
+#[test]
+fn integer_alpha_compatibility_and_exactness_precede_alpha_range() {
+    let y = tensor(vec![1.0, 3.0, 5.0], 3, 1);
+    let x = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
+    let one = Value::Tensor(Tensor::new_integer(IntegerStorage::I64(vec![1]), vec![1, 1]).unwrap());
+    {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(regress_builtin(y.clone(), x.clone(), vec![one]))
+            .expect_err("typed alpha is a RunMat-only extension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:RegressIntegerAlphaExtension")
+        );
+    }
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let wide = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 54) + 1]), vec![1, 1]).unwrap(),
+    );
+    let error = block_on(regress_builtin(y, x, vec![wide]))
+        .expect_err("wide integer alpha must cross an exact boundary first");
+    assert!(error.message().contains("exactly representable"));
+}
+
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
 }

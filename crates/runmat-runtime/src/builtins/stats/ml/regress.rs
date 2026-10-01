@@ -70,15 +70,6 @@ async fn regress_builtin(y: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<
     }
     let alpha = rest.into_iter().next().map(prepare_alpha).transpose()?;
     preflight_data(&y, &x, outputs)?;
-    if let Some(alpha) = &alpha {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            alpha.source(),
-            &REGRESS_INTEGER_ALPHA_EXTENSION,
-            NAME,
-            "alpha",
-        )
-        .await?;
-    }
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &y,
         &REGRESS_INTEGER_DATA_EXTENSION,
@@ -93,6 +84,16 @@ async fn regress_builtin(y: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<
         "design",
     )
     .await?;
+    if let Some(alpha) = &alpha {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            alpha.source(),
+            &REGRESS_INTEGER_ALPHA_EXTENSION,
+            NAME,
+            "alpha",
+        )
+        .await?;
+    }
+    let alpha = alpha.map(AlphaHeader::after_integer_boundary).transpose()?;
     let y = gather_tensor(y).await?;
     let x = gather_tensor(x).await?;
     let alpha = if let Some(value) = alpha {
