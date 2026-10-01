@@ -1,5 +1,7 @@
 //! Metadata admission before any resident input is downloaded.
-use super::{invalid_argument, parse_type, prior::PriorSpec};
+use super::{
+    gathered, invalid_argument, labels_from_value, parse_type, prior::PriorSpec, LabelVector,
+};
 use crate::BuiltinResult;
 use runmat_builtins::DiscriminantType;
 use runmat_value::Value;
@@ -7,7 +9,7 @@ use runmat_value::Value;
 pub(super) fn admit(
     sample: &Value,
     training: &Value,
-    group: &Value,
+    group: Value,
     rest: &[Value],
 ) -> BuiltinResult<AdmittedHeader> {
     let sample_geometry = predictor_geometry(sample, "sample")?;
@@ -28,8 +30,8 @@ pub(super) fn admit(
             "classify: sample and training must be nonempty numeric matrices",
         ));
     }
-    if let (Some((training_rows, _)), Some(group_count)) = (training_geometry, group_count(group)?)
-    {
+    let group = GroupSpec::prepare(group)?;
+    if let (Some((training_rows, _)), Some(group_count)) = (training_geometry, group.known_len()) {
         if group_count != training_rows {
             return Err(invalid_argument(
                 "classify: group length must match the number of rows in training",
@@ -43,12 +45,45 @@ pub(super) fn admit(
     Ok(AdmittedHeader {
         discriminant,
         prior,
+        group,
     })
 }
 
 pub(super) struct AdmittedHeader {
     pub(super) discriminant: DiscriminantType,
     pub(super) prior: PriorSpec,
+    pub(super) group: GroupSpec,
+}
+
+pub(super) enum GroupSpec {
+    Host(LabelVector),
+    Resident(Value),
+}
+
+impl GroupSpec {
+    fn prepare(value: Value) -> BuiltinResult<Self> {
+        let count = group_count(&value)?;
+        if matches!(value, Value::GpuTensor(_)) {
+            return Ok(Self::Resident(value));
+        }
+        let labels = labels_from_value(value, "group")?;
+        debug_assert_eq!(count, Some(labels.labels.len()));
+        Ok(Self::Host(labels))
+    }
+
+    fn known_len(&self) -> Option<usize> {
+        match self {
+            Self::Host(labels) => Some(labels.labels.len()),
+            Self::Resident(value) => group_count(value).ok().flatten(),
+        }
+    }
+
+    pub(super) async fn materialize(self) -> BuiltinResult<LabelVector> {
+        match self {
+            Self::Host(labels) => Ok(labels),
+            Self::Resident(value) => labels_from_value(gathered(value).await?, "group"),
+        }
+    }
 }
 
 pub(super) fn preflight_numeric_vector(value: &Value, role: &str) -> BuiltinResult<()> {

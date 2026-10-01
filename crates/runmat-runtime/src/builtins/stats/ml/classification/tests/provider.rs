@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
     ThreadProviderGuard,
 };
-use runmat_value::StructValue;
+use runmat_value::{CellArray, StructValue};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct RejectingDownloadProvider {
@@ -62,6 +62,30 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
     assert!(err
         .message()
         .contains("prior struct must contain prob field"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+
+    let invalid_group = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(2.0),
+            ],
+            4,
+            1,
+        )
+        .unwrap(),
+    );
+    let err = classify_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        training.clone(),
+        invalid_group,
+        Vec::new(),
+    )
+    .await
+    .expect_err("host cell labels must reject before resident sample download");
+    assert!(err.message().contains("group"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
     for probabilities in [

@@ -131,10 +131,10 @@ async fn classify_builtin(
         ));
     }
     ensure_compatibility_extensions(&sample, &training, &group, &rest)?;
-    let admitted = header::admit(&sample, &training, &group, &rest)?;
+    let admitted = header::admit(&sample, &training, group, &rest)?;
     let sample = gathered(sample).await?;
     let training = gathered(training).await?;
-    let group = gathered(group).await?;
+    let group = admitted.group.materialize().await?;
     let prior = admitted.prior.materialize().await?;
     let output_limit = requested_outputs.unwrap_or(1).max(1);
     let result = classify_compute(
@@ -235,7 +235,7 @@ async fn gathered(value: Value) -> BuiltinResult<Value> {
 fn classify_compute(
     sample: Value,
     training: Value,
-    group: Value,
+    group: LabelVector,
     discriminant: DiscriminantType,
     prior: prior::PriorSpec,
     output_limit: usize,
@@ -259,13 +259,12 @@ fn classify_compute(
             "classify: sample and training must contain finite values",
         ));
     }
-    let labels = labels_from_value(group, "group")?;
-    if labels.labels.len() != training.rows {
+    if group.labels.len() != training.rows {
         return Err(invalid_argument(
             "classify: group length must match the number of rows in training",
         ));
     }
-    let prepared = prepare_model(&training, labels, discriminant, prior)?;
+    let prepared = prepare_model(&training, group, discriminant, prior)?;
     let predictions = predict_rows(&prepared, &sample, output_limit >= 3, output_limit >= 4)?;
     let class = labels_value(&prepared.classes, prepared.kind, &predictions.labels)?;
     if output_limit == 1 {
