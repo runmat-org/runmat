@@ -1,5 +1,6 @@
 mod electrical;
 mod identity;
+mod magnetic;
 mod nonstructural;
 mod realizations;
 mod registry;
@@ -16,6 +17,8 @@ use serde::{Deserialize, Serialize};
 pub use electrical::admit_canonical_electrical_static;
 pub(crate) use electrical::realization as canonical_electrical_realization;
 pub use identity::AnalysisRunIdentity;
+pub use magnetic::admit_canonical_magnetostatic;
+pub(crate) use magnetic::realization as canonical_magnetic_realization;
 pub use nonstructural::admit_nonstructural;
 pub use realizations::{registered_formulations, RegisteredFormulation};
 pub use structural::{

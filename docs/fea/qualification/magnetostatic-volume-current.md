@@ -3,7 +3,8 @@
 ## Decision and ownership
 
 Stage 7 remains open. This is a physical **experimental numerical/model-compilation
-baseline**, not production admission, authored native execution, restart, or release
+baseline**, with experimental formulation identity and portable retained results,
+not production admission, authored native execution, restart, or release
 qualification. The old reduced harmonic pipeline explicitly rejects magnetic intent;
 its graph tests are not evidence for this formulation. Its eventual replacement by
 physical Maxwell remains required.
@@ -52,8 +53,41 @@ An invertible common permeability scaling and dimensional gauge-row scaling bala
 the saddle equations without changing the field. Acceptance independently checks
 the **unscaled physical** K·A−f residual, weak gauge residual, quadrature energy
 `U=½∫B·H`, and physical source work `W=∫J·A`, with `2U=W` under this ground policy.
-Recovered fields are produced once from the solved edge circulations. No cold import
-or reconstruction after loss is implemented or claimed by this baseline.
+Recovered fields are produced once from the solved edge circulations. Cold result
+import validates those retained arrays; it does not reconstruct fields after loss.
+
+## Portable execution and retention contract
+
+The exact experimental realization distinguishes integrated lowest-order edge
+curl-curl, element-owned permeability, weak-Coulomb saddle solve, A/B/H/energy
+recovery, oriented canonical Tet4/Tet10 topology, volume projection and explicit
+full-exterior grounding. Production and spliced scalar/reduced-graph identities
+remain rejected. Generic static selection does not guess an equation. The legacy
+solver compatibility table does not advertise this new magnetic workload.
+
+`MagnetostaticWorkload` uses the shared canonical codec and identity foundations.
+The retained result binds original workload, producer, exact formulation, mesh,
+projection, geometry order and residual target. It retains oriented edge
+circulations and all physical quadrature samples, not only a plot or coefficients
+requiring later field reconstruction. Cold validation verifies canonical sample
+cardinality/order/geometry, affine/topological eligibility, finite SI arrays,
+original element permeability, original volume current and retained energy/work
+integrals. It assembles no matrix and runs no numerical solve. Cold import requires
+an independently authenticated expected byte digest: source binding alone cannot
+authenticate arbitrary producer field values or certify their spatial accuracy.
+Round-trip tests drop live solver values before reopening both geometry orders,
+both current signs and zero current; these are contract-level cold consumers,
+not producer-exit native process or numerical-restart evidence.
+
+Before projected topology, selected properties or numerical assembly are allocated,
+checked count-only preflight reserves additive numerical requested-heap allowances
+for support/boundary discovery, shared projection estimates, arbitrary material/
+assignment/source metadata, contribution discovery and CSR, GMRES basis/Hessenberg/
+vectors and retained samples. Bounds use E≤6T, D≤6T+N and Q=15T. Overflow,
+unrepresentable u32 iteration counts and ceilings one byte below the reservation
+are rejected. This is not measured RSS or a generic scheduler resource plan;
+borrowed inputs, encoded result payloads and field/state publication still need
+their governed lifecycle reservations and independent residency evidence.
 
 ## Independent continuum evidence
 
@@ -94,9 +128,9 @@ not the historical exact 4π×10⁻⁷ SI convention.
 
 ## Remaining implementation and gates
 
-Complete distinct magnetic formulation/admission/resource identity, checked transient
-and retained-memory/peak envelopes, portable workload/result/receipts and magnetic
-semantic-state/field publication. Carry the actual authored CAD/native process through
+Complete checked transient/retained-memory and encoded-payload scheduler envelopes,
+planned sparse support/GMRES execution, numerical receipts and magnetic semantic-state/
+field publication. Carry the actual authored CAD/native process through
 full/partial reads, source-bound cold reopening and numerical restart, then apply
 independent accuracy and release evidence. The model numerical entry validates allowed
 typed state declarations but does not fulfill their governed publication lifecycle.

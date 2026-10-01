@@ -14,13 +14,17 @@ use runmat_analysis_core::*;
 use runmat_meshing_core::{BoundaryFaceRole, SolverMeshArtifact};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub fn solve_canonical_static(
-    model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
+pub fn validate_canonical_input<'a>(
+    model: &'a AnalysisModel,
     step_id: &str,
     requirement: FormulationRequirement,
     residual_target: f64,
-) -> Result<MagnetostaticResponse, MagnetostaticError> {
+) -> Result<&'a ProcedureStep, MagnetostaticError> {
+    if !residual_target.is_finite() || residual_target <= 0.0 || residual_target >= 1.0 {
+        return Err(MagnetostaticError::InvalidInput(
+            "relative residual target".into(),
+        ));
+    }
     if requirement != FormulationRequirement::Experimental {
         return Err(MagnetostaticError::Unsupported(
             "production magnetic qualification".into(),
@@ -85,6 +89,27 @@ pub fn solve_canonical_static(
             "non-volume magnetic current action".into(),
         ));
     }
+    Ok(step)
+}
+
+pub(crate) struct CompiledMagneticInput {
+    pub projection: AnalysisProjection,
+    pub volumes: Vec<MagneticVolumeData>,
+}
+
+pub(crate) fn compile_canonical_input(
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+    step_id: &str,
+    requirement: FormulationRequirement,
+    residual_target: f64,
+) -> Result<CompiledMagneticInput, MagnetostaticError> {
+    let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
+    super::resources::require_canonical_ceiling(
+        model,
+        mesh,
+        step.accuracy.resources.maximum_resident_bytes,
+    )?;
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
     let raw: BTreeMap<_, _> = mesh
@@ -258,5 +283,19 @@ pub fn solve_canonical_static(
             ));
         }
     }
-    super::solve_full_grounded_volume(&projection, &volumes, residual_target)
+    Ok(CompiledMagneticInput {
+        projection,
+        volumes,
+    })
+}
+
+pub fn solve_canonical_static(
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+    step_id: &str,
+    requirement: FormulationRequirement,
+    residual_target: f64,
+) -> Result<MagnetostaticResponse, MagnetostaticError> {
+    let compiled = compile_canonical_input(model, mesh, step_id, requirement, residual_target)?;
+    super::solve_full_grounded_volume(&compiled.projection, &compiled.volumes, residual_target)
 }

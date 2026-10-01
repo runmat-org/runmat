@@ -186,6 +186,7 @@ const fn boundary_transfer_order(transfer: BoundaryTransferImplementation) -> u8
         BoundaryTransferImplementation::ImplicitNaturalBoundaryAndGaugeAnchor => 5,
         BoundaryTransferImplementation::HeuristicInterfaceTransfer => 6,
         BoundaryTransferImplementation::UnmappedFallback => 7,
+        BoundaryTransferImplementation::FullExteriorTangentialPotentialGroundWithWeakCoulombGauge => 8,
     }
 }
 

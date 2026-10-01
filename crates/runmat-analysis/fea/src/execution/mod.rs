@@ -16,6 +16,8 @@ mod accuracy_source;
 mod buckling_result;
 mod buckling_workload;
 mod electrical_static;
+mod magnetic_static;
+pub use magnetic_static::{MagnetostaticSolverResult, MagnetostaticWorkload};
 mod error;
 pub use electrical_static::{
     ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,

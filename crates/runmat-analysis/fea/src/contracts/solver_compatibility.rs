@@ -197,7 +197,8 @@ const fn method_is_compatible(
             _ => false,
         },
         TemporalImplementation::PrescribedThermomechanicalProfileApplication
-        | TemporalImplementation::SolvedThermalStateApplication => false,
+        | TemporalImplementation::SolvedThermalStateApplication
+        | TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve => false,
     }
 }
 

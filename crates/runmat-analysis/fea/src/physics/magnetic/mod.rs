@@ -3,12 +3,25 @@
 mod assembly;
 mod boundary;
 mod input;
+mod resources;
 mod response;
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
 
 use crate::topology::AnalysisProjection;
-pub use input::solve_canonical_static;
+pub(crate) use input::compile_canonical_input;
+pub(crate) fn validate_projection_envelope(
+    projection: &AnalysisProjection,
+) -> Result<crate::topology::TetrahedralEdgeSpace, MagnetostaticError> {
+    let edges = crate::topology::TetrahedralEdgeSpace::derive(projection)
+        .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
+    boundary::MagneticBoundarySpace::derive(projection, &edges)?;
+    assembly::validate_affine_geometry(projection)?;
+    Ok(edges)
+}
+pub use input::{solve_canonical_static, validate_canonical_input};
 pub use response::{MagneticFieldSample, MagnetostaticResponse};
 
 /// CODATA 2022 vacuum permeability, SI H/m (not an exact SI defining constant).

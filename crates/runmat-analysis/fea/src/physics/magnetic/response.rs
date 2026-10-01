@@ -3,7 +3,8 @@ use crate::algebra::{dot_canonical, spmv};
 use crate::solve::krylov::{restarted_gmres, GmresPolicy};
 use runmat_meshing_core::StableDigest;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MagneticFieldSample {
     pub element_identity: StableDigest,
     pub position_m: [f64; 3],
@@ -13,7 +14,8 @@ pub struct MagneticFieldSample {
     pub magnetic_field_a_per_m: [f64; 3],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MagnetostaticResponse {
     pub edge_node_identities: Vec<[StableDigest; 2]>,
     pub edge_circulations_wb: Vec<f64>,
@@ -32,6 +34,11 @@ pub(super) fn solve(
     tolerance: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
     let n = assembled.saddle.rows();
+    let maximum_iterations = n
+        .checked_mul(40)
+        .map(|v| v.max(128))
+        .filter(|v| u32::try_from(*v).is_ok())
+        .ok_or_else(|| MagnetostaticError::InvalidInput("GMRES iteration count overflow".into()))?;
     let (solution, iterations) = if n == 0 {
         (Vec::new(), 0)
     } else {
@@ -41,7 +48,7 @@ pub(super) fn solve(
             GmresPolicy {
                 relative_tolerance: tolerance,
                 restart: n.min(128),
-                maximum_iterations: n.saturating_mul(40).max(128),
+                maximum_iterations,
             },
             |x| spmv(&assembled.saddle, x).map_err(|e| MagnetostaticError::Operator(e.into())),
             |a, b| Ok(dot_canonical(a, b)),
@@ -80,7 +87,11 @@ pub(super) fn solve(
     } else {
         norm(&saddle_action[free_count..])
     };
-    if physical_residual > tolerance * 8.0 || gauge_residual > tolerance * 8.0 {
+    if !physical_residual.is_finite()
+        || !gauge_residual.is_finite()
+        || physical_residual > tolerance * 8.0
+        || gauge_residual > tolerance * 8.0
+    {
         return Err(MagnetostaticError::NotConverged(format!(
             "physical={physical_residual:e}, gauge={gauge_residual:e}"
         )));
@@ -89,7 +100,13 @@ pub(super) fn solve(
     for (&edge, &value) in assembled.boundary.free_edges.iter().zip(free) {
         edge_circulations[edge] = value;
     }
-    let mut samples = Vec::with_capacity(assembled.projection.elements.len() * 15);
+    let count = assembled
+        .projection
+        .elements
+        .len()
+        .checked_mul(15)
+        .ok_or_else(|| MagnetostaticError::InvalidInput("magnetic sample count overflow".into()))?;
+    let mut samples = Vec::with_capacity(count);
     let mut energy = 0.0;
     let mut work = 0.0;
     for (index, data) in assembled.volumes.iter().enumerate() {

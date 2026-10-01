@@ -73,7 +73,12 @@ impl<'a> MagneticAssembly<'a> {
             .enumerate()
             .map(|(row, &node)| (node, row + boundary.free_edges.len()))
             .collect();
-        let dimension = edge_rows.len() + gauge_rows.len();
+        let dimension = edge_rows
+            .len()
+            .checked_add(gauge_rows.len())
+            .ok_or_else(|| {
+                MagnetostaticError::InvalidInput("magnetic dimension overflow".into())
+            })?;
         let mut saddle = RealSparseAssembler::square(
             dimension,
             OperatorRole::Stiffness,
@@ -96,26 +101,8 @@ impl<'a> MagneticAssembly<'a> {
             return Err(MagnetostaticError::Topology("invalid length scale".into()));
         }
         let gauge_scale = 1.0 / (length * length);
+        validate_affine_geometry(projection)?;
         for (index, (element, data)) in projection.elements.iter().zip(&volumes).enumerate() {
-            if element.order == ElementOrder::Tet10 {
-                for (midside, [a, b]) in runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
-                    .into_iter()
-                    .enumerate()
-                {
-                    let midpoint =
-                        projection.nodes[element.node_indices[4 + midside]].coordinates_m;
-                    let left = projection.nodes[element.node_indices[a]].coordinates_m;
-                    let right = projection.nodes[element.node_indices[b]].coordinates_m;
-                    if (0..3).any(|axis| {
-                        (midpoint[axis] - (left[axis] + right[axis]) * 0.5).abs()
-                            > 64.0 * f64::EPSILON * length
-                    }) {
-                        return Err(MagnetostaticError::Unsupported(
-                            "general curved magnetic form quadrature".into(),
-                        ));
-                    }
-                }
-            }
             let moments = edge_space
                 .element_moments(projection, index)
                 .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
@@ -190,4 +177,37 @@ impl<'a> MagneticAssembly<'a> {
             permeability_scale,
         })
     }
+}
+
+/// Eligibility check shared by numerical execution and cold validation; no
+/// physical form integration, operator assembly or field reconstruction.
+pub(super) fn validate_affine_geometry(
+    projection: &AnalysisProjection,
+) -> Result<(), MagnetostaticError> {
+    let length = projection.characteristic_length_m;
+    if !length.is_finite() || length <= 0.0 {
+        return Err(MagnetostaticError::Topology("invalid length scale".into()));
+    }
+    for element in &projection.elements {
+        if element.order != ElementOrder::Tet10 {
+            continue;
+        }
+        for (midside, [a, b]) in runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
+            .into_iter()
+            .enumerate()
+        {
+            let midpoint = projection.nodes[element.node_indices[4 + midside]].coordinates_m;
+            let left = projection.nodes[element.node_indices[a]].coordinates_m;
+            let right = projection.nodes[element.node_indices[b]].coordinates_m;
+            if (0..3).any(|axis| {
+                (midpoint[axis] - (left[axis] + right[axis]) * 0.5).abs()
+                    > 64.0 * f64::EPSILON * length
+            }) {
+                return Err(MagnetostaticError::Unsupported(
+                    "general curved magnetic form quadrature".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
