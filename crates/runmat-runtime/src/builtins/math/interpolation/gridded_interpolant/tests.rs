@@ -198,6 +198,22 @@ fn two_dimensional_grid_vectors_interpolate() {
 }
 
 #[test]
+fn full_query_grid_visits_column_major_points_without_changing_shape() {
+    let grid =
+        CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2]).unwrap();
+    let values = Tensor::new(vec![0.0, 10.0, 20.0, 30.0], vec![2, 2]).unwrap();
+    let obj = call(vec![Value::Cell(grid), Value::Tensor(values)]).unwrap();
+    let queries =
+        CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2]).unwrap();
+    let result = subsref(obj, vec![Value::Cell(queries)]).unwrap();
+    let Value::Tensor(tensor) = result else {
+        panic!("expected array result");
+    };
+    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.materialize_f64(), vec![0.0, 10.0, 20.0, 30.0]);
+}
+
+#[test]
 fn grid_vectors_values_and_queries_read_typed_integer_storage_exactly() {
     let grid = CellArray::new_with_shape(
         vec![

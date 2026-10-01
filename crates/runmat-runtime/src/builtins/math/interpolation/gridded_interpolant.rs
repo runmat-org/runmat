@@ -120,7 +120,7 @@ impl QueryPlan {
         }
     }
 
-    fn for_each_point(&self, mut f: impl FnMut(&[f64])) {
+    fn for_each_point(&self, mut f: impl FnMut(&[f64])) -> BuiltinResult<()> {
         match &self.coords {
             QueryCoords::Explicit(points) => {
                 for point in points {
@@ -128,17 +128,23 @@ impl QueryPlan {
                 }
             }
             QueryCoords::FullGrid { vectors, total } => {
+                let mut point = Vec::new();
+                point
+                    .try_reserve_exact(vectors.len())
+                    .map_err(|_| invalid("query coordinate workspace exceeds available memory"))?;
+                point.resize(vectors.len(), 0.0);
                 for linear in 0..*total {
-                    let subs = unravel_column_major(linear, &self.shape);
-                    let point = subs
-                        .iter()
-                        .enumerate()
-                        .map(|(dim, &idx)| vectors[dim][idx])
-                        .collect::<Vec<_>>();
+                    let mut remaining = linear;
+                    for (dim, vector) in vectors.iter().enumerate() {
+                        let index = remaining % vector.len();
+                        remaining /= vector.len();
+                        point[dim] = vector[index];
+                    }
                     f(&point);
                 }
             }
         }
+        Ok(())
     }
 }
 

@@ -51,7 +51,13 @@ pub(super) fn evaluate_interpolant(
             out_shape,
         );
     }
-    let mut out = Vec::with_capacity(plan.len() * extra_count);
+    let output_count = plan
+        .len()
+        .checked_mul(extra_count)
+        .ok_or_else(|| invalid("interpolant output size exceeds platform limits"))?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(output_count)
+        .map_err(|_| invalid("interpolant output exceeds available memory"))?;
     for series in 0..extra_count {
         let series_offset = series * grid_size;
         plan.for_each_point(|point| {
@@ -61,7 +67,7 @@ pub(super) fn evaluate_interpolant(
                 point,
                 series_offset,
             ))
-        });
+        })?;
     }
     finish_interpolant_output(out, out_shape, spec.values.numeric_dtype())
 }
@@ -75,7 +81,13 @@ pub(super) fn evaluate_piecewise_interpolant(
     out_shape: Vec<usize>,
 ) -> BuiltinResult<Value> {
     let x = &spec.grid_vectors[0];
-    let mut out = Vec::with_capacity(plan.len() * extra_count);
+    let output_count = plan
+        .len()
+        .checked_mul(extra_count)
+        .ok_or_else(|| invalid("interpolant output size exceeds platform limits"))?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(output_count)
+        .map_err(|_| invalid("interpolant output exceeds available memory"))?;
     for series in 0..extra_count {
         let series_offset = series * grid_size;
         let y = values[series_offset..series_offset + grid_size].to_vec();
@@ -102,7 +114,7 @@ pub(super) fn evaluate_piecewise_interpolant(
                 point[0],
                 series_offset,
             ));
-        });
+        })?;
     }
     finish_interpolant_output(out, out_shape, spec.values.numeric_dtype())
 }
