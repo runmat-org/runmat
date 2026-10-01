@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
     ThreadProviderGuard,
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 struct FailingDownloadProvider {
     owner: TestAllocationOwner,
@@ -25,12 +25,12 @@ impl AccelProvider for FailingDownloadProvider {
     }
 
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.downloads.fetch_add(1, AtomicOrdering::SeqCst);
         Box::pin(async { anyhow::bail!("mnrfit fixture download failure") })
     }
 
     fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
-        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.downloads.fetch_add(1, AtomicOrdering::SeqCst);
         Box::pin(async { anyhow::bail!("mnrfit fixture native download failure") })
     }
 }
@@ -54,7 +54,7 @@ async fn mnrfit_provider_failure_retains_cause_and_borrowed_lease() {
     )
     .await
     .expect_err("registered provider must fail the X download");
-    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 1);
     assert_eq!(error.context.builtin.as_deref(), Some("mnrfit"));
     assert!(error.message().contains("mnrfit fixture"));
     assert!(error.source.is_some());
