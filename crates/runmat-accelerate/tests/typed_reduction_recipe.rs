@@ -4,7 +4,9 @@ mod fixture;
 use futures::executor::block_on;
 use runmat_accelerate::{
     fusion::{
-        reduction_recipe::{authenticate_sources, build, ReductionRecipe, ReductionRecipeConfig},
+        reduction_recipe::{
+            build, validate_lowered_sources, ReductionRecipe, ReductionRecipeConfig,
+        },
         FusionKind, FusionOp,
     },
     fusion_exec::{resolve_reduction_program, FusionExecutionRequest},
@@ -70,7 +72,7 @@ fn checked_reduction_relowering_rejects_forged_shader_stage() {
         config(),
     );
     let physical = built.physical();
-    authenticate_sources(physical).expect("owner-built checked shader must re-lower exactly");
+    validate_lowered_sources(physical).expect("owner-built checked shader must re-lower exactly");
     let mut forged = physical.sources().clone();
     forged.pass1.push_str("\n// forged stage");
     let forged = ProviderReductionRecipe::new_checked(
@@ -81,7 +83,7 @@ fn checked_reduction_relowering_rejects_forged_shader_stage() {
         physical.scalar_inputs().to_vec(),
     )
     .unwrap();
-    assert!(authenticate_sources(&forged).is_err());
+    assert!(validate_lowered_sources(&forged).is_err());
 }
 fn try_recipe(
     name: &str,

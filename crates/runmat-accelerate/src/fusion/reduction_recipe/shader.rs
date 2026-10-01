@@ -26,10 +26,9 @@ pub(super) fn sources(
     )
 }
 
-/// Re-lower a checked recipe at the executing backend boundary. This compares
-/// the full physical shader triplet to the same typed scalar/reduction/index
-/// authorities that built it, before a provider touches an allocation.
-pub(super) fn authenticate_sources(recipe: &ProviderReductionRecipe) -> Result<()> {
+/// Re-lower a checked recipe and compare every physical shader stage. This
+/// checks internal consistency, not provenance of the carried scalar program.
+pub(super) fn validate_lowered_sources(recipe: &ProviderReductionRecipe) -> Result<()> {
     let checked = recipe.checked_scalar().ok_or_else(|| {
         runmat_accelerate_api::unsupported_provider_operation(
             "reduction recipe has no checked scalar producer",

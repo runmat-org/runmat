@@ -23,10 +23,11 @@ mod indexing;
 mod state;
 mod shader;
 
-/// Authenticate all shader stages against the checked scalar program and
-/// canonical reduction contract before a provider observes any operand.
-pub fn authenticate_sources(recipe: &ProviderReductionRecipe) -> Result<()> {
-    shader::authenticate_sources(recipe)
+/// Check that all shader stages lower from the carried scalar program and
+/// reduction contract. This does not authenticate the scalar program against
+/// the admitted source plan; submission must do that before provider effects.
+pub fn validate_lowered_sources(recipe: &ProviderReductionRecipe) -> Result<()> {
+    shader::validate_lowered_sources(recipe)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -210,7 +211,7 @@ pub fn build(
         ProviderReductionRecipe::new(semantic_identity, descriptor, sources)?
     };
     if physical.checked_scalar().is_some() {
-        authenticate_sources(&physical)?;
+        validate_lowered_sources(&physical)?;
     }
     Ok(ReductionRecipe {
         inputs,
