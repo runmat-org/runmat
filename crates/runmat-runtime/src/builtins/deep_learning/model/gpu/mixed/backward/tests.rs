@@ -123,6 +123,134 @@ fn softmax_adjoint_non_square_rows_match_independent_jacobian() {
 }
 
 #[test]
+fn single_softmax_adjoint_restores_row_sum_before_subtraction_without_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let shape = [2, 3];
+        let input_values = [1.0_f32, 2.0, 2.0, 0.0, 3.0, -1.0];
+        let seed_values = [0.5_f32, -1.0, -0.75, 0.2, 1.5, 0.3];
+        let upload = |values: &[f32]| {
+            provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F32(values),
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap()
+        };
+        let input = upload(&input_values);
+        let forward = block_on(provider.activation_softmax_rows(&input)).unwrap();
+        let trace = ResidentTrace {
+            stages: vec![super::super::trace::ResidentStage {
+                kind: ResidentStageKind::Softmax,
+                input: input.clone(),
+                output: forward.clone(),
+            }],
+            output: forward.clone(),
+        };
+        let seed = upload(&seed_values);
+        provider.reset_telemetry();
+        let result = block_on(reverse(&trace, seed, &|| Ok(()))).unwrap();
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&result.input),
+            Some(ProviderPrecision::F32)
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let actual = values(result.input);
+        let probabilities = values(forward);
+        for row in 0..shape[0] {
+            let weighted = (0..shape[1])
+                .map(|column| {
+                    let index = row + column * shape[0];
+                    probabilities[index] * f64::from(seed_values[index])
+                })
+                .sum::<f64>() as f32;
+            for column in 0..shape[1] {
+                let index = row + column * shape[0];
+                let expected = probabilities[index] * f64::from(seed_values[index] - weighted);
+                assert!((actual[index] - expected).abs() < 2e-6);
+            }
+        }
+        input.allocation_lease().validate_live().unwrap();
+    });
+}
+
+#[test]
+fn single_dense_bias_adjoint_restores_parameter_precision_without_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let upload = |values: &[f32], shape: &[usize]| {
+            provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F32(values),
+                    shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap()
+        };
+        let input = upload(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2]);
+        let weights = upload(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+        let output = block_on(provider.matmul(&input, &weights)).unwrap();
+        let trace = ResidentTrace {
+            stages: vec![super::super::trace::ResidentStage {
+                kind: ResidentStageKind::Dense {
+                    layer_index: 0,
+                    weights,
+                },
+                input: input.clone(),
+                output: output.clone(),
+            }],
+            output,
+        };
+        let seed = upload(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2]);
+        provider.reset_telemetry();
+        let gradients = block_on(reverse(&trace, seed, &|| Ok(()))).unwrap();
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&gradients.input),
+            Some(ProviderPrecision::F32)
+        );
+        let bias = gradients
+            .parameters
+            .iter()
+            .find(|(_, role, _)| *role == ParameterRole::Bias)
+            .unwrap();
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&bias.2),
+            Some(ProviderPrecision::F32)
+        );
+        assert_eq!(values(bias.2.clone()), vec![6.0, 15.0]);
+        input.allocation_lease().validate_live().unwrap();
+    });
+}
+
+#[test]
+fn single_adjoint_rejects_a_single_reduction_disguised_as_double() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let upload = |values: &[f32], shape: &[usize]| {
+            provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F32(values),
+                    shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap()
+        };
+        let input = upload(&[1.0, 2.0], &[2, 1]);
+        let malformed = upload(&[3.0], &[1, 1]);
+        provider.reset_telemetry();
+        assert!(block_on(checked_sum_reduction(
+            malformed.clone(),
+            &input,
+            provider,
+            &[1, 1],
+        ))
+        .is_err());
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        input.allocation_lease().validate_live().unwrap();
+        malformed.allocation_lease().validate_live().unwrap();
+    });
+}
+
+#[test]
 fn cancellation_before_reverse_preserves_borrowed_stage_handles() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let input = upload(provider, &[1.0, -2.0], &[1, 2]);

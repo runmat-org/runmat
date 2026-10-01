@@ -323,20 +323,76 @@ async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         && !runmat_accelerate_api::handle_is_logical(&handle);
     if diag_len != 0 && floating_input {
         if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-            if let Ok(diagonal) = provider.diag_extract(&handle, 0) {
-                let reduced = provider.reduce_sum(&diagonal).await;
-                drop(diagonal);
-                if let Ok(result) = reduced {
-                    return Ok(Value::GpuTensor(result));
+            let diagonal = match provider.diag_extract(&handle, 0) {
+                Ok(diagonal) => Some(diagonal),
+                Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => None,
+                Err(source) => return Err(trace_provider_failure(source)),
+            };
+            if let Some(diagonal) = diagonal {
+                let diagonal = trace_admit_resident(
+                    provider,
+                    &handle,
+                    diagonal,
+                    &[diag_len, 1],
+                    runmat_accelerate_api::handle_precision(&handle),
+                    &[&handle],
+                )?;
+                let reduced = match provider.reduce_sum(&diagonal).await {
+                    Ok(result) => Some(result),
+                    Err(source) if source.is_unsupported() => None,
+                    Err(source) => return Err(trace_provider_failure(source)),
+                };
+                if let Some(result) = reduced {
+                    let result = trace_admit_resident(
+                        provider,
+                        &handle,
+                        result,
+                        &[1, 1],
+                        Some(runmat_accelerate_api::ProviderPrecision::F64),
+                        &[&handle, &diagonal],
+                    )?;
+                    let result = if runmat_accelerate_api::handle_precision(&handle)
+                        == Some(runmat_accelerate_api::ProviderPrecision::F32)
+                    {
+                        let cast = match provider.unary_single(&result).await {
+                            Ok(cast) => Some(cast),
+                            Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => {
+                                None
+                            }
+                            Err(source) => return Err(trace_provider_failure(source)),
+                        };
+                        if let Some(cast) = cast {
+                            Some(trace_admit_resident(
+                                provider,
+                                &handle,
+                                cast,
+                                &[1, 1],
+                                Some(runmat_accelerate_api::ProviderPrecision::F32),
+                                &[&handle, &diagonal, &result],
+                            )?)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(result)
+                    };
+                    if let Some(mut result) = result {
+                        gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
+                        return Ok(Value::GpuTensor(result));
+                    }
                 }
             }
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
         .await
         .map_err(map_control_flow)?;
-    let host = match trace_numeric(Value::Tensor(tensor))? {
+    let traced = match gathered {
+        Value::ComplexTensor(tensor) => trace_complex_tensor(tensor)?,
+        other => trace_numeric(other)?,
+    };
+    let host = match traced {
         Value::Num(value) => {
             Value::Tensor(Tensor::new(vec![value], vec![1, 1]).map_err(trace_invalid_input)?)
         }
@@ -344,6 +400,47 @@ async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     };
     gpu_helpers::restore_class_preserving_value(&handle, host, NAME)
         .map_err(|error| trace_error_with_message(format!("trace: {error}"), &TRACE_ERROR_INTERNAL))
+}
+
+fn trace_provider_failure(
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> RuntimeError {
+    let mut error = trace_error(&TRACE_ERROR_INTERNAL);
+    error = crate::runtime_error::with_provider_execution_source(error, source.into());
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
+fn trace_admit_resident(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    original: &GpuTensorHandle,
+    output: GpuTensorHandle,
+    shape: &[usize],
+    precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    borrowed: &[&GpuTensorHandle],
+) -> BuiltinResult<GpuTensorHandle> {
+    let valid = output.shape() == shape
+        && output.device_id() == original.device_id()
+        && output.allocation_lease().validate_live().is_ok()
+        && gpu_helpers::exact_provider_for_handle(&output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+        && runmat_accelerate_api::handle_storage(&output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&output) == precision
+        && runmat_accelerate_api::handle_integer_type(&output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&output)
+        && gpu_helpers::gpu_class_metadata_matches(&output, precision, None, false)
+        && gpu_helpers::expected_handle_numeric_element_type(&output).is_ok()
+        && borrowed
+            .iter()
+            .all(|input| !output.shares_allocation_with(input));
+    if valid {
+        Ok(output)
+    } else {
+        let mut error = trace_error(&TRACE_ERROR_INTERNAL);
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        Err(gpu_helpers::reject_gpu_output(output, error))
+    }
 }
 
 fn trace_tensor_sum(tensor: &Tensor) -> f64 {
@@ -606,6 +703,60 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected gpu result, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn trace_single_resident_sum_restores_single_without_download() {
+        test_support::with_test_provider(|provider| {
+            let matrix = [16_777_216.0_f32, 2.0, 3.0, 1.0];
+            let input = provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F32(&matrix),
+                    shape: &[2, 2],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .unwrap();
+            provider.reset_telemetry();
+            let result = trace_builtin(Value::GpuTensor(input.clone())).unwrap();
+            let Value::GpuTensor(output) = result else {
+                panic!("single trace should stay resident")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(output))
+                    .unwrap()
+                    .materialize_f64(),
+                vec![16_777_216.0],
+            );
+            input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn complex_resident_trace_uses_class_preserving_fallback() {
+        test_support::with_test_provider(|provider| {
+            let matrix = ComplexTensor::new(
+                vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                vec![2, 2],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &matrix).unwrap();
+            let result = trace_builtin(Value::GpuTensor(input.clone())).unwrap();
+            let Value::GpuTensor(output) = result else {
+                panic!("complex trace must retain resident class")
+            };
+            let Value::ComplexTensor(host) =
+                test_support::gather(Value::GpuTensor(output)).unwrap()
+            else {
+                panic!("complex trace must preserve complex storage")
+            };
+            assert_eq!(host.materialize_f64(), vec![(8.0, 10.0)]);
+            input.allocation_lease().validate_live().unwrap();
         });
     }
 
