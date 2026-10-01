@@ -44,5 +44,3 @@ pub const GRIDDED_INTERPOLANT_SUBSREF_CATALOG_ENTRY: BuiltinCatalogEntry = Built
     integer_audit: None,
     suppress_auto_output: false,
 };
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GRIDDED_INTERPOLANT_SUBSREF_CATALOG_ENTRY];

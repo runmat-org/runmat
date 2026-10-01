@@ -22,7 +22,11 @@ pub use extensions::*;
 pub use integer::*;
 pub use subsref::GRIDDED_INTERPOLANT_SUBSREF_CATALOG_ENTRY;
 
+const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
+    &GRIDDED_INTERPOLANT_CATALOG_ENTRY,
+    &GRIDDED_INTERPOLANT_SUBSREF_CATALOG_ENTRY,
+];
+
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
-    values.push(&GRIDDED_INTERPOLANT_CATALOG_ENTRY);
-    values.extend(subsref::ENTRIES.iter().copied());
+    values.extend(ENTRIES.iter().copied());
 }
