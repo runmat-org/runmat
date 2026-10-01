@@ -71,7 +71,13 @@ impl AccelProvider for Provider {
     fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move { self.fail() })
     }
-    dimension_hook!(reduce_sum_dim);
+    fn reduce_sum_dim<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: usize,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail().map_err(ProviderExecutionError::from) })
+    }
     dimension_hook!(reduce_mean_dim);
     dimension_hook!(reduce_integer_mean_native_dim);
     fn reduce_min_dim<'a>(
