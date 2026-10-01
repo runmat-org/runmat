@@ -77,14 +77,6 @@ const INPUT_PD: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "ProbabilityDistribution object returned by fitdist.",
 };
 
-const INPUT_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Probability values.",
-};
-
 const INPUT_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "NameValue",
     ty: BuiltinParamType::Any,
@@ -116,7 +108,6 @@ const PDF_INPUTS: [BuiltinParamDescriptor; 2] = [INPUT_PD, INPUT_X];
 const PDF_NAME_INPUTS: [BuiltinParamDescriptor; 3] = [INPUT_DIST, INPUT_X, INPUT_OPTIONS];
 const CDF_INPUTS: [BuiltinParamDescriptor; 2] = [INPUT_PD, INPUT_X];
 const CDF_NAME_INPUTS: [BuiltinParamDescriptor; 3] = [INPUT_DIST, INPUT_X, INPUT_CDF_PARAMS];
-const ICDF_INPUTS: [BuiltinParamDescriptor; 2] = [INPUT_PD, INPUT_P];
 const RANDOM_INPUTS: [BuiltinParamDescriptor; 1] = [INPUT_PD];
 const RANDOM_INPUTS_SIZE: [BuiltinParamDescriptor; 2] = [INPUT_PD, INPUT_SZ];
 const RANDOM_NAME_INPUTS: [BuiltinParamDescriptor; 2] = [INPUT_DIST, INPUT_OPTIONS];
@@ -292,12 +283,6 @@ pub const CDF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         notes: "RunMat-only typed-integer parameters preserve authoritative storage through admission and scalar expansion, then cross an exact binary64 boundary for evaluation.",
     },
 ];
-
-pub(crate) const ICDF_OBJECT_SIGNATURE: BuiltinSignatureDescriptor = BuiltinSignatureDescriptor {
-    label: "x = icdf(pd, p)",
-    inputs: &ICDF_INPUTS,
-    outputs: &DIST_OUTPUTS,
-};
 
 const RANDOM_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
