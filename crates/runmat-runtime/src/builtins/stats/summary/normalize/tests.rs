@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::common::gpu_helpers;
 use futures::executor::block_on;
-use runmat_value::{IntegerComplexStorage, IntegerStorage};
+use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
 fn call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     block_on(normalize_builtin(value, rest))
@@ -51,6 +51,46 @@ fn default_zscore_normalizes_first_non_singleton_dimension() {
 }
 
 #[test]
+fn normalization_keyword_roles_preserve_public_diagnostics() {
+    let input = || tensor(vec![1.0, 2.0, 3.0], vec![3, 1]);
+    let accepted = call(
+        input(),
+        vec![
+            Value::from("CENTER"),
+            Value::from("MEAN"),
+            Value::from("SCALE"),
+            Value::from("STD"),
+        ],
+    )
+    .expect("case-insensitive center and scale tokens");
+    assert_eq!(expect_tensor(accepted).shape, vec![3, 1]);
+
+    for (arguments, expected) in [
+        (vec![Value::from("unknown")], "unsupported method 'unknown'"),
+        (
+            vec![Value::from("ZSCORE"), Value::from("mystery")],
+            "unsupported zscore method type 'mystery'",
+        ),
+        (
+            vec![Value::from("CENTER"), Value::from("mystery")],
+            "unsupported center type 'mystery'",
+        ),
+        (
+            vec![Value::from("SCALE"), Value::from("mystery")],
+            "unsupported scale type 'mystery'",
+        ),
+        (
+            vec![Value::from("DataVariables")],
+            "table name-value options are not supported",
+        ),
+    ] {
+        let error = call(input(), arguments).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:normalize:InvalidArgument"));
+        assert!(error.message().contains(expected), "{}", error.message());
+    }
+}
+
+#[test]
 fn normalize_reads_typed_integer_input_storage_exactly() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = expect_tensor(
@@ -80,6 +120,72 @@ fn normalize_integer_data_gates_and_wide_values_reject() {
     let wide = int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]);
     let error = call(wide, Vec::new()).unwrap_err();
     assert!(error.message.contains("exactly representable"));
+}
+
+#[test]
+fn exact_wide_integer_boundaries_apply_to_scalar_dense_and_complex_storage() {
+    let exact = 1_u64 << 54;
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let NumericInput::Real { data, .. } =
+        block_on(value_to_input(Value::Int(IntValue::U64(exact)))).unwrap()
+    else {
+        panic!("expected real scalar input");
+    };
+    assert_eq!(data, vec![exact as f64]);
+
+    let NumericInput::Real { data, .. } = block_on(value_to_input(mirrorless_int_tensor(
+        IntegerStorage::I64(vec![i64::MIN, exact as i64]),
+        vec![2, 1],
+    )))
+    .unwrap() else {
+        panic!("expected real dense input");
+    };
+    assert_eq!(data, vec![i64::MIN as f64, exact as f64]);
+
+    let NumericInput::Complex { data, .. } = block_on(value_to_input(complex_int_tensor(
+        IntegerStorage::I64(vec![i64::MIN]),
+        IntegerStorage::I64(vec![exact as i64]),
+        vec![1, 1],
+    )))
+    .unwrap() else {
+        panic!("expected complex input");
+    };
+    assert_eq!(data, vec![(i64::MIN as f64, exact as f64)]);
+
+    for value in [
+        Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+        mirrorless_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
+        complex_int_tensor(
+            IntegerStorage::I64(vec![i64::MIN]),
+            IntegerStorage::I64(vec![((1_u64 << 53) + 1) as i64]),
+            vec![1, 1],
+        ),
+    ] {
+        assert!(block_on(value_to_input(value))
+            .err()
+            .expect("inexact integer boundary must reject")
+            .message()
+            .contains("exactly representable"));
+    }
+}
+
+#[test]
+fn structural_dimension_is_not_forced_through_the_floating_boundary() {
+    let input = tensor(vec![1.0, 2.0], vec![2, 1]);
+    let error = call(input, vec![Value::Int(IntValue::U64(1_u64 << 54))]).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:normalize:InvalidArgument"));
+    assert!(error.message().contains("dimension must be <="));
+    assert!(!error.message().contains("exactly representable"));
+
+    let output = call(
+        tensor(vec![1.0, 2.0], vec![2, 1]),
+        vec![Value::from("range"), Value::Int(IntValue::U64(1_u64 << 54))],
+    )
+    .expect("exact wide range boundary");
+    assert_eq!(
+        expect_tensor(output).materialize_f64(),
+        vec![0.0, (1_u64 << 54) as f64]
+    );
 }
 
 #[test]

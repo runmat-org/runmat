@@ -2,6 +2,7 @@
 mod contract;
 mod documentation;
 mod inference;
+mod options;
 
 use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
@@ -11,6 +12,7 @@ pub use contract::{
     NORMALIZE_INTEGER_CAPABILITIES, NORMALIZE_INTEGER_DATA_EXTENSION,
     NORMALIZE_LOGICAL_DATA_EXTENSION, NORMALIZE_RESIDENT_CONTROL_EXTENSION,
 };
+pub use options::NormalizeKeyword;
 
 pub const NORMALIZE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

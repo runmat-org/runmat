@@ -1,38 +1,11 @@
 //! Conservative static facts for normalization's method-dependent outputs.
+use super::NormalizeKeyword;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
     LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact,
     ValueFact, ValueKindFact,
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Method {
-    ZScore,
-    Norm,
-    Scale,
-    Range,
-    Center,
-    MedianIqr,
-    DataVariables,
-    ReplaceValues,
-}
-
-impl Method {
-    fn parse(text: &str) -> Option<Self> {
-        match text.trim().to_ascii_lowercase().as_str() {
-            "zscore" => Some(Self::ZScore),
-            "norm" => Some(Self::Norm),
-            "scale" => Some(Self::Scale),
-            "range" => Some(Self::Range),
-            "center" => Some(Self::Center),
-            "medianiqr" => Some(Self::MedianIqr),
-            "datavariables" => Some(Self::DataVariables),
-            "replacevalues" => Some(Self::ReplaceValues),
-            _ => None,
-        }
-    }
-}
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -75,13 +48,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             | LiteralValue::Keyword(text) => text,
             _ => continue,
         };
-        if let Some(method) = Method::parse(text) {
-            if matches!(method, Method::DataVariables | Method::ReplaceValues) {
-                diagnostics.push(error(
-                    "METHOD",
-                    "tabular normalize options are not supported for array input",
-                ));
-            }
+        let method = NormalizeKeyword::from_public_text(text);
+        if matches!(
+            method,
+            NormalizeKeyword::DataVariables | NormalizeKeyword::ReplaceValues
+        ) {
+            diagnostics.push(error(
+                "METHOD",
+                "tabular normalize options are not supported for array input",
+            ));
         }
     }
     let shape = input.map_or(ShapeFact::Unknown, |fact| fact.shape.clone());
