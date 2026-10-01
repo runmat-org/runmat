@@ -804,8 +804,7 @@ fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
 
 async fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelection>> {
     match value {
-        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, "min", false)
-            .await
+        Value::Int(_) | Value::Num(_) => tensor::scalar_dimension_from_value_typed(value, false)
             .map_err(map_scalar_dim_error)
             .map(|dim| dim.map(DimSelection::Dim)),
         Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
@@ -854,19 +853,31 @@ async fn parse_dimension_tensor(
     Ok(Some(DimSelection::Vec(uniq)))
 }
 
-fn map_scalar_dim_error(message: String) -> RuntimeError {
-    if message.contains("integer") {
-        return min_invalid_argument("min: dimension must be integral");
-    }
-    min_invalid_argument(message)
+fn map_scalar_dim_error(error: tensor::DimensionDecodeError) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match &error {
+        DimensionDecodeError::Fractional => "min: dimension must be integral".to_string(),
+        DimensionDecodeError::NonFinite => "min: dimension must be finite".to_string(),
+        DimensionDecodeError::Negative | DimensionDecodeError::BelowMinimum => {
+            "min: dimension must be >= 1".to_string()
+        }
+        DimensionDecodeError::OutOfPlatformRange
+        | DimensionDecodeError::IntegerNegative
+        | DimensionDecodeError::IntegerOutOfPlatformRange => {
+            "min: dimension is outside the supported range".to_string()
+        }
+        DimensionDecodeError::Gather(_) => error.to_string(),
+    };
+    error.attach_cause(min_invalid_argument(message))
 }
 
 fn map_vector_dim_error(error: tensor::DimensionDecodeError) -> RuntimeError {
     use tensor::DimensionDecodeError;
     let message = match &error {
-        DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform => {
-            "min: dimension indices must be >= 1".to_string()
-        }
+        DimensionDecodeError::Negative
+        | DimensionDecodeError::IntegerNegative
+        | DimensionDecodeError::IntegerOutOfPlatformRange
+        | DimensionDecodeError::BelowMinimum => "min: dimension indices must be >= 1".to_string(),
         DimensionDecodeError::NonFinite => "min: dimension entries must be finite".to_string(),
         DimensionDecodeError::Fractional => "min: dimension entries must be integers".to_string(),
         DimensionDecodeError::OutOfPlatformRange | DimensionDecodeError::Gather(_) => {
@@ -2958,5 +2969,25 @@ pub(crate) mod tests {
         let args = vec![placeholder(), Value::Int(IntValue::I32(0))];
         let err = evaluate(Value::Tensor(tensor), &args).expect_err("expected error");
         assert!(err.message().contains("dimension must be >= 1"));
+    }
+
+    #[test]
+    fn min_scalar_dimension_diagnostics_follow_typed_decode_reasons() {
+        let invalid = [
+            (Value::Num(f64::NAN), "dimension must be finite"),
+            (Value::Num(1.25), "dimension must be integral"),
+            (Value::Num(0.0), "dimension must be >= 1"),
+            (
+                Value::Int(IntValue::I64(-1)),
+                "dimension is outside the supported range",
+            ),
+        ];
+        for (dimension, expected) in invalid {
+            let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+            let error = evaluate(Value::Tensor(input), &[placeholder(), dimension])
+                .expect_err("invalid scalar dimension must fail");
+            assert_eq!(error.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);
+            assert!(error.message().contains(expected), "{error}");
+        }
     }
 }

@@ -628,12 +628,20 @@ fn value_as_str(value: &Value) -> Option<String> {
 fn map_dims_error(error: tensor::DimensionDecodeError, scalar: bool) -> RuntimeError {
     use tensor::DimensionDecodeError;
     let message = match (&error, scalar) {
-        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, true) => {
-            "std: dimension must be >= 1".to_string()
-        }
-        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, false) => {
-            "std: dimension entries must be >= 1".to_string()
-        }
+        (
+            DimensionDecodeError::Negative
+            | DimensionDecodeError::IntegerNegative
+            | DimensionDecodeError::IntegerOutOfPlatformRange
+            | DimensionDecodeError::BelowMinimum,
+            true,
+        ) => "std: dimension must be >= 1".to_string(),
+        (
+            DimensionDecodeError::Negative
+            | DimensionDecodeError::IntegerNegative
+            | DimensionDecodeError::IntegerOutOfPlatformRange
+            | DimensionDecodeError::BelowMinimum,
+            false,
+        ) => "std: dimension entries must be >= 1".to_string(),
         (DimensionDecodeError::NonFinite, true) => "std: dimension must be finite".to_string(),
         (DimensionDecodeError::NonFinite, false) => {
             "std: dimension entries must be finite integers".to_string()

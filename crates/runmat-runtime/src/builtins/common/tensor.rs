@@ -385,18 +385,86 @@ pub async fn dimension_from_value_async(
     parse_numeric_dimension_value(raw, name, allow_zero).map(Some)
 }
 
+/// Decode an integer or floating scalar dimension without provider access.
+/// Other value kinds are left to the existing asynchronous scalar admission.
+pub fn scalar_dimension_from_value_typed(
+    value: &Value,
+    allow_zero: bool,
+) -> Result<Option<usize>, DimensionDecodeError> {
+    match value {
+        Value::Int(value) => parse_integer_dimension_typed(value, allow_zero).map(Some),
+        Value::Num(value) => parse_numeric_dimension_value_typed(*value, allow_zero).map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn parse_integer_dimension_typed(
+    value: &IntValue,
+    allow_zero: bool,
+) -> Result<usize, DimensionDecodeError> {
+    if value.to_i128() < 0 {
+        return Err(DimensionDecodeError::IntegerNegative);
+    }
+    let dimension = value
+        .try_to_usize()
+        .ok_or(DimensionDecodeError::IntegerOutOfPlatformRange)?;
+    if !allow_zero && dimension == 0 {
+        return Err(DimensionDecodeError::BelowMinimum);
+    }
+    Ok(dimension)
+}
+
+fn parse_numeric_dimension_value_typed(
+    value: f64,
+    allow_zero: bool,
+) -> Result<usize, DimensionDecodeError> {
+    if !value.is_finite() {
+        return Err(DimensionDecodeError::NonFinite);
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > 1e-6 {
+        return Err(DimensionDecodeError::Fractional);
+    }
+    let minimum = if allow_zero { 0.0 } else { 1.0 };
+    if rounded < minimum {
+        return Err(DimensionDecodeError::BelowMinimum);
+    }
+    if !fits_platform_usize(rounded) {
+        return Err(DimensionDecodeError::OutOfPlatformRange);
+    }
+    Ok(rounded as usize)
+}
+
+fn scalar_dimension_legacy_message(
+    error: DimensionDecodeError,
+    name: &str,
+    allow_zero: bool,
+) -> String {
+    match error {
+        DimensionDecodeError::NonFinite => format!("{name}: dimension must be finite"),
+        DimensionDecodeError::Fractional => format!("{name}: dimension must be an integer"),
+        DimensionDecodeError::BelowMinimum | DimensionDecodeError::Negative => {
+            format!(
+                "{name}: dimension must be >= {}",
+                if allow_zero { 0 } else { 1 }
+            )
+        }
+        DimensionDecodeError::OutOfPlatformRange
+        | DimensionDecodeError::IntegerNegative
+        | DimensionDecodeError::IntegerOutOfPlatformRange => {
+            format!("{name}: dimension is outside the supported range")
+        }
+        DimensionDecodeError::Gather(source) => format!("{name}: {source}"),
+    }
+}
+
 fn parse_integer_dimension(
     value: &IntValue,
     name: &str,
     allow_zero: bool,
 ) -> Result<usize, String> {
-    let dim = value
-        .try_to_usize()
-        .ok_or_else(|| format!("{name}: dimension is outside the supported range"))?;
-    if !allow_zero && dim == 0 {
-        return Err(format!("{name}: dimension must be >= 1"));
-    }
-    Ok(dim)
+    parse_integer_dimension_typed(value, allow_zero)
+        .map_err(|error| scalar_dimension_legacy_message(error, name, allow_zero))
 }
 
 /// Parse every element of a typed integer tensor as a dimension selector without
@@ -432,7 +500,11 @@ pub enum DimensionDecodeError {
     #[error("dimensions are outside the supported platform range")]
     OutOfPlatformRange,
     #[error("dimensions must be non-negative platform integers")]
-    IntegerNotPlatform,
+    IntegerNegative,
+    #[error("dimensions must be non-negative platform integers")]
+    IntegerOutOfPlatformRange,
+    #[error("dimension is below the allowed minimum")]
+    BelowMinimum,
     #[error("dimensions: {0}")]
     Gather(#[source] RuntimeError),
 }
@@ -453,9 +525,12 @@ impl DimensionDecodeError {
 }
 
 fn parse_integer_shape_dimension(value: &IntValue) -> Result<usize, DimensionDecodeError> {
+    if value.to_i128() < 0 {
+        return Err(DimensionDecodeError::IntegerNegative);
+    }
     value
         .try_to_usize()
-        .ok_or(DimensionDecodeError::IntegerNotPlatform)
+        .ok_or(DimensionDecodeError::IntegerOutOfPlatformRange)
 }
 
 fn parse_numeric_dimension(value: f64) -> Result<usize, DimensionDecodeError> {
@@ -634,23 +709,8 @@ fn parse_numeric_dimension_value(
     name: &str,
     allow_zero: bool,
 ) -> Result<usize, String> {
-    if !value.is_finite() {
-        return Err(format!("{name}: dimension must be finite"));
-    }
-    let rounded = value.round();
-    // Allow small floating error tolerance when users pass float-typed dims
-    if (rounded - value).abs() > 1e-6 {
-        return Err(format!("{name}: dimension must be an integer"));
-    }
-    let min = if allow_zero { 0.0 } else { 1.0 };
-    if rounded < min {
-        let bound = if allow_zero { 0 } else { 1 };
-        return Err(format!("{name}: dimension must be >= {bound}"));
-    }
-    if !fits_platform_usize(rounded) {
-        return Err(format!("{name}: dimension is outside the supported range"));
-    }
-    Ok(rounded as usize)
+    parse_numeric_dimension_value_typed(value, allow_zero)
+        .map_err(|error| scalar_dimension_legacy_message(error, name, allow_zero))
 }
 
 /// Attempt to extract a string from a runtime value.
@@ -855,8 +915,9 @@ mod dtype_tests {
 mod dimension_tests {
     use super::{
         dimension_from_value_async, dims_from_value_async, dims_from_value_async_typed,
-        integer_tensor_to_f64, parse_dimension, scalar_f64_from_value_async, tensor_into_value,
-        tensor_into_values_f64, tensor_values_f64, tensor_values_f64_cow, DimensionDecodeError,
+        integer_tensor_to_f64, parse_dimension, scalar_dimension_from_value_typed,
+        scalar_f64_from_value_async, tensor_into_value, tensor_into_values_f64, tensor_values_f64,
+        tensor_values_f64_cow, DimensionDecodeError,
     };
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
@@ -877,8 +938,21 @@ mod dimension_tests {
         ));
         assert!(matches!(
             block_on(dims_from_value_async_typed(&Value::Int(IntValue::I64(-1)))),
-            Err(DimensionDecodeError::IntegerNotPlatform)
+            Err(DimensionDecodeError::IntegerNegative)
         ));
+        assert!(matches!(
+            scalar_dimension_from_value_typed(&Value::Num(0.0), false),
+            Err(DimensionDecodeError::BelowMinimum)
+        ));
+        assert!(matches!(
+            scalar_dimension_from_value_typed(&Value::Num(1.25), false),
+            Err(DimensionDecodeError::Fractional)
+        ));
+        assert_eq!(
+            scalar_dimension_from_value_typed(&Value::Num(1.0 + 5.0e-7), false)
+                .expect("legacy scalar tolerance retained"),
+            Some(1)
+        );
     }
 
     #[test]

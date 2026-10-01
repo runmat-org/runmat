@@ -259,4 +259,26 @@ mod tests {
             Type::Num
         );
     }
+
+    #[test]
+    fn repeated_mean_vecdim_literals_are_idempotent() {
+        let inferred = infer_mean_type(
+            &[
+                input(),
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(2)]),
+                },
+            ],
+            &ResolveContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Vector(vec![LiteralValue::Number(2.0), LiteralValue::Number(2.0)]),
+            ]),
+        );
+        assert_eq!(
+            inferred,
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(1)])
+            }
+        );
+    }
 }

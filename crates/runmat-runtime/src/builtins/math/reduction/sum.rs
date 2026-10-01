@@ -744,9 +744,10 @@ async fn parse_dimension_tensor(
 fn map_dims_error(error: tensor::DimensionDecodeError) -> RuntimeError {
     use tensor::DimensionDecodeError;
     let message = match &error {
-        DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform => {
-            "sum: dimension indices must be >= 1".to_string()
-        }
+        DimensionDecodeError::Negative
+        | DimensionDecodeError::IntegerNegative
+        | DimensionDecodeError::IntegerOutOfPlatformRange
+        | DimensionDecodeError::BelowMinimum => "sum: dimension indices must be >= 1".to_string(),
         DimensionDecodeError::NonFinite => "sum: dimensions must be finite".to_string(),
         DimensionDecodeError::Fractional => "sum: dimensions must contain integers".to_string(),
         DimensionDecodeError::OutOfPlatformRange | DimensionDecodeError::Gather(_) => {

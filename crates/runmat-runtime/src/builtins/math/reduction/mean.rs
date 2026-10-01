@@ -976,12 +976,20 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
 fn map_dims_error(error: tensor::DimensionDecodeError, scalar: bool) -> RuntimeError {
     use tensor::DimensionDecodeError;
     let message = match (&error, scalar) {
-        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, true) => {
-            "mean: dimension must be >= 1"
-        }
-        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, false) => {
-            "mean: dimension entries must be >= 1"
-        }
+        (
+            DimensionDecodeError::Negative
+            | DimensionDecodeError::IntegerNegative
+            | DimensionDecodeError::IntegerOutOfPlatformRange
+            | DimensionDecodeError::BelowMinimum,
+            true,
+        ) => "mean: dimension must be >= 1",
+        (
+            DimensionDecodeError::Negative
+            | DimensionDecodeError::IntegerNegative
+            | DimensionDecodeError::IntegerOutOfPlatformRange
+            | DimensionDecodeError::BelowMinimum,
+            false,
+        ) => "mean: dimension entries must be >= 1",
         (DimensionDecodeError::NonFinite, true) => "mean: dimension must be finite",
         (DimensionDecodeError::Fractional, true) => "mean: dimension must be an integer",
         (
@@ -2296,6 +2304,19 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(4)])
             }
         );
+    }
+
+    #[test]
+    fn mean_repeated_vecdim_executes_each_dimension_once() {
+        let input = Tensor::new((1..=12).map(f64::from).collect(), vec![3, 4]).unwrap();
+        let dimensions = Tensor::new(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let result = mean_builtin(Value::Tensor(input), vec![Value::Tensor(dimensions)])
+            .expect("repeated vecdim is admitted");
+        let Value::Tensor(result) = result else {
+            panic!("expected row-wise reduction tensor");
+        };
+        assert_eq!(result.shape, vec![3, 1]);
+        assert_eq!(values(&result), vec![5.5, 6.5, 7.5]);
     }
 
     #[test]
