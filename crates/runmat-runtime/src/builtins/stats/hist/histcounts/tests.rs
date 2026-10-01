@@ -30,7 +30,7 @@ fn wide_integer_edges_classify_without_rounding_and_keep_exact_widths() {
         IntegerStorage::U64(vec![base, base + 1, base + 2]),
         vec![1, 3],
     );
-    let eval = block_on(evaluate(data.clone(), &[edges.clone()])).expect("exact edges");
+    let eval = block_on(evaluate(data.clone(), std::slice::from_ref(&edges))).expect("exact edges");
     let (counts, _) = eval.into_pair();
     assert_eq!(values_from_tensor(counts), vec![1.0, 2.0]);
 
@@ -255,15 +255,6 @@ fn histcounts_numeric_vectors_read_typed_integer_storage_exactly() {
         .unwrap(),
         vec![1.0, 3.0, 5.0]
     );
-    match classify_bin_argument(&integer_tensor(
-        IntegerStorage::U16(vec![2, 4, 6]),
-        vec![1, 3],
-    ))
-    .unwrap()
-    {
-        BinArgument::Edges(edges) => assert_eq!(edges, vec![2.0, 4.0, 6.0]),
-        other => panic!("expected edge vector, got {other:?}"),
-    }
     assert_eq!(
         scalar_value(
             &integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),

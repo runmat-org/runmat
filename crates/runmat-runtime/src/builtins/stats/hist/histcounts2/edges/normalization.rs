@@ -1,7 +1,7 @@
 use super::super::options::HistogramNormalization;
 use runmat_value::IntValue;
 
-pub(super) fn apply_normalization_2d(
+pub(in crate::builtins::stats::hist::histcounts2) fn apply_normalization_2d(
     counts: &[f64],
     x_edges: &[f64],
     y_edges: &[f64],

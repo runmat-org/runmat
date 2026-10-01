@@ -1,3 +1,4 @@
+use super::super::integer_bins;
 use super::*;
 use runmat_builtins::{HISTCOUNTS_ERROR_BINMETHOD_CONFLICT, HISTCOUNTS_ERROR_BINWIDTH_INVALID};
 #[derive(Clone, Default)]
@@ -98,7 +99,7 @@ pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<HistcountsOptions> 
         match runmat_builtins::HistcountsOption::parse(&key) {
             Some(runmat_builtins::HistcountsOption::BinEdges) => {
                 let edges = numeric_vector(value, "histcounts", "BinEdges")?;
-                let exact = super::integer_bins::exact_integer_vector(value);
+                let exact = integer_bins::exact_integer_vector(value);
                 validate_bin_edges(&edges, exact.as_deref())?;
                 options.explicit_edges = Some(edges);
                 options.exact_edges = exact;
@@ -174,7 +175,7 @@ fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
                 let edges = tensor::tensor_values_f64(tensor);
                 Ok(BinArgument::Edges(
                     edges,
-                    super::integer_bins::exact_integer_vector(value),
+                    integer_bins::exact_integer_vector(value),
                 ))
             }
         }
@@ -316,3 +317,6 @@ fn parse_normalization(text: &str) -> BuiltinResult<HistogramNormalization> {
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests;

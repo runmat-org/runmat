@@ -77,7 +77,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             index,
         ));
     }
-    let count_shape = bins.map_or(ShapeFact::Unknown, |n| row(n));
+    let count_shape = bins.map_or(ShapeFact::Unknown, row);
     let edge_shape = bins
         .and_then(|n| n.checked_add(1))
         .map_or(ShapeFact::Unknown, row);

@@ -132,7 +132,7 @@ pub(super) fn cover_exact_integer_range(edges: &mut [f64], values: &[IntValue]) 
         values
             .iter()
             .map(IntValue::to_i128)
-            .fold(None, |bounds, value| {
+            .fold(None::<(i128, i128)>, |bounds, value| {
                 Some(match bounds {
                     None => (value, value),
                     Some((low, high)) => (low.min(value), high.max(value)),

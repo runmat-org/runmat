@@ -1,4 +1,4 @@
-use super::super::integer_bins::exact_integer_vector;
+use super::super::integer_bins::{exact_integer_vector, validate_exact_edges};
 use super::edges::validate_edges;
 use super::*;
 use runmat_builtins::{HISTCOUNTS2_ERROR_BINMETHOD_CONFLICT, HISTCOUNTS2_ERROR_NUMBINS_INVALID};
@@ -342,7 +342,7 @@ fn validate_edge_value(value: &Value, floating: &[f64], axis: &str) -> BuiltinRe
                 "{NAME}: {axis}BinEdges must contain at least two elements"
             )));
         }
-        if !super::integer_bins::validate_exact_edges(&exact) {
+        if !validate_exact_edges(&exact) {
             return Err(builtin_error(format!(
                 "{NAME}: {axis}BinEdges must be strictly increasing"
             )));
