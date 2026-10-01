@@ -14,6 +14,17 @@ fn tabulate_expands_positive_integer_levels() {
 }
 
 #[test]
+fn tabulate_near_integer_floats_remain_distinct_exact_levels() {
+    let adjacent = 1.0 + 5.0e-13;
+    assert_ne!(adjacent, 1.0);
+    let input = Value::Tensor(Tensor::new(vec![1.0, adjacent, adjacent], vec![1, 3]).unwrap());
+    let (data, shape) = tensor_values(block_on(tabulate::tabulate_builtin(input)).unwrap());
+    assert_eq!(shape, vec![2, 3]);
+    assert_eq!(&data[..2], &[1.0, adjacent]);
+    assert_eq!(&data[2..4], &[1.0, 2.0]);
+}
+
+#[test]
 fn tabulate_rejects_unbounded_positive_floating_levels_before_expansion() {
     assert_eq!(
         super::super::tabulation::expanded_level_count(1_000_000),
@@ -121,4 +132,18 @@ fn tabulate_string_array_returns_cell_table() {
         }
         other => panic!("expected cell table, got {other:?}"),
     }
+}
+
+#[test]
+fn tabulate_rejects_multirow_characters_and_nested_cell_labels() {
+    let chars = runmat_value::CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+    assert!(block_on(tabulate::tabulate_builtin(Value::CharArray(chars))).is_err());
+
+    let inner = runmat_value::CellArray::new(vec![Value::from("a")], 1, 1).unwrap();
+    let outer = runmat_value::CellArray::new(vec![Value::Cell(inner)], 1, 1).unwrap();
+    let err = block_on(tabulate::tabulate_builtin(Value::Cell(outer)))
+        .expect_err("nested cells are not scalar labels");
+    assert!(err
+        .message()
+        .contains("cell entries must be scalar strings or scalars"));
 }

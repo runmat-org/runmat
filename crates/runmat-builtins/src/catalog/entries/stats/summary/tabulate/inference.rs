@@ -1,7 +1,7 @@
 //! A table always has three columns; its row count depends on observed values.
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, CellFact, DynamicReason,
+    infer_call, CallContract, CallInference, CallRequest, CellFact, DimensionFact, DynamicReason,
     InferenceDiagnostic, NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact,
     StorageFact, ValueFact, ValueKindFact,
 };
@@ -23,9 +23,29 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 })
             }
         }
-        Some(ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Cell(_)) => {
-            cell_kind()
-        }
+        Some(ValueKindFact::String) => cell_kind(),
+        Some(ValueKindFact::Character) => match character_row(&request.arguments[0].shape) {
+            Admission::Valid => cell_kind(),
+            Admission::Invalid => {
+                diagnostics.push(InferenceDiagnostic::error(
+                    "RM.TABULATE.INPUT",
+                    "tabulate character input must have one row",
+                ));
+                ValueKindFact::Unknown
+            }
+            Admission::Unknown => ValueKindFact::Unknown,
+        },
+        Some(ValueKindFact::Cell(cell)) => match cell_labels(cell) {
+            Admission::Valid => cell_kind(),
+            Admission::Invalid => {
+                diagnostics.push(InferenceDiagnostic::error(
+                    "RM.TABULATE.INPUT",
+                    "tabulate cell entries must be scalar strings or scalars",
+                ));
+                ValueKindFact::Unknown
+            }
+            Admission::Unknown => ValueKindFact::Unknown,
+        },
         Some(ValueKindFact::Logical) => ValueKindFact::Unknown,
         Some(ValueKindFact::Unknown) => ValueKindFact::Unknown,
         Some(_) => {
@@ -73,6 +93,61 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     result.diagnostics.extend(diagnostics);
     result
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Admission {
+    Valid,
+    Invalid,
+    Unknown,
+}
+
+fn character_row(shape: &ShapeFact) -> Admission {
+    match shape {
+        ShapeFact::Scalar => Admission::Valid,
+        ShapeFact::Shaped { dims } => match dims.first() {
+            Some(DimensionFact::Known(1)) => Admission::Valid,
+            Some(DimensionFact::Known(_)) => Admission::Invalid,
+            _ => Admission::Unknown,
+        },
+        ShapeFact::Unknown | ShapeFact::Ranked { .. } => Admission::Unknown,
+    }
+}
+
+fn cell_labels(cell: &CellFact) -> Admission {
+    if !cell.elements_complete {
+        return Admission::Unknown;
+    }
+    let mut result = Admission::Valid;
+    for element in &cell.elements {
+        match cell_label(element) {
+            Admission::Invalid => return Admission::Invalid,
+            Admission::Unknown => result = Admission::Unknown,
+            Admission::Valid => {}
+        }
+    }
+    result
+}
+
+fn cell_label(element: &ValueFact) -> Admission {
+    match &element.kind {
+        ValueKindFact::String => match element.shape.element_count() {
+            Some(1) => Admission::Valid,
+            Some(_) => Admission::Invalid,
+            None => Admission::Unknown,
+        },
+        ValueKindFact::Character => character_row(&element.shape),
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        })
+        | ValueKindFact::Logical => match element.shape.element_count() {
+            Some(1) | None => Admission::Unknown,
+            Some(_) => Admission::Invalid,
+        },
+        ValueKindFact::Unknown => Admission::Unknown,
+        _ => Admission::Invalid,
+    }
 }
 
 fn cell_kind() -> ValueKindFact {

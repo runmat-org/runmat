@@ -137,10 +137,10 @@ fn numeric_tabulate(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
     let positive_integers = !values.is_empty()
         && values
             .iter()
-            .all(|value| value.is_finite() && *value >= 1.0 && value.fract().abs() <= 1e-12);
+            .all(|value| value.is_finite() && *value >= 1.0 && value.fract() == 0.0);
     let mut rows = Vec::<(f64, f64)>::new();
     if positive_integers {
-        let maximum = values.last().copied().unwrap_or(0.0).round();
+        let maximum = values.last().copied().unwrap_or(0.0);
         if maximum > MAX_EXPANDED_LEVELS as f64 {
             return Err(descriptive_error(
                 name,
@@ -162,7 +162,7 @@ fn numeric_tabulate(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
         })?;
         counts.resize(count_len, 0usize);
         for value in values {
-            counts[value.round() as usize] += 1;
+            counts[value as usize] += 1;
         }
         rows.extend((1..=max_value).map(|idx| (idx as f64, counts[idx] as f64)));
     } else {
