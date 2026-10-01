@@ -180,7 +180,7 @@ fn owner_shape_accepts_ranked_identity_and_scalar_normalization() {
     identity.output_shape = vec![2, 3, 1];
     identity.inputs[0].shape = vec![2, 3, 1];
     identity.inputs[0].broadcast_shape = vec![2, 3, 1];
-    identity.inputs[0].strides = vec![1, 2, 6];
+    identity.inputs[0].strides = vec![1, 2, 0];
     identity.inputs[0].payload_bytes = 24;
     identity.partial.precision = ProviderPrecision::F32;
     identity.partial.alignment = 4;
@@ -205,7 +205,8 @@ fn owner_shape_accepts_ranked_identity_and_scalar_normalization() {
     identity.work.partial_payload_bytes = 72;
     identity.work.partial_requested_bytes = 72;
     identity.work.workgroup_bytes = 96;
-    assert!(ProviderReductionRecipe::new(Digest::sha256(b"identity"), identity, sources()).is_ok());
+    ProviderReductionRecipe::new(Digest::sha256(b"identity"), identity, sources())
+        .expect("rank-preserving identity must retain zero singleton strides");
 
     let mut scalar = descriptor();
     scalar.contract.input_shape = vec![1, 1, 1];
@@ -215,7 +216,7 @@ fn owner_shape_accepts_ranked_identity_and_scalar_normalization() {
     scalar.output_shape = vec![1, 1];
     scalar.inputs[0].shape = vec![1, 1, 1];
     scalar.inputs[0].broadcast_shape = vec![1, 1, 1];
-    scalar.inputs[0].strides = vec![1, 1, 1];
+    scalar.inputs[0].strides = vec![0, 0, 0];
     scalar.inputs[0].payload_bytes = 4;
     scalar.geometry.reduce_elements = 1;
     scalar.geometry.slices = 1;
@@ -234,7 +235,8 @@ fn owner_shape_accepts_ranked_identity_and_scalar_normalization() {
     scalar.work.output_requested_bytes = 8;
     scalar.work.partial_payload_bytes = 16;
     scalar.work.partial_requested_bytes = 16;
-    assert!(ProviderReductionRecipe::new(Digest::sha256(b"scalar"), scalar, sources()).is_ok());
+    ProviderReductionRecipe::new(Digest::sha256(b"scalar"), scalar, sources())
+        .expect("scalar-normalized reduction must retain zero singleton strides");
 }
 
 #[test]
@@ -301,6 +303,8 @@ fn empty_output_keeps_minimum_output_allocation_but_no_scratch_or_dispatch() {
     d.inputs.clear(); // A constant producer need not bind a data operand.
     d.iteration_shape = vec![4, 0];
     d.output_shape = vec![1, 0];
+    d.contract.input_shape = d.iteration_shape.clone();
+    d.contract.output_shape = d.output_shape.clone();
     d.geometry.slices = 0;
     d.geometry.partial_elements = 0;
     let absent = ReductionDispatch {
