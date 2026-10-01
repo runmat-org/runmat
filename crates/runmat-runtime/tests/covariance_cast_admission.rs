@@ -2,7 +2,7 @@ use futures::executor::block_on;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use runmat_runtime::{call_builtin_async_with_outputs, GpuGatherRetry};
-use runmat_value::Value;
+use runmat_value::{NumericDType, Value};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Mutex,
@@ -206,7 +206,7 @@ impl AccelProvider for Provider {
 }
 
 #[test]
-fn typed_unsupported_cast_uses_admitted_host_materialization_without_retiring_inputs() {
+fn typed_unsupported_cast_respects_each_builtin_host_boundary_and_input_lifetime() {
     for builtin in ["cov", "corrcoef"] {
         let provider = Provider::new(Mode::CastUnsupported);
         let _selected = ThreadProviderGuard::set(Some(provider));
@@ -226,29 +226,38 @@ fn typed_unsupported_cast_uses_admitted_host_materialization_without_retiring_in
         ))
         .unwrap();
         let output = match result {
-            Value::GpuTensor(value) => value,
-            Value::OutputList(mut values) if values.len() == 1 => {
-                let Value::GpuTensor(value) = values.remove(0) else {
-                    panic!("{builtin} should restore its output to the original device");
-                };
-                value
-            }
-            _ => panic!("{builtin} should restore its output to the original device"),
+            Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+            value => value,
         };
-        assert_eq!(output.shape(), &[2, 2]);
-        assert_eq!(handle_precision(&output), Some(ProviderPrecision::F32));
-        assert!(!output.shares_allocation_with(&input.handle));
         assert_eq!(provider.casts.load(Ordering::SeqCst), 1);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
-        assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
-        let downloaded = block_on(provider.download_numeric(&output)).unwrap();
-        let HostNumericDataOwned::F32(values) = downloaded.data else {
-            panic!("{builtin} restoration changed numeric precision");
-        };
-        assert_eq!(downloaded.shape, vec![2, 2]);
-        assert!(values
-            .iter()
-            .all(|&value| (value - if builtin == "cov" { 0.5 } else { 1.0 }).abs() < 1e-6));
+        match (builtin, output) {
+            ("cov", Value::GpuTensor(output)) => {
+                assert_eq!(output.shape(), &[2, 2]);
+                assert_eq!(handle_precision(&output), Some(ProviderPrecision::F32));
+                assert!(!output.shares_allocation_with(&input.handle));
+                assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
+                let downloaded = block_on(provider.download_numeric(&output)).unwrap();
+                let HostNumericDataOwned::F32(values) = downloaded.data else {
+                    panic!("cov restoration changed numeric precision");
+                };
+                assert_eq!(downloaded.shape, vec![2, 2]);
+                assert!(values.iter().all(|&value| (value - 0.5).abs() < 1e-6));
+                drop(output);
+            }
+            ("corrcoef", Value::Tensor(output)) => {
+                // This builtin's documented fallback is host reference execution;
+                // unlike cov, it does not promise device restoration.
+                assert_eq!(output.shape, vec![2, 2]);
+                assert_eq!(output.numeric_dtype(), NumericDType::F32);
+                assert!(output
+                    .materialize_f64()
+                    .iter()
+                    .all(|&value| (value - 1.0).abs() < 1e-6));
+                assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+            }
+            _ => panic!("{builtin} fallback returned the wrong output carrier"),
+        }
         assert!(input.handle.allocation_lease().validate_live().is_ok());
         assert_eq!(input.probe.retirements(), 0);
         drop(output);
