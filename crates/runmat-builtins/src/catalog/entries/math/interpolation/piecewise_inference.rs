@@ -127,7 +127,7 @@ fn evaluated_values(request: &CallRequest) -> ValueFact {
     output
 }
 
-fn known_vector(shape: &ShapeFact) -> bool {
+pub(super) fn known_vector(shape: &ShapeFact) -> bool {
     match shape {
         ShapeFact::Scalar => false,
         ShapeFact::Shaped { dims } => {
