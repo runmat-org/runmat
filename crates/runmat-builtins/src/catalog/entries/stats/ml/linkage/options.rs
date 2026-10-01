@@ -1,5 +1,3 @@
-use super::super::pairwise_distance::DistanceMetricKind;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LinkageMethod {
     Single,
@@ -59,8 +57,4 @@ impl SaveMemorySetting {
             None
         }
     }
-}
-
-pub fn is_default_or_euclidean_metric(metric: Option<DistanceMetricKind>) -> bool {
-    metric.is_none_or(|metric| metric == DistanceMetricKind::Euclidean)
 }
