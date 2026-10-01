@@ -68,13 +68,14 @@ fn known_bad_control(
             !matches!(
                 fact.kind,
                 ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
-            ) || (kind == BinscatterOptionKind::DisplayStyle
-                && literal.is_some_and(|literal| match literal {
-                    LiteralValue::String(value) | LiteralValue::Character(value) => {
-                        !value.trim().eq_ignore_ascii_case("tile")
-                    }
-                    _ => false,
-                }))
+            ) || (matches!(fact.kind, ValueKindFact::String) && count.is_some_and(|n| n != 1))
+                || (kind == BinscatterOptionKind::DisplayStyle
+                    && literal.is_some_and(|literal| match literal {
+                        LiteralValue::String(value) | LiteralValue::Character(value) => {
+                            !value.trim().eq_ignore_ascii_case("tile")
+                        }
+                        _ => false,
+                    }))
         }
         BinscatterOptionKind::UnsupportedMatlabOption => true,
     }
@@ -194,6 +195,23 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 }
             }
         }
+    }
+    // With exactly two inputs, a scalar numeric first operand can be X or
+    // an axes handle. If the second input is a non-scalar observation vector,
+    // direct X/Y has incompatible lengths and axes/X lacks its Y operand.
+    if !direct_xy
+        && args.len() == 2
+        && args[0].shape.element_count() == Some(1)
+        && args[1].shape.element_count().is_some_and(|n| n != 1)
+        && matches!(
+            args[0].kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical
+        )
+    {
+        diagnostics.push(InferenceDiagnostic::error(
+            "LENGTH",
+            "binscatter x and y must contain the same number of elements",
+        ));
     }
     let mut contract = CallContract::fixed(vec![if diagnostics.is_empty() {
         chart_handle()

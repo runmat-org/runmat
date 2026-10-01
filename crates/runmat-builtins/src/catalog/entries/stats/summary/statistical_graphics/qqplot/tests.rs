@@ -1,7 +1,7 @@
 use super::*;
 use runmat_types::{
-    CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
-    RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+    OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 fn real(shape: Vec<Option<usize>>) -> ValueFact {
@@ -13,6 +13,40 @@ fn real(shape: Vec<Option<usize>>) -> ValueFact {
         ShapeFact::from(shape),
         StorageFact::Dense,
     )
+}
+
+#[test]
+fn ambiguous_scalar_axes_cannot_hide_invalid_second_sample() {
+    let text = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let result = call(vec![real(vec![Some(1), Some(1)]), text], 1);
+    assert!(!result.diagnostics.is_empty());
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
+fn source_known_percentage_outside_interval_cannot_prove_handle() {
+    let result = inference::infer(
+        &CallRequest {
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Empty,
+                LiteralValue::Vector(vec![LiteralValue::Number(-1.0), LiteralValue::Number(50.0)]),
+            ]),
+            arguments: vec![
+                real(vec![Some(3), Some(1)]),
+                real(vec![Some(0), Some(0)]),
+                real(vec![Some(1), Some(2)]),
+            ],
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+        &QQPLOT_CATALOG_ENTRY,
+    );
+    assert!(!result.diagnostics.is_empty());
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
 }
 
 fn call(arguments: Vec<ValueFact>, outputs: usize) -> runmat_types::CallInference {

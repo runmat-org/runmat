@@ -2,7 +2,8 @@
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 fn handles() -> ValueFact {
@@ -61,6 +62,16 @@ fn admissible_percentages(fact: &ValueFact) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn invalid_percentage_literal(literal: &LiteralValue) -> bool {
+    match literal {
+        LiteralValue::Vector(values) => values.iter().any(invalid_percentage_literal),
+        LiteralValue::Matrix(rows) => rows.iter().flatten().any(invalid_percentage_literal),
+        LiteralValue::Unknown => false,
+        value => LiteralContext::numeric_from_literal(value)
+            .is_some_and(|number| !number.is_finite() || !(0.0..=100.0).contains(&number)),
+    }
+}
+
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let args = &request.arguments;
     let mut diagnostics = Vec::new();
@@ -84,15 +95,48 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     "qqplot accepts at most x, y and pvec without an axes handle",
                 ));
             }
-            if let Some(second) = args.get(1) {
-                if let Err(message) = admissible_sample(second, args.len() == 3) {
-                    diagnostics.push(InferenceDiagnostic::error("SAMPLE", message));
-                }
-            }
             if let Some(third) = args.get(2) {
                 if let Err(message) = admissible_percentages(third) {
                     diagnostics.push(InferenceDiagnostic::error("PVEC", message));
                 }
+                if request
+                    .literals
+                    .literal_args
+                    .get(2)
+                    .is_some_and(invalid_percentage_literal)
+                {
+                    diagnostics.push(InferenceDiagnostic::error(
+                        "PVEC",
+                        "qqplot percentages must be finite values in [0, 100]",
+                    ));
+                }
+            }
+        }
+        // The second argument is a sample in both interpretations: it is Y
+        // without leading axes and X with leading axes. Only an empty Y in
+        // the three-input normal form has a special admissible meaning.
+        if let Some(second) = args.get(1) {
+            if let Err(message) = admissible_sample(second, args.len() == 3) {
+                diagnostics.push(InferenceDiagnostic::error("SAMPLE", message));
+            }
+        }
+        if args.len() == 4 && !first_is_sample {
+            if let Err(message) = admissible_sample(&args[2], true) {
+                diagnostics.push(InferenceDiagnostic::error("SAMPLE", message));
+            }
+            if let Err(message) = admissible_percentages(&args[3]) {
+                diagnostics.push(InferenceDiagnostic::error("PVEC", message));
+            }
+            if request
+                .literals
+                .literal_args
+                .get(3)
+                .is_some_and(invalid_percentage_literal)
+            {
+                diagnostics.push(InferenceDiagnostic::error(
+                    "PVEC",
+                    "qqplot percentages must be finite values in [0, 100]",
+                ));
             }
         }
     }

@@ -7,6 +7,10 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
         "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/qqplot.rs",
     ),
 };
+const ADMISSION: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Q-Q input admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/qqplot/admission.rs") };
+const SERIES: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Q-Q quantile series", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/qqplot/series.rs") };
+const GEOMETRY: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Q-Q reference geometry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/qqplot/geometry.rs") };
+const PLOT: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Q-Q rendering", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/qqplot/plot.rs") };
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
@@ -36,8 +40,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "qqplot-normal",
             title: "Compare a sample with a normal distribution",
-            program: "h = qqplot([1; 2; 4; 8]);",
-            display_output: None,
+            program: "h = qqplot([1; 2; 4; 8])",
+            display_output: Some("h is a 3-by-1 vector of line handles."),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
@@ -50,8 +54,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "qqplot-percentages",
             title: "Compare explicit sample quantiles",
-            program: "h = qqplot([0; 10; 20], [], [25 50 75]); y = get(h(1),'YData');",
-            display_output: None,
+            program: "h = qqplot([0; 10; 20], [], [25 50 75]); y = get(h(1),'YData')",
+            display_output: Some("y is [5 10 15]."),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
@@ -64,8 +68,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "qqplot-two-samples",
             title: "Compare two medians",
-            program: "h = qqplot([1; 3; 5], [2; 4; 6], 50);",
-            display_output: None,
+            program: "h = qqplot([1; 3; 5], [2; 4; 6], 50)",
+            display_output: Some("The plotted point compares median quantiles 3 and 4."),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
@@ -83,14 +87,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             answer: "The line relates the first and third quartiles of theoretical and observed quantiles; it is not a second sample series.",
         },
     ],
-    links: &[SOURCE],
+    links: &[SOURCE, ADMISSION, SERIES, GEOMETRY, PLOT],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[SOURCE, ADMISSION, SERIES, GEOMETRY, PLOT],
         verification: &[BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,
             label: "Normal/two-sample quantile geometry, integer extension gates and graphics handles",
-            location: "crates/runmat-runtime/src/builtins/stats/summary/qqplot.rs",
+            location: "crates/runmat-runtime/src/builtins/stats/summary/qqplot/tests.rs",
         }],
         notes: &["Host graphics result; resident inputs use the checked host quantile boundary."],
     },

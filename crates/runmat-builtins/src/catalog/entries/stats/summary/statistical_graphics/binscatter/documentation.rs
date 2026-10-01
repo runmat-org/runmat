@@ -7,6 +7,10 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
         "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/binscatter.rs",
     ),
 };
+const OPTIONS: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Binned-scatter options", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/binscatter/options.rs") };
+const INPUT: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Binned-scatter input admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/binscatter/input.rs") };
+const BINNING: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Binned-scatter numeric binning", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/binscatter/numeric.rs") };
+const PLOT: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Binned-scatter chart rendering", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/binscatter/plot.rs") };
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
@@ -30,8 +34,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample {
             id: "binscatter-counts", title: "Count points in four tiles",
-            program: "h = binscatter([0; 0.2; 0.8; 1], [0; 0.1; 0.9; 1], [2 2]); values = get(h,'Values');",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            program: "h = binscatter([0; 0.2; 0.8; 1], [0; 0.1; 0.9; 1], [2 2]); values = get(h,'Values'); get(h,'Values')",
+            display_output: Some("ans =\n     2     0\n     0     2"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isequal(values,[2 0;0 2])); assert(isequal(get(h,'NumBins'),[2 2]));" },
@@ -57,11 +61,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq { question: "Does hiding empty tiles change Values?", answer: "No. `ShowEmptyBins` changes visibility, while `Values` retains the numeric count for every bin." },
     ],
-    links: &[SOURCE],
+    links: &[SOURCE, OPTIONS, INPUT, BINNING, PLOT],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact integer bins, chart state, get/set and graphics handles", location: "crates/runmat-runtime/src/builtins/stats/summary/binscatter.rs" }],
+        implementation: &[SOURCE, OPTIONS, INPUT, BINNING, PLOT],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact integer bins, chart state, get/set and graphics handles", location: "crates/runmat-runtime/src/builtins/stats/summary/binscatter/tests.rs" }],
         notes: &["Indexed image surface and colorbar render through the host graphics system."],
     },
     introduced: None,

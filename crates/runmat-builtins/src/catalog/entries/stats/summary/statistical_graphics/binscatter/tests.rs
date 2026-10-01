@@ -60,6 +60,46 @@ fn wrong_vector_geometry_and_lengths_do_not_prove_output() {
 }
 
 #[test]
+fn ambiguous_scalar_axes_cannot_prove_missing_y_or_mismatched_xy() {
+    let result = call(
+        vec![real(vec![Some(1), Some(1)]), real(vec![Some(2), Some(1)])],
+        vec![],
+    );
+    assert!(!result.diagnostics.is_empty());
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
+fn nonscalar_string_option_value_is_known_invalid() {
+    let option = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let string_array = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    );
+    let result = call(
+        vec![
+            real(vec![Some(3), Some(1)]),
+            real(vec![Some(3), Some(1)]),
+            option,
+            string_array,
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("DisplayName".into()),
+            LiteralValue::Unknown,
+        ],
+    );
+    assert!(!result.diagnostics.is_empty());
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
 fn known_unsupported_option_name_uses_typed_grammar() {
     let option = ValueFact::proven(
         ValueKindFact::String,
