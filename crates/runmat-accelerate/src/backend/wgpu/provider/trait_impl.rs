@@ -15,14 +15,38 @@ use runmat_accelerate_api::{
 /// The reduction hook, rather than its caller, certifies the selected sum
 /// kernel. Host uploads and publication casts may also submit commands, so a
 /// submission observed only at the public binding cannot prove reduction work.
-fn confirm_sum_kernel_submission(provider: &WgpuProvider) {
-    if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation() {
-        let identity = runmat_accelerate_api::ProviderOperationIdentity::new(
-            runmat_builtins::SUM_CATALOG_ENTRY.identity.name,
+fn sum_observation_identity() -> runmat_accelerate_api::ProviderOperationIdentity {
+    runmat_accelerate_api::ProviderOperationIdentity::new(
+        runmat_builtins::SUM_CATALOG_ENTRY.identity.name,
+    )
+}
+
+fn sum_submission_checkpoint() -> Option<(
+    runmat_accelerate_api::observation::ProviderOperationRecorder,
+    u64,
+)> {
+    let recorder = runmat_accelerate_api::observation::current_provider_observation()?;
+    recorder
+        .expects_operation(&sum_observation_identity())
+        .then(|| {
+            let checkpoint = recorder.submission_checkpoint();
+            (recorder, checkpoint)
+        })
+}
+
+fn confirm_sum_kernel_submission(
+    provider: &WgpuProvider,
+    checkpoint: Option<(
+        runmat_accelerate_api::observation::ProviderOperationRecorder,
+        u64,
+    )>,
+) {
+    if let Some((recorder, before)) = checkpoint {
+        recorder.confirm_submitted_provider_execution_after(
+            provider.device_id_exec(),
+            &sum_observation_identity(),
+            before,
         );
-        if recorder.expects_operation(&identity) {
-            recorder.confirm_submitted_provider_execution(provider.device_id_exec(), &identity);
-        }
     }
 }
 
@@ -1868,6 +1892,7 @@ impl AccelProvider for WgpuProvider {
             if entry.integer_type().is_some() {
                 return self.integer_floating_sum_dim_exec(a, dim);
             }
+            let checkpoint = sum_submission_checkpoint();
             let result = if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
                 self.single_double_sum_dim_exec(a, dim)
             } else {
@@ -1883,7 +1908,7 @@ impl AccelProvider for WgpuProvider {
                 result.map_err(runmat_accelerate_api::ProviderExecutionError::from)
             };
             if result.is_ok() && entry.len != 0 {
-                confirm_sum_kernel_submission(self);
+                confirm_sum_kernel_submission(self, checkpoint);
             }
             result
         })
@@ -2066,6 +2091,7 @@ impl AccelProvider for WgpuProvider {
             if entry.integer_type().is_some() {
                 return self.integer_floating_sum_global_exec(a);
             }
+            let checkpoint = sum_submission_checkpoint();
             let result = if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
                 self.single_double_sum_global_exec(a)
             } else {
@@ -2073,7 +2099,7 @@ impl AccelProvider for WgpuProvider {
                     .map_err(runmat_accelerate_api::ProviderExecutionError::from)
             };
             if result.is_ok() && entry.len > 1 {
-                confirm_sum_kernel_submission(self);
+                confirm_sum_kernel_submission(self, checkpoint);
             }
             result
         })

@@ -310,15 +310,24 @@ impl ProviderOperationRecorder {
         })
     }
 
-    /// A provider operation that requires a real device launch cannot be
-    /// certified by a returned resident alias or a mock hook with no submit.
-    pub fn confirm_submitted_provider_execution(
+    /// Snapshot submission registration immediately before an operation hook.
+    /// Earlier uploads and unrelated preparation cannot satisfy its witness.
+    pub fn submission_checkpoint(&self) -> u64 {
+        self.0.with(|state| state.registered)
+    }
+
+    /// The selected provider hook, not the public binding, certifies that it
+    /// registered a new submission while executing this exact operation.
+    /// The hook must also know that its successful nonempty path launches the
+    /// required kernel; a cast or transfer alone is not that proof.
+    pub fn confirm_submitted_provider_execution_after(
         &self,
         device_id: u32,
         operation: &crate::ProviderOperationIdentity,
+        checkpoint: u64,
     ) {
         self.0.with(|state| {
-            if state.registered == 0 {
+            if state.registered <= checkpoint {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
                 return;
             }

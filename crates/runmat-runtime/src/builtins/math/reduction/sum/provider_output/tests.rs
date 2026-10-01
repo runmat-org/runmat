@@ -71,11 +71,15 @@ fn sum_receipt_requires_actual_submit_and_ignores_unrelated_outer_operation() {
     submitted.require_provider_execution(provider.device_id(), sum);
     let output = new_output();
     with_provider_observation(Some(submitted.recorder()), || {
+        let checkpoint = submitted.recorder().submission_checkpoint();
         submitted.recorder().submission().unwrap().complete();
-        submitted.recorder().confirm_submitted_provider_execution(
-            provider.device_id(),
-            &super::super::sum_observation_identity(),
-        );
+        submitted
+            .recorder()
+            .confirm_submitted_provider_execution_after(
+                provider.device_id(),
+                &super::super::sum_observation_identity(),
+                checkpoint,
+            );
         super::super::publish_submitted_sum(provider, output.handle, &input.handle).unwrap()
     });
     submitted.publish().unwrap();

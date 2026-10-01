@@ -122,7 +122,7 @@ fn submitted_operation_witness_requires_a_real_registered_submission() {
     let recorder = unsubmitted.recorder();
     assert!(recorder.expects_operation(&sum));
     assert!(!recorder.expects_operation(&other));
-    recorder.confirm_submitted_provider_execution(7, &sum);
+    recorder.confirm_submitted_provider_execution_after(7, &sum, recorder.submission_checkpoint());
     assert!(unsubmitted.publish().is_err());
     assert!(matches!(
         unsubmitted.status(),
@@ -132,11 +132,28 @@ fn submitted_operation_witness_requires_a_real_registered_submission() {
     let mut submitted = ProviderOperationReceipt::new();
     submitted.require_provider_execution(7, sum.clone());
     let recorder = submitted.recorder();
+    let checkpoint = recorder.submission_checkpoint();
     recorder.submission().unwrap().complete();
-    recorder.confirm_submitted_provider_execution(7, &sum);
+    recorder.confirm_submitted_provider_execution_after(7, &sum, checkpoint);
     submitted.publish().unwrap();
     assert!(matches!(
         submitted.status(),
         ProviderObservationStatus::Completed { submissions: 1, .. }
     ));
+}
+
+#[test]
+fn prior_upload_submission_cannot_certify_later_operation() {
+    let sum = crate::ProviderOperationIdentity::new("fixture.sum");
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_provider_execution(7, sum.clone());
+    let recorder = receipt.recorder();
+    recorder.submission().unwrap().complete();
+    let after_upload = recorder.submission_checkpoint();
+    assert_eq!(after_upload, 1);
+    recorder.confirm_submitted_provider_execution_after(7, &sum, after_upload);
+    assert_eq!(
+        receipt.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
 }
