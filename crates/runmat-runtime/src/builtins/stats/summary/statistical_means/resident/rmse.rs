@@ -134,6 +134,12 @@ async fn run(
         .await
         .map_err(|e| provider_failure(kind, e))?;
     validate_output(kind, provider, forecast, &scale, output_shape, precision)?;
+    if options.missing == super::super::options::MissingMode::Omit {
+        scale = provider
+            .map_nan_to_zero(&scale)
+            .map_err(|e| provider_failure(kind, e))?;
+        validate_output(kind, provider, forecast, &scale, output_shape, precision)?;
+    }
     for axis in reduction::selected_axes(output_shape, &options.axes) {
         scale = provider
             .reduce_max_dim(&scale, axis)
