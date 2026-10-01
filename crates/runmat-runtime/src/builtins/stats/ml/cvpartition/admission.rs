@@ -242,10 +242,10 @@ pub(super) fn ensure_cvpartition_extensions(
         }
     }
 
-    if matches!(kind, PartitionKind::KFold | PartitionKind::Holdout) {
-        if rest.first().is_some_and(typed_integer_value) {
-            enable_extension(&CVPARTITION_INTEGER_CONTROL_EXTENSION)?;
-        }
+    if matches!(kind, PartitionKind::KFold | PartitionKind::Holdout)
+        && rest.first().is_some_and(typed_integer_value)
+    {
+        enable_extension(&CVPARTITION_INTEGER_CONTROL_EXTENSION)?;
     }
     Ok(())
 }
