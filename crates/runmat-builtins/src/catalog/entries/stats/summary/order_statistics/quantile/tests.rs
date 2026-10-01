@@ -61,7 +61,7 @@ fn vector_request_changes_only_reduced_axis_and_returns_double() {
 fn unknown_request_length_and_runtime_dimension_do_not_invent_output_shape() {
     assert_eq!(
         call(known(&[4, 3]), ShapeFact::Ranked { rank: 2 }, None).outputs[0].shape,
-        ShapeFact::Unknown
+        ShapeFact::Ranked { rank: 2 }
     );
     assert_eq!(
         call(
@@ -165,7 +165,9 @@ fn wide_integer_dimensions_remain_exact_without_materializing_a_huge_shape() {
         )),
     );
     assert!(!invalid.diagnostics.is_empty());
-    assert_eq!(invalid.outputs[0].shape, known(&[1, 3]));
+    // A nonliteral scalar request can select either one probability or a
+    // count; retain rank, but do not invent the selected extent.
+    assert_eq!(invalid.outputs[0].shape, ShapeFact::Ranked { rank: 2 });
 }
 
 #[test]

@@ -13,6 +13,7 @@ pub(crate) async fn prctile_builtin(value: Value, rest: Vec<Value>) -> BuiltinRe
         &runmat_builtins::PRCTILE_DATA_EXTENSION,
         &runmat_builtins::PRCTILE_PROBABILITY_EXTENSION,
     )?;
-    let args = super::parse_quantile_args("prctile", value, rest, QuantileRequestUnit::Percentage).await?;
+    let args =
+        super::parse_quantile_args("prctile", value, rest, QuantileRequestUnit::Percentage).await?;
     super::quantile_tensor(args, "prctile")
 }

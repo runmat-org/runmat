@@ -14,6 +14,7 @@ pub(crate) async fn quantile_builtin(value: Value, rest: Vec<Value>) -> BuiltinR
         &runmat_builtins::QUANTILE_PROBABILITY_EXTENSION,
     )?;
     let args =
-        super::parse_quantile_args("quantile", value, rest, QuantileRequestUnit::Probability).await?;
+        super::parse_quantile_args("quantile", value, rest, QuantileRequestUnit::Probability)
+            .await?;
     super::quantile_tensor(args, "quantile")
 }

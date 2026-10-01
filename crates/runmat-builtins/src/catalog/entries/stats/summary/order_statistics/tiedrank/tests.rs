@@ -51,6 +51,15 @@ fn dynamic_shape_does_not_guess_vector_tie_adjustment() {
 }
 
 #[test]
+fn rank_only_facts_remain_symbolic_without_dimension_allocation() {
+    let shape = ShapeFact::Ranked { rank: usize::MAX };
+    let inferred = infer(shape.clone(), 2);
+    assert_eq!(inferred.outputs[0].shape, shape);
+    assert_eq!(inferred.outputs[1].shape, ShapeFact::Unknown);
+    assert!(inferred.diagnostics.is_empty());
+}
+
+#[test]
 fn kendall_mode_has_three_corrections_and_unknown_flags_keep_shape_dynamic() {
     let data = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {

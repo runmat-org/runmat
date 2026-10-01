@@ -1,6 +1,7 @@
 mod contract;
 mod inference;
 mod options;
+mod shape;
 mod prctile;
 mod quantile;
 mod tiedrank;
