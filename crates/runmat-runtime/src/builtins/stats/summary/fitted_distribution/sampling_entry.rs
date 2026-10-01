@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn sample_distribution(
+pub(in crate::builtins::stats::summary) async fn sample_distribution(
     distribution: Value,
     rest: Vec<Value>,
     runtime: Option<&crate::context::RuntimeContext>,

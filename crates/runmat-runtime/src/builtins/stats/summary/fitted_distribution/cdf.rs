@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn evaluate_cdf_entry(
+pub(in crate::builtins::stats::summary) async fn evaluate_cdf_entry(
     distribution: Value,
     x: Value,
     mut rest: Vec<Value>,

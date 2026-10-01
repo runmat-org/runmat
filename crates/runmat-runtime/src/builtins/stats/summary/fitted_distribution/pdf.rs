@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn evaluate_pdf_entry(
+pub(in crate::builtins::stats::summary) async fn evaluate_pdf_entry(
     distribution: Value,
     x: Value,
     rest: Vec<Value>,

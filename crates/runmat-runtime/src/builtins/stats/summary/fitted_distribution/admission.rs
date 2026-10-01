@@ -148,7 +148,7 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     shape.iter().filter(|&&extent| extent > 1).count() <= 1
 }
 
-fn numeric_shape(builtin: &'static str, value: &Value) -> BuiltinResult<&[usize]> {
+fn numeric_shape<'a>(builtin: &'static str, value: &'a Value) -> BuiltinResult<&'a [usize]> {
     let shape = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => &[1, 1][..],
         Value::Tensor(tensor) => tensor.shape.as_slice(),

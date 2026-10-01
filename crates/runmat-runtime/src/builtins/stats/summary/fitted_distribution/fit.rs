@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn fit_sample_distribution(
+pub(in crate::builtins::stats::summary) async fn fit_sample_distribution(
     data: Value,
     distname: Value,
     rest: Vec<Value>,
