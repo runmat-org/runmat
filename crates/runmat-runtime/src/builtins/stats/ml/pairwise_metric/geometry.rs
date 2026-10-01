@@ -1,11 +1,11 @@
 //! Scale and covariance geometry used by standardized and Mahalanobis metrics.
 
-use super::metric_compute::{matrix_value, row_value};
-use super::{distance_error, internal_error, EPS};
+use super::compute::{matrix_value, row_value};
+use super::{distance_error, internal_error, MetricCaller, EPS};
 use crate::BuiltinResult;
 use runmat_value::Tensor;
 
-pub(super) fn variance_scale(name: &'static str, x: &Tensor) -> BuiltinResult<Vec<f64>> {
+pub(super) fn variance_scale(name: MetricCaller, x: &Tensor) -> BuiltinResult<Vec<f64>> {
     let cols = x.cols;
     let mut counts = vec![0usize; cols];
     let mut means = vec![0.0; cols];
@@ -46,7 +46,7 @@ pub(super) fn variance_scale(name: &'static str, x: &Tensor) -> BuiltinResult<Ve
     Ok(vars)
 }
 
-pub(super) fn covariance_matrix(name: &'static str, x: &Tensor) -> BuiltinResult<Vec<f64>> {
+pub(super) fn covariance_matrix(name: MetricCaller, x: &Tensor) -> BuiltinResult<Vec<f64>> {
     let cols = x.cols;
     let rows = x.rows;
     if rows < 2 {
@@ -93,7 +93,7 @@ fn accumulate_covariance(out: &mut [f64], data: &Tensor, means: &[f64]) {
 }
 
 pub(super) fn invert_spd_matrix(
-    name: &'static str,
+    name: MetricCaller,
     matrix: &[f64],
     size: usize,
     label: &str,
@@ -170,7 +170,7 @@ pub(super) fn invert_spd_matrix(
 }
 
 fn validate_symmetric_positive_definite(
-    name: &'static str,
+    name: MetricCaller,
     matrix: &[f64],
     size: usize,
     label: &str,

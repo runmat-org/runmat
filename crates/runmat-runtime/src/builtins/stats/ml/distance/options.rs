@@ -1,214 +1,15 @@
-//! Typed admission of distance metrics and public name-value controls.
+//! Typed selection and KNN controls at the distance builtin boundary.
 
 use runmat_builtins::{
     DistanceMetricKind, DistanceSelectionKind, KnnCacheSizeKeyword, KnnMetric, KnnOption,
     KnnSearchMethod,
 };
-use runmat_value::{Tensor, Value};
+use runmat_value::Value;
 
-use super::metric_geometry::{covariance_matrix, invert_spd_matrix, variance_scale};
-use super::{
-    distance_error, gather_value, value_to_matrix, DistanceMetric, KnnOptions, Selection, EPS,
-    KNNSEARCH_NAME, PDIST2_NAME,
-};
+use super::{distance_error, KnnOptions, Selection, EPS, KNNSEARCH_NAME, PDIST2_NAME};
 use crate::builtins::common::{random_args::keyword_of, tensor};
+use crate::builtins::stats::ml::pairwise_metric::{scalar_parameter, MetricCaller};
 use crate::BuiltinResult;
-
-pub(super) fn parse_metric_name(
-    name: &'static str,
-    args: &[Value],
-) -> BuiltinResult<DistanceMetricKind> {
-    let Some(first) = args.first() else {
-        return Ok(DistanceMetricKind::Euclidean);
-    };
-    let text = keyword_of(first)
-        .ok_or_else(|| distance_error(name, format!("{name}: distance metric must be text")))?;
-    DistanceMetricKind::from_keyword(&text).ok_or_else(|| {
-        distance_error(
-            name,
-            format!("{name}: unsupported distance metric '{text}'"),
-        )
-    })
-}
-
-pub(super) async fn parse_metric(
-    name: &'static str,
-    x: &Tensor,
-    _y: Option<&Tensor>,
-    args: Vec<Value>,
-) -> BuiltinResult<DistanceMetric> {
-    let kind = parse_metric_name(name, &args)?;
-    let rest = if args.is_empty() {
-        Vec::new()
-    } else {
-        args[1..].to_vec()
-    };
-    parse_metric_kind(name, x, kind, rest).await
-}
-
-pub(super) async fn parse_metric_kind(
-    name: &'static str,
-    x: &Tensor,
-    kind: DistanceMetricKind,
-    rest: Vec<Value>,
-) -> BuiltinResult<DistanceMetric> {
-    match kind {
-        DistanceMetricKind::Euclidean => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::Euclidean)
-        }
-        DistanceMetricKind::SquareEuclidean => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::SquareEuclidean)
-        }
-        DistanceMetricKind::Cityblock => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::Cityblock)
-        }
-        DistanceMetricKind::Chebychev => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::Chebychev)
-        }
-        DistanceMetricKind::Minkowski => {
-            let p = if rest.is_empty() {
-                2.0
-            } else {
-                scalar_parameter(name, &rest[0], "minkowski exponent").await?
-            };
-            if rest.len() > 1 || !p.is_finite() || p <= 0.0 {
-                return Err(distance_error(
-                    name,
-                    format!("{name}: Minkowski exponent must be a positive finite scalar"),
-                ));
-            }
-            Ok(DistanceMetric::Minkowski(p))
-        }
-        DistanceMetricKind::Seuclidean => {
-            let scale = if rest.is_empty() {
-                variance_scale(name, x)?
-            } else {
-                let stddev =
-                    vector_parameter(name, rest[0].clone(), x.cols, "seuclidean scale").await?;
-                stddev
-                    .into_iter()
-                    .map(|value| value * value)
-                    .collect::<Vec<_>>()
-            };
-            if rest.len() > 1 || scale.iter().any(|v| !v.is_finite() || *v <= 0.0) {
-                return Err(distance_error(
-                    name,
-                    format!("{name}: seuclidean scale values must be positive and finite"),
-                ));
-            }
-            Ok(DistanceMetric::Seuclidean(scale))
-        }
-        DistanceMetricKind::Mahalanobis => {
-            let covariance = if rest.is_empty() {
-                covariance_matrix(name, x)?
-            } else {
-                matrix_parameter(name, rest[0].clone(), x.cols, "mahalanobis covariance").await?
-            };
-            if rest.len() > 1 {
-                return Err(distance_error(
-                    name,
-                    format!("{name}: mahalanobis accepts at most one covariance matrix"),
-                ));
-            }
-            Ok(DistanceMetric::Mahalanobis(invert_spd_matrix(
-                name,
-                &covariance,
-                x.cols,
-                "mahalanobis covariance",
-            )?))
-        }
-        DistanceMetricKind::Cosine => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::Cosine)
-        }
-        DistanceMetricKind::Correlation => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::Correlation)
-        }
-        DistanceMetricKind::Hamming => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::Hamming)
-        }
-        DistanceMetricKind::Jaccard => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::Jaccard)
-        }
-        DistanceMetricKind::Spearman => {
-            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
-                .map(|()| DistanceMetric::Spearman)
-        }
-    }
-}
-
-fn ensure_no_metric_parameter(
-    name: &'static str,
-    args: &[Value],
-    metric: &str,
-) -> BuiltinResult<()> {
-    if args.is_empty() {
-        Ok(())
-    } else {
-        Err(distance_error(
-            name,
-            format!("{name}: {metric} distance does not accept a distance parameter"),
-        ))
-    }
-}
-
-pub(super) async fn scalar_parameter(
-    name: &'static str,
-    value: &Value,
-    label: &str,
-) -> BuiltinResult<f64> {
-    let gathered = gather_value(name, value.clone()).await?;
-    match gathered {
-        Value::Num(value) => Ok(value),
-        Value::Int(value) => Ok(value.to_f64()),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
-            Ok(tensor::tensor_value_f64(&tensor, 0))
-        }
-        other => Err(distance_error(
-            name,
-            format!("{name}: {label} must be a numeric scalar, got {other:?}"),
-        )),
-    }
-}
-
-async fn vector_parameter(
-    name: &'static str,
-    value: Value,
-    expected_len: usize,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    let tensor = value_to_matrix(name, value).await?;
-    if tensor::tensor_element_len(&tensor) != expected_len {
-        return Err(distance_error(
-            name,
-            format!("{name}: {label} length must match the number of columns"),
-        ));
-    }
-    Ok(tensor::tensor_into_values_f64(tensor))
-}
-
-async fn matrix_parameter(
-    name: &'static str,
-    value: Value,
-    expected_size: usize,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    let tensor = value_to_matrix(name, value).await?;
-    if tensor.rows != expected_size || tensor.cols != expected_size {
-        return Err(distance_error(
-            name,
-            format!("{name}: {label} must be a square matrix matching the number of columns"),
-        ));
-    }
-    Ok(tensor::tensor_into_values_f64(tensor))
-}
 
 pub(super) fn split_pdist2_options(
     args: Vec<Value>,
@@ -498,7 +299,7 @@ fn preflight_numeric_cache_size(value: &Value) -> BuiltinResult<()> {
 
 pub(super) async fn validate_numeric_cache_sizes(values: Vec<Value>) -> BuiltinResult<()> {
     for value in values {
-        let raw = scalar_parameter(KNNSEARCH_NAME, &value, "CacheSize").await?;
+        let raw = scalar_parameter(MetricCaller::Knnsearch, &value, "CacheSize").await?;
         if !raw.is_finite() || raw <= 0.0 {
             return Err(distance_error(
                 KNNSEARCH_NAME,

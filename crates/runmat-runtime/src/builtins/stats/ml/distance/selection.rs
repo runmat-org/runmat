@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use runmat_value::{CellArray, Tensor, Value};
 
-use super::metric_compute::{row_distance, row_value};
+use super::super::pairwise_metric::{row_distance, row_value, MetricCaller};
 use super::{internal_error, DistanceMetric, KnnOptions, Selection, KNNSEARCH_NAME, PDIST2_NAME};
 use crate::BuiltinResult;
 
@@ -220,7 +220,7 @@ fn sorted_neighbors(
         .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: neighbor allocation failed"))?;
     for row in 0..x.rows {
         values.push((
-            row_distance(KNNSEARCH_NAME, x, row, y, query, metric)?,
+            row_distance(MetricCaller::Knnsearch, x, row, y, query, metric)?,
             row + 1,
         ));
     }

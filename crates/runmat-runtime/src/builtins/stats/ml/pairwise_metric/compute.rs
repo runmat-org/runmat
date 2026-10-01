@@ -4,12 +4,12 @@ use std::cmp::Ordering;
 
 use runmat_value::Tensor;
 
-use super::{distance_error, internal_error, DistanceMetric, EPS, PDIST_NAME};
+use super::{distance_error, internal_error, DistanceMetric, MetricCaller, EPS};
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
-pub(super) fn condensed_distances(
-    name: &'static str,
+pub(in crate::builtins::stats::ml) fn condensed_distances(
+    name: MetricCaller,
     x: &Tensor,
     metric: &DistanceMetric,
 ) -> BuiltinResult<Tensor> {
@@ -17,20 +17,20 @@ pub(super) fn condensed_distances(
     let len = rows
         .checked_mul(rows.saturating_sub(1))
         .and_then(|value| value.checked_div(2))
-        .ok_or_else(|| internal_error(name, "pdist: output size overflow"))?;
+        .ok_or_else(|| internal_error(name, format!("{name}: output size overflow")))?;
     let mut out = Vec::new();
     out.try_reserve(len)
-        .map_err(|_| internal_error(name, "pdist: failed to allocate output vector"))?;
+        .map_err(|_| internal_error(name, format!("{name}: failed to allocate output vector")))?;
     for col in 0..rows {
         for row in (col + 1)..rows {
             out.push(row_distance(name, x, row, x, col, metric)?);
         }
     }
-    Tensor::new(out, vec![1, len]).map_err(|err| internal_error(name, format!("pdist: {err}")))
+    Tensor::new(out, vec![1, len]).map_err(|err| internal_error(name, format!("{name}: {err}")))
 }
 
-pub(super) fn distance_matrix(
-    name: &'static str,
+pub(in crate::builtins::stats::ml) fn distance_matrix(
+    name: MetricCaller,
     x: &Tensor,
     y: &Tensor,
     metric: &DistanceMetric,
@@ -38,21 +38,21 @@ pub(super) fn distance_matrix(
     let len = x
         .rows
         .checked_mul(y.rows)
-        .ok_or_else(|| internal_error(name, "pdist2: output size overflow"))?;
+        .ok_or_else(|| internal_error(name, format!("{name}: output size overflow")))?;
     let mut out = Vec::new();
     out.try_reserve(len)
-        .map_err(|_| internal_error(name, "pdist2: failed to allocate output matrix"))?;
+        .map_err(|_| internal_error(name, format!("{name}: failed to allocate output matrix")))?;
     for col in 0..y.rows {
         for row in 0..x.rows {
             out.push(row_distance(name, x, row, y, col, metric)?);
         }
     }
     Tensor::new(out, vec![x.rows, y.rows])
-        .map_err(|err| internal_error(name, format!("pdist2: {err}")))
+        .map_err(|err| internal_error(name, format!("{name}: {err}")))
 }
 
-pub(super) fn row_distance(
-    name: &'static str,
+pub(in crate::builtins::stats::ml) fn row_distance(
+    name: MetricCaller,
     x: &Tensor,
     xi: usize,
     y: &Tensor,
@@ -162,7 +162,7 @@ pub(super) fn row_distance(
                 Ok(unequal_nonzero as f64 / nonzero_union as f64)
             }
         }
-        DistanceMetric::Spearman => spearman_distance(x, xi, y, yi),
+        DistanceMetric::Spearman => spearman_distance(name, x, xi, y, yi),
     }
 }
 
@@ -188,7 +188,7 @@ fn scaled_lp_distance(x: &Tensor, xi: usize, y: &Tensor, yi: usize, p: f64) -> f
     scale * normalized_sum.powf(1.0 / p)
 }
 
-pub(super) fn row_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
+pub(in crate::builtins::stats::ml) fn row_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
     tensor::tensor_value_f64(tensor, col * tensor.rows + row)
 }
 
@@ -224,13 +224,19 @@ fn correlation_distance(x: &Tensor, xi: usize, y: &Tensor, yi: usize) -> Builtin
     }
 }
 
-fn spearman_distance(x: &Tensor, xi: usize, y: &Tensor, yi: usize) -> BuiltinResult<f64> {
+fn spearman_distance(
+    name: MetricCaller,
+    x: &Tensor,
+    xi: usize,
+    y: &Tensor,
+    yi: usize,
+) -> BuiltinResult<f64> {
     let x_rank = row_ranks(x, xi);
     let y_rank = row_ranks(y, yi);
     let rank_x = Tensor::new(x_rank, vec![1, x.cols])
-        .map_err(|err| internal_error(PDIST_NAME, format!("spearman: {err}")))?;
+        .map_err(|err| internal_error(name, format!("spearman: {err}")))?;
     let rank_y = Tensor::new(y_rank, vec![1, y.cols])
-        .map_err(|err| internal_error(PDIST_NAME, format!("spearman: {err}")))?;
+        .map_err(|err| internal_error(name, format!("spearman: {err}")))?;
     correlation_distance(&rank_x, 0, &rank_y, 0)
 }
 

@@ -49,6 +49,10 @@ pub enum DistanceMetricKind {
 }
 
 impl DistanceMetricKind {
+    pub const fn accepts_parameter(self) -> bool {
+        matches!(self, Self::Minkowski | Self::Seuclidean | Self::Mahalanobis)
+    }
+
     pub fn from_keyword(keyword: &str) -> Option<Self> {
         match keyword.to_ascii_lowercase().as_str() {
             "euclidean" => Some(Self::Euclidean),

@@ -25,18 +25,18 @@ const KNNSEARCH_NAME: &str = "knnsearch";
 const SQUAREFORM_NAME: &str = "squareform";
 const EPS: f64 = 1.0e-12;
 
-mod metric_compute;
-mod metric_geometry;
 mod options;
 mod selection;
 mod squareform;
 #[cfg(test)]
 mod tests;
 
-use metric_compute::{condensed_distances, distance_matrix};
+use super::pairwise_metric::{
+    condensed_distances, distance_matrix, parse_metric_kind, parse_metric_name, scalar_parameter,
+    DistanceMetric, MetricCaller,
+};
 use options::{
-    parse_knnsearch_options, parse_metric, parse_metric_kind, parse_metric_name,
-    preflight_knn_metric_parameter, scalar_parameter, split_pdist2_options,
+    parse_knnsearch_options, preflight_knn_metric_parameter, split_pdist2_options,
     validate_numeric_cache_sizes,
 };
 #[cfg(test)]
@@ -69,22 +69,6 @@ fn distance_descriptor_error(
         builder = builder.with_identifier(identifier);
     }
     builder.build()
-}
-
-#[derive(Clone, Debug)]
-enum DistanceMetric {
-    Euclidean,
-    SquareEuclidean,
-    Cityblock,
-    Chebychev,
-    Minkowski(f64),
-    Seuclidean(Vec<f64>),
-    Mahalanobis(Vec<f64>),
-    Cosine,
-    Correlation,
-    Hamming,
-    Jaccard,
-    Spearman,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -135,11 +119,17 @@ struct KnnOptions {
 )]
 async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_pdist_integer_boundaries(PairwiseDistanceBuiltin::Pdist, &x, None, &rest).await?;
-    let metric_args = strip_cache_size_option(PDIST_NAME, rest).await?;
-    parse_metric_name(PDIST_NAME, &metric_args)?;
+    let metric_args = strip_cache_size_option(MetricCaller::Pdist, rest).await?;
+    let kind = parse_metric_name(MetricCaller::Pdist, &metric_args)?;
     let x = value_to_matrix(PDIST_NAME, x).await?;
-    let metric = parse_metric(PDIST_NAME, &x, None, metric_args).await?;
-    let distances = condensed_distances(PDIST_NAME, &x, &metric)?;
+    let metric = parse_metric_kind(
+        MetricCaller::Pdist,
+        &x,
+        kind,
+        metric_args.into_iter().skip(1).collect(),
+    )
+    .await?;
+    let distances = condensed_distances(MetricCaller::Pdist, &x, &metric)?;
     Ok(Value::Tensor(distances))
 }
 
@@ -151,8 +141,8 @@ async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_pdist_integer_boundaries(PairwiseDistanceBuiltin::Pdist2, &x, Some(&y), &rest).await?;
     let (metric_args, selection) = split_pdist2_options(rest)?;
-    let metric_args = strip_cache_size_option(PDIST2_NAME, metric_args).await?;
-    parse_metric_name(PDIST2_NAME, &metric_args)?;
+    let metric_args = strip_cache_size_option(MetricCaller::Pdist2, metric_args).await?;
+    let kind = parse_metric_name(MetricCaller::Pdist2, &metric_args)?;
     if selection.is_none()
         && matches!(crate::output_count::current_output_count(), Some(count) if count > 1)
     {
@@ -169,8 +159,14 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
             "pdist2: X and Y must have the same number of columns",
         ));
     }
-    let metric = parse_metric(PDIST2_NAME, &x, Some(&y), metric_args).await?;
-    let distances = distance_matrix(PDIST2_NAME, &x, &y, &metric)?;
+    let metric = parse_metric_kind(
+        MetricCaller::Pdist2,
+        &x,
+        kind,
+        metric_args.into_iter().skip(1).collect(),
+    )
+    .await?;
+    let distances = distance_matrix(MetricCaller::Pdist2, &x, &y, &metric)?;
     match selection {
         Some(selection) => selected_distance_outputs(&distances, selection),
         None => match crate::output_count::current_output_count() {
@@ -185,9 +181,10 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
 }
 
 async fn strip_cache_size_option(
-    name: &'static str,
+    caller: MetricCaller,
     args: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
+    let name = caller.name();
     let mut metric_args = Vec::with_capacity(args.len());
     let mut index = 0usize;
     while index < args.len() {
@@ -210,7 +207,7 @@ async fn strip_cache_size_option(
                 index += 2;
                 continue;
             }
-            let cache_size = scalar_parameter(name, value, "CacheSize").await?;
+            let cache_size = scalar_parameter(caller, value, "CacheSize").await?;
             if !cache_size.is_finite() || cache_size <= 0.0 {
                 return Err(distance_error(
                     name,
@@ -310,7 +307,7 @@ async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResul
         ));
     }
     let metric = parse_metric_kind(
-        KNNSEARCH_NAME,
+        MetricCaller::Knnsearch,
         &x,
         parsed.metric.kind,
         parsed.metric_parameter.into_iter().collect(),
@@ -626,15 +623,6 @@ async fn squareform_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Val
             Ok(Value::Tensor(output))
         }
     }
-}
-
-pub(super) async fn condensed_distances_from_metric_args(
-    name: &'static str,
-    x: &Tensor,
-    args: Vec<Value>,
-) -> BuiltinResult<Tensor> {
-    let metric = parse_metric(name, x, None, args).await?;
-    condensed_distances(name, x, &metric)
 }
 
 async fn value_to_matrix(name: &'static str, value: Value) -> BuiltinResult<Tensor> {
