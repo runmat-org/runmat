@@ -293,12 +293,21 @@ fn cancellation_flag_prevents_a_success_sample() {
 }
 
 #[test]
-fn preparation_passes_session_and_exact_operation_to_existing_planner() {
+fn admitted_operation_passes_session_and_exact_identity_to_existing_planner() {
     let probe = Rc::new(Probe::default());
     let runtime = runtime(&probe);
     let auto = NativeAutoOffload::new(&PROVIDER, ThresholdConfig::default());
     let input = Value::Tensor(Tensor::new(vec![1.; 4], vec![1, 4]).unwrap());
-    let prepared = auto.prepare_call("mean", &[input], Some(&runtime)).unwrap();
+    // Canonical mean owns domain admission; this witness exercises the
+    // operation-level planner, not the retired legacy name-policy route.
+    let prepared = auto
+        .prepare_operation(
+            "mean",
+            &[input],
+            Some(&runtime),
+            super::preparation::ArgumentOperation::Reduction,
+        )
+        .unwrap();
     assert_eq!(probe.requests.borrow().len(), 1);
     assert_eq!(probe.requests.borrow()[0].signature.operation, "mean");
     assert!(probe.feedback.borrow().is_empty());
@@ -336,7 +345,14 @@ fn upload_failure_closes_selected_provider_attempt_before_call() {
     let runtime = runtime(&probe);
     let auto = NativeAutoOffload::new(&PROVIDER, ThresholdConfig::default());
     let input = Value::Tensor(Tensor::new(vec![1.; 4], vec![1, 4]).unwrap());
-    assert!(auto.prepare_call("mean", &[input], Some(&runtime)).is_err());
+    assert!(auto
+        .prepare_operation(
+            "mean",
+            &[input],
+            Some(&runtime),
+            super::preparation::ArgumentOperation::Reduction,
+        )
+        .is_err());
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
 }
