@@ -4,7 +4,9 @@ use super::*;
 use crate::gather_if_needed_async;
 use runmat_value::{IntValue, NumericScalar};
 
-pub(super) async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {
+pub(in crate::builtins::stats::summary::normalize) async fn value_to_input(
+    value: Value,
+) -> BuiltinResult<NumericInput> {
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
