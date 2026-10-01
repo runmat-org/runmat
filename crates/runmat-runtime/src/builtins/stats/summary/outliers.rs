@@ -1,7 +1,7 @@
 //! Outlier detection and filling helpers.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FILLOUTLIERS_INTEGER_DATA_EXTENSION,
+    BuiltinErrorDescriptor, OutlierOption, FILLOUTLIERS_INTEGER_DATA_EXTENSION,
     FILLOUTLIERS_INTEGER_FILL_EXTENSION, FILLOUTLIERS_NUMERIC_MASK_EXTENSION,
     FILLOUTLIERS_RESIDENT_INPUT_EXTENSION, ISOUTLIER_GPU_DATA_VARIABLES_EXTENSION,
     ISOUTLIER_GPU_MOVMEDIAN_EXTENSION, ISOUTLIER_GPU_SAMPLE_POINTS_EXTENSION,
@@ -28,7 +28,7 @@ use detection::detect_outliers;
 use fill::fill_outlier_tensor;
 #[cfg(test)]
 use fill::fill_slice;
-use options::{parse_detection_options, parse_fill_method};
+use options::{parse_detection_options, parse_fill_method, preflight_host_options, DecodedOptions};
 
 const ISOUTLIER_NAME: &str = "isoutlier";
 const FILLOUTLIERS_NAME: &str = "filloutliers";
@@ -144,11 +144,13 @@ struct DetectionResult {
     builtin_path = "crate::builtins::stats::summary::outliers"
 )]
 pub(crate) async fn isoutlier_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_isoutlier_extensions(&value, &rest)?;
-    ensure_isoutlier_exact_boundaries(&value, &rest).await?;
+    let decoded = DecodedOptions::new(OutlierOperation::Detect, &rest);
+    ensure_isoutlier_extensions(&value, &rest, &decoded)?;
+    preflight_host_options(OutlierOperation::Detect, &rest, &decoded).await?;
+    ensure_isoutlier_exact_boundaries(&value, &rest, &decoded).await?;
     let output_source = isoutlier_gpu_source(&value);
     let tensor = value_to_tensor(ISOUTLIER_NAME, value).await?;
-    let options = parse_detection_options(OutlierOperation::Detect, rest).await?;
+    let options = parse_detection_options(OutlierOperation::Detect, rest, decoded.all()).await?;
     let result = detect_outliers(&tensor, &options, ISOUTLIER_NAME)?;
     let value = outlier_outputs(ISOUTLIER_NAME, None, result)?;
     restore_isoutlier_value(value, output_source.as_ref())
@@ -205,7 +207,11 @@ fn explicit_isoutlier_gpu(value: &Value) -> bool {
     matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
 }
 
-fn ensure_isoutlier_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_isoutlier_extensions(
+    value: &Value,
+    rest: &[Value],
+    decoded: &DecodedOptions,
+) -> BuiltinResult<()> {
     if is_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ISOUTLIER_INTEGER_DATA_EXTENSION,
@@ -215,11 +221,10 @@ fn ensure_isoutlier_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
     let explicit_gpu = explicit_isoutlier_gpu(value) || rest.iter().any(explicit_isoutlier_gpu);
     let mut idx = 0;
     while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
-            let keyword = keyword.to_ascii_lowercase();
-            match keyword.as_str() {
-                "movmedian" | "movmean" => {
-                    if keyword == "movmedian" && explicit_gpu {
+        if keyword_of(&rest[idx]).is_some() {
+            match decoded.at(idx) {
+                Some(OutlierOption::MovingMedian | OutlierOption::MovingMean) => {
+                    if decoded.at(idx) == Some(OutlierOption::MovingMedian) && explicit_gpu {
                         crate::compatibility::ensure_builtin_extension_enabled(
                             &ISOUTLIER_GPU_MOVMEDIAN_EXTENSION,
                             ISOUTLIER_NAME,
@@ -234,7 +239,7 @@ fn ensure_isoutlier_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
                     idx += 2;
                     continue;
                 }
-                "samplepoints" => {
+                Some(OutlierOption::SamplePoints) => {
                     if explicit_gpu {
                         crate::compatibility::ensure_builtin_extension_enabled(
                             &ISOUTLIER_GPU_SAMPLE_POINTS_EXTENSION,
@@ -244,7 +249,7 @@ fn ensure_isoutlier_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
                     idx += 2;
                     continue;
                 }
-                "data variables" | "datavariables" => {
+                Some(OutlierOption::DataVariables) => {
                     if explicit_gpu {
                         crate::compatibility::ensure_builtin_extension_enabled(
                             &ISOUTLIER_GPU_DATA_VARIABLES_EXTENSION,
@@ -254,7 +259,7 @@ fn ensure_isoutlier_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
                     idx += 2;
                     continue;
                 }
-                "percentiles" | "thresholdfactor" => {
+                Some(OutlierOption::Percentiles | OutlierOption::ThresholdFactor) => {
                     if rest.get(idx + 1).is_some_and(is_typed_integer_value) {
                         crate::compatibility::ensure_builtin_extension_enabled(
                             &ISOUTLIER_INTEGER_THRESHOLD_EXTENSION,
@@ -277,14 +282,18 @@ fn ensure_isoutlier_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
     Ok(())
 }
 
-async fn ensure_isoutlier_exact_boundaries(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+async fn ensure_isoutlier_exact_boundaries(
+    value: &Value,
+    rest: &[Value],
+    decoded: &DecodedOptions,
+) -> BuiltinResult<()> {
     ensure_isoutlier_exact_f64(value, "input data").await?;
     let mut idx = 0;
     while idx + 1 < rest.len() {
-        if keyword_of(&rest[idx]).is_some_and(|keyword| {
+        if decoded.at(idx).is_some_and(|option| {
             matches!(
-                keyword.to_ascii_lowercase().as_str(),
-                "percentiles" | "thresholdfactor"
+                option,
+                OutlierOption::Percentiles | OutlierOption::ThresholdFactor
             )
         }) {
             ensure_isoutlier_exact_f64(&rest[idx + 1], "threshold value").await?;
@@ -313,7 +322,9 @@ async fn ensure_isoutlier_exact_f64(value: &Value, role: &str) -> BuiltinResult<
     builtin_path = "crate::builtins::stats::summary::outliers"
 )]
 pub(crate) async fn filloutliers_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_filloutliers_extensions(&value, &rest)?;
+    let decoded = DecodedOptions::new(OutlierOperation::Fill, &rest);
+    ensure_filloutliers_extensions(&value, &rest, &decoded)?;
+    preflight_host_options(OutlierOperation::Fill, &rest, &decoded).await?;
     let tensor = value_to_tensor(FILLOUTLIERS_NAME, value).await?;
     let mut rest = gather_values(rest).await?;
     if rest.is_empty() {
@@ -323,14 +334,19 @@ pub(crate) async fn filloutliers_builtin(value: Value, rest: Vec<Value>) -> Buil
         ));
     }
     let fill_method = parse_fill_method(&mut rest)?;
-    let options = parse_detection_options(OutlierOperation::Fill, rest).await?;
+    let options =
+        parse_detection_options(OutlierOperation::Fill, rest, decoded.after_fill()).await?;
     let mut result = detect_outliers(&tensor, &options, FILLOUTLIERS_NAME)?;
     let (filled, filled_mask) = fill_outlier_tensor(&tensor, &result, &options, &fill_method)?;
     result.mask = filled_mask;
     outlier_outputs(FILLOUTLIERS_NAME, Some(filled), result)
 }
 
-fn ensure_filloutliers_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_filloutliers_extensions(
+    value: &Value,
+    rest: &[Value],
+    decoded: &DecodedOptions,
+) -> BuiltinResult<()> {
     if is_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &FILLOUTLIERS_INTEGER_DATA_EXTENSION,
@@ -351,7 +367,7 @@ fn ensure_filloutliers_extensions(value: &Value, rest: &[Value]) -> BuiltinResul
     }
     let mut idx = 0;
     while idx + 1 < rest.len() {
-        if keyword_of(&rest[idx]).is_some_and(|name| name.eq_ignore_ascii_case("outlierlocations"))
+        if decoded.at(idx) == Some(OutlierOption::OutlierLocations)
             && is_numeric_mask_value(&rest[idx + 1])
         {
             crate::compatibility::ensure_builtin_extension_enabled(

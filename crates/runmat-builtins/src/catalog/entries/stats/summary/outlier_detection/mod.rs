@@ -2,6 +2,7 @@
 mod contract;
 mod documentation;
 mod inference;
+mod policy;
 
 use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
@@ -17,6 +18,7 @@ pub use contract::{
     ISOUTLIER_INTEGER_WINDOW_EXTENSION, OUTLIER_ERROR_INTERNAL, OUTLIER_ERROR_INVALID_ARGUMENT,
     OUTLIER_ERROR_TOO_MANY_OUTPUTS, OUTLIER_ERROR_UNSUPPORTED,
 };
+pub use policy::OutlierOption;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum OutlierKind {

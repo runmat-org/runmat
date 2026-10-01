@@ -1,9 +1,210 @@
 //! Numeric-array outlier option parsing and exact structural controls.
 use super::*;
 
+pub(super) struct DecodedOptions {
+    tokens: Vec<Option<OutlierOption>>,
+}
+
+impl DecodedOptions {
+    pub(super) fn new(operation: OutlierOperation, rest: &[Value]) -> Self {
+        let tokens = rest
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                if operation == OutlierOperation::Fill && index == 0 {
+                    None
+                } else {
+                    keyword_of(value).and_then(|keyword| OutlierOption::parse(&keyword))
+                }
+            })
+            .collect();
+        Self { tokens }
+    }
+
+    pub(super) fn at(&self, index: usize) -> Option<OutlierOption> {
+        self.tokens.get(index).copied().flatten()
+    }
+
+    pub(super) fn after_fill(self) -> Vec<Option<OutlierOption>> {
+        self.tokens.into_iter().skip(1).collect()
+    }
+
+    pub(super) fn all(self) -> Vec<Option<OutlierOption>> {
+        self.tokens
+    }
+}
+
+pub(super) async fn preflight_host_options(
+    operation: OutlierOperation,
+    rest: &[Value],
+    decoded: &DecodedOptions,
+) -> BuiltinResult<()> {
+    let builtin = operation.name();
+    let start = if operation == OutlierOperation::Fill {
+        let Some(fill) = rest.first() else {
+            return Err(invalid_argument(
+                builtin,
+                "filloutliers: fill method is required",
+            ));
+        };
+        if let Some(keyword) = keyword_of(fill) {
+            parse_fill_keyword(&keyword)?;
+        } else if !matches!(fill, Value::GpuTensor(_)) && scalar_number(fill).is_none() {
+            return Err(invalid_argument(
+                builtin,
+                "filloutliers: fill method must be text or numeric scalar",
+            ));
+        }
+        1
+    } else {
+        0
+    };
+    let mut method_specified = false;
+    let mut forced_mask = false;
+    let mut percentiles = false;
+    let mut threshold_factor = false;
+    let mut index = start;
+    while index < rest.len() {
+        let Some(keyword) = keyword_of(&rest[index]) else {
+            if !matches!(&rest[index], Value::GpuTensor(_)) {
+                parse_dim(builtin, &rest[index])?;
+            }
+            index += 1;
+            continue;
+        };
+        let Some(option) = decoded.at(index) else {
+            return Err(invalid_argument(
+                builtin,
+                format!("unsupported option or method '{keyword}'"),
+            ));
+        };
+        if option.unsupported_array_form()
+            || (option == OutlierOption::OutlierLocations && operation == OutlierOperation::Detect)
+        {
+            return Err(unsupported(
+                builtin,
+                format!("{keyword} is not supported for numeric-array outlier detection yet"),
+            ));
+        }
+        if option.consumes_value() && rest.get(index + 1).is_none() {
+            return Err(invalid_argument(
+                builtin,
+                format!("{keyword} requires a value"),
+            ));
+        }
+        if let Some(control) = rest.get(index + 1).filter(|_| option.consumes_value()) {
+            if !matches!(control, Value::GpuTensor(_)) {
+                match option {
+                    OutlierOption::Percentiles => {
+                        ensure_host_integer_exact(control, builtin).await?;
+                        percentile_bounds(builtin, control)?;
+                    }
+                    OutlierOption::MovingMedian | OutlierOption::MovingMean => {
+                        if scalar_usize(builtin, control, "window")? == 0 {
+                            return Err(invalid_argument(builtin, "window must be positive"));
+                        }
+                    }
+                    OutlierOption::ThresholdFactor => {
+                        ensure_host_integer_exact(control, builtin).await?;
+                        threshold_factor_value(builtin, control)?;
+                    }
+                    OutlierOption::OutlierLocations => {
+                        logical_mask(builtin, control)?;
+                    }
+                    OutlierOption::SamplePoints
+                    | OutlierOption::DataVariables
+                    | OutlierOption::MaxNumOutliers
+                    | OutlierOption::Median
+                    | OutlierOption::Mean
+                    | OutlierOption::Quartiles
+                    | OutlierOption::Grubbs
+                    | OutlierOption::Gesd => {}
+                }
+            }
+        }
+        match option {
+            OutlierOption::Median
+            | OutlierOption::Mean
+            | OutlierOption::Quartiles
+            | OutlierOption::Percentiles
+            | OutlierOption::MovingMedian
+            | OutlierOption::MovingMean => method_specified = true,
+            OutlierOption::OutlierLocations => forced_mask = true,
+            OutlierOption::ThresholdFactor
+            | OutlierOption::SamplePoints
+            | OutlierOption::DataVariables
+            | OutlierOption::MaxNumOutliers
+            | OutlierOption::Grubbs
+            | OutlierOption::Gesd => {}
+        }
+        percentiles |= option == OutlierOption::Percentiles;
+        threshold_factor |= option == OutlierOption::ThresholdFactor;
+        index += if option.consumes_value() { 2 } else { 1 };
+    }
+    if percentiles && threshold_factor {
+        return Err(invalid_argument(
+            builtin,
+            "ThresholdFactor is not supported with the percentiles method",
+        ));
+    }
+    if forced_mask && method_specified {
+        return Err(invalid_argument(
+            builtin,
+            "OutlierLocations cannot be combined with a specified find method",
+        ));
+    }
+    Ok(())
+}
+
+async fn ensure_host_integer_exact(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
+    if is_typed_integer_value(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(invalid_argument(
+            builtin,
+            "typed-integer threshold value must be exactly representable as double",
+        ));
+    }
+    Ok(())
+}
+
+fn percentile_bounds(builtin: &'static str, value: &Value) -> BuiltinResult<(f64, f64)> {
+    let bounds = numeric_vector(builtin, value)?;
+    if bounds.len() != 2 {
+        return Err(invalid_argument(
+            builtin,
+            "percentiles must be a two-element vector",
+        ));
+    }
+    if !(0.0..=100.0).contains(&bounds[0])
+        || !(0.0..=100.0).contains(&bounds[1])
+        || bounds[0] >= bounds[1]
+    {
+        return Err(invalid_argument(
+            builtin,
+            "percentiles must satisfy 0 <= p1 < p2 <= 100",
+        ));
+    }
+    Ok((bounds[0] / 100.0, bounds[1] / 100.0))
+}
+
+fn threshold_factor_value(builtin: &'static str, value: &Value) -> BuiltinResult<f64> {
+    let factor = scalar_number(value)
+        .ok_or_else(|| invalid_argument(builtin, "ThresholdFactor must be a numeric scalar"))?;
+    if !(factor.is_finite() && factor >= 0.0) {
+        return Err(invalid_argument(
+            builtin,
+            "ThresholdFactor must be a finite nonnegative scalar",
+        ));
+    }
+    Ok(factor)
+}
+
 pub(super) async fn parse_detection_options(
     operation: OutlierOperation,
     rest: Vec<Value>,
+    decoded: Vec<Option<OutlierOption>>,
 ) -> BuiltinResult<DetectionOptions> {
     let builtin = operation.name();
     let rest = gather_values(rest).await?;
@@ -12,20 +213,21 @@ pub(super) async fn parse_detection_options(
     while idx < rest.len() {
         let arg = &rest[idx];
         if let Some(keyword) = keyword_of(arg) {
-            match keyword.to_ascii_lowercase().as_str() {
-                "median" => {
+            let option = decoded.get(idx).copied().flatten();
+            match option {
+                Some(OutlierOption::Median) => {
                     options.method = DetectionMethod::Median;
                     options.method_was_specified = true;
                 }
-                "mean" => {
+                Some(OutlierOption::Mean) => {
                     options.method = DetectionMethod::Mean;
                     options.method_was_specified = true;
                 }
-                "quartiles" => {
+                Some(OutlierOption::Quartiles) => {
                     options.method = DetectionMethod::Quartiles;
                     options.method_was_specified = true;
                 }
-                "percentiles" => {
+                Some(OutlierOption::Percentiles) => {
                     options.method_was_specified = true;
                     idx += 1;
                     if idx >= rest.len() {
@@ -34,28 +236,12 @@ pub(super) async fn parse_detection_options(
                             "percentiles requires [lower upper]",
                         ));
                     }
-                    let bounds = numeric_vector(builtin, &rest[idx])?;
-                    if bounds.len() != 2 {
-                        return Err(invalid_argument(
-                            builtin,
-                            "percentiles must be a two-element vector",
-                        ));
-                    }
-                    if !(0.0..=100.0).contains(&bounds[0])
-                        || !(0.0..=100.0).contains(&bounds[1])
-                        || bounds[0] >= bounds[1]
-                    {
-                        return Err(invalid_argument(
-                            builtin,
-                            "percentiles must satisfy 0 <= p1 < p2 <= 100",
-                        ));
-                    }
-                    options.method =
-                        DetectionMethod::Percentiles(bounds[0] / 100.0, bounds[1] / 100.0);
+                    let (lower, upper) = percentile_bounds(builtin, &rest[idx])?;
+                    options.method = DetectionMethod::Percentiles(lower, upper);
                 }
-                "movmedian" | "movmean" => {
+                Some(OutlierOption::MovingMedian | OutlierOption::MovingMean) => {
                     options.method_was_specified = true;
-                    let is_median = keyword.eq_ignore_ascii_case("movmedian");
+                    let is_median = option == Some(OutlierOption::MovingMedian);
                     idx += 1;
                     if idx >= rest.len() {
                         return Err(invalid_argument(builtin, "moving method requires a window"));
@@ -70,7 +256,7 @@ pub(super) async fn parse_detection_options(
                         DetectionMethod::MovingMean(window)
                     };
                 }
-                "thresholdfactor" => {
+                Some(OutlierOption::ThresholdFactor) => {
                     idx += 1;
                     if idx >= rest.len() {
                         return Err(invalid_argument(
@@ -78,18 +264,9 @@ pub(super) async fn parse_detection_options(
                             "ThresholdFactor requires a numeric scalar",
                         ));
                     }
-                    let factor = scalar_number(&rest[idx]).ok_or_else(|| {
-                        invalid_argument(builtin, "ThresholdFactor must be a numeric scalar")
-                    })?;
-                    if !(factor.is_finite() && factor >= 0.0) {
-                        return Err(invalid_argument(
-                            builtin,
-                            "ThresholdFactor must be a finite nonnegative scalar",
-                        ));
-                    }
-                    options.threshold_factor = Some(factor);
+                    options.threshold_factor = Some(threshold_factor_value(builtin, &rest[idx])?);
                 }
-                "outlierlocations" if operation == OutlierOperation::Fill => {
+                Some(OutlierOption::OutlierLocations) if operation == OutlierOperation::Fill => {
                     idx += 1;
                     if idx >= rest.len() {
                         return Err(invalid_argument(
@@ -99,7 +276,12 @@ pub(super) async fn parse_detection_options(
                     }
                     options.forced_mask = Some(logical_mask(builtin, &rest[idx])?);
                 }
-                "samplepoints" | "data variables" | "datavariables" | "outlierlocations" => {
+                Some(
+                    OutlierOption::SamplePoints
+                    | OutlierOption::DataVariables
+                    | OutlierOption::MaxNumOutliers
+                    | OutlierOption::OutlierLocations,
+                ) => {
                     idx += 1;
                     if idx >= rest.len() {
                         return Err(invalid_argument(
@@ -114,10 +296,18 @@ pub(super) async fn parse_detection_options(
                         ),
                     ));
                 }
-                other => {
+                Some(OutlierOption::Grubbs | OutlierOption::Gesd) => {
+                    return Err(unsupported(
+                        builtin,
+                        format!(
+                            "{keyword} is not supported for numeric-array outlier detection yet"
+                        ),
+                    ));
+                }
+                None => {
                     return Err(invalid_argument(
                         builtin,
-                        format!("unsupported option or method '{other}'"),
+                        format!("unsupported option or method '{keyword}'"),
                     ));
                 }
             }
@@ -154,7 +344,11 @@ pub(super) fn parse_fill_method(rest: &mut Vec<Value>) -> BuiltinResult<FillMeth
             "filloutliers: fill method must be text or numeric scalar",
         ));
     };
-    match keyword.to_ascii_lowercase().as_str() {
+    parse_fill_keyword(&keyword)
+}
+
+fn parse_fill_keyword(keyword: &str) -> BuiltinResult<FillMethod> {
+    match keyword.trim().to_ascii_lowercase().as_str() {
         "center" => Ok(FillMethod::Center),
         "clip" => Ok(FillMethod::Clip),
         "previous" => Ok(FillMethod::Previous),

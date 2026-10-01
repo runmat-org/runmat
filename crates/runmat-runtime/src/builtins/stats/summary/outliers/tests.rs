@@ -612,6 +612,55 @@ fn too_many_outputs_error() {
 }
 
 #[test]
+fn host_visible_invalid_options_precede_unregistered_provider_access() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(
+            vec![3, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("unregistered resident fixture");
+    let resident = || Value::GpuTensor(allocation.handle.clone());
+
+    let error = block_on(isoutlier_builtin(
+        resident(),
+        vec![Value::from("unsupported")],
+    ))
+    .expect_err("method rejection before gather");
+    assert_eq!(error.identifier(), Some("RunMat:outliers:InvalidArgument"));
+
+    let error = block_on(isoutlier_builtin(
+        resident(),
+        vec![Value::from("SamplePoints"), Value::Num(1.0)],
+    ))
+    .expect_err("unsupported option before gather");
+    assert_eq!(error.identifier(), Some("RunMat:outliers:Unsupported"));
+
+    let error = block_on(isoutlier_builtin(
+        resident(),
+        vec![Value::from("percentiles"), tensor(vec![10.0], vec![1, 1])],
+    ))
+    .expect_err("malformed host percentile bounds before gather");
+    assert_eq!(error.identifier(), Some("RunMat:outliers:InvalidArgument"));
+
+    let error = block_on(filloutliers_builtin(
+        resident(),
+        vec![Value::from("spline")],
+    ))
+    .expect_err("unsupported fill method before gather");
+    assert_eq!(error.identifier(), Some("RunMat:outliers:Unsupported"));
+
+    let error = block_on(filloutliers_builtin(
+        resident(),
+        vec![Value::from("center"), Value::from("OutlierLocations")],
+    ))
+    .expect_err("missing mask before gather");
+    assert_eq!(error.identifier(), Some("RunMat:outliers:InvalidArgument"));
+}
+
+#[test]
 fn implicit_trailing_singleton_dimension_keeps_bounded_nd_geometry() {
     let input = Tensor::new((1..=8).map(f64::from).collect(), vec![2, 2, 2]).unwrap();
     let options = DetectionOptions {

@@ -1,10 +1,10 @@
 //! Static output facts shared by outlier detection and replacement.
-use super::OutlierKind;
+use super::{OutlierKind, OutlierOption};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact,
-    ValueKindFact,
+    LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer(
@@ -25,6 +25,38 @@ pub(super) fn infer(
             "ARITY",
             "filloutliers requires a fill method",
         ));
+    }
+    let mut index = if kind == OutlierKind::Fill { 2 } else { 1 };
+    while let Some(literal) = request.literals.literal_args.get(index) {
+        let text = match literal {
+            LiteralValue::Character(text)
+            | LiteralValue::String(text)
+            | LiteralValue::Keyword(text) => text,
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
+        match OutlierOption::parse(text) {
+            Some(option) => {
+                if option.unsupported_array_form()
+                    || (kind == OutlierKind::Detect && option == OutlierOption::OutlierLocations)
+                {
+                    diagnostics.push(InferenceDiagnostic::error(
+                        "OPTION",
+                        "unsupported numeric-array outlier option",
+                    ));
+                }
+                index += if option.consumes_value() { 2 } else { 1 };
+            }
+            None => {
+                diagnostics.push(InferenceDiagnostic::error(
+                    "OPTION",
+                    "unsupported outlier method or option",
+                ));
+                index += 1;
+            }
+        }
     }
     let class = input.and_then(|value| match value.kind {
         ValueKindFact::Numeric(NumericFact {
@@ -165,5 +197,33 @@ mod tests {
             OutlierKind::Detect,
         );
         assert_eq!(result.outputs[0].shape, shape);
+    }
+
+    #[test]
+    fn unsupported_literal_option_is_diagnosed_without_string_semantic_dispatch() {
+        let request = CallRequest {
+            arguments: vec![
+                ValueFact::proven(
+                    ValueKindFact::Numeric(NumericFact {
+                        class: NumericClass::Double,
+                        domain: NumericDomain::Real,
+                    }),
+                    ShapeFact::Scalar,
+                    StorageFact::Dense,
+                ),
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("SamplePoints".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let result = infer(
+            &request,
+            &super::super::ISOUTLIER_CATALOG_ENTRY,
+            OutlierKind::Detect,
+        );
+        assert!(!result.diagnostics.is_empty());
     }
 }
