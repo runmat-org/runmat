@@ -1792,6 +1792,23 @@ pub(crate) mod tests {
         assert!(invalid.message().contains("only supported for reduction"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn same_class_single_scalar_pairwise_retains_typed_storage() {
+        let left = Tensor::from_f32(vec![3.25], vec![1, 1]).expect("single left");
+        let right = Tensor::from_f32(vec![2.5], vec![1, 1]).expect("single right");
+        let (value, index) = evaluate(Value::Tensor(left), &[Value::Tensor(right)])
+            .expect("single scalar pairwise minimum")
+            .into_pair();
+        let Value::Tensor(value) = value else {
+            panic!("single scalar remains a typed tensor");
+        };
+        assert_eq!(value.numeric_dtype(), NumericDType::F32);
+        assert_eq!(value.shape, vec![1, 1]);
+        assert_eq!(value.materialize_f64(), vec![2.5]);
+        assert_eq!(index, Value::Num(2.0));
+    }
+
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
         block_on(super::evaluate(value, rest))
     }

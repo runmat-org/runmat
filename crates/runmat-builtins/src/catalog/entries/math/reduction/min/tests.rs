@@ -266,26 +266,26 @@ fn pairwise_known_shape_mismatch_is_diagnosed_without_proving_result() {
 }
 
 #[test]
-fn unresolved_single_scalar_selection_does_not_prove_output_class() {
-    let request = CallRequest {
-        arguments: vec![
-            numeric(NumericClass::Single, ShapeFact::Unknown),
-            numeric(NumericClass::Single, ShapeFact::Scalar),
-        ],
-        literals: LiteralContext::new(vec![
-            LiteralValue::Unknown,
-            LiteralValue::Real {
-                text: "2".into(),
-                class: NumericClass::Single,
-            },
-        ]),
-        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-    };
-    let result = inference::infer(&request, &MIN_CATALOG_ENTRY);
-    assert!(matches!(
-        result.outputs[0].certainty,
-        CertaintyFact::Dynamic(_)
-    ));
+fn same_class_single_pairwise_preserves_class_with_unknown_or_scalar_shape() {
+    for left_shape in [ShapeFact::Unknown, ShapeFact::Scalar] {
+        let request = CallRequest {
+            arguments: vec![
+                numeric(NumericClass::Single, left_shape.clone()),
+                numeric(NumericClass::Single, ShapeFact::Scalar),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Real {
+                    text: "2".into(),
+                    class: NumericClass::Single,
+                },
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let result = inference::infer(&request, &MIN_CATALOG_ENTRY);
+        assert_eq!(result.outputs[0].numeric().unwrap().class, NumericClass::Single);
+        assert_eq!(result.outputs[0].shape, left_shape);
+    }
 }
 
 #[test]

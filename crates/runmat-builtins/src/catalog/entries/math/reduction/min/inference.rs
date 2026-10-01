@@ -160,10 +160,6 @@ fn pairwise_output(
                 // both imaginary components are zero. Runtime values decide.
                 return ValueFact::unknown(DynamicReason::RuntimeValue);
             }
-            if a.class == NumericClass::Single && !known_array_operand {
-                // Scalar selection can materialize as binary64.
-                return ValueFact::unknown(DynamicReason::RuntimeValue);
-            }
             ValueKindFact::Numeric(*a)
         }
         (ValueKindFact::Logical, ValueKindFact::Logical) => ValueKindFact::Numeric(NumericFact {
