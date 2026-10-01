@@ -31,7 +31,7 @@ fn add(literal: ScalarLiteral) -> Result<ScalarProgram> {
 }
 
 #[test]
-fn exact_literal_bits_and_semantic_revision_are_part_of_identity() {
+fn exact_literal_bits_are_identified_and_unknown_revisions_rejected() {
     let positive = add(ScalarLiteral::F32Bits(0.0f32.to_bits())).unwrap();
     let negative = add(ScalarLiteral::F32Bits((-0.0f32).to_bits())).unwrap();
     assert_ne!(positive.identity(), negative.identity());
@@ -40,10 +40,11 @@ fn exact_literal_bits_and_semantic_revision_are_part_of_identity() {
     assert_ne!(nan_a.identity(), nan_b.identity());
     let mut revised = positive.wire().clone();
     revised.semantic_revision += 1;
-    assert_ne!(
-        positive.identity(),
-        ScalarProgram::from_wire(revised).unwrap().identity()
-    );
+    assert!(ScalarProgram::from_wire(revised).is_err());
+    assert!(positive.require_source_identity(source()).is_ok());
+    assert!(positive
+        .require_source_identity(Digest::sha256(b"unrelated binding"))
+        .is_err());
     let encoded = serde_json::to_vec(positive.wire()).unwrap();
     let decoded: ScalarProgramWire = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(

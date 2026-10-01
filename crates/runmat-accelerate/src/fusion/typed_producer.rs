@@ -32,9 +32,10 @@ impl TypedProducer {
         // its admitted subset. WGSL-only declarations keep their established
         // path until their exact numerical policy is represented there too.
         if let Some(&[root]) = roots {
-            if let Ok(checked) = Self::emit_checked_program(plan, program, buffer_type, root) {
-                if let Ok(lowered) =
-                    Self::lower_checked_wgsl(&checked, buffer_type, expressions.clone())
+            if let Some(checked) = Self::emit_checked_program(plan, program, buffer_type, root)? {
+                checked.require_source_identity(program.cache_identity()?)?;
+                if let Some(lowered) =
+                    Self::lower_checked_wgsl(&checked, buffer_type, expressions.clone())?
                 {
                     return Ok(lowered);
                 }

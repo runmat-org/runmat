@@ -1,6 +1,8 @@
 use super::*;
 use crate::graph::PrimitiveOp;
-use runmat_accelerate_api::scalar_program::{ScalarLiteral, ScalarNode, ScalarProgram};
+use runmat_accelerate_api::scalar_program::{
+    ScalarLiteral, ScalarNode, ScalarProgram, SCALAR_PROGRAM_REVISION,
+};
 use runmat_types::{OperatorKind, ScalarOperation};
 use runmat_value::{NumericScalar, Value};
 
@@ -13,7 +15,7 @@ impl TypedProducer {
         program: &ResolvedProgram,
         buffer_type: ScalarType,
         root: ValueId,
-    ) -> Result<ScalarProgram> {
+    ) -> Result<Option<ScalarProgram>> {
         let leaves: HashMap<_, _> = plan
             .inputs
             .iter()
@@ -21,6 +23,21 @@ impl TypedProducer {
             .map(|&id| (id, String::new()))
             .collect();
         let selected = producer_indices(plan, &leaves, &[root])?;
+        // Check every selected advertised binding before an unsupported legacy
+        // operation can request fallback. A malformed closed binding must not
+        // execute through its older expression template by accident.
+        let resolved = plan
+            .operations
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| selected.contains(index))
+            .map(|(index, operation)| {
+                resolved_operation(program, operation).map(|identity| (index, identity))
+            })
+            .collect::<Result<HashMap<_, _>>>()?;
+        if resolved.values().any(Option::is_none) {
+            return Ok(None);
+        }
         let produced: HashSet<_> = selected
             .iter()
             .map(|&index| match &plan.operations[index] {
@@ -54,10 +71,15 @@ impl TypedProducer {
             let class = program.floating_class(id)?;
             require_provider_class(class, buffer_type)?;
             if let Some(value) = plan.const_values.get(&id) {
-                let literal = literal(value)
-                    .ok_or_else(|| anyhow!("scalar constant has no exact floating payload"))?;
+                let Some(literal) = literal(value) else {
+                    return Ok(None);
+                };
                 if literal.class() != class {
-                    return Err(anyhow!("scalar constant class differs from admitted fact"));
+                    // An explicit provider precision policy can materialize a
+                    // Double source literal as Single. This wire format keeps
+                    // source bits, but does not yet encode that admission-time
+                    // conversion as a literal operation; use legacy lowering.
+                    return Ok(None);
                 }
                 nodes.push(ScalarNode::Literal { id, value: literal });
             } else {
@@ -75,39 +97,11 @@ impl TypedProducer {
             let id = output.ok_or_else(|| anyhow!("scalar operation has no output"))?;
             let class = program.floating_class(id)?;
             require_provider_class(class, buffer_type)?;
-            let operation = if let Some(declaration) = program.declaration(id) {
-                let entry = program
-                    .catalog_entry(id)
-                    .ok_or_else(|| anyhow!("missing captured scalar binding"))?;
-                if entry.contract.purity != runmat_builtins::BuiltinPurity::Pure
-                    || entry.contract.workspace_effect.is_some()
-                    || entry.contract.environment_effect.is_some()
-                {
-                    return Err(anyhow!("scalar program requires an effect-free binding"));
-                }
-                let precision = match class {
-                    NumericClass::Single => ScalarType::F32,
-                    NumericClass::Double => ScalarType::F64,
-                    _ => return Err(anyhow!("scalar operation has no floating precision")),
-                };
-                if !declaration
-                    .spec
-                    .elementwise
-                    .as_ref()
-                    .is_some_and(|template| template.scalar_precisions.contains(&precision))
-                {
-                    return Err(anyhow!("binding has no matching scalar template"));
-                }
-                declaration
-                    .semantics
-                    .and_then(|semantics| semantics.scalar_operation)
-                    .ok_or_else(|| anyhow!("binding has no portable scalar operation"))?
-            } else {
-                let FusionOp::Primitive { op, .. } = operation else {
-                    return Err(anyhow!("builtin has no captured scalar binding"));
-                };
-                primitive_operation(*op)?
-            };
+            let operation = resolved
+                .get(&index)
+                .copied()
+                .flatten()
+                .ok_or_else(|| anyhow!("selected scalar operation lost its binding"))?;
             nodes.push(ScalarNode::Apply {
                 id,
                 source_index: u32::try_from(index)?,
@@ -116,14 +110,20 @@ impl TypedProducer {
                 operands: inputs.clone(),
             });
         }
-        ScalarProgram::new(program.cache_identity()?, 1, nodes, root)
+        ScalarProgram::new(
+            program.cache_identity()?,
+            SCALAR_PROGRAM_REVISION,
+            nodes,
+            root,
+        )
+        .map(Some)
     }
 
     pub(super) fn lower_checked_wgsl(
         checked: &ScalarProgram,
         buffer_type: ScalarType,
         mut expressions: HashMap<ValueId, String>,
-    ) -> Result<Self> {
+    ) -> Result<Option<Self>> {
         let mut body = String::new();
         for node in &checked.wire().nodes {
             match node {
@@ -137,7 +137,7 @@ impl TypedProducer {
                 // because the portable receipt retains its exact bits. The
                 // established WGSL constant path remains in charge for now.
                 ScalarNode::Literal { .. } => {
-                    return Err(anyhow!("exact scalar literal lowering unavailable"));
+                    return Ok(None);
                 }
                 ScalarNode::Apply {
                     id,
@@ -179,11 +179,11 @@ impl TypedProducer {
                 }
             }
         }
-        Ok(Self {
+        Ok(Some(Self {
             body,
             expressions,
             helpers: Vec::new(),
-        })
+        }))
     }
 }
 
@@ -208,7 +208,7 @@ fn literal(value: &Value) -> Option<ScalarLiteral> {
     }
 }
 
-fn primitive_operation(op: PrimitiveOp) -> Result<ScalarOperation> {
+fn primitive_operation(op: PrimitiveOp) -> Option<ScalarOperation> {
     let kind = match op {
         PrimitiveOp::Add => OperatorKind::Add,
         PrimitiveOp::Sub => OperatorKind::Subtract,
@@ -217,7 +217,68 @@ fn primitive_operation(op: PrimitiveOp) -> Result<ScalarOperation> {
         PrimitiveOp::ElemLeftDiv => OperatorKind::ElementwiseLeftDivide,
         PrimitiveOp::Neg => OperatorKind::UnaryMinus,
         PrimitiveOp::UPlus => OperatorKind::UnaryPlus,
-        _ => return Err(anyhow!("primitive has no portable scalar operation")),
+        _ => return None,
     };
-    Ok(ScalarOperation::Operator(kind))
+    Some(ScalarOperation::Operator(kind))
+}
+
+fn resolved_operation(
+    program: &ResolvedProgram,
+    operation: &FusionOp,
+) -> Result<Option<ScalarOperation>> {
+    let (inputs, output) = match operation {
+        FusionOp::Primitive { inputs, output, .. } | FusionOp::Builtin { inputs, output, .. } => {
+            (inputs, output)
+        }
+    };
+    let id = output.ok_or_else(|| anyhow!("scalar operation has no output"))?;
+    let class = program.floating_class(id)?;
+    let identity = if let Some(declaration) = program.declaration(id) {
+        let entry = program
+            .catalog_entry(id)
+            .ok_or_else(|| anyhow!("missing captured scalar binding"))?;
+        if entry.contract.purity != runmat_builtins::BuiltinPurity::Pure
+            || entry.contract.workspace_effect.is_some()
+            || entry.contract.environment_effect.is_some()
+        {
+            return Err(anyhow!("scalar program requires an effect-free binding"));
+        }
+        let precision = match class {
+            NumericClass::Single => ScalarType::F32,
+            NumericClass::Double => ScalarType::F64,
+            _ => return Err(anyhow!("scalar operation has no floating precision")),
+        };
+        if !declaration
+            .spec
+            .elementwise
+            .as_ref()
+            .is_some_and(|template| template.scalar_precisions.contains(&precision))
+        {
+            return Err(anyhow!("binding has no matching scalar template"));
+        }
+        declaration
+            .semantics
+            .and_then(|semantics| semantics.scalar_operation)
+    } else {
+        let FusionOp::Primitive { op, .. } = operation else {
+            return Err(anyhow!("builtin has no captured scalar binding"));
+        };
+        primitive_operation(*op)
+    };
+    if let Some(identity) = identity {
+        if identity.arity() != Some(inputs.len()) {
+            return Err(anyhow!("captured scalar operation arity mismatch"));
+        }
+        if matches!(identity, ScalarOperation::Cast(target) if target != class) {
+            return Err(anyhow!("captured scalar cast result class mismatch"));
+        }
+        if !matches!(identity, ScalarOperation::Cast(_)) {
+            for input in inputs {
+                if program.floating_class(*input)? != class {
+                    return Err(anyhow!("captured scalar operand class mismatch"));
+                }
+            }
+        }
+    }
+    Ok(identity)
 }

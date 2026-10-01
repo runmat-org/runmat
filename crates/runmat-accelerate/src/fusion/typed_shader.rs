@@ -4,7 +4,7 @@ use anyhow::Result;
 use runmat_runtime::builtins::common::spec::ScalarType;
 
 use super::semantics::ResolvedProgram;
-use super::typed_producer::{scalar_name, TypedProducer};
+use super::typed_producer::{producer_indices, scalar_name, TypedProducer};
 use super::FusionGroupPlan;
 use crate::graph::ValueId;
 
@@ -23,7 +23,12 @@ impl FusionGroupPlan {
         for (index, id) in self.inputs.iter().enumerate() {
             expressions.insert(*id, format!("input{index}.data[i{index}]"));
         }
-        let producer = TypedProducer::emit(self, program, buffer_type, expressions, None)?;
+        // A single public result may use checked lowering only when it covers
+        // every source operation. A partial slice could hide an effect or an
+        // invalid operation that complete elementwise emission must report.
+        let checked_root = self.complete_single_output_root(outputs);
+        let roots = checked_root.as_ref().map(std::slice::from_ref);
+        let producer = TypedProducer::emit(self, program, buffer_type, expressions, roots)?;
         let mut bindings = String::new();
         let mut writes = String::new();
         for (index, id) in outputs.iter().enumerate() {
@@ -47,5 +52,17 @@ impl FusionGroupPlan {
                 &writes,
             )
         ))
+    }
+
+    pub(crate) fn complete_single_output_root(&self, outputs: &[ValueId]) -> Option<ValueId> {
+        let [root] = outputs else { return None };
+        let leaves: HashMap<_, _> = self
+            .inputs
+            .iter()
+            .chain(self.const_values.keys())
+            .map(|&id| (id, String::new()))
+            .collect();
+        (producer_indices(self, &leaves, outputs).ok()?.len() == self.operations.len())
+            .then_some(*root)
     }
 }

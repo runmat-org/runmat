@@ -10,6 +10,8 @@ use runmat_execution::Digest;
 use runmat_types::{NumericClass, ScalarOperation};
 use serde::{Deserialize, Serialize};
 
+pub const SCALAR_PROGRAM_REVISION: u32 = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScalarLiteral {
     F32Bits(u32),
@@ -91,7 +93,10 @@ impl ScalarProgram {
     }
 
     pub fn from_wire(wire: ScalarProgramWire) -> Result<Self> {
-        ensure!(wire.semantic_revision != 0, "zero scalar semantic revision");
+        ensure!(
+            wire.semantic_revision == SCALAR_PROGRAM_REVISION,
+            "unsupported scalar semantic revision"
+        );
         ensure!(!wire.nodes.is_empty(), "empty scalar program");
         let mut previous = HashMap::new();
         let mut last_source_index = None;
@@ -161,6 +166,17 @@ impl ScalarProgram {
 
     pub fn identity(&self) -> Digest {
         self.identity
+    }
+
+    /// Structural validation alone does not authenticate a serialized
+    /// program's claimed source. Execution owners must compare it with their
+    /// captured, admitted source identity before lowering or submission.
+    pub fn require_source_identity(&self, expected: Digest) -> Result<()> {
+        ensure!(
+            self.wire.source_identity == expected,
+            "scalar source identity mismatch"
+        );
+        Ok(())
     }
 }
 

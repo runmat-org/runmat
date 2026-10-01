@@ -96,15 +96,22 @@ fn root_slice_keeps_shared_dependencies_once_and_original_temporary_indices() {
 #[test]
 fn full_elementwise_source_and_rounding_are_unchanged() {
     let plan = plan(vec![add(0, 1, 2), add(2, 1, 3)], 3);
+    assert_eq!(plan.complete_single_output_root(&[3]), Some(3));
+    assert_eq!(plan.complete_single_output_root(&[2]), None);
+    assert_eq!(plan.complete_single_output_root(&[2, 3]), None);
     let program = resolve(
         &plan,
         &[Value::Num(1.0), Value::Num(2.0)],
         ProviderPrecision::F64,
     );
     let producer = TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), None).unwrap();
-    let checked = TypedProducer::emit_checked_program(&plan, &program, ScalarType::F64, 3).unwrap();
+    let checked = TypedProducer::emit_checked_program(&plan, &program, ScalarType::F64, 3)
+        .unwrap()
+        .unwrap();
     assert_eq!(checked.wire().nodes.len(), 4);
-    let lowered = TypedProducer::lower_checked_wgsl(&checked, ScalarType::F64, leaves()).unwrap();
+    let lowered = TypedProducer::lower_checked_wgsl(&checked, ScalarType::F64, leaves())
+        .unwrap()
+        .unwrap();
     assert_eq!(producer.body, lowered.body);
     let selected =
         TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), Some(&[3])).unwrap();
@@ -169,7 +176,9 @@ fn checked_program_uses_captured_cast_binding_and_exact_constant_bits() {
         &[Value::Num(16_777_217.0), Value::Num(0.0)],
         ProviderPrecision::F64,
     );
-    let checked = TypedProducer::emit_checked_program(&cast, &facts, ScalarType::F64, 2).unwrap();
+    let checked = TypedProducer::emit_checked_program(&cast, &facts, ScalarType::F64, 2)
+        .unwrap()
+        .unwrap();
     assert!(matches!(
         &checked.wire().nodes[1],
         ScalarNode::Apply {
@@ -186,8 +195,14 @@ fn checked_program_uses_captured_cast_binding_and_exact_constant_bits() {
     signed_zero.inputs = vec![0];
     signed_zero.const_values.insert(1, Value::Num(-0.0));
     let facts = resolve(&signed_zero, &[Value::Num(1.0)], ProviderPrecision::F64);
-    let checked =
-        TypedProducer::emit_checked_program(&signed_zero, &facts, ScalarType::F64, 2).unwrap();
+    let checked = TypedProducer::emit_checked_program(&signed_zero, &facts, ScalarType::F64, 2)
+        .unwrap()
+        .unwrap();
+    assert!(
+        TypedProducer::lower_checked_wgsl(&checked, ScalarType::F64, leaves())
+            .unwrap()
+            .is_none()
+    );
     assert!(matches!(
         &checked.wire().nodes[1],
         ScalarNode::Literal {
@@ -195,6 +210,36 @@ fn checked_program_uses_captured_cast_binding_and_exact_constant_bits() {
             ..
         } if *bits == (-0.0f64).to_bits()
     ));
+}
+
+#[test]
+fn malformed_advertised_cast_cannot_fall_back_to_legacy_expression() {
+    let cast = plan(
+        vec![FusionOp::Builtin {
+            origin: Default::default(),
+            name: "single".into(),
+            inputs: vec![0],
+            output: Some(2),
+        }],
+        2,
+    );
+    let facts = resolve(
+        &cast,
+        &[Value::Num(3.0), Value::Num(4.0)],
+        ProviderPrecision::F64,
+    );
+    let malformed = plan(
+        vec![FusionOp::Builtin {
+            origin: Default::default(),
+            name: "single".into(),
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    assert!(
+        TypedProducer::emit(&malformed, &facts, ScalarType::F64, leaves(), Some(&[2])).is_err()
+    );
 }
 
 #[test]
@@ -213,7 +258,11 @@ fn unsupported_scalar_contract_does_not_change_existing_wgsl_route() {
         &[Value::Num(2.5), Value::Num(0.0)],
         ProviderPrecision::F64,
     );
-    assert!(TypedProducer::emit_checked_program(&plan, &facts, ScalarType::F64, 2).is_err());
+    assert!(
+        TypedProducer::emit_checked_program(&plan, &facts, ScalarType::F64, 2)
+            .unwrap()
+            .is_none()
+    );
     assert!(
         TypedProducer::emit(&plan, &facts, ScalarType::F64, leaves(), Some(&[2]))
             .unwrap()
