@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`X` and `Y` must be real numeric vectors or two-dimensional matrices with the same number of columns. The default metric is Euclidean distance.",
             "Supported named metrics match `pdist`: `euclidean`, `squaredeuclidean`, `cityblock`, `chebychev`, `minkowski`, `seuclidean`, `mahalanobis`, `cosine`, `correlation`, `hamming`, `jaccard`, and `spearman`. Custom distance functions are not supported.",
             "`pdist2(X,Y,\"minkowski\",P)` uses a positive finite exponent. `seuclidean` accepts a standard-deviation vector and defaults to scale estimated from `X`. `mahalanobis` accepts a symmetric positive-definite covariance matrix and defaults to covariance estimated from `X`.",
-            "`\"Smallest\",K` and `\"Largest\",K` return the K smallest or largest distances for each row of `Y`; K is limited to the number of rows in `X`. `[D,I]` also returns one-based row indices from `X` for selected distances.",
+            "`\"Smallest\",K` and `\"Largest\",K` return the K smallest or largest distances for each row of `Y`; when K exceeds the number of rows in `X`, all X rows are returned. `[D,I]` also returns one-based row indices from `X` for selected distances.",
         ]},
         BuiltinDocumentationSection { heading: "Classes and execution", paragraphs: &[
             "Distances and selected indices are double. Typed-integer observation data, distance parameters, and `CacheSize` are checked RunMat floating-boundary extensions; typed `Smallest` and `Largest` counts are separately gated structural extensions decoded from native storage. `CacheSize` is validated but does not change the current CPU algorithm.",
@@ -37,12 +37,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Selected distances and output indices", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/distance/selection.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Pairwise distance selection and metrics", location: "builtins::stats::ml::distance::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Integer and numeric distance integration", location: "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs" },
         ],
-        notes: &["Legacy summary, description, all seven behaviors, three examples, FAQs, links, GPU/fusion notes, and test references retained; examples are standalone with assertions. JSON retained pending export parity."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

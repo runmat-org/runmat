@@ -78,12 +78,15 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Clustering admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/linkage/admission.rs") },
+            BuiltinDocumentationLink { label: "Hierarchical solver", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/linkage/compute.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Hierarchical merge and admission tests", location: "builtins::stats::ml::linkage::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "VM ML integration", location: "crates/runmat-vm/tests/stats_ml.rs" },
         ],
-        notes: &["All twelve legacy behaviors, three examples, FAQs, links, resource limits, residency, and tests are retained. Legacy JSON remains until integrated export parity."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

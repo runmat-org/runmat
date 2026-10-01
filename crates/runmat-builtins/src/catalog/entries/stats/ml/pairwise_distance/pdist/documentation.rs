@@ -41,7 +41,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Pairwise distance metric behavior", location: "builtins::stats::ml::distance::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Integer and numeric distance integration", location: "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs" },
         ],
-        notes: &["Legacy summary, description, all seven behaviors, three examples, FAQs, links, GPU/fusion notes, and test references retained; examples are standalone with assertions. JSON retained pending export parity."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

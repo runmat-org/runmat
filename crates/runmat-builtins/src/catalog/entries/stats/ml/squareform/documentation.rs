@@ -89,7 +89,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Structural, integer, and logical squareform conversion", location: "builtins::stats::ml::distance::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "VM statistics integration", location: "crates/runmat-vm/tests/stats_ml.rs" },
         ],
-        notes: &["All substantive legacy sidecar fields, examples, FAQ, and links are retained. Examples are standalone and asserted; legacy JSON remains until integrated export parity is verified."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

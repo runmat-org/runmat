@@ -40,12 +40,15 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Neighbor selection and output ownership", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/distance/selection.rs") },
+            BuiltinDocumentationLink { label: "Distance options", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/distance/options.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "K-nearest selection, options, and residency", location: "builtins::stats::ml::distance::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "VM statistics integration", location: "crates/runmat-vm/tests/stats_ml.rs" },
         ],
-        notes: &["All nine legacy behaviors, three examples, FAQs, links, execution/fusion notes and test references retained; examples are standalone and asserted. Legacy JSON remains pending export parity."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
