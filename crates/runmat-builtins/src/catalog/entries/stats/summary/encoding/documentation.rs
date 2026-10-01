@@ -57,7 +57,10 @@ pub(super) const DUMMYVAR: BuiltinDocumentation = BuiltinDocumentation {
         SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, LABELS_SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Numeric, missing, typed-integer and compatibility admission tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/dummyvar.rs" }], notes: &["Host-only double output; GPU input is a compatibility-gated gather boundary."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, LABELS_SOURCE], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Numeric, missing, typed-integer and compatibility admission tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/dummyvar.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled encoding surface", location: "crates/runmat-vm/tests/stats_ml.rs" },
+    ], notes: &["Host-only double output; GPU input is a compatibility-gated gather boundary."] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 
@@ -97,7 +100,10 @@ pub(super) const ONEHOTENCODE: BuiltinDocumentation = BuiltinDocumentation {
         SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, CONTROLS_SOURCE, LABELS_SOURCE, GEOMETRY_SOURCE, OUTPUT_SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Class order, output type, exact integer labels, missing and extension tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/encode.rs" }], notes: &["Automatic GPU input is gathered; no provider-resident encoder is claimed."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, CONTROLS_SOURCE, LABELS_SOURCE, GEOMETRY_SOURCE, OUTPUT_SOURCE], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Class order, output type, exact integer labels, missing and extension tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/encode.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled wide integer label semantics", location: "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs" },
+    ], notes: &["Automatic GPU input is gathered; no provider-resident encoder is claimed."] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 
@@ -136,6 +142,9 @@ pub(super) const ONEHOTDECODE: BuiltinDocumentation = BuiltinDocumentation {
         SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, CONTROLS_SOURCE, LABELS_SOURCE, GEOMETRY_SOURCE, OUTPUT_SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "First-max, exact integer classes, categorical order and compatibility tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/decode.rs" }], notes: &["Decoding is a host materialization boundary, not a GPU kernel or fusion path."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, CONTROLS_SOURCE, LABELS_SOURCE, GEOMETRY_SOURCE, OUTPUT_SOURCE], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "First-max, exact integer classes, categorical order and compatibility tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/decode.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled wide integer label semantics", location: "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs" },
+    ], notes: &["Decoding is a host materialization boundary, not a GPU kernel or fusion path."] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
