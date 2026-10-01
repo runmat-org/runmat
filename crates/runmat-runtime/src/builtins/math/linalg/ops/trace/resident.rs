@@ -37,6 +37,12 @@ pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     Err(source) => return Err(trace_provider_failure(source)),
                 };
                 if let Some(result) = reduced {
+                    let diagonal_sibling = [&diagonal];
+                    let protected_siblings = if diag_len == 1 {
+                        &[][..]
+                    } else {
+                        &diagonal_sibling[..]
+                    };
                     let result = admit_resident(
                         provider,
                         &handle,
@@ -51,7 +57,7 @@ pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                                 GpuOutputAliasPolicy::RequireDistinctAllocation
                             },
                         ),
-                        if diag_len == 1 { &[] } else { &[&diagonal] },
+                        protected_siblings,
                     )?;
                     let result = if runmat_accelerate_api::handle_precision(&handle)
                         == Some(ProviderPrecision::F32)
