@@ -494,7 +494,7 @@ async fn parse_axes(
                 "median: dimension string must not be empty",
             ));
         }
-        return match MedianControl::from_public_option(text) {
+        return match MedianControl::from_public_option(&text) {
             Some(MedianControl::All) => Ok(Some(MedianAxes::All)),
             Some(MedianControl::Missing(_)) => Ok(None),
             Some(MedianControl::Weights) | None => Err(median_invalid_argument(format!(

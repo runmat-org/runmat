@@ -105,7 +105,7 @@ pub(super) fn parse_model_spec(value: &Value, predictors: usize) -> BuiltinResul
     }
 }
 
-fn parse_model_spec_text(text: &str, _predictors: usize) -> BuiltinResult<ModelSpec> {
+pub(super) fn parse_model_spec_text(text: &str, _predictors: usize) -> BuiltinResult<ModelSpec> {
     if text.eq_ignore_ascii_case("constant") {
         Ok(ModelSpec::Constant)
     } else if text.eq_ignore_ascii_case("linear") {
@@ -123,7 +123,7 @@ fn parse_model_spec_text(text: &str, _predictors: usize) -> BuiltinResult<ModelS
     }
 }
 
-fn is_known_model_spec(text: &str) -> bool {
+pub(super) fn is_known_model_spec(text: &str) -> bool {
     matches!(
         text.to_ascii_lowercase().as_str(),
         "constant" | "linear" | "interactions" | "purequadratic" | "quadratic"
@@ -235,7 +235,7 @@ pub(super) fn parse_formula_terms(
     Ok(terms)
 }
 
-fn formula_rhs_tokens(rhs: &str) -> Vec<String> {
+pub(super) fn formula_rhs_tokens(rhs: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
     let mut sign = 1_i8;

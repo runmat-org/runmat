@@ -2,8 +2,7 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, FitlmOption,
-    FITLM_ERROR_INTERNAL as ERROR_FITLM_INTERNAL,
+    BuiltinErrorDescriptor, FitlmOption, FITLM_ERROR_INTERNAL as ERROR_FITLM_INTERNAL,
     FITLM_ERROR_INVALID_ARGUMENT as ERROR_FITLM_INVALID_ARGUMENT,
     FITLM_ERROR_NUMERICAL as ERROR_FITLM_NUMERICAL, FITLM_INTEGER_CONTROL_EXTENSION,
     FITLM_INTEGER_PREDICTOR_EXTENSION, FITLM_INTEGER_RESPONSE_EXTENSION,
@@ -31,26 +30,26 @@ const EPS: f64 = 1.0e-12;
 mod training;
 use training::{evaluate_term, fit_ols};
 mod header;
-use header::{preflight_matrix_rank, FitlmArguments, HeaderInspection};
+use header::{preflight_matrix_rank, FitlmArguments, HeaderInspection, NamedOption};
 mod admission;
 mod options;
 mod prediction;
 mod projection;
 use admission::{build_fit_spec, is_table_value};
 use options::{
-    coefficient_names, formula_text, model_terms, parse_fit_name_values, parse_formula_predictors,
-    parse_formula_terms, parse_model_spec, parse_predict_options, ModelSpec,
+    coefficient_names, formula_rhs_tokens, formula_text, is_known_model_spec, model_terms,
+    parse_fit_name_values, parse_formula_predictors, parse_formula_terms, parse_model_spec,
+    parse_model_spec_text, parse_predict_options, ModelSpec,
 };
 use prediction::predict_linear_model;
 use projection::model_object;
 mod values;
 use values::{
     bool_scalar, columns_to_tensor, columns_to_tensor_predict,
-    ensure_exact_fitlm_integer_scalar_boundary, ensure_exact_fitlm_integer_tensor_boundary,
-    exclude_mask, exclude_spec, has_intercept, matrix_property, numeric_column, numeric_property,
-    numeric_scalar, numeric_scalar_property, numeric_vector, scalar_text, string_column,
-    string_property, string_row, terms_from_object, terms_tensor, text_list, vector_values,
-    vector_values_predict, x_value,
+    ensure_exact_fitlm_integer_tensor_boundary, exclude_mask, exclude_spec, has_intercept,
+    matrix_property, numeric_column, numeric_property, numeric_scalar, numeric_scalar_property,
+    numeric_vector, scalar_text, string_column, string_property, string_row, terms_from_object,
+    terms_tensor, text_list, vector_values, vector_values_predict, x_value,
 };
 
 fn fitlm_error(

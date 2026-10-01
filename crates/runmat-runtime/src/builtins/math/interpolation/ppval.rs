@@ -1,7 +1,7 @@
 //! Evaluate piecewise-polynomial structs produced by `spline` and `pchip`.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, PPVAL_DESCRIPTOR, PPVAL_ERROR_INTERNAL, PPVAL_ERROR_INVALID_ARGUMENT,
+    BuiltinErrorDescriptor, PPVAL_ERROR_INTERNAL, PPVAL_ERROR_INVALID_ARGUMENT,
     PPVAL_ERROR_INVALID_INPUT, PPVAL_INTEGER_QUERY_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
@@ -91,6 +91,7 @@ mod tests {
     use super::*;
     use crate::builtins::math::interpolation::pp::{build_spline_pp, pp_to_value, NumericSeries};
     use futures::executor::block_on;
+    use runmat_builtins::PPVAL_DESCRIPTOR;
     use runmat_value::{StructValue, Tensor};
 
     #[test]

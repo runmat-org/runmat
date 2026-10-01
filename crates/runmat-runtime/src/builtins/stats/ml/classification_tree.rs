@@ -47,9 +47,8 @@ use projection::model_object;
 mod labels;
 mod values;
 use labels::{
-    class_kind_property, integer_class_name, integer_storage, is_missing_label, label_vector,
-    labels_from_value, labels_value, predicted_labels_value, same_label, unique_labels,
-    validate_class_names,
+    class_kind_property, integer_class_name, is_missing_label, label_vector, labels_from_value,
+    labels_value, predicted_labels_value, same_label, unique_labels, validate_class_names,
 };
 use values::{
     char_rows, columns_to_tensor, columns_to_tensor_predict, ensure_integer_tensor_exact,

@@ -96,7 +96,7 @@ pub(super) fn evaluate_piecewise_interpolant(
             y,
             series: 1,
             component_shape: Vec::new(),
-            sample_axis: super::pp::SampleAxis::First,
+            sample_axis: super::super::pp::SampleAxis::First,
         };
         let pp = match spec.method {
             InterpMethod::Pchip => {

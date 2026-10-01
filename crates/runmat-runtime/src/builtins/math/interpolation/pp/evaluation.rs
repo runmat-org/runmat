@@ -155,7 +155,7 @@ fn eval_nearest(x: &[f64], y: &[f64], xq: f64, extrap: &Extrapolation) -> f64 {
     }
 }
 
-pub(super) fn eval_pp_scalar(
+pub(in crate::builtins::math::interpolation) fn eval_pp_scalar(
     pp: &PiecewisePolynomial,
     series: usize,
     xq: f64,
@@ -178,7 +178,11 @@ pub(super) fn eval_pp_scalar(
     acc
 }
 
-pub(super) fn interval_index(x: &[f64], xq: f64, allow_extrapolation: bool) -> Option<usize> {
+pub(in crate::builtins::math::interpolation) fn interval_index(
+    x: &[f64],
+    xq: f64,
+    allow_extrapolation: bool,
+) -> Option<usize> {
     if xq < x[0] {
         return allow_extrapolation.then_some(0);
     }
@@ -196,7 +200,7 @@ pub(super) fn interval_index(x: &[f64], xq: f64, allow_extrapolation: bool) -> O
     }
 }
 
-pub(super) fn out_of_range_value(extrap: &Extrapolation) -> f64 {
+pub(in crate::builtins::math::interpolation) fn out_of_range_value(extrap: &Extrapolation) -> f64 {
     match extrap {
         Extrapolation::Nan => f64::NAN,
         Extrapolation::Extrapolate => f64::NAN,

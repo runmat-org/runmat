@@ -95,7 +95,7 @@ pub(super) async fn admit(
 ) -> BuiltinResult<OdeOptions> {
     // Check every host-visible field and compatibility gate before the first
     // resident read. Unknown and shadowed fields are not solver operands.
-    for (field, value) in selected.iter() {
+    for (_, value) in selected.iter() {
         if crate::builtins::common::validation::value_contains_explicit_gpu(value) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 extensions.resident_input,

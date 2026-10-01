@@ -33,7 +33,7 @@ const EPS: f64 = 1.0e-12;
 mod training;
 use training::fit_models;
 mod header;
-use header::{preflight_matrix_rank, FitclinearArguments, HeaderInspection};
+use header::{preflight_matrix_rank, FitclinearArguments, HeaderInspection, NamedOption};
 mod admission;
 mod options;
 mod prediction;
@@ -45,8 +45,8 @@ use projection::fit_info_value;
 mod labels;
 mod values;
 use labels::{
-    integer_storage, is_missing_label, label_kind_name, label_vector, labels_from_value,
-    labels_value, numeric_vector_property, predicted_labels_value, same_label, score_transform,
+    is_missing_label, label_kind_name, label_vector, labels_from_value, labels_value,
+    numeric_vector_property, predicted_labels_value, same_label, score_transform,
     score_transform_property, string_array_property, tensor_property, unique_labels,
     validate_class_names,
 };

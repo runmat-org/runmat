@@ -1,3 +1,4 @@
+use super::header::{NamedOption, PreparedOption};
 use super::*;
 
 pub(super) enum FitctreeAction {
