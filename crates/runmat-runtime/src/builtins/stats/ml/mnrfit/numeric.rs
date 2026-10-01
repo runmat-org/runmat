@@ -8,8 +8,13 @@ pub(super) async fn numeric_tensor(
     value: Value,
     cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Tensor> {
-    let tensor = tensor::value_into_tensor_for(label, value)
-        .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))?;
+    let tensor = match value {
+        Value::LogicalArray(array) => {
+            logical_tensor_cooperatively(array, label, cooperation).await?
+        }
+        other => tensor::value_into_tensor_for(label, other)
+            .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))?,
+    };
     ensure_exact_integer_tensor(&tensor, label, cooperation).await?;
     Ok(tensor)
 }
@@ -20,24 +25,40 @@ pub(super) async fn admitted_host_predictor(
 ) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(tensor) => Ok(tensor),
-        Value::LogicalArray(array) => {
-            let mut values = Vec::new();
-            values.try_reserve_exact(array.data.len()).map_err(|_| {
-                invalid("mnrfit: predictor conversion exceeds available host resources")
-            })?;
-            for (index, value) in array.data.iter().enumerate() {
-                values.push(f64::from(*value != 0));
-                if (index + 1).is_multiple_of(16_384) {
-                    cooperation.completed(16_384).await?;
-                }
-            }
-            cooperation
-                .completed((array.data.len() % 16_384) as u64)
-                .await?;
-            Tensor::new(values, array.shape).map_err(|_| invalid("mnrfit: X must be numeric"))
-        }
+        Value::LogicalArray(array) => logical_tensor_cooperatively(array, "X", cooperation).await,
         scalar => numeric_tensor("X", scalar, cooperation).await,
     }
+}
+
+async fn logical_tensor_cooperatively(
+    array: LogicalArray,
+    label: &str,
+    cooperation: &mut FitCooperation,
+) -> BuiltinResult<Tensor> {
+    let values = logical_values_cooperatively(&array, label, cooperation).await?;
+    Tensor::new(values, array.shape)
+        .map_err(|_| invalid(format!("mnrfit: {label} must be numeric")))
+}
+
+async fn logical_values_cooperatively(
+    array: &LogicalArray,
+    label: &str,
+    cooperation: &mut FitCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(array.data.len())
+        .map_err(|_| invalid(format!("mnrfit: {label} exceeds available host resources")))?;
+    for (index, value) in array.data.iter().enumerate() {
+        values.push(f64::from(*value != 0));
+        if (index + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
+    }
+    cooperation
+        .completed((array.data.len() % 16_384) as u64)
+        .await?;
+    Ok(values)
 }
 
 pub(super) async fn numeric_vector(
@@ -45,6 +66,15 @@ pub(super) async fn numeric_vector(
     label: &str,
     cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<f64>> {
+    let value = match value {
+        Value::LogicalArray(array) => {
+            if array.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
+                return Err(invalid(format!("mnrfit: {label} must be a vector")));
+            }
+            return logical_values_cooperatively(&array, label, cooperation).await;
+        }
+        other => other,
+    };
     let tensor = numeric_tensor(label, value, cooperation).await?;
     if tensor.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid(format!("mnrfit: {label} must be a vector")));
