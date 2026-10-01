@@ -2,13 +2,10 @@
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, POLYINT_ERROR_INVALID_ARGUMENT, POLYINT_ERROR_INVALID_INPUT,
 };
+#[cfg(test)]
+use runmat_builtins::{POLYINT_DESCRIPTOR, POLYINT_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
 
@@ -18,121 +15,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::poly::type_resolvers::polyint_type;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyint";
-
-const POLYINT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "q",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Integrated polynomial coefficient vector.",
-}];
-
-const POLYINT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Polynomial coefficient vector.",
-}];
-
-const POLYINT_INPUTS_WITH_K: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Constant of integration.",
-    },
-];
-
-const POLYINT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "q = polyint(p)",
-        inputs: &POLYINT_INPUTS,
-        outputs: &POLYINT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "q = polyint(p, k)",
-        inputs: &POLYINT_INPUTS_WITH_K,
-        outputs: &POLYINT_OUTPUT,
-    },
-];
-
-const POLYINT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYINT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polyint:InvalidArgument"),
-    when: "Input arity or integration-constant argument is malformed.",
-    message: "polyint: invalid argument",
-};
-
-const POLYINT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYINT.INVALID_INPUT",
-    identifier: Some("RunMat:polyint:InvalidInput"),
-    when: "Inputs are not single- or double-precision coefficient/constant values, or coefficients do not form a vector.",
-    message: "polyint: invalid input",
-};
-
-const POLYINT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYINT.INTERNAL",
-    identifier: Some("RunMat:polyint:Internal"),
-    when: "Runtime fails while building output tensors or provider fallback paths.",
-    message: "polyint: internal runtime failure",
-};
-
-const POLYINT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    POLYINT_ERROR_INVALID_ARGUMENT,
-    POLYINT_ERROR_INVALID_INPUT,
-    POLYINT_ERROR_INTERNAL,
-];
-
-pub const POLYINT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLYINT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLYINT_ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer and logical coefficient vectors are rejected before floating host/provider dispatch.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "k",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer and logical integration constants are rejected; only single/double real or complex values are supported.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "q = polyint(p, k)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "This builtin has no integer overload; the empty accepted-class masks are intentional and prevent generic numeric coercion from admitting integers.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyint")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -182,12 +69,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polyint",
-    category = "math/poly",
-    summary = "Integrate polynomial coefficient vectors and append a constant of integration.",
-    keywords = "polyint,polynomial,integral,antiderivative",
-    type_resolver(polyint_type),
-    descriptor(crate::builtins::math::poly::polyint::POLYINT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::poly::polyint::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyint"
 )]
 async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

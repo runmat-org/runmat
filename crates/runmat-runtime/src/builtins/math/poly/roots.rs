@@ -7,13 +7,11 @@
 
 use nalgebra::DMatrix;
 use num_complex::Complex64;
+#[cfg(test)]
+use runmat_builtins::ROOTS_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ROOTS_ERROR_INTERNAL, ROOTS_ERROR_INVALID_INPUT,
+    ROOTS_INTEGER_COEFFICIENTS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -23,86 +21,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::poly::type_resolvers::roots_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const LEADING_ZERO_TOL: f64 = 1.0e-12;
 const RESULT_ZERO_TOL: f64 = 1.0e-10;
 const BUILTIN_NAME: &str = "roots";
-
-const ROOTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "r",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Roots of the polynomial as a column vector.",
-}];
-
-const ROOTS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "c",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Polynomial coefficient vector in descending power order.",
-}];
-
-const ROOTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "r = roots(c)",
-    inputs: &ROOTS_INPUTS,
-    outputs: &ROOTS_OUTPUT,
-}];
-
-const ROOTS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROOTS.INVALID_INPUT",
-    identifier: Some("RunMat:roots:InvalidInput"),
-    when: "Input cannot be interpreted as a numeric coefficient vector.",
-    message: "roots: invalid input",
-};
-
-const ROOTS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROOTS.INTERNAL",
-    identifier: Some("RunMat:roots:Internal"),
-    when: "Runtime fails while building companion matrix outputs or solving eigenvalues.",
-    message: "roots: internal runtime failure",
-};
-
-const ROOTS_ERRORS: [BuiltinErrorDescriptor; 2] = [ROOTS_ERROR_INVALID_INPUT, ROOTS_ERROR_INTERNAL];
-
-pub const ROOTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ROOTS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ROOTS_ERRORS,
-};
-
-const ROOTS_INTEGER_COEFFICIENTS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "roots-integer-coefficients",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "roots accepts typed-integer polynomial coefficients as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:RootsIntegerCoefficientsExtension"),
-    };
-pub const ROOTS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [ROOTS_INTEGER_COEFFICIENTS_EXTENSION];
-const ROOTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "c",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double coefficients; RunMat admits typed integers only when every coefficient is exactly representable in binary64.",
-    }];
-pub const ROOTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "r = roots(integer_c)",
-        inputs: &ROOTS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The checked extension crosses once into the double companion-matrix/eigenvalue algorithm. Automatic residency gathers through the owning provider; explicit typed-integer input is gated before provider access.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::roots")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -148,14 +71,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "roots",
-    category = "math/poly",
-    summary = "Compute polynomial roots from a coefficient vector.",
-    keywords = "roots,polynomial,eigenvalues,companion",
-    accel = "sink",
-    type_resolver(roots_type),
-    descriptor(crate::builtins::math::poly::roots::ROOTS_DESCRIPTOR),
-    extensions(crate::builtins::math::poly::roots::ROOTS_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::poly::roots::ROOTS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::roots"
 )]
 async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
@@ -234,7 +150,7 @@ fn ensure_vector_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     let is_vector = match shape.len() {
         0 => true,
         1 => true,
-        2 => shape[0] == 1 || shape[1] == 1 || shape.iter().product::<usize>() == 0,
+        2 => shape[0] == 1 || shape[1] == 1 || shape.contains(&0),
         _ => shape.iter().filter(|&&dim| dim > 1).count() <= 1,
     };
     if !is_vector {
