@@ -2,6 +2,30 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::{IntValue, IntegerStorage, SparseTensor, StringArray, StructValue, Tensor};
 
+#[test]
+fn cancelled_invocation_rejects_before_fit_or_output_publication() {
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::rc::Rc;
+
+    let source = CancellationSource::new();
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        source.token(),
+    );
+    source.cancel(CancellationReason::User);
+    let error = block_on(mnrfit_in_runtime(
+        Some(&runtime),
+        tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
+        tensor_value(vec![1.0, 1.0, 2.0, 2.0], 4, 1),
+        Vec::new(),
+    ))
+    .expect_err("cancelled invocation cannot publish a model");
+    assert!(error
+        .identifier()
+        .is_some_and(|identifier| identifier.ends_with(":Cancelled")));
+}
+
 fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
 }

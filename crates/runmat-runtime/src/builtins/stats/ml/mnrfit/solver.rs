@@ -3,6 +3,9 @@ use crate::builtins::stats::summary::distribution_math;
 
 const RIDGE: f64 = 1.0e-8;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Debug)]
 pub(super) struct NominalFit {
     pub(super) beta: Vec<f64>,
@@ -18,7 +21,9 @@ pub(super) fn fit_nominal_logit(
     data: &PreparedData,
     max_iter: usize,
     tol_x: f64,
+    check: &impl Fn() -> BuiltinResult<()>,
 ) -> BuiltinResult<NominalFit> {
+    check()?;
     let cols = data.cols;
     let logits = data.outcomes.len();
     let dim = checked_elements(cols, logits, "coefficients")?;
@@ -27,12 +32,15 @@ pub(super) fn fit_nominal_logit(
     let mut information = filled(matrix_len, 0.0, "information matrix")?;
     let mut gradient = filled(dim, 0.0, "gradient")?;
     for _ in 0..max_iter {
+        check()?;
         information.fill(0.0);
         gradient.fill(0.0);
         for row in 0..data.rows {
-            let probs = row_probabilities(&data.design, row, cols, &beta, logits)?;
+            check()?;
+            let probs = row_probabilities(&data.design, row, cols, &beta, logits, check)?;
             let weight = data.weights[row];
             for j in 0..logits {
+                check()?;
                 let residual = weight * (data.outcomes[j][row] - probs[j]);
                 for a in 0..cols {
                     gradient[j * cols + a] += residual * data.design[row + a * data.rows];
@@ -40,8 +48,10 @@ pub(super) fn fit_nominal_logit(
             }
             for j in 0..logits {
                 for l in 0..logits {
+                    check()?;
                     let block = weight * probs[j] * if j == l { 1.0 - probs[l] } else { -probs[l] };
                     for a in 0..cols {
+                        check()?;
                         let za = data.design[row + a * data.rows];
                         for b in 0..cols {
                             let zb = data.design[row + b * data.rows];
@@ -58,6 +68,7 @@ pub(super) fn fit_nominal_logit(
             copy(&information, "information solve copy")?,
             copy(&gradient, "gradient solve copy")?,
             dim,
+            check,
         )?;
         let max_step = delta.iter().map(|value| value.abs()).fold(0.0, f64::max);
         for (coef, step) in beta.iter_mut().zip(delta.iter()) {
@@ -74,12 +85,16 @@ pub(super) fn fit_nominal_logit(
     }
     information.fill(0.0);
     for row in 0..data.rows {
-        let probs = row_probabilities(&data.design, row, cols, &beta, logits)?;
+        check()?;
+        let probs = row_probabilities(&data.design, row, cols, &beta, logits, check)?;
         let weight = data.weights[row];
         for j in 0..logits {
+            check()?;
             for l in 0..logits {
+                check()?;
                 let block = weight * probs[j] * if j == l { 1.0 - probs[l] } else { -probs[l] };
                 for a in 0..cols {
+                    check()?;
                     let za = data.design[row + a * data.rows];
                     for b in 0..cols {
                         let zb = data.design[row + b * data.rows];
@@ -92,7 +107,7 @@ pub(super) fn fit_nominal_logit(
     for idx in 0..dim {
         information[idx * dim + idx] += RIDGE;
     }
-    let covb = invert_matrix(information, dim)?;
+    let covb = invert_matrix(information, dim, check)?;
     let se = (0..dim)
         .map(|idx| covb[idx * dim + idx].max(0.0).sqrt())
         .collect::<Vec<_>>();
@@ -111,8 +126,9 @@ pub(super) fn fit_nominal_logit(
             }
         })
         .collect::<Vec<_>>();
-    let loglik = log_likelihood(data, &beta)?;
-    let saturated = saturated_log_likelihood(data);
+    let loglik = log_likelihood(data, &beta, check)?;
+    let saturated = saturated_log_likelihood(data, check)?;
+    check()?;
     let dfe = (data.observations - dim as f64).max(0.0);
     Ok(NominalFit {
         beta,
@@ -131,11 +147,13 @@ fn row_probabilities(
     cols: usize,
     beta: &[f64],
     logits: usize,
+    check: &impl Fn() -> BuiltinResult<()>,
 ) -> BuiltinResult<Vec<f64>> {
     let rows = design.len() / cols;
     let mut eta = reserved(logits, "row scores")?;
     let mut max_eta = 0.0f64;
     for j in 0..logits {
+        check()?;
         let mut value = 0.0;
         for col in 0..cols {
             value += design[row + col * rows] * beta[j * cols + col];
@@ -157,11 +175,16 @@ fn row_probabilities(
     Ok(exp_eta)
 }
 
-fn log_likelihood(data: &PreparedData, beta: &[f64]) -> BuiltinResult<f64> {
+fn log_likelihood(
+    data: &PreparedData,
+    beta: &[f64],
+    check: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<f64> {
     let logits = data.outcomes.len();
     let mut ll = 0.0;
     for row in 0..data.rows {
-        let probs = row_probabilities(&data.design, row, data.cols, beta, logits)?;
+        check()?;
+        let probs = row_probabilities(&data.design, row, data.cols, beta, logits, check)?;
         let mut baseline = 1.0 - probs.iter().sum::<f64>();
         baseline = baseline.max(EPS);
         for (j, prob) in probs.iter().enumerate() {
@@ -179,10 +202,14 @@ fn log_likelihood(data: &PreparedData, beta: &[f64]) -> BuiltinResult<f64> {
     Ok(ll)
 }
 
-fn saturated_log_likelihood(data: &PreparedData) -> f64 {
+fn saturated_log_likelihood(
+    data: &PreparedData,
+    check: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<f64> {
     let logits = data.outcomes.len();
     let mut ll = 0.0;
     for row in 0..data.rows {
+        check()?;
         let weight = data.weights[row];
         for j in 0..logits {
             let p = data.outcomes[j][row];
@@ -195,14 +222,21 @@ fn saturated_log_likelihood(data: &PreparedData) -> f64 {
             ll += weight * baseline_p * baseline_p.max(EPS).ln();
         }
     }
-    ll
+    Ok(ll)
 }
 
-fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> BuiltinResult<Vec<f64>> {
+fn solve_linear(
+    mut a: Vec<f64>,
+    mut b: Vec<f64>,
+    n: usize,
+    check: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<Vec<f64>> {
     for col in 0..n {
+        check()?;
         let mut pivot = col;
         let mut best = a[col * n + col].abs();
         for row in col + 1..n {
+            check()?;
             let value = a[row * n + col].abs();
             if value > best {
                 best = value;
@@ -232,6 +266,7 @@ fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> BuiltinResult<Vec
     }
     let mut x = filled(n, 0.0, "solver result")?;
     for row in (0..n).rev() {
+        check()?;
         let mut rhs = b[row];
         for col in row + 1..n {
             rhs -= a[row * n + col] * x[col];
@@ -241,16 +276,21 @@ fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> BuiltinResult<Vec
     Ok(x)
 }
 
-fn invert_matrix(a: Vec<f64>, n: usize) -> BuiltinResult<Vec<f64>> {
+fn invert_matrix(
+    a: Vec<f64>,
+    n: usize,
+    check: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<Vec<f64>> {
     let mut out = filled(
         checked_elements(n, n, "covariance matrix")?,
         0.0,
         "covariance matrix",
     )?;
     for col in 0..n {
+        check()?;
         let mut rhs = filled(n, 0.0, "covariance solve")?;
         rhs[col] = 1.0;
-        let solved = solve_linear(copy(&a, "covariance solve copy")?, rhs, n)?;
+        let solved = solve_linear(copy(&a, "covariance solve copy")?, rhs, n, check)?;
         for row in 0..n {
             out[row + col * n] = solved[row];
         }

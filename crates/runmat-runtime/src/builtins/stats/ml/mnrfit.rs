@@ -65,9 +65,40 @@ struct FitResult {
 #[runtime_builtin(
     name = "mnrfit",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::mnrfit"
 )]
+pub(crate) async fn mnrfit_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    y: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    mnrfit_in_runtime(runtime.as_ref(), x, y, rest).await
+}
+
+#[cfg(test)]
 pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    mnrfit_in_runtime(None, x, y, rest).await
+}
+
+fn check_cancellation(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<()> {
+    if let Some(runtime) = runtime.filter(|runtime| runtime.is_cancelled()) {
+        return Err(build_runtime_error("mnrfit: execution was cancelled")
+            .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+            .with_builtin(NAME)
+            .build());
+    }
+    Ok(())
+}
+
+async fn mnrfit_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    x: Value,
+    y: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    check_cancellation(runtime)?;
     let inspected = options::inspect(&rest);
     ensure_extensions(&x, &y, &rest, &inspected)?;
     let names = options::validate(&rest, inspected)?;
@@ -76,9 +107,13 @@ pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
     let prepared = prepare_values(names.into_iter().zip(values).collect())?;
     prepared.preflight_host_weights(response.rows())?;
     let x = gather_value(x).await?;
+    check_cancellation(runtime)?;
     let response = response.materialize().await?;
+    check_cancellation(runtime)?;
     let options = prepared.materialize().await?;
-    let result = fit(x, response, options)?;
+    check_cancellation(runtime)?;
+    let result = fit(x, response, options, runtime)?;
+    check_cancellation(runtime)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![result.b])),
@@ -200,13 +235,21 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
     })
 }
 
-fn fit(x: Value, response: ResponseOutcomes, options: Options) -> BuiltinResult<FitResult> {
+fn fit(
+    x: Value,
+    response: ResponseOutcomes,
+    options: Options,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<FitResult> {
     let x = numeric_tensor("X", x)?;
     if x.rows() == 0 || x.cols() == 0 {
         return Err(invalid("mnrfit: X must be a nonempty numeric matrix"));
     }
+    check_cancellation(runtime)?;
     let data = prepare_data(&x, response, &options)?;
-    let fit = fit_nominal_logit(&data, options.max_iter, options.tol_x)?;
+    let fit = fit_nominal_logit(&data, options.max_iter, options.tol_x, &|| {
+        check_cancellation(runtime)
+    })?;
     let b = coefficients_value(&fit.beta, data.cols, data.outcomes.len())?;
     let stats = stats_value(&fit, &data)?;
     Ok(FitResult {
