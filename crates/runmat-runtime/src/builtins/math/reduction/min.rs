@@ -832,7 +832,7 @@ async fn parse_dimension_tensor(
             "min: dimension vector must be a row or column vector",
         ));
     }
-    let dims = tensor::dims_from_value_async(value)
+    let dims = tensor::dims_from_value_async_typed(value)
         .await
         .map_err(map_vector_dim_error)?;
     let Some(dims) = dims else {
@@ -861,17 +861,19 @@ fn map_scalar_dim_error(message: String) -> RuntimeError {
     min_invalid_argument(message)
 }
 
-fn map_vector_dim_error(message: String) -> RuntimeError {
-    if message.contains("non-negative") {
-        return min_invalid_argument("min: dimension indices must be >= 1");
-    }
-    if message.contains("finite") {
-        return min_invalid_argument("min: dimension entries must be finite");
-    }
-    if message.contains("integer") {
-        return min_invalid_argument("min: dimension entries must be integers");
-    }
-    min_invalid_argument(message)
+fn map_vector_dim_error(error: tensor::DimensionDecodeError) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match &error {
+        DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform => {
+            "min: dimension indices must be >= 1".to_string()
+        }
+        DimensionDecodeError::NonFinite => "min: dimension entries must be finite".to_string(),
+        DimensionDecodeError::Fractional => "min: dimension entries must be integers".to_string(),
+        DimensionDecodeError::OutOfPlatformRange | DimensionDecodeError::Gather(_) => {
+            error.to_string()
+        }
+    };
+    error.attach_cause(min_invalid_argument(message))
 }
 
 async fn reduction_min(

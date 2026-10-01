@@ -580,7 +580,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
         | Value::LogicalArray(_)
         | Value::Int(_)
         | Value::Num(_)
-        | Value::GpuTensor(_) => tensor::dims_from_value_async(value)
+        | Value::GpuTensor(_) => tensor::dims_from_value_async_typed(value)
             .await
             .map_err(|err| map_dims_error(err, scalar_hint))?,
         Value::Bool(_) => {
@@ -625,26 +625,28 @@ fn value_as_str(value: &Value) -> Option<String> {
     }
 }
 
-fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
-    if message.contains("non-negative") {
-        if scalar {
-            return std_invalid_argument("std: dimension must be >= 1");
+fn map_dims_error(error: tensor::DimensionDecodeError, scalar: bool) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match (&error, scalar) {
+        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, true) => {
+            "std: dimension must be >= 1".to_string()
         }
-        return std_invalid_argument("std: dimension entries must be >= 1");
-    }
-    if message.contains("finite") {
-        if scalar {
-            return std_invalid_argument("std: dimension must be finite");
+        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, false) => {
+            "std: dimension entries must be >= 1".to_string()
         }
-        return std_invalid_argument("std: dimension entries must be finite integers");
-    }
-    if message.contains("integer") {
-        if scalar {
-            return std_invalid_argument("std: dimension must be an integer");
+        (DimensionDecodeError::NonFinite, true) => "std: dimension must be finite".to_string(),
+        (DimensionDecodeError::NonFinite, false) => {
+            "std: dimension entries must be finite integers".to_string()
         }
-        return std_invalid_argument("std: dimension entries must be integers");
-    }
-    std_invalid_argument(message)
+        (DimensionDecodeError::Fractional, true) => "std: dimension must be an integer".to_string(),
+        (DimensionDecodeError::Fractional, false) => {
+            "std: dimension entries must be integers".to_string()
+        }
+        (DimensionDecodeError::OutOfPlatformRange | DimensionDecodeError::Gather(_), _) => {
+            error.to_string()
+        }
+    };
+    error.attach_cause(std_invalid_argument(message))
 }
 
 fn std_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {

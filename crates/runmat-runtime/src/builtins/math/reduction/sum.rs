@@ -724,7 +724,7 @@ async fn parse_dimension_tensor(
             "sum: dimension vector must be a row or column vector",
         ));
     }
-    let dims = tensor::dims_from_value_async(value)
+    let dims = tensor::dims_from_value_async_typed(value)
         .await
         .map_err(map_dims_error)?;
     let Some(dims) = dims else {
@@ -741,17 +741,19 @@ async fn parse_dimension_tensor(
     Ok(Some(DimSelection::Vec(dims)))
 }
 
-fn map_dims_error(message: String) -> RuntimeError {
-    if message.contains("non-negative") {
-        return sum_invalid_argument("sum: dimension indices must be >= 1");
-    }
-    if message.contains("finite") {
-        return sum_invalid_argument("sum: dimensions must be finite");
-    }
-    if message.contains("integer") {
-        return sum_invalid_argument("sum: dimensions must contain integers");
-    }
-    sum_invalid_argument(message)
+fn map_dims_error(error: tensor::DimensionDecodeError) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match &error {
+        DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform => {
+            "sum: dimension indices must be >= 1".to_string()
+        }
+        DimensionDecodeError::NonFinite => "sum: dimensions must be finite".to_string(),
+        DimensionDecodeError::Fractional => "sum: dimensions must contain integers".to_string(),
+        DimensionDecodeError::OutOfPlatformRange | DimensionDecodeError::Gather(_) => {
+            error.to_string()
+        }
+    };
+    error.attach_cause(sum_invalid_argument(message))
 }
 
 fn is_vector_shape(shape: &[usize]) -> bool {

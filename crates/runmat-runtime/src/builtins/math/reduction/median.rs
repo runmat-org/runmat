@@ -853,7 +853,7 @@ async fn parse_axes(
         | Value::LogicalArray(_)
         | Value::Int(_)
         | Value::Num(_)
-        | Value::GpuTensor(_) => tensor::dims_from_value_async(value)
+        | Value::GpuTensor(_) => tensor::dims_from_value_async_typed(value)
             .await
             .map_err(|err| map_dims_error(err, scalar_hint))?,
         Value::Bool(_) => {
@@ -885,26 +885,30 @@ async fn parse_axes(
     Ok(Some(MedianAxes::Vec(dims)))
 }
 
-fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
-    if message.contains("non-negative") {
-        if scalar {
-            return median_invalid_argument("median: dimension must be >= 1");
+fn map_dims_error(error: tensor::DimensionDecodeError, scalar: bool) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match (&error, scalar) {
+        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, true) => {
+            "median: dimension must be >= 1".to_string()
         }
-        return median_invalid_argument("median: dimension entries must be >= 1");
-    }
-    if message.contains("finite") {
-        if scalar {
-            return median_invalid_argument("median: dimension must be finite");
+        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, false) => {
+            "median: dimension entries must be >= 1".to_string()
         }
-        return median_invalid_argument("median: dimension entries must be finite integers");
-    }
-    if message.contains("integer") {
-        if scalar {
-            return median_invalid_argument("median: dimension must be an integer");
+        (DimensionDecodeError::NonFinite, true) => "median: dimension must be finite".to_string(),
+        (DimensionDecodeError::NonFinite, false) => {
+            "median: dimension entries must be finite integers".to_string()
         }
-        return median_invalid_argument("median: dimension entries must be integers");
-    }
-    median_invalid_argument(message)
+        (DimensionDecodeError::Fractional, true) => {
+            "median: dimension must be an integer".to_string()
+        }
+        (DimensionDecodeError::Fractional, false) => {
+            "median: dimension entries must be integers".to_string()
+        }
+        (DimensionDecodeError::OutOfPlatformRange | DimensionDecodeError::Gather(_), _) => {
+            error.to_string()
+        }
+    };
+    error.attach_cause(median_invalid_argument(message))
 }
 
 fn tensor_len(tensor: &Tensor) -> usize {

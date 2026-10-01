@@ -8,6 +8,7 @@ use runmat_value::{
 };
 
 use crate::dispatcher::gather_if_needed_async;
+use crate::RuntimeError;
 
 /// Return the total number of elements for a given shape.
 pub fn element_count(shape: &[usize]) -> usize {
@@ -418,25 +419,58 @@ pub fn integer_tensor_dimension_vector(
     )
 }
 
-fn parse_integer_shape_dimension(value: &IntValue) -> Result<usize, String> {
-    value
-        .try_to_usize()
-        .ok_or_else(|| "dimensions must be non-negative platform integers".to_string())
+/// Why a shape/dimension vector cannot be decoded. Public builtins retain
+/// their own diagnostic wording while dispatching on these semantic causes.
+#[derive(Debug, thiserror::Error)]
+pub enum DimensionDecodeError {
+    #[error("dimensions must be finite")]
+    NonFinite,
+    #[error("matrix dimensions must be non-negative")]
+    Negative,
+    #[error("dimensions must be integers")]
+    Fractional,
+    #[error("dimensions are outside the supported platform range")]
+    OutOfPlatformRange,
+    #[error("dimensions must be non-negative platform integers")]
+    IntegerNotPlatform,
+    #[error("dimensions: {0}")]
+    Gather(#[source] RuntimeError),
 }
 
-fn parse_numeric_dimension(value: f64) -> Result<usize, String> {
+impl DimensionDecodeError {
+    /// Preserve provider provenance and retry policy beneath an owning
+    /// builtin's public diagnostic rather than formatting away the source.
+    pub fn attach_cause(self, mut owner: RuntimeError) -> RuntimeError {
+        if let Self::Gather(cause) = self {
+            owner.gpu_gather_retry = cause.gpu_gather_retry;
+            if owner.span.is_none() {
+                owner.span = cause.span.clone();
+            }
+            owner.source = Some(Box::new(cause));
+        }
+        owner
+    }
+}
+
+fn parse_integer_shape_dimension(value: &IntValue) -> Result<usize, DimensionDecodeError> {
+    value
+        .try_to_usize()
+        .ok_or(DimensionDecodeError::IntegerNotPlatform)
+}
+
+fn parse_numeric_dimension(value: f64) -> Result<usize, DimensionDecodeError> {
     if !value.is_finite() {
-        return Err("dimensions must be finite".to_string());
+        return Err(DimensionDecodeError::NonFinite);
     }
     if value < 0.0 {
-        return Err("matrix dimensions must be non-negative".to_string());
+        return Err(DimensionDecodeError::Negative);
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err("dimensions must be integers".to_string());
+        return Err(DimensionDecodeError::Fractional);
     }
     if !fits_platform_usize(rounded) {
-        return Err("dimensions are outside the supported platform range".to_string());
+        return Err(DimensionDecodeError::OutOfPlatformRange);
     }
     Ok(rounded as usize)
 }
@@ -445,7 +479,10 @@ fn fits_platform_usize(value: f64) -> bool {
     value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
-fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec<usize>>, String> {
+fn dims_from_tensor_values(
+    values: &[f64],
+    shape: &[usize],
+) -> Result<Option<Vec<usize>>, DimensionDecodeError> {
     let len = values.len();
     if len == 0 {
         return Ok(Some(Vec::new()));
@@ -466,7 +503,7 @@ fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec
 fn dims_from_integer_tensor_values(
     storage: &IntegerStorage,
     shape: &[usize],
-) -> Result<Option<Vec<usize>>, String> {
+) -> Result<Option<Vec<usize>>, DimensionDecodeError> {
     let len = storage.len();
     if len == 0 {
         return Ok(Some(Vec::new()));
@@ -488,6 +525,17 @@ fn dims_from_integer_tensor_values(
 
 /// Attempt to parse a dimension vector from a runtime value asynchronously.
 pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, String> {
+    dims_from_value_async_typed(value)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Typed dimension-vector admission for owners that need semantic error
+/// identity and a retained provider cause. The string-returning wrapper above
+/// remains for existing callers until they migrate to this boundary.
+pub async fn dims_from_value_async_typed(
+    value: &Value,
+) -> Result<Option<Vec<usize>>, DimensionDecodeError> {
     match value {
         Value::Num(n) => parse_numeric_dimension(*n).map(|dim| Some(vec![dim])),
         Value::Int(i) => parse_integer_shape_dimension(i).map(|dim| Some(vec![dim])),
@@ -506,7 +554,7 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
         Value::GpuTensor(handle) => {
             let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone()))
                 .await
-                .map_err(|e| format!("dimensions: {e}"))?;
+                .map_err(DimensionDecodeError::Gather)?;
             match gathered {
                 Value::Tensor(t) => {
                     if t.is_empty() {
@@ -806,12 +854,44 @@ mod dtype_tests {
 #[cfg(test)]
 mod dimension_tests {
     use super::{
-        dimension_from_value_async, dims_from_value_async, integer_tensor_to_f64, parse_dimension,
-        scalar_f64_from_value_async, tensor_into_value, tensor_into_values_f64, tensor_values_f64,
-        tensor_values_f64_cow,
+        dimension_from_value_async, dims_from_value_async, dims_from_value_async_typed,
+        integer_tensor_to_f64, parse_dimension, scalar_f64_from_value_async, tensor_into_value,
+        tensor_into_values_f64, tensor_values_f64, tensor_values_f64_cow, DimensionDecodeError,
     };
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
+
+    #[test]
+    fn typed_dimension_decoder_retains_semantic_error_identity() {
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Num(f64::NAN))),
+            Err(DimensionDecodeError::NonFinite)
+        ));
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Num(-1.0))),
+            Err(DimensionDecodeError::Negative)
+        ));
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Num(1.25))),
+            Err(DimensionDecodeError::Fractional)
+        ));
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Int(IntValue::I64(-1)))),
+            Err(DimensionDecodeError::IntegerNotPlatform)
+        ));
+    }
+
+    #[test]
+    fn typed_dimension_error_preserves_nested_provider_cause_and_retry() {
+        let mut cause = crate::RuntimeError::new("provider transfer failed");
+        cause.identifier = Some("RunMat:test:ProviderTransfer".into());
+        cause.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        let owner = DimensionDecodeError::Gather(cause)
+            .attach_cause(crate::RuntimeError::new("mean: invalid dimension"));
+        assert_eq!(owner.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let source = owner.source.expect("provider cause retained");
+        assert_eq!(source.to_string(), "provider transfer failed");
+    }
 
     #[test]
     fn typed_dimension_parsers_preserve_representable_uint64_values() {

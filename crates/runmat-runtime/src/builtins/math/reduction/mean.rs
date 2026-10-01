@@ -938,7 +938,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         | Value::LogicalArray(_)
         | Value::Int(_)
         | Value::Num(_)
-        | Value::GpuTensor(_) => tensor::dims_from_value_async(value)
+        | Value::GpuTensor(_) => tensor::dims_from_value_async_typed(value)
             .await
             .map_err(|err| map_dims_error(err, scalar_hint))?,
         Value::Bool(_) => {
@@ -973,22 +973,26 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
     Ok(Some(MeanAxes::Vec(dims)))
 }
 
-fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
-    if message.contains("non-negative") {
-        if scalar {
-            return mean_invalid_argument("mean: dimension must be >= 1");
+fn map_dims_error(error: tensor::DimensionDecodeError, scalar: bool) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match (&error, scalar) {
+        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, true) => {
+            "mean: dimension must be >= 1"
         }
-        return mean_invalid_argument("mean: dimension entries must be >= 1");
-    }
-    if scalar {
-        if message.contains("finite") {
-            return mean_invalid_argument("mean: dimension must be finite");
+        (DimensionDecodeError::Negative | DimensionDecodeError::IntegerNotPlatform, false) => {
+            "mean: dimension entries must be >= 1"
         }
-        if message.contains("integer") {
-            return mean_invalid_argument("mean: dimension must be an integer");
-        }
-    }
-    mean_invalid_argument("mean: dimension entries must be finite integers")
+        (DimensionDecodeError::NonFinite, true) => "mean: dimension must be finite",
+        (DimensionDecodeError::Fractional, true) => "mean: dimension must be an integer",
+        (
+            DimensionDecodeError::NonFinite
+            | DimensionDecodeError::Fractional
+            | DimensionDecodeError::OutOfPlatformRange
+            | DimensionDecodeError::Gather(_),
+            _,
+        ) => "mean: dimension entries must be finite integers",
+    };
+    error.attach_cause(mean_invalid_argument(message))
 }
 
 #[derive(Clone, Copy)]
