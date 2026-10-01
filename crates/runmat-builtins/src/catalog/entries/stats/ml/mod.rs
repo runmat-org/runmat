@@ -2,6 +2,7 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod bayesopt;
+mod classify;
 mod confusionmat;
 mod crossvalidation;
 mod distance_errors;
@@ -24,6 +25,7 @@ mod squareform;
 mod tsne;
 
 pub use self::bayesopt::*;
+pub use self::classify::*;
 pub use self::confusionmat::*;
 pub use self::crossvalidation::*;
 pub use self::distance_errors::*;
@@ -65,4 +67,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(tsne::ENTRIES.iter().copied());
     values.extend(bayesopt::ENTRIES.iter().copied());
     values.extend(optimizable_variable::ENTRIES.iter().copied());
+    values.extend(classify::ENTRIES.iter().copied());
 }

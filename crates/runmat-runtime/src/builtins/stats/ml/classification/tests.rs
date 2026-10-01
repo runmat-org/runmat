@@ -2,10 +2,13 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
+#[path = "tests/core.rs"]
 mod core;
+#[path = "tests/integer.rs"]
 mod integer;
 #[path = "tests/labels.rs"]
 mod label_cases;
+#[path = "tests/provider.rs"]
 mod provider;
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {

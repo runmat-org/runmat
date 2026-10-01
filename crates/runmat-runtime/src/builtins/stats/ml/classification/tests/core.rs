@@ -3,7 +3,16 @@ use runmat_builtins::{builtin_function_by_name, BuiltinIntegerOutputClassRule};
 
 #[test]
 fn classify_registers_independent_integer_extensions_and_capabilities() {
-    let builtin = builtin_function_by_name(CLASSIFY_NAME).expect("classify builtin");
+    let builtin = runmat_builtins::builtin_catalog_primary_entry_by_name(CLASSIFY_NAME)
+        .expect("canonical classify identity");
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name(CLASSIFY_NAME);
+    assert_eq!(bindings.len(), 1, "one canonical implementation binding");
+    assert_eq!(bindings[0].identity.builtin, builtin.identity);
+    assert_eq!(bindings[0].identity.variant, "default");
+    assert!(
+        builtin_function_by_name(CLASSIFY_NAME).is_none(),
+        "no legacy authority"
+    );
     assert_eq!(builtin.extensions.len(), 6);
     assert_eq!(builtin.integer_capabilities.len(), 4);
     assert!(builtin
