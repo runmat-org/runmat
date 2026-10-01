@@ -296,16 +296,51 @@ fn nan_map_requires_fresh_same_class_storage() {
         .0
         .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
-    admit_nan_map(provider, &input.handle, bad.handle).unwrap_err();
+    admit_nan_map(provider, &input.handle, &input.handle, bad.handle).unwrap_err();
     assert_eq!(bad.probe.retirements(), 1);
-    admit_nan_map(provider, &input.handle, input.handle.clone()).unwrap_err();
+    admit_nan_map(provider, &input.handle, &input.handle, input.handle.clone()).unwrap_err();
     assert_eq!(input.probe.retirements(), 0);
     let good = provider
         .0
         .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
-    let accepted = admit_nan_map(provider, &input.handle, good.handle).unwrap();
+    let accepted = admit_nan_map(provider, &input.handle, &input.handle, good.handle).unwrap();
     assert_eq!(accepted.shape(), input.handle.shape());
+}
+
+#[test]
+fn single_omit_widening_and_map_keep_original_borrowed() {
+    let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let original = provider
+        .0
+        .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let wrong = provider
+        .0
+        .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    admit_input_double(provider, &original.handle, wrong.handle).unwrap_err();
+    assert_eq!(wrong.probe.retirements(), 1);
+    admit_input_double(provider, &original.handle, original.handle.clone()).unwrap_err();
+    assert_eq!(original.probe.retirements(), 0);
+    let widened = provider
+        .0
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let widened_handle = admit_input_double(provider, &original.handle, widened.handle).unwrap();
+    let mapped = provider
+        .0
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let mapped_handle =
+        admit_nan_map(provider, &original.handle, &widened_handle, mapped.handle).unwrap();
+    assert_eq!(mapped_handle.shape(), original.handle.shape());
+    widened_handle.release().unwrap();
+    assert_eq!(widened.probe.retirements(), 1);
+    assert_eq!(original.probe.retirements(), 0);
+    original.handle.allocation_lease().validate_live().unwrap();
+    mapped_handle.release().unwrap();
 }
 
 #[test]

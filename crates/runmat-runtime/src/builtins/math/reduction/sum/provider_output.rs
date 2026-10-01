@@ -38,6 +38,11 @@ fn physical_contract(
             Some(runmat_accelerate_api::ProviderPrecision::F32),
             None,
         ),
+        OutputStage::InputDouble => (
+            GpuTensorStorage::Real,
+            Some(runmat_accelerate_api::ProviderPrecision::F64),
+            None,
+        ),
         OutputStage::Reduction(_) => (
             runmat_accelerate_api::handle_storage(input),
             Some(runmat_accelerate_api::ProviderPrecision::F64),
@@ -56,8 +61,26 @@ fn physical_contract(
 #[derive(Clone, Copy)]
 enum OutputStage {
     NanMap,
+    InputDouble,
     Reduction(OutputTemplate),
     PublicSingle,
+}
+
+pub(super) fn admit_input_double(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    output: GpuTensorHandle,
+) -> BuiltinResult<GpuTensorHandle> {
+    admit(
+        provider,
+        input,
+        input,
+        output,
+        input.shape(),
+        gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+        "double-accumulator input adaptation",
+        OutputStage::InputDouble,
+    )
 }
 
 /// Adapt a double-accumulating result to the public single class without a
@@ -145,12 +168,13 @@ fn admit(
 
 pub(super) fn admit_nan_map(
     provider: &'static dyn AccelProvider,
+    original: &GpuTensorHandle,
     input: &GpuTensorHandle,
     output: GpuTensorHandle,
 ) -> BuiltinResult<GpuTensorHandle> {
     admit(
         provider,
-        input,
+        original,
         input,
         output,
         input.shape(),
@@ -229,8 +253,16 @@ pub(super) fn fail_stage(
 }
 
 pub(super) fn retire_before_fallback(current: GpuTensorHandle) -> BuiltinResult<()> {
+    retire_intermediate(current, "reduction intermediate")
+}
+
+pub(super) fn retire_widened_input(current: GpuTensorHandle) -> BuiltinResult<()> {
+    retire_intermediate(current, "double-accumulator input")
+}
+
+fn retire_intermediate(current: GpuTensorHandle, detail: &str) -> BuiltinResult<()> {
     current.release().map(|_| ()).map_err(|source| {
-        let mut error = sum_internal_error("sum: failed to retire reduction intermediate");
+        let mut error = sum_internal_error(format!("failed to retire {detail}"));
         error.source = Some(Box::new(source));
         error.gpu_gather_retry = GpuGatherRetry::Never;
         error

@@ -167,11 +167,15 @@ fn omission_counts_map_warmup_and_each_dimensional_reduction() {
     route.missing = ReductionNaN::Omit;
     route.output = SumOutputClass::Native;
     route.publication_class = NumericClass::Single;
-    assert_eq!(
-        rejection_code(validate(&provider, true, &single).unwrap()),
-        ProviderRejectionCode::UnknownResourceEstimate,
-        "Single omission requires its own real widening/map recipe"
-    );
+    let single_work = work(&provider, true, &single).unwrap();
+    assert_eq!(single_work.estimate.output_bytes, Some(12));
+    assert_eq!(single_work.estimate.dispatches, Some(4));
+    #[cfg(feature = "wgpu")]
+    {
+        assert!(single_work.nan_map && single_work.input_cast && single_work.output_cast);
+        assert_eq!(single_work.queue_submissions, 5);
+        assert_eq!(single_work.allocations, 9);
+    }
 }
 
 #[test]

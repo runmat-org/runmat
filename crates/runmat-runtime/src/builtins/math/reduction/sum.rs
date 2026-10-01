@@ -82,6 +82,13 @@ mod provider_output;
 #[path = "sum/preparation.rs"]
 mod preparation;
 
+#[path = "sum/omit.rs"]
+mod omit;
+
+#[cfg(test)]
+#[path = "sum/omit_tests.rs"]
+mod omit_tests;
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::sum", reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sum",
@@ -502,7 +509,7 @@ fn sum_host_complex_scalar(re: f64, im: f64, parsed: &ParsedArguments) -> Builti
 
 async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     if matches!(parsed.nan_mode, ReductionNaN::Omit) {
-        return sum_gpu_with_omitnan(handle, parsed).await;
+        return omit::sum_gpu_with_omitnan(handle, parsed).await;
     }
     sum_gpu_include(handle, parsed).await
 }
@@ -581,83 +588,6 @@ async fn sum_gpu_include(
     }
 
     let mut current = handle.clone();
-    for &dim in &resolved.dims_in_bounds {
-        match provider.reduce_sum_dim(&current, dim).await {
-            Ok(next) => {
-                current = provider_output::advance_reduction(
-                    provider,
-                    &handle,
-                    current,
-                    next,
-                    dim,
-                    parsed.output,
-                )?;
-            }
-            Err(error) if error.is_unsupported() => {
-                provider_output::retire_before_fallback(current)?;
-                return sum_gpu_fallback(&handle, parsed).await;
-            }
-            Err(error) => {
-                return Err(provider_output::fail_stage(
-                    current,
-                    sum_provider_error(error),
-                ))
-            }
-        }
-    }
-    publish_submitted_sum(provider, current, &handle)
-}
-
-async fn sum_gpu_with_omitnan(
-    handle: GpuTensorHandle,
-    parsed: &ParsedArguments,
-) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_storage(&handle)
-        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-    {
-        // Complex omission is a pairwise numerical policy; the real-only
-        // provider NaN map cannot implement it by transforming lanes alone.
-        return sum_gpu_fallback(&handle, parsed).await;
-    }
-    if runmat_accelerate_api::handle_is_logical(&handle)
-        || runmat_accelerate_api::handle_integer_type(&handle).is_some()
-    {
-        // Logical and integer values cannot contain NaN. Both ordinary
-        // floating and native integer sums use their usual resident route.
-        let include = ParsedArguments {
-            selection: parsed.selection.clone(),
-            nan_mode: ReductionNaN::Include,
-            output: parsed.output,
-        };
-        return sum_gpu_include(handle, &include).await;
-    }
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id() != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
-    let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
-        return sum_gpu_fallback(&handle, parsed).await;
-    };
-    let resolved = resolve_dims(handle.shape(), &parsed.selection)?;
-    if resolved.dims_in_bounds.is_empty() {
-        return Ok(Value::GpuTensor(handle));
-    }
-
-    // Replace NaNs with 0 on device, then reduce along requested dims.
-    let cleaned = match provider.map_nan_to_zero(&handle) {
-        Ok(cleaned) => provider_output::admit_nan_map(provider, &handle, cleaned)?,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-            return sum_gpu_fallback(&handle, parsed).await;
-        }
-        Err(error) => return Err(sum_provider_error(error)),
-    };
-
-    // Reduce along requested dimensions iteratively on device.
-    let mut current = cleaned;
     for &dim in &resolved.dims_in_bounds {
         match provider.reduce_sum_dim(&current, dim).await {
             Ok(next) => {

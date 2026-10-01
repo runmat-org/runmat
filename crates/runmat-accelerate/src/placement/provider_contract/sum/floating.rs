@@ -187,6 +187,22 @@ enum CastStage {
     Output,
 }
 
+pub(super) fn add_input_cast(
+    work: &mut SumWork,
+    elements: u64,
+    geometry: ProviderSumGeometry,
+) -> Result<(), ProviderFeasibility> {
+    add_cast(work, elements, geometry, CastStage::Input)
+}
+
+pub(super) fn add_output_cast(
+    work: &mut SumWork,
+    elements: u64,
+    geometry: ProviderSumGeometry,
+) -> Result<(), ProviderFeasibility> {
+    add_cast(work, elements, geometry, CastStage::Output)
+}
+
 fn add_cast(
     work: &mut SumWork,
     elements: u64,

@@ -11,12 +11,15 @@ pub(super) fn work(
     publication_bytes: u64,
 ) -> Result<SumWork, ProviderFeasibility> {
     let reject = ProviderFeasibility::rejected;
-    // The current NaN-map hook uses the provider's native physical precision.
-    // Single inputs must first gain an admitted F64 widening stage; do not
-    // borrow this F64 map recipe for that currently unsupported path.
-    if route.input_class != NumericClass::Double
-        || route.publication_class != NumericClass::Double
-        || route.axes.is_empty()
+    // The owning runtime widens Single observations to the exact F64
+    // accumulator before invoking the provider's native F64 NaN-map hook.
+    if !matches!(
+        route.input_class,
+        NumericClass::Single | NumericClass::Double
+    ) || !matches!(
+        route.publication_class,
+        NumericClass::Single | NumericClass::Double
+    ) || route.axes.is_empty()
     {
         return Err(reject(
             ProviderRejectionCode::UnknownResourceEstimate,
@@ -53,6 +56,13 @@ pub(super) fn work(
         )
     })?;
     check_buffer(input_bytes, geometry)?;
+    let mapped_bytes = elements.checked_mul(8).ok_or_else(|| {
+        reject(
+            ProviderRejectionCode::ResourceLimit,
+            "sum.omit_mapped_bytes_overflow",
+        )
+    })?;
+    check_buffer(mapped_bytes, geometry)?;
     let map_chunks =
         u32::try_from(elements.div_ceil(geometry.cast_chunk_elements)).map_err(|_| {
             reject(
@@ -119,6 +129,12 @@ pub(super) fn work(
     let mut work = reduction
         .ok_or_else(|| reject(ProviderRejectionCode::InvalidShape, "sum.omit_missing_axis"))?;
     add_map(&mut work, elements, map_chunks)?;
+    if route.input_class == NumericClass::Single {
+        floating::add_input_cast(&mut work, elements, geometry)?;
+    }
+    if route.publication_class == NumericClass::Single {
+        floating::add_output_cast(&mut work, output_elements, geometry)?;
+    }
     work.estimate.output_bytes = Some(publication_bytes.max(8));
     Ok(work)
 }
