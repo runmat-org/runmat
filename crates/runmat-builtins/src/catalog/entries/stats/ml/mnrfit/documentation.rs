@@ -2,7 +2,23 @@ use crate::*;
 
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Multinomial solver implementation",
-    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit.rs"),
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/solver.rs"),
+};
+const ADMISSION_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Input and response admission",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/admission.rs"),
+};
+const DATA_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Response and design preparation",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/data.rs"),
+};
+const OPTIONS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Typed option admission",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/options/runtime.rs"),
+};
+const OUTPUT_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Fit result construction",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/output.rs"),
 };
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
@@ -15,8 +31,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["lasso", "fitclinear"],
     sections: &[
         BuiltinDocumentationSection { heading: "Inputs and response classes", paragraphs: &[
-            "`X` is a finite real numeric predictor matrix. Current MATLAB documents single or double `X`; typed-integer `X`, typed-integer `Y`, and logical `X` are independently gated RunMat extensions. Logical `Y` remains admitted. Integer predictors, grouped counts, weights, and tolerance values must be exactly representable at the binary64 host-solver boundary.",
-            "`Y` may be a numeric, logical, string, character, cell-string, or categorical class vector with one response per row of `X`. Classes are sorted and the last class is the reference. Alternatively, an N-by-K numeric `Y` supplies grouped response counts; columns are categories and row totals contribute observation weights. Rows with NaN in `X`, numeric `Y`, or grouped counts are omitted.",
+            "`X` is a real numeric predictor matrix. Current MATLAB documents single or double `X`; typed-integer `X`, typed-integer `Y`, and logical `X` are independently gated RunMat extensions. Logical `Y` remains admitted. Integer predictors, grouped counts, weights, and tolerance values must be exactly representable at the binary64 host-solver boundary.",
+            "`Y` may be a numeric, logical, string, character, cell-string, or categorical class vector with one response per row of `X`. Classes are sorted and the last class is the reference. Alternatively, an N-by-K numeric `Y` supplies grouped response counts; columns are categories and row totals contribute observation weights. Rows with nonfinite `X` values or NaN response values are omitted. Infinite numeric class values are rejected; grouped count rows marked missing by NaN are omitted, while inspected non-NaN counts must be finite and nonnegative.",
         ] },
         BuiltinDocumentationSection { heading: "Solver controls and outputs", paragraphs: &[
             "The default model includes a constant term. `Model` supports `nominal`, `Link` supports `logit`, and `Interactions` accepts `off`. `Weights` is a nonnegative finite observation-weight vector with positive total; `IterationLimit` and `Tolerance` control convergence. `EstDisp` accepts only `off`; overdispersion estimation is not implemented.",
@@ -68,12 +84,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "lasso", target: BuiltinDocumentationLinkTarget::Builtin("lasso") },
         BuiltinDocumentationLink { label: "fitclinear", target: BuiltinDocumentationLinkTarget::Builtin("fitclinear") },
         SOURCE,
+        ADMISSION_SOURCE,
+        DATA_SOURCE,
+        OPTIONS_SOURCE,
+        OUTPUT_SOURCE,
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[SOURCE, ADMISSION_SOURCE, DATA_SOURCE, OPTIONS_SOURCE, OUTPUT_SOURCE],
         verification: &[
-            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Multinomial fitting, class forms, integer boundaries, and provider failure", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Multinomial fitting, class forms, and integer boundaries", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/tests.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Provider failure and host admission", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/provider_tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Integer regression semantics", location: "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs" },
         ],
         notes: &["The legacy editable sidecar remains until field parity, exporter output, and example execution are qualified."],
