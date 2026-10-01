@@ -18,10 +18,25 @@ pub(super) fn kstest_cdf_contains_typed_integer(value: &Value) -> bool {
 pub(super) fn validate_kstest_cdf_role(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Tensor(_)
-        | Value::GpuTensor(_)
         | Value::String(_)
         | Value::CharArray(_)
         | Value::FunctionHandle(_) => Ok(()),
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(kstest_invalid_argument(
+                    "kstest: CDF must be a real numeric matrix",
+                ));
+            }
+            let shape = handle.shape();
+            if shape.len() != 2 || shape[1] != 2 || shape[0] < 2 {
+                return Err(kstest_invalid_argument(
+                    "kstest: CDF table must be an n-by-2 numeric matrix",
+                ));
+            }
+            Ok(())
+        }
         Value::Cell(cell) if cell.data.len() == 1 => validate_kstest_cdf_role(&cell.data[0]),
         other => Err(kstest_invalid_argument(format!(
             "kstest: CDF must be a two-column numeric matrix or normcdf handle; probability distribution objects are not supported yet, got {other:?}"
@@ -35,6 +50,13 @@ pub(super) fn validate_kstest_alpha_role(value: &Value) -> BuiltinResult<()> {
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
         Value::LogicalArray(array) => array.data.len() == 1,
         Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(kstest_invalid_argument(
+                    "kstest: Alpha must be real numeric",
+                ));
+            }
             handle
                 .shape()
                 .iter()

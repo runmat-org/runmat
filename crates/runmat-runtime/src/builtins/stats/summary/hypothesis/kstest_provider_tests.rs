@@ -113,6 +113,85 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
         assert!(error.message().contains("unsupported Tail"), "{error}");
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
+        let error = block_on(kstest_builtin(
+            resident(),
+            vec![resident(), Value::Num(0.05)],
+        ))
+        .unwrap_err();
+        assert!(error.message().contains("option name"), "{error}");
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+
+        let invalid_resident_cdf = provider
+            .owner
+            .allocate_zeroed(vec![2, 3], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let error = block_on(kstest_builtin(
+            resident(),
+            vec![
+                Value::from("CDF"),
+                Value::GpuTensor(invalid_resident_cdf.handle.clone()),
+            ],
+        ))
+        .unwrap_err();
+        assert!(error.message().contains("n-by-2"), "{error}");
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        invalid_resident_cdf
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(invalid_resident_cdf.probe.retirements(), 0);
+
+        let complex_cdf = provider
+            .owner
+            .allocate_zeroed(
+                vec![2, 2],
+                NumericElementType::F64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
+            .unwrap();
+        let error = block_on(kstest_builtin(
+            resident(),
+            vec![
+                Value::from("CDF"),
+                Value::GpuTensor(complex_cdf.handle.clone()),
+            ],
+        ))
+        .unwrap_err();
+        assert!(error.message().contains("real numeric matrix"), "{error}");
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        complex_cdf
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(complex_cdf.probe.retirements(), 0);
+
+        let complex_alpha = provider
+            .owner
+            .allocate_zeroed(
+                vec![1, 1],
+                NumericElementType::F64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
+            .unwrap();
+        let error = block_on(kstest_builtin(
+            resident(),
+            vec![
+                Value::from("Alpha"),
+                Value::GpuTensor(complex_alpha.handle.clone()),
+            ],
+        ))
+        .unwrap_err();
+        assert!(error.message().contains("real numeric"), "{error}");
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        complex_alpha
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(complex_alpha.probe.retirements(), 0);
+
         let invalid_cdf = Value::Tensor(Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap());
         let error = block_on(kstest_builtin(
             resident(),

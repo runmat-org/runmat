@@ -4,7 +4,6 @@ use super::*;
 enum Step {
     Ready(BuiltinResult<DecodedOption>),
     DeferredValue(KstestOptionName, Value),
-    DeferredName(Value, Value),
 }
 
 enum DecodedOption {
@@ -32,7 +31,12 @@ impl KstestOptionPlan {
         let mut rest = rest.into_iter();
         while let (Some(name), Some(value)) = (rest.next(), rest.next()) {
             if crate::value_contains_gpu(&name) {
-                steps.push(Step::DeferredName(name, value));
+                // A resident numeric value cannot decode as a public option name.
+                // Retain the error until after compatibility gates, but never
+                // download the sample or the invalid name to discover it.
+                steps.push(Step::Ready(Err(kstest_invalid_argument(
+                    "kstest: option name must be a string scalar",
+                ))));
                 continue;
             }
             let name = kstest_scalar_text(&name, "option name")?;
@@ -87,16 +91,6 @@ impl KstestOptionPlan {
         Ok(self)
     }
 
-    fn gate_integer_cdf(option: KstestOptionName, value: &Value) -> BuiltinResult<()> {
-        if option == KstestOptionName::Cdf && kstest_cdf_contains_typed_integer(value) {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &KSTEST_INTEGER_CDF_EXTENSION,
-                KSTEST_NAME,
-            )?;
-        }
-        Ok(())
-    }
-
     fn validate_resident_role(option: KstestOptionName, value: &Value) -> BuiltinResult<()> {
         match option {
             KstestOptionName::Alpha => validate_kstest_alpha_role(value),
@@ -139,20 +133,6 @@ impl KstestOptionPlan {
             let decoded = match step {
                 Step::Ready(value) => value?,
                 Step::DeferredValue(option, value) => {
-                    let value = kstest_gather(value).await?;
-                    Self::decode(option, &value)?
-                }
-                Step::DeferredName(name, value) => {
-                    let name = kstest_gather(name).await?;
-                    let name = kstest_scalar_text(&name, "option name")?;
-                    let option = KstestOptionName::from_public(&name).ok_or_else(|| {
-                        kstest_invalid_argument(format!(
-                            "kstest: unsupported option '{}'",
-                            name.to_ascii_lowercase()
-                        ))
-                    })?;
-                    Self::gate_integer_cdf(option, &value)?;
-                    Self::validate_resident_role(option, &value)?;
                     let value = kstest_gather(value).await?;
                     Self::decode(option, &value)?
                 }
