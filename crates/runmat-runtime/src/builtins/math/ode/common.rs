@@ -32,7 +32,7 @@ impl OdeMethod {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct OdeOptions {
     pub rel_tol: f64,
     pub abs_tol: f64,

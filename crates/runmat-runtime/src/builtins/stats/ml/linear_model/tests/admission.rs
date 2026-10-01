@@ -1,3 +1,4 @@
+use super::super::values::ensure_exact_fitlm_integer_scalar_boundary;
 use super::*;
 
 #[test]

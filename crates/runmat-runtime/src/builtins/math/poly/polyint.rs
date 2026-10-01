@@ -1,11 +1,11 @@
 //! MATLAB-compatible `polyint` builtin with GPU-aware semantics for RunMat.
 
 use num_complex::Complex64;
+#[cfg(test)]
+use runmat_builtins::POLYINT_DESCRIPTOR;
 use runmat_builtins::{
     BuiltinErrorDescriptor, POLYINT_ERROR_INVALID_ARGUMENT, POLYINT_ERROR_INVALID_INPUT,
 };
-#[cfg(test)]
-use runmat_builtins::{POLYINT_DESCRIPTOR, POLYINT_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
 
