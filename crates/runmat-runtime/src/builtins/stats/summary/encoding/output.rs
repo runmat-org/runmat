@@ -17,7 +17,6 @@ pub(super) fn onehot_numeric_output(
     Ok(Value::Tensor(output))
 }
 
-#[derive(Default)]
 pub(super) fn labels_to_value(
     name: &str,
     labels: &[Label],
