@@ -440,8 +440,14 @@ async fn numeric_outcomes(
     cooperation
         .completed((values.len() % 16_384) as u64)
         .await?;
-    classes.sort_by(f64::total_cmp);
-    classes.dedup_by(|a, b| *a == *b);
+    let classes = class_census::sort_unique(
+        classes,
+        f64::total_cmp,
+        |left, right| left == right,
+        "numeric class census",
+        cooperation,
+    )
+    .await?;
     if classes.len() < 2 {
         return Err(invalid("mnrfit: Y must contain at least two classes"));
     }
@@ -494,12 +500,38 @@ async fn text_outcomes(
             "mnrfit: categorical Y must be a vector with one response per row of X",
         ));
     }
-    if values.iter().any(|value| value.is_empty()) {
-        return Err(invalid("mnrfit: text response classes must be nonempty"));
+    for (index, value) in values.iter().enumerate() {
+        if value.is_empty() {
+            return Err(invalid("mnrfit: text response classes must be nonempty"));
+        }
+        if (index + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
     }
-    let mut classes = values.clone();
-    classes.sort();
-    classes.dedup();
+    cooperation
+        .completed((values.len() % 16_384) as u64)
+        .await?;
+    let mut classes = Vec::new();
+    classes
+        .try_reserve_exact(values.len())
+        .map_err(|_| invalid("mnrfit: text class census exceeds available host resources"))?;
+    for (index, value) in values.iter().enumerate() {
+        classes.push(value.clone());
+        if (index + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
+    }
+    cooperation
+        .completed((values.len() % 16_384) as u64)
+        .await?;
+    let classes = class_census::sort_unique(
+        classes,
+        String::cmp,
+        |left, right| left == right,
+        "text class census",
+        cooperation,
+    )
+    .await?;
     if classes.len() < 2 {
         return Err(invalid("mnrfit: Y must contain at least two classes"));
     }
@@ -526,13 +558,21 @@ async fn cellstr_outcomes(
     rows: usize,
     cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<ResponseOutcomes> {
-    let labels = cell
-        .data
-        .iter()
-        .map(|value| {
-            scalar_text(value).ok_or_else(|| invalid("mnrfit: Y cell entries must be text"))
-        })
-        .collect::<BuiltinResult<Vec<_>>>()?;
+    let mut labels = Vec::new();
+    labels
+        .try_reserve_exact(cell.data.len())
+        .map_err(|_| invalid("mnrfit: text response labels exceed available host resources"))?;
+    for (index, value) in cell.data.iter().enumerate() {
+        labels.push(
+            scalar_text(value).ok_or_else(|| invalid("mnrfit: Y cell entries must be text"))?,
+        );
+        if (index + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
+    }
+    cooperation
+        .completed((cell.data.len() % 16_384) as u64)
+        .await?;
     text_outcomes(labels, cell.shape.clone(), rows, cooperation).await
 }
 

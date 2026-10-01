@@ -2,6 +2,7 @@
 
 mod admission;
 mod allocation;
+mod class_census;
 mod cooperation;
 mod data;
 mod numeric;

@@ -109,3 +109,39 @@ fn schedule_error(error: JsValue) -> ExecutionServiceError {
         "browser CPU task-turn scheduling failed: {cause}"
     ))
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test(async)]
+    async fn queued_browser_message_runs_during_a_cpu_task_turn() {
+        let queued = MessageChannel::new().expect("browser MessageChannel");
+        let seen = Rc::new(Cell::new(false));
+        let marked = seen.clone();
+        let callback = Closure::wrap(Box::new(move |_event: MessageEvent| {
+            marked.set(true);
+        }) as Box<dyn FnMut(MessageEvent)>);
+        queued
+            .port1()
+            .set_onmessage(Some(callback.as_ref().unchecked_ref()));
+        queued.port1().start();
+        queued
+            .port2()
+            .post_message(&JsValue::UNDEFINED)
+            .expect("queue an earlier browser task");
+
+        BrowserTaskTurn::new()
+            .expect("create CPU turn")
+            .await
+            .expect("complete CPU turn");
+        assert!(seen.get(), "a real queued task must run between CPU chunks");
+        queued.port1().set_onmessage(None);
+        queued.port1().close();
+        queued.port2().close();
+    }
+}
