@@ -260,7 +260,8 @@ fn tsne_gates_integer_roles_and_explicit_residency_before_gather() {
         error.identifier(),
         Some("RunMat:compatibility:TsneIntegerDataExtension")
     );
-    let error = ensure_tsne_extensions(&Value::Num(1.0), &[Value::from("NumDimensions"), integer])
+    let headers = option_headers(vec![Value::from("NumDimensions"), integer]).unwrap();
+    let error = ensure_tsne_extensions(&Value::Num(1.0), &headers)
         .expect_err("integer option must gate");
     assert_eq!(
         error.identifier(),

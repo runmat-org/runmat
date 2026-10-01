@@ -116,8 +116,7 @@ pub(super) fn finish_pdf(
         source, output, PDF_NAME, &protected,
     )
     .map_err(|error| with_fitted_context(PDF_NAME, error))?;
-    if runmat_accelerate_api::handle_is_explicit(source)
-        && !matches!(restored, Value::GpuTensor(_))
+    if runmat_accelerate_api::handle_is_explicit(source) && !matches!(restored, Value::GpuTensor(_))
     {
         return Err(invalid_for(
             PDF_NAME,
