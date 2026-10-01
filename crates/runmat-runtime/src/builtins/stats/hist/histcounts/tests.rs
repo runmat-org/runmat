@@ -1,6 +1,10 @@
 use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
+use runmat_builtins::{
+    HISTCOUNTS_ERROR_BINMETHOD_CONFLICT, HISTCOUNTS_ERROR_BINWIDTH_INVALID,
+    HISTCOUNTS_ERROR_EDGE_PRECISION,
+};
 use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
 
 fn values_from_tensor(value: Value) -> Vec<f64> {
@@ -13,6 +17,117 @@ fn values_from_tensor(value: Value) -> Vec<f64> {
 
 fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+}
+
+#[test]
+fn wide_integer_edges_classify_without_rounding_and_keep_exact_widths() {
+    let base = 9_007_199_254_740_992_u64;
+    let data = integer_tensor(
+        IntegerStorage::U64(vec![base, base + 1, base + 2]),
+        vec![1, 3],
+    );
+    let edges = integer_tensor(
+        IntegerStorage::U64(vec![base, base + 1, base + 2]),
+        vec![1, 3],
+    );
+    let eval = block_on(evaluate(data.clone(), &[edges.clone()])).expect("exact edges");
+    let (counts, _) = eval.into_pair();
+    assert_eq!(values_from_tensor(counts), vec![1.0, 2.0]);
+
+    let _outputs = crate::output_count::push_output_count(Some(3));
+    let result = block_on(histcounts_builtin(
+        data,
+        vec![
+            Value::String("BinEdges".into()),
+            edges,
+            Value::String("Normalization".into()),
+            Value::String("countdensity".into()),
+        ],
+    ))
+    .expect("density with exact integer widths");
+    let Value::OutputList(outputs) = result else {
+        panic!("expected three outputs");
+    };
+    assert_eq!(values_from_tensor(outputs[0].clone()), vec![1.0, 2.0]);
+    assert_eq!(values_from_tensor(outputs[2].clone()), vec![1.0, 2.0, 2.0]);
+}
+
+#[test]
+fn signed_minimum_unsigned_maximum_and_cross_class_edges_are_exact() {
+    let signed = integer_tensor(
+        IntegerStorage::I64(vec![i64::MIN, i64::MIN + 1, i64::MIN + 2]),
+        vec![1, 3],
+    );
+    let signed_edges = integer_tensor(
+        IntegerStorage::I64(vec![i64::MIN, i64::MIN + 1, i64::MIN + 2]),
+        vec![1, 3],
+    );
+    let (counts, _) = block_on(evaluate(signed, &[signed_edges]))
+        .expect("signed minimum")
+        .into_pair();
+    assert_eq!(values_from_tensor(counts), vec![1.0, 2.0]);
+
+    let unsigned = integer_tensor(
+        IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX - 1, u64::MAX]),
+        vec![1, 3],
+    );
+    let unsigned_edges = integer_tensor(
+        IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX - 1, u64::MAX]),
+        vec![1, 3],
+    );
+    let (counts, _) = block_on(evaluate(unsigned, &[unsigned_edges]))
+        .expect("unsigned maximum")
+        .into_pair();
+    assert_eq!(values_from_tensor(counts), vec![1.0, 2.0]);
+
+    let signed = integer_tensor(IntegerStorage::I16(vec![-1, 0, 1]), vec![1, 3]);
+    let unsigned_edges = integer_tensor(IntegerStorage::U64(vec![0, 1, 2]), vec![1, 3]);
+    let (counts, _) = block_on(evaluate(signed, &[unsigned_edges]))
+        .expect("mixed integer classes")
+        .into_pair();
+    assert_eq!(values_from_tensor(counts), vec![1.0, 1.0]);
+}
+
+#[test]
+fn third_output_preserves_input_shape_and_marks_excluded_observations() {
+    let _outputs = crate::output_count::push_output_count(Some(3));
+    let input =
+        Tensor::new(vec![-1.0, 0.0, 1.0, 2.0, 3.0, f64::NAN], vec![2, 3]).expect("nonsquare input");
+    let edges = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).expect("edges");
+    let result = block_on(histcounts_builtin(
+        Value::Tensor(input),
+        vec![Value::Tensor(edges)],
+    ))
+    .expect("three histogram outputs");
+    let Value::OutputList(outputs) = result else {
+        panic!("expected three outputs");
+    };
+    assert_eq!(outputs.len(), 3);
+    let mut outputs = outputs.into_iter();
+    assert_eq!(
+        values_from_tensor(outputs.next().unwrap()),
+        vec![1.0, 1.0, 2.0]
+    );
+    assert_eq!(
+        values_from_tensor(outputs.next().unwrap()),
+        vec![0.0, 1.0, 2.0, 3.0]
+    );
+    let Value::Tensor(bins) = outputs.next().unwrap() else {
+        panic!("bin indices must be a tensor");
+    };
+    assert_eq!(bins.shape, vec![2, 3]);
+    assert_eq!(bins.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0, 3.0, 0.0]);
+}
+
+#[test]
+fn excessive_outputs_are_rejected_before_invalid_bin_options() {
+    let _outputs = crate::output_count::push_output_count(Some(4));
+    let result = block_on(histcounts_builtin(Value::Num(1.0), vec![Value::Num(-1.0)]));
+    let error = match result {
+        Ok(_) => panic!("four outputs must fail before invalid bins"),
+        Err(error) => error,
+    };
+    assert!(error.message().contains("too many output arguments"));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -279,6 +394,53 @@ fn histcounts_binmethod_integers_with_limits() {
     assert_eq!(edges, vec![2.0, 3.0, 4.0]);
 }
 
+#[test]
+fn integer_method_rejects_unrepresentable_unit_edges_without_rejecting_wide_data() {
+    let base = 9_007_199_254_740_992.0;
+    let data = Value::Tensor(Tensor::new(vec![base, base + 2.0], vec![1, 2]).unwrap());
+    let error = block_on(evaluate(
+        data.clone(),
+        &[Value::from("BinMethod"), Value::from("integers")],
+    ))
+    .err()
+    .expect("unit edges above flintmax are not distinct doubles");
+    assert_eq!(
+        error.identifier(),
+        HISTCOUNTS_ERROR_EDGE_PRECISION.identifier
+    );
+    let explicit_count_error = block_on(evaluate(
+        data.clone(),
+        &[Value::from("NumBins"), Value::Num(10.0)],
+    ))
+    .err()
+    .expect("requested bins cannot be silently collapsed");
+    assert_eq!(
+        explicit_count_error.identifier(),
+        HISTCOUNTS_ERROR_EDGE_PRECISION.identifier
+    );
+    let wide_default = block_on(evaluate(data, &[])).expect("wider double bins remain legal");
+    let (counts, edges) = wide_default.into_pair();
+    assert_eq!(values_from_tensor(counts).iter().sum::<f64>(), 2.0);
+    assert!(values_from_tensor(edges)
+        .windows(2)
+        .all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn empty_integer_method_input_uses_finite_default_edges() {
+    let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap());
+    let evaluation = block_on(evaluate(
+        empty,
+        &[Value::from("BinMethod"), Value::from("integers")],
+    ))
+    .expect("empty integer-method histogram");
+    let (counts, edges) = evaluation.into_pair();
+    assert_eq!(values_from_tensor(counts).iter().sum::<f64>(), 0.0);
+    assert!(values_from_tensor(edges)
+        .windows(2)
+        .all(|pair| pair[0].is_finite() && pair[0] < pair[1]));
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn histcounts_binmethod_conflict_errors() {
@@ -415,10 +577,10 @@ fn histcounts_accepts_supported_integer_gpu_classes() {
 #[test]
 #[cfg(feature = "wgpu")]
 fn histcounts_wgpu_roundtrip() {
-    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-    );
-    let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+    )
+    .expect("required WGPU provider");
     let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
     let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
     let eval = block_on(evaluate(

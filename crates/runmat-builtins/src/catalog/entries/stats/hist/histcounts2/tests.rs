@@ -12,6 +12,17 @@ fn value(shape: &[usize]) -> ValueFact {
     )
 }
 
+fn complex_value(shape: &[usize]) -> ValueFact {
+    ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(shape.iter().copied().map(Some).collect::<Vec<_>>()),
+        StorageFact::Dense,
+    )
+}
+
 fn infer(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>, count: usize) -> CallInference {
     super::inference::infer(
         &CallRequest {
@@ -69,6 +80,17 @@ fn scalar_counts_and_unknown_controls_are_conservative() {
         3,
     );
     assert_eq!(dynamic.outputs[0].shape, ShapeFact::Unknown);
+    let matrix_edges = infer(
+        vec![
+            value(&[4, 1]),
+            value(&[4, 1]),
+            value(&[2, 2]),
+            value(&[2, 2]),
+        ],
+        vec![LiteralValue::Unknown; 4],
+        3,
+    );
+    assert_eq!(matrix_edges.outputs[0].shape, ShapeFact::Unknown);
     assert!(!infer(
         vec![value(&[4, 1]), value(&[4, 1])],
         vec![LiteralValue::Unknown; 2],
@@ -76,6 +98,35 @@ fn scalar_counts_and_unknown_controls_are_conservative() {
     )
     .diagnostics
     .is_empty());
+}
+
+#[test]
+fn complex_observations_are_rejected_by_static_admission() {
+    let result = infer(
+        vec![complex_value(&[1, 3]), value(&[1, 3])],
+        vec![LiteralValue::Unknown; 2],
+        1,
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-HISTCOUNTS2-DATA"));
+    let sparse = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        value(&[1, 3]).shape,
+        StorageFact::Sparse,
+    );
+    assert!(infer(
+        vec![value(&[1, 3]), sparse],
+        vec![LiteralValue::Unknown; 2],
+        1,
+    )
+    .diagnostics
+    .iter()
+    .any(|diagnostic| diagnostic.code == "RM-CATALOG-HISTCOUNTS2-DATA"));
 }
 
 #[test]

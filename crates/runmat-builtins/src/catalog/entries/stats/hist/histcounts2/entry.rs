@@ -11,7 +11,7 @@ pub const HISTCOUNTS2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     documentation: documentation::DOCUMENTATION,
     descriptor: &HISTCOUNTS2_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
-        maturity: BuiltinContractMaturity::Complete,
+        maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             inference::infer,
         )),

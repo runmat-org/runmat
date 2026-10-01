@@ -261,6 +261,13 @@ pub const HISTCOUNTS2_ERROR_BINMETHOD_CONFLICT: BuiltinErrorDescriptor = Builtin
     message: "histcounts2: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth",
 };
 
+pub const HISTCOUNTS2_ERROR_EDGE_PRECISION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HISTCOUNTS2.EDGE_PRECISION",
+    identifier: Some("RunMat:histcounts2:EdgePrecision"),
+    when: "Integer-aligned unit bin boundaries cannot be represented distinctly by the double edge output.",
+    message: "histcounts2: integer-aligned bin boundaries cannot be represented distinctly as double",
+};
+
 pub const HISTCOUNTS2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.HISTCOUNTS2.INTERNAL",
     identifier: Some("RunMat:histcounts2:Internal"),
@@ -268,10 +275,11 @@ pub const HISTCOUNTS2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescr
     message: "histcounts2: internal operation failed",
 };
 
-const HISTCOUNTS2_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const HISTCOUNTS2_ERRORS: [BuiltinErrorDescriptor; 5] = [
     HISTCOUNTS2_ERROR_INVALID_ARGUMENT,
     HISTCOUNTS2_ERROR_NUMBINS_INVALID,
     HISTCOUNTS2_ERROR_BINMETHOD_CONFLICT,
+    HISTCOUNTS2_ERROR_EDGE_PRECISION,
     HISTCOUNTS2_ERROR_INTERNAL,
 ];
 

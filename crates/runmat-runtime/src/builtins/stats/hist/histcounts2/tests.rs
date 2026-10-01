@@ -1,6 +1,11 @@
+use super::options::HistogramNormalization;
 use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
+use runmat_builtins::{
+    HISTCOUNTS2_ERROR_BINMETHOD_CONFLICT, HISTCOUNTS2_ERROR_EDGE_PRECISION,
+    HISTCOUNTS2_ERROR_NUMBINS_INVALID,
+};
 use runmat_value::{IntValue, IntegerStorage};
 
 fn tensor_from_value(value: Value) -> Tensor {
@@ -17,6 +22,86 @@ fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
 
 fn double_values(tensor: &Tensor) -> &[f64] {
     tensor.as_f64_slice().expect("expected double tensor")
+}
+
+#[test]
+fn excessive_outputs_are_rejected_before_option_parsing_or_evaluation() {
+    let _outputs = crate::output_count::push_output_count(Some(6));
+    let error = match block_on(histcounts2_builtin(
+        Value::Num(1.0),
+        Value::Num(2.0),
+        vec![Value::Num(-1.0)],
+    )) {
+        Ok(_) => panic!("six outputs must fail before parsing invalid bins"),
+        Err(error) => error,
+    };
+    assert!(error.message().contains("too many output arguments"));
+}
+
+#[test]
+fn five_outputs_preserve_bin_shapes_and_zero_excluded_positions() {
+    let _outputs = crate::output_count::push_output_count(Some(5));
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let x = Tensor::new(vec![0.5, 1.5, 2.5, f64::NAN], vec![2, 2]).expect("X");
+    let y = Tensor::new(vec![0.5, 1.5, 0.5, 1.5], vec![2, 2]).expect("Y");
+    let edges = || Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).expect("edges");
+    let result = block_on(histcounts2_builtin(
+        Value::Tensor(x),
+        Value::Tensor(y),
+        vec![Value::Tensor(edges()), Value::Tensor(edges())],
+    ))
+    .expect("five histogram outputs");
+    let Value::OutputList(outputs) = result else {
+        panic!("expected output list");
+    };
+    assert_eq!(outputs.len(), 5);
+    let mut outputs = outputs.into_iter();
+    let counts = tensor_from_value(outputs.next().unwrap());
+    assert_eq!(counts.shape, vec![2, 2]);
+    assert_eq!(double_values(&counts), &[1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(
+        double_values(&tensor_from_value(outputs.next().unwrap())),
+        &[0.0, 1.0, 2.0]
+    );
+    assert_eq!(
+        double_values(&tensor_from_value(outputs.next().unwrap())),
+        &[0.0, 1.0, 2.0]
+    );
+    let x_bins = tensor_from_value(outputs.next().unwrap());
+    let y_bins = tensor_from_value(outputs.next().unwrap());
+    assert_eq!(x_bins.shape, vec![2, 2]);
+    assert_eq!(y_bins.shape, vec![2, 2]);
+    assert_eq!(double_values(&x_bins), &[1.0, 2.0, 0.0, 0.0]);
+    assert_eq!(double_values(&y_bins), &[1.0, 2.0, 1.0, 2.0]);
+}
+
+#[test]
+fn host_and_resident_shape_mismatch_is_rejected_at_admission() {
+    test_support::with_test_provider(|provider| {
+        let resident = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("resident input");
+        let handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: double_values(&resident),
+                shape: &resident.shape,
+            })
+            .expect("upload");
+        let host = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("host input");
+        let error = match block_on(evaluate(Value::GpuTensor(handle), Value::Tensor(host), &[])) {
+            Ok(_) => panic!("different shapes must be rejected before gather"),
+            Err(error) => error,
+        };
+        assert!(error.message().contains("must be the same size"));
+    });
+}
+
+#[test]
+fn histogram_shape_product_overflow_is_an_error() {
+    let result = compute_histogram_counts(&[], &[], usize::MAX, 2);
+    let error = match result {
+        Ok(_) => panic!("unrepresentable histogram must not allocate or wrap"),
+        Err(error) => error,
+    };
+    assert!(error.message().contains("exceed addressable size"));
 }
 
 #[test]
@@ -346,6 +431,67 @@ fn histcounts2_num_bins_zero_errors() {
     );
 }
 
+#[test]
+fn integer_method_rejects_unrepresentable_axis_but_default_wide_bins_remain_legal() {
+    let base = 9_007_199_254_740_992.0;
+    let x = Value::Tensor(Tensor::new(vec![base, base + 2.0], vec![1, 2]).unwrap());
+    let y = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+    let error = block_on(evaluate(
+        x.clone(),
+        y.clone(),
+        &[Value::from("XBinMethod"), Value::from("integers")],
+    ))
+    .err()
+    .expect("X unit boundaries are not distinct doubles");
+    assert_eq!(
+        error.identifier(),
+        HISTCOUNTS2_ERROR_EDGE_PRECISION.identifier
+    );
+    let explicit_count_error = block_on(evaluate(
+        x.clone(),
+        y.clone(),
+        &[Value::from("NumBins"), Value::Num(10.0)],
+    ))
+    .err()
+    .expect("requested X bins cannot be silently collapsed");
+    assert_eq!(
+        explicit_count_error.identifier(),
+        HISTCOUNTS2_ERROR_EDGE_PRECISION.identifier
+    );
+    let default = block_on(evaluate(x, y, &[])).expect("wider double bins remain legal");
+    let (counts, _, _) = default.into_triple();
+    assert_eq!(
+        double_values(&tensor_from_value(counts))
+            .iter()
+            .sum::<f64>(),
+        2.0
+    );
+}
+
+#[test]
+fn empty_integer_method_axes_use_finite_default_edges() {
+    let x = Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap());
+    let y = Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap());
+    let evaluation = block_on(evaluate(
+        x,
+        y,
+        &[Value::from("BinMethod"), Value::from("integers")],
+    ))
+    .expect("empty two-axis histogram");
+    let (counts, x_edges, y_edges) = evaluation.into_triple();
+    assert_eq!(
+        double_values(&tensor_from_value(counts))
+            .iter()
+            .sum::<f64>(),
+        0.0
+    );
+    for edges in [x_edges, y_edges] {
+        assert!(double_values(&tensor_from_value(edges))
+            .windows(2)
+            .all(|pair| pair[0].is_finite() && pair[0] < pair[1]));
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn histcounts2_binmethod_conflict_errors() {
@@ -404,6 +550,55 @@ fn histcounts2_wide_explicit_edges_classify_exactly() {
 }
 
 #[test]
+fn histcounts2_cross_integer_classes_and_signed_extremes_use_exact_edges() {
+    let x = integer_tensor(IntegerStorage::I64(vec![-1, 0, 1]), vec![1, 3]);
+    let y = integer_tensor(
+        IntegerStorage::I64(vec![i64::MIN, i64::MIN + 1, i64::MIN + 2]),
+        vec![1, 3],
+    );
+    let x_edges = integer_tensor(IntegerStorage::U64(vec![0, 1, 2]), vec![1, 3]);
+    let y_edges = integer_tensor(
+        IntegerStorage::I64(vec![i64::MIN, i64::MIN + 1, i64::MIN + 2]),
+        vec![1, 3],
+    );
+    let (counts, _, _, bin_x, bin_y) = block_on(evaluate(x, y, &[x_edges, y_edges]))
+        .expect("cross-class exact edges")
+        .into_all();
+    assert_eq!(
+        double_values(&tensor_from_value(counts)),
+        &[0.0, 0.0, 1.0, 1.0]
+    );
+    assert_eq!(double_values(&tensor_from_value(bin_x)), &[0.0, 1.0, 2.0]);
+    assert_eq!(double_values(&tensor_from_value(bin_y)), &[1.0, 2.0, 2.0]);
+}
+
+#[test]
+fn histcounts2_density_uses_exact_wide_integer_bin_areas() {
+    let base = 9_007_199_254_740_992_u64;
+    let x = integer_tensor(IntegerStorage::U64(vec![base, base + 1]), vec![1, 2]);
+    let y = integer_tensor(IntegerStorage::U64(vec![base, base + 1]), vec![1, 2]);
+    let edges = integer_tensor(
+        IntegerStorage::U64(vec![base, base + 1, base + 2]),
+        vec![1, 3],
+    );
+    let eval = block_on(evaluate(
+        x,
+        y,
+        &[
+            edges.clone(),
+            edges,
+            Value::String("Normalization".into()),
+            Value::String("countdensity".into()),
+        ],
+    ))
+    .expect("exact area density");
+    assert_eq!(
+        double_values(&tensor_from_value(eval.into_counts_value())),
+        &[1.0, 0.0, 0.0, 1.0]
+    );
+}
+
+#[test]
 fn histcounts2_percentage_and_cumulative_are_two_dimensional() {
     let counts = vec![1.0, 2.0, 3.0, 4.0];
     let edges = vec![0.0, 1.0, 2.0];
@@ -412,6 +607,8 @@ fn histcounts2_percentage_and_cumulative_are_two_dimensional() {
             &counts,
             &edges,
             &edges,
+            None,
+            None,
             HistogramNormalization::Percentage,
             10
         ),
@@ -422,13 +619,23 @@ fn histcounts2_percentage_and_cumulative_are_two_dimensional() {
             &counts,
             &edges,
             &edges,
+            None,
+            None,
             HistogramNormalization::CumCount,
             10
         ),
         vec![1.0, 3.0, 4.0, 10.0]
     );
     assert_eq!(
-        apply_normalization_2d(&counts, &edges, &edges, HistogramNormalization::Cdf, 10),
+        apply_normalization_2d(
+            &counts,
+            &edges,
+            &edges,
+            None,
+            None,
+            HistogramNormalization::Cdf,
+            10
+        ),
         vec![0.1, 0.3, 0.4, 1.0]
     );
 }
@@ -477,10 +684,10 @@ fn histcounts2_gpu_roundtrip() {
 #[cfg(feature = "wgpu")]
 fn histcounts2_wgpu_roundtrip() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-    );
-    let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+    )
+    .expect("required WGPU provider");
 
     let x = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
     let y = Tensor::new(vec![1.0, 1.1, 2.9], vec![3, 1]).unwrap();

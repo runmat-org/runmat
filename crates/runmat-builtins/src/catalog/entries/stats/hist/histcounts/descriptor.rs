@@ -25,6 +25,30 @@ const HISTCOUNTS_OUTPUT_NE: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const HISTCOUNTS_OUTPUT_NEB: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Histogram bin counts.",
+    },
+    BuiltinParamDescriptor {
+        name: "edges",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bin edge vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "bin",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based bin indices in the shape of X; zero for excluded observations.",
+    },
+];
+
 const HISTCOUNTS_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
     ty: BuiltinParamType::Any,
@@ -92,7 +116,7 @@ const HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const HISTCOUNTS_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+const HISTCOUNTS_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
     BuiltinSignatureDescriptor {
         label: "N = histcounts(X)",
         inputs: &HISTCOUNTS_INPUTS_X,
@@ -133,6 +157,26 @@ const HISTCOUNTS_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
         inputs: &HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE,
         outputs: &HISTCOUNTS_OUTPUT_NE,
     },
+    BuiltinSignatureDescriptor {
+        label: "[N, edges, bin] = histcounts(X)",
+        inputs: &HISTCOUNTS_INPUTS_X,
+        outputs: &HISTCOUNTS_OUTPUT_NEB,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[N, edges, bin] = histcounts(X, bins)",
+        inputs: &HISTCOUNTS_INPUTS_X_BINS,
+        outputs: &HISTCOUNTS_OUTPUT_NEB,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[N, edges, bin] = histcounts(X, Name, Value, ...)",
+        inputs: &HISTCOUNTS_INPUTS_X_NAMEVALUE,
+        outputs: &HISTCOUNTS_OUTPUT_NEB,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[N, edges, bin] = histcounts(X, bins, Name, Value, ...)",
+        inputs: &HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE,
+        outputs: &HISTCOUNTS_OUTPUT_NEB,
+    },
 ];
 
 pub const HISTCOUNTS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -156,6 +200,13 @@ pub const HISTCOUNTS_ERROR_BINWIDTH_INVALID: BuiltinErrorDescriptor = BuiltinErr
     message: "histcounts: BinWidth must be a positive finite scalar",
 };
 
+pub const HISTCOUNTS_ERROR_EDGE_PRECISION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HISTCOUNTS.EDGE_PRECISION",
+    identifier: Some("RunMat:histcounts:EdgePrecision"),
+    when: "Integer-aligned unit bin boundaries cannot be represented distinctly by the double edge output.",
+    message: "histcounts: integer-aligned bin boundaries cannot be represented distinctly as double",
+};
+
 pub const HISTCOUNTS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.HISTCOUNTS.INTERNAL",
     identifier: Some("RunMat:histcounts:Internal"),
@@ -163,10 +214,11 @@ pub const HISTCOUNTS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescri
     message: "histcounts: internal operation failed",
 };
 
-const HISTCOUNTS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const HISTCOUNTS_ERRORS: [BuiltinErrorDescriptor; 5] = [
     HISTCOUNTS_ERROR_INVALID_ARGUMENT,
     HISTCOUNTS_ERROR_BINMETHOD_CONFLICT,
     HISTCOUNTS_ERROR_BINWIDTH_INVALID,
+    HISTCOUNTS_ERROR_EDGE_PRECISION,
     HISTCOUNTS_ERROR_INTERNAL,
 ];
 

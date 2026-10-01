@@ -1,3 +1,4 @@
+use super::Histcounts2Option;
 use crate::catalog::inference::argument_error;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
@@ -15,10 +16,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     for (index, value) in request.arguments.iter().take(2).enumerate() {
-        if !matches!(
-            value.kind,
-            ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
-        ) {
+        if value.storage == StorageFact::Sparse
+            || !matches!(
+                value.kind,
+                ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                }) | ValueKindFact::Logical
+                    | ValueKindFact::Unknown
+            )
+        {
             diagnostics.push(argument_error(
                 "RM-CATALOG-HISTCOUNTS2-DATA",
                 "histcounts2 requires real numeric or logical observations",
@@ -59,12 +66,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 ValueKindFact::Numeric(_) | ValueKindFact::Logical
             )
         {
-            let x_len = request.arguments[index].shape.element_count();
-            let y_len = request.arguments[index + 1].shape.element_count();
-            if x_len.is_some_and(|n| n > 1) && y_len.is_some_and(|n| n > 1) {
-                x_bins = x_len.map(|n| n - 1);
-                y_bins = y_len.map(|n| n - 1);
-            } else if x_len == Some(1) && y_len == Some(1) {
+            let x_shape = &request.arguments[index].shape;
+            let y_shape = &request.arguments[index + 1].shape;
+            if edge_bins(x_shape).is_some() && edge_bins(y_shape).is_some() {
+                x_bins = edge_bins(x_shape);
+                y_bins = edge_bins(y_shape);
+            } else if x_shape.element_count() == Some(1) && y_shape.element_count() == Some(1) {
                 x_bins = positive_count(request.literals.literal_args.get(index));
                 y_bins = positive_count(request.literals.literal_args.get(index + 1));
             }
@@ -90,14 +97,19 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     while index + 1 < request.arguments.len() {
         let argument = index + 1;
-        match request.literals.literal_string_at(index).as_deref() {
-            Some("xbinedges") => {
-                x_bins = edge_bins(request.arguments[argument].shape.element_count())
+        match request
+            .literals
+            .literal_string_at(index)
+            .as_deref()
+            .and_then(Histcounts2Option::parse)
+        {
+            Some(Histcounts2Option::XBinEdges) => {
+                x_bins = edge_bins(&request.arguments[argument].shape)
             }
-            Some("ybinedges") => {
-                y_bins = edge_bins(request.arguments[argument].shape.element_count())
+            Some(Histcounts2Option::YBinEdges) => {
+                y_bins = edge_bins(&request.arguments[argument].shape)
             }
-            Some("numbins") => {
+            Some(Histcounts2Option::NumBins) => {
                 if let Some(LiteralValue::Vector(values)) =
                     request.literals.literal_args.get(argument)
                 {
@@ -114,9 +126,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     y_bins = both;
                 }
             }
-            Some("xbinwidth" | "xbinmethod") => x_bins = None,
-            Some("ybinwidth" | "ybinmethod") => y_bins = None,
-            Some("binwidth" | "binmethod") => {
+            Some(Histcounts2Option::XBinWidth | Histcounts2Option::XBinMethod) => x_bins = None,
+            Some(Histcounts2Option::YBinWidth | Histcounts2Option::YBinMethod) => y_bins = None,
+            Some(Histcounts2Option::BinWidth | Histcounts2Option::BinMethod) => {
                 x_bins = None;
                 y_bins = None;
             }
@@ -173,8 +185,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     result
 }
 
-fn edge_bins(length: Option<usize>) -> Option<usize> {
-    length.filter(|n| *n > 1).map(|n| n - 1)
+fn edge_bins(shape: &ShapeFact) -> Option<usize> {
+    let dims = shape.known_dims()?;
+    let mut length = 1usize;
+    let mut non_singletons = 0;
+    for dim in dims {
+        let dim = dim?;
+        non_singletons += usize::from(dim > 1);
+        length = length.checked_mul(dim)?;
+    }
+    (non_singletons == 1 && length > 1).then_some(length - 1)
 }
 
 fn positive_count(value: Option<&LiteralValue>) -> Option<usize> {

@@ -1,3 +1,4 @@
+use super::HistcountsOption;
 use crate::catalog::inference::argument_error;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
@@ -15,10 +16,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(data) = request.arguments.first() {
-        if !matches!(
-            data.kind,
-            ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
-        ) {
+        if data.storage == StorageFact::Sparse
+            || !matches!(
+                data.kind,
+                ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                }) | ValueKindFact::Logical
+                    | ValueKindFact::Unknown
+            )
+        {
             diagnostics.push(argument_error(
                 "RM-CATALOG-HISTCOUNTS-DATA",
                 "histcounts requires real numeric or logical observations",
@@ -40,20 +47,25 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         )
     {
         let control = &request.arguments[1];
-        bins = edge_bins(control.shape.element_count())
+        bins = edge_bins(&control.shape)
             .or_else(|| known_positive_bin_count(request.literals.literal_args.get(1)));
         options_start = 2;
     }
     let mut index = options_start;
     while index + 1 < request.arguments.len() {
-        match request.literals.literal_string_at(index).as_deref() {
-            Some("binedges") => {
-                bins = edge_bins(request.arguments[index + 1].shape.element_count());
+        match request
+            .literals
+            .literal_string_at(index)
+            .as_deref()
+            .and_then(HistcountsOption::parse)
+        {
+            Some(HistcountsOption::BinEdges) => {
+                bins = edge_bins(&request.arguments[index + 1].shape);
             }
-            Some("numbins") => {
+            Some(HistcountsOption::NumBins) => {
                 bins = known_positive_bin_count(request.literals.literal_args.get(index + 1));
             }
-            Some("binwidth" | "binmethod") => bins = None,
+            Some(HistcountsOption::BinWidth | HistcountsOption::BinMethod) => bins = None,
             _ => {}
         }
         index += 2;
@@ -69,13 +81,24 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let edge_shape = bins
         .and_then(|n| n.checked_add(1))
         .map_or(ShapeFact::Unknown, row);
-    let count = request.outputs.requested.known_count().unwrap_or(2);
-    let outputs = (0..count)
+    let count = request.outputs.requested.known_count().unwrap_or(3);
+    if count > 3 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-HISTCOUNTS-OUTPUTS",
+            "histcounts supports at most three outputs",
+            count,
+        ));
+    }
+    let outputs = (0..count.min(3))
         .map(|slot| match slot {
             0 => double(count_shape.clone()),
             1 => double(edge_shape.clone()),
-            // The current runtime pads excess requested outputs with scalar zero.
-            _ => double(ShapeFact::Scalar),
+            _ => double(
+                request
+                    .arguments
+                    .first()
+                    .map_or(ShapeFact::Unknown, |value| value.shape.clone()),
+            ),
         })
         .collect();
     let mut contract = CallContract::fixed(outputs);
@@ -87,8 +110,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     result
 }
 
-fn edge_bins(length: Option<usize>) -> Option<usize> {
-    length.filter(|length| *length > 1).map(|length| length - 1)
+fn edge_bins(shape: &ShapeFact) -> Option<usize> {
+    let dims = shape.known_dims()?;
+    let mut length = 1usize;
+    let mut non_singletons = 0;
+    for dim in dims {
+        let dim = dim?;
+        non_singletons += usize::from(dim > 1);
+        length = length.checked_mul(dim)?;
+    }
+    (non_singletons == 1 && length > 1).then_some(length - 1)
 }
 
 fn known_positive_bin_count(literal: Option<&LiteralValue>) -> Option<usize> {

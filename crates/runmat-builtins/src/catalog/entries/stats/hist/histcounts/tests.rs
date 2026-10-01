@@ -12,6 +12,17 @@ fn value(shape: &[usize]) -> ValueFact {
     )
 }
 
+fn complex_value(shape: &[usize]) -> ValueFact {
+    ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(shape.iter().copied().map(Some).collect::<Vec<_>>()),
+        StorageFact::Dense,
+    )
+}
+
 fn infer(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>, count: usize) -> CallInference {
     super::inference::infer(
         &CallRequest {
@@ -63,6 +74,50 @@ fn defaults_and_dynamic_controls_remain_unknown() {
         2,
     );
     assert_eq!(huge.outputs[0].shape, ShapeFact::Unknown);
+    let matrix_edges = infer(
+        vec![value(&[5, 1]), value(&[2, 3])],
+        vec![LiteralValue::Unknown; 2],
+        2,
+    );
+    assert_eq!(matrix_edges.outputs[0].shape, ShapeFact::Unknown);
+}
+
+#[test]
+fn complex_observations_are_rejected_by_static_admission() {
+    let result = infer(vec![complex_value(&[1, 3])], vec![LiteralValue::Unknown], 1);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-HISTCOUNTS-DATA"));
+    let sparse = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        value(&[1, 3]).shape,
+        StorageFact::Sparse,
+    );
+    assert!(infer(vec![sparse], vec![LiteralValue::Unknown], 1)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-HISTCOUNTS-DATA"));
+}
+
+#[test]
+fn third_output_tracks_observation_shape_and_excess_outputs_fail() {
+    let result = infer(vec![value(&[2, 3])], vec![LiteralValue::Unknown], 3);
+    assert_eq!(result.outputs.len(), 3);
+    assert_eq!(result.outputs[2].shape, value(&[2, 3]).shape);
+    assert_eq!(
+        result.outputs[2].numeric().unwrap().class,
+        NumericClass::Double
+    );
+
+    let excess = infer(vec![value(&[2, 3])], vec![LiteralValue::Unknown], 4);
+    assert!(excess
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-HISTCOUNTS-OUTPUTS"));
 }
 
 #[test]
@@ -75,4 +130,5 @@ fn descriptor_covers_core_forms() {
     assert!(labels.contains(&"N = histcounts(X)"));
     assert!(labels.contains(&"N = histcounts(X, bins)"));
     assert!(labels.contains(&"[N, edges] = histcounts(X, Name, Value, ...)"));
+    assert!(labels.contains(&"[N, edges, bin] = histcounts(X, bins, Name, Value, ...)"));
 }
