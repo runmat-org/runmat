@@ -218,11 +218,14 @@ pub(super) fn nonmissing_classes(
     Ok(classes)
 }
 
-pub(super) fn class_index(classes: &[Label]) -> BuiltinResult<HashMap<LabelKey, usize>> {
+pub(super) fn class_index(
+    owner: EncodingBuiltin,
+    classes: &[Label],
+) -> BuiltinResult<HashMap<LabelKey, usize>> {
     let mut index = HashMap::with_capacity(classes.len());
     for (idx, class) in classes.iter().enumerate() {
         if index.insert(label_key(class), idx).is_some() {
-            return Err(error("encoding", "encoding: duplicate class labels"));
+            return Err(invalid(owner, format!("{owner}: duplicate class labels")));
         }
     }
     Ok(index)

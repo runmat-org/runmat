@@ -121,10 +121,10 @@ pub(super) fn normalized_shape(shape: &[usize]) -> Vec<usize> {
     }
 }
 
-pub(super) fn element_count(shape: &[usize]) -> BuiltinResult<usize> {
+pub(super) fn element_count(owner: EncodingBuiltin, shape: &[usize]) -> BuiltinResult<usize> {
     shape.iter().try_fold(1usize, |acc, dim| {
         acc.checked_mul(*dim)
-            .ok_or_else(|| error("encoding", "encoding: array is too large"))
+            .ok_or_else(|| invalid(owner, format!("{owner}: array is too large")))
     })
 }
 

@@ -361,7 +361,7 @@ fn dummyvar_compute(group: Value) -> BuiltinResult<Value> {
     let mut data = vec![0.0; cell_count];
     let mut col_offset = 0usize;
     for (group, classes) in specs {
-        let index = class_index(&classes)?;
+        let index = class_index(EncodingBuiltin::Dummyvar, &classes)?;
         for (row, label) in group.labels.iter().enumerate() {
             if label.is_none() {
                 for col in 0..classes.len() {
@@ -422,7 +422,7 @@ fn onehotencode_compute(
         feature_dim,
         classes.len(),
     )?;
-    let cell_count = element_count(&shape)?;
+    let cell_count = element_count(EncodingBuiltin::OnehotEncode, &shape)?;
     if cell_count > MAX_ONEHOT_CELLS {
         return Err(invalid(
             EncodingBuiltin::OnehotEncode,
@@ -431,7 +431,7 @@ fn onehotencode_compute(
     }
     let mut values = vec![0.0; cell_count];
     let mut has_nan_vector = false;
-    let index = class_index(&classes)?;
+    let index = class_index(EncodingBuiltin::OnehotEncode, &classes)?;
     let out_strides = strides(&shape);
     let input_shape = normalized_shape(&labels.shape);
     let input_strides = strides(&input_shape);
@@ -541,7 +541,7 @@ fn onehotdecode_compute(
     }
     let mut out_shape = shape.clone();
     out_shape[feature_axis] = 1;
-    let out_count = element_count(&out_shape)?;
+    let out_count = element_count(EncodingBuiltin::OnehotDecode, &out_shape)?;
     let out_strides = strides(&out_shape);
     let encoded_strides = strides(&shape);
     let mut decoded = Vec::with_capacity(out_count);
