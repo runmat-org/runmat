@@ -142,6 +142,12 @@ pub(crate) fn tensor_representation(
             vec![1, 1],
             ProviderResidency::Host,
         ),
+        Value::Int(integer) => (
+            provider_element_type(integer.numeric_dtype()),
+            ProviderStorage::DenseReal,
+            vec![1, 1],
+            ProviderResidency::Host,
+        ),
         _ => return None,
     };
     Some(ProviderRepresentation {
@@ -539,6 +545,31 @@ mod tests {
             .unwrap();
             assert_eq!(tensor.element_type, ProviderElementType::F32);
             assert_ne!(scalar.element_type, tensor.element_type);
+        }
+    }
+
+    #[test]
+    fn native_integer_scalar_representation_keeps_its_physical_class() {
+        use super::*;
+        use runmat_value::IntValue;
+        for (integer, element) in [
+            (IntValue::I8(-1), ProviderElementType::I8),
+            (IntValue::I16(-1), ProviderElementType::I16),
+            (IntValue::I32(-1), ProviderElementType::I32),
+            (IntValue::I64(i64::MIN), ProviderElementType::I64),
+            (IntValue::U8(1), ProviderElementType::U8),
+            (IntValue::U16(1), ProviderElementType::U16),
+            (IntValue::U32(1), ProviderElementType::U32),
+            (IntValue::U64(u64::MAX), ProviderElementType::U64),
+        ] {
+            for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
+                let representation =
+                    tensor_representation(&Value::Int(integer.clone()), precision).unwrap();
+                assert_eq!(representation.element_type, element);
+                assert_eq!(representation.storage, ProviderStorage::DenseReal);
+                assert_eq!(representation.shape, vec![1, 1]);
+                assert_eq!(representation.residency, ProviderResidency::Host);
+            }
         }
     }
     use super::*;
