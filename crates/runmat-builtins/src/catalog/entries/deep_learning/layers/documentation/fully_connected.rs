@@ -9,5 +9,5 @@ layer_documentation!(
     "layer = fullyConnectedLayer(10, 'Name', 'fc1'); fprintf('%g\\n', layer.OutputSize);",
     "10",
     "assert(layer.OutputSize == 10); assert(strcmp(layer.Name, 'fc1'));",
-    "`OutputSize` is stored as a scalar. The R2026a positional `dim` form stores `OperationDimension`; an explicit dimension still requires compatible network execution. `Weights` and `Bias` can be supplied as name-value properties for supported forward execution."
+    "The result has class `nnet.cnn.layer.FullyConnectedLayer`; `OutputSize` is stored as a scalar. The R2026a positional `dim` form stores `OperationDimension`; an explicit dimension still requires compatible network execution. `Weights` and `Bias` can be supplied as name-value properties for supported forward execution."
 );

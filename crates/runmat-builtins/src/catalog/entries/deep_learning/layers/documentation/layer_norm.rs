@@ -9,5 +9,5 @@ layer_documentation!(
     "layer = layerNormalizationLayer('Name', 'ln'); fprintf('%.5f\\n', layer.Epsilon);",
     "0.00001",
     "assert(layer.Epsilon == 1e-5); assert(strcmp(layer.Name, 'ln'));",
-    "The constructor does not normalize data. Network execution supports real single and double feature, sequence, and 1-D spatial inputs; OperationDimension selects channel-only, spatial-and-channel, or batch-excluded groups. The network initializes Scale and Offset, which remain editable learnables."
+    "The constructor does not normalize data. Recognized learn-rate factors and initializers are retained as layer properties. Network execution supports real single and double feature, sequence, and 1-D spatial inputs; OperationDimension selects channel-only, spatial-and-channel, or batch-excluded groups. The network initializes Scale and Offset, which remain editable learnables."
 );

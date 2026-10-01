@@ -19,7 +19,7 @@ macro_rules! layer_documentation {
             sections: &[
                 BuiltinDocumentationSection { heading: "Layer metadata", paragraphs: &[
                     $detail,
-                    "The result is a host layer object. `Name` and `Description` are text. Recognized name-value options are stored under their canonical property names; unknown, duplicate, and cross-layer option names are rejected. A layer graph can retain recognized options that are not yet executable by `forward` or training.",
+                    "The result is a host layer object. Optional name-value arguments may be omitted to use defaults. `Name` and `Description` are text. Recognized name-value options are stored under their canonical property names; unknown, duplicate, and cross-layer option names are rejected. A layer graph can retain recognized options that are not yet executable by `forward` or training.",
                 ] },
                 BuiltinDocumentationSection { heading: "Placement and validation", paragraphs: &[
                     "The constructor validates required sizes and option syntax before downloading resident controls. Numeric and logical controls needed for validation may be gathered; data, learnables, recurrent state, and initializer captures retain their original storage and provider ownership. The result is a host metadata object, not a GPU kernel invocation. Invalid host text options reject without downloading earlier resident values. Execution validates parameter geometry and provider support separately.",
