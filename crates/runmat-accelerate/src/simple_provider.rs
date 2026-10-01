@@ -3,6 +3,7 @@ mod allocation_state;
 use allocation_state::{integer_registry, numeric_registry, registry};
 mod power;
 mod select;
+mod elementwise_extrema;
 mod logical;
 mod nan;
 mod logarithms;
@@ -5683,6 +5684,14 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Mul) })
+    }
+
+    fn elem_max<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.native_elem_max(a, b) })
     }
 
     fn elem_sub<'a>(
