@@ -27,9 +27,18 @@ impl AccelProvider for Provider {
 
 #[test]
 fn sum_receipt_requires_actual_submit_and_ignores_unrelated_outer_operation() {
+    for invocation in [
+        runmat_types::SumInvocation::Sum,
+        runmat_types::SumInvocation::NanSum,
+    ] {
+        assert_sum_receipt(invocation);
+    }
+}
+
+fn assert_sum_receipt(invocation: runmat_types::SumInvocation) {
     let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let sum = super::super::sum_observation_identity();
+    let sum = super::super::sum_observation_identity(invocation);
     let input = provider
         .0
         .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
@@ -77,7 +86,7 @@ fn sum_receipt_requires_actual_submit_and_ignores_unrelated_outer_operation() {
             .recorder()
             .confirm_submitted_provider_execution_after(
                 provider.device_id(),
-                &super::super::sum_observation_identity(),
+                &super::super::sum_observation_identity(invocation),
                 checkpoint,
             );
         super::super::publish_submitted_sum(provider, output.handle, &input.handle).unwrap()
@@ -106,15 +115,31 @@ fn sum_receipt_requires_actual_submit_and_ignores_unrelated_outer_operation() {
     let mut fallback = ProviderOperationReceipt::new();
     fallback.require_provider_execution(
         provider.device_id(),
-        super::super::sum_observation_identity(),
+        super::super::sum_observation_identity(invocation),
     );
-    with_provider_observation(
-        Some(fallback.recorder()),
-        super::super::mark_sum_runtime_fallback,
-    );
+    with_provider_observation(Some(fallback.recorder()), || {
+        super::super::mark_sum_runtime_fallback(invocation)
+    });
     assert!(matches!(
         fallback.status(),
         ProviderObservationStatus::Failed(ProviderObservationFailure::SharedRuntimeFallback)
+    ));
+
+    let other = match invocation {
+        runmat_types::SumInvocation::Sum => runmat_types::SumInvocation::NanSum,
+        runmat_types::SumInvocation::NanSum => runmat_types::SumInvocation::Sum,
+    };
+    let mut wrong_identity = ProviderOperationReceipt::new();
+    wrong_identity.require_provider_execution(
+        provider.device_id(),
+        super::super::sum_observation_identity(invocation),
+    );
+    with_provider_observation(Some(wrong_identity.recorder()), || {
+        super::super::mark_sum_runtime_fallback(other);
+    });
+    assert!(matches!(
+        wrong_identity.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
     ));
 }
 
