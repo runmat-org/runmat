@@ -17,7 +17,9 @@ pub(super) fn work(
     }
     if geometry.global_group_elements < 2
         || geometry.global_chunk_elements < geometry.global_group_elements
-        || geometry.global_chunk_elements % geometry.global_group_elements != 0
+        || !geometry
+            .global_chunk_elements
+            .is_multiple_of(geometry.global_group_elements)
     {
         return Err(reject(
             ProviderRejectionCode::UnknownResourceEstimate,
