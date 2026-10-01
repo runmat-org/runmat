@@ -25,9 +25,21 @@ impl FillMissingMethodKind {
     }
 }
 
+/// Named control decoded at the public option boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FillMissingOptionKind {
+    Dimension,
+}
+
+impl FillMissingOptionKind {
+    pub fn parse(text: &str) -> Option<Self> {
+        text.eq_ignore_ascii_case("dim").then_some(Self::Dimension)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::FillMissingMethodKind;
+    use super::{FillMissingMethodKind, FillMissingOptionKind};
 
     #[test]
     fn method_decoder_accepts_only_supported_public_spellings() {
@@ -48,6 +60,21 @@ mod tests {
         }
         for text in ["", " constant", "constant ", "spline", "CONSTANTLY"] {
             assert_eq!(FillMissingMethodKind::parse(text), None);
+        }
+    }
+
+    #[test]
+    fn named_dimension_decoder_rejects_other_controls() {
+        assert_eq!(
+            FillMissingOptionKind::parse("dim"),
+            Some(FillMissingOptionKind::Dimension)
+        );
+        assert_eq!(
+            FillMissingOptionKind::parse("DIM"),
+            Some(FillMissingOptionKind::Dimension)
+        );
+        for option in ["", "dimension", " dim", "dim "] {
+            assert_eq!(FillMissingOptionKind::parse(option), None);
         }
     }
 }

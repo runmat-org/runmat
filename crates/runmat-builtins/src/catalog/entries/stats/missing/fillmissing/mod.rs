@@ -8,7 +8,7 @@ mod tests;
 use crate::*;
 use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequirement};
 
-pub use method::FillMissingMethodKind;
+pub use method::{FillMissingMethodKind, FillMissingOptionKind};
 
 pub use contract::{
     FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION, FILLMISSING_DESCRIPTOR, FILLMISSING_EXTENSIONS,

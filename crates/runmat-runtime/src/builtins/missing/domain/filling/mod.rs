@@ -1,7 +1,10 @@
 use super::detection::{any_missing, logical_array_mask_for_rows};
 use super::numeric::{is_missing_text, numeric_scalar, scalar_text, scalar_usize};
 use super::*;
-use runmat_builtins::FillMissingMethodKind;
+use runmat_accelerate_api::{
+    handle_integer_type, handle_is_logical, handle_storage, GpuTensorStorage,
+};
+use runmat_builtins::{FillMissingMethodKind, FillMissingOptionKind};
 
 pub(super) mod numeric;
 mod lines;
@@ -66,19 +69,22 @@ impl FillOptions {
         let mut dim = None;
         while idx < args.len() {
             if let Some(text) = scalar_text(&args[idx]) {
-                if text.eq_ignore_ascii_case("dim") && idx + 1 < args.len() {
-                    dim = Some(scalar_usize(&args[idx + 1], "fillmissing dimension")?);
+                if let Some(FillMissingOptionKind::Dimension) = FillMissingOptionKind::parse(&text)
+                {
+                    let value = args
+                        .get(idx + 1)
+                        .ok_or_else(|| invalid_argument("fillmissing: 'dim' requires a value"))?;
+                    dim = Some(scalar_usize(value, "fillmissing dimension")?);
                     idx += 2;
                     continue;
-                }
-                if text.eq_ignore_ascii_case("dim") {
-                    return Err(invalid_argument("fillmissing: 'dim' requires a value"));
                 }
                 return Err(invalid_argument(format!(
                     "fillmissing: unsupported option '{text}'"
                 )));
             }
-            if matches!(args[idx], Value::Num(_) | Value::Int(_)) {
+            if matches!(args[idx], Value::Num(_) | Value::Int(_))
+                || matches!(&args[idx], Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor))
+            {
                 dim = Some(scalar_usize(&args[idx], "fillmissing dimension")?);
                 idx += 1;
                 continue;
@@ -89,6 +95,84 @@ impl FillOptions {
             )));
         }
         Ok(Self { method, dim })
+    }
+
+    /// Reject host-visible invalid calls before a resident operand can be
+    /// materialized. The same typed method and dimension drive execution.
+    pub(super) fn preflight(&self, value: &Value) -> BuiltinResult<()> {
+        match value {
+            Value::Tensor(tensor) => {
+                self.preflight_numeric(&tensor.shape, tensor.integer_storage().is_some())
+            }
+            Value::GpuTensor(handle) => {
+                if handle_storage(handle) != GpuTensorStorage::Real {
+                    return Err(unsupported_type(
+                        "fillmissing: complex arrays are not supported yet",
+                    ));
+                }
+                if handle_is_logical(handle) {
+                    FillLines::new(handle.shape(), self.dim)?;
+                    return Ok(());
+                }
+                self.preflight_numeric(handle.shape(), handle_integer_type(handle).is_some())
+            }
+            Value::LogicalArray(array) => {
+                FillLines::new(&array.shape, self.dim)?;
+                Ok(())
+            }
+            Value::StringArray(array) => {
+                FillLines::new(&array.shape, self.dim)?;
+                match &self.method {
+                    FillMethod::Constant(fill) => {
+                        scalar_text(fill).ok_or_else(|| {
+                            invalid_argument("fillmissing: string constant must be text")
+                        })?;
+                        Ok(())
+                    }
+                    FillMethod::Previous | FillMethod::Next | FillMethod::Nearest => Ok(()),
+                    _ => Err(unsupported_type(
+                        "fillmissing: string arrays support constant, previous, next, and nearest",
+                    )),
+                }
+            }
+            Value::Cell(_) => match &self.method {
+                FillMethod::Constant(_) => Ok(()),
+                _ => Err(unsupported_type(
+                    "fillmissing: cell arrays currently support the constant method",
+                )),
+            },
+            Value::Object(object) if is_tabular_object(object) => {
+                let variables = table_variables(object)?;
+                for child in variables.fields.values() {
+                    self.preflight(child)?;
+                }
+                Ok(())
+            }
+            Value::ComplexTensor(_) => Err(unsupported_type(
+                "fillmissing: complex arrays are not supported yet",
+            )),
+            Value::SparseTensor(_) => Err(unsupported_type(
+                "fillmissing: sparse arrays are not supported yet",
+            )),
+            other => {
+                if !matches!(&self.method, FillMethod::Constant(_)) && any_missing(other)? {
+                    return Err(unsupported_type(
+                        "fillmissing: scalar fill requires the constant method",
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn preflight_numeric(&self, shape: &[usize], integer: bool) -> BuiltinResult<()> {
+        FillLines::new(shape, self.dim)?;
+        if !integer {
+            if let FillMethod::Constant(fill) = &self.method {
+                numeric_scalar(fill, "fillmissing constant")?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -170,12 +254,12 @@ pub(super) fn fill_missing_tensor(
     tensor: Tensor,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
+    let lines = FillLines::new(&tensor.shape, options.dim)?;
     if tensor.integer_storage().is_some() {
         let mask = LogicalArray::new(vec![0; tensor.len()], tensor.shape.clone())
             .map_err(internal_error)?;
         return Ok((Value::Tensor(tensor), mask));
     }
-    let lines = FillLines::new(&tensor.shape, options.dim)?;
     let dtype = tensor.numeric_dtype();
     let shape = tensor.shape.clone();
     let mut data = tensor_utils::tensor_into_values_f64(tensor);

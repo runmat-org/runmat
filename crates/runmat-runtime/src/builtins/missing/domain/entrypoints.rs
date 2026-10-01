@@ -192,6 +192,7 @@ pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> Built
         )?;
     }
     let options = FillOptions::parse(&rest)?;
+    options.preflight(&value)?;
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| gather_error("fillmissing", "input", err))?;
