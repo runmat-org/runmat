@@ -204,8 +204,8 @@ fn full_axis_nd_single_and_complex_outputs_have_scalar_geometry() {
         1,
     );
     assert_eq!(
-        single.outputs[0].shape,
-        ShapeFact::from(vec![Some(1), Some(1)])
+        single.outputs[0].shape.known_dims(),
+        Some(vec![Some(1), Some(1)])
     );
     assert_eq!(
         single.outputs[0].numeric().unwrap().class,
@@ -219,8 +219,8 @@ fn full_axis_nd_single_and_complex_outputs_have_scalar_geometry() {
     });
     let result = call(complex, vec![LiteralValue::String("all".into())], 1);
     assert_eq!(
-        result.outputs[0].shape,
-        ShapeFact::from(vec![Some(1), Some(1)])
+        result.outputs[0].shape.known_dims(),
+        Some(vec![Some(1), Some(1)])
     );
     assert_eq!(
         result.outputs[0].numeric().unwrap().class,
