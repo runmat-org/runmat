@@ -9,7 +9,10 @@ mod scalar;
 mod validation;
 
 pub(super) use broadcast::broadcast_repetitions;
-pub(super) use dispatch::{try_host_left, try_host_right, try_pair};
+pub(super) use dispatch::{
+    common_owner, compatible_inputs, float_handle_supported, try_host_left, try_host_right,
+    try_pair,
+};
 pub(super) use expanded::ExpandedPair;
 pub(super) use operation::ArithmeticProviderOperation;
 pub(super) use residency::resident_output_from_sources;

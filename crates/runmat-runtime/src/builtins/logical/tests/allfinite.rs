@@ -15,7 +15,11 @@ use runmat_builtins::{
     ALLFINITE_STRING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, SparseTensor, Tensor, Value};
+use runmat_value::Value;
+
+#[path = "allfinite/host.rs"]
+mod host;
+use host::{complex_tensor_all_finite, sparse_all_finite, tensor_all_finite};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::allfinite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -219,41 +223,6 @@ impl AllFiniteBoundary {
         }
         builder.build()
     }
-}
-
-fn tensor_all_finite(value: &Tensor) -> bool {
-    (0..value.len()).all(|index| {
-        value
-            .numeric_value_at(index)
-            .expect("tensor storage is structurally valid")
-            .is_finite()
-    })
-}
-
-fn complex_tensor_all_finite(value: &ComplexTensor) -> bool {
-    (0..value.len()).all(|index| {
-        let (real, imaginary) = value
-            .numeric_value_at(index)
-            .expect("complex tensor storage is structurally valid");
-        real.is_finite() && imaginary.is_finite()
-    })
-}
-
-fn sparse_all_finite(value: &SparseTensor) -> bool {
-    if value.integer_storage().is_some() || value.is_logical() {
-        return true;
-    }
-    if value.is_complex() {
-        return value
-            .materialize_complex_f64()
-            .expect("complex sparse storage is structurally valid")
-            .iter()
-            .all(|(real, imaginary)| real.is_finite() && imaginary.is_finite());
-    }
-    value
-        .materialize_f64()
-        .iter()
-        .all(|value| value.is_finite())
 }
 
 #[cfg(test)]

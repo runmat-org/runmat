@@ -37,7 +37,7 @@ pub(super) fn accept_output(
     }
 }
 
-pub(super) fn common_owner(
+pub(in crate::builtins::math::elementwise::binary_arithmetic) fn common_owner(
     left: &GpuTensorHandle,
     right: &GpuTensorHandle,
 ) -> Option<&'static dyn AccelProvider> {
@@ -48,7 +48,10 @@ pub(super) fn common_owner(
     .then_some(left_owner)
 }
 
-pub(super) fn compatible_inputs(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
+pub(in crate::builtins::math::elementwise::binary_arithmetic) fn compatible_inputs(
+    left: &GpuTensorHandle,
+    right: &GpuTensorHandle,
+) -> bool {
     if runmat_accelerate_api::handle_storage(left) != GpuTensorStorage::Real
         || runmat_accelerate_api::handle_storage(right) != GpuTensorStorage::Real
         || runmat_accelerate_api::handle_is_logical(left)
@@ -70,7 +73,9 @@ pub(super) fn compatible_inputs(left: &GpuTensorHandle, right: &GpuTensorHandle)
     }
 }
 
-pub(super) fn float_handle_supported(handle: &GpuTensorHandle) -> bool {
+pub(in crate::builtins::math::elementwise::binary_arithmetic) fn float_handle_supported(
+    handle: &GpuTensorHandle,
+) -> bool {
     runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(handle)

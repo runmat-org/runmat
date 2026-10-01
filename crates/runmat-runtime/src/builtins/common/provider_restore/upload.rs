@@ -4,6 +4,10 @@ use runmat_value::{ComplexTensor, IntegerStorage, Tensor, Value};
 use super::super::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult};
 
+#[path = "upload/complex.rs"]
+mod complex;
+use complex::upload_complex_without_precision_override;
+
 #[cfg(test)]
 #[path = "upload_protection_tests.rs"]
 mod protection_tests;
@@ -197,29 +201,4 @@ pub(crate) fn upload_value_protected(
         ));
     }
     gpu_helpers::resident_gpu_value(handle)
-}
-
-fn upload_complex_without_precision_override(
-    provider: &dyn AccelProvider,
-    tensor: &ComplexTensor,
-    builtin: &str,
-    protected: &[&GpuTensorHandle],
-) -> BuiltinResult<GpuTensorHandle> {
-    if tensor.integer_storage().is_some() {
-        return Err(build_runtime_error(format!(
-            "{builtin}: typed complex integer GPU buffers are not supported"
-        ))
-        .with_builtin(builtin)
-        .build());
-    }
-    let handle = gpu_helpers::upload_complex_tensor_protecting(provider, tensor, protected)
-        .map_err(|error| {
-            build_runtime_error(format!(
-                "{builtin}: failed to restore result to input provider: {error}"
-            ))
-            .with_builtin(builtin)
-            .with_source(error)
-            .build()
-        })?;
-    Ok(handle)
 }

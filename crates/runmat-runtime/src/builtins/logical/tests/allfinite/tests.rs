@@ -7,7 +7,8 @@ use runmat_accelerate_api::{
     ThreadProviderGuard,
 };
 use runmat_value::{
-    CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    SparseTensor, StringArray, Tensor,
 };
 
 fn call(value: Value) -> BuiltinResult<Value> {

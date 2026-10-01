@@ -1,5 +1,6 @@
 use super::super::{builtin_error, power_host, BUILTIN_NAME};
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin};
+use crate::builtins::math::elementwise::binary_arithmetic::provider_support::common_owner;
 use crate::BuiltinResult;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, PowerResultDomain};
 use runmat_value::Value;
@@ -100,17 +101,6 @@ fn valid_output(
                 alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
             },
         )
-}
-
-fn common_owner(
-    lhs: &GpuTensorHandle,
-    rhs: &GpuTensorHandle,
-) -> Option<&'static dyn AccelProvider> {
-    let left = gpu_helpers::exact_provider_for_handle(lhs)?;
-    let right = gpu_helpers::exact_provider_for_handle(rhs)?;
-    (runmat_accelerate_api::same_provider_instance(left, right)
-        && lhs.device_id() == rhs.device_id())
-    .then_some(left)
 }
 
 fn compatible_real_inputs(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {

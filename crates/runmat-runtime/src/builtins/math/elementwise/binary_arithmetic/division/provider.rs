@@ -1,9 +1,11 @@
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_value::Value;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::math::elementwise::binary_arithmetic::provider_support::valid_real_binary_output;
+use crate::builtins::math::elementwise::binary_arithmetic::provider_support::{
+    common_owner, compatible_inputs, float_handle_supported, valid_real_binary_output,
+};
 use crate::BuiltinResult;
 
 use super::DivisionContext;
@@ -16,7 +18,7 @@ pub(super) async fn try_pair(
     let Some(provider) = common_owner(numerator, denominator) else {
         return Ok(None);
     };
-    if !pair_metadata_supported(numerator, denominator) {
+    if !compatible_inputs(numerator, denominator) {
         return Ok(None);
     }
     let expected_shape = BroadcastPlan::new(numerator.shape(), denominator.shape())
@@ -208,17 +210,6 @@ pub(super) async fn try_resident_denominator(
     Ok(None)
 }
 
-fn common_owner(
-    left: &GpuTensorHandle,
-    right: &GpuTensorHandle,
-) -> Option<&'static dyn AccelProvider> {
-    let left_owner = gpu_helpers::exact_provider_for_handle(left)?;
-    let right_owner = gpu_helpers::exact_provider_for_handle(right)?;
-    (runmat_accelerate_api::same_provider_instance(left_owner, right_owner)
-        && left.device_id() == right.device_id())
-    .then_some(left_owner)
-}
-
 async fn divide(
     provider: &dyn AccelProvider,
     left: &GpuTensorHandle,
@@ -227,33 +218,4 @@ async fn divide(
     let _left = gpu_helpers::ResidencyRestoreGuard::new(left);
     let _right = gpu_helpers::ResidencyRestoreGuard::new(right);
     provider.elem_div(left, right).await
-}
-
-fn float_handle_supported(handle: &GpuTensorHandle) -> bool {
-    runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(handle).is_none()
-        && !runmat_accelerate_api::handle_is_logical(handle)
-        && runmat_accelerate_api::handle_precision(handle).is_some()
-}
-
-fn pair_metadata_supported(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    if runmat_accelerate_api::handle_storage(left) != GpuTensorStorage::Real
-        || runmat_accelerate_api::handle_storage(right) != GpuTensorStorage::Real
-        || runmat_accelerate_api::handle_is_logical(left)
-        || runmat_accelerate_api::handle_is_logical(right)
-    {
-        return false;
-    }
-    match (
-        runmat_accelerate_api::handle_integer_type(left),
-        runmat_accelerate_api::handle_integer_type(right),
-    ) {
-        (Some(left), Some(right)) => left == right,
-        (None, None) => {
-            runmat_accelerate_api::handle_precision(left)
-                == runmat_accelerate_api::handle_precision(right)
-                && runmat_accelerate_api::handle_precision(left).is_some()
-        }
-        _ => false,
-    }
 }

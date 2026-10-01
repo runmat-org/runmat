@@ -1,83 +1,14 @@
-use crate::context::preparation::{
-    AdmittedBuiltinPreparation, BuiltinPreparationObservation, PreparedBuiltinOperands,
-};
-use crate::context::{
-    RuntimeAccelerationService, RuntimeContext, RuntimeContextGuard, RuntimeServiceFuture,
-    RuntimeServicePorts,
-};
-use crate::RuntimeError;
+mod fixtures;
+use fixtures::{enter, Events};
 use futures::executor::block_on;
 use runmat_builtins::{
     BuiltinAsyncBehavior, BuiltinOperandPreparation, BuiltinPreparationOperation,
 };
 use runmat_value::{IntegerStorage, Tensor, Value};
-use std::{cell::RefCell, rc::Rc};
 
 const NAMES: [&str; 8] = [
     "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
 ];
-type Events = Rc<RefCell<Vec<&'static str>>>;
-struct Observer(Events);
-impl BuiltinPreparationObservation for Observer {
-    fn begin_execution(&mut self) {
-        self.0.borrow_mut().push("begin");
-    }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
-        self.0
-            .borrow_mut()
-            .push(if result.is_ok() { "success" } else { "failure" });
-        Ok(())
-    }
-    fn abort(self: Box<Self>) {
-        self.0.borrow_mut().push("abort");
-    }
-}
-
-struct Service {
-    events: Events,
-    replace_invalid: bool,
-}
-impl RuntimeAccelerationService for Service {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
-    fn prepare_admitted(
-        &self,
-        _: RuntimeContext,
-        request: AdmittedBuiltinPreparation,
-    ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
-        assert!(NAMES.contains(&request.admission().binding.builtin.name));
-        assert_eq!(request.form().operation, BuiltinPreparationOperation::Unary);
-        assert_eq!(request.form().data_arguments, &[0]);
-        assert_eq!(request.admission().signature, 0);
-        self.events.borrow_mut().push("prepare");
-        let operands = if self.replace_invalid {
-            vec![Value::String("invalid service replacement".into())]
-        } else {
-            request.into_operands()
-        };
-        let observer = Observer(self.events.clone());
-        Box::pin(async move {
-            Ok(PreparedBuiltinOperands::new(
-                operands,
-                Some(Box::new(observer)),
-            ))
-        })
-    }
-}
-
-fn enter(events: &Events, replace_invalid: bool) -> RuntimeContextGuard {
-    RuntimeContextGuard::enter(
-        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-            .with_service_ports(RuntimeServicePorts::default().with_acceleration(Rc::new(
-                Service {
-                    events: events.clone(),
-                    replace_invalid,
-                },
-            ))),
-    )
-}
-
 #[test]
 fn all_eight_contracts_declare_real_suspension_and_typed_unary_form() {
     for name in NAMES {
