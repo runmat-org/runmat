@@ -6,12 +6,6 @@ pub(super) fn checked_elements(rows: usize, columns: usize, role: &str) -> Built
         .ok_or_else(|| invalid(format!("mnrfit: {role} dimensions overflow")))
 }
 
-pub(super) fn filled(len: usize, value: f64, role: &str) -> BuiltinResult<Vec<f64>> {
-    let mut out = reserved(len, role)?;
-    out.resize(len, value);
-    Ok(out)
-}
-
 pub(super) async fn filled_cooperatively(
     len: usize,
     value: f64,

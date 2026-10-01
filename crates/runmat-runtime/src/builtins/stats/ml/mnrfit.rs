@@ -31,7 +31,7 @@ use runmat_builtins::{
     MNRFIT_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, Value};
+use runmat_value::Value;
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -237,7 +237,7 @@ async fn fit(
     x: Value,
     response: ResponseOutcomes,
     options: Options,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<FitResult> {
     let x = numeric_tensor("X", x)?;
     if x.rows() == 0 || x.cols() == 0 {
