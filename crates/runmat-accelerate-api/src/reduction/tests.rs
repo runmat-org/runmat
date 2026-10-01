@@ -31,6 +31,7 @@ fn descriptor() -> ReductionRecipeDescriptor {
             empty: FusionReductionEmpty::PositiveZero,
             ties: FusionReductionTies::NotApplicable,
         },
+        execution_precision: ProviderPrecision::F64,
         config: ReductionRecipeConfig {
             workgroup_size: 8,
             chunk_elements: 2,
@@ -133,6 +134,12 @@ fn owner_contract_axes_and_classes_must_match_physical_recipe() {
     let mut bad_axis = descriptor();
     bad_axis.contract.axes = vec![1];
     assert!(ProviderReductionRecipe::new(Digest::sha256(b"source"), bad_axis, sources()).is_err());
+    let mut swapped_output = descriptor();
+    swapped_output.contract.output_shape = vec![2, 1];
+    swapped_output.output_shape = vec![2, 1];
+    assert!(
+        ProviderReductionRecipe::new(Digest::sha256(b"source"), swapped_output, sources()).is_err()
+    );
     let mut duplicate = descriptor();
     duplicate.contract.axes = vec![0, 0];
     assert!(ProviderReductionRecipe::new(Digest::sha256(b"source"), duplicate, sources()).is_err());

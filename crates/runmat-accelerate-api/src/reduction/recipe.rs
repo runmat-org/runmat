@@ -11,6 +11,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 pub struct ReductionRecipeDescriptor {
     pub contract: FusionReductionContract,
+    pub execution_precision: ProviderPrecision,
     pub config: ReductionRecipeConfig,
     pub inputs: Vec<ReductionInputBinding>,
     pub iteration_shape: Vec<usize>,
@@ -33,6 +34,7 @@ pub struct ReductionShaderSources {
 /// responsibility; constructing this value is not an execution permission.
 pub struct ProviderReductionRecipe {
     identity: Digest,
+    semantic_identity: Digest,
     descriptor: ReductionRecipeDescriptor,
     sources: ReductionShaderSources,
     checked_scalar: Option<ScalarProgram>,
@@ -137,6 +139,7 @@ impl ProviderReductionRecipe {
         ))?);
         Ok(Self {
             identity,
+            semantic_identity,
             descriptor,
             sources,
             checked_scalar,
@@ -146,6 +149,9 @@ impl ProviderReductionRecipe {
 
     pub fn identity(&self) -> Digest {
         self.identity
+    }
+    pub fn semantic_identity(&self) -> Digest {
+        self.semantic_identity
     }
     pub fn descriptor(&self) -> &ReductionRecipeDescriptor {
         &self.descriptor

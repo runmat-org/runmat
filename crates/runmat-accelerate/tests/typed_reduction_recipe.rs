@@ -4,14 +4,15 @@ mod fixture;
 use futures::executor::block_on;
 use runmat_accelerate::{
     fusion::{
-        reduction_recipe::{build, ReductionRecipe, ReductionRecipeConfig},
+        reduction_recipe::{authenticate_sources, build, ReductionRecipe, ReductionRecipeConfig},
         FusionKind, FusionOp,
     },
     fusion_exec::{resolve_reduction_program, FusionExecutionRequest},
     graph::PrimitiveOp,
 };
 use runmat_accelerate_api::{
-    GpuTensorLayout, GpuTensorStorage, NumericElementType, ProviderPrecision, TransposeInfo,
+    reduction::ProviderReductionRecipe, GpuTensorLayout, GpuTensorStorage, NumericElementType,
+    ProviderPrecision, TransposeInfo,
 };
 use runmat_value::{Tensor, Value};
 
@@ -56,6 +57,31 @@ fn recipe(
     cfg: ReductionRecipeConfig,
 ) -> ReductionRecipe {
     try_recipe(name, inputs, controls, producer, cfg).unwrap()
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn checked_reduction_relowering_rejects_forged_shader_stage() {
+    let built = recipe(
+        "sum",
+        vec![array(false, &[4, 2])],
+        vec![Value::Num(1.0)],
+        None,
+        config(),
+    );
+    let physical = built.physical();
+    authenticate_sources(physical).expect("owner-built checked shader must re-lower exactly");
+    let mut forged = physical.sources().clone();
+    forged.pass1.push_str("\n// forged stage");
+    let forged = ProviderReductionRecipe::new_checked(
+        physical.semantic_identity(),
+        physical.descriptor().clone(),
+        forged,
+        physical.checked_scalar().unwrap().clone(),
+        physical.scalar_inputs().to_vec(),
+    )
+    .unwrap();
+    assert!(authenticate_sources(&forged).is_err());
 }
 fn try_recipe(
     name: &str,

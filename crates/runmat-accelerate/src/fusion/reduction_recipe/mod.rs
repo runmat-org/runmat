@@ -23,6 +23,12 @@ mod indexing;
 mod state;
 mod shader;
 
+/// Authenticate all shader stages against the checked scalar program and
+/// canonical reduction contract before a provider observes any operand.
+pub fn authenticate_sources(recipe: &ProviderReductionRecipe) -> Result<()> {
+    shader::authenticate_sources(recipe)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReductionInputLayout {
     pub value_id: crate::graph::ValueId,
@@ -149,9 +155,9 @@ pub fn build(
         two_pass_dispatches: if geometry.slices == 0 { 0 } else { 2 },
         uniform_bytes: 0, // All recipe geometry is specialized in source.
     };
-    let sources = shader::sources(program, &inputs, &geometry, partial, config)?;
     let descriptor = ReductionRecipeDescriptor {
         contract: contract.clone(),
+        execution_precision: program.execution_precision(),
         config,
         inputs: inputs
             .iter()
@@ -182,6 +188,7 @@ pub fn build(
         &inputs,
         contract,
     ))?);
+    let sources = shader::sources(program, &descriptor, semantic_identity)?;
     let sources = ReductionShaderSources {
         single: sources.0,
         pass1: sources.1,
@@ -202,6 +209,9 @@ pub fn build(
     } else {
         ProviderReductionRecipe::new(semantic_identity, descriptor, sources)?
     };
+    if physical.checked_scalar().is_some() {
+        authenticate_sources(&physical)?;
+    }
     Ok(ReductionRecipe {
         inputs,
         contract: contract.clone(),

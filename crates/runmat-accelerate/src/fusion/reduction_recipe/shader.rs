@@ -1,5 +1,9 @@
 //! Both input-reading strategies embed exactly the same producer and indexing.
 use super::*;
+use crate::fusion::typed_producer::TypedProducer;
+use crate::graph::ValueId;
+use runmat_runtime::builtins::common::spec::ScalarType;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy)]
 enum Pass {
@@ -10,13 +14,70 @@ enum Pass {
 
 pub(super) fn sources(
     program: &ResolvedReductionProgram<'_>,
-    inputs: &[ReductionInputLayout],
-    geometry: &ReductionGeometry,
-    partial: ReductionPartialLayout,
-    config: ReductionRecipeConfig,
+    descriptor: &ReductionRecipeDescriptor,
+    semantic_identity: Digest,
 ) -> Result<(String, String, String)> {
-    let state = state::source(program.contract(), partial, geometry)?;
-    let indices = indexing::source(program, inputs)?;
+    render(
+        descriptor,
+        semantic_identity,
+        program.producer_preamble(),
+        program.producer_body(),
+        program.producer_expression(),
+    )
+}
+
+/// Re-lower a checked recipe at the executing backend boundary. This compares
+/// the full physical shader triplet to the same typed scalar/reduction/index
+/// authorities that built it, before a provider touches an allocation.
+pub(super) fn authenticate_sources(recipe: &ProviderReductionRecipe) -> Result<()> {
+    let checked = recipe.checked_scalar().ok_or_else(|| {
+        runmat_accelerate_api::unsupported_provider_operation(
+            "reduction recipe has no checked scalar producer",
+        )
+    })?;
+    let scalar = match recipe.descriptor().execution_precision {
+        ProviderPrecision::F32 => ScalarType::F32,
+        ProviderPrecision::F64 => ScalarType::F64,
+    };
+    let expressions: HashMap<ValueId, String> = recipe
+        .scalar_inputs()
+        .iter()
+        .enumerate()
+        .map(|(slot, &id)| (id, format!("input{slot}.data[i{slot}]")))
+        .collect();
+    let producer = TypedProducer::lower_checked_wgsl(checked, scalar, expressions)?
+        .ok_or_else(|| anyhow!("checked reduction producer has no WGSL lowering"))?;
+    let preamble = format!("// {}\n\n", checked.wire().source_identity);
+    let expected = render(
+        recipe.descriptor(),
+        recipe.semantic_identity(),
+        &preamble,
+        &producer.body,
+        producer.expression(checked.wire().root)?,
+    )?;
+    ensure!(
+        recipe.sources().single == expected.0
+            && recipe.sources().pass1 == expected.1
+            && recipe.sources().pass2 == expected.2,
+        "checked reduction source differs from typed semantics"
+    );
+    Ok(())
+}
+
+fn render(
+    descriptor: &ReductionRecipeDescriptor,
+    identity: Digest,
+    preamble: &str,
+    body: &str,
+    expression: &str,
+) -> Result<(String, String, String)> {
+    let contract = &descriptor.contract;
+    let inputs = &descriptor.inputs;
+    let geometry = &descriptor.geometry;
+    let partial = descriptor.partial;
+    let config = descriptor.config;
+    let state = state::source(contract, partial, geometry)?;
+    let indices = indexing::source(contract, inputs)?;
     let mut producer = indices;
     producer.push_str(&format!(
         "fn rr_value(slice: u32, r: u32) -> {} {{\n",
@@ -25,14 +86,16 @@ pub(super) fn sources(
     for slot in 0..inputs.len() {
         producer.push_str(&format!("  let i{slot} = rr_index{slot}(slice, r);\n"));
     }
-    producer.push_str(program.producer_body());
+    producer.push_str(body);
     producer.push_str(&format!(
         "  return {}({});\n}}\n",
         scalar(partial.precision),
-        program.producer_expression()
+        expression
     ));
     let context = Shader {
-        program,
+        contract,
+        identity,
+        preamble,
         inputs,
         geometry,
         config,
@@ -46,30 +109,31 @@ pub(super) fn sources(
     ))
 }
 
-struct Shader<'a, 'value> {
-    program: &'a ResolvedReductionProgram<'value>,
-    inputs: &'a [ReductionInputLayout],
+struct Shader<'a> {
+    contract: &'a FusionReductionContract,
+    identity: Digest,
+    preamble: &'a str,
+    inputs: &'a [ReductionInputBinding],
     geometry: &'a ReductionGeometry,
     config: ReductionRecipeConfig,
     state: &'a str,
     producer: &'a str,
 }
-impl Shader<'_, '_> {
+impl Shader<'_> {
     fn emit(&self, pass: Pass) -> Result<String> {
-        let output = scalar(precision_of_output(self.program.contract())?);
+        let output = scalar(precision_of_output(self.contract)?);
         let wg = self.config.workgroup_size;
         let mut source = format!(
             "// typed reduction semantic receipt {:?}\n{}",
-            self.program.identity(),
-            self.state
+            self.identity, self.state
         );
         let output_binding = if matches!(pass, Pass::Second) {
             source.push_str("struct RRPartials { data: array<RRPartial>, };\n@group(0) @binding(0) var<storage, read> partials: RRPartials;\n");
             1
         } else {
-            source.push_str(self.program.producer_preamble());
+            source.push_str(self.preamble);
             for (slot, input) in self.inputs.iter().enumerate() {
-                source.push_str(&format!("struct RRInput{slot} {{ data: array<{}>, }};\n@group(0) @binding({slot}) var<storage, read> input{slot}: RRInput{slot};\n", scalar(input.bound_precision)));
+                source.push_str(&format!("struct RRInput{slot} {{ data: array<{}>, }};\n@group(0) @binding({slot}) var<storage, read> input{slot}: RRInput{slot};\n", scalar(input.precision)));
             }
             source.push_str(self.producer);
             self.inputs.len()
@@ -79,7 +143,7 @@ impl Shader<'_, '_> {
         } else {
             source.push_str(&format!("struct RROutput {{ data: array<{output}>, }};\n@group(0) @binding({output_binding}) var<storage, read_write> output: RROutput;\n"));
         }
-        if !self.program.contract().identity {
+        if !self.contract.identity {
             source.push_str(&format!(
                 "var<workgroup> rr_tile: array<RRPartial, {wg}>;\n"
             ));
@@ -105,7 +169,7 @@ impl Shader<'_, '_> {
             Pass::First => source.push_str(&format!("  let slice = rr_group / {chunks}u;\n  let chunk = rr_group % {chunks}u;\n  let start = chunk * {}u;\n  let end = start + min({}u, {length}u - start);\n", self.config.chunk_elements, self.config.chunk_elements)),
             Pass::Second => source.push_str(&format!("  let slice = rr_group;\n  let start = 0u;\n  let end = {chunks}u;\n")),
         }
-        if self.program.contract().identity {
+        if self.contract.identity {
             let write = match pass {
                 Pass::Single => format!("output.data[slice] = {output}(rr_value(slice, 0u));"),
                 Pass::First => "partials.data[rr_group] = rr_sample(rr_value(slice, 0u));".into(),

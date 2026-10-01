@@ -191,10 +191,9 @@ fn dispatch(groups: u32, limit: u32) -> Result<ReductionDispatch> {
 
 /// One coordinate-to-buffer mapping is used verbatim by single pass and pass 1.
 pub(super) fn source(
-    program: &ResolvedReductionProgram<'_>,
-    inputs: &[ReductionInputLayout],
+    contract: &FusionReductionContract,
+    inputs: &[ReductionInputBinding],
 ) -> Result<String> {
-    let contract = program.contract();
     let mut code = String::new();
     for (slot, input) in inputs.iter().enumerate() {
         let mut terms = Vec::new();

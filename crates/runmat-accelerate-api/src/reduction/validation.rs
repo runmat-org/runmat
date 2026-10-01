@@ -115,6 +115,13 @@ pub(super) fn recipe(
 fn semantic(d: &ReductionRecipeDescriptor) -> Result<()> {
     let contract = &d.contract;
     ensure!(
+        matches!(
+            contract.input_class,
+            NumericClass::Single | NumericClass::Double
+        ),
+        "reduction owner input must be real floating"
+    );
+    ensure!(
         contract.input_shape == d.iteration_shape && contract.output_shape == d.output_shape,
         "reduction owner geometry differs from physical geometry"
     );
@@ -146,6 +153,17 @@ fn semantic(d: &ReductionRecipeDescriptor) -> Result<()> {
             reduced[axis] = true;
         }
     }
+    let expected_shape = contract
+        .input_shape
+        .iter()
+        .enumerate()
+        .map(|(axis, &extent)| if reduced[axis] { 1 } else { extent })
+        .collect::<Vec<_>>();
+    ensure!(
+        contract.output_shape == expected_shape
+            || (elements(&expected_shape)? == 1 && contract.output_shape == [1, 1]),
+        "reduction owner output shape differs from selected axes"
+    );
     let reduce_shape = contract
         .input_shape
         .iter()

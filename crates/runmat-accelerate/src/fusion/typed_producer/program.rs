@@ -119,7 +119,7 @@ impl TypedProducer {
         .map(Some)
     }
 
-    pub(super) fn lower_checked_wgsl(
+    pub(crate) fn lower_checked_wgsl(
         checked: &ScalarProgram,
         buffer_type: ScalarType,
         mut expressions: HashMap<ValueId, String>,
