@@ -7,6 +7,7 @@ pub(super) use self::prepare::prepare_data;
 #[cfg(test)]
 use self::prepare::{compact_complete_cases, CompleteCaseBuffers};
 pub(super) use self::response::response_outcomes;
+pub(super) use self::response::ResponseExactness;
 #[cfg(test)]
 use self::response::{count_outcomes, numeric_outcomes};
 #[cfg(test)]

@@ -240,7 +240,9 @@ async fn mnrfit_rejects_host_visible_x_and_y_before_other_operand_download() {
     }
     let valid_x = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1, 1]).unwrap());
     let valid_y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1, 1]).unwrap());
-    admission::preflight(&valid_x, &valid_y).expect("trailing singleton axes preserve 2-D forms");
+    admission::preflight(&valid_x, &valid_y, &mut FitCooperation::new(None))
+        .await
+        .expect("trailing singleton axes preserve 2-D forms");
     assert_eq!(resident.probe.retirements(), 0);
     drop(resident.handle);
     assert_eq!(resident.probe.retirements(), 1);

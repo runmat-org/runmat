@@ -1,15 +1,20 @@
 //! Host-visible matrix and response admission before provider materialization.
 use super::{
-    ensure_exact_integer_tensor, exact_integer_as_f64, gather_value, invalid, response_outcomes,
-    scalar_text, FitCooperation, ResponseOutcomes,
+    admitted_host_predictor, ensure_exact_integer_tensor, exact_integer_as_f64, gather_value,
+    invalid, numeric_tensor, response_outcomes, FitCooperation, ResponseExactness,
+    ResponseOutcomes,
 };
 use crate::BuiltinResult;
 use runmat_accelerate_api::GpuTensorStorage;
-use runmat_value::Value;
+use runmat_value::{Tensor, Value};
 
-pub(super) fn preflight(x: &Value, y: &Value) -> BuiltinResult<usize> {
-    let rows = predictor_rows(x)?;
-    response_geometry(y, rows)?;
+pub(super) async fn preflight(
+    x: &Value,
+    y: &Value,
+    cooperation: &mut FitCooperation,
+) -> BuiltinResult<usize> {
+    let rows = predictor_rows(x, cooperation).await?;
+    response_geometry(y, rows, cooperation).await?;
     Ok(rows)
 }
 
@@ -24,19 +29,63 @@ pub(super) enum PreparedResponse {
     },
 }
 
+pub(super) enum PreparedPredictor {
+    Host(Value),
+    Resident(Value),
+}
+
+pub(super) struct PreparedAdmission {
+    predictor: PreparedPredictor,
+    response: PreparedResponse,
+}
+
+impl PreparedAdmission {
+    pub(super) fn rows(&self) -> usize {
+        self.response.rows()
+    }
+
+    pub(super) fn into_parts(self) -> (PreparedPredictor, PreparedResponse) {
+        (self.predictor, self.response)
+    }
+}
+
 pub(super) async fn prepare(
-    x: &Value,
+    x: Value,
     y: Value,
     cooperation: &mut FitCooperation,
-) -> BuiltinResult<PreparedResponse> {
-    let rows = preflight(x, &y)?;
-    if crate::dispatcher::value_contains_gpu(&y) {
-        Ok(PreparedResponse::Resident { value: y, rows })
+) -> BuiltinResult<PreparedAdmission> {
+    let rows = preflight(&x, &y, cooperation).await?;
+    let predictor = if crate::dispatcher::value_contains_gpu(&x) {
+        PreparedPredictor::Resident(x)
     } else {
-        Ok(PreparedResponse::Host {
-            response: response_outcomes(y, rows, cooperation).await?,
+        PreparedPredictor::Host(x)
+    };
+    let response = if crate::dispatcher::value_contains_gpu(&y) {
+        PreparedResponse::Resident { value: y, rows }
+    } else {
+        PreparedResponse::Host {
+            response: response_outcomes(y, rows, ResponseExactness::PrevalidatedHost, cooperation)
+                .await?,
             rows,
-        })
+        }
+    };
+    Ok(PreparedAdmission {
+        predictor,
+        response,
+    })
+}
+
+impl PreparedPredictor {
+    pub(super) async fn materialize(
+        self,
+        cooperation: &mut FitCooperation,
+    ) -> BuiltinResult<Tensor> {
+        match self {
+            Self::Host(value) => admitted_host_predictor(value, cooperation).await,
+            Self::Resident(value) => {
+                numeric_tensor("X", gather_value(value).await?, cooperation).await
+            }
+        }
     }
 }
 
@@ -54,16 +103,22 @@ impl PreparedResponse {
         match self {
             Self::Host { response, .. } => Ok(response),
             Self::Resident { value, rows } => {
-                response_outcomes(gather_value(value).await?, rows, cooperation).await
+                response_outcomes(
+                    gather_value(value).await?,
+                    rows,
+                    ResponseExactness::ValidateDownloaded,
+                    cooperation,
+                )
+                .await
             }
         }
     }
 }
 
-fn predictor_rows(x: &Value) -> BuiltinResult<usize> {
+async fn predictor_rows(x: &Value, cooperation: &mut FitCooperation) -> BuiltinResult<usize> {
     let shape = match x {
         Value::Tensor(tensor) => {
-            ensure_exact_integer_tensor(tensor, "X")?;
+            ensure_exact_integer_tensor(tensor, "X", cooperation).await?;
             tensor.shape.as_slice()
         }
         Value::LogicalArray(array) => array.shape.as_slice(),
@@ -85,10 +140,14 @@ fn predictor_rows(x: &Value) -> BuiltinResult<usize> {
     Ok(rows)
 }
 
-fn response_geometry(y: &Value, rows: usize) -> BuiltinResult<()> {
+async fn response_geometry(
+    y: &Value,
+    rows: usize,
+    cooperation: &mut FitCooperation,
+) -> BuiltinResult<()> {
     match y {
         Value::Tensor(tensor) => {
-            ensure_exact_integer_tensor(tensor, "Y")?;
+            ensure_exact_integer_tensor(tensor, "Y", cooperation).await?;
             numeric_response_shape(&tensor.shape, tensor.len(), rows)
         }
         Value::GpuTensor(handle) if handle.physical().storage() == GpuTensorStorage::Real => {
@@ -100,9 +159,20 @@ fn response_geometry(y: &Value, rows: usize) -> BuiltinResult<()> {
         Value::StringArray(array) => vector_response_shape(&array.shape, array.data.len(), rows),
         Value::Cell(array) => {
             vector_response_shape(&array.shape, array.data.len(), rows)?;
-            if array.data.iter().any(|value| scalar_text(value).is_none()) {
-                return Err(invalid("mnrfit: Y cell entries must be text"));
+            for (index, value) in array.data.iter().enumerate() {
+                let valid_text = match value {
+                    Value::String(_) => true,
+                    Value::CharArray(chars) => chars.rows == 1,
+                    _ => false,
+                };
+                if !valid_text {
+                    return Err(invalid("mnrfit: Y cell entries must be text"));
+                }
+                if (index + 1).is_multiple_of(16_384) {
+                    cooperation.completed(16_384).await?;
+                }
             }
+            cooperation.completed((array.data.len() % 16_384) as u64).await?;
             Ok(())
         }
         Value::CharArray(array) if array.rows == rows => Ok(()),

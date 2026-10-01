@@ -2,18 +2,29 @@ use super::*;
 use crate::builtins::common::tensor;
 use runmat_value::{CellArray, CharArray, Tensor};
 
+#[derive(Clone, Copy)]
+pub(in super::super) enum ResponseExactness {
+    PrevalidatedHost,
+    ValidateDownloaded,
+}
+
 pub(in super::super) async fn response_outcomes(
     value: Value,
     rows: usize,
+    exactness: ResponseExactness,
     cooperation: &mut FitCooperation,
 ) -> BuiltinResult<ResponseOutcomes> {
     match value {
         Value::Tensor(tensor) if tensor.cols() >= 2 && tensor.rows() == rows => {
-            ensure_exact_integer_tensor(&tensor, "Y")?;
+            if matches!(exactness, ResponseExactness::ValidateDownloaded) {
+                ensure_exact_integer_tensor(&tensor, "Y", cooperation).await?;
+            }
             count_outcomes(&tensor, cooperation).await
         }
         Value::Tensor(tensor) => {
-            ensure_exact_integer_tensor(&tensor, "Y")?;
+            if matches!(exactness, ResponseExactness::ValidateDownloaded) {
+                ensure_exact_integer_tensor(&tensor, "Y", cooperation).await?;
+            }
             let shape = tensor.shape.clone();
             let mut values = reserved(tensor.len(), "numeric responses")?;
             for index in 0..tensor.len() {

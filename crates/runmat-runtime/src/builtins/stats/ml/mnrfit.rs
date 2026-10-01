@@ -31,7 +31,7 @@ use runmat_builtins::{
     MNRFIT_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::Value;
+use runmat_value::{Tensor, Value};
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -100,15 +100,17 @@ async fn mnrfit_in_runtime(
     let inspected = options::inspect(&rest);
     ensure_extensions(&x, &y, &rest, &inspected)?;
     let names = options::validate(&rest, inspected)?;
-    let response = admission::prepare(&x, y, &mut cooperation).await?;
+    let admitted = admission::prepare(x, y, &mut cooperation).await?;
     let values = rest.into_iter().skip(1).step_by(2);
-    let prepared = prepare_values(names.into_iter().zip(values).collect())?;
-    prepared.preflight_host_weights(response.rows())?;
-    let x = gather_value(x).await?;
+    let prepared =
+        prepare_values(names.into_iter().zip(values).collect(), &mut cooperation).await?;
+    prepared.preflight_host_weights(admitted.rows())?;
+    let (predictor, response) = admitted.into_parts();
+    let x = predictor.materialize(&mut cooperation).await?;
     cooperation.check()?;
     let response = response.materialize(&mut cooperation).await?;
     cooperation.check()?;
-    let options = prepared.materialize().await?;
+    let options = prepared.materialize(&mut cooperation).await?;
     cooperation.check()?;
     let result = fit(x, response, options, &mut cooperation).await?;
     cooperation.check()?;
@@ -234,12 +236,11 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn fit(
-    x: Value,
+    x: Tensor,
     response: ResponseOutcomes,
     options: Options,
     cooperation: &mut FitCooperation,
 ) -> BuiltinResult<FitResult> {
-    let x = numeric_tensor("X", x)?;
     if x.rows() == 0 || x.cols() == 0 {
         return Err(invalid("mnrfit: X must be a nonempty numeric matrix"));
     }

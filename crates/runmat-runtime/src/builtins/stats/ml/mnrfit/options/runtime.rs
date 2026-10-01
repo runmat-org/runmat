@@ -1,6 +1,7 @@
 use super::super::data::validate_option_weight_length;
 use super::super::{
     gather_value, invalid, numeric_vector, positive_integer, positive_scalar, scalar_text,
+    FitCooperation,
 };
 use super::{OptionName, Options};
 use crate::BuiltinResult;
@@ -27,8 +28,9 @@ enum OptionValue {
     Tolerance(f64),
 }
 
-pub(in crate::builtins::stats::ml::mnrfit) fn prepare_values(
+pub(in crate::builtins::stats::ml::mnrfit) async fn prepare_values(
     values: Vec<(OptionName, Value)>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<PreparedOptions> {
     let mut actions = Vec::new();
     for (name, value) in values {
@@ -49,7 +51,9 @@ pub(in crate::builtins::stats::ml::mnrfit) fn prepare_values(
         } else if crate::dispatcher::value_contains_gpu(&value) {
             actions.push(PreparedAction::Resident(name, value));
         } else {
-            actions.push(PreparedAction::Host(decode(name, value)?));
+            actions.push(PreparedAction::Host(
+                decode(name, value, cooperation).await?,
+            ));
         }
     }
     Ok(PreparedOptions { actions })
@@ -77,12 +81,15 @@ impl PreparedOptions {
 
     pub(in crate::builtins::stats::ml::mnrfit) async fn materialize(
         self,
+        cooperation: &mut FitCooperation,
     ) -> BuiltinResult<Options> {
         let mut options = Options::default();
         for action in self.actions {
             let decoded = match action {
                 PreparedAction::Host(value) => value,
-                PreparedAction::Resident(name, value) => decode(name, gather_value(value).await?)?,
+                PreparedAction::Resident(name, value) => {
+                    decode(name, gather_value(value).await?, cooperation).await?
+                }
                 PreparedAction::ResidentStatset(field, value) => {
                     decode_statset(field, gather_value(value).await?)?
                 }
@@ -105,7 +112,11 @@ impl PreparedOptions {
     }
 }
 
-fn decode(name: OptionName, value: Value) -> BuiltinResult<OptionValue> {
+async fn decode(
+    name: OptionName,
+    value: Value,
+    cooperation: &mut FitCooperation,
+) -> BuiltinResult<OptionValue> {
     match name {
         OptionName::Model => {
             let model =
@@ -151,7 +162,9 @@ fn decode(name: OptionName, value: Value) -> BuiltinResult<OptionValue> {
             }
             Ok(OptionValue::Accepted)
         }
-        OptionName::Weights => Ok(OptionValue::Weights(numeric_vector(value, "Weights")?)),
+        OptionName::Weights => Ok(OptionValue::Weights(
+            numeric_vector(value, "Weights", cooperation).await?,
+        )),
         OptionName::MaxIter | OptionName::IterationLimit => Ok(OptionValue::IterationLimit(
             positive_integer(&value, "IterationLimit")?,
         )),

@@ -51,7 +51,7 @@ fn mnrfit_rejects_sparse_predictors_and_responses_at_admission() {
     let dense_x = tensor_value(vec![0.0; 8], 4, 2);
     let dense_y = tensor_value(vec![1.0, 1.0, 2.0, 2.0], 4, 1);
     let x_error = block_on(admission::prepare(
-        &sparse_x,
+        sparse_x,
         dense_y,
         &mut FitCooperation::new(None),
     ))
@@ -59,7 +59,7 @@ fn mnrfit_rejects_sparse_predictors_and_responses_at_admission() {
     .expect("sparse X is not an admitted predictor matrix");
     assert!(x_error.message().contains("X must be numeric"));
     let y_error = block_on(admission::prepare(
-        &dense_x,
+        dense_x,
         sparse_y,
         &mut FitCooperation::new(None),
     ))
@@ -427,7 +427,12 @@ fn mnrfit_integer_boundary_accepts_all_exact_binary64_values() {
             integer.to_f64()
         );
         let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-        ensure_exact_integer_tensor(&tensor, "X").unwrap();
+        block_on(ensure_exact_integer_tensor(
+            &tensor,
+            "X",
+            &mut FitCooperation::new(None),
+        ))
+        .unwrap();
     }
     for integer in [
         IntValue::I64((1_i64 << 53) + 1),
