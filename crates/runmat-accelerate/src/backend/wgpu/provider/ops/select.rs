@@ -14,42 +14,56 @@ impl WgpuProvider {
             NumericPrecision::F32 => NumericElementType::F32,
             NumericPrecision::F64 => NumericElementType::F64,
         };
+        // A foreign or released allocation is an ownership failure, never an
+        // unsupported-operation signal that could trigger a fallback.
+        let entries = [mask, then_value, else_value]
+            .into_iter()
+            .map(|handle| self.get_entry_raw(handle))
+            .collect::<Result<Vec<_>>>()?;
         if plan.element_type() != expected {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
                 "select requires the provider's native floating precision",
             ));
         }
-        ensure!(
-            plan.shape().len() <= crate::backend::wgpu::params::BCAST_MAX_RANK
-                && plan.len() <= u32::MAX as usize
-                && plan
-                    .shape()
-                    .iter()
-                    .all(|&extent| extent <= u32::MAX as usize),
-            "select output exceeds GPU broadcast limits"
-        );
+        if plan.shape().len() > crate::backend::wgpu::params::BCAST_MAX_RANK
+            || plan
+                .shape()
+                .iter()
+                .any(|&extent| extent > u32::MAX as usize)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "select output exceeds GPU broadcast rank or extent limits",
+            ));
+        }
+        if plan.len() > u32::MAX as usize {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "select output exceeds GPU dispatch length limit",
+            ));
+        }
         let uniform_bytes = crate::backend::wgpu_geometry::fusion_broadcast_uniform_bytes(
             3,
             crate::backend::wgpu::params::BCAST_MAX_RANK,
         )
         .ok_or_else(|| anyhow!("select broadcast uniform size overflow"))?;
-        ensure!(
-            uniform_bytes <= u64::from(self.adapter_limits.max_uniform_buffer_binding_size),
-            "select broadcast uniform exceeds adapter limit"
-        );
+        if uniform_bytes > u64::from(self.adapter_limits.max_uniform_buffer_binding_size) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "select broadcast uniform exceeds adapter limit",
+            ));
+        }
         let output_bytes = u64::try_from(plan.len().max(1))
             .ok()
             .and_then(|len| len.checked_mul(expected.element_size() as u64))
             .ok_or_else(|| anyhow!("select output byte count overflow"))?;
-        ensure!(
-            output_bytes <= self.adapter_limits.max_buffer_size
-                && output_bytes <= u64::from(self.adapter_limits.max_storage_buffer_binding_size),
-            "select output exceeds adapter storage limits"
-        );
+        if output_bytes > self.adapter_limits.max_buffer_size
+            || output_bytes > u64::from(self.adapter_limits.max_storage_buffer_binding_size)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "select output exceeds adapter storage limits",
+            ));
+        }
         // Authenticate all three physical records before allocation or submission.
         // The fused dispatcher performs the same check when it binds the records.
-        for handle in [mask, then_value, else_value] {
-            let entry = self.get_entry(handle)?;
+        for (handle, entry) in [mask, then_value, else_value].into_iter().zip(&entries) {
             ensure!(
                 entry.element_type == expected
                     && entry.storage == GpuTensorStorage::Real

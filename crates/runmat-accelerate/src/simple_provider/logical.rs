@@ -1,17 +1,13 @@
 //! Native floating views for logical predicates and comparisons.
 use super::*;
+use runmat_builtins::RelationalOperator;
 
 #[derive(Clone, Copy)]
 pub(super) enum BinaryPredicate {
     And,
     Or,
     Xor,
-    Equal,
-    NotEqual,
-    LessThan,
-    LessThanOrEqual,
-    GreaterThan,
-    GreaterThanOrEqual,
+    Compare(RelationalOperator),
 }
 
 #[derive(Clone, Copy)]
@@ -70,16 +66,15 @@ impl<'a> FloatingView<'a> {
         index: usize,
         other: Self,
         other_index: usize,
-        predicate: BinaryPredicate,
+        predicate: RelationalOperator,
     ) -> bool {
         let test = |a: f64, b: f64| match predicate {
-            BinaryPredicate::Equal => a == b,
-            BinaryPredicate::NotEqual => a != b,
-            BinaryPredicate::LessThan => a < b,
-            BinaryPredicate::LessThanOrEqual => a <= b,
-            BinaryPredicate::GreaterThan => a > b,
-            BinaryPredicate::GreaterThanOrEqual => a >= b,
-            _ => unreachable!("a numerical comparison predicate is required"),
+            RelationalOperator::Equal => a == b,
+            RelationalOperator::NotEqual => a != b,
+            RelationalOperator::LessThan => a < b,
+            RelationalOperator::LessThanOrEqual => a <= b,
+            RelationalOperator::GreaterThan => a > b,
+            RelationalOperator::GreaterThanOrEqual => a >= b,
         };
         match (self, other) {
             (Self::F32(a), Self::F32(b)) => test(f64::from(a[index]), f64::from(b[other_index])),
@@ -181,13 +176,8 @@ impl InProcessProvider {
                     BinaryPredicate::And => a_data.nonzero(left) && b_data.nonzero(right),
                     BinaryPredicate::Or => a_data.nonzero(left) || b_data.nonzero(right),
                     BinaryPredicate::Xor => a_data.nonzero(left) ^ b_data.nonzero(right),
-                    BinaryPredicate::Equal
-                    | BinaryPredicate::NotEqual
-                    | BinaryPredicate::LessThan
-                    | BinaryPredicate::LessThanOrEqual
-                    | BinaryPredicate::GreaterThan
-                    | BinaryPredicate::GreaterThanOrEqual => {
-                        a_data.compare(left, b_data, right, predicate)
+                    BinaryPredicate::Compare(operator) => {
+                        a_data.compare(left, b_data, right, operator)
                     }
                 };
                 output.push(if truth { 1.0 } else { 0.0 });
@@ -230,167 +220,4 @@ impl InProcessProvider {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-
-    #[test]
-    fn native_single_and_double_predicates_preserve_logical_outputs() {
-        let provider = InProcessProvider::new();
-        for input in [
-            HostNumericDataView::F32(&[f32::NAN, 0.0, f32::INFINITY, -1.0]),
-            HostNumericDataView::F64(&[f64::NAN, 0.0, f64::INFINITY, -1.0]),
-        ] {
-            let data = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: input,
-                    shape: &[2, 2],
-                    storage: GpuTensorStorage::Real,
-                })
-                .unwrap();
-            let zero = provider.zeros_like(&data, &[2, 2]).unwrap();
-            let finite = provider.logical_isfinite(&data).unwrap();
-            let nonzero = block_on(provider.elem_ne(&data, &zero)).unwrap();
-            let selected = provider.logical_and(&finite, &nonzero).unwrap();
-            assert_eq!(
-                block_on(provider.download(&selected)).unwrap().data,
-                [0.0, 0.0, 0.0, 1.0]
-            );
-            assert_eq!(
-                block_on(provider.download(&provider.logical_or(&finite, &nonzero).unwrap()))
-                    .unwrap()
-                    .data,
-                [1.0, 1.0, 1.0, 1.0]
-            );
-            assert_eq!(
-                block_on(provider.download(&provider.logical_xor(&finite, &nonzero).unwrap()))
-                    .unwrap()
-                    .data,
-                [1.0, 1.0, 1.0, 0.0]
-            );
-            assert_eq!(
-                block_on(provider.download(&provider.logical_not(&data).unwrap()))
-                    .unwrap()
-                    .data,
-                [0.0, 1.0, 0.0, 0.0]
-            );
-            assert_eq!(
-                block_on(provider.download(&provider.logical_isnan(&data).unwrap()))
-                    .unwrap()
-                    .data,
-                [1.0, 0.0, 0.0, 0.0]
-            );
-            assert_eq!(
-                block_on(provider.download(&provider.logical_isinf(&data).unwrap()))
-                    .unwrap()
-                    .data,
-                [0.0, 0.0, 1.0, 0.0]
-            );
-            assert_eq!(
-                block_on(provider.download(&block_on(provider.elem_eq(&data, &zero)).unwrap()))
-                    .unwrap()
-                    .data,
-                [0.0, 1.0, 0.0, 0.0]
-            );
-            assert!(selected.view().is_logical());
-            assert!(!selected.shares_allocation_with(&data));
-        }
-    }
-
-    #[test]
-    fn native_relational_predicates_respect_nan_infinity_signed_zero_and_broadcast() {
-        let provider = InProcessProvider::new();
-        for (left, right) in [
-            (
-                HostNumericDataView::F32(&[f32::NAN, f32::INFINITY, -0.0, -2.0]),
-                HostNumericDataView::F32(&[0.0, 0.0, 0.0, -1.0]),
-            ),
-            (
-                HostNumericDataView::F64(&[f64::NAN, f64::INFINITY, -0.0, -2.0]),
-                HostNumericDataView::F64(&[0.0, 0.0, 0.0, -1.0]),
-            ),
-        ] {
-            let left = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: left,
-                    shape: &[2, 2],
-                    storage: GpuTensorStorage::Real,
-                })
-                .unwrap();
-            let right = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: right,
-                    shape: &[2, 2],
-                    storage: GpuTensorStorage::Real,
-                })
-                .unwrap();
-            for (predicate, expected) in [
-                (BinaryPredicate::LessThan, [0.0, 0.0, 0.0, 1.0]),
-                (BinaryPredicate::LessThanOrEqual, [0.0, 0.0, 1.0, 1.0]),
-                (BinaryPredicate::GreaterThan, [0.0, 1.0, 0.0, 0.0]),
-                (BinaryPredicate::GreaterThanOrEqual, [0.0, 1.0, 1.0, 0.0]),
-            ] {
-                let output = provider
-                    .binary_predicate_impl(&left, &right, predicate)
-                    .unwrap();
-                assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
-                assert!(output.view().is_logical());
-                assert!(!output.shares_allocation_with(&left));
-            }
-        }
-        let left = provider
-            .upload_numeric(&HostNumericTensorView {
-                data: HostNumericDataView::F32(&[-1.0, 2.0]),
-                shape: &[2, 1],
-                storage: GpuTensorStorage::Real,
-            })
-            .unwrap();
-        let right = provider
-            .upload_numeric(&HostNumericTensorView {
-                data: HostNumericDataView::F32(&[0.0, 3.0, -2.0]),
-                shape: &[1, 3],
-                storage: GpuTensorStorage::Real,
-            })
-            .unwrap();
-        let output = block_on(provider.elem_lt(&left, &right)).unwrap();
-        assert_eq!(output.shape(), &[2, 3]);
-        assert_eq!(
-            block_on(provider.download(&output)).unwrap().data,
-            [1.0, 0.0, 1.0, 1.0, 0.0, 0.0]
-        );
-    }
-
-    #[test]
-    fn integer_complex_and_foreign_inputs_do_not_enter_floating_predicates() {
-        let provider = InProcessProvider::new();
-        let integer = provider
-            .upload_numeric(&HostNumericTensorView {
-                data: HostNumericDataView::I64(&[i64::MAX]),
-                shape: &[1, 1],
-                storage: GpuTensorStorage::Real,
-            })
-            .unwrap();
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-            &provider.logical_isfinite(&integer).unwrap_err()
-        ));
-        let complex = provider
-            .upload_numeric(&HostNumericTensorView {
-                data: HostNumericDataView::F64(&[1.0, 0.0]),
-                shape: &[1, 1],
-                storage: GpuTensorStorage::ComplexInterleaved,
-            })
-            .unwrap();
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-            &provider.logical_isfinite(&complex).unwrap_err()
-        ));
-        let foreign = InProcessProvider::new()
-            .upload(&HostTensorView {
-                data: &[1.0],
-                shape: &[1, 1],
-            })
-            .unwrap();
-        assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
-            &provider.logical_and(&integer, &foreign).unwrap_err()
-        ));
-    }
-}
+mod tests;

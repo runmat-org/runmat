@@ -6058,9 +6058,13 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.binary_predicate_impl(a, b, logical::BinaryPredicate::NotEqual) },
-        )
+        Box::pin(async move {
+            self.binary_predicate_impl(
+                a,
+                b,
+                logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::NotEqual),
+            )
+        })
     }
     fn elem_ge<'a>(
         &'a self,
@@ -6068,7 +6072,13 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_predicate_impl(a, b, logical::BinaryPredicate::GreaterThanOrEqual)
+            self.binary_predicate_impl(
+                a,
+                b,
+                logical::BinaryPredicate::Compare(
+                    runmat_builtins::RelationalOperator::GreaterThanOrEqual,
+                ),
+            )
         })
     }
 
@@ -6078,7 +6088,13 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_predicate_impl(a, b, logical::BinaryPredicate::LessThanOrEqual)
+            self.binary_predicate_impl(
+                a,
+                b,
+                logical::BinaryPredicate::Compare(
+                    runmat_builtins::RelationalOperator::LessThanOrEqual,
+                ),
+            )
         })
     }
 
@@ -6087,9 +6103,13 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.binary_predicate_impl(a, b, logical::BinaryPredicate::LessThan) },
-        )
+        Box::pin(async move {
+            self.binary_predicate_impl(
+                a,
+                b,
+                logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::LessThan),
+            )
+        })
     }
 
     fn elem_gt<'a>(
@@ -6097,9 +6117,13 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.binary_predicate_impl(a, b, logical::BinaryPredicate::GreaterThan) },
-        )
+        Box::pin(async move {
+            self.binary_predicate_impl(
+                a,
+                b,
+                logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::GreaterThan),
+            )
+        })
     }
 
     fn elem_eq<'a>(
@@ -6107,7 +6131,13 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.binary_predicate_impl(a, b, logical::BinaryPredicate::Equal) })
+        Box::pin(async move {
+            self.binary_predicate_impl(
+                a,
+                b,
+                logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::Equal),
+            )
+        })
     }
     fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.binary_predicate_impl(a, b, logical::BinaryPredicate::And)
