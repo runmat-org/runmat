@@ -1428,7 +1428,8 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
     }
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if let Some(mut device_result) =
-            provider_execution::execute(provider, &handle, &args.axes, args.nan_mode).await?
+            provider_execution::execute(provider, &handle, &args.axes, args.nan_mode, &args.output)
+                .await?
         {
             gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])?;
             return gpu_helpers::resident_gpu_value(device_result);
