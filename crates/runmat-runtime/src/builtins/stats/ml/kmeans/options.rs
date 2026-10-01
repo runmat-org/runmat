@@ -1,99 +1,56 @@
 use super::{
-    invalid, tensor_rows_cols, Distance, EmptyAction, KmeansDisplay, KmeansOption, KmeansStart,
-    KmeansStatsetField, KmeansToggle, Options, StartSpec, EPS, MAX_WORK_CELLS, NAME,
+    admission::{BorrowedOperands, OptionInput, StartInput, StatsetInput},
+    gather, invalid, tensor_rows_cols, Options, StartSpec, EPS, MAX_WORK_CELLS, NAME,
 };
-use crate::builtins::common::{random_args::keyword_of, tensor};
+use crate::builtins::common::tensor;
 use crate::BuiltinResult;
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 
-/// Validate the public option structure before any provider access. Values
-/// remain unexamined here because a numeric Start may itself be resident.
-pub(super) fn parse_option_headers(args: &[Value]) -> BuiltinResult<()> {
-    if !args.len().is_multiple_of(2) {
-        return Err(invalid("kmeans: options must be name-value pairs"));
-    }
-    for pair in args.chunks_exact(2) {
-        let name =
-            keyword_of(&pair[0]).ok_or_else(|| invalid("kmeans: option name must be text"))?;
-        KmeansOption::from_keyword(&name)
-            .ok_or_else(|| invalid(format!("kmeans: unsupported option '{name}'")))?;
-    }
-    Ok(())
-}
-
-pub(super) fn parse_options(args: Vec<Value>) -> BuiltinResult<Options> {
-    if !args.len().is_multiple_of(2) {
-        return Err(invalid("kmeans: options must be name-value pairs"));
-    }
+pub(super) async fn parse_options(
+    args: Vec<OptionInput>,
+    borrowed: &mut BorrowedOperands,
+) -> BuiltinResult<Options> {
     let mut options = Options::default();
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let name =
-            keyword_of(&args[idx]).ok_or_else(|| invalid("kmeans: option name must be text"))?;
-        let option = KmeansOption::from_keyword(&name)
-            .ok_or_else(|| invalid(format!("kmeans: unsupported option '{name}'")))?;
-        let value = &args[idx + 1];
-        match option {
-            KmeansOption::Distance => options.distance = parse_distance(value)?,
-            KmeansOption::EmptyAction => options.empty_action = parse_empty_action(value)?,
-            KmeansOption::MaxIter => options.max_iter = parse_positive_usize(value, "MaxIter")?,
-            KmeansOption::Replicates => {
-                options.replicates = parse_positive_usize(value, "Replicates")?
+    for arg in args {
+        match arg {
+            OptionInput::Distance(distance) => options.distance = distance,
+            OptionInput::EmptyAction(action) => options.empty_action = action,
+            OptionInput::MaxIter(value) => {
+                let value = materialize(value, borrowed).await?;
+                options.max_iter = parse_positive_usize(&value, "MaxIter")?;
             }
-            KmeansOption::Start => options.start = parse_start(value)?,
-            KmeansOption::Display => {
-                let display = keyword_of(value)
-                    .ok_or_else(|| invalid("kmeans: Display must be 'off', 'final', or 'iter'"))?;
-                if KmeansDisplay::from_keyword(&display).is_none() {
-                    return Err(invalid(format!("kmeans: unsupported Display '{display}'")));
-                }
+            OptionInput::Replicates(value) => {
+                let value = materialize(value, borrowed).await?;
+                options.replicates = parse_positive_usize(&value, "Replicates")?;
             }
-            KmeansOption::OnlinePhase => {
-                let flag = keyword_of(value)
-                    .ok_or_else(|| invalid("kmeans: OnlinePhase must be 'off' or 'on'"))?;
-                options.online_phase = match KmeansToggle::from_keyword(&flag) {
-                    Some(KmeansToggle::Off) => false,
-                    Some(KmeansToggle::On) => true,
-                    None => {
-                        return Err(invalid(format!("kmeans: unsupported OnlinePhase '{flag}'")))
-                    }
-                };
+            OptionInput::Start(StartInput::Named(start)) => options.start = StartSpec::Named(start),
+            OptionInput::Start(StartInput::Prepared(start)) => options.start = start,
+            OptionInput::Start(StartInput::Resident(value)) => {
+                let value = materialize(value, borrowed).await?;
+                if !super::admission::numeric_value_is_exact(&value) {
+                    return Err(invalid("kmeans: typed-integer Start values must be exactly representable as double"));
+                }
+                options.start = parse_numeric_start(&value)?;
             }
-            KmeansOption::Options => match value {
-                Value::Struct(options_struct) => {
-                    apply_options_struct(&mut options, options_struct)?
-                }
-                _ if is_empty_numeric(value) => {}
-                _ => {
-                    return Err(invalid(
-                        "kmeans: Options must be [] or a statset options struct",
-                    ))
-                }
-            },
+            OptionInput::Display => {}
+            OptionInput::OnlinePhase(toggle) => {
+                options.online_phase = matches!(toggle, super::KmeansToggle::On)
+            }
+            OptionInput::Statset(fields) => {
+                apply_options_struct(&mut options, fields, borrowed).await?
+            }
+            OptionInput::EmptyStatset => {}
         }
-        idx += 2;
     }
     Ok(options)
 }
 
-fn parse_distance(value: &Value) -> BuiltinResult<Distance> {
-    let text = keyword_of(value).ok_or_else(|| invalid("kmeans: Distance must be text"))?;
-    Distance::from_keyword(&text)
-        .ok_or_else(|| invalid(format!("kmeans: unsupported Distance '{text}'")))
+async fn materialize(value: Value, borrowed: &mut BorrowedOperands) -> BuiltinResult<Value> {
+    borrowed.record(&value);
+    gather(value).await
 }
 
-fn parse_empty_action(value: &Value) -> BuiltinResult<EmptyAction> {
-    let text = keyword_of(value).ok_or_else(|| invalid("kmeans: EmptyAction must be text"))?;
-    EmptyAction::from_keyword(&text)
-        .ok_or_else(|| invalid(format!("kmeans: unsupported EmptyAction '{text}'")))
-}
-
-fn parse_start(value: &Value) -> BuiltinResult<StartSpec> {
-    if let Some(text) = keyword_of(value) {
-        return KmeansStart::from_keyword(&text)
-            .map(StartSpec::Named)
-            .ok_or_else(|| invalid(format!("kmeans: unsupported Start '{text}'")));
-    }
+pub(super) fn parse_numeric_start(value: &Value) -> BuiltinResult<StartSpec> {
     let tensor = tensor::value_into_tensor_for(NAME, value.clone())
         .map_err(|err| invalid(format!("kmeans: {err}")))?;
     if tensor.shape.len() > 3 {
@@ -186,68 +143,59 @@ fn scalar_number(value: &Value) -> Option<f64> {
     }
 }
 
-pub(super) fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
-}
+pub(super) use super::admission::is_empty_numeric;
 
-fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinResult<()> {
-    for (name, field) in &value.fields {
-        if is_empty_option_value(field) {
-            continue;
-        }
-        match KmeansStatsetField::from_keyword(name) {
-            KmeansStatsetField::MaxIter => {
-                options.max_iter = parse_positive_usize(field, "Options.MaxIter")?
+async fn apply_options_struct(
+    options: &mut Options,
+    fields: Vec<StatsetInput>,
+    borrowed: &mut BorrowedOperands,
+) -> BuiltinResult<()> {
+    for field in fields {
+        match field {
+            StatsetInput::MaxIter(value) => {
+                let value = materialize(value, borrowed).await?;
+                options.max_iter = parse_positive_usize(&value, "Options.MaxIter")?;
             }
-            KmeansStatsetField::Display => {
-                let display = keyword_of(field).ok_or_else(|| {
-                    invalid("kmeans: Options.Display must be 'off', 'final', or 'iter'")
-                })?;
-                if KmeansDisplay::from_keyword(&display).is_none() {
-                    return Err(invalid(format!(
-                        "kmeans: unsupported Options.Display '{display}'"
-                    )));
-                }
-            }
-            KmeansStatsetField::UseParallel | KmeansStatsetField::UseSubstreams => {
-                if bool_option(field)? {
-                    return Err(invalid(format!(
-                        "kmeans: Options.{name} is not supported by the CPU runtime"
-                    )));
-                }
-            }
-            KmeansStatsetField::Streams => {
-                if !is_empty_numeric(field) {
+            StatsetInput::Display => {}
+            StatsetInput::UseParallel(value) => {
+                let value = materialize(value, borrowed).await?;
+                if bool_option(&value)? {
                     return Err(invalid(
-                        "kmeans: Options.Streams is not supported by the CPU runtime",
+                        "kmeans: Options.UseParallel is not supported by the CPU runtime",
                     ));
                 }
             }
-            KmeansStatsetField::TolX | KmeansStatsetField::TolFun => {
-                let value = scalar_number(field).ok_or_else(|| {
-                    invalid(format!("kmeans: Options.{name} must be a numeric scalar"))
-                })?;
-                if !value.is_finite() || value < 0.0 {
-                    return Err(invalid(format!(
-                        "kmeans: Options.{name} must be a nonnegative finite scalar"
-                    )));
+            StatsetInput::UseSubstreams(value) => {
+                let value = materialize(value, borrowed).await?;
+                if bool_option(&value)? {
+                    return Err(invalid(
+                        "kmeans: Options.UseSubstreams is not supported by the CPU runtime",
+                    ));
                 }
             }
-            KmeansStatsetField::Other => {}
+            StatsetInput::Streams => {}
+            StatsetInput::TolX(value) => {
+                let value = materialize(value, borrowed).await?;
+                validate_tolerance(&value, "Options.TolX")?;
+            }
+            StatsetInput::TolFun(value) => {
+                let value = materialize(value, borrowed).await?;
+                validate_tolerance(&value, "Options.TolFun")?;
+            }
         }
     }
     Ok(())
 }
 
-pub(super) fn is_empty_option_value(value: &Value) -> bool {
-    match value {
-        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
-        Value::LogicalArray(array) => array.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
-        Value::StringArray(array) => array.data.is_empty(),
-        Value::CharArray(array) => array.data.is_empty(),
-        _ => false,
+pub(super) fn validate_tolerance(value: &Value, label: &str) -> BuiltinResult<()> {
+    let number = scalar_number(value)
+        .ok_or_else(|| invalid(format!("kmeans: {label} must be a numeric scalar")))?;
+    if !number.is_finite() || number < 0.0 {
+        return Err(invalid(format!(
+            "kmeans: {label} must be a nonnegative finite scalar"
+        )));
     }
+    Ok(())
 }
 
 pub(super) fn bool_option(value: &Value) -> BuiltinResult<bool> {

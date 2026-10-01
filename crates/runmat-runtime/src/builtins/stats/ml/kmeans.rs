@@ -12,18 +12,25 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::builtins::common::random_args::keyword_of;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+mod admission;
 mod compute;
 mod geometry;
 mod options;
 mod output;
 #[cfg(test)]
+mod admission_tests;
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 use crate::builtins::common::random;
+#[cfg(test)]
+use admission::is_empty_option_value;
+#[cfg(test)]
+use admission::parse_option_headers;
+use admission::{BorrowedOperands, OptionHeader};
 use compute::run_kmeans;
 use geometry::{
     preflight_cluster_count, preflight_observations, prepare_data, tensor_rows_cols,
@@ -31,7 +38,7 @@ use geometry::{
 };
 #[cfg(test)]
 use options::{bool_option, is_empty_numeric, parse_positive_usize};
-use options::{parse_k, parse_option_headers, parse_options};
+use options::{parse_k, parse_options};
 use output::outputs_for_count;
 #[cfg(test)]
 use runmat_builtins::{KMEANS_EXTENSIONS, KMEANS_INTEGER_CAPABILITIES};
@@ -123,23 +130,33 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
     if crate::output_count::current_output_count().is_some_and(|count| count > 4) {
         return Err(invalid("kmeans: too many output arguments; maximum is 4"));
     }
-    parse_option_headers(&rest)?;
+    let headers = admission::parse_option_headers(&rest)?;
     preflight_observations(&x)?;
     preflight_cluster_count(&k)?;
-    ensure_kmeans_extensions(&x, &k, &rest)?;
-    ensure_exact_integer_boundary(&x, "observation data").await?;
-    ensure_exact_start_boundary(&rest).await?;
+    ensure_kmeans_extensions(&x, &k, &headers)?;
+    let options = admission::admit_option_values(headers)?;
+    if !matches!(&k, Value::GpuTensor(_)) && !admission::is_empty_numeric(&k) {
+        options::parse_positive_usize(&k, "k")?;
+    }
+    let mut borrowed = BorrowedOperands::new();
     let output_source = value_gpu_source(&x);
+    borrowed.record(&x);
+    let x_was_integer = typed_integer(&x);
     let x = gather(x).await?;
+    if x_was_integer && !admission::numeric_value_is_exact(&x) {
+        return Err(invalid(
+            "kmeans: typed-integer observation data must be exactly representable as double",
+        ));
+    }
+    borrowed.record(&k);
     let k = gather(k).await?;
-    let rest = gather_all(rest).await?;
-    let mut options = parse_options(rest)?;
+    let mut options = parse_options(options, &mut borrowed).await?;
     let data = prepare_data(x, options.distance)?;
     let k = parse_k(&k, &options.start)?;
     validate_options(&mut options, k, &data)?;
     let result = run_kmeans(&data, k, &options)?;
     let value = outputs_for_count(result, &data)?;
-    restore_kmeans_value(value, output_source.as_ref())
+    restore_kmeans_value(value, output_source.as_ref(), &borrowed)
 }
 
 fn value_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {
@@ -152,28 +169,42 @@ fn value_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHan
 fn restore_kmeans_value(
     value: Value,
     source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    borrowed: &BorrowedOperands,
 ) -> BuiltinResult<Value> {
     let Some(source) = source else {
         return Ok(value);
     };
     match value {
-        Value::Tensor(_) => restore_one_kmeans_output(value, source, &[]),
+        Value::Tensor(_) => {
+            let protected = borrowed.handles().iter().collect::<Vec<_>>();
+            restore_one_kmeans_output(value, source, &protected)
+        }
         Value::OutputList(values) => {
             let mut restored = Vec::with_capacity(values.len());
             for value in values {
-                let protected = restored
-                    .iter()
-                    .filter_map(|value| match value {
-                        Value::GpuTensor(handle) => Some(handle),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                restored.push(restore_one_kmeans_output(value, source, &protected)?);
+                let mut protected = borrowed.handles().iter().collect::<Vec<_>>();
+                protected.extend(restored.iter().filter_map(|value| match value {
+                    Value::GpuTensor(handle) => Some(handle),
+                    _ => None,
+                }));
+                match restore_one_kmeans_output(value, source, &protected) {
+                    Ok(value) => restored.push(value),
+                    Err(error) => return Err(retire_staged_outputs(restored, error)),
+                }
             }
             Ok(Value::OutputList(restored))
         }
         other => Ok(other),
     }
+}
+
+fn retire_staged_outputs(values: Vec<Value>, mut error: RuntimeError) -> RuntimeError {
+    for value in values {
+        if let Value::GpuTensor(handle) = value {
+            error = crate::builtins::common::gpu_helpers::reject_gpu_output(handle, error);
+        }
+    }
+    error
 }
 
 fn restore_one_kmeans_output(
@@ -205,7 +236,7 @@ fn typed_integer(value: &Value) -> bool {
     crate::builtins::common::validation::value_has_native_integer_class(value)
 }
 
-fn ensure_kmeans_extensions(x: &Value, k: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_kmeans_extensions(x: &Value, k: &Value, options: &[OptionHeader]) -> BuiltinResult<()> {
     if typed_integer(x) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &KMEANS_INTEGER_DATA_EXTENSION,
@@ -218,84 +249,45 @@ fn ensure_kmeans_extensions(x: &Value, k: &Value, rest: &[Value]) -> BuiltinResu
             NAME,
         )?;
     }
-    let mut idx = 0;
-    while idx + 1 < rest.len() {
-        let Some(name) = keyword_of(&rest[idx]) else {
-            idx += 1;
-            continue;
-        };
-        let value = &rest[idx + 1];
-        let Some(option) = KmeansOption::from_keyword(name.trim()) else {
-            idx += 2;
-            continue;
-        };
-        match option {
-            KmeansOption::Start if typed_integer(value) => {
+    for option in options {
+        match option.kind {
+            KmeansOption::Start if typed_integer(&option.value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &KMEANS_INTEGER_START_EXTENSION,
                     NAME,
                 )?;
             }
-            KmeansOption::MaxIter | KmeansOption::Replicates if typed_integer(value) => {
+            KmeansOption::MaxIter | KmeansOption::Replicates if typed_integer(&option.value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION,
                     NAME,
                 )?;
             }
             KmeansOption::Options => {
-                if let Value::Struct(options) = value {
-                    for (field, value) in &options.fields {
-                        if KmeansStatsetField::from_keyword(field) == KmeansStatsetField::MaxIter
-                            && typed_integer(value)
-                        {
-                            crate::compatibility::ensure_builtin_extension_enabled(
-                                &KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION,
-                                NAME,
-                            )?;
-                        }
-                        if matches!(
-                            KmeansStatsetField::from_keyword(field),
+                if let Some(fields) = &option.statset_fields {
+                    for field in fields {
+                        match field.kind {
+                            KmeansStatsetField::MaxIter if typed_integer(&field.value) => {
+                                crate::compatibility::ensure_builtin_extension_enabled(
+                                    &KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION,
+                                    NAME,
+                                )?;
+                            }
                             KmeansStatsetField::UseParallel | KmeansStatsetField::UseSubstreams
-                        ) && typed_integer(value)
-                        {
-                            crate::compatibility::ensure_builtin_extension_enabled(
-                                &KMEANS_INTEGER_PARALLEL_TOGGLE_EXTENSION,
-                                NAME,
-                            )?;
+                                if typed_integer(&field.value) =>
+                            {
+                                crate::compatibility::ensure_builtin_extension_enabled(
+                                    &KMEANS_INTEGER_PARALLEL_TOGGLE_EXTENSION,
+                                    NAME,
+                                )?;
+                            }
+                            _ => {}
                         }
                     }
                 }
             }
             _ => {}
         }
-        idx += 2;
-    }
-    Ok(())
-}
-
-async fn ensure_exact_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
-    if typed_integer(value)
-        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
-            .await?
-    {
-        return Err(invalid(format!(
-            "kmeans: typed-integer {role} must be exactly representable as double"
-        )));
-    }
-    Ok(())
-}
-
-async fn ensure_exact_start_boundary(rest: &[Value]) -> BuiltinResult<()> {
-    let mut idx = 0;
-    while idx + 1 < rest.len() {
-        if keyword_of(&rest[idx])
-            .as_deref()
-            .and_then(KmeansOption::from_keyword)
-            == Some(KmeansOption::Start)
-        {
-            ensure_exact_integer_boundary(&rest[idx + 1], "Start values").await?;
-        }
-        idx += 2;
     }
     Ok(())
 }
@@ -304,12 +296,4 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value)
         .await
         .map_err(with_kmeans_context)
-}
-
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
-    }
-    Ok(out)
 }
