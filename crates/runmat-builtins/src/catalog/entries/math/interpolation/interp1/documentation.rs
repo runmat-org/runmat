@@ -5,14 +5,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("interp1"),
     slug: Some("interp1"),
     summary: "Interpolate one-dimensional sampled data.",
-    description: "`interp1(X,Y,Xq)` estimates sampled values at query locations. `interp1(Y,Xq)` uses implicit sample locations `1:numel(Y)`. The default method is linear; nearest, spline, and pchip are also available.",
+    description: "`interp1(X,Y,Xq)` estimates sampled values at query locations. `interp1(Y,Xq)` uses implicit sample locations `1:n`, where `n` is the length of Y's first non-singleton sample dimension. The default method is linear; nearest, spline, and pchip are also available.",
     keywords: &["interp1", "interpolation", "linear", "nearest", "spline", "pchip"],
     related: &["spline", "pchip", "interp2"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Syntax and geometry",
             paragraphs: &[
-                "`Vq = interp1(Y,Xq)` uses implicit sample points. `Vq = interp1(X,Y,Xq)` uses a strictly increasing sample-location vector X. Optional method and extrapolation arguments follow Xq.",
+                "`Vq = interp1(Y,Xq)` uses sample points `1:n` along Y's first non-singleton dimension (`1:numel(Y)` for vector Y). `Vq = interp1(X,Y,Xq)` uses a strictly increasing sample-location vector X. Optional method and extrapolation arguments follow Xq.",
                 "Vector Y follows X and preserves the shape of Xq. Matrix or N-D Y is interpolated along its first sample dimension; the output places the query dimensions before the remaining component dimensions. A scalar query produces a scalar for vector Y.",
                 "The supported methods are `linear`, `nearest`, `spline`, and `pchip`; `linear` is the default. Out-of-range queries return NaN unless `extrap` or a scalar fill value is supplied. Cubic methods use the shared spline and shape-preserving piecewise-polynomial implementations.",
             ],
@@ -48,6 +48,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(numel(yq)==2); assert(abs(yq(1)-2.25)<1e-12); assert(abs(yq(2)-6.25)<1e-12);" },
+        },
+        BuiltinExample {
+            id: "implicit-matrix-samples",
+            title: "Interpolate each column of a matrix",
+            program: "Y = [10 20; 30 40; 50 60]; Vq = interp1(Y,1.5)",
+            display_output: Some("Vq = [20 30]"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(size(Vq,1)==1 && size(Vq,2)==2); assert(abs(Vq(1)-20)<1e-12); assert(abs(Vq(2)-30)<1e-12); assert(strcmp(class(Vq),'double'));" },
         },
         BuiltinExample {
             id: "resident-linear",

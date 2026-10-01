@@ -14,7 +14,7 @@ const INTERP1_INPUTS_Y_XQ: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Sample values at implicit X = 1:numel(Y).",
+        description: "Sample values at X = 1:n along Y's first non-singleton sample dimension.",
     },
     BuiltinParamDescriptor {
         name: "Xq",
@@ -55,7 +55,7 @@ const INTERP1_INPUTS_Y_XQ_METHOD: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Sample values at implicit X = 1:numel(Y).",
+        description: "Sample values at X = 1:n along Y's first non-singleton sample dimension.",
     },
     BuiltinParamDescriptor {
         name: "Xq",
@@ -79,7 +79,7 @@ const INTERP1_INPUTS_Y_XQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Sample values at implicit X = 1:numel(Y).",
+        description: "Sample values at X = 1:n along Y's first non-singleton sample dimension.",
     },
     BuiltinParamDescriptor {
         name: "Xq",
@@ -179,7 +179,7 @@ const INTERP1_INPUTS_Y_XQ_EXTRAP: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Sample values at implicit X = 1:numel(Y).",
+        description: "Sample values at X = 1:n along Y's first non-singleton sample dimension.",
     },
     BuiltinParamDescriptor {
         name: "Xq",

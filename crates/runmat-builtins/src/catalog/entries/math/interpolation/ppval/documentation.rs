@@ -44,7 +44,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Runtime and shared pp evaluator", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/ppval.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "ppval runtime entry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/ppval.rs") },
+            BuiltinDocumentationLink { label: "Piecewise-polynomial structure and coefficient layout", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/format.rs") },
+            BuiltinDocumentationLink { label: "Piecewise-polynomial evaluation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/evaluation.rs") },
+        ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Piecewise-polynomial evaluation and diagnostics", location: "builtins::math::interpolation::ppval::tests" }],
         notes: &["The legacy GPU precision listing described admitted resident input classes, not a device ppval kernel. The CPU evaluator publishes double values."],
     },

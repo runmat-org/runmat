@@ -62,7 +62,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Runtime PCHIP and shared polynomial construction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pchip.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "PCHIP runtime entry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pchip.rs") },
+            BuiltinDocumentationLink { label: "Sample-series axes and component layout", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/series.rs") },
+            BuiltinDocumentationLink { label: "PCHIP coefficients", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/coefficients.rs") },
+            BuiltinDocumentationLink { label: "Piecewise-polynomial structure", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/format.rs") },
+            BuiltinDocumentationLink { label: "Piecewise-polynomial evaluation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/evaluation.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "PCHIP direct forms and diagnostics", location: "builtins::math::interpolation::pchip::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Typed integer interpolation semantics", location: "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs" },

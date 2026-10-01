@@ -76,7 +76,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Spline runtime and shared coefficient owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/spline.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Spline runtime entry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/spline.rs") },
+            BuiltinDocumentationLink { label: "Sample-series axes and component layout", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/series.rs") },
+            BuiltinDocumentationLink { label: "Spline coefficients and end conditions", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/coefficients.rs") },
+            BuiltinDocumentationLink { label: "Piecewise-polynomial structure", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/format.rs") },
+            BuiltinDocumentationLink { label: "Piecewise-polynomial evaluation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/pp/evaluation.rs") },
+        ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Spline direct, pp, endpoint-slope, and array geometry cases", location: "builtins::math::interpolation::spline::tests" }],
         notes: &["The legacy GPU precision listing described accepted resident input classes, not a GPU spline kernel. Exact output class behavior is documented as RunMat behavior without asserting unverified MATLAB parity."],
     },
