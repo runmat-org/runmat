@@ -224,9 +224,13 @@ fn ensure_compatibility_extensions(
 }
 
 async fn gathered(value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(|err| invalid_argument(format!("classify: {err}")))
+    gather_if_needed_async(&value).await.map_err(|cause| {
+        let mut error = invalid_argument(format!("classify: {cause}"));
+        error.gpu_gather_retry = cause.gpu_gather_retry;
+        error.span = cause.span;
+        error.source = Some(Box::new(cause));
+        error
+    })
 }
 
 fn classify_compute(
@@ -854,19 +858,10 @@ fn ensure_exact_integer_tensor_boundary(tensor: &Tensor, name: &str) -> BuiltinR
 }
 
 fn ensure_exact_integer_scalar_boundary(value: NumericScalar, name: &str) -> BuiltinResult<()> {
-    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
-    let integer = match value {
-        NumericScalar::I8(value) => Some(i128::from(value)),
-        NumericScalar::I16(value) => Some(i128::from(value)),
-        NumericScalar::I32(value) => Some(i128::from(value)),
-        NumericScalar::I64(value) => Some(i128::from(value)),
-        NumericScalar::U8(value) => Some(i128::from(value)),
-        NumericScalar::U16(value) => Some(i128::from(value)),
-        NumericScalar::U32(value) => Some(i128::from(value)),
-        NumericScalar::U64(value) => Some(i128::from(value)),
-        NumericScalar::F32(_) | NumericScalar::F64(_) => None,
-    };
-    if integer.is_some_and(|value| !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&value)) {
+    if value
+        .into_int_value()
+        .is_some_and(|integer| !crate::builtins::common::validation::integer_is_exact_f64(&integer))
+    {
         return Err(invalid_argument(format!(
             "classify: {name} integer values must be exactly representable as double"
         )));

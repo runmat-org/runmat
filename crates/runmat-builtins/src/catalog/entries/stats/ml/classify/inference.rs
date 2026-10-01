@@ -68,8 +68,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     if let (Some(training), Some(group)) = (request.arguments.get(1), request.arguments.get(2)) {
-        if let (Some(expected), Some(actual)) = (rows(&training.shape), group.shape.element_count())
-        {
+        let group_count = if matches!(group.kind, ValueKindFact::Character) {
+            rows(&group.shape)
+        } else {
+            group.shape.element_count()
+        };
+        if let (Some(expected), Some(actual)) = (rows(&training.shape), group_count) {
             if expected != actual {
                 diagnostics.push(InferenceDiagnostic::error(
                     "RM.CLASSIFY.GROUP",

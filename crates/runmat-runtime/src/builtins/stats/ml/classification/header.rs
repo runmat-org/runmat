@@ -44,7 +44,14 @@ fn predictor_geometry(value: &Value, role: &str) -> BuiltinResult<Option<(usize,
     let shape = match value {
         Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
         Value::LogicalArray(array) => Some(array.shape.as_slice()),
-        Value::GpuTensor(handle) => Some(handle.shape()),
+        Value::GpuTensor(handle) => {
+            if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
+                return Err(invalid_argument(format!(
+                    "classify: {role} must be a 2-D numeric matrix"
+                )));
+            }
+            Some(handle.shape())
+        }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Ok(Some((1, 1))),
         _ => None,
     };
@@ -81,6 +88,11 @@ fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
         Value::Cell(array) => Some(array.data.len()),
         Value::CharArray(array) => Some(array.rows),
         Value::GpuTensor(handle) => {
+            if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
+                return Err(invalid_argument(
+                    "classify: group must be numeric, logical, string, character, or cellstr labels",
+                ));
+            }
             if handle
                 .shape()
                 .iter()

@@ -78,6 +78,29 @@ fn invalid_geometry_does_not_prove_successful_outputs() {
 }
 
 #[test]
+fn character_group_rows_count_labels_not_characters() {
+    let result = inference::infer(
+        &request(
+            numeric(NumericClass::Double, 2, 1),
+            numeric(NumericClass::Double, 4, 1),
+            ValueFact::proven(
+                ValueKindFact::Character,
+                ShapeFact::from(vec![Some(4), Some(3)]),
+                StorageFact::Dense,
+            ),
+            1,
+        ),
+        &CLASSIFY_CATALOG_ENTRY,
+    );
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Character);
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), None])
+    );
+}
+
+#[test]
 fn unknown_labels_and_excess_outputs_remain_conservative() {
     let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
     let result = inference::infer(

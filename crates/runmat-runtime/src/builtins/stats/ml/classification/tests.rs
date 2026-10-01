@@ -160,6 +160,18 @@ fn classify_preserves_native_single_and_wide_integer_group_labels() {
 }
 
 #[test]
+fn classify_checked_integer_solver_boundary_accepts_exact_wide_values() {
+    for exact in [1_i64 << 54, i64::MIN] {
+        ensure_exact_integer_scalar_boundary(NumericScalar::I64(exact), "sample")
+            .expect("exact wide integer is representable in binary64");
+    }
+    let inexact = (1_i64 << 53) + 1;
+    let err = ensure_exact_integer_scalar_boundary(NumericScalar::I64(inexact), "sample")
+        .expect_err("adjacent wide integer loses binary64 precision");
+    assert!(err.message().contains("exactly representable"));
+}
+
+#[test]
 fn classify_preserves_all_integer_group_classes() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     for storage in all_integer_storages(&[1, 1, 2, 2]) {
