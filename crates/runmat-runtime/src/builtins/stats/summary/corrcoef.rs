@@ -97,29 +97,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CorrcoefArgs::parse(value, rest)?;
     ensure_corrcoef_extensions(&args)?;
+    admit_corrcoef_inputs(&args)?;
     let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs == Some(0) {
         return Ok(Value::OutputList(Vec::new()));
-    }
-    for handle in std::iter::once(&args.first)
-        .chain(args.second.as_ref())
-        .filter_map(|value| match value {
-            Value::GpuTensor(handle) => Some(handle),
-            _ => None,
-        })
-    {
-        if gpu_helpers::exact_provider_for_handle(handle).is_none() {
-            let mut error =
-                corrcoef_internal_error("corrcoef: resident operand has no exact owning provider");
-            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            return Err(error);
-        }
-        handle.allocation_lease().validate_live().map_err(|error| {
-            corrcoef_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
-                error,
-            ))
-        })?;
     }
     if requested_outputs.is_none() || requested_outputs == Some(1) {
         if let Some(result) = corrcoef_try_gpu(&args).await? {
@@ -155,7 +137,7 @@ mod domain;
 mod admission;
 mod host;
 mod provider;
-use admission::{ensure_corrcoef_extensions, CorrcoefArgs};
+use admission::{admit_corrcoef_inputs, ensure_corrcoef_extensions, CorrcoefArgs};
 use domain::{evaluate_inputs, same_size, CorrcoefEvaluation, NumericInput};
 use host::corrcoef_host;
 use provider::corrcoef_try_gpu;

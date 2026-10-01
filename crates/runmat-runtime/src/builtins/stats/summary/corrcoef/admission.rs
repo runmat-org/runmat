@@ -133,6 +133,58 @@ pub(super) fn ensure_corrcoef_extensions(args: &CorrcoefArgs) -> BuiltinResult<(
     Ok(())
 }
 
+/// Check the data carriers and geometry without evaluating a correlation.
+/// Discarded-output calls must observe the same input errors as ordinary
+/// calls, but should not upload, download, or invoke a numerical provider.
+pub(super) fn admit_corrcoef_inputs(args: &CorrcoefArgs) -> BuiltinResult<()> {
+    for handle in std::iter::once(&args.first)
+        .chain(args.second.as_ref())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+    {
+        if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+            let mut error =
+                corrcoef_internal_error("corrcoef: resident operand has no exact owning provider");
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+        handle.allocation_lease().validate_live().map_err(|error| {
+            corrcoef_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
+        })?;
+    }
+    let first_shape = admissible_shape(&args.first)?;
+    if first_shape.len() > 2 {
+        return Err(corrcoef_error_with_detail(
+            &CORRCOEF_ERROR_INVALID_ARGUMENT,
+            "A must be a matrix",
+        ));
+    }
+    if let Some(second) = &args.second {
+        let second_shape = admissible_shape(second)?;
+        if !same_size(first_shape, second_shape) {
+            return Err(corrcoef_error(&CORRCOEF_ERROR_SIZE_MISMATCH));
+        }
+    }
+    Ok(())
+}
+
+fn admissible_shape(value: &Value) -> BuiltinResult<&[usize]> {
+    match value {
+        Value::Tensor(tensor) => Ok(&tensor.shape),
+        Value::ComplexTensor(tensor) => Ok(&tensor.shape),
+        Value::LogicalArray(array) => Ok(&array.shape),
+        Value::GpuTensor(handle) => Ok(handle.shape()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(&[1, 1]),
+        other => Err(corrcoef_internal_error(format!(
+            "corrcoef: unsupported input type {other:?}; expected numeric or logical values"
+        ))),
+    }
+}
+
 fn parse_rows_option(value: &str) -> BuiltinResult<CorrcoefRows> {
     match CorrcoefRowsOption::parse(value) {
         Some(CorrcoefRowsOption::All) => Ok(CorrcoefRows::All),
