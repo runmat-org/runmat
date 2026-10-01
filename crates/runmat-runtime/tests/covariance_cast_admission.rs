@@ -20,6 +20,7 @@ enum Mode {
     ConvertedClass,
     ConvertedBorrowAlias,
     CastFault,
+    CastUnsupported,
 }
 
 struct Provider {
@@ -30,6 +31,7 @@ struct Provider {
     downloads: AtomicUsize,
     outputs: Mutex<Vec<RetirementProbe>>,
     borrowed: Mutex<Option<allocation::WeakGpuTensorHandle>>,
+    input_probe: Mutex<Option<RetirementProbe>>,
 }
 
 impl Provider {
@@ -42,6 +44,7 @@ impl Provider {
             downloads: AtomicUsize::new(0),
             outputs: Mutex::new(Vec::new()),
             borrowed: Mutex::new(None),
+            input_probe: Mutex::new(None),
         }))
     }
 
@@ -104,6 +107,26 @@ impl AccelProvider for Provider {
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
 
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        let probe = self.input_probe.lock().unwrap().clone();
+        Box::pin(async move {
+            let probe = probe.ok_or_else(|| anyhow::anyhow!("unexpected numeric download"))?;
+            let data = probe.with_data(handle, |view| match view {
+                HostNumericDataView::F32(values) => Ok(HostNumericDataOwned::F32(values.to_vec())),
+                _ => anyhow::bail!("numeric download requires native single input"),
+            })??;
+            Ok(HostNumericTensorOwned {
+                data,
+                shape: handle.shape().to_vec(),
+                storage: handle.physical().storage(),
+            })
+        })
+    }
+
     fn covariance<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
@@ -143,8 +166,57 @@ impl AccelProvider for Provider {
             if matches!(self.mode, Mode::CastFault) {
                 anyhow::bail!("cast execution failed");
             }
+            if matches!(self.mode, Mode::CastUnsupported) {
+                return Err(unsupported_provider_operation(
+                    "fixture cannot cast this result",
+                ));
+            }
             self.result(true)
         })
+    }
+}
+
+#[test]
+fn typed_unsupported_cast_uses_admitted_host_materialization_without_retiring_inputs() {
+    for builtin in ["cov", "corrcoef"] {
+        let provider = Provider::new(Mode::CastUnsupported);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider
+            .owner
+            .allocate_numeric(HostNumericTensorOwned {
+                data: HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0]),
+                shape: vec![2, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        *provider.input_probe.lock().unwrap() = Some(input.probe.clone());
+        let result = block_on(call_builtin_async_with_outputs(
+            builtin,
+            &[Value::GpuTensor(input.handle.clone())],
+            1,
+        ))
+        .unwrap();
+        let output = match result {
+            Value::Tensor(value) => value,
+            Value::OutputList(mut values) if values.len() == 1 => {
+                let Value::Tensor(value) = values.remove(0) else {
+                    panic!("{builtin} should materialize its output on the admitted host path");
+                };
+                value
+            }
+            _ => panic!("{builtin} should materialize its output on the admitted host path"),
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(provider.casts.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+        assert!(input.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(input.probe.retirements(), 0);
+        assert!(provider
+            .outputs
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|probe| probe.retirements() == 1));
     }
 }
 
