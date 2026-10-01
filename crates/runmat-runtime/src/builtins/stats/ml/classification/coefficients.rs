@@ -1,6 +1,12 @@
 use super::*;
 use runmat_value::{CellArray, StructValue};
 
+pub(super) struct PairwiseCoefficients {
+    constant: f64,
+    linear: Vec<f64>,
+    pub(super) quadratic: Option<Vec<f64>>,
+}
+
 pub(super) fn coeff_value(model: &PreparedModel) -> BuiltinResult<Value> {
     let k = model.classes.len();
     let entry_count = k
@@ -20,22 +26,19 @@ pub(super) fn coeff_value(model: &PreparedModel) -> BuiltinResult<Value> {
             );
             st.insert("name1", labels_value(&model.classes, model.kind, &[row])?);
             st.insert("name2", labels_value(&model.classes, model.kind, &[col])?);
-            st.insert("const", Value::Num(coeff.0));
+            st.insert("const", Value::Num(coeff.constant));
             st.insert(
                 "linear",
                 Value::Tensor(
-                    Tensor::new(coeff.1, vec![model.cols, 1])
+                    Tensor::new(coeff.linear, vec![model.cols, 1])
                         .map_err(|err| internal_error(format!("classify: {err}")))?,
                 ),
             );
-            if !matches!(
-                model.discriminant,
-                DiscriminantType::Linear | DiscriminantType::DiagLinear
-            ) {
+            if let Some(quadratic) = coeff.quadratic {
                 st.insert(
                     "quadratic",
                     Value::Tensor(
-                        Tensor::new(coeff.2, vec![model.cols, model.cols])
+                        Tensor::new(quadratic, vec![model.cols, model.cols])
                             .map_err(|err| internal_error(format!("classify: {err}")))?,
                     ),
                 );
@@ -52,20 +55,17 @@ pub(super) fn pairwise_coeff(
     model: &PreparedModel,
     i: usize,
     j: usize,
-) -> BuiltinResult<(f64, Vec<f64>, Vec<f64>)> {
-    let quadratic_len = model
-        .cols
-        .checked_mul(model.cols)
-        .ok_or_else(|| internal_error("classify: quadratic coefficient shape overflows"))?;
+) -> BuiltinResult<PairwiseCoefficients> {
     if i == j {
-        let mut quadratic = Vec::new();
-        quadratic.try_reserve_exact(quadratic_len).map_err(|err| {
-            internal_error(format!(
-                "classify: cannot allocate quadratic coefficients: {err}"
-            ))
-        })?;
-        quadratic.resize(quadratic_len, 0.0);
-        return Ok((0.0, vec![0.0; model.cols], quadratic));
+        return Ok(PairwiseCoefficients {
+            constant: 0.0,
+            linear: vec![0.0; model.cols],
+            quadratic: if model.discriminant.has_quadratic_coefficient() {
+                Some(zero_quadratic(model.cols)?)
+            } else {
+                None
+            },
+        });
     }
     let class_i = &model.classes[i];
     let class_j = &model.classes[j];
@@ -92,19 +92,32 @@ pub(super) fn pairwise_coeff(
                 * ((mean_i.transpose() * inv_i * &mean_i)[(0, 0)]
                     - (mean_j.transpose() * inv_j * &mean_j)[(0, 0)])
     };
-    let quadratic = if model.discriminant.uses_shared_covariance() {
-        let mut values = Vec::new();
-        values.try_reserve_exact(quadratic_len).map_err(|err| {
-            internal_error(format!(
-                "classify: cannot allocate quadratic coefficients: {err}"
-            ))
-        })?;
-        values.resize(quadratic_len, 0.0);
-        values
+    let quadratic = if !model.discriminant.has_quadratic_coefficient() {
+        None
+    } else if model.discriminant.uses_shared_covariance() {
+        Some(zero_quadratic(model.cols)?)
     } else {
-        ((inv_j - inv_i) * 0.5).iter().copied().collect()
+        Some(((inv_j - inv_i) * 0.5).iter().copied().collect())
     };
-    Ok((const_term, linear_vec.iter().copied().collect(), quadratic))
+    Ok(PairwiseCoefficients {
+        constant: const_term,
+        linear: linear_vec.iter().copied().collect(),
+        quadratic,
+    })
+}
+
+fn zero_quadratic(columns: usize) -> BuiltinResult<Vec<f64>> {
+    let count = columns
+        .checked_mul(columns)
+        .ok_or_else(|| internal_error("classify: quadratic coefficient shape overflows"))?;
+    let mut values = Vec::new();
+    values.try_reserve_exact(count).map_err(|err| {
+        internal_error(format!(
+            "classify: cannot allocate quadratic coefficients: {err}"
+        ))
+    })?;
+    values.resize(count, 0.0);
+    Ok(values)
 }
 
 pub(super) fn log_prior_ratio(left: f64, right: f64) -> f64 {

@@ -65,6 +65,9 @@ fn classify_materializes_only_requested_prediction_outputs() {
     assert!(labels_only.posterior.is_none());
     assert!(labels_only.logp.is_none());
 
+    let linear_coefficients = pairwise_coeff(&model, 0, 1).unwrap();
+    assert!(linear_coefficients.quadratic.is_none());
+
     let posterior = predict_rows(&model, &sample, true, false).unwrap();
     assert_eq!(posterior.posterior.as_ref().unwrap().shape, vec![2, 2]);
     assert!(posterior.logp.is_none());

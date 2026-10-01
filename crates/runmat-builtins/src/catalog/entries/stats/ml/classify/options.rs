@@ -42,4 +42,8 @@ impl DiscriminantType {
     pub fn uses_diagonal_covariance(self) -> bool {
         matches!(self, Self::DiagLinear | Self::DiagQuadratic)
     }
+
+    pub fn has_quadratic_coefficient(self) -> bool {
+        !matches!(self, Self::Linear | Self::DiagLinear)
+    }
 }
