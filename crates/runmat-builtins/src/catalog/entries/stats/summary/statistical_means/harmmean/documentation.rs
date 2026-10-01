@@ -37,8 +37,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[], verification: &[],
-        notes: &["Legacy description, example, FAQ, and related links retained; the example now asserts its numerical result. GPU execution remains an open qualification obligation."],
+        implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/statistical_means/harmmean.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Statistical reduction classes, values and residency", location: "crates/runmat-runtime/src/builtins/stats/summary/statistical_means/tests.rs" }],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

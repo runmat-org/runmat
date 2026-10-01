@@ -185,15 +185,15 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference {
                 kind: BuiltinEvidenceKind::UnitTest,
                 label: "Histogram semantics",
-                location: "builtins::stats::hist::histcounts::tests" },
+                location: "crates/runmat-runtime/src/builtins/stats/hist/histcounts/tests.rs" },
             BuiltinEvidenceReference {
                 kind: BuiltinEvidenceKind::IntegrationTest,
                 label: "Resident provider round trip",
-                location: "builtins::stats::hist::histcounts::tests::histcounts_gpu_roundtrip" },
+                location: "crates/runmat-runtime/src/builtins/stats/hist/histcounts/tests.rs#histcounts_gpu_roundtrip" },
             BuiltinEvidenceReference {
                 kind: BuiltinEvidenceKind::WgpuTest,
                 label: "WGPU histogram round trip",
-                location: "builtins::stats::hist::histcounts::tests::histcounts_wgpu_roundtrip" }
+                location: "crates/runmat-runtime/src/builtins/stats/hist/histcounts/tests.rs#histcounts_wgpu_roundtrip" }
         ],
         notes: &[
         ]
