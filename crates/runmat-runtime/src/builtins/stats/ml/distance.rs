@@ -643,9 +643,3 @@ fn host_value_to_matrix(name: &'static str, gathered: Value) -> BuiltinResult<Te
     }
     Ok(tensor)
 }
-
-async fn gather_value(name: &'static str, value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(|error| with_distance_context(name, error))
-}
