@@ -136,6 +136,51 @@ fn spline_matches_quadratic_for_three_points() {
 }
 
 #[test]
+fn not_a_knot_spline_recovers_cubic_on_uneven_samples() {
+    let x = [0.0, 0.5, 2.0, 3.0, 5.0];
+    let cubic = |point: f64| point * point * point - 2.0 * point + 1.0;
+    let series = NumericSeries {
+        x: x.to_vec(),
+        y: x.into_iter().map(cubic).collect(),
+        series: 1,
+        component_shape: Vec::new(),
+        sample_axis: SampleAxis::Last,
+    };
+    let pp = build_spline_pp(&series, "spline").unwrap();
+    let query = QueryPoints {
+        values: vec![0.25, 1.25, 4.0],
+        shape: vec![1, 3],
+    };
+    let Value::Tensor(output) = evaluate_pp(
+        &pp,
+        &query,
+        &Extrapolation::Extrapolate,
+        PpOutputLayout::ComponentLeading,
+        "spline",
+    )
+    .unwrap() else {
+        panic!("three queries must return a tensor");
+    };
+    for (&actual, &point) in output.materialize_f64().iter().zip(&query.values) {
+        assert!((actual - cubic(point)).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn not_a_knot_spline_has_no_absolute_spacing_cutoff() {
+    let series = NumericSeries {
+        x: vec![0.0, 1e-16, 2e-16, 3e-16],
+        y: vec![0.0, 1.0, 2.0, 3.0],
+        series: 1,
+        component_shape: Vec::new(),
+        sample_axis: SampleAxis::Last,
+    };
+    let pp = build_spline_pp(&series, "spline").unwrap();
+    let value = eval_pp_scalar(&pp, 0, 1.5e-16, &Extrapolation::Extrapolate);
+    assert!((value - 1.5).abs() < 1e-8);
+}
+
+#[test]
 fn ppval_multiseries_places_component_dimension_before_queries() {
     let series = NumericSeries {
         x: vec![1.0, 2.0, 3.0],

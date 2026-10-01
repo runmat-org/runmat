@@ -17,25 +17,75 @@ pub(super) fn spline_coefs_for_series(
         return Ok(quadratic_as_piecewise_cubic(x, y));
     }
 
-    let h: Vec<f64> = x.windows(2).map(|pair| pair[1] - pair[0]).collect();
-    let mut a = vec![vec![0.0; n]; n];
-    let mut rhs = vec![0.0; n];
-
-    a[0][0] = -h[1];
-    a[0][1] = h[0] + h[1];
-    a[0][2] = -h[0];
-    for i in 1..(n - 1) {
-        a[i][i - 1] = h[i - 1];
-        a[i][i] = 2.0 * (h[i - 1] + h[i]);
-        a[i][i + 1] = h[i];
-        rhs[i] = 6.0 * ((y[i + 1] - y[i]) / h[i] - (y[i] - y[i - 1]) / h[i - 1]);
-    }
-    a[n - 1][n - 3] = -h[n - 2];
-    a[n - 1][n - 2] = h[n - 3] + h[n - 2];
-    a[n - 1][n - 1] = -h[n - 3];
-
-    let second = solve_dense(a, rhs)?;
+    let second = not_a_knot_second_derivatives(x, y)?;
     Ok(second_derivatives_to_coefs(x, y, &second))
+}
+
+/// Eliminate the two endpoint second derivatives from the not-a-knot
+/// equations, then solve the remaining tridiagonal system in O(n) space
+/// and time. The endpoint values are recovered from continuity of the
+/// third derivative across the first and last interior breaks.
+fn not_a_knot_second_derivatives(x: &[f64], y: &[f64]) -> BuiltinResult<Vec<f64>> {
+    let n = x.len();
+    let h: Vec<f64> = x.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    let secants: Vec<f64> = y
+        .windows(2)
+        .zip(h.iter())
+        .map(|(pair, &width)| (pair[1] - pair[0]) / width)
+        .collect();
+    let count = n - 2;
+    let mut lower = vec![0.0; count];
+    let mut diagonal = vec![0.0; count];
+    let mut upper = vec![0.0; count];
+    let mut rhs = vec![0.0; count];
+    for local in 0..count {
+        let i = local + 1;
+        lower[local] = h[i - 1];
+        diagonal[local] = 2.0 * (h[i - 1] + h[i]);
+        upper[local] = h[i];
+        rhs[local] = 6.0 * (secants[i] - secants[i - 1]);
+    }
+    diagonal[0] += h[0] * (h[0] + h[1]) / h[1];
+    upper[0] -= h[0] * h[0] / h[1];
+    lower[0] = 0.0;
+    let last = count - 1;
+    diagonal[last] += h[n - 2] * (h[n - 3] + h[n - 2]) / h[n - 3];
+    lower[last] -= h[n - 2] * h[n - 2] / h[n - 3];
+    upper[last] = 0.0;
+
+    for i in 1..count {
+        if !diagonal[i - 1].is_finite() || diagonal[i - 1] == 0.0 {
+            return Err(interp_error(
+                "spline",
+                "spline: singular interpolation system",
+            ));
+        }
+        let factor = lower[i] / diagonal[i - 1];
+        diagonal[i] -= factor * upper[i - 1];
+        rhs[i] -= factor * rhs[i - 1];
+    }
+    if !diagonal[last].is_finite() || diagonal[last] == 0.0 {
+        return Err(interp_error(
+            "spline",
+            "spline: singular interpolation system",
+        ));
+    }
+    let mut interior = vec![0.0; count];
+    interior[last] = rhs[last] / diagonal[last];
+    for i in (0..last).rev() {
+        interior[i] = (rhs[i] - upper[i] * interior[i + 1]) / diagonal[i];
+    }
+    let mut second = vec![0.0; n];
+    second[1..n - 1].copy_from_slice(&interior);
+    second[0] = ((h[0] + h[1]) * second[1] - h[0] * second[2]) / h[1];
+    second[n - 1] = ((h[n - 3] + h[n - 2]) * second[n - 2] - h[n - 2] * second[n - 3]) / h[n - 3];
+    if second.iter().any(|value| !value.is_finite()) {
+        return Err(interp_error(
+            "spline",
+            "spline: invalid interpolation system",
+        ));
+    }
+    Ok(second)
 }
 
 /// Solve the strictly diagonally dominant tridiagonal second-derivative
@@ -171,49 +221,6 @@ fn endpoint_slope(h0: f64, h1: f64, del0: f64, del1: f64) -> f64 {
         slope = 3.0 * del0;
     }
     slope
-}
-
-fn solve_dense(mut a: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> BuiltinResult<Vec<f64>> {
-    let n = rhs.len();
-    for col in 0..n {
-        let mut pivot = col;
-        let mut pivot_abs = a[col][col].abs();
-        for row in (col + 1)..n {
-            let candidate = a[row][col].abs();
-            if candidate > pivot_abs {
-                pivot = row;
-                pivot_abs = candidate;
-            }
-        }
-        if pivot_abs <= 1.0e-14 {
-            return Err(interp_error(
-                "spline",
-                "spline: singular interpolation system",
-            ));
-        }
-        if pivot != col {
-            a.swap(pivot, col);
-            rhs.swap(pivot, col);
-        }
-        for row in (col + 1)..n {
-            let factor = a[row][col] / a[col][col];
-            a[row][col] = 0.0;
-            for k in (col + 1)..n {
-                a[row][k] -= factor * a[col][k];
-            }
-            rhs[row] -= factor * rhs[col];
-        }
-    }
-
-    let mut solution = vec![0.0; n];
-    for row in (0..n).rev() {
-        let mut acc = rhs[row];
-        for col in (row + 1)..n {
-            acc -= a[row][col] * solution[col];
-        }
-        solution[row] = acc / a[row][row];
-    }
-    Ok(solution)
 }
 
 pub(super) fn validate_finite_coefs(coefs: &[f64], name: &'static str) -> BuiltinResult<()> {
