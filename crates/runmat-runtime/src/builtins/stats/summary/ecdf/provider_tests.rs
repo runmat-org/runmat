@@ -205,6 +205,9 @@ fn gather_errors_preserve_owner_cause_and_borrowed_lease() {
 
 #[test]
 fn abandoned_unpolled_and_pending_calls_retain_borrowed_input() {
+    use std::future::Future;
+    use std::task::Context;
+
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(WitnessProvider::new(DownloadMode::Pending)));
     unsafe { runmat_accelerate_api::register_provider(provider) };
@@ -221,7 +224,8 @@ fn abandoned_unpolled_and_pending_calls_retain_borrowed_input() {
     let mut pending = Box::pin(cdfplot_builtin(vec![Value::GpuTensor(
         allocation.handle.clone(),
     )]));
-    assert!(futures::poll!(pending.as_mut()).is_pending());
+    let mut context = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(pending.as_mut().poll(&mut context).is_pending());
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     drop(pending);
     allocation
