@@ -16,6 +16,7 @@ mod geometry_materialization;
 mod graph;
 mod host;
 mod input_materialization;
+mod input_plan;
 mod materialized_signal;
 mod modal_object_access;
 mod modal_task;
@@ -213,6 +214,7 @@ pub use host::{
     ANALYSIS_HOST_TARGET_PROFILE,
 };
 pub use input_materialization::{InputMaterializationExpectation, PreparedInputMaterialization};
+pub use input_plan::{InputMaterializationPlan, InputMaterializationPlanExpectation};
 pub use materialized_signal::{
     canonical_tabulated_signal_content_digest, materialize_signal_for_solver,
 };
@@ -348,10 +350,11 @@ pub use signal_materialization::{
     GeneratorChunkOutput, PlannedGenerator,
 };
 pub use signal_program::{
-    build_generator_task_submission, prepare_generator_program, prepare_signal_materialization,
-    GeneratorExecutionContext, GeneratorProgramAdmission, GeneratorProgramAdmissionRef,
-    PreparedGeneratorChunk, PreparedGeneratorProgram, PreparedSignalMaterialization,
-    SignalMaterializationExpectation, GENERATOR_EXECUTION_MODE, GENERATOR_TARGET_PROFILE,
+    build_generator_task_submission, prepare_generator_descriptor, prepare_generator_program,
+    prepare_signal_materialization, GeneratorExecutionContext, GeneratorProgramAdmission,
+    GeneratorProgramAdmissionRef, PreparedGeneratorChunk, PreparedGeneratorProgram,
+    PreparedSignalMaterialization, SignalMaterializationExpectation, GENERATOR_EXECUTION_MODE,
+    GENERATOR_TARGET_PROFILE,
 };
 pub use spectral_materialization::{
     canonical_materialized_random_spectrum_bytes, canonical_materialized_response_spectrum_bytes,

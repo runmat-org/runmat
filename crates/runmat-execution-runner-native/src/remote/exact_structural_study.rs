@@ -84,7 +84,6 @@ pub(super) async fn execute_for_composition(
     recovery_publisher: Option<&mut dyn StructuralTransientRecoveryPublisher>,
 ) -> NativeExecutionResult<RemoteExactStructuralStudyComposition> {
     let decoded = crate::decode_exact_structural_study_root(request, pool.as_ref())?;
-    let input_materializations = decoded.input_materializations.clone();
     let artifact_access = decoded.artifact_access.clone();
     let meshing = super::exact_meshing::execute_for_composition(
         Arc::clone(&pool),
@@ -92,9 +91,9 @@ pub(super) async fn execute_for_composition(
         run_id,
         resources,
     );
-    let inputs = super::input_materialization::execute(
+    let inputs = super::input_materialization::execute_ready(
         Arc::clone(&pool),
-        input_materializations,
+        &decoded.input_materializations,
         &artifact_access,
         resources,
     );
@@ -103,6 +102,17 @@ pub(super) async fn execute_for_composition(
         RemoteExactMeshingComposition::Completed(completed) => completed,
         RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(outcome)),
     };
+    let mut input_outcomes = input_outcomes?;
+    input_outcomes.extend(
+        super::input_materialization::execute_deferred(
+            Arc::clone(&pool),
+            &decoded.input_materializations,
+            &completed.result.artifact,
+            &artifact_access,
+            resources,
+        )
+        .await?,
+    );
     let recovery = match recovery_publisher {
         Some(publisher) => StructuralTransientRecoveryAdmission::Available {
             restored: recovered,
@@ -120,7 +130,7 @@ pub(super) async fn execute_for_composition(
         request,
         decoded,
         completed,
-        &input_outcomes?,
+        &input_outcomes,
         resources,
         recovery,
     ))
@@ -199,9 +209,15 @@ pub(super) async fn execute_with_completed_meshing(
         )?;
     let mut workloads = decoded.workloads.clone();
     let mut resolved_model = workloads.authored_model().map_err(protocol)?.clone();
+    let input_materializations = decoded
+        .input_materializations
+        .iter()
+        .map(|plan| plan.resolve(&completed.result.artifact))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(protocol)?;
     let completed_inputs = match super::input_materialization::apply_to_model(
         &mut resolved_model,
-        &decoded.input_materializations,
+        &input_materializations,
         input_outcomes,
     ) {
         Ok(completed) => completed,

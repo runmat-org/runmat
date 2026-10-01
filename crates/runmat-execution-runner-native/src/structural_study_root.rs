@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{AuthoredMaterialRef, MaterialModel, RealizedStudy};
 use runmat_analysis_execution::{
-    prepare_analysis_host_program, InputMaterializationExpectation, PreparedInputMaterialization,
+    prepare_analysis_host_program, InputMaterializationPlan, InputMaterializationPlanExpectation,
 };
 use runmat_analysis_fea::{
     planning::resource::LocalExecutionPlan, study::StructuralStudyPlanningPolicy,
@@ -23,7 +23,8 @@ use runmat_execution_artifact::{
 use serde::{Deserialize, Serialize};
 
 use crate::input_materialization_contract::{
-    validate_input_materialization_inventory, InputMaterializationRequest,
+    validate_input_materialization_plan_inventory, validate_input_plan_expectation_inventory,
+    InputMaterializationPlanRequest,
 };
 use crate::{
     decode_geometry_meshing_root, NativeExecutionError, NativeExecutionResult,
@@ -51,7 +52,7 @@ struct StructuralStudyRootRequest {
     planning: StructuralStudyPlanningPolicy,
     local_execution: LocalExecutionPlan,
     analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    input_materializations: Vec<InputMaterializationRequest>,
+    input_materializations: Vec<InputMaterializationPlanRequest>,
     geometry_meshing: ProgramExecutionDescriptor,
     geometry_argument_count: u32,
     materialization_argument_count: u32,
@@ -63,7 +64,7 @@ impl StructuralStudyRootRequest {
         self.geometry_meshing
             .validate_for_portable_host()
             .map_err(protocol)?;
-        if self.schema_version != 2
+        if self.schema_version != 3
             || self.authored_study_digest.bytes() == &[0; 32]
             || self
                 .frozen_project_digest
@@ -98,16 +99,16 @@ impl StructuralStudyRootRequest {
         let materializations = self
             .input_materializations
             .iter()
-            .map(InputMaterializationRequest::to_prepared)
+            .map(InputMaterializationPlanRequest::to_plan)
             .collect::<NativeExecutionResult<Vec<_>>>()?;
-        validate_input_materialization_inventory(
+        validate_input_materialization_plan_inventory(
             &self.study,
             &materializations,
             &self.geometry_meshing.recipe.program_revision,
         )?;
         let reference_count = materializations
             .iter()
-            .flat_map(|prepared| prepared.program().input_references.iter())
+            .flat_map(|prepared| prepared.input_references().iter())
             .map(|reference| reference.id)
             .collect::<BTreeSet<_>>()
             .len();
@@ -151,7 +152,7 @@ pub struct StructuralStudyRootPreparation {
     pub planning: StructuralStudyPlanningPolicy,
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    pub input_materializations: Vec<PreparedInputMaterialization>,
+    pub input_materializations: Vec<InputMaterializationPlan>,
     pub geometry_meshing: PreparedGeometryMeshingRoot,
 }
 
@@ -173,7 +174,7 @@ pub struct StructuralStudyResultExpectation {
     pub planning: StructuralStudyPlanningPolicy,
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    pub input_materializations: Vec<InputMaterializationExpectation>,
+    pub input_materializations: Vec<InputMaterializationPlanExpectation>,
     pub geometry_request: runmat_analysis_execution::GeometryMaterializationRequest,
     pub expected_meshing_request: runmat_meshing_core::MeshingRequest,
 }
@@ -240,7 +241,7 @@ impl StructuralStudyResultExpectation {
             ));
         }
         validate_accelerator_requests(self.planning.backend, &self.analysis_accelerator_requests)?;
-        validate_input_expectation_inventory(
+        validate_input_plan_expectation_inventory(
             &self.study,
             &self.input_materializations,
             &self.program_revision,
@@ -411,7 +412,7 @@ pub struct DecodedStructuralStudyRoot {
     pub planning: StructuralStudyPlanningPolicy,
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    pub input_materializations: Vec<PreparedInputMaterialization>,
+    pub input_materializations: Vec<InputMaterializationPlan>,
     pub geometry_meshing: ProgramExecutionRequest,
     pub artifact_access: ArtifactAccess,
 }
@@ -444,7 +445,11 @@ pub fn prepare_structural_study_root(
         .into_iter()
         .map(|materialization| materialization.rebind(&artifact_access).map_err(protocol))
         .collect::<NativeExecutionResult<Vec<_>>>()?;
-    validate_input_materialization_inventory(&study, &input_materializations, &program_revision)?;
+    validate_input_materialization_plan_inventory(
+        &study,
+        &input_materializations,
+        &program_revision,
+    )?;
     let mut input_value_objects = BTreeMap::new();
     for materialization in &input_materializations {
         materialization.validate_closed().map_err(protocol)?;
@@ -464,11 +469,11 @@ pub fn prepare_structural_study_root(
     }
     let input_expectations = input_materializations
         .iter()
-        .map(PreparedInputMaterialization::expectation)
+        .map(InputMaterializationPlan::expectation)
         .collect::<Result<Vec<_>, _>>()
         .map_err(protocol)?;
     let root = StructuralStudyRootRequest {
-        schema_version: 2,
+        schema_version: 3,
         authored_study_digest,
         frozen_project_digest,
         study,
@@ -484,7 +489,7 @@ pub fn prepare_structural_study_root(
         analysis_accelerator_requests,
         input_materializations: input_materializations
             .iter()
-            .map(InputMaterializationRequest::from_prepared)
+            .map(InputMaterializationPlanRequest::from_plan)
             .collect::<NativeExecutionResult<Vec<_>>>()?,
         geometry_meshing: descriptor_from_request(geometry_meshing.request()),
         geometry_argument_count: u32::try_from(geometry_meshing.request().arguments.len())
@@ -548,9 +553,10 @@ pub fn prepare_structural_study_root(
             .map(required_program),
     );
     for materialization in &input_materializations {
+        let descriptor = materialization.descriptor().map_err(protocol)?;
         required_programs.push(RequiredStructuralStudyProgram {
-            recipe: materialization.program().descriptor.recipe.clone(),
-            artifact: materialization.program().descriptor.artifact.clone(),
+            recipe: descriptor.recipe,
+            artifact: descriptor.artifact,
         });
     }
     let analysis_host =
@@ -666,11 +672,11 @@ pub fn decode_structural_study_root(
     let input_materializations = root
         .input_materializations
         .iter()
-        .map(InputMaterializationRequest::to_prepared)
+        .map(InputMaterializationPlanRequest::to_plan)
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let expected_materialization_references = input_materializations
         .iter()
-        .flat_map(|prepared| prepared.program().input_references.iter())
+        .flat_map(|prepared| prepared.input_references().iter())
         .map(|reference| (reference.id, reference))
         .collect::<BTreeMap<_, _>>();
     let transported_materialization_references = materialization_arguments
@@ -741,81 +747,6 @@ fn validate_accelerator_requests(
         )),
         _ => Ok(()),
     }
-}
-
-fn validate_input_expectation_inventory(
-    study: &RealizedStudy,
-    expectations: &[InputMaterializationExpectation],
-    revision: &ProgramRevision,
-) -> NativeExecutionResult<()> {
-    for expectation in expectations {
-        expectation.validate().map_err(protocol)?;
-    }
-    let models = study
-        .included_models
-        .iter()
-        .chain(std::iter::once(&study.model))
-        .collect::<Vec<_>>();
-    let expected = models
-        .iter()
-        .flat_map(|model| &model.signals)
-        .filter(|signal| signal.generator().is_some())
-        .map(InputExpectationSource::Signal)
-        .chain(
-            models
-                .iter()
-                .flat_map(|model| &model.response_spectra)
-                .filter(|spectrum| spectrum.ordinates.generator().is_some())
-                .map(InputExpectationSource::Response),
-        )
-        .chain(
-            models
-                .iter()
-                .flat_map(|model| &model.random_excitations)
-                .filter(|spectrum| spectrum.spectral_density.generator().is_some())
-                .map(InputExpectationSource::Random),
-        )
-        .collect::<Vec<_>>();
-    let actual = expectations
-        .iter()
-        .map(|expectation| match expectation {
-            InputMaterializationExpectation::Signal(value) => (
-                &value.admitted.program_revision,
-                InputExpectationSource::Signal(&value.authored),
-            ),
-            InputMaterializationExpectation::Numerical(value) => {
-                let source = match &value.authored {
-                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
-                        value,
-                    ) => InputExpectationSource::Response(value),
-                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(value) => {
-                        InputExpectationSource::Random(value)
-                    }
-                };
-                (&value.admitted.invocation.program_revision, source)
-            }
-        })
-        .collect::<Vec<_>>();
-    if actual.len() != expected.len()
-        || actual
-            .iter()
-            .zip(expected)
-            .any(|((actual_revision, actual), expected)| {
-                *actual_revision != revision || *actual != expected
-            })
-    {
-        return Err(protocol(
-            "study input expectations differ from its authored generator inventory",
-        ));
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum InputExpectationSource<'a> {
-    Signal(&'a runmat_analysis_core::PhysicalSignal),
-    Response(&'a runmat_analysis_core::ResponseSpectrum),
-    Random(&'a runmat_analysis_core::RandomExcitationSpectrum),
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

@@ -54,18 +54,20 @@ pub(crate) async fn execute(
             });
         studies.push((study, study_root, meshing_index));
     }
-    let input_execution = super::input_materialization::execute(
+    let all_input_plans = studies
+        .iter()
+        .flat_map(|(_, study, _)| study.input_materializations.iter().cloned())
+        .collect::<Vec<_>>();
+    let input_execution = super::input_materialization::execute_ready(
         Arc::clone(&pool),
-        studies
-            .iter()
-            .flat_map(|(_, study, _)| study.input_materializations.iter().cloned()),
+        &all_input_plans,
         &decoded.artifact_access,
         &resources,
     );
     let meshing_execution =
         execute_shared_meshing(Arc::clone(&pool), meshing_requests, &run_id, &resources);
     let (input_outcomes, meshing_outcomes) = tokio::join!(input_execution, meshing_execution);
-    let input_outcomes = input_outcomes?;
+    let mut input_outcomes = input_outcomes?;
     let meshing_outcomes = meshing_outcomes?;
 
     if decoded.composition.fail_fast() {
@@ -102,6 +104,28 @@ pub(crate) async fn execute(
                 pool,
             );
         }
+    }
+
+    // Mesh-dependent plans cannot be deduplicated or submitted before their mesh succeeds.
+    for (group, meshing) in meshing_outcomes.iter().enumerate() {
+        let SharedMeshingOutcome::Completed(completed) = meshing else {
+            continue;
+        };
+        let group_plans = studies
+            .iter()
+            .filter(|(_, _, meshing_index)| *meshing_index == group)
+            .flat_map(|(_, study, _)| study.input_materializations.iter().cloned())
+            .collect::<Vec<_>>();
+        input_outcomes.extend(
+            super::input_materialization::execute_deferred(
+                Arc::clone(&pool),
+                &group_plans,
+                &completed.result.artifact,
+                &decoded.artifact_access,
+                &resources,
+            )
+            .await?,
+        );
     }
 
     let mut tasks = tokio::task::JoinSet::new();

@@ -166,68 +166,157 @@ fn prepared_program(
     }
 }
 
-pub(crate) fn validate_input_materialization_inventory(
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InputMaterializationPlanRequest {
+    Ready(Box<InputMaterializationRequest>),
+    DeferredSignal(Box<runmat_analysis_execution::FrozenDeferredSignal>),
+}
+
+impl InputMaterializationPlanRequest {
+    pub(crate) fn from_plan(
+        plan: &runmat_analysis_execution::InputMaterializationPlan,
+    ) -> NativeExecutionResult<Self> {
+        plan.validate_closed().map_err(protocol)?;
+        match plan {
+            runmat_analysis_execution::InputMaterializationPlan::Ready(value) => {
+                InputMaterializationRequest::from_prepared(value)
+                    .map(Box::new)
+                    .map(Self::Ready)
+            }
+            runmat_analysis_execution::InputMaterializationPlan::DeferredSignal(value) => {
+                Ok(Self::DeferredSignal(value.clone()))
+            }
+        }
+    }
+
+    pub(crate) fn to_plan(
+        &self,
+    ) -> NativeExecutionResult<runmat_analysis_execution::InputMaterializationPlan> {
+        let plan = match self {
+            Self::Ready(value) => value.to_prepared()?.into(),
+            Self::DeferredSignal(value) => {
+                runmat_analysis_execution::InputMaterializationPlan::DeferredSignal(value.clone())
+            }
+        };
+        plan.validate().map_err(protocol)?;
+        Ok(plan)
+    }
+}
+
+pub(crate) fn validate_input_materialization_plan_inventory(
     study: &RealizedStudy,
-    materializations: &[PreparedInputMaterialization],
+    plans: &[runmat_analysis_execution::InputMaterializationPlan],
     revision: &ProgramRevision,
 ) -> NativeExecutionResult<()> {
+    let mut identities = BTreeSet::new();
+    for plan in plans {
+        let identity = match plan {
+            runmat_analysis_execution::InputMaterializationPlan::Ready(value) => {
+                value.materialization_digest()
+            }
+            runmat_analysis_execution::InputMaterializationPlan::DeferredSignal(value) => {
+                value.identity().map_err(protocol)?
+            }
+        };
+        if !identities.insert(identity) {
+            return Err(protocol(
+                "study input plan inventory contains duplicated identities",
+            ));
+        }
+    }
+    let expectations = plans
+        .iter()
+        .map(|plan| plan.expectation().map_err(protocol))
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    validate_input_plan_expectation_inventory(study, &expectations, revision)
+}
+
+pub(crate) fn validate_input_plan_expectation_inventory(
+    study: &RealizedStudy,
+    expectations: &[runmat_analysis_execution::InputMaterializationPlanExpectation],
+    revision: &ProgramRevision,
+) -> NativeExecutionResult<()> {
+    for expectation in expectations {
+        expectation.validate().map_err(protocol)?;
+    }
     let models = study
         .included_models
         .iter()
         .chain(std::iter::once(&study.model))
         .collect::<Vec<_>>();
-    let mut signals = models
+    let expected = models
         .iter()
         .flat_map(|model| &model.signals)
-        .filter(|signal| signal.generator().is_some());
-    let mut responses = models
+        .filter(|signal| signal.generator().is_some())
+        .map(InputExpectationSource::Signal)
+        .chain(
+            models
+                .iter()
+                .flat_map(|model| &model.response_spectra)
+                .filter(|spectrum| spectrum.ordinates.generator().is_some())
+                .map(InputExpectationSource::Response),
+        )
+        .chain(
+            models
+                .iter()
+                .flat_map(|model| &model.random_excitations)
+                .filter(|spectrum| spectrum.spectral_density.generator().is_some())
+                .map(InputExpectationSource::Random),
+        )
+        .collect::<Vec<_>>();
+    let actual = expectations
         .iter()
-        .flat_map(|model| &model.response_spectra)
-        .filter(|spectrum| spectrum.ordinates.generator().is_some());
-    let mut random = models
-        .iter()
-        .flat_map(|model| &model.random_excitations)
-        .filter(|spectrum| spectrum.spectral_density.generator().is_some());
-    let expected_count =
-        signals.clone().count() + responses.clone().count() + random.clone().count();
-    if expected_count != materializations.len() {
+        .map(|expectation| match expectation {
+            runmat_analysis_execution::InputMaterializationPlanExpectation::DeferredSignal(
+                value,
+            ) => (
+                &value.admitted().program_revision,
+                InputExpectationSource::Signal(value.authored()),
+            ),
+            runmat_analysis_execution::InputMaterializationPlanExpectation::Ready(value) => {
+                match value.as_ref() {
+                    runmat_analysis_execution::InputMaterializationExpectation::Signal(value) => (
+                        &value.admitted.program_revision,
+                        InputExpectationSource::Signal(&value.authored),
+                    ),
+                    runmat_analysis_execution::InputMaterializationExpectation::Numerical(
+                        value,
+                    ) => {
+                        let source = match &value.authored {
+                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
+                        value,
+                    ) => InputExpectationSource::Response(value),
+                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(value) => {
+                        InputExpectationSource::Random(value)
+                    }
+                };
+                        (&value.admitted.invocation.program_revision, source)
+                    }
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    if actual.len() != expected.len()
+        || actual
+            .iter()
+            .zip(expected)
+            .any(|((actual_revision, actual), expected)| {
+                *actual_revision != revision || *actual != expected
+            })
+    {
         return Err(protocol(
-            "study input materializations differ from its authored generator inventory",
+            "study input expectations differ from its authored generator inventory",
         ));
     }
-    let mut identities = BTreeSet::new();
-    for prepared in materializations {
-        prepared.validate().map_err(protocol)?;
-        let (materialization_revision, identity, authored_matches) = match prepared {
-            PreparedInputMaterialization::Signal(prepared) => (
-                &prepared.admitted.program_revision,
-                prepared.admitted.materialization_identity.digest(),
-                signals.next() == Some(&prepared.authored),
-            ),
-            PreparedInputMaterialization::Numerical(prepared) => {
-                let authored_matches = match &prepared.authored {
-                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
-                        spectrum,
-                    ) => responses.next() == Some(spectrum.as_ref()),
-                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
-                        spectrum,
-                    ) => random.next() == Some(spectrum.as_ref()),
-                };
-                (
-                    &prepared.admitted.invocation.program_revision,
-                    prepared.admitted.materialization_identity.digest(),
-                    authored_matches,
-                )
-            }
-        };
-        if materialization_revision != revision || !authored_matches || !identities.insert(identity)
-        {
-            return Err(protocol(
-                "study input materialization inventory is inconsistent or duplicated",
-            ));
-        }
-    }
     Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum InputExpectationSource<'a> {
+    Signal(&'a runmat_analysis_core::PhysicalSignal),
+    Response(&'a runmat_analysis_core::ResponseSpectrum),
+    Random(&'a runmat_analysis_core::RandomExcitationSpectrum),
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

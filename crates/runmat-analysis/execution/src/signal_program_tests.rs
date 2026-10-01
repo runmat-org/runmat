@@ -162,6 +162,42 @@ fn task_context(scope: &[u8], pool: &[u8]) -> GeneratorExecutionContext {
 }
 
 #[test]
+fn descriptor_preserves_exact_callable_authority_without_preparing_chunks() {
+    let admitted = admitted();
+    let executable = executable(&admitted);
+    let descriptor = prepare_generator_descriptor(&admitted, executable.clone()).unwrap();
+    let prepared = prepare_generator_program(&admitted, executable.clone(), chunks(), &[]).unwrap();
+    assert_eq!(descriptor, prepared.descriptor);
+    assert!(prepare_generator_program(&admitted, executable.clone(), Vec::new(), &[]).is_err());
+
+    let mut foreign = admitted.clone();
+    foreign.callable.owner_identity = "foreign@1".into();
+    assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
+    let mut foreign = admitted.clone();
+    foreign.function = ProgramFunctionId(4);
+    assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
+    let mut foreign = admitted.clone();
+    foreign.executable_source_digest = digest("foreign-executable-source");
+    assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
+    let mut foreign = admitted.clone();
+    foreign.program_revision = ProgramRevision::new(
+        digest("foreign-graph"),
+        digest("foreign-project-source"),
+        ProgramEnvironment::new(1, 1, digest("runtime"), digest("catalog"), "matlab").unwrap(),
+    )
+    .unwrap();
+    assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
+    let mut foreign = admitted.clone();
+    foreign
+        .required_capabilities
+        .insert(runmat_types::CapabilityRequirement::Filesystem);
+    assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
+    let mut tampered = executable;
+    tampered.payloads[0].bytes.push(0);
+    assert!(prepare_generator_descriptor(&admitted, tampered).is_err());
+}
+
+#[test]
 fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
     let admitted = admitted();
     let prepared =
@@ -208,6 +244,98 @@ fn portable_program_requires_an_exact_immutable_input_inventory() {
 
     assert!(
         prepare_generator_program(&admitted, executable(&admitted), chunks(), &[input],).is_err()
+    );
+}
+
+#[test]
+fn ready_input_plan_retains_transport_authority_without_local_object_bytes() {
+    use runmat_analysis_core::{
+        GeneratorArgument, GeneratorEffectPolicy, PhysicalSignal, SignalArtifactDomain,
+        SignalArtifactRef, SignalRepresentation,
+    };
+    use runmat_execution::value::{
+        ValueAdmissionOwnership, ValueAdmissionReceipt, ValueAdmissionTransfer,
+        ValueCopyAccounting, VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
+    };
+    use runmat_types::{
+        MutationFact, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact,
+        ValueKindFact,
+    };
+
+    let admitted = admitted();
+    let input = external_input("signal-run");
+    let mut authored = crate::callable::executable::tests::signal();
+    let PhysicalSignal::Force(signal) = &mut authored else {
+        unreachable!();
+    };
+    let SignalRepresentation::Generator(generator) = &mut signal.representation else {
+        unreachable!();
+    };
+    generator.invocation.effects = GeneratorEffectPolicy::DeclaredImmutableArtifacts;
+    generator.invocation.arguments = vec![GeneratorArgument::Artifact(SignalArtifactRef {
+        artifact_id: "immutable-scale".into(),
+        content_digest: input.reference.logical_digest.to_string(),
+        schema: input.reference.value_schema.clone(),
+        domain: SignalArtifactDomain::Constant,
+        topology_digest: None,
+        sample_count: 1,
+    })];
+    let mut target = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Dense,
+    );
+    target.mutation = MutationFact::Immutable;
+    let planned = crate::plan_signal_generator_chunks(&authored, &admitted, None, 8192, |_| {
+        Ok(crate::ResolvedSignalArtifact {
+            value: ValuePayload::Object(Box::new(input.reference.clone())),
+            admission: ValueAdmissionReceipt {
+                schema_version: VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
+                source: target.clone(),
+                target: target.clone(),
+                ownership: ValueAdmissionOwnership::Moved,
+                conversion: None,
+                transfer: ValueAdmissionTransfer::None,
+                copies: ValueCopyAccounting::default(),
+            },
+        })
+    })
+    .unwrap();
+    let mut prepared = prepare_signal_materialization(
+        authored,
+        admitted.clone(),
+        executable(&admitted),
+        planned.chunks,
+        vec![input],
+        planned.input_admissions,
+        None,
+    )
+    .unwrap();
+    let original = crate::InputMaterializationPlan::from(
+        crate::PreparedInputMaterialization::Signal(Box::new(prepared.clone())),
+    );
+    let expectation = original.expectation().unwrap();
+    let descriptor = original.descriptor().unwrap();
+    // Native transport registers immutable objects separately and retains only their references
+    // in the decoded prepared input. Contract inspection must not demand duplicate local bytes.
+    prepared.input_objects.clear();
+    let transported = crate::InputMaterializationPlan::from(
+        crate::PreparedInputMaterialization::Signal(Box::new(prepared)),
+    );
+    transported.validate().unwrap();
+    assert!(transported.validate_closed().is_err());
+    assert_eq!(transported.input_references().len(), 1);
+    assert_eq!(transported.expectation().unwrap(), expectation);
+    assert_eq!(transported.descriptor().unwrap(), descriptor);
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
+        runmat_meshing_core::ElementOrder::Tet4,
+    );
+    assert_eq!(
+        transported.resolve(&mesh).unwrap().expectation().unwrap(),
+        expectation.resolve(&mesh).unwrap()
     );
 }
 

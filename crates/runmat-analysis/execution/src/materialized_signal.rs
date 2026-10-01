@@ -14,6 +14,10 @@ use crate::{AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult};
 #[path = "materialized_signal/topology_tests.rs"]
 mod topology_tests;
 
+#[cfg(test)]
+#[path = "materialized_signal/authority_tests.rs"]
+mod authority_tests;
+
 /// Derive the same provider-neutral numerical content identity used by generated realizations.
 ///
 /// Authorship and callable provenance deliberately do not enter this digest. Knot discontinuities
@@ -280,11 +284,13 @@ pub fn materialize_signal_for_solver(
     realization: &CanonicalSignalRealization,
 ) -> AnalysisBridgeResult<PhysicalSignal> {
     realization.validate()?;
+    validate_realization_artifact_inventory(authored, realization)?;
     if authored.signal_id() != &realization.signal_id
         || authored.quantity() != realization.quantity
         || authored.shape() != &realization.shape
         || authored.precision() != realization.precision
         || realization.materialization != admitted.materialization_identity
+        || realization.provenance != admitted.provenance
         || authored
             .generator()
             .map(|value| value.invocation.callable.display_name())
@@ -340,6 +346,52 @@ pub fn materialize_signal_for_solver(
         }
         PhysicalSignal::MassFlowRate(signal) => materialize!(MassFlowRate, signal),
     })
+}
+
+fn validate_realization_artifact_inventory(
+    authored: &PhysicalSignal,
+    realization: &CanonicalSignalRealization,
+) -> AnalysisBridgeResult<()> {
+    let generator = authored.generator().ok_or_else(|| {
+        AnalysisBridgeError::Invalid(
+            "only callable-backed signals can consume a generator realization".into(),
+        )
+    })?;
+    let mut expected = std::collections::BTreeMap::new();
+    for argument in &generator.invocation.arguments {
+        let runmat_analysis_core::GeneratorArgument::Artifact(artifact) = argument else {
+            continue;
+        };
+        let digest = artifact
+            .content_digest
+            .parse::<Digest>()
+            .map_err(AnalysisBridgeError::Platform)?;
+        let key = (artifact.artifact_id.as_str(), digest);
+        if expected
+            .insert(key, artifact.schema.as_str())
+            .is_some_and(|schema| schema != artifact.schema)
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "authored immutable signal input declarations conflict",
+            ));
+        }
+    }
+    let actual = realization
+        .input_admissions
+        .iter()
+        .map(|admission| {
+            (
+                (admission.artifact_id.as_str(), admission.logical_digest),
+                admission.value_schema.as_str(),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if actual != expected {
+        return Err(AnalysisBridgeError::Identity(
+            "canonical signal input admissions differ from authored immutable arguments",
+        ));
+    }
+    Ok(())
 }
 
 fn materialize_typed_signal<Q: CanonicalQuantity>(

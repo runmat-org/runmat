@@ -54,6 +54,13 @@ impl FrozenDeferredSignal {
         Ok(frozen)
     }
 
+    pub fn descriptor(
+        &self,
+    ) -> AnalysisBridgeResult<runmat_execution_artifact::ProgramExecutionDescriptor> {
+        self.validate()?;
+        crate::prepare_generator_descriptor(&self.admitted, self.executable.clone())
+    }
+
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
         if !matches!(
             self.authored.shape(),

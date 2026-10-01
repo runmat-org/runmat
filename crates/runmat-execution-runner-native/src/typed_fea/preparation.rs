@@ -153,7 +153,7 @@ pub async fn prepare_study(
                 .into_iter()
                 .map(|materialization| materialization.rebind(&access).map_err(|e| e.to_string()))
                 .collect::<Result<Vec<_>, String>>()?;
-            crate::input_materialization_contract::validate_input_materialization_inventory(
+            crate::input_materialization_contract::validate_input_materialization_plan_inventory(
                 &realized,
                 &input_materializations,
                 &revision,
@@ -185,7 +185,7 @@ pub async fn prepare_study(
                         .map_err(|error| error.to_string())
                 })
                 .collect::<Result<Vec<_>, String>>()?;
-            crate::input_materialization_contract::validate_input_materialization_inventory(
+            crate::input_materialization_contract::validate_input_materialization_plan_inventory(
                 &realized,
                 &input_materializations,
                 &revision,

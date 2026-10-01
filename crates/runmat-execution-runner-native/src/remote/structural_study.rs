@@ -65,9 +65,9 @@ pub(super) async fn execute_for_composition(
         run_id,
         resources,
     );
-    let inputs = super::input_materialization::execute(
+    let inputs = super::input_materialization::execute_ready(
         Arc::clone(&pool),
-        input_materializations.clone(),
+        &input_materializations,
         &artifact_access,
         resources,
     );
@@ -78,6 +78,22 @@ pub(super) async fn execute_for_composition(
             return Ok(super::exact_structural_study::composition(outcome))
         }
     };
+    let mut input_outcomes = input_outcomes?;
+    let deferred_outcomes = super::input_materialization::execute_deferred(
+        Arc::clone(&pool),
+        &input_materializations,
+        &completed.result.artifact,
+        &artifact_access,
+        resources,
+    )
+    .await?;
+    for (identity, outcome) in deferred_outcomes {
+        if input_outcomes.insert(identity, outcome).is_some() {
+            return Err(crate::NativeExecutionError::Protocol(
+                "ready and mesh-dependent input identities collide".into(),
+            ));
+        }
+    }
     let regions = match &completed.regions {
         MeshedGeometryRegions::Materialized(regions) => regions,
         MeshedGeometryRegions::ImporterAliases(_) => {
@@ -135,7 +151,7 @@ pub(super) async fn execute_for_composition(
         request,
         execution_view,
         completed,
-        &input_outcomes?,
+        &input_outcomes,
         resources,
         super::exact_structural_study::StructuralTransientRecoveryAdmission::Available {
             restored: recovered,

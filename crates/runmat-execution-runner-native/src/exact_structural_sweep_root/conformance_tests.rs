@@ -170,7 +170,8 @@ async fn run_exact_structural_sweep_conformance() {
         input_materializations: vec![
             runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
                 signal_materialization.clone(),
-            )),
+            ))
+            .into(),
         ],
         exact_meshing: exact_meshing.clone(),
     })
@@ -192,7 +193,8 @@ async fn run_exact_structural_sweep_conformance() {
         input_materializations: vec![
             runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
                 signal_materialization.clone(),
-            )),
+            ))
+            .into(),
         ],
         exact_meshing: exact_meshing.clone(),
     })
@@ -308,7 +310,8 @@ async fn run_exact_structural_sweep_conformance() {
         input_materializations: vec![
             runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
                 signal_materialization,
-            )),
+            ))
+            .into(),
         ],
         exact_meshing: exact_meshing.clone(),
     })
@@ -527,8 +530,13 @@ async fn run_exact_structural_sweep_conformance() {
         )
         .is_err());
         let mut wrong_signal = expectation.clone();
-        let runmat_analysis_execution::InputMaterializationExpectation::Signal(signal) =
+        let runmat_analysis_execution::InputMaterializationPlanExpectation::Ready(input) =
             &mut wrong_signal.studies[0].input_materializations[0]
+        else {
+            panic!("expected ready input materialization");
+        };
+        let runmat_analysis_execution::InputMaterializationExpectation::Signal(signal) =
+            input.as_mut()
         else {
             panic!("expected signal materialization");
         };

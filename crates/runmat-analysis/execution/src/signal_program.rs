@@ -403,14 +403,13 @@ pub struct GeneratorExecutionContext {
     pub priority: i16,
 }
 
-/// Bind admitted callable facts to the exact portable executable and produce one request per
-/// deterministic materialization chunk.
-pub fn prepare_generator_program(
+/// Bind admitted callable facts to the exact portable executable without planning materialization
+/// chunks. This descriptor preserves executable authority while topology-dependent cardinality is
+/// still deferred; it is not a prepared or executable materialization by itself.
+pub fn prepare_generator_descriptor(
     admitted: &impl GeneratorProgramAdmission,
     executable: ExecutableUnitEnvelope,
-    chunks: Vec<GeneratorChunk>,
-    input_objects: &[ProgramExecutionObject],
-) -> AnalysisBridgeResult<PreparedGeneratorProgram> {
+) -> AnalysisBridgeResult<ProgramExecutionDescriptor> {
     let admission = admitted.invocation_admission();
     executable.validate()?;
     let identity = &executable.manifest.identity;
@@ -430,11 +429,6 @@ pub fn prepare_generator_program(
     {
         return Err(AnalysisBridgeError::Identity(
             "portable executable omits admitted callable capabilities",
-        ));
-    }
-    if chunks.is_empty() {
-        return Err(AnalysisBridgeError::Invalid(
-            "generator program requires at least one chunk".into(),
         ));
     }
     let executable_bytes = executable.canonical_bytes()?;
@@ -465,7 +459,23 @@ pub fn prepare_generator_program(
         requested_outputs: 1,
     };
     descriptor.validate_for_portable_host()?;
+    Ok(descriptor)
+}
 
+/// Bind admitted callable facts to the exact portable executable and produce one request per
+/// deterministic materialization chunk.
+pub fn prepare_generator_program(
+    admitted: &impl GeneratorProgramAdmission,
+    executable: ExecutableUnitEnvelope,
+    chunks: Vec<GeneratorChunk>,
+    input_objects: &[ProgramExecutionObject],
+) -> AnalysisBridgeResult<PreparedGeneratorProgram> {
+    let descriptor = prepare_generator_descriptor(admitted, executable)?;
+    if chunks.is_empty() {
+        return Err(AnalysisBridgeError::Invalid(
+            "generator program requires at least one chunk".into(),
+        ));
+    }
     let mut input_references = input_objects
         .iter()
         .map(|object| {

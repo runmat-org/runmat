@@ -5,15 +5,15 @@ use runmat_analysis_execution::{
     admit_named_random_spectrum_generator, admit_named_response_spectrum_generator,
     admit_named_signal_generator, plan_random_spectrum_generator_chunks,
     plan_response_spectrum_generator_chunks, plan_signal_generator_chunks,
-    prepare_numerical_materialization, prepare_signal_materialization, NumericalGeneratorSource,
-    PreparedInputMaterialization,
+    prepare_numerical_materialization, prepare_signal_materialization, FrozenDeferredSignal,
+    InputMaterializationPlan, NumericalGeneratorSource, PreparedInputMaterialization,
 };
 use runmat_execution::value::ValueLimits;
 
 pub(super) async fn prepare_input_materializations(
     source: &runmat_core::CheckedFeaSessionSource,
     study: &RealizedStudy,
-) -> Result<Vec<PreparedInputMaterialization>, String> {
+) -> Result<Vec<InputMaterializationPlan>, String> {
     let models = study
         .included_models
         .iter()
@@ -42,6 +42,22 @@ pub(super) async fn prepare_input_materializations(
             Some(&identity.source_digest),
         )
         .await?;
+        if matches!(
+            signal.shape(),
+            runmat_analysis_core::SignalShape::DeferredTopologyField { .. }
+        ) {
+            let frozen = FrozenDeferredSignal::prepare(
+                signal.clone(),
+                compiled.revision,
+                compiled.callable,
+                compiled.executable,
+                BTreeSet::new(),
+                maximum_inline_result_bytes,
+            )
+            .map_err(|error| error.to_string())?;
+            prepared.push(InputMaterializationPlan::DeferredSignal(Box::new(frozen)));
+            continue;
+        }
         let admitted = admit_named_signal_generator(
             signal,
             compiled.revision,
@@ -69,9 +85,7 @@ pub(super) async fn prepare_input_materializations(
             None,
         )
         .map_err(|error| error.to_string())?;
-        prepared.push(PreparedInputMaterialization::Signal(Box::new(
-            materialization,
-        )));
+        prepared.push(PreparedInputMaterialization::Signal(Box::new(materialization)).into());
     }
 
     for spectrum in models
@@ -118,9 +132,7 @@ pub(super) async fn prepare_input_materializations(
             plan.input_admissions,
         )
         .map_err(|error| error.to_string())?;
-        prepared.push(PreparedInputMaterialization::Numerical(Box::new(
-            materialization,
-        )));
+        prepared.push(PreparedInputMaterialization::Numerical(Box::new(materialization)).into());
     }
 
     for spectrum in models
@@ -167,9 +179,7 @@ pub(super) async fn prepare_input_materializations(
             plan.input_admissions,
         )
         .map_err(|error| error.to_string())?;
-        prepared.push(PreparedInputMaterialization::Numerical(Box::new(
-            materialization,
-        )));
+        prepared.push(PreparedInputMaterialization::Numerical(Box::new(materialization)).into());
     }
 
     Ok(prepared)

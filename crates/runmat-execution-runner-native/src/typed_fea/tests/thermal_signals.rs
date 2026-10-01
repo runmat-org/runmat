@@ -158,6 +158,15 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
     let prepared = crate::typed_fea::input::prepare_input_materializations(&checked, &realized)
         .await
         .unwrap();
+    let prepared = prepared
+        .into_iter()
+        .map(|plan| match plan {
+            runmat_analysis_execution::InputMaterializationPlan::Ready(value) => *value,
+            runmat_analysis_execution::InputMaterializationPlan::DeferredSignal(_) => {
+                panic!("uniform inputs must not require mesh")
+            }
+        })
+        .collect::<Vec<_>>();
     assert_eq!(prepared.len(), 2);
     let mut completed = Vec::new();
     for input in &prepared {

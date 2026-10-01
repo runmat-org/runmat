@@ -103,9 +103,14 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
         mesh: &meshing.artifact,
     })
     .map_err(protocol)?;
+    let resolved_inputs = decoded
+        .input_materializations
+        .iter()
+        .map(|plan| plan.resolve(&meshing.artifact).map_err(protocol))
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
     let completed_inputs = crate::input_materialization::execute_locally(
         analysis_config.clone(),
-        &decoded.input_materializations,
+        &resolved_inputs,
         &composition_store,
         &decoded.artifact_access,
         workers,

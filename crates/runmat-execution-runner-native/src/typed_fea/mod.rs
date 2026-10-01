@@ -19,6 +19,10 @@ mod tests;
 #[path = "tests/thermal_signals.rs"]
 mod thermal_signals;
 
+#[cfg(test)]
+#[path = "tests/spatial_signals.rs"]
+mod spatial_signals;
+
 pub use acoustic_execution::CompletedAuthoredAcousticStudy;
 pub use electrical_execution::CompletedAuthoredElectricalStudy;
 pub use geometry::MaterializedFeaGeometry;

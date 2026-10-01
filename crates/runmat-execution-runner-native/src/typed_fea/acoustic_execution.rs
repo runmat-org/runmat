@@ -118,9 +118,17 @@ pub(super) async fn execute(
         mesh: &geometry.meshing.artifact,
     })
     .map_err(|e| e.to_string())?;
+    let resolved_inputs = prepared
+        .input_materializations
+        .iter()
+        .map(|plan| {
+            plan.resolve(&geometry.meshing.artifact)
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let materialized = crate::input_materialization::execute_locally(
         geometry.analysis_config.clone(),
-        &prepared.input_materializations,
+        &resolved_inputs,
         &store,
         &prepared.artifact_access,
         workers,

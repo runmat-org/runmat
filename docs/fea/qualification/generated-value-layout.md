@@ -1,8 +1,9 @@
 # Generated tensor and spatial-field value layout
 
-Status: bounded shared input-layout correction. No formulation, stage or production
-promotion; whole-study post-mesh scheduling and preprocessing resource,
-publication and restart gates remain open.
+Status: bounded shared input-layout and deferred-input graph integration. No
+formulation, stage or production promotion. Arbitrary-mesh generator arguments,
+exact preprocessing resources, positive whole-study spatial solves and restart
+qualification remain open.
 
 Runtime MATLAB dense arrays use column-major storage. Generator output axes are
 sample-leading: `[samples, tail...]`; canonical signal values are sample-major with
@@ -126,8 +127,37 @@ are not admitted by this named deferred-input contract.
 The process matrix now exercises actual named field compilation, frozen-contract
 serialization/reopening, resolution and canonical values across all four placements.
 The ordinary vector fixture still covers a captured anonymous callable. The shared
-frozen-project fixture compiler replaces duplicated preparation. This remains a
-fixture-mesh chain, not whole-study root transport, post-mesh scheduling, mesh-specific
-sweep deduplication, publication/restart or exact preprocessing resource admission.
+frozen-project fixture compiler replaces duplicated preparation. These placement
+cases remain a fixture-mesh chain, not whole-study spatial solve/restart evidence.
 In particular, thermal excitation consumers still require scalar samples: Node1
 temperature generator transport does not qualify a thermal Node1 excitation solve.
+
+## Native two-phase input graph
+
+`InputMaterializationPlan` carries either a fully prepared Ready input or original
+frozen deferred intent. Source and exact study roots transport that distinction;
+they do not manufacture chunks before meshing. Local structural, thermal and acoustic
+composition resolves plans against the authenticated mesh before applying canonical
+inputs and admitting numerical work. Existing electrical no-generator admission is
+unchanged. Remote study and sweep coordinators retain topology-free input/mesh
+concurrency; mesh-dependent tasks run only after successful meshing. Sweep identities
+and deduplication are resolved within successful mesh groups, not by authored intent
+alone. Different request groups returning an identical mesh may repeat input work;
+cross-group resolved deduplication is not claimed.
+
+Cold imports retain the original source comparison, then independently derive input
+expectations from original frozen intent and returned verified mesh. Numerical
+projection checks admitted provenance and exact authored artifact identity/digest/schema
+inventory, including rejection of metadata tampering that leaves numerical identity
+unchanged. Ready inputs may transport references separately from bytes: producer
+closure checks and runtime registered-payload validation remain required; decoding
+references is not itself proof of a local byte closure.
+
+The native OCCT test follows checked imported Node3 source through root transport,
+constructed CAD, exact meshing and authenticated resolution, executes the named
+callable, and rejects its deliberately wrong one-row result. No implicit broadcast
+is permitted. This is authority and invalid-shape evidence, not a positive spatial
+structural solve. The generator wire currently passes its sample axis and authored
+arguments, not mesh cardinality or coordinates; arbitrary-mesh sizing/coordinate
+arguments, direct deferred artifacts, exact resource admission, cold positive
+whole-study spatial results and failure/replacement restart still need qualification.

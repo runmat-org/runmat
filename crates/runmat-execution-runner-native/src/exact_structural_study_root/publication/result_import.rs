@@ -147,12 +147,14 @@ pub fn import_exact_structural_study_result(
         .iter()
         .zip(&expected.input_materializations)
     {
+        // Resolve from the retained original intent, never from returned admission facts.
+        let prepared = prepared.resolve(&mesh.artifact).map_err(protocol)?;
         let manifest =
             runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(&read(
                 source, root,
             )?)
             .map_err(protocol)?;
-        let kind = match prepared {
+        let kind = match &prepared {
             runmat_analysis_execution::InputMaterializationExpectation::Signal(_) => {
                 AnalysisNumericalObjectKind::Signal
             }
@@ -188,7 +190,7 @@ pub fn import_exact_structural_study_result(
             }
             admitted_input_objects.push(reference);
         }
-        match prepared {
+        match &prepared {
             runmat_analysis_execution::InputMaterializationExpectation::Signal(prepared) => {
                 prepared
                     .validate_for_mesh(&mesh.artifact)

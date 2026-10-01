@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_execution::{
-    prepare_analysis_host_program, AnalysisHostProgramArtifact, PreparedInputMaterialization,
+    prepare_analysis_host_program, AnalysisHostProgramArtifact, InputMaterializationPlan,
     StructuralStudyWorkloads,
 };
 use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
@@ -25,7 +25,7 @@ use super::{
     EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE, ROOT_DOMAIN, ROOT_MEDIA_TYPE, ROOT_PREFIX,
     ROOT_PROGRAM_BYTES, ROOT_VALUE_SCHEMA,
 };
-use crate::input_materialization_contract::InputMaterializationRequest;
+use crate::input_materialization_contract::InputMaterializationPlanRequest;
 use crate::{decode_exact_meshing_root, NativeExecutionResult, PreparedExactMeshingRoot};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -38,7 +38,7 @@ struct ExactStructuralStudyRootRequest {
     workloads: StructuralStudyWorkloads,
     local_execution: LocalExecutionPlan,
     analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    input_materializations: Vec<InputMaterializationRequest>,
+    input_materializations: Vec<InputMaterializationPlanRequest>,
     exact_meshing: ProgramExecutionDescriptor,
     exact_argument_count: u32,
     materialization_argument_count: u32,
@@ -55,7 +55,7 @@ impl ExactStructuralStudyRootRequest {
         let prepared_inputs = self
             .input_materializations
             .iter()
-            .map(InputMaterializationRequest::to_prepared)
+            .map(InputMaterializationPlanRequest::to_plan)
             .collect::<NativeExecutionResult<Vec<_>>>()?;
         validate_input_materialization_inventory(
             &self.workloads,
@@ -64,11 +64,11 @@ impl ExactStructuralStudyRootRequest {
         )?;
         let materialization_reference_count = prepared_inputs
             .iter()
-            .flat_map(|prepared| prepared.program().input_references.iter())
+            .flat_map(|prepared| prepared.input_references().iter())
             .map(|reference| reference.id)
             .collect::<BTreeSet<_>>()
             .len();
-        if self.schema_version != 2
+        if self.schema_version != 3
             || self.authored_study_digest.bytes() == &[0; 32]
             || self.geometry_source_digest.bytes() == &[0; 32]
             || self
@@ -108,7 +108,7 @@ pub struct ExactStructuralStudyRootPreparation {
     pub workloads: StructuralStudyWorkloads,
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    pub input_materializations: Vec<PreparedInputMaterialization>,
+    pub input_materializations: Vec<InputMaterializationPlan>,
     pub exact_meshing: PreparedExactMeshingRoot,
 }
 
@@ -127,7 +127,7 @@ pub struct PreparedExactStructuralStudyRoot {
     artifact_access: ArtifactAccess,
     required_programs: Vec<RequiredStudyProgram>,
     expected_meshing_request: MeshingRequest,
-    input_expectations: Vec<runmat_analysis_execution::InputMaterializationExpectation>,
+    input_expectations: Vec<runmat_analysis_execution::InputMaterializationPlanExpectation>,
 }
 
 impl PreparedExactStructuralStudyRoot {
@@ -213,7 +213,7 @@ pub struct DecodedExactStructuralStudyRoot {
     pub workloads: StructuralStudyWorkloads,
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    pub input_materializations: Vec<PreparedInputMaterialization>,
+    pub input_materializations: Vec<InputMaterializationPlan>,
     pub exact_meshing: ProgramExecutionRequest,
     pub meshing_request: MeshingRequest,
     pub artifact_access: ArtifactAccess,
@@ -270,7 +270,7 @@ pub fn prepare_exact_structural_study_root(
     }
     let input_expectations = input_materializations
         .iter()
-        .map(PreparedInputMaterialization::expectation)
+        .map(InputMaterializationPlan::expectation)
         .collect::<Result<Vec<_>, _>>()
         .map_err(protocol)?;
     if exact_request.recipe.program_revision != program_revision {
@@ -286,7 +286,7 @@ pub fn prepare_exact_structural_study_root(
         }
     }
     let root = ExactStructuralStudyRootRequest {
-        schema_version: 2,
+        schema_version: 3,
         authored_study_digest,
         frozen_project_digest,
         geometry_source_digest,
@@ -295,7 +295,7 @@ pub fn prepare_exact_structural_study_root(
         analysis_accelerator_requests,
         input_materializations: input_materializations
             .iter()
-            .map(InputMaterializationRequest::from_prepared)
+            .map(InputMaterializationPlanRequest::from_plan)
             .collect::<NativeExecutionResult<Vec<_>>>()?,
         exact_meshing: descriptor(&exact_request),
         exact_argument_count: u32::try_from(exact_request.arguments.len()).map_err(protocol)?,
@@ -358,9 +358,10 @@ pub fn prepare_exact_structural_study_root(
         required_programs.push(RequiredStudyProgram { recipe, artifact });
     }
     for materialization in &input_materializations {
+        let descriptor = materialization.descriptor().map_err(protocol)?;
         required_programs.push(RequiredStudyProgram {
-            recipe: materialization.program().descriptor.recipe.clone(),
-            artifact: materialization.program().descriptor.artifact.clone(),
+            recipe: descriptor.recipe,
+            artifact: descriptor.artifact,
         });
     }
     let AnalysisHostProgramArtifact { recipe, artifact } =
@@ -447,11 +448,11 @@ pub fn decode_exact_structural_study_root(
     let input_materializations = root
         .input_materializations
         .iter()
-        .map(InputMaterializationRequest::to_prepared)
+        .map(InputMaterializationPlanRequest::to_plan)
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let expected_materialization_references = input_materializations
         .iter()
-        .flat_map(|prepared| prepared.program().input_references.iter())
+        .flat_map(|prepared| prepared.input_references().iter())
         .map(|reference| (reference.id, reference))
         .collect::<BTreeMap<_, _>>();
     let transported_materialization_references = materialization_arguments
@@ -494,7 +495,7 @@ pub fn decode_exact_structural_study_root(
 
 fn validate_input_materialization_inventory(
     workloads: &StructuralStudyWorkloads,
-    materializations: &[PreparedInputMaterialization],
+    materializations: &[InputMaterializationPlan],
     program_revision: &ProgramRevision,
 ) -> NativeExecutionResult<()> {
     let model = workloads.authored_model().map_err(protocol)?;
@@ -536,26 +537,33 @@ fn validate_input_materialization_inventory(
     for prepared in materializations {
         prepared.validate().map_err(protocol)?;
         let (revision, identity, authored_matches) = match prepared {
-            PreparedInputMaterialization::Signal(prepared) => (
-                &prepared.admitted.program_revision,
-                prepared.admitted.materialization_identity.digest(),
-                signals.next() == Some(&prepared.authored),
+            InputMaterializationPlan::DeferredSignal(frozen) => (
+                &frozen.admitted().program_revision,
+                frozen.identity().map_err(protocol)?,
+                signals.next() == Some(frozen.authored()),
             ),
-            PreparedInputMaterialization::Numerical(prepared) => {
-                let matches = match &prepared.authored {
-                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
-                        spectrum,
-                    ) => responses.next() == Some(spectrum.as_ref()),
-                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
-                        spectrum,
-                    ) => random.next() == Some(spectrum.as_ref()),
-                };
-                (
-                    &prepared.admitted.invocation.program_revision,
+            InputMaterializationPlan::Ready(prepared) => match prepared.as_ref() {
+                runmat_analysis_execution::PreparedInputMaterialization::Signal(prepared) => (
+                    &prepared.admitted.program_revision,
                     prepared.admitted.materialization_identity.digest(),
-                    matches,
-                )
-            }
+                    signals.next() == Some(&prepared.authored),
+                ),
+                runmat_analysis_execution::PreparedInputMaterialization::Numerical(prepared) => {
+                    let matches = match &prepared.authored {
+                        runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
+                            spectrum,
+                        ) => responses.next() == Some(spectrum.as_ref()),
+                        runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
+                            spectrum,
+                        ) => random.next() == Some(spectrum.as_ref()),
+                    };
+                    (
+                        &prepared.admitted.invocation.program_revision,
+                        prepared.admitted.materialization_identity.digest(),
+                        matches,
+                    )
+                }
+            },
         };
         if revision != program_revision || !authored_matches || !identities.insert(identity) {
             return Err(protocol(

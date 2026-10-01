@@ -907,7 +907,7 @@ pub struct ExactStructuralStudyResultExpectation {
     pub workloads: StructuralStudyWorkloads,
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<runmat_execution::resource::AcceleratorRequest>,
-    pub input_materializations: Vec<runmat_analysis_execution::InputMaterializationExpectation>,
+    pub input_materializations: Vec<runmat_analysis_execution::InputMaterializationPlanExpectation>,
     pub expected_meshing_request: MeshingRequest,
 }
 
@@ -953,12 +953,25 @@ impl ExactStructuralStudyResultExpectation {
         for materialization in &self.input_materializations {
             materialization.validate().map_err(protocol)?;
             let (revision, matches) = match materialization {
-                runmat_analysis_execution::InputMaterializationExpectation::Signal(expected) => (
-                    &expected.admitted.program_revision,
-                    signals.next() == Some(&expected.authored),
+                runmat_analysis_execution::InputMaterializationPlanExpectation::DeferredSignal(
+                    frozen,
+                ) => (
+                    &frozen.admitted().program_revision,
+                    signals.next() == Some(frozen.authored()),
                 ),
-                runmat_analysis_execution::InputMaterializationExpectation::Numerical(expected) => {
-                    let matches = match &expected.authored {
+                runmat_analysis_execution::InputMaterializationPlanExpectation::Ready(
+                    materialization,
+                ) => match materialization.as_ref() {
+                    runmat_analysis_execution::InputMaterializationExpectation::Signal(
+                        expected,
+                    ) => (
+                        &expected.admitted.program_revision,
+                        signals.next() == Some(&expected.authored),
+                    ),
+                    runmat_analysis_execution::InputMaterializationExpectation::Numerical(
+                        expected,
+                    ) => {
+                        let matches = match &expected.authored {
                         runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
                             spectrum,
                         ) => responses.next() == Some(spectrum.as_ref()),
@@ -966,8 +979,9 @@ impl ExactStructuralStudyResultExpectation {
                             spectrum,
                         ) => random.next() == Some(spectrum.as_ref()),
                     };
-                    (&expected.admitted.invocation.program_revision, matches)
-                }
+                        (&expected.admitted.invocation.program_revision, matches)
+                    }
+                },
             };
             if revision != &self.program_revision || !matches {
                 return Err(protocol(

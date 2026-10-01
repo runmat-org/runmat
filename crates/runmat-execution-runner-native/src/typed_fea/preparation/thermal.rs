@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AuthoredMaterialRef, MaterialModel, RealizedStudy};
-use runmat_analysis_execution::PreparedInputMaterialization;
+use runmat_analysis_execution::InputMaterializationPlan;
 use runmat_analysis_fea::{
     planning::resource::LocalExecutionPlan, study::ThermalStudyPlanningPolicy,
 };
@@ -18,7 +18,7 @@ pub struct PreparedAuthoredThermalStudy {
     pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
     pub program_revision: ProgramRevision,
     pub artifact_access: ArtifactAccess,
-    pub input_materializations: Vec<PreparedInputMaterialization>,
+    pub input_materializations: Vec<InputMaterializationPlan>,
     pub planning: ThermalStudyPlanningPolicy,
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,

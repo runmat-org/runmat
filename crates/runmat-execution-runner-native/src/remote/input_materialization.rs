@@ -27,15 +27,55 @@ pub(super) enum RemoteInputMaterializationOutcome {
     Indeterminate(String),
 }
 
+/// Topology-independent inputs retain concurrency with geometry and meshing.
+pub(super) async fn execute_ready(
+    pool: Arc<RemotePoolDriver>,
+    plans: &[runmat_analysis_execution::InputMaterializationPlan],
+    access: &ArtifactAccess,
+    resources: &AllocationResources,
+) -> NativeExecutionResult<BTreeMap<runmat_execution::Digest, RemoteInputMaterializationOutcome>> {
+    let ready = plans
+        .iter()
+        .filter(|plan| !plan.requires_mesh())
+        .map(|plan| match plan {
+            runmat_analysis_execution::InputMaterializationPlan::Ready(value) => {
+                plan.validate().map_err(protocol)?;
+                Ok(value.as_ref().clone())
+            }
+            runmat_analysis_execution::InputMaterializationPlan::DeferredSignal(_) => Err(
+                protocol("deferred input cannot execute without mesh authority"),
+            ),
+        })
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    execute(pool, ready, access, resources, None).await
+}
+
+/// Called only after successful authenticated meshing. Identities become mesh-specific here.
+pub(super) async fn execute_deferred(
+    pool: Arc<RemotePoolDriver>,
+    plans: &[runmat_analysis_execution::InputMaterializationPlan],
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    access: &ArtifactAccess,
+    resources: &AllocationResources,
+) -> NativeExecutionResult<BTreeMap<runmat_execution::Digest, RemoteInputMaterializationOutcome>> {
+    let resolved = plans
+        .iter()
+        .filter(|plan| plan.requires_mesh())
+        .map(|plan| plan.resolve(mesh).map_err(protocol))
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    execute(pool, resolved, access, resources, Some(mesh)).await
+}
+
 pub(super) async fn execute(
     pool: Arc<RemotePoolDriver>,
     materializations: impl IntoIterator<Item = PreparedInputMaterialization>,
     artifact_access: &ArtifactAccess,
     resources: &AllocationResources,
+    mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
 ) -> NativeExecutionResult<BTreeMap<runmat_execution::Digest, RemoteInputMaterializationOutcome>> {
     let mut unique = BTreeMap::new();
     for prepared in materializations {
-        crate::input_materialization::validate_materialization_mesh(&prepared, None)?;
+        crate::input_materialization::validate_materialization_mesh(&prepared, mesh)?;
         for object in prepared.input_objects() {
             pool.register_value_object(object.reference.clone(), object.bytes.clone())?;
         }
@@ -158,7 +198,7 @@ pub(super) async fn execute(
                 .map(|chunk| chunk.plan.clone())
                 .collect::<Vec<_>>();
             let (input, kind, identity, bytes) =
-                materialize_input(&prepared, &chunks, &outputs, None)?;
+                materialize_input(&prepared, &chunks, &outputs, mesh)?;
             let objects = prepare_analysis_objects(
                 kind,
                 identity,
