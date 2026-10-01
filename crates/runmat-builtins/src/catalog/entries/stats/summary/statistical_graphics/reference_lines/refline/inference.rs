@@ -32,17 +32,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    // Two scalar numbers remain ambiguous: the first might be a live axes
-    // handle. A single two-element numeric vector is not an axes handle.
-    let coefficient_vector = request.arguments.len() == 1
-        && request.arguments.first().is_some_and(|fact| {
-            matches!(fact.kind, ValueKindFact::Numeric(_))
-                && fact
-                    .numeric()
-                    .is_some_and(|n| n.domain == NumericDomain::Real)
-                && fact.shape.element_count() == Some(2)
-        });
-    let proven = diagnostics.is_empty() && (request.arguments.is_empty() || coefficient_vector);
+    // The first scalar may be a live axes handle, and the number of created
+    // lines depends on figure state. Every successful route nevertheless
+    // publishes host numeric line handles.
+    let proven = diagnostics.is_empty();
     let mut contract = CallContract::fixed(vec![if proven {
         facts::handles()
     } else {

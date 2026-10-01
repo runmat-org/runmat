@@ -26,9 +26,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    // The runtime may find no eligible series, one fit, or multiple fits.
-    // A scalar numeric fact alone cannot prove an actual live axes identity.
-    let proven = diagnostics.is_empty() && request.arguments.is_empty();
+    // Every successful route returns host numeric line handles. A scalar
+    // numeric fact cannot prove a live axes identity or the handle count.
+    let proven = diagnostics.is_empty();
     let mut contract = CallContract::fixed(vec![if proven {
         facts::handles()
     } else {

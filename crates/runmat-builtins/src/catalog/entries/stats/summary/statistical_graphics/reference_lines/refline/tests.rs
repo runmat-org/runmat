@@ -37,9 +37,23 @@ fn vector_coefficients_prove_host_double_handle_class_not_count() {
 }
 
 #[test]
-fn two_scalar_args_remain_axes_ambiguous_and_known_bad_class_fails() {
+fn axes_ambiguous_and_unknown_inputs_still_have_conditional_handle_class() {
     let scalars = call(vec![number(ShapeFact::Scalar), number(ShapeFact::Scalar)]);
-    assert!(matches!(scalars.outputs[0].kind, ValueKindFact::Unknown));
+    assert_eq!(
+        scalars.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(scalars.outputs[0].shape, ShapeFact::Unknown);
+    let unknown = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
+    let possible_axes = call(vec![
+        unknown,
+        number(ShapeFact::from(vec![Some(1), Some(2)])),
+    ]);
+    assert!(possible_axes.diagnostics.is_empty());
+    assert_eq!(
+        possible_axes.outputs[0].numeric().unwrap().domain,
+        NumericDomain::Real
+    );
     let complex = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Double,

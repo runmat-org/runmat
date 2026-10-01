@@ -34,6 +34,13 @@ fn no_output_and_handle_forms_keep_ui_effect_and_unknown_handle_count() {
 
 #[test]
 fn invalid_axes_and_output_count_never_prove_extra_results() {
+    let possible_axes = call(vec![number(ShapeFact::Scalar)], 1);
+    assert!(possible_axes.diagnostics.is_empty());
+    assert_eq!(
+        possible_axes.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(possible_axes.outputs[0].shape, ShapeFact::Unknown);
     let vector = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Double,
