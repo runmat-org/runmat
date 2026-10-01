@@ -17,7 +17,7 @@ pub(super) fn resolve_target(
     request: &ObservationRequest,
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     connector_plan: Option<&CanonicalStructuralConnectorPlan>,
     maximum_selected_entities: usize,

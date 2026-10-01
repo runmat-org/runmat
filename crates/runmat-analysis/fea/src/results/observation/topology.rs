@@ -9,39 +9,48 @@ use crate::{
         explicit_element_identity, node_space::CanonicalStructuralNodeSpace,
         CanonicalStructuralTopologyIdentity,
     },
-    results::field::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain},
+    results::field::{
+        RecoveredFieldEntityCounts, RecoveredFieldEntityDomain, SampledVolumeFieldTopology,
+    },
     topology::{quadrature::TETRAHEDRON_FOUR_POINT_RULE, AnalysisProjection},
 };
 
 use super::ObservationError;
 
 #[derive(Clone, Debug)]
-pub(crate) struct StructuralObservationNode {
+pub(crate) struct ObservationNode {
     pub identity: StableDigest,
     pub coordinates_m: [f64; 3],
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StructuralObservationElement {
+pub(crate) struct ObservationElement {
     pub identity: StableDigest,
     pub region_id: String,
     pub centroid_m: [f64; 3],
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StructuralObservationTopology {
-    pub identity: CanonicalStructuralTopologyIdentity,
+pub(crate) struct ObservationTopology {
+    pub identity: Option<CanonicalStructuralTopologyIdentity>,
     topology_digest: Digest,
-    pub nodes: Vec<StructuralObservationNode>,
-    pub volume_elements: Vec<StructuralObservationElement>,
-    pub volume_integration_points: Vec<StructuralObservationElement>,
-    pub beam_elements: Vec<StructuralObservationElement>,
-    pub shell_elements: Vec<StructuralObservationElement>,
+    pub nodes: Vec<ObservationNode>,
+    pub volume_elements: Vec<ObservationElement>,
+    pub volume_integration_points: Vec<ObservationElement>,
+    pub oriented_edges: Vec<ObservationElement>,
+    pub beam_elements: Vec<ObservationElement>,
+    pub shell_elements: Vec<ObservationElement>,
     pub solid_projection: Option<AnalysisProjection>,
+    pub sampling: Option<SampledVolumeFieldTopology>,
+    integration_points_by_parent: Vec<Vec<usize>>,
     node_selectors: BTreeMap<u64, Vec<usize>>,
 }
 
-impl StructuralObservationTopology {
+mod sampled;
+#[cfg(test)]
+mod tests;
+
+impl ObservationTopology {
     pub fn from_projection(projection: &AnalysisProjection) -> Self {
         let node_selectors = projection
             .nodes
@@ -51,14 +60,14 @@ impl StructuralObservationTopology {
             .collect();
         let volume_integration_points = integration_point_elements(projection);
         Self {
-            identity: CanonicalStructuralTopologyIdentity::Solid {
+            identity: Some(CanonicalStructuralTopologyIdentity::Solid {
                 mesh_digest: projection.mesh_digest,
-            },
+            }),
             topology_digest: projection.projection_digest,
             nodes: projection
                 .nodes
                 .iter()
-                .map(|node| StructuralObservationNode {
+                .map(|node| ObservationNode {
                     identity: node.stable_identity,
                     coordinates_m: node.coordinates_m,
                 })
@@ -66,16 +75,19 @@ impl StructuralObservationTopology {
             volume_elements: projection
                 .elements
                 .iter()
-                .map(|element| StructuralObservationElement {
+                .map(|element| ObservationElement {
                     identity: element.stable_identity,
                     region_id: String::new(),
                     centroid_m: element.centroid_m,
                 })
                 .collect(),
             volume_integration_points,
+            oriented_edges: Vec::new(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             solid_projection: Some(projection.clone()),
+            sampling: None,
+            integration_points_by_parent: structural_integration_indices(projection),
             node_selectors,
         }
     }
@@ -85,7 +97,7 @@ impl StructuralObservationTopology {
             nodes: self.nodes.len(),
             volume_elements: self.volume_elements.len(),
             volume_integration_points: self.volume_integration_points.len(),
-            oriented_edges: 0,
+            oriented_edges: self.oriented_edges.len(),
             beam_elements: self.beam_elements.len(),
             shell_elements: self.shell_elements.len(),
             connectors: 0,
@@ -109,7 +121,15 @@ impl StructuralObservationTopology {
                     "structural observations require solid or explicit topology",
                 ),
             )?;
-            topology.topology_digest = topology.identity.discretization_digest();
+            let identity = CanonicalStructuralTopologyIdentity::Solid {
+                mesh_digest: projection
+                    .as_ref()
+                    .ok_or(ObservationError::Unsupported(
+                        "structural observations require solid topology",
+                    ))?
+                    .mesh_digest,
+            };
+            topology.topology_digest = identity.discretization_digest();
             return Ok(topology);
         }
         let Some(structural) = structural else {
@@ -154,12 +174,12 @@ impl StructuralObservationTopology {
             indices.dedup();
         }
         let mut topology = Self {
-            identity: node_space.identity,
+            identity: Some(node_space.identity),
             topology_digest: node_space.identity.discretization_digest(),
             nodes: node_space
                 .nodes
                 .iter()
-                .map(|node| StructuralObservationNode {
+                .map(|node| ObservationNode {
                     identity: node.identity,
                     coordinates_m: node.coordinates_m,
                 })
@@ -170,7 +190,7 @@ impl StructuralObservationTopology {
                     projection
                         .elements
                         .iter()
-                        .map(|element| StructuralObservationElement {
+                        .map(|element| ObservationElement {
                             identity: element.stable_identity,
                             region_id: String::new(),
                             centroid_m: element.centroid_m,
@@ -184,6 +204,12 @@ impl StructuralObservationTopology {
                 .unwrap_or_default(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
+            oriented_edges: Vec::new(),
+            sampling: None,
+            integration_points_by_parent: projection
+                .as_ref()
+                .map(structural_integration_indices)
+                .unwrap_or_default(),
             solid_projection: projection,
             node_selectors,
         };
@@ -209,7 +235,7 @@ impl StructuralObservationTopology {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let centroid_m = centroid(&node_indices, &topology.nodes)?;
-            let projected = StructuralObservationElement {
+            let projected = ObservationElement {
                 identity: explicit_element_identity(
                     explicit_digest,
                     &element.element_id,
@@ -232,6 +258,38 @@ impl StructuralObservationTopology {
         self.topology_digest
     }
 
+    /// Expand actual parent membership, not a solver-specific fixed sampling count.
+    /// Reject the complete selection before allocating its output indices.
+    pub fn integration_indices(
+        &self,
+        parents: impl Iterator<Item = usize> + Clone,
+        maximum: usize,
+    ) -> Result<Vec<usize>, ObservationError> {
+        let count = parents.clone().try_fold(0usize, |count, parent| {
+            let indices =
+                self.integration_points_by_parent
+                    .get(parent)
+                    .ok_or(ObservationError::Identity(
+                        "integration-point parent exceeds observation topology",
+                    ))?;
+            let count = count
+                .checked_add(indices.len())
+                .ok_or(ObservationError::Limit("integration-point target count"))?;
+            if count > maximum {
+                return Err(ObservationError::Limit("integration-point target count"));
+            }
+            Ok(count)
+        })?;
+        let mut indices = Vec::new();
+        indices
+            .try_reserve_exact(count)
+            .map_err(|_| ObservationError::Limit("integration-point target allocation"))?;
+        for parent in parents {
+            indices.extend_from_slice(&self.integration_points_by_parent[parent]);
+        }
+        Ok(indices)
+    }
+
     pub fn node_index(&self, node_id: u64) -> Result<Option<usize>, ObservationError> {
         match self.node_selectors.get(&node_id).map(Vec::as_slice) {
             None => Ok(None),
@@ -245,7 +303,7 @@ impl StructuralObservationTopology {
     pub fn elements(
         &self,
         domain: RecoveredFieldEntityDomain,
-    ) -> Result<&[StructuralObservationElement], ObservationError> {
+    ) -> Result<&[ObservationElement], ObservationError> {
         match domain {
             RecoveredFieldEntityDomain::VolumeElements => Ok(&self.volume_elements),
             RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
@@ -262,16 +320,24 @@ impl StructuralObservationTopology {
             RecoveredFieldEntityDomain::Nodes => Err(ObservationError::Invalid(
                 "nodal field domain cannot resolve element topology".into(),
             )),
+            RecoveredFieldEntityDomain::OrientedEdges if self.sampling.is_some() => {
+                Ok(&self.oriented_edges)
+            }
             RecoveredFieldEntityDomain::OrientedEdges => Err(ObservationError::Unsupported(
-                "oriented edges require sampled volume topology, not structural element topology",
+                "oriented edges require sampled volume topology",
             )),
         }
     }
 }
 
-fn integration_point_elements(
-    projection: &AnalysisProjection,
-) -> Vec<StructuralObservationElement> {
+fn structural_integration_indices(projection: &AnalysisProjection) -> Vec<Vec<usize>> {
+    let points = TETRAHEDRON_FOUR_POINT_RULE.len();
+    (0..projection.elements.len())
+        .map(|parent| (parent * points..(parent + 1) * points).collect())
+        .collect()
+}
+
+fn integration_point_elements(projection: &AnalysisProjection) -> Vec<ObservationElement> {
     projection
         .elements
         .iter()
@@ -291,7 +357,7 @@ fn integration_point_elements(
                             .map(|(shape, node)| shape * node[axis])
                             .sum()
                     });
-                    StructuralObservationElement {
+                    ObservationElement {
                         identity: integration_point_identity(element.stable_identity, ordinal),
                         region_id: element.region_id.source_topology_id.clone(),
                         centroid_m: position_m,
@@ -328,10 +394,7 @@ fn integration_point_identity(element: StableDigest, ordinal: usize) -> StableDi
     StableDigest::from_bytes(*Digest::sha256(bytes).bytes())
 }
 
-fn centroid(
-    indices: &[usize],
-    nodes: &[StructuralObservationNode],
-) -> Result<[f64; 3], ObservationError> {
+fn centroid(indices: &[usize], nodes: &[ObservationNode]) -> Result<[f64; 3], ObservationError> {
     let mut sum = [0.0; 3];
     for index in indices {
         let node = nodes.get(*index).ok_or(ObservationError::Identity(

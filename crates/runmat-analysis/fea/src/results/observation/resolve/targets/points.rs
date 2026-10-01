@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn resolve_interpolated_points(
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     maximum: usize,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     if spec.source_location != FieldLocation::Node
@@ -58,7 +58,7 @@ pub(super) fn resolve_interpolated_points(
 pub(super) fn resolve_probe(
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     maximum: usize,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     let ObservationTarget::Point { position } = spec.target else {

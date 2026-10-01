@@ -28,7 +28,7 @@ use super::{
     extrema::{
         extrema_values, partition_selected_entities, selected_or_extrema_payload, spatial_extrema,
     },
-    topology::StructuralObservationTopology,
+    topology::ObservationTopology,
     ObservationAccelerationEvidence, ObservationEntity, ObservationError,
     ObservationEventAttribution, ObservationExecutionPolicy, ObservationPartition,
     ObservationPartitionIdentity, ObservationPartitionPlan, ObservationPartitionPlanIdentity,
@@ -453,7 +453,7 @@ pub(crate) fn evaluate_partitioned_observation(
     plan: &ResolvedObservationPlan,
     observation: &ResolvedObservation,
     field: &RecoveredField,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     execution_policy: ObservationExecutionPolicy,
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationResult, ObservationError> {
@@ -492,7 +492,7 @@ pub fn evaluate_structural_observation_partition(
     field: &RecoveredFieldPartitionSet,
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     if topology.digest() != plan.topology_digest {
         return Err(ObservationError::Identity(
             "observation partition topology differs from its resolved plan",
@@ -516,7 +516,7 @@ pub fn evaluate_solid_observation_partition(
     field: &RecoveredFieldPartitionSet,
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
-    let topology = StructuralObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection);
     if topology.digest() != plan.topology_digest {
         return Err(ObservationError::Identity(
             "observation partition topology differs from its resolved plan",
@@ -540,7 +540,7 @@ pub fn reduce_observation_partitions(
     combine_observation_partitions(plan, partition_plan, contributions)
 }
 
-mod source_selection;
+pub(super) mod source_selection;
 use source_selection::prepare_observation_field_partition;
 pub use source_selection::{
     prepare_solid_observation_field_partition, prepare_structural_observation_field_partition,
@@ -599,7 +599,7 @@ fn observation_partition_payload(
     observation: &ResolvedObservation,
     partition: &ObservationPartition,
     field: &RecoveredFieldPartitionSet,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
 ) -> Result<ObservationPartitionPayload, ObservationError> {
     Ok(match &partition.target {
         ObservationPartitionTarget::Nodes {
@@ -705,12 +705,12 @@ fn observation_partition_payload(
     })
 }
 
-fn evaluate_observation_partition_with_attribution(
+pub(super) fn evaluate_observation_partition_with_attribution(
     plan: &ResolvedObservationPlan,
     partition_plan: &ObservationPartitionPlan,
     partition: &ObservationPartition,
     field: &RecoveredFieldPartitionSet,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
     let observation = validate_observation_partition_input(

@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn resolve_reduction_target(
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     maximum: usize,
 ) -> Result<ResolvedObservationTarget, ObservationError> {

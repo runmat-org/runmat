@@ -27,7 +27,7 @@ use super::{
     distributed_numeric::select_values,
     ObservationEntity, ObservationError, ObservationEventAttribution, ObservationPartition,
     ObservationPartitionContribution, ObservationPartitionPayload, ObservationPartitionPlan,
-    ObservationPartitionTarget, ResolvedObservationPlan, StructuralObservationTopology,
+    ObservationPartitionTarget, ObservationTopology, ResolvedObservationPlan,
 };
 
 static LOCAL_OBSERVATION_ATTEMPT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -72,7 +72,7 @@ pub fn evaluate_structural_observation_partition_accelerated(
     let provider = runmat_accelerate_api::provider().ok_or(ObservationError::Unsupported(
         "accelerated observation evaluation requires an active provider",
     ))?;
-    let topology = StructuralObservationTopology::derive(input.model, input.mesh)?;
+    let topology = ObservationTopology::derive(input.model, input.mesh)?;
     if topology.digest() != plan.topology_digest {
         return Err(ObservationError::Identity(
             "accelerated observation topology differs from its resolved plan",

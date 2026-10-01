@@ -10,6 +10,7 @@ mod catalog;
 mod contract;
 mod distributed;
 mod distributed_numeric;
+mod entity;
 mod evaluate;
 mod extrema;
 mod history;
@@ -23,7 +24,13 @@ pub use publication::{
     SeriesReductionPublicationContribution,
 };
 mod resolve;
+mod sampled;
 mod source;
+pub use sampled::{
+    evaluate_sampled_observation_partition, evaluate_sampled_observations,
+    prepare_sampled_observation_field_partition, resolve_sampled_observation_plan,
+    sampled_observation_partition_source_indices,
+};
 mod topology;
 
 pub use source::{
@@ -79,7 +86,7 @@ pub use resolve::{
     resolve_observation_plan, resolve_structural_observation_plan,
     resolve_structural_observation_plan_with_connectors,
 };
-pub(crate) use topology::StructuralObservationTopology;
+pub(crate) use topology::ObservationTopology;
 
 #[cfg(test)]
 mod acceleration_tests;

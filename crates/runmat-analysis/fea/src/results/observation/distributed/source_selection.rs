@@ -7,7 +7,7 @@ pub fn structural_observation_partition_source_indices(
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
 ) -> Result<Vec<usize>, ObservationError> {
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     observation_partition_source_indices(plan, partition_plan, partition, &topology)
 }
 
@@ -17,15 +17,15 @@ pub fn solid_observation_partition_source_indices(
     partition: &ObservationPartition,
     projection: &AnalysisProjection,
 ) -> Result<Vec<usize>, ObservationError> {
-    let topology = StructuralObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection);
     observation_partition_source_indices(plan, partition_plan, partition, &topology)
 }
 
-fn observation_partition_source_indices(
+pub(in super::super) fn observation_partition_source_indices(
     plan: &ResolvedObservationPlan,
     partition_plan: &ObservationPartitionPlan,
     partition: &ObservationPartition,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
 ) -> Result<Vec<usize>, ObservationError> {
     partition_plan.validate_for(plan)?;
     if partition_plan
@@ -60,7 +60,7 @@ pub fn prepare_structural_observation_field_partition(
     mesh: Option<&SolverMeshArtifact>,
     field: &RecoveredField,
 ) -> Result<RecoveredFieldPartitionSet, ObservationError> {
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     prepare_observation_field_partition(plan, partition_plan, partition, field, &topology)
 }
 
@@ -71,16 +71,16 @@ pub fn prepare_solid_observation_field_partition(
     projection: &AnalysisProjection,
     field: &RecoveredField,
 ) -> Result<RecoveredFieldPartitionSet, ObservationError> {
-    let topology = StructuralObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection);
     prepare_observation_field_partition(plan, partition_plan, partition, field, &topology)
 }
 
-pub(super) fn prepare_observation_field_partition(
+pub(in super::super) fn prepare_observation_field_partition(
     plan: &ResolvedObservationPlan,
     partition_plan: &ObservationPartitionPlan,
     partition: &ObservationPartition,
     field: &RecoveredField,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
 ) -> Result<RecoveredFieldPartitionSet, ObservationError> {
     partition_plan.validate_for(plan)?;
     if partition_plan

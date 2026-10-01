@@ -1,0 +1,114 @@
+use super::*;
+use crate::results::field::VolumeFieldSamplingRule;
+use runmat_meshing_core::fixtures::{canonical_tetrahedron_solver_mesh, slab_mesh};
+
+#[test]
+fn sampled_observation_topology_retains_each_original_rule_order_and_identity() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let mut previous = None;
+        for rule in [
+            VolumeFieldSamplingRule::TetrahedronFourPoint,
+            VolumeFieldSamplingRule::TetrahedronKeastFifteen,
+        ] {
+            let samples = SampledVolumeFieldTopology::derive(&mesh, rule).unwrap();
+            let topology = ObservationTopology::from_sampled(&samples, &mesh).unwrap();
+            assert!(topology.identity.is_none());
+            assert_eq!(
+                topology.digest(),
+                samples.identity().unwrap().discretization_digest()
+            );
+            assert_eq!(topology.entity_counts(), samples.entity_counts());
+            assert_eq!(topology.sampling.as_ref(), Some(&samples));
+            assert_eq!(
+                topology
+                    .solid_projection
+                    .as_ref()
+                    .unwrap()
+                    .projection_digest,
+                samples.projection_digest()
+            );
+            assert_eq!(
+                topology
+                    .integration_indices(std::iter::once(0), rule.points_per_element())
+                    .unwrap(),
+                (0..rule.points_per_element()).collect::<Vec<_>>()
+            );
+            assert!(topology
+                .integration_indices(std::iter::once(0), rule.points_per_element() - 1)
+                .is_err());
+            assert!(topology
+                .integration_indices(std::iter::once(1), usize::MAX)
+                .is_err());
+            for (actual, source) in topology
+                .volume_integration_points
+                .iter()
+                .zip(samples.integration_samples())
+            {
+                assert_eq!(actual.identity, source.identity);
+                assert_eq!(actual.centroid_m, source.position_m);
+            }
+            for (actual, source) in topology
+                .elements(RecoveredFieldEntityDomain::OrientedEdges)
+                .unwrap()
+                .iter()
+                .zip(samples.oriented_edges())
+            {
+                assert_eq!(actual.identity, source.identity);
+            }
+            if let Some(previous) = previous {
+                assert_ne!(topology.digest(), previous);
+            }
+            previous = Some(topology.digest());
+            assert!(ObservationTopology::from_sampled(&samples, &slab_mesh(1)).is_err());
+        }
+    }
+}
+
+#[test]
+fn parent_expansion_counts_actual_samples_and_preserves_structural_legacy_identity() {
+    let mesh = slab_mesh(1);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let structural = ObservationTopology::from_projection(&projection);
+    assert_eq!(
+        structural.identity,
+        Some(CanonicalStructuralTopologyIdentity::Solid {
+            mesh_digest: projection.mesh_digest
+        })
+    );
+    assert_eq!(structural.digest(), projection.projection_digest);
+    assert_eq!(
+        structural
+            .integration_indices([2, 4].into_iter(), 8)
+            .unwrap(),
+        vec![8, 9, 10, 11, 16, 17, 18, 19]
+    );
+    assert!(structural
+        .integration_indices([2, 4].into_iter(), 7)
+        .is_err());
+    assert!(structural
+        .integration_indices(std::iter::once(usize::MAX), 4)
+        .is_err());
+    for (parent, element) in projection.elements.iter().enumerate() {
+        for (ordinal, index) in structural
+            .integration_indices(std::iter::once(parent), 4)
+            .unwrap()
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(
+                structural.volume_integration_points[index].identity,
+                integration_point_identity(element.stable_identity, ordinal)
+            );
+        }
+    }
+    let samples =
+        SampledVolumeFieldTopology::derive(&mesh, VolumeFieldSamplingRule::TetrahedronKeastFifteen)
+            .unwrap();
+    let sampled = ObservationTopology::from_sampled(&samples, &mesh).unwrap();
+    assert_eq!(
+        sampled.integration_indices([2, 4].into_iter(), 30).unwrap(),
+        (30..45).chain(60..75).collect::<Vec<_>>()
+    );
+    assert!(sampled.integration_indices([2, 4].into_iter(), 29).is_err());
+}

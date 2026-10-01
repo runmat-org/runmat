@@ -50,32 +50,9 @@ pub(super) fn unique_nodes(
     Ok(values)
 }
 
-pub(super) fn integration_indices(
-    parents: impl Iterator<Item = usize> + Clone,
-    maximum: usize,
-) -> Result<Vec<usize>, ObservationError> {
-    let count = parents
-        .clone()
-        .count()
-        .checked_mul(4)
-        .ok_or(ObservationError::Limit("integration-point target count"))?;
-    require_selected(count, maximum)?;
-    let mut values = reserved(count)?;
-    for parent in parents {
-        let start = parent
-            .checked_mul(4)
-            .ok_or(ObservationError::Limit("integration-point target index"))?;
-        let end = start
-            .checked_add(4)
-            .ok_or(ObservationError::Limit("integration-point target index"))?;
-        values.extend(start..end);
-    }
-    Ok(values)
-}
-
 pub(super) fn nodes_target(
     indices: Vec<usize>,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     maximum: usize,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     require_selected(indices.len(), maximum)?;
@@ -94,7 +71,7 @@ pub(super) fn nodes_target(
 pub(super) fn elements_target(
     indices: Vec<usize>,
     domain: RecoveredFieldEntityDomain,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     maximum: usize,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     require_selected(indices.len(), maximum)?;
@@ -115,7 +92,7 @@ pub(super) fn elements_target(
 pub(super) fn matching_elements<'a>(
     target: &'a runmat_analysis_core::RegionTarget,
     domain: RecoveredFieldEntityDomain,
-    topology: &'a StructuralObservationTopology,
+    topology: &'a ObservationTopology,
 ) -> Result<impl Iterator<Item = usize> + Clone + 'a, ObservationError> {
     let elements = topology.elements(domain)?;
     let projection = if domain == RecoveredFieldEntityDomain::VolumeElements {
@@ -147,7 +124,7 @@ pub(super) fn matching_faces<'a>(
 }
 
 pub(super) fn solid_projection<'a>(
-    topology: &'a StructuralObservationTopology,
+    topology: &'a ObservationTopology,
     spec: &ObservationSpec,
 ) -> Result<&'a AnalysisProjection, ObservationError> {
     topology.solid_projection.as_ref().ok_or_else(|| {

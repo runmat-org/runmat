@@ -17,8 +17,8 @@ use crate::{
             resolve_structural_observation_plan,
             resolve_structural_observation_plan_with_connectors, sample_matches_policy,
             BoundedObservationHistory, ObservationError, ObservationEventAttribution,
-            ObservationExecutionPolicy, ObservationHistory, ObservationLimits,
-            SeriesReductionResult, StructuralObservationTopology,
+            ObservationExecutionPolicy, ObservationHistory, ObservationLimits, ObservationTopology,
+            SeriesReductionResult,
         },
     },
     topology::AnalysisProjection,
@@ -298,7 +298,7 @@ pub(crate) fn evaluate_field_histories(
         .collect::<Result<Vec<_>, _>>()?;
     let (plan, topology_digest, entity_counts) = match topology {
         HistoryTopology::Solid(projection) => {
-            let topology = StructuralObservationTopology::from_projection(projection);
+            let topology = ObservationTopology::from_projection(projection);
             (
                 resolve_observation_plan(
                     &history_step,
@@ -315,7 +315,7 @@ pub(crate) fn evaluate_field_histories(
             mesh,
             connector_plan,
         } => {
-            let topology = StructuralObservationTopology::derive(model, mesh)?;
+            let topology = ObservationTopology::derive(model, mesh)?;
             let constraint_plan =
                 crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
                     model, mesh,

@@ -14,14 +14,14 @@ use super::history::{
     sample_matches_domain, sample_matches_history_policy, ObservationEventAttribution,
     ObservationHistorySample,
 };
-use super::topology::StructuralObservationTopology;
+use super::topology::ObservationTopology;
 
 pub fn evaluate_observations(
     plan: &ResolvedObservationPlan,
     projection: &AnalysisProjection,
     fields: &RecoveredFieldCatalog,
 ) -> Result<Vec<ObservationResult>, ObservationError> {
-    let topology = StructuralObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection);
     evaluate_observations_for_topology(plan, &topology, fields)
 }
 
@@ -31,13 +31,13 @@ pub fn evaluate_structural_observations(
     mesh: Option<&SolverMeshArtifact>,
     fields: &RecoveredFieldCatalog,
 ) -> Result<Vec<ObservationResult>, ObservationError> {
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     evaluate_observations_for_topology(plan, &topology, fields)
 }
 
-fn evaluate_observations_for_topology(
+pub(super) fn evaluate_observations_for_topology(
     plan: &ResolvedObservationPlan,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     fields: &RecoveredFieldCatalog,
 ) -> Result<Vec<ObservationResult>, ObservationError> {
     plan.validate_identity()?;
@@ -106,7 +106,7 @@ pub fn evaluate_observation_sample(
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
 ) -> Result<ObservationResult, ObservationError> {
-    let topology = StructuralObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection);
     evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample, None)
 }
 
@@ -117,7 +117,7 @@ pub fn evaluate_observation_event_sample(
     fields: &RecoveredFieldCatalog,
     attribution: ObservationEventAttribution,
 ) -> Result<ObservationHistorySample, ObservationError> {
-    let topology = StructuralObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection);
     let sample = attribution.sample();
     let result = evaluate_observation_sample_for_topology(
         plan,
@@ -138,7 +138,7 @@ pub fn evaluate_structural_observation_sample(
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
 ) -> Result<ObservationResult, ObservationError> {
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample, None)
 }
 
@@ -150,7 +150,7 @@ pub fn evaluate_structural_observation_event_sample(
     fields: &RecoveredFieldCatalog,
     attribution: ObservationEventAttribution,
 ) -> Result<ObservationHistorySample, ObservationError> {
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     let sample = attribution.sample();
     let result = evaluate_observation_sample_for_topology(
         plan,
@@ -166,7 +166,7 @@ pub fn evaluate_structural_observation_event_sample(
 fn evaluate_observation_sample_for_topology(
     plan: &ResolvedObservationPlan,
     observation_id: &ObservationId,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
     event_attribution: Option<ObservationEventAttribution>,
@@ -235,7 +235,7 @@ pub fn resolved_observation_accepts_sample(
 fn evaluate_sample(
     plan: &ResolvedObservationPlan,
     observation: &ResolvedObservation,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
     event_attribution: Option<ObservationEventAttribution>,
@@ -266,7 +266,7 @@ fn evaluate_sample(
 
 fn validate_plan_targets(
     plan: &ResolvedObservationPlan,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
 ) -> Result<(), ObservationError> {
     for observation in &plan.observations {
         match &observation.target {
@@ -416,7 +416,7 @@ fn evaluate_one(
     plan: &ResolvedObservationPlan,
     observation: &ResolvedObservation,
     field: &crate::results::field::RecoveredField,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationResult, ObservationError> {
     super::distributed::evaluate_partitioned_observation(

@@ -39,17 +39,6 @@ fn union_stops_before_consuming_beyond_first_excess_unique_node() {
 }
 
 #[test]
-fn ip4_expansion_preserves_parent_order_and_enforces_final_count() {
-    assert_eq!(
-        integration_indices([2, 4].into_iter(), 8).unwrap(),
-        [8, 9, 10, 11, 16, 17, 18, 19]
-    );
-    assert!(integration_indices([2, 4].into_iter(), 7).is_err());
-    assert!(integration_indices(std::iter::once(usize::MAX), 4).is_err());
-    assert!(integration_indices(std::iter::once(usize::MAX / 4), 4).is_err());
-}
-
-#[test]
 fn known_reservation_overflow_is_fallible() {
     assert!(reserved::<StableDigest>(usize::MAX).is_err());
 }

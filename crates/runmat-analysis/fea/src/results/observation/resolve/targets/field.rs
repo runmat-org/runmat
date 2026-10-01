@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn resolve_field_target(
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     maximum: usize,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     if matches!(spec.target, ObservationTarget::Path { .. })
@@ -20,7 +20,7 @@ pub(super) fn resolve_field_target(
                     topology,
                     maximum,
                 ),
-                FieldLocation::Element | FieldLocation::IntegrationPoint => {
+                FieldLocation::Element | FieldLocation::IntegrationPoint | FieldLocation::Edge => {
                     let elements = topology.elements(field_domain)?;
                     elements_target(
                         selected_indices(0..elements.len(), maximum)?,
@@ -91,7 +91,7 @@ pub(super) fn resolve_field_target(
                     )?;
                     enforce_cardinality(region.cardinality, parents.clone().count(), spec)?;
                     elements_target(
-                        integration_indices(parents, maximum)?,
+                        topology.integration_indices(parents, maximum)?,
                         field_domain,
                         topology,
                         maximum,

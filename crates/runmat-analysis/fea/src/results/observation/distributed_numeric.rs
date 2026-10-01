@@ -8,7 +8,7 @@ use crate::{results::field::RecoveredFieldPartitionSet, topology::AnalysisProjec
 
 use super::{
     contract::{observation_result_storage_component_count, shape_component_count},
-    topology::StructuralObservationTopology,
+    topology::ObservationTopology,
     ObservationError, ObservationPartition, ObservationPartitionPayload,
     ObservationPartitionTarget, ResolvedComponentProjection, ResolvedObservation,
 };
@@ -22,7 +22,7 @@ pub(super) struct CompensatedSum {
 pub(super) fn required_source_indices(
     observation: &ResolvedObservation,
     partition: &ObservationPartition,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
 ) -> Result<Vec<usize>, ObservationError> {
     let indices = match &partition.target {
         ObservationPartitionTarget::Nodes { indices, .. }
@@ -452,7 +452,7 @@ pub(super) fn discrete_reaction_contribution(
     observation: &ResolvedObservation,
     field: &RecoveredFieldPartitionSet,
     node_indices: &[usize],
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
 ) -> Result<ObservationPartitionPayload, ObservationError> {
     if !matches!(
         observation.spec.quantity,

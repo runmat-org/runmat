@@ -26,7 +26,7 @@ use super::contract::{
     ResolvedObservationPlanIdentity, ResolvedObservationPoint, ResolvedObservationTarget,
 };
 use super::history::resolve_history_sample_bounds;
-use super::topology::StructuralObservationTopology;
+use super::topology::ObservationTopology;
 
 mod connectors;
 use connectors::{compile_connector_observation_plan, resolve_connector_target};
@@ -48,7 +48,7 @@ pub fn resolve_observation_plan(
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
     validate_request_counts(step, limits)?;
-    let topology = StructuralObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection);
     resolve_observation_plan_for_topology(step, &topology, None, None, fields, limits)
 }
 
@@ -61,7 +61,7 @@ pub fn resolve_structural_observation_plan(
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
     validate_request_counts(step, limits)?;
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     let connector_plan =
         compile_connector_observation_plan(model, mesh, constraint_plan, topology.nodes.len())?;
     validate_structural_context(model, &topology, constraint_plan, &connector_plan)?;
@@ -85,7 +85,7 @@ pub fn resolve_structural_observation_plan_with_connectors(
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
     validate_request_counts(step, limits)?;
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     validate_structural_context(model, &topology, constraint_plan, connector_plan)?;
     resolve_observation_plan_for_topology(
         step,
@@ -99,14 +99,14 @@ pub fn resolve_structural_observation_plan_with_connectors(
 
 fn validate_structural_context(
     model: &AnalysisModel,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     constraint_plan: &CanonicalStructuralConstraintPlan,
     connector_plan: &CanonicalStructuralConnectorPlan,
 ) -> Result<(), ObservationError> {
     constraint_plan
         .validate()
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    if constraint_plan.topology != topology.identity {
+    if Some(constraint_plan.topology) != topology.identity {
         return Err(ObservationError::Identity(
             "constraint plan topology differs from the observation topology",
         ));
@@ -117,7 +117,7 @@ fn validate_structural_context(
     connector_plan
         .validate_against_authored(&model.connectors)
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    if connector_plan.topology != topology.identity {
+    if Some(connector_plan.topology) != topology.identity {
         return Err(ObservationError::Identity(
             "connector plan topology differs from the observation topology",
         ));
@@ -125,7 +125,7 @@ fn validate_structural_context(
     Ok(())
 }
 
-fn validate_request_counts(
+pub(super) fn validate_request_counts(
     step: &ProcedureStep,
     limits: ObservationLimits,
 ) -> Result<(), ObservationError> {
@@ -149,9 +149,9 @@ fn validate_request_counts(
     Ok(())
 }
 
-fn resolve_observation_plan_for_topology(
+pub(super) fn resolve_observation_plan_for_topology(
     step: &ProcedureStep,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     connector_plan: Option<&CanonicalStructuralConnectorPlan>,
     fields: &[RecoveredFieldDefinition],
@@ -204,6 +204,7 @@ fn validate_field_catalog(fields: &[RecoveredFieldDefinition]) -> Result<(), Obs
                 | FieldLocation::IntegrationPoint
                 | FieldLocation::Connector
                 | FieldLocation::Constraint
+                | FieldLocation::Edge
         ) {
             return Err(ObservationError::Unsupported(
                 "this evaluator accepts only recovered nodal, element, integration-point, connector, and constraint-group fields",
@@ -217,7 +218,7 @@ fn validate_field_catalog(fields: &[RecoveredFieldDefinition]) -> Result<(), Obs
 fn resolve_request(
     step: &ProcedureStep,
     request: &ObservationRequest,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     connector_plan: Option<&CanonicalStructuralConnectorPlan>,
     fields: &[RecoveredFieldDefinition],
@@ -466,7 +467,7 @@ fn resolve_component(
 
 fn integration_work(
     target: &ResolvedObservationTarget,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
 ) -> Result<usize, ObservationError> {
     match target {
         ResolvedObservationTarget::Nodes { indices, .. }

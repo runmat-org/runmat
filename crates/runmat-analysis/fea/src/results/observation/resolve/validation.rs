@@ -40,6 +40,7 @@ pub(super) fn validate_supported_spec(
             | FieldLocation::IntegrationPoint
             | FieldLocation::Connector
             | FieldLocation::Constraint
+            | FieldLocation::Edge
     ) {
         return Err(ObservationError::Unsupported(
             "this evaluator accepts only nodal, element, integration-point, connector, and constraint-group fields",

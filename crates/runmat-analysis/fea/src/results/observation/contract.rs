@@ -85,32 +85,8 @@ impl Default for ObservationLimits {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ObservationEntity {
-    Node(StableDigest),
-    Element(StableDigest),
-    IntegrationPoint(StableDigest),
-    Connector(StableDigest),
-    Point {
-        identity: StableDigest,
-        ordinal: u64,
-        position_m: [f64; 3],
-        source_element: StableDigest,
-    },
-}
-
-pub(super) const fn observation_element_entity(
-    domain: RecoveredFieldEntityDomain,
-    identity: StableDigest,
-) -> ObservationEntity {
-    match domain {
-        RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
-            ObservationEntity::IntegrationPoint(identity)
-        }
-        _ => ObservationEntity::Element(identity),
-    }
-}
+pub(super) use super::entity::observation_element_entity;
+pub use super::entity::ObservationEntity;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -378,6 +354,7 @@ impl ObservationResult {
                 ObservationEntity::IntegrationPoint(identity) => {
                     (FieldLocation::IntegrationPoint, identity)
                 }
+                ObservationEntity::OrientedEdge(identity) => (FieldLocation::Edge, identity),
                 ObservationEntity::Connector(identity) => (FieldLocation::Connector, identity),
                 ObservationEntity::Point {
                     identity,
@@ -984,10 +961,12 @@ fn validate_resolved_observation(
         } => {
             if !matches!(
                 materialized_field_location(&observation.spec),
-                FieldLocation::Element | FieldLocation::IntegrationPoint
+                FieldLocation::Element | FieldLocation::IntegrationPoint | FieldLocation::Edge
             ) || (materialized_field_location(&observation.spec)
                 == FieldLocation::IntegrationPoint)
                 != (*domain == RecoveredFieldEntityDomain::VolumeIntegrationPoints)
+                || (materialized_field_location(&observation.spec) == FieldLocation::Edge)
+                    != (*domain == RecoveredFieldEntityDomain::OrientedEdges)
                 || observation.source_entity_domain != *domain
                 || *domain == RecoveredFieldEntityDomain::Nodes
                 || (has_spatial_reduction && !spatial_extrema)

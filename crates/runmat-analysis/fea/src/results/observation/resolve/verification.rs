@@ -48,7 +48,7 @@ pub(crate) fn verify_observation_plan(
     plan: &ResolvedObservationPlan,
 ) -> Result<(), ObservationError> {
     verify_authored_observations(step, plan)?;
-    let topology = StructuralObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection);
     verify_for_topology(step, &topology, None, None, fields, plan)
 }
 
@@ -61,7 +61,7 @@ pub(crate) fn verify_structural_observation_plan(
     plan: &ResolvedObservationPlan,
 ) -> Result<(), ObservationError> {
     verify_authored_observations(step, plan)?;
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = ObservationTopology::derive(model, mesh)?;
     let connectors =
         compile_connector_observation_plan(model, mesh, constraint_plan, topology.nodes.len())?;
     validate_structural_context(model, &topology, constraint_plan, &connectors)?;
@@ -77,7 +77,7 @@ pub(crate) fn verify_structural_observation_plan(
 
 fn verify_for_topology(
     step: &ProcedureStep,
-    topology: &StructuralObservationTopology,
+    topology: &ObservationTopology,
     constraints: Option<&CanonicalStructuralConstraintPlan>,
     connectors: Option<&CanonicalStructuralConnectorPlan>,
     fields: &[RecoveredFieldDefinition],
