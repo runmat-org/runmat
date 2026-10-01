@@ -55,9 +55,17 @@ fn descriptor_preserves_public_forms_defaults_and_errors() {
         "S = sum(A, dim, missingflag)",
         "S = sum(A, missingflag, dim)",
         "S = sum(A, vecdim)",
+        "S = sum(A, options...)",
     ] {
         assert!(labels.contains(&form), "missing {form}");
     }
+    assert!(crate::validate_builtin_preparation(&SUM_CATALOG_ENTRY).is_empty());
+    let BuiltinOperandPreparation::Forms(forms) = SUM_CATALOG_ENTRY.placement.preparation else {
+        panic!("sum uses its admitted data-only preparation form")
+    };
+    assert_eq!(forms.len(), 1);
+    assert_eq!(forms[0].signatures, &[8]);
+    assert_eq!(forms[0].data_arguments, &[0]);
     assert!(!labels
         .iter()
         .any(|label| label.contains("nanflag") || label.contains("like")));

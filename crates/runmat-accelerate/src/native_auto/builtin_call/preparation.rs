@@ -2,6 +2,9 @@ use super::*;
 
 pub(super) enum ArgumentOperation {
     Reduction,
+    AdmittedSum {
+        requested_outputs: Option<u32>,
+    },
     Binary(BinaryOp),
     ElementwiseNary {
         data_arity: usize,
@@ -27,6 +30,14 @@ impl ArgumentOperation {
         }
     }
     fn for_call(name: &str, args: &[Value]) -> Option<Self> {
+        if runmat_builtins::builtin_catalog_primary_entry_by_name(name).is_some_and(|entry| {
+            matches!(entry.placement.preparation, runmat_builtins::BuiltinOperandPreparation::Forms(forms)
+                if forms.iter().any(|form| form.operation == runmat_builtins::BuiltinPreparationOperation::Reduction(runmat_builtins::BuiltinPreparationReduction::Sum)))
+        }) {
+            // The selected sum binding prepares after its own option admission.
+            // Legacy pre-call promotion cannot inspect those controls safely.
+            return None;
+        }
         let policy = builtin_policy(name)?;
         let has = |tag| policy.accel_tags.contains(&tag);
         if args.is_empty() {
@@ -84,7 +95,7 @@ impl ArgumentOperation {
                     ProviderOperationFamily::Elementwise,
                 )
             }
-            Self::Reduction => (
+            Self::Reduction | Self::AdmittedSum { .. } => (
                 auto.evaluate_reduction(elements),
                 ProviderOperationFamily::Reduction,
             ),
@@ -131,6 +142,12 @@ impl ArgumentOperation {
                 )
             }
         };
+        if let Self::AdmittedSum {
+            requested_outputs, ..
+        } = self
+        {
+            workload.requested_outputs = *requested_outputs;
+        }
         Some((evaluation, family, workload))
     }
 }

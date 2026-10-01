@@ -1,7 +1,8 @@
 use super::*;
 use runmat_runtime::context::preparation::{
-    AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
+    AdmittedBuiltinPreparation, AdmittedSumReduction, BuiltinPreparationAdmission,
 };
+use runmat_types::{NumericClass, NumericDomain};
 
 fn logical_request() -> AdmittedBuiltinPreparation {
     let entry = runmat_builtins::builtin_catalog_primary_entry_by_name("logical").unwrap();
@@ -19,6 +20,52 @@ fn logical_request() -> AdmittedBuiltinPreparation {
         vec![Value::Tensor(Tensor::new(vec![1.; 4], vec![1, 4]).unwrap())],
     )
     .unwrap()
+}
+
+fn sum_request(axes: Vec<usize>) -> AdmittedBuiltinPreparation {
+    let entry = &runmat_builtins::SUM_CATALOG_ENTRY;
+    AdmittedBuiltinPreparation::new(
+        BuiltinPreparationAdmission {
+            binding: runmat_builtins::BuiltinBindingIdentity {
+                builtin: entry.identity,
+                variant: "default",
+            },
+            form: runmat_builtins::BuiltinPreparationFormId(0),
+            signature: 8,
+            input_count: 4,
+            requested_outputs: Some(1),
+        },
+        vec![Value::Tensor(Tensor::new(vec![1.; 4], vec![2, 2]).unwrap())],
+    )
+    .unwrap()
+    .with_sum_reduction(AdmittedSumReduction {
+        axes,
+        missing: runmat_builtins::ReductionNaN::Omit,
+        output: runmat_builtins::SumOutputClass::Double,
+        input_class: NumericClass::Double,
+        input_domain: NumericDomain::Real,
+        accumulation_class: NumericClass::Double,
+        publication_class: NumericClass::Double,
+    })
+    .unwrap()
+}
+
+#[test]
+fn admitted_sum_uses_existing_session_only_for_real_reduction_work() {
+    let probe = Rc::new(Probe::default());
+    let context = runtime(&probe);
+    let auto = NativeAutoOffload::new(&PROVIDER, ThresholdConfig::default());
+    let identity =
+        super::super::admitted::prepare_with(&auto, &context, sum_request(vec![])).unwrap();
+    assert!(matches!(identity.args()[0], Value::Tensor(_)));
+    assert!(probe.requests.borrow().is_empty());
+    let prepared =
+        super::super::admitted::prepare_with(&auto, &context, sum_request(vec![0])).unwrap();
+    assert_eq!(probe.requests.borrow().len(), 1);
+    assert_eq!(probe.requests.borrow()[0].signature.operation, "sum");
+    assert!(probe.feedback.borrow().is_empty());
+    futures::executor::block_on(prepared.execute(|_| async { Ok(Value::Num(4.0)) })).unwrap();
+    assert_eq!(probe.feedback.borrow().len(), 1);
 }
 
 #[test]

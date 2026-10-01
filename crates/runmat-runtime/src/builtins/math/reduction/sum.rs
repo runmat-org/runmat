@@ -79,6 +79,9 @@ mod fusion_contract;
 #[path = "sum/provider_output.rs"]
 mod provider_output;
 
+#[path = "sum/preparation.rs"]
+mod preparation;
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::sum", reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sum",
@@ -113,6 +116,7 @@ pub(crate) async fn sum_with_nan_policy(
     rest: Vec<Value>,
     imposed_nan_mode: Option<ReductionNaN>,
 ) -> crate::BuiltinResult<Value> {
+    let input_count = rest.len() + 1;
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(sum_invalid_input(
             "operations involving complex numbers with integer types are not supported",
@@ -128,13 +132,20 @@ pub(crate) async fn sum_with_nan_policy(
             return Ok(result);
         }
     }
-    let raw_result = match value {
-        Value::GpuTensor(handle) => sum_gpu(handle, &parsed).await?,
-        Value::ComplexTensor(ct) => sum_host_complex_tensor(ct, &parsed)?,
-        Value::Complex(re, im) => sum_host_complex_scalar(re, im, &parsed)?,
-        other => sum_host(other, &parsed)?,
-    };
+    if imposed_nan_mode.is_none() && preparation::eligible(&value) {
+        return preparation::execute(value, parsed, input_meta, input_count).await;
+    }
+    let raw_result = execute_raw(value, &parsed).await?;
     apply_output_template(raw_result, &parsed.output, &input_meta).await
+}
+
+async fn execute_raw(value: Value, parsed: &ParsedArguments) -> BuiltinResult<Value> {
+    Ok(match value {
+        Value::GpuTensor(handle) => sum_gpu(handle, parsed).await?,
+        Value::ComplexTensor(ct) => sum_host_complex_tensor(ct, parsed)?,
+        Value::Complex(re, im) => sum_host_complex_scalar(re, im, parsed)?,
+        other => sum_host(other, parsed)?,
+    })
 }
 
 fn sum_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<Option<Value>> {

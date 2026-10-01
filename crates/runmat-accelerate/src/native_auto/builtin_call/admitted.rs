@@ -140,6 +140,33 @@ pub(super) fn prepare_with(
         },
         Operation::RealPower => ArgumentOperation::RealPower(request.numerical_domain()),
         Operation::MatrixMultiply => ArgumentOperation::Binary(BinaryOp::MatMul),
+        Operation::Reduction(runmat_builtins::BuiltinPreparationReduction::Sum) => {
+            let controls = request.sum_reduction().ok_or_else(|| {
+                Box::new(preparation_error(
+                    anyhow::anyhow!("admitted sum is missing its resolved controls").into(),
+                ))
+            })?;
+            if controls.axes.is_empty() && controls.input_class == controls.publication_class {
+                // The domain has proved an identity route with no class change.
+                // Do not upload a host array only to return it unchanged.
+                return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+            }
+            ArgumentOperation::AdmittedSum {
+                requested_outputs: request
+                    .admission()
+                    .requested_outputs
+                    .map(u32::try_from)
+                    .transpose()
+                    .map_err(|_| {
+                        Box::new(preparation_error(
+                            anyhow::anyhow!(
+                                "requested output count exceeds workload representation"
+                            )
+                            .into(),
+                        ))
+                    })?,
+            }
+        }
         Operation::Reduction(_) => ArgumentOperation::Reduction,
         Operation::Sink(_) => unreachable!("sinks handled independently of automatic promotion"),
     };

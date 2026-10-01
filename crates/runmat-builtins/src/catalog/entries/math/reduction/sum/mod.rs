@@ -12,6 +12,15 @@ pub use contract::{
     SUM_INTEGER_CAPABILITIES,
 };
 
+const SUM_PREPARATION_FORMS: [BuiltinPreparationForm; 1] = [BuiltinPreparationForm {
+    id: BuiltinPreparationFormId(0),
+    binding_variant: "default",
+    signatures: &[8],
+    data_arguments: &[0],
+    operation: BuiltinPreparationOperation::Reduction(BuiltinPreparationReduction::Sum),
+    provider_requirement: BuiltinPreparationProviderRequirement::InputSupported,
+}];
+
 pub const SUM_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "sum" },
@@ -36,7 +45,7 @@ pub const SUM_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
-        preparation: BuiltinOperandPreparation::RuntimeOwned,
+        preparation: BuiltinOperandPreparation::Forms(&SUM_PREPARATION_FORMS),
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,

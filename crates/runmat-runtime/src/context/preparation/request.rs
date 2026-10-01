@@ -1,8 +1,10 @@
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinOperandPreparation, BuiltinParamArity,
-    BuiltinPreparationForm, BuiltinPreparationFormId,
+    BuiltinPreparationForm, BuiltinPreparationFormId, BuiltinPreparationOperation,
+    BuiltinPreparationReduction, ReductionNaN, SumOutputClass,
 };
+use runmat_types::{NumericClass, NumericDomain};
 use runmat_value::Value;
 
 /// The domain supplies this only after its existing output, compatibility,
@@ -25,9 +27,42 @@ pub struct AdmittedBuiltinPreparation {
     form: &'static BuiltinPreparationForm,
     operands: Vec<Value>,
     numerical_domain: runmat_accelerate_api::NumericalDomainEvidence,
+    sum_reduction: Option<AdmittedSumReduction>,
+}
+
+/// Already-resolved numerical controls, not a second public option grammar.
+/// Axes are zero-based, in-bounds and ordered as the owning reduction executes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmittedSumReduction {
+    pub axes: Vec<usize>,
+    pub missing: ReductionNaN,
+    pub output: SumOutputClass,
+    pub input_class: NumericClass,
+    pub input_domain: NumericDomain,
+    pub accumulation_class: NumericClass,
+    pub publication_class: NumericClass,
 }
 
 impl AdmittedBuiltinPreparation {
+    pub fn with_sum_reduction(
+        mut self,
+        controls: AdmittedSumReduction,
+    ) -> Result<Self, RuntimeError> {
+        if self.form.operation
+            != BuiltinPreparationOperation::Reduction(BuiltinPreparationReduction::Sum)
+        {
+            return Err(invalid(
+                "sum controls do not belong to preparation operation",
+            ));
+        }
+        self.sum_reduction = Some(controls);
+        Ok(self)
+    }
+
+    pub fn sum_reduction(&self) -> Option<&AdmittedSumReduction> {
+        self.sum_reduction.as_ref()
+    }
+
     /// Evaluate semantic evidence against this request's immutable operands.
     /// Domain implementations cannot attach a detached cached boolean to a
     /// later call, and services cannot replace these operands in place.
@@ -181,6 +216,7 @@ impl AdmittedBuiltinPreparation {
             form,
             operands,
             numerical_domain: Default::default(),
+            sum_reduction: None,
         })
     }
 

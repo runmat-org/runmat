@@ -6,7 +6,7 @@
 mod owned;
 mod request;
 pub use owned::{BuiltinPreparationObservation, PreparedBuiltinOperands};
-pub use request::{AdmittedBuiltinPreparation, BuiltinPreparationAdmission};
+pub use request::{AdmittedBuiltinPreparation, AdmittedSumReduction, BuiltinPreparationAdmission};
 
 use super::RuntimeContext;
 use crate::RuntimeError;

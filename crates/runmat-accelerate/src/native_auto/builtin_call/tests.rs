@@ -284,6 +284,23 @@ fn preparation_passes_session_and_exact_operation_to_existing_planner() {
 }
 
 #[test]
+fn sum_legacy_preparation_does_not_upload_before_domain_option_admission() {
+    let probe = Rc::new(Probe::default());
+    probe.provider.set(true);
+    let runtime = runtime(&probe);
+    let auto = NativeAutoOffload::new(&PROVIDER, ThresholdConfig::default());
+    let input = Value::Tensor(Tensor::new(vec![1.; 4], vec![1, 4]).unwrap());
+    let controls = Value::Num(0.0);
+    let prepared = auto
+        .prepare_call("sum", &[input, controls], Some(&runtime))
+        .unwrap();
+    assert_eq!(prepared.args().len(), 2);
+    assert!(matches!(prepared.args()[0], Value::Tensor(_)));
+    assert!(probe.requests.borrow().is_empty());
+    assert!(probe.feedback.borrow().is_empty());
+}
+
+#[test]
 fn upload_failure_closes_selected_provider_attempt_before_call() {
     let probe = Rc::new(Probe::default());
     probe.provider.set(true);

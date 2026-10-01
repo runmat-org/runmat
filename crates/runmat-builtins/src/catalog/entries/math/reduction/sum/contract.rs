@@ -131,7 +131,24 @@ const SUM_INPUTS_A_MISSINGFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+const SUM_INPUTS_VARIADIC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Admitted dimension, missing-data, and output-class controls.",
+    },
+];
+
+const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
     BuiltinSignatureDescriptor {
         label: "S = sum(A)",
         inputs: &SUM_INPUTS_A,
@@ -170,6 +187,11 @@ const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
     BuiltinSignatureDescriptor {
         label: "S = sum(A, vecdim)",
         inputs: &SUM_INPUTS_A_DIM,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, options...)",
+        inputs: &SUM_INPUTS_VARIADIC,
         outputs: &SUM_OUTPUT,
     },
 ];
