@@ -149,6 +149,7 @@ fn unit(symbol: &str) -> Option<ParsedUnit> {
         "K" => (PhysicalDimension::TEMPERATURE, 1.0, 0.0),
         "degC" => (PhysicalDimension::TEMPERATURE, 1.0, 273.15),
         "A" => (PhysicalDimension::ELECTRIC_CURRENT, 1.0, 0.0),
+        "C" => (PhysicalDimension::new([0, 0, 1, 1, 0, 0, 0, 0]), 1.0, 0.0),
         "V" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1.0, 0.0),
         "T" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1.0, 0.0),
         "rad" => (PhysicalDimension::DIMENSIONLESS, 1.0, 0.0),

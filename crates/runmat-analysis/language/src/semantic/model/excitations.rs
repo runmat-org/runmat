@@ -461,6 +461,10 @@ fn kind_policy(
         ),
         "electric_current" => (AuthoredExcitationKind::ElectricCurrent, "electric_current"),
         "electric_charge" => (AuthoredExcitationKind::ElectricCharge, "electric_charge"),
+        "electric_charge_density" => (
+            AuthoredExcitationKind::ElectricChargeDensity,
+            "electric_charge_density",
+        ),
         "current_density" => (
             AuthoredExcitationKind::CurrentDensity,
             "electric_current_density",

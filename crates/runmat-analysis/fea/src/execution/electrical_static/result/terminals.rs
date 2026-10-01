@@ -48,7 +48,15 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
     if !sum.is_finite() || !scale.is_finite() {
         return Err(invalid("nonfinite electrical terminal accounting"));
     }
-    let imbalance = sum.abs() / scale.max(f64::MIN_POSITIVE);
+    let charge = r
+        .charge_sources
+        .as_ref()
+        .map_or(0.0, |source| source.integrated_charge_c);
+    let source_scale = r
+        .charge_sources
+        .as_ref()
+        .map_or(0.0, |source| source.absolute_charge_c);
+    let imbalance = (sum - charge).abs() / scale.max(source_scale).max(f64::MIN_POSITIVE);
     if !imbalance.is_finite() || imbalance != r.relative_flux_imbalance {
         return Err(invalid(
             "electrical flux closure disagrees with terminal accounting",
@@ -132,6 +140,23 @@ pub(super) fn validate_for(
         return Err(invalid(
             "retained electrical potential violates prescribed source",
         ));
+    }
+    let prescribed_values = prescribed.into_iter().collect::<BTreeMap<_, _>>();
+    for component in
+        crate::algebra::connected_components(&projection.node_neighbors).map_err(invalid)?
+    {
+        let reference = component
+            .iter()
+            .find_map(|&node| prescribed_values.get(&projection.nodes[node].node_id))
+            .ok_or_else(|| invalid("unanchored electrical component"))?;
+        for node in component {
+            let expected = r.potential_increment_v[node] + reference;
+            if expected != r.potential_v[node] {
+                return Err(invalid(
+                    "retained potential disagrees with gauge departure and prescribed reference",
+                ));
+            }
+        }
     }
     Ok(())
 }

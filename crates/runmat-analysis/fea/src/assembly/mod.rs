@@ -21,6 +21,7 @@ mod solid_recovery_types;
 pub mod solver_solid;
 mod solver_solid_boundary;
 mod structural_inputs;
+pub use structural_inputs::StructuralLoadKind;
 mod structural_loads;
 mod transient_basis;
 pub(crate) use transient_basis::PreparedStructuralTransientBasis;
@@ -204,61 +205,6 @@ impl fmt::Display for LinearAssemblyError {
 }
 
 impl std::error::Error for LinearAssemblyError {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StructuralLoadKind {
-    Force,
-    Moment,
-    Traction,
-    Pressure,
-    BodyForce,
-    HeatGeneration,
-    HeatFlux,
-    TemperatureField,
-    AmbientTemperature,
-    TerminalVoltage,
-    ElectricCurrent,
-    ElectricCharge,
-    CurrentDensity,
-    MagneticVectorPotential,
-    AcousticPressure,
-    NormalVelocity,
-    InletVelocity,
-    MassFlow,
-    WallMotion,
-}
-
-impl StructuralLoadKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Force => "force",
-            Self::Moment => "moment",
-            Self::Traction => "traction",
-            Self::Pressure => "pressure",
-            Self::BodyForce => "body_force",
-            Self::HeatGeneration => "heat_generation",
-            Self::HeatFlux => "heat_flux",
-            Self::TemperatureField => "temperature_field",
-            Self::AmbientTemperature => "ambient_temperature",
-            Self::TerminalVoltage => "terminal_voltage",
-            Self::ElectricCurrent => "electric_current",
-            Self::ElectricCharge => "electric_charge",
-            Self::CurrentDensity => "current_density",
-            Self::MagneticVectorPotential => "magnetic_vector_potential",
-            Self::AcousticPressure => "acoustic_pressure",
-            Self::NormalVelocity => "normal_velocity",
-            Self::InletVelocity => "inlet_velocity",
-            Self::MassFlow => "mass_flow",
-            Self::WallMotion => "wall_motion",
-        }
-    }
-}
-
-impl fmt::Display for StructuralLoadKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StructuralAssemblyError {

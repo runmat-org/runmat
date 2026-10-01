@@ -69,9 +69,9 @@ pub(super) fn verify(
     );
     assert_eq!(fields[3], *density);
     for vector in fields[1].chunks_exact(3) {
-        for axis in 0..3 {
+        for (axis, &component) in vector.iter().enumerate() {
             near(
-                vector[axis],
+                component,
                 if axis == 0 { -voltage } else { 0.0 },
                 voltage.abs(),
                 "E",
@@ -79,9 +79,9 @@ pub(super) fn verify(
         }
     }
     for vector in fields[2].chunks_exact(3) {
-        for axis in 0..3 {
+        for (axis, &component) in vector.iter().enumerate() {
             near(
-                vector[axis],
+                component,
                 if axis == 0 {
                     -coefficient * voltage
                 } else {

@@ -244,6 +244,7 @@ fn realize_excitation(
         AuthoredExcitationKind::TerminalVoltage => action!(TerminalVoltage),
         AuthoredExcitationKind::ElectricCurrent => action!(ElectricCurrent),
         AuthoredExcitationKind::ElectricCharge => action!(ElectricCharge),
+        AuthoredExcitationKind::ElectricChargeDensity => action!(ElectricChargeDensity),
         AuthoredExcitationKind::CurrentDensity => action!(CurrentDensity),
         AuthoredExcitationKind::MagneticVectorPotential => action!(MagneticVectorPotential),
         AuthoredExcitationKind::AcousticPressure => action!(AcousticPressure),

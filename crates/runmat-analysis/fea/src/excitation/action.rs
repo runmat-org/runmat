@@ -123,6 +123,14 @@ pub(super) fn realize_kind(
         ExcitationAction::ElectricCharge(_) => RealizedExcitationKind::ElectricCharge(
             scalar_action!(signal, PhysicalSignal::ElectricCharge, coulombs, sample)?,
         ),
+        ExcitationAction::ElectricChargeDensity(_) => {
+            RealizedExcitationKind::ElectricChargeDensity(scalar_action!(
+                signal,
+                PhysicalSignal::ElectricChargeDensity,
+                coulombs_per_cubic_meter,
+                sample
+            )?)
+        }
         ExcitationAction::CurrentDensity(_) => {
             RealizedExcitationKind::CurrentDensity(vector_action!(
                 signal,

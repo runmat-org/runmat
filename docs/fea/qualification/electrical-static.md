@@ -1,5 +1,13 @@
 # Canonical static electrical qualification
 
+This document records the initial source-free milestones and their historical
+boundaries. The retained authored/native chain is described in
+[electrical-authored-static.md](electrical-authored-static.md); the current volume
+charge extension and its explicit remaining gates are described in
+[electrical-volume-charge.md](electrical-volume-charge.md). Earlier statements below
+that native dispatch/publication/resources were absent refer to those initial slices,
+not the current repository. Production and the largest Tet10 proof gate remain open.
+
 The CPU library entry `physics::electrical::solve_canonical_static` solves distinct
 electrostatic and steady DC conduction equations on canonical Tet4/Tet10 topology.
 This is not the legacy reduced EM edge graph, native authored dispatch, restart,

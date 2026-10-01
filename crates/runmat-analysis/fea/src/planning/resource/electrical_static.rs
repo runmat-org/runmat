@@ -92,12 +92,21 @@ pub fn electrical_static_result_payload_bytes_upper_bound(
     let terminals = count(workload.model.constraints.len())?;
     // IDs, potential and physical flux per node; ID, E and constitutive vector/energy per
     // element. Nine bytes per scalar plus array framing fits these intentionally loose bounds.
-    let fields = add(mul(nodes, 64)?, mul(elements, 160)?)?;
+    // Retained gauge increments and optional nodal volume charge are separate arrays.
+    let fields = add(mul(nodes, 96)?, mul(elements, 160)?)?;
     let terminal_fields = mul(terminals, add(128, mul(nodes, 16)?)?)?;
     let formulation = profile_serialized(&formulation, LIMITS).map_err(invalid)?;
     let constraints = profile_serialized(&workload.model.constraints, LIMITS).map_err(invalid)?;
     let declarations = profile_serialized(&workload.model.sequence.steps[0].state_outputs, LIMITS)
         .map_err(invalid)?;
+    let charge_metadata =
+        profile_serialized(&workload.model.excitations, LIMITS).map_err(invalid)?;
+    // Per-action projection evidence carries copied source/signal names and fixed scalar
+    // balance metadata. Its topology cardinalities are counts, not another connectivity array.
+    let charge_evidence = add(
+        mul(charge_metadata.encoded_bytes_upper_bound, 2)?,
+        mul(count(workload.model.excitations.len())?, 2048)?,
+    )?;
     // Closed schema keys, fixed-width producer/source/projection/mesh identities, order,
     // residual/iteration/energy/conservation summaries and framing (not authored strings).
     [
@@ -107,6 +116,7 @@ pub fn electrical_static_result_payload_bytes_upper_bound(
         formulation.encoded_bytes_upper_bound,
         constraints.encoded_bytes_upper_bound,
         declarations.encoded_bytes_upper_bound,
+        charge_evidence,
     ]
     .into_iter()
     .try_fold(0, add)
@@ -240,6 +250,13 @@ pub fn build_electrical_static_resource_plan(
     // Per-element gradient recovery, physical product integration, retained constitutive
     // arrays/coefficient data and result clone. All lifetimes are summed, not maxed.
     let recovery = mul(elements, 512)?;
+    // Source realization + retained evidence/metadata, gauge increments, source load and
+    // cold source rederivation, raw-volume identity index and scalar projection scratch.
+    // These named lifetimes are additive; existing vectors are not presumed to absorb them.
+    let charge_sources = add(
+        add(mul(metadata, 3)?, mul(nodes, 48)?)?,
+        mul(elements, 128)?,
+    )?;
     let reservation = [
         support_preparation_bytes(mesh)?,
         mul(projection, 3)?,
@@ -249,6 +266,7 @@ pub fn build_electrical_static_resource_plan(
         proof,
         vectors,
         recovery,
+        charge_sources,
         payload,
     ]
     .into_iter()

@@ -108,7 +108,7 @@ impl RegionTarget {
             || self.cardinality == TargetCardinality::One && entities.len() != 1
             || entities
                 .iter()
-                .any(|entity| entity.validate().is_err() || entity.kind != expected)
+                .any(|entity| entity.validate().is_err() || !self.accepts_entity_kind(entity.kind))
         {
             return Err(self.resolution_error(expected, entities.len()));
         }
@@ -129,7 +129,7 @@ impl RegionTarget {
             || self
                 .resolved_entities
                 .iter()
-                .any(|entity| entity.validate().is_err() || entity.kind != expected)
+                .any(|entity| entity.validate().is_err() || !self.accepts_entity_kind(entity.kind))
         {
             return Err(self.resolution_error(expected, self.resolved_entities.len()));
         }
@@ -142,6 +142,22 @@ impl RegionTarget {
             EntityDimension::Edge => PersistentEntityKind::Edge,
             EntityDimension::Face => PersistentEntityKind::Face,
             EntityDimension::Volume => PersistentEntityKind::Region,
+        }
+    }
+
+    fn accepts_entity_kind(&self, kind: PersistentEntityKind) -> bool {
+        // A volume element may be selected through its exact CAD solid provenance
+        // or a canonical mesh region. Keep the original identity, never relabel a
+        // Solid as Region. Cell targets still require actual Region identities.
+        if self.entity_dimension == EntityDimension::Volume
+            && self.expected_topology == ExpectedTopology::MeshElement
+        {
+            matches!(
+                kind,
+                PersistentEntityKind::Solid | PersistentEntityKind::Region
+            )
+        } else {
+            kind == self.expected_entity_kind()
         }
     }
 
@@ -187,3 +203,6 @@ pub struct ResolvedTopologyTarget {
     pub selection_digest: String,
     pub matched_entity_count: usize,
 }
+
+#[cfg(test)]
+mod tests;

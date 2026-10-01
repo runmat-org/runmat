@@ -2,6 +2,8 @@ use crate::fixtures::{
     fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind, FixtureId,
 };
 
+mod charge_density;
+
 use super::{
     realize::{realize_excitations, realize_step_excitations, RealizationError},
     sample::ExcitationSamplePoint,

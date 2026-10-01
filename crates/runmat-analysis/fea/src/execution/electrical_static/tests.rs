@@ -3,6 +3,7 @@ use crate::physics::electrical::tests::{mesh, model, prescribe};
 use runmat_analysis_core::{RegionTarget, RestartPolicy};
 use runmat_meshing_core::ElementOrder;
 
+mod charge_density;
 mod publication;
 
 fn workload(equation: StaticElectricalEquation) -> ElectricalStaticWorkload {
@@ -157,8 +158,9 @@ fn source_bound_import_rejects_lineage_and_terminal_substitution_without_rerunni
     let mut value = serde_json::to_value(&result).unwrap();
     value["response"]["constitutive"]["steady_conduction"]["total_joule_power_w"] =
         serde_json::json!(24.0);
-    let decoded: ElectricalStaticSolverResult = serde_json::from_value(value).unwrap();
-    assert!(decoded.validate_for(&workload, &mesh).is_err());
+    // Retained source/terminal work now rejects the forged total at the bare
+    // decoding boundary, before source-bound integral validation.
+    assert!(serde_json::from_value::<ElectricalStaticSolverResult>(value).is_err());
     let mut value = serde_json::to_value(&result).unwrap();
     let nodes = &result.response().terminals[0].ordered_node_ids;
     for id in nodes {

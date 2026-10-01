@@ -94,6 +94,7 @@ impl ElectricalStaticWorkload {
     ) -> AnalysisExecutionResult<AnalysisRunIdentity> {
         crate::admission::admit_canonical_electrical_static(
             self.equation()?,
+            crate::physics::electrical::sources::kind(&self.model),
             mesh,
             self.formulation_requirement,
         )

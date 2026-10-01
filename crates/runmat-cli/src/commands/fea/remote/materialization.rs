@@ -328,7 +328,15 @@ fn result_expectation(
         workloads: study.workloads(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         analysis_accelerator_requests: Vec::new(),
-        input_materializations: input_materializations.to_vec(),
+        input_materializations: input_materializations
+            .iter()
+            .cloned()
+            .map(|input| {
+                runmat_analysis_execution::InputMaterializationPlanExpectation::Ready(Box::new(
+                    input,
+                ))
+            })
+            .collect(),
         expected_meshing_request: authored_meshing_request(study)?,
     };
     expectation.validate()?;

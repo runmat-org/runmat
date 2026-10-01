@@ -203,6 +203,11 @@ fn validate_action_policy(
             excitation.distribution,
             ExcitationDistribution::IntensityPerVolume | ExcitationDistribution::TopologyField
         ),
+        ExcitationAction::ElectricChargeDensity(_) => {
+            excitation.distribution == ExcitationDistribution::IntensityPerVolume
+                && signal.shape() == &SignalShape::Scalar
+                && excitation.direction.is_none()
+        }
         ExcitationAction::WallMotion(_) => {
             excitation.distribution == ExcitationDistribution::UniformKinematic
         }
@@ -242,6 +247,7 @@ fn validate_action_policy(
             | ExcitationAction::HeatFlux(_)
             | ExcitationAction::ElectricCurrent(_)
             | ExcitationAction::ElectricCharge(_)
+            | ExcitationAction::ElectricChargeDensity(_)
             | ExcitationAction::MassFlow(_)
     ) && excitation.projection.preserve_moment
     {
@@ -286,7 +292,9 @@ fn validate_action_target(
         | ExcitationAction::MassFlow(_)
         | ExcitationAction::TerminalVoltage(_)
         | ExcitationAction::AcousticPressure(_) => surface_target,
-        ExcitationAction::BodyForce(_) | ExcitationAction::HeatGeneration(_) => {
+        ExcitationAction::BodyForce(_)
+        | ExcitationAction::HeatGeneration(_)
+        | ExcitationAction::ElectricChargeDensity(_) => {
             matches!(target, ExcitationTarget::WholeModel)
                 || region_dimension == Some(EntityDimension::Volume)
         }

@@ -4,7 +4,64 @@ use runmat_analysis_core::{
 
 use crate::excitation::{RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations};
 
-use super::{StructuralAssemblyError, StructuralLoadKind};
+use super::StructuralAssemblyError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralLoadKind {
+    Force,
+    Moment,
+    Traction,
+    Pressure,
+    BodyForce,
+    HeatGeneration,
+    HeatFlux,
+    TemperatureField,
+    AmbientTemperature,
+    TerminalVoltage,
+    ElectricCurrent,
+    ElectricCharge,
+    ElectricChargeDensity,
+    CurrentDensity,
+    MagneticVectorPotential,
+    AcousticPressure,
+    NormalVelocity,
+    InletVelocity,
+    MassFlow,
+    WallMotion,
+}
+
+impl StructuralLoadKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Force => "force",
+            Self::Moment => "moment",
+            Self::Traction => "traction",
+            Self::Pressure => "pressure",
+            Self::BodyForce => "body_force",
+            Self::HeatGeneration => "heat_generation",
+            Self::HeatFlux => "heat_flux",
+            Self::TemperatureField => "temperature_field",
+            Self::AmbientTemperature => "ambient_temperature",
+            Self::TerminalVoltage => "terminal_voltage",
+            Self::ElectricCurrent => "electric_current",
+            Self::ElectricCharge => "electric_charge",
+            Self::ElectricChargeDensity => "electric_charge_density",
+            Self::CurrentDensity => "current_density",
+            Self::MagneticVectorPotential => "magnetic_vector_potential",
+            Self::AcousticPressure => "acoustic_pressure",
+            Self::NormalVelocity => "normal_velocity",
+            Self::InletVelocity => "inlet_velocity",
+            Self::MassFlow => "mass_flow",
+            Self::WallMotion => "wall_motion",
+        }
+    }
+}
+
+impl std::fmt::Display for StructuralLoadKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StructuralProjectionBasis {
@@ -212,6 +269,9 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::ElectricCharge(_), _) => {
                 (StructuralLoadKind::ElectricCharge, false)
             }
+            (RealizedExcitationKind::ElectricChargeDensity(_), _) => {
+                (StructuralLoadKind::ElectricChargeDensity, false)
+            }
             (RealizedExcitationKind::CurrentDensity(_), _) => {
                 (StructuralLoadKind::CurrentDensity, false)
             }
@@ -341,6 +401,9 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
         RealizedExcitationKind::TerminalVoltage(_) => StructuralLoadKind::TerminalVoltage,
         RealizedExcitationKind::ElectricCurrent(_) => StructuralLoadKind::ElectricCurrent,
         RealizedExcitationKind::ElectricCharge(_) => StructuralLoadKind::ElectricCharge,
+        RealizedExcitationKind::ElectricChargeDensity(_) => {
+            StructuralLoadKind::ElectricChargeDensity
+        }
         RealizedExcitationKind::CurrentDensity(_) => StructuralLoadKind::CurrentDensity,
         RealizedExcitationKind::MagneticVectorPotential(_) => {
             StructuralLoadKind::MagneticVectorPotential

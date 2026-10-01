@@ -40,11 +40,17 @@ pub struct CanonicalElectricalResponse {
     pub ordered_node_ids: Vec<u64>,
     pub ordered_element_ids: Vec<u64>,
     pub potential_v: Vec<f64>,
+    /// Component-wise gauge departure retained before adding absolute potentials.
+    pub potential_increment_v: Vec<f64>,
     /// Volume averages. Quadratic products below are integrated BEFORE averaging.
     pub element_electric_field_v_per_m: Vec<[f64; 3]>,
     pub constitutive: ElectricalConstitutiveResponse,
     pub terminals: Vec<ElectricalTerminalResponse>,
     pub nodal_outward_flux: Vec<f64>,
+    pub charge_sources: Option<super::ElectricalChargeSources>,
+    /// Gauge-departure work (J electrostatic, W conduction), not stored energy/2.
+    pub volume_source_work: f64,
+    pub terminal_work: f64,
     pub relative_flux_imbalance: f64,
     pub relative_energy_identity_error: f64,
     /// Absolute L2 residual of the dimensionless Dirichlet-lifted system.
@@ -120,7 +126,18 @@ pub(super) fn solve(
         .prescribed
         .iter()
         .zip(&reference)
-        .map(|(value, reference)| value.map_or(0.0, |value| value - reference))
+        .enumerate()
+        .map(|(node, (value, reference))| {
+            value.map_or_else(
+                || {
+                    assembly
+                        .charge_sources
+                        .as_ref()
+                        .map_or(0.0, |source| source.nodal_charge_c[node] / scale)
+                },
+                |value| value - reference,
+            )
+        })
         .collect();
     let system = AssembledRealSystem::try_new_with_nullspace_evidence(
         operators,
@@ -183,11 +200,27 @@ pub(super) fn solve(
         .map(|(square, coefficient)| square * coefficient)
         .collect::<Vec<_>>();
     let total = integrals.iter().sum::<f64>();
-    let weak_total = increment
+    let volume_source_work = assembly.charge_sources.as_ref().map_or(0.0, |source| {
+        increment
+            .iter()
+            .zip(&source.nodal_charge_c)
+            .map(|(value, charge)| value * charge)
+            .sum::<f64>()
+    });
+    let terminal_work = assembly
+        .prescribed
         .iter()
-        .zip(&reactions)
-        .map(|(value, reaction)| value * reaction)
+        .enumerate()
+        .filter(|(_, value)| value.is_some())
+        .map(|(node, _)| {
+            let charge = assembly
+                .charge_sources
+                .as_ref()
+                .map_or(0.0, |source| source.nodal_charge_c[node]);
+            increment[node] * (reactions[node] - charge)
+        })
         .sum::<f64>();
+    let weak_total = volume_source_work + terminal_work;
     let relative_energy_identity_error =
         (total - weak_total).abs() / total.abs().max(weak_total.abs()).max(f64::MIN_POSITIVE);
     let constitutive = match equation {
@@ -214,7 +247,17 @@ pub(super) fn solve(
             }
         }
     };
-    let nodal_outward_flux = reactions.iter().map(|value| -value).collect::<Vec<_>>();
+    let nodal_outward_flux = reactions
+        .iter()
+        .enumerate()
+        .map(|(node, value)| {
+            assembly
+                .charge_sources
+                .as_ref()
+                .map_or(0.0, |source| source.nodal_charge_c[node])
+                - value
+        })
+        .collect::<Vec<_>>();
     let terminals = assembly
         .terminal_nodes
         .iter()
@@ -231,12 +274,21 @@ pub(super) fn solve(
         .iter()
         .map(|terminal| terminal.outward_flux.abs())
         .sum::<f64>();
-    let relative_flux_imbalance = terminals
+    let integrated_charge = assembly
+        .charge_sources
+        .as_ref()
+        .map_or(0.0, |source| source.integrated_charge_c);
+    let source_scale = assembly
+        .charge_sources
+        .as_ref()
+        .map_or(0.0, |source| source.absolute_charge_c);
+    let relative_flux_imbalance = (terminals
         .iter()
         .map(|terminal| terminal.outward_flux)
         .sum::<f64>()
+        - integrated_charge)
         .abs()
-        / flux_scale.max(f64::MIN_POSITIVE);
+        / flux_scale.max(source_scale).max(f64::MIN_POSITIVE);
     if !total.is_finite()
         || !relative_energy_identity_error.is_finite()
         || !relative_flux_imbalance.is_finite()
@@ -270,10 +322,14 @@ pub(super) fn solve(
             .map(|element| element.element_id)
             .collect(),
         potential_v: potential,
+        potential_increment_v: increment,
         element_electric_field_v_per_m: recovery.electric_field,
         constitutive,
         terminals,
         nodal_outward_flux,
+        charge_sources: assembly.charge_sources,
+        volume_source_work,
+        terminal_work,
         relative_flux_imbalance,
         relative_energy_identity_error,
         linear_absolute_residual: solution.residual_norm,

@@ -6,6 +6,7 @@ mod assembly;
 mod boundary;
 mod recovery;
 mod response;
+pub(crate) mod sources;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -18,6 +19,7 @@ use runmat_analysis_core::{
     SolutionSpace, StateCompleteness, StateKind,
 };
 use runmat_meshing_core::SolverMeshArtifact;
+pub use sources::{CanonicalElectricalSource, ElectricalChargeSources};
 use thiserror::Error;
 
 /// SI vacuum permittivity (CODATA 2022); uncertainty is irrelevant to numerical convergence.
@@ -75,7 +77,8 @@ pub(crate) fn solve_canonical_static_with_admission(
     let properties = crate::properties::compile_solid_property_map(model, mesh)
         .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
     let assembled = assembly::ElectricalAssembly::assemble(projection, &properties, *equation)?;
-    let assembled = assembled.with_constraints(model, mesh, step)?;
+    let mut assembled = assembled.with_constraints(model, mesh, step)?;
+    assembled.charge_sources = sources::assemble(model, mesh, step, &assembled.projection)?;
     response::solve(assembled, *equation, residual_target, admission)
 }
 
@@ -145,12 +148,23 @@ pub(crate) fn validate_canonical_input<'a>(
             "coupled or initial-state model".into(),
         ));
     }
-    if !model.excitations.is_empty()
-        || !model.excitation_cases.is_empty()
-        || !model.boundaries.is_empty()
+    if !model.boundaries.is_empty()
+        || model.excitations.iter().any(|action| {
+            !matches!(
+                action,
+                runmat_analysis_core::ExcitationAction::ElectricChargeDensity(_)
+            )
+        })
+        || (sources::kind(model) == CanonicalElectricalSource::VolumeCharge
+            && !matches!(
+                model.electromagnetic,
+                Some(ElectromagneticDomain::Static {
+                    equation: runmat_analysis_core::StaticElectricalEquation::Electrostatics
+                })
+            ))
     {
         return Err(ElectricalStaticError::Unsupported(
-            "source actions or explicit natural/Robin boundaries".into(),
+            "non-electrostatic volume charge or unsupported source/natural/Robin boundary".into(),
         ));
     }
     Ok(step)

@@ -146,6 +146,7 @@ fn assemble_with_mesh(
                             | RealizedExcitationKind::TerminalVoltage(_)
                             | RealizedExcitationKind::ElectricCurrent(_)
                             | RealizedExcitationKind::ElectricCharge(_)
+                            | RealizedExcitationKind::ElectricChargeDensity(_)
                             | RealizedExcitationKind::CurrentDensity(_)
                             | RealizedExcitationKind::MagneticVectorPotential(_)
                     )

@@ -85,6 +85,7 @@ pub enum ExcitationAction {
     TerminalVoltage(AnalysisExcitation),
     ElectricCurrent(AnalysisExcitation),
     ElectricCharge(AnalysisExcitation),
+    ElectricChargeDensity(AnalysisExcitation),
     CurrentDensity(AnalysisExcitation),
     MagneticVectorPotential(AnalysisExcitation),
     AcousticPressure(AnalysisExcitation),
@@ -109,6 +110,7 @@ impl ExcitationAction {
             | Self::TerminalVoltage(value)
             | Self::ElectricCurrent(value)
             | Self::ElectricCharge(value)
+            | Self::ElectricChargeDensity(value)
             | Self::CurrentDensity(value)
             | Self::MagneticVectorPotential(value)
             | Self::AcousticPressure(value)
@@ -137,6 +139,7 @@ impl ExcitationAction {
             Self::TerminalVoltage(_) => PhysicalQuantityKind::ElectricPotential,
             Self::ElectricCurrent(_) => PhysicalQuantityKind::ElectricCurrent,
             Self::ElectricCharge(_) => PhysicalQuantityKind::ElectricCharge,
+            Self::ElectricChargeDensity(_) => PhysicalQuantityKind::ElectricChargeDensity,
             Self::CurrentDensity(_) => PhysicalQuantityKind::ElectricCurrentDensity,
             Self::MagneticVectorPotential(_) => PhysicalQuantityKind::MagneticVectorPotential,
             Self::MassFlow(_) => PhysicalQuantityKind::MassFlowRate,
@@ -157,6 +160,7 @@ impl ExcitationAction {
             | Self::TerminalVoltage(value)
             | Self::ElectricCurrent(value)
             | Self::ElectricCharge(value)
+            | Self::ElectricChargeDensity(value)
             | Self::CurrentDensity(value)
             | Self::MagneticVectorPotential(value)
             | Self::AcousticPressure(value)

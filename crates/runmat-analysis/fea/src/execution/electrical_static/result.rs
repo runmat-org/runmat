@@ -8,6 +8,7 @@ use crate::{
 use runmat_analysis_core::{AnalysisProcedure, PhysicsFamily, SolutionSpace};
 
 mod integrals;
+mod sources;
 mod terminals;
 const PREFIX: &[u8] = b"runmat-electrical-static-result/v1\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
@@ -80,7 +81,15 @@ impl ElectricalStaticSolverResult {
         }
         if d.formulation.family() != PhysicsFamily::Electromagnetic
             || d.formulation.realization()
-                != &crate::admission::canonical_electrical_realization(r.equation, d.element_order)
+                != &crate::admission::canonical_electrical_realization(
+                    r.equation,
+                    d.element_order,
+                    if r.charge_sources.is_some() {
+                        crate::physics::electrical::CanonicalElectricalSource::VolumeCharge
+                    } else {
+                        crate::physics::electrical::CanonicalElectricalSource::SourceFree
+                    },
+                )
             || d.formulation.procedure() != AnalysisProcedure::Static
             || d.formulation.solution_space() != SolutionSpace::Direct
             || !tolerance.is_finite()
@@ -104,11 +113,13 @@ impl ElectricalStaticSolverResult {
         if !unique(&r.ordered_node_ids)
             || !unique(&r.ordered_element_ids)
             || r.potential_v.len() != nodes
+            || r.potential_increment_v.len() != nodes
             || r.nodal_outward_flux.len() != nodes
             || r.element_electric_field_v_per_m.len() != elements
             || r.potential_v
                 .iter()
                 .chain(&r.nodal_outward_flux)
+                .chain(&r.potential_increment_v)
                 .any(|x| !x.is_finite())
             || r.element_electric_field_v_per_m
                 .iter()
@@ -163,6 +174,7 @@ impl ElectricalStaticSolverResult {
             ));
         }
         terminals::validate(r)?;
+        sources::validate(r)?;
         Ok(())
     }
 
@@ -202,6 +214,21 @@ impl ElectricalStaticSolverResult {
             ));
         }
         terminals::validate_for(r, workload, mesh, &projection)?;
+        let step = crate::physics::electrical::validate_canonical_input(
+            &workload.model,
+            workload.step_id.as_str(),
+            workload.formulation_requirement,
+            workload.relative_residual_target,
+        )
+        .map_err(invalid)?;
+        let sources =
+            crate::physics::electrical::sources::assemble(&workload.model, mesh, step, &projection)
+                .map_err(invalid)?;
+        if r.charge_sources != sources {
+            return Err(invalid(
+                "retained charge source disagrees with authored volume integration",
+            ));
+        }
         integrals::validate_for(r, &projection)
     }
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {

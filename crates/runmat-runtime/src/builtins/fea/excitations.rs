@@ -743,6 +743,7 @@ fn action_class(action: &ExcitationAction) -> &'static str {
         ExcitationAction::TerminalVoltage(_)
         | ExcitationAction::ElectricCurrent(_)
         | ExcitationAction::ElectricCharge(_)
+        | ExcitationAction::ElectricChargeDensity(_)
         | ExcitationAction::CurrentDensity(_) => ELECTRICAL_EXCITATION_CLASS,
         ExcitationAction::MagneticVectorPotential(_) => MAGNETIC_EXCITATION_CLASS,
         ExcitationAction::AcousticPressure(_) | ExcitationAction::NormalVelocity(_) => {

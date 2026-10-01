@@ -15,6 +15,7 @@ pub(super) struct ElectricalAssembly {
     pub coefficients: Vec<f64>,
     pub prescribed: Vec<Option<f64>>,
     pub terminal_nodes: Vec<(String, Vec<usize>)>,
+    pub charge_sources: Option<super::ElectricalChargeSources>,
 }
 
 impl ElectricalAssembly {
@@ -92,6 +93,7 @@ impl ElectricalAssembly {
             coefficients,
             prescribed: vec![None; count],
             terminal_nodes: Vec::new(),
+            charge_sources: None,
         })
     }
 }

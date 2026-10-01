@@ -47,6 +47,7 @@ pub enum AuthoredExcitationKind {
     TerminalVoltage,
     ElectricCurrent,
     ElectricCharge,
+    ElectricChargeDensity,
     CurrentDensity,
     MagneticVectorPotential,
     AcousticPressure,
@@ -55,6 +56,9 @@ pub enum AuthoredExcitationKind {
     MassFlow,
     WallMotion,
 }
+
+#[cfg(test)]
+mod charge_density_tests;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +89,7 @@ impl AuthoredExcitationKind {
             Self::TerminalVoltage => PhysicalQuantityKind::ElectricPotential,
             Self::ElectricCurrent => PhysicalQuantityKind::ElectricCurrent,
             Self::ElectricCharge => PhysicalQuantityKind::ElectricCharge,
+            Self::ElectricChargeDensity => PhysicalQuantityKind::ElectricChargeDensity,
             Self::CurrentDensity => PhysicalQuantityKind::ElectricCurrentDensity,
             Self::MagneticVectorPotential => PhysicalQuantityKind::MagneticVectorPotential,
             Self::NormalVelocity | Self::InletVelocity | Self::WallMotion => {
@@ -104,7 +109,9 @@ impl AuthoredExcitationKind {
             Self::Traction | Self::Pressure | Self::HeatFlux | Self::CurrentDensity => {
                 ExcitationDistribution::IntensityPerArea
             }
-            Self::BodyForce | Self::HeatGeneration => ExcitationDistribution::IntensityPerVolume,
+            Self::BodyForce | Self::HeatGeneration | Self::ElectricChargeDensity => {
+                ExcitationDistribution::IntensityPerVolume
+            }
             Self::TemperatureField
             | Self::AmbientTemperature
             | Self::TerminalVoltage
@@ -269,9 +276,9 @@ fn validate_excitation(
     );
     let valid_target = match excitation.kind {
         AuthoredExcitationKind::Force | AuthoredExcitationKind::Moment => attachment,
-        AuthoredExcitationKind::BodyForce | AuthoredExcitationKind::HeatGeneration => {
-            volume || role.is_none()
-        }
+        AuthoredExcitationKind::BodyForce
+        | AuthoredExcitationKind::HeatGeneration
+        | AuthoredExcitationKind::ElectricChargeDensity => volume || role.is_none(),
         AuthoredExcitationKind::TemperatureField => volume,
         _ => surface,
     };
@@ -326,6 +333,7 @@ fn valid_shape_and_direction(
         | AuthoredExcitationKind::TerminalVoltage
         | AuthoredExcitationKind::ElectricCurrent
         | AuthoredExcitationKind::ElectricCharge
+        | AuthoredExcitationKind::ElectricChargeDensity
         | AuthoredExcitationKind::AcousticPressure
         | AuthoredExcitationKind::NormalVelocity
         | AuthoredExcitationKind::MassFlow => scalar && !has_direction,

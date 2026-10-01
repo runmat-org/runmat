@@ -9,11 +9,13 @@ use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
 use super::{admit_formulation, AnalysisRunIdentity, FormulationAdmissionRequest};
 use crate::contracts::FeaRunError;
+use crate::physics::electrical::CanonicalElectricalSource;
 
-/// Admit the source-free canonical scalar potential FEM, with the equation chosen explicitly.
+/// Admit canonical scalar potential FEM, with equation and source kind chosen explicitly.
 /// This is experimental identity admission, not model validation or production qualification.
 pub fn admit_canonical_electrical_static(
     equation: StaticElectricalEquation,
+    source: CanonicalElectricalSource,
     mesh: &SolverMeshArtifact,
     requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
@@ -22,7 +24,7 @@ pub fn admit_canonical_electrical_static(
         procedure: AnalysisProcedure::Static,
         solution_space: SolutionSpace::Direct,
         requirement,
-        realization: realization(equation, mesh.resolved_request.element_order),
+        realization: realization(equation, mesh.resolved_request.element_order, source),
     })
     .map(|receipt| receipt.into_identity())
     .map_err(Into::into)
@@ -37,7 +39,18 @@ pub(super) fn registered_realizations() -> Vec<ExactFormulationRealization> {
     .flat_map(|equation| {
         [ElementOrder::Tet4, ElementOrder::Tet10]
             .into_iter()
-            .map(move |order| realization(equation, order))
+            .flat_map(move |order| {
+                [
+                    CanonicalElectricalSource::SourceFree,
+                    CanonicalElectricalSource::VolumeCharge,
+                ]
+                .into_iter()
+                .filter(move |source| {
+                    equation == StaticElectricalEquation::Electrostatics
+                        || *source == CanonicalElectricalSource::SourceFree
+                })
+                .map(move |source| realization(equation, order, source))
+            })
     })
     .collect()
 }
@@ -45,6 +58,7 @@ pub(super) fn registered_realizations() -> Vec<ExactFormulationRealization> {
 pub(crate) fn realization(
     equation: StaticElectricalEquation,
     order: ElementOrder,
+    source: CanonicalElectricalSource,
 ) -> ExactFormulationRealization {
     let (constitutive, recovery, temporal) = match equation {
         StaticElectricalEquation::Electrostatics => (
@@ -68,7 +82,12 @@ pub(crate) fn realization(
             constitutive,
             recovery,
             topologies: vec![topology],
-            sources: vec![SourceImplementation::NotApplicable],
+            sources: vec![match source {
+                CanonicalElectricalSource::SourceFree => SourceImplementation::NotApplicable,
+                CanonicalElectricalSource::VolumeCharge => {
+                    SourceImplementation::CanonicalVolumeProjection
+                }
+            }],
         }],
         temporals: vec![temporal],
         coupling: CouplingImplementation::Uncoupled,

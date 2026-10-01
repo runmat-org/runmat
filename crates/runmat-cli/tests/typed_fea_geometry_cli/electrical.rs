@@ -5,12 +5,21 @@ use runmat_runtime::analysis::{
     AnalysisFieldPageValues, AnalysisFieldRequestOptions, AnalysisFieldSelection,
 };
 
+#[path = "electrical/charge_reference.rs"]
+mod charge_reference;
 #[path = "electrical/closure.rs"]
 mod closure;
 #[path = "electrical/fixture.rs"]
 mod fixture;
 #[path = "electrical/reference.rs"]
 mod reference;
+
+#[test]
+fn authored_charged_poisson_tet10_signed_gauge_and_cold_publication() {
+    for sign in [-1.0, 1.0] {
+        execute_with_charge(true, "electrostatics", 1000.0, 0.0, Some(sign));
+    }
+}
 
 #[test]
 fn authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold() {
@@ -48,9 +57,26 @@ fn execute(
     gauge: f64,
     voltage: f64,
 ) -> (runmat_meshing_core::StableDigest, [Vec<f64>; 4]) {
+    execute_with_charge(quadratic, equation, gauge, voltage, None)
+}
+
+fn execute_with_charge(
+    quadratic: bool,
+    equation: &str,
+    gauge: f64,
+    voltage: f64,
+    charge_sign: Option<f64>,
+) -> (runmat_meshing_core::StableDigest, [Vec<f64>; 4]) {
     let project = TempDir::new().unwrap();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let faces = fixture::prepare(&project, quadratic, equation, gauge, voltage);
+        if let Some(sign) = charge_sign {
+            let path = project.path().join("src/main.fea");
+            let source = fs::read_to_string(&path).unwrap();
+            let rho = sign * 8.0 * 8.854_187_818_8e-12;
+            let charge = format!("model electric {{\nload bulk_charge {{ electric_charge_density on geometry.part.region.body = {rho:.17e} C/m^3 }}\nload_case charge {{ include load.bulk_charge }}");
+            fs::write(path, source.replace("model electric {", &charge)).unwrap();
+        }
         let output = runmat(
             &project,
             &[
@@ -150,7 +176,11 @@ fn execute(
             assert_eq!(field.as_host_f64().unwrap(), &fields[index]);
         }
         let completion = closure::reopen(&project, &manifest, &retained, &mesh);
-        reference::verify(&completion, &mesh, gauge, voltage, &fields);
+        if let Some(sign) = charge_sign {
+            charge_reference::verify(&completion, &mesh, gauge, sign, &fields);
+        } else {
+            reference::verify(&completion, &mesh, gauge, voltage, &fields);
+        }
         eprintln!("authored electrical equation={equation} quadratic={quadratic} gauge={gauge} voltage={voltage} nodes={} elements={} residual={} flux={} energy={}",
             mesh.topology.nodes.len(), mesh.topology.volume_elements.len(),
             completion.result.response().linear_relative_residual,

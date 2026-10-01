@@ -69,6 +69,40 @@ fn output_facts(bytes: u64) -> PreparedOutputResourceFacts {
 }
 
 #[test]
+fn charged_results_fit_admission_and_cannot_use_source_free_plans() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        for charge in [-2e-11, 0.0, 2e-11] {
+            let mut charged = workload(StaticElectricalEquation::Electrostatics);
+            charged.model =
+                crate::physics::electrical::tests::charge_density::charged_model(charge, 1000.0);
+            let mesh = mesh(order, 2);
+            let prepared = facts(&charged, &mesh);
+            let plan =
+                build_electrical_static_resource_plan(&charged, &mesh, prepared.clone()).unwrap();
+            let result = charged.execute_with_resource_plan(&mesh, &plan).unwrap();
+            assert!(
+                result.canonical_bytes().unwrap().len() as u64
+                    <= prepared.result_output.encoded_payload_bytes_upper_bound.0
+            );
+            assert!(result.response().charge_sources.is_some());
+            let free = workload(StaticElectricalEquation::Electrostatics);
+            let free_plan =
+                build_electrical_static_resource_plan(&free, &mesh, facts(&free, &mesh)).unwrap();
+            assert_ne!(plan, free_plan);
+            assert!(charged
+                .execute_with_resource_plan(&mesh, &free_plan)
+                .is_err());
+            let mut insufficient = plan.input.clone();
+            insufficient.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes - 1;
+            assert!(matches!(
+                build_resource_plan(insufficient),
+                Err(ResourcePlanningError::AccuracyCeiling { .. })
+            ));
+        }
+    }
+}
+
+#[test]
 fn electrical_solve_declares_exact_three_distinct_output_envelopes() {
     use crate::execution::AnalysisNumericalObjectKind;
     for equation in [

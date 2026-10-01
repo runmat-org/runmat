@@ -7,6 +7,46 @@ use runmat_analysis_core::{FormulationAdmissionRejectionReason, FormulationMatur
 use runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh;
 
 #[test]
+fn volume_charge_has_distinct_experimental_identity_and_no_conduction_admission() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let charged = admit_canonical_electrical_static(
+            StaticElectricalEquation::Electrostatics,
+            CanonicalElectricalSource::VolumeCharge,
+            &mesh,
+            FormulationRequirement::Experimental,
+        )
+        .unwrap();
+        let free = admit_canonical_electrical_static(
+            StaticElectricalEquation::Electrostatics,
+            CanonicalElectricalSource::SourceFree,
+            &mesh,
+            FormulationRequirement::Experimental,
+        )
+        .unwrap();
+        assert_ne!(charged, free);
+        for (equation, requirement) in [
+            (
+                StaticElectricalEquation::Electrostatics,
+                FormulationRequirement::Production,
+            ),
+            (
+                StaticElectricalEquation::SteadyConduction,
+                FormulationRequirement::Experimental,
+            ),
+        ] {
+            assert!(admit_canonical_electrical_static(
+                equation,
+                CanonicalElectricalSource::VolumeCharge,
+                &mesh,
+                requirement,
+            )
+            .is_err());
+        }
+    }
+}
+
+#[test]
 fn equation_and_topology_select_four_distinct_registry_identities() {
     let mut identities = Vec::new();
     for equation in [
@@ -26,6 +66,7 @@ fn equation_and_topology_select_four_distinct_registry_identities() {
             let mesh = canonical_tetrahedron_solver_mesh(order);
             let identity = admit_canonical_electrical_static(
                 equation,
+                CanonicalElectricalSource::SourceFree,
                 &mesh,
                 FormulationRequirement::Experimental,
             )
@@ -34,7 +75,10 @@ fn equation_and_topology_select_four_distinct_registry_identities() {
             assert_eq!(identity.procedure(), AnalysisProcedure::Static);
             assert_eq!(identity.solution_space(), SolutionSpace::Direct);
             assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
-            assert_eq!(identity.realization(), &realization(equation, order));
+            assert_eq!(
+                identity.realization(),
+                &realization(equation, order, CanonicalElectricalSource::SourceFree)
+            );
             assert_eq!(
                 identity.realization().components[0].topologies,
                 vec![topology]
@@ -79,13 +123,14 @@ fn production_and_cross_equation_or_harmonic_identity_splicing_fail_closed() {
             let mesh = canonical_tetrahedron_solver_mesh(order);
             let error = admit_canonical_electrical_static(
                 equation,
+                CanonicalElectricalSource::SourceFree,
                 &mesh,
                 FormulationRequirement::Production,
             )
             .unwrap_err();
             assert!(matches!(error, FeaRunError::FormulationAdmission(rejection)
                 if rejection.reason == FormulationAdmissionRejectionReason::ProductionQualificationMissing));
-            let mut mixed = realization(equation, order);
+            let mut mixed = realization(equation, order, CanonicalElectricalSource::SourceFree);
             mixed.temporals =
                 vec![TemporalImplementation::ElectromagneticReducedEdgeGraphHarmonicSolve];
             assert!(admit_formulation(FormulationAdmissionRequest {
@@ -96,7 +141,7 @@ fn production_and_cross_equation_or_harmonic_identity_splicing_fail_closed() {
                 realization: mixed,
             })
             .is_err());
-            let mut crossed = realization(equation, order);
+            let mut crossed = realization(equation, order, CanonicalElectricalSource::SourceFree);
             crossed.components[0].recovery = match equation {
                 StaticElectricalEquation::Electrostatics => {
                     RecoveryImplementation::ElectricalSolverMeshFieldCurrentJoulePower
