@@ -8,9 +8,42 @@ use runmat_builtins::{
 #[runtime_builtin(
     name = "icdf",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::distributions::icdf"
 )]
+pub(crate) async fn icdf_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    name: Value,
+    p: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    icdf_in_runtime(runtime.as_ref(), name, p, rest).await
+}
+
+#[cfg(test)]
 pub(crate) async fn icdf_builtin(name: Value, p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    icdf_in_runtime(None, name, p, rest).await
+}
+
+pub(super) fn check_cancellation(
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<()> {
+    if let Some(runtime) = runtime.filter(|runtime| runtime.is_cancelled()) {
+        return Err(build_runtime_error("icdf: execution was cancelled")
+            .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+            .with_builtin("icdf")
+            .build());
+    }
+    Ok(())
+}
+
+async fn icdf_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    name: Value,
+    p: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    check_cancellation(runtime)?;
     if matches!(name, Value::Object(_)) {
         if !rest.is_empty() {
             return Err(super::normal_error(
@@ -26,6 +59,7 @@ pub(crate) async fn icdf_builtin(name: Value, p: Value, rest: Vec<Value>) -> Bui
         let output =
             crate::builtins::stats::summary::fitdist::icdf_probability_distribution(name, p)
                 .await?;
+        check_cancellation(runtime)?;
         return admission.finish(output);
     }
 
@@ -54,15 +88,16 @@ pub(crate) async fn icdf_builtin(name: Value, p: Value, rest: Vec<Value>) -> Bui
         IcdfDistribution::StudentT => student_t_icdf(p, gathered_rest).await,
         IcdfDistribution::Weibull => weibull_icdf(p, gathered_rest).await,
         IcdfDistribution::ChiSquare => chi_square_icdf(p, gathered_rest).await,
-        IcdfDistribution::Binomial => binomial_icdf(p, gathered_rest).await,
+        IcdfDistribution::Binomial => binomial_icdf(p, gathered_rest, runtime).await,
         IcdfDistribution::Gamma => gamma_icdf(p, gathered_rest).await,
         IcdfDistribution::Exponential => exponential_icdf(p, gathered_rest).await,
-        IcdfDistribution::Poisson => poisson_icdf(p, gathered_rest).await,
+        IcdfDistribution::Poisson => poisson_icdf(p, gathered_rest, runtime).await,
         IcdfDistribution::Uniform => uniform_icdf(p, gathered_rest).await,
         IcdfDistribution::Lognormal => lognormal_icdf(p, gathered_rest).await,
         IcdfDistribution::Beta => beta_icdf(p, gathered_rest).await,
         IcdfDistribution::F => f_icdf(p, gathered_rest).await,
     }?;
+    check_cancellation(runtime)?;
     admission.finish(output)
 }
 

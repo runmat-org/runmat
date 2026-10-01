@@ -1,6 +1,33 @@
 use super::*;
 
 #[test]
+fn canonical_icdf_binding_uses_invocation_cancellation() {
+    use runmat_execution::{cancellation::CancellationSource, CancellationReason};
+    use std::rc::Rc;
+
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    runtime.set_error_namespace("Invocation");
+    let cancelled = CancellationSource::new();
+    cancelled.cancel(CancellationReason::User);
+    let runtime = runtime.with_cancellation_token(cancelled.token());
+    let args = [
+        Value::from("Binomial"),
+        Value::Num(0.75),
+        Value::Num(10.0),
+        Value::Num(0.5),
+    ];
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name("icdf");
+    assert_eq!(bindings.len(), 1);
+    let error = block_on((bindings[0].implementation)(
+        crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime), Some(1)),
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("Invocation:Cancelled"));
+}
+
+#[test]
 fn icdf_dispatches_supported_distribution_names() {
     let normal = block_on(icdf::icdf_builtin(
         Value::from("Normal"),

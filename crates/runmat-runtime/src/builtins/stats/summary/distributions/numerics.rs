@@ -158,7 +158,13 @@ pub(super) fn chi2inv_scalar(p: f64, nu: f64) -> f64 {
     0.5 * (lo + hi)
 }
 
-pub(super) fn binoinv_scalar(probability: f64, n: f64, success_probability: f64) -> f64 {
+pub(super) fn binoinv_scalar(
+    probability: f64,
+    n: f64,
+    success_probability: f64,
+    poll: impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<f64> {
+    poll()?;
     if probability.is_nan()
         || n.is_nan()
         || success_probability.is_nan()
@@ -167,25 +173,66 @@ pub(super) fn binoinv_scalar(probability: f64, n: f64, success_probability: f64)
         || !(0.0..=1.0).contains(&probability)
         || !(0.0..=1.0).contains(&success_probability)
     {
-        return f64::NAN;
+        return Ok(f64::NAN);
     }
     if probability == 0.0 || success_probability == 0.0 {
-        return 0.0;
+        return Ok(0.0);
     }
     if probability == 1.0 || success_probability == 1.0 {
-        return n;
+        return Ok(n);
     }
+    first_representable_discrete_quantile(
+        probability,
+        n,
+        |x| binocdf_scalar(x, n, success_probability, DistributionTail::Lower),
+        &poll,
+    )
+}
+
+/// Find the first nonnegative integer-valued `f64` whose CDF reaches the
+/// requested probability. Above the consecutive-integer range this selects
+/// among representable integer values, without fabricating an exact integer
+/// that the public double result cannot carry. The ordered positive `f64`
+/// encoding makes every bisection strictly shrink the representable interval.
+fn first_representable_discrete_quantile(
+    probability: f64,
+    mut hi: f64,
+    mut cdf: impl FnMut(f64) -> f64,
+    poll: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<f64> {
     let mut lo = 0.0;
-    let mut hi = n;
+    poll()?;
+    if cdf(lo) >= probability {
+        return Ok(lo);
+    }
     while lo < hi {
-        let mid = ((lo + hi) / 2.0).floor();
-        if binocdf_scalar(mid, n, success_probability, DistributionTail::Lower) >= probability {
+        poll()?;
+        let low_bits = lo.to_bits();
+        let high_bits = hi.to_bits();
+        if high_bits - low_bits <= 1 {
+            return Ok(hi);
+        }
+        let candidate = f64::from_bits(low_bits + (high_bits - low_bits) / 2).ceil();
+        let next = if lo < 9_007_199_254_740_992.0 {
+            lo + 1.0
+        } else {
+            f64::from_bits(low_bits + 1)
+        };
+        let mid = if candidate <= lo || candidate >= hi {
+            next
+        } else {
+            candidate
+        };
+        if mid >= hi {
+            return Ok(hi);
+        }
+        if cdf(mid) >= probability {
             hi = mid;
         } else {
-            lo = mid + 1.0;
+            lo = mid;
         }
     }
-    lo
+    Ok(hi)
 }
 
 pub(super) fn expinv_scalar(p: f64, mu: f64) -> f64 {
@@ -281,35 +328,32 @@ pub(super) fn finv_scalar(p: f64, v1: f64, v2: f64) -> f64 {
     })
 }
 
-pub(super) fn poissinv_scalar(p: f64, lambda: f64) -> f64 {
+pub(super) fn poissinv_scalar(
+    p: f64,
+    lambda: f64,
+    poll: impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<f64> {
+    poll()?;
     if p.is_nan() || lambda.is_nan() || lambda < 0.0 || !(0.0..=1.0).contains(&p) {
-        return f64::NAN;
+        return Ok(f64::NAN);
     }
     if p == 1.0 {
-        return f64::INFINITY;
+        return Ok(f64::INFINITY);
     }
     if p == 0.0 || lambda == 0.0 {
-        return 0.0;
+        return Ok(0.0);
     }
-    let mut lo = 0.0;
     let mut hi = lambda.ceil().max(1.0);
     let mut iterations = 0;
     while poisscdf_scalar(hi, lambda) < p {
+        poll()?;
         hi *= 2.0;
         iterations += 1;
         if !hi.is_finite() || iterations > 2048 {
-            return f64::INFINITY;
+            return Ok(f64::INFINITY);
         }
     }
-    while lo < hi {
-        let mid = ((lo + hi) / 2.0).floor();
-        if poisscdf_scalar(mid, lambda) >= p {
-            hi = mid;
-        } else {
-            lo = mid + 1.0;
-        }
-    }
-    lo
+    first_representable_discrete_quantile(p, hi, |x| poisscdf_scalar(x, lambda), &poll)
 }
 
 pub(super) fn poisscdf_scalar(k: f64, lambda: f64) -> f64 {
@@ -348,4 +392,71 @@ where
         }
     }
     0.5 * (lo + hi)
+}
+
+#[cfg(test)]
+mod discrete_search_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn discrete_inverse_preserves_cdf_crossing_and_wide_endpoint() {
+        let binomial = binoinv_scalar(0.75, 10.0, 0.5, || Ok(())).unwrap();
+        assert_eq!(binomial, 6.0);
+        assert!(binocdf_scalar(binomial - 1.0, 10.0, 0.5, DistributionTail::Lower) < 0.75);
+        assert!(binocdf_scalar(binomial, 10.0, 0.5, DistributionTail::Lower) >= 0.75);
+
+        let poisson = poissinv_scalar(0.8, 3.0, || Ok(())).unwrap();
+        assert_eq!(poisson, 4.0);
+        assert!(poisscdf_scalar(poisson - 1.0, 3.0) < 0.8);
+        assert!(poisscdf_scalar(poisson, 3.0) >= 0.8);
+
+        let wide_trials = (1_u64 << 54) as f64;
+        assert_eq!(
+            binoinv_scalar(1.0, wide_trials, 0.5, || Ok(())).unwrap(),
+            wide_trials
+        );
+    }
+
+    #[test]
+    fn wide_representable_threshold_progresses_and_polls() {
+        let threshold = f64::from_bits(((1_u64 << 54) as f64).to_bits() + 3);
+        let polls = Cell::new(0);
+        let result = first_representable_discrete_quantile(
+            0.5,
+            threshold * 2.0,
+            |value| if value >= threshold { 1.0 } else { 0.0 },
+            &|| {
+                polls.set(polls.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(result, threshold);
+        assert!(polls.get() > 1);
+        assert!(
+            polls.get() <= 70,
+            "ordered-float bisection must make progress"
+        );
+    }
+
+    #[test]
+    fn discrete_search_propagates_cooperative_cancellation() {
+        let polls = Cell::new(0);
+        let error = first_representable_discrete_quantile(
+            0.5,
+            1.0e18,
+            |value| if value >= 1.0e16 { 1.0 } else { 0.0 },
+            &|| {
+                polls.set(polls.get() + 1);
+                if polls.get() > 2 {
+                    Err(normal_error("icdf", "icdf: cancelled"))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:icdf:InvalidArgument"));
+    }
 }

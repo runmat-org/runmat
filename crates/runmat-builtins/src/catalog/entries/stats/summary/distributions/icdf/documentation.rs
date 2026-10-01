@@ -17,6 +17,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`icdf(\"Weibull\",p)` uses scale `1` and shape `1`; `icdf(\"Weibull\",p,a,b)` uses supplied Weibull scale and shape.",
             "`icdf(\"Chi-square\",p,nu)` inverts the chi-square CDF with degrees of freedom `nu`.",
             "`icdf(\"Binomial\",p,n,prob)` returns the smallest integer outcome whose binomial CDF is at least `p`.",
+            "For wide Binomial and Poisson parameters, RunMat returns the first integer-valued `double` representation whose CDF reaches `p`; the output cannot encode every integer above `flintmax`.",
             "`icdf(\"Gamma\",p,shape,scale)`, `icdf(\"Exponential\",p,mu)`, `icdf(\"Poisson\",p,lambda)`, `icdf(\"Beta\",p,a,b)`, and `icdf(\"F\",p,v1,v2)` require the shown distribution parameters.",
             "`icdf(\"Uniform\",p)` uses bounds `[0,1]`; `icdf(\"Uniform\",p,a,b)` uses supplied lower and upper bounds.",
             "`icdf(\"Lognormal\",p)` uses mean `0` and standard deviation `1` for the underlying normal distribution; `icdf(\"Lognormal\",p,mu)` and `icdf(\"Lognormal\",p,mu,sigma)` use supplied lognormal parameters.",

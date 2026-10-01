@@ -21,6 +21,40 @@ fn invalid_distribution_calls_fail_before_resident_provider_access() {
         bad_normal.identifier(),
         Some("RunMat:normpdf:InvalidArgument")
     );
+    macro_rules! rejects_before_owner {
+        ($call:expr, $identifier:literal) => {{
+            let error = block_on($call).unwrap_err();
+            assert_eq!(error.identifier(), Some($identifier));
+        }};
+    }
+    rejects_before_owner!(
+        normcdf::normcdf_builtin(input.clone(), vec![Value::from("bad")]),
+        "RunMat:normcdf:InvalidArgument"
+    );
+    rejects_before_owner!(
+        norminv::norminv_builtin(input.clone(), vec![Value::from("bad")]),
+        "RunMat:norminv:InvalidArgument"
+    );
+    rejects_before_owner!(
+        tpdf::tpdf_builtin(input.clone(), vec![Value::from("bad")]),
+        "RunMat:tpdf:InvalidArgument"
+    );
+    rejects_before_owner!(
+        tcdf::tcdf_builtin(input.clone(), vec![Value::from("bad")]),
+        "RunMat:tcdf:InvalidArgument"
+    );
+    rejects_before_owner!(
+        tinv::tinv_builtin(input.clone(), vec![Value::from("bad")]),
+        "RunMat:tinv:InvalidArgument"
+    );
+    rejects_before_owner!(
+        chi2cdf::chi2cdf_builtin(input.clone(), vec![Value::from("bad")]),
+        "RunMat:chi2cdf:InvalidArgument"
+    );
+    rejects_before_owner!(
+        binocdf::binocdf_builtin(input.clone(), vec![Value::Num(10.0), Value::from("bad")]),
+        "RunMat:binocdf:InvalidArgument"
+    );
 
     let bad_named = block_on(icdf::icdf_builtin(
         Value::from("Normal"),

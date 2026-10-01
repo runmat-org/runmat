@@ -61,7 +61,11 @@ pub(super) async fn chi_square_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult
     super::finish(args.shape, data)
 }
 
-pub(super) async fn binomial_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn binomial_icdf(
+    p: Value,
+    rest: Vec<Value>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     let args = super::three_args("icdf", p, rest, None).await?;
     let data = args
         .x
@@ -69,9 +73,11 @@ pub(super) async fn binomial_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<V
         .zip(args.a.iter())
         .zip(args.b.iter())
         .map(|((probability, n), success_probability)| {
-            super::binoinv_scalar(*probability, *n, *success_probability)
+            super::binoinv_scalar(*probability, *n, *success_probability, || {
+                super::check_cancellation(runtime)
+            })
         })
-        .collect();
+        .collect::<BuiltinResult<Vec<_>>>()?;
     super::finish(args.shape, data)
 }
 
@@ -98,14 +104,20 @@ pub(super) async fn exponential_icdf(p: Value, rest: Vec<Value>) -> BuiltinResul
     super::finish(args.shape, data)
 }
 
-pub(super) async fn poisson_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn poisson_icdf(
+    p: Value,
+    rest: Vec<Value>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     let args = one_param_args(IcdfDistribution::Poisson, p, rest).await?;
     let data = args
         .x
         .iter()
         .zip(args.param.iter())
-        .map(|(p, lambda)| super::poissinv_scalar(*p, *lambda))
-        .collect();
+        .map(|(p, lambda)| {
+            super::poissinv_scalar(*p, *lambda, || super::check_cancellation(runtime))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
     super::finish(args.shape, data)
 }
 
