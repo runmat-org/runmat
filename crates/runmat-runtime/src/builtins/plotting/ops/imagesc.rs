@@ -378,8 +378,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         &c_data_mapping,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_imagesc_internal(err));

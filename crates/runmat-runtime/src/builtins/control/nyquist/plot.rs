@@ -2,7 +2,7 @@
 
 use super::solver::NyquistResponse;
 use super::*;
-use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
+use crate::builtins::plotting::state::presentation_failure_kind;
 use runmat_builtins::NYQUIST_ERROR_PLOT_FAILED;
 
 pub(super) async fn render(response: &NyquistResponse) -> BuiltinResult<()> {
@@ -24,7 +24,7 @@ pub(super) async fn render(response: &NyquistResponse) -> BuiltinResult<()> {
         }
     }
     if let Err(error) = crate::call_builtin_async("plot", &args).await {
-        if is_nonfatal_plot_setup_error(&error) {
+        if presentation_failure_kind(&error).is_some() {
             return Ok(());
         }
         return Err(plot_error(error));

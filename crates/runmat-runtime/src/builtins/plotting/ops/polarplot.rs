@@ -354,8 +354,7 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         plot_index,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_polarplot_internal(err));

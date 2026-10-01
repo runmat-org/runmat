@@ -13,11 +13,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
 };
 use crate::builtins::control::tf_model::RealTfModel;
+use crate::builtins::plotting::state::presentation_failure_kind;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "impulse";
@@ -206,7 +206,7 @@ fn value_contains_single(value: &Value) -> bool {
 
 async fn emit_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<()> {
     if let Err(err) = render_impulse_plot(response).await {
-        if is_nonfatal_plot_setup_error(&err) {
+        if presentation_failure_kind(&err).is_some() {
             return Ok(());
         }
         return Err(impulse_plot_error(err));

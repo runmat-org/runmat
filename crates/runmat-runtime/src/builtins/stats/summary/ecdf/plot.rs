@@ -48,8 +48,7 @@ pub(super) fn plot_ecdf_line(
         plot_index,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::core::error::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(internal_with_cause(builtin, err));

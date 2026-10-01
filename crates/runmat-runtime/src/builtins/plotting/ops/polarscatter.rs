@@ -393,8 +393,7 @@ async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value>
         })
         .collect();
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handles_value(handles));
         }
         return Err(err);

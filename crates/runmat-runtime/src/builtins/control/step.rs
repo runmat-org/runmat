@@ -14,13 +14,13 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::validation::{
     native_integer_value_is_exact_f64, value_has_native_integer_class,
 };
-use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::response::step::{
     admit_time, preflight_host_time, simulate, StepResponse, StepSimulationCaller,
 };
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
 };
+use crate::builtins::plotting::state::presentation_failure_kind;
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -299,7 +299,7 @@ async fn plot_response_with_style(eval: &StepResponse, style: Option<&Value>) ->
         vec![t, y]
     };
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if is_nonfatal_plot_setup_error(&err) {
+        if presentation_failure_kind(&err).is_some() {
             return Ok(());
         }
         return Err(step_error_with_detail(

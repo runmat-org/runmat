@@ -345,8 +345,7 @@ pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     };
     let handle = register_line_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_triplot_internal(err));

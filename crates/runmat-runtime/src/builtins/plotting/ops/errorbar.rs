@@ -557,8 +557,7 @@ pub async fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         })
         .collect();
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handles[0]);
         }
         return Err(map_errorbar_invalid(err));

@@ -1387,8 +1387,7 @@ fn handle_plot_render_result(result: BuiltinResult<String>) -> BuiltinResult<()>
     match result {
         Ok(_) => Ok(()),
         Err(err) => {
-            let lower = err.to_string().to_lowercase();
-            if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            if crate::builtins::plotting::state::presentation_unavailable(&err) {
                 Ok(())
             } else {
                 Err(internal(err.message))

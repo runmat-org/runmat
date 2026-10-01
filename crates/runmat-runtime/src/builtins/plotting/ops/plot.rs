@@ -597,8 +597,7 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         plot_index,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_plot_internal(err));
@@ -1088,9 +1087,8 @@ pub(crate) mod tests {
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
-        let lower = err.to_string().to_lowercase();
         assert!(
-            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            crate::builtins::plotting::state::presentation_unavailable(err),
             "unexpected error: {err}"
         );
     }
@@ -1119,6 +1117,22 @@ pub(crate) mod tests {
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
+    }
+
+    #[test]
+    fn plot_keeps_handle_after_typed_unavailable_presentation() {
+        let guard = setup_plot_tests();
+        let _unmanaged = guard.disable_host_managed_plot_env();
+        let handle = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[2.0, 3.0])),
+        ]))
+        .expect("only presentation was unavailable");
+        assert!(handle > 0.0);
+        assert!(crate::builtins::plotting::state::clone_figure(
+            crate::builtins::plotting::state::current_figure_handle(),
+        )
+        .is_some());
     }
 
     #[test]

@@ -1874,9 +1874,8 @@ pub(crate) mod tests {
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
-        let lower = err.to_string().to_lowercase();
         assert!(
-            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            crate::builtins::plotting::state::presentation_unavailable(err),
             "unexpected error: {err}"
         );
     }

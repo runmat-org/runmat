@@ -933,8 +933,7 @@ fn render_imhist_plot(counts: &Tensor, locations: &Tensor) -> BuiltinResult<()> 
         },
     );
     if let Err(err) = render_result {
-        let lower = err.message().to_ascii_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(());
         }
         return Err(plot_failed(err.message()));

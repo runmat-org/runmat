@@ -405,8 +405,7 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return render_result.map(|_| Value::Num(f64::NAN));
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !lower.contains("plotting is unavailable") && !lower.contains("non-main thread") {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(map_fill3_internal(err));
         }
     }

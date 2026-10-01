@@ -529,8 +529,7 @@ pub async fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_stem_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_stem_internal(err));
@@ -944,8 +943,9 @@ mod tests {
             Value::String("filled".into()),
         ]);
         if let Err(err) = &result {
-            let msg = err.to_string().to_lowercase();
-            assert!(msg.contains("plotting is unavailable") || msg.contains("non-main thread"));
+            assert!(crate::builtins::plotting::state::presentation_unavailable(
+                err
+            ));
         }
         let handle = result.unwrap_or(-1.0);
         let fig = clone_figure(current_figure_handle()).unwrap();

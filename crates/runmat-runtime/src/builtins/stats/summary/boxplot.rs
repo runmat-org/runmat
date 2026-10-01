@@ -998,8 +998,7 @@ fn render_boxplot(boxes: &[BoxStats], options: &BoxplotOptions) -> BuiltinResult
         .collect::<Vec<_>>();
 
     if let Err(err) = render_result {
-        let lower = err.to_string().to_ascii_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handles);
         }
         return Err(internal(err.message));

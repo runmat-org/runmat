@@ -19,10 +19,10 @@ use crate::builtins::common::{
     tensor,
 };
 use crate::builtins::control::model_polynomial::ss_object_to_tf_async;
-use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::tf_model::{
     poly_eval, polynomial_roots, TfModel, EPS, SS_CLASS, TF_CLASS,
 };
+use crate::builtins::plotting::state::presentation_failure_kind;
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::{BuiltinResult, RuntimeError};
 
@@ -706,7 +706,7 @@ async fn render_root_locus_plot(eval: &RootLocus, style: Option<&Value>) -> Buil
         return Ok(());
     }
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if is_nonfatal_plot_setup_error(&err) {
+        if presentation_failure_kind(&err).is_some() {
             return Ok(());
         }
         return Err(rlocus_error(

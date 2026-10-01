@@ -77,7 +77,7 @@ impl Drop for WindowRegistration {
 
 pub fn render_figure(handle: u32, figure: Figure) -> Result<String, String> {
     if handle == 0 {
-        return crate::show_interactive_platform_optimal(figure);
+        return crate::show_interactive_platform_optimal(figure).map_err(|error| error.to_string());
     }
 
     if !figure.visible {

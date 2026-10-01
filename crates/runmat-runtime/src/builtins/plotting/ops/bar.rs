@@ -763,8 +763,7 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
         Ok(())
     });
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(err);
         }
     }
@@ -1645,10 +1644,8 @@ pub(crate) mod tests {
         setup_plot_tests();
         let out = bar_builtin(vec![Value::Tensor(tensor_from(&[1.0, 2.0, 3.0]))]);
         if let Err(err) = out {
-            let msg_lower = err.to_string().to_lowercase();
             assert!(
-                msg_lower.contains("plotting is unavailable")
-                    || msg_lower.contains("non-main thread"),
+                crate::builtins::plotting::state::presentation_unavailable(&err),
                 "unexpected error: {err}"
             );
         }
@@ -1678,10 +1675,8 @@ pub(crate) mod tests {
         setup_plot_tests();
         let out = barh_builtin(vec![Value::Tensor(tensor_from(&[1.0, 2.0, 3.0]))]);
         if let Err(err) = out {
-            let msg_lower = err.to_string().to_lowercase();
             assert!(
-                msg_lower.contains("plotting is unavailable")
-                    || msg_lower.contains("non-main thread"),
+                crate::builtins::plotting::state::presentation_unavailable(&err),
                 "unexpected error: {err}"
             );
         }
@@ -2068,8 +2063,9 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[1.0, 2.0])),
         ]);
         if let Err(err) = out {
-            let msg = err.to_string().to_lowercase();
-            assert!(msg.contains("plotting is unavailable") || msg.contains("non-main thread"));
+            assert!(crate::builtins::plotting::state::presentation_unavailable(
+                &err
+            ));
         }
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
         let style = parse_bar_style_args("bar", &[], defaults).unwrap();

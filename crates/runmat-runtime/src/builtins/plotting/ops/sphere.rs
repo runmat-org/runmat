@@ -391,8 +391,7 @@ fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
     });
 
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(());
         }
         return Err(sphere_error(

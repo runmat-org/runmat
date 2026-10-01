@@ -17,6 +17,8 @@ pub(crate) mod wgpu_compat;
 
 // High-level plot types and figures
 pub mod plots;
+pub mod presentation;
+pub use presentation::{PlotPresentationError, PresentationFailureKind};
 
 // Export capabilities
 pub mod export;
@@ -116,29 +118,7 @@ pub fn show_plot_unified(
             // Static export: Render using same GPU pipeline and save to file
             render_figure_to_file(figure, path)
         }
-        None => {
-            // Interactive mode: Show GPU-accelerated window
-            #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
-            {
-                if !figure.visible {
-                    return Ok("Figure is hidden".to_string());
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    if !is_main_thread() {
-                        return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread, or use file export APIs for headless rendering.".to_string());
-                    }
-                }
-                show_plot_sequential(figure)
-            }
-            #[cfg(any(not(feature = "gui"), target_arch = "wasm32"))]
-            {
-                Err(
-                    "GUI feature not enabled. Build with --features gui for interactive plotting."
-                        .to_string(),
-                )
-            }
-        }
+        None => render_interactive_with_handle(0, figure).map_err(|error| error.to_string()),
     }
 }
 
@@ -315,7 +295,9 @@ pub fn plot_histogram(
 
 /// Show an interactive plot with optimal platform compatibility
 /// This is the main entry point used by the runtime
-pub fn show_interactive_platform_optimal(figure: plots::Figure) -> Result<String, String> {
+pub fn show_interactive_platform_optimal(
+    figure: plots::Figure,
+) -> Result<String, PlotPresentationError> {
     render_interactive_with_handle(0, figure)
 }
 
@@ -325,7 +307,7 @@ pub fn show_interactive_platform_optimal(figure: plots::Figure) -> Result<String
 pub fn render_interactive_with_handle(
     handle: u32,
     figure: plots::Figure,
-) -> Result<String, String> {
+) -> Result<String, PlotPresentationError> {
     #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
     {
         if !figure.visible {
@@ -336,30 +318,29 @@ pub fn render_interactive_with_handle(
             return Ok(format!("Figure {handle} is hidden"));
         }
         if std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS").is_some() {
-            return Err(
-                "Plotting is unavailable in this environment (interactive rendering disabled)."
-                    .to_string(),
-            );
+            return Err(PlotPresentationError::Unavailable(
+                "Plotting is unavailable in this environment (interactive rendering disabled).",
+            ));
         }
         #[cfg(target_os = "macos")]
         {
             if !is_main_thread() {
-                return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread, or use file export APIs for headless rendering.".to_string());
+                return Err(PlotPresentationError::MainThreadRequired);
             }
         }
         if handle == 0 {
-            show_plot_unified(figure, None)
+            show_plot_sequential(figure).map_err(PlotPresentationError::InteractiveBackend)
         } else {
             gui::lifecycle::render_figure(handle, figure)
+                .map_err(PlotPresentationError::InteractiveBackend)
         }
     }
     #[cfg(any(not(feature = "gui"), target_arch = "wasm32"))]
     {
         let _ = handle;
         let _ = figure;
-        Err(
-            "GUI feature not enabled. Build with --features gui for interactive plotting."
-                .to_string(),
-        )
+        Err(PlotPresentationError::Unavailable(
+            "GUI feature not enabled. Build with --features gui for interactive plotting.",
+        ))
     }
 }

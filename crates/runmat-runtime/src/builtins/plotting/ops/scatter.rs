@@ -593,8 +593,7 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     let handle =
         crate::builtins::plotting::state::register_scatter_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_scatter_internal(err));
@@ -1202,9 +1201,8 @@ pub(crate) mod tests {
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
-        let lower = err.to_string().to_lowercase();
         assert!(
-            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            crate::builtins::plotting::state::presentation_unavailable(err),
             "unexpected error: {err}"
         );
     }

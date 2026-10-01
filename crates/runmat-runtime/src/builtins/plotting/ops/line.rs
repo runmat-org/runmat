@@ -210,8 +210,7 @@ pub async fn line_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .collect::<Vec<_>>();
 
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(plotting_error(BUILTIN_NAME, err.to_string()));
         }
     }

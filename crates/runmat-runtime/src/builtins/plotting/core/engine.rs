@@ -14,8 +14,6 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[derive(Debug, Error)]
 #[allow(dead_code)]
 enum PlottingBackendError {
-    #[error("interactive backend error: {0}")]
-    Interactive(String),
     #[error("static backend error: {0}")]
     Static(String),
     #[error("export initialization error: {0}")]
@@ -51,7 +49,10 @@ pub fn render_figure(handle: FigureHandle, figure: Figure) -> BuiltinResult<Stri
     {
         let _ = handle;
         let _ = figure;
-        Err(engine_error(ERR_PLOTTING_UNAVAILABLE))
+        Err(engine_error_with_source(
+            ERR_PLOTTING_UNAVAILABLE,
+            runmat_plot::PlotPresentationError::Unavailable(ERR_PLOTTING_UNAVAILABLE),
+        ))
     }
 }
 
@@ -664,7 +665,7 @@ pub(crate) mod native {
         runmat_plot::render_interactive_with_handle(handle.as_u32(), figure_clone).map_err(|err| {
             engine_error_with_source(
                 "Interactive plotting failed. Please check GPU/GUI system setup.",
-                PlottingBackendError::Interactive(err),
+                err,
             )
         })
     }

@@ -17,6 +17,7 @@ use thiserror::Error;
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
 #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 use super::engine::render_figure;
+pub(crate) use super::error::{presentation_failure_kind, presentation_unavailable};
 use super::web::current_plot_theme_config;
 use super::{plotting_error, plotting_error_with_source};
 
@@ -5672,7 +5673,11 @@ fn present_figure_update_with_options(
         if host_managed_rendering {
             return Ok(updated());
         }
-        return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
+        return Err(super::plotting_error_with_source(
+            builtin,
+            ERR_PLOTTING_UNAVAILABLE,
+            runmat_plot::PlotPresentationError::Unavailable(ERR_PLOTTING_UNAVAILABLE),
+        ));
     }
 
     if host_managed_rendering {
@@ -5819,6 +5824,48 @@ mod tests {
         let result = present_figure_update_with_options("plot", handle, figure, true, false)
             .expect("hidden figure should not try to present");
         assert_eq!(result, format!("Figure {} updated", handle.as_u32()));
+    }
+
+    #[test]
+    fn unavailable_presentation_is_typed_after_one_successful_plot_mutation() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let guard = lock_plot_test_registry();
+        let _unmanaged = guard.disable_host_managed_plot_env();
+        reset_for_tests();
+        let handle = new_figure_handle();
+        let before = current_figure_revision(handle).unwrap();
+        let applied = AtomicUsize::new(0);
+        let error = render_active_plot("plot", PlotRenderOptions::default(), |figure, axes| {
+            applied.fetch_add(1, Ordering::SeqCst);
+            figure.set_axes_title(axes, "retained after unavailable presentation");
+            Ok(())
+        })
+        .expect_err("disabled interactive presentation must report its cause");
+        assert_eq!(applied.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            current_figure_revision(handle),
+            Some(before.wrapping_add(1))
+        );
+        assert_eq!(
+            presentation_failure_kind(&error),
+            Some(runmat_plot::PresentationFailureKind::Unavailable)
+        );
+        assert_eq!(error.message(), ERR_PLOTTING_UNAVAILABLE);
+
+        let spoofed = render_active_plot("plot", PlotRenderOptions::default(), |_figure, _axes| {
+            Err(crate::build_runtime_error(
+                "data conversion failed: plotting is unavailable on non-main thread",
+            )
+            .build())
+        })
+        .expect_err("operational data error must not be classified as presentation");
+        assert_eq!(presentation_failure_kind(&spoofed), None);
+        assert_eq!(applied.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            current_figure_revision(handle),
+            Some(before.wrapping_add(1))
+        );
     }
 
     #[cfg(all(
