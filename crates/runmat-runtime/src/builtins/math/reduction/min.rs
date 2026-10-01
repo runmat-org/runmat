@@ -10,7 +10,8 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
+    BuiltinSignatureDescriptor, MinComparisonMethod as ComparisonMethod, MinControl,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
@@ -358,7 +359,6 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     },
 ];
 
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -596,13 +596,6 @@ enum DimSelection {
     All,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ComparisonMethod {
-    Auto,
-    Real,
-    Abs,
-}
-
 #[derive(Debug, Clone)]
 struct ElementwiseArgs {
     other: Value,
@@ -648,47 +641,15 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     let mut comparison_set = matches!(args.comparison, ComparisonMethod::Auto);
-    let tokens = tokens_from_values(rest);
     while idx < rest.len() {
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            match text.as_str() {
-                "omitnan" => {
-                    args.nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includenan" => {
-                    args.nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
-                    if selection_set {
-                        return Err(min_invalid_argument(
-                            "min: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                    args.selection = DimSelection::All;
-                    selection_set = true;
-                    idx += 1;
-                    continue;
-                }
-                _ => {}
-            }
-        }
         if let Some(keyword) = keyword_of(&rest[idx]) {
-            match keyword.as_str() {
-                "omitnan" => {
-                    args.nan_mode = ReductionNaN::Omit;
+            match MinControl::from_public_option(&keyword) {
+                Some(MinControl::Missing(mode)) => {
+                    args.nan_mode = mode;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
-                    args.nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
+                Some(MinControl::All) => {
                     if selection_set {
                         return Err(min_invalid_argument(
                             "min: 'all' cannot be combined with an explicit dimension",
@@ -699,7 +660,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                     idx += 1;
                     continue;
                 }
-                "linear" => {
+                Some(MinControl::Linear) => {
                     if selection_set {
                         return Err(min_invalid_argument(
                             "min: 'linear' cannot be combined with an explicit dimension",
@@ -711,7 +672,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                     idx += 1;
                     continue;
                 }
-                "comparisonmethod" => {
+                Some(MinControl::ComparisonMethod) => {
                     let Some(value) = rest.get(idx + 1) else {
                         return Err(min_invalid_argument(
                             "min: expected a value after 'ComparisonMethod'",
@@ -722,7 +683,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                     idx += 2;
                     continue;
                 }
-                _ => {}
+                None => {}
             }
         }
 
@@ -754,8 +715,8 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
     let mut idx = 0usize;
     while idx < rest.len() {
         if let Some(keyword) = keyword_of(&rest[idx]) {
-            match keyword.as_str() {
-                "comparisonmethod" => {
+            match MinControl::from_public_option(&keyword) {
+                Some(MinControl::ComparisonMethod) => {
                     let Some(value) = rest.get(idx + 1) else {
                         return Err(min_invalid_argument(
                             "min: expected a value after 'ComparisonMethod'",
@@ -766,13 +727,13 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
                     idx += 2;
                     continue;
                 }
-                "omitnan" | "includenan" | "all" | "linear" => {
+                Some(MinControl::Missing(_) | MinControl::All | MinControl::Linear) => {
                     return Err(min_invalid_argument(format!(
                         "min: '{}' is only supported for reduction calls",
                         keyword
                     )));
                 }
-                _ => {}
+                None => {}
             }
         }
         return Err(min_invalid_argument(format!(
@@ -792,14 +753,9 @@ fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
             "min: 'ComparisonMethod' expects a string value",
         ));
     };
-    match keyword.as_str() {
-        "auto" => Ok(ComparisonMethod::Auto),
-        "abs" | "magnitude" => Ok(ComparisonMethod::Abs),
-        "real" => Ok(ComparisonMethod::Real),
-        other => Err(min_invalid_argument(format!(
-            "min: unsupported ComparisonMethod '{other}'"
-        ))),
-    }
+    ComparisonMethod::from_public_option(&keyword).ok_or_else(|| {
+        min_invalid_argument(format!("min: unsupported ComparisonMethod '{keyword}'"))
+    })
 }
 
 async fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelection>> {
@@ -2165,6 +2121,28 @@ pub(crate) mod tests {
         assert!(codes.contains(&"RM.MIN.INVALID_INPUT"));
         assert!(codes.contains(&"RM.MIN.SIZE_MISMATCH"));
         assert!(codes.contains(&"RM.MIN.INTERNAL"));
+    }
+
+    #[test]
+    fn min_typed_controls_keep_pairwise_restrictions_and_method_alias() {
+        let pairwise = min_builtin(
+            Value::Num(3.0),
+            vec![
+                Value::Num(2.0),
+                Value::from("ComparisonMethod"),
+                Value::from("magnitude"),
+            ],
+        )
+        .expect("comparison method alias");
+        assert_eq!(pairwise, Value::Num(2.0));
+
+        let invalid = min_builtin(
+            Value::Num(3.0),
+            vec![Value::Num(2.0), Value::from("omitnan")],
+        )
+        .expect_err("missing policy is reduction-only");
+        assert_eq!(invalid.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(invalid.message().contains("only supported for reduction"));
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
