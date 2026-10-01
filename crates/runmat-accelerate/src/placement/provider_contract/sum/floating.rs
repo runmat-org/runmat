@@ -159,6 +159,8 @@ pub(super) fn dimension_work(
         #[cfg(feature = "wgpu")]
         input_cast: false,
         #[cfg(feature = "wgpu")]
+        integer_input_cast: false,
+        #[cfg(feature = "wgpu")]
         output_cast: false,
         #[cfg(feature = "wgpu")]
         nan_map: false,
@@ -184,6 +186,7 @@ pub(super) fn dimension_work(
 #[derive(Clone, Copy)]
 enum CastStage {
     Input,
+    IntegerInput,
     Output,
 }
 
@@ -193,6 +196,14 @@ pub(super) fn add_input_cast(
     geometry: ProviderSumGeometry,
 ) -> Result<(), ProviderFeasibility> {
     add_cast(work, elements, geometry, CastStage::Input)
+}
+
+pub(super) fn add_integer_input_cast(
+    work: &mut SumWork,
+    elements: u64,
+    geometry: ProviderSumGeometry,
+) -> Result<(), ProviderFeasibility> {
+    add_cast(work, elements, geometry, CastStage::IntegerInput)
 }
 
 pub(super) fn add_output_cast(
@@ -210,13 +221,17 @@ fn add_cast(
     stage: CastStage,
 ) -> Result<(), ProviderFeasibility> {
     let reject = ProviderFeasibility::rejected;
-    if geometry.cast_chunk_elements == 0 {
+    let chunk_elements = match stage {
+        CastStage::IntegerInput => geometry.integer_cast_chunk_elements,
+        CastStage::Input | CastStage::Output => geometry.cast_chunk_elements,
+    };
+    if chunk_elements == 0 {
         return Err(reject(
             ProviderRejectionCode::UnknownResourceEstimate,
             "sum.cast_chunk_geometry_unknown",
         ));
     }
-    let chunks = u32::try_from(elements.div_ceil(geometry.cast_chunk_elements)).map_err(|_| {
+    let chunks = u32::try_from(elements.div_ceil(chunk_elements)).map_err(|_| {
         reject(
             ProviderRejectionCode::ResourceLimit,
             "sum.cast_dispatch_count",
@@ -258,6 +273,7 @@ fn add_cast(
             .ok_or_else(|| reject(ProviderRejectionCode::ResourceLimit, "sum.cast_scalar_work"))?;
         match stage {
             CastStage::Input => work.input_cast = true,
+            CastStage::IntegerInput => work.integer_input_cast = true,
             CastStage::Output => work.output_cast = true,
         }
     }

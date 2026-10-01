@@ -53,3 +53,25 @@ fn cast_recipe_distinguishes_both_physical_precisions_and_workgroup() {
         }
     }
 }
+
+#[test]
+fn integer_sum_conversion_recipe_matches_the_execution_shader_identity() {
+    for workgroup in [64, 256, 512] {
+        let recipe = PipelineRecipe::integer_sum_cast(workgroup);
+        assert_eq!(recipe.layout, "runmat-integer-sum-floating-cast-bgl");
+        assert_eq!(
+            recipe.key(),
+            key::compute_pipeline_hash_bytes(
+                crate::backend::wgpu::shaders::integer::floating_sum_cast_shader(workgroup)
+                    .as_bytes(),
+                "runmat-integer-sum-floating-cast-bgl",
+                Some(workgroup)
+            )
+        );
+        assert_ne!(
+            recipe.key(),
+            PipelineRecipe::floating_cast(NumericPrecision::F32, NumericPrecision::F64, workgroup)
+                .key()
+        );
+    }
+}

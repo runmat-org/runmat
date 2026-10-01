@@ -9,6 +9,7 @@ use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
 mod tests;
 mod global;
 mod floating;
+mod integer;
 mod omit;
 
 pub(crate) struct SumWork {
@@ -17,6 +18,8 @@ pub(crate) struct SumWork {
     pub kernel: SumKernelRoute,
     #[cfg(feature = "wgpu")]
     pub input_cast: bool,
+    #[cfg(feature = "wgpu")]
+    pub integer_input_cast: bool,
     #[cfg(feature = "wgpu")]
     pub output_cast: bool,
     #[cfg(feature = "wgpu")]
@@ -188,6 +191,8 @@ fn work(
             #[cfg(feature = "wgpu")]
             input_cast: false,
             #[cfg(feature = "wgpu")]
+            integer_input_cast: false,
+            #[cfg(feature = "wgpu")]
             output_cast: false,
             #[cfg(feature = "wgpu")]
             nan_map: false,
@@ -221,6 +226,16 @@ fn work(
             ProviderRejectionCode::UnknownResourceEstimate,
             "sum.physical_recipe_unresolved",
         ));
+    }
+    if route.input_class.integer_class().is_some() {
+        return integer::work(
+            provider,
+            input,
+            route,
+            elements,
+            output_elements,
+            output_bytes,
+        );
     }
     match route.missing {
         ReductionNaN::Include => floating::work(

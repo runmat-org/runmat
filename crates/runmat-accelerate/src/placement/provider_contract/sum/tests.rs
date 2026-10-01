@@ -30,6 +30,7 @@ impl AccelProvider for GeometryProvider {
             max_binding_bytes: 1 << 20,
             nd_chunk_elements: 128,
             cast_chunk_elements: 128,
+            integer_cast_chunk_elements: 128,
             dimension_2_max_output_elements: 512 * 65535,
             global_chunk_elements: 1024,
             global_group_elements: 1024,
@@ -42,6 +43,7 @@ fn query(class: ProviderElementType, shape: &[u64], axes: &[u64]) -> ProviderFea
         ProviderElementType::F32 => NumericClass::Single,
         ProviderElementType::F64 => NumericClass::Double,
         ProviderElementType::I64 => NumericClass::Int64,
+        ProviderElementType::I8 => NumericClass::Int8,
         _ => panic!("fixture class"),
     };
     ProviderFeasibilityQuery {
@@ -117,10 +119,10 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
         Some(ProviderFeasibility::Supported { .. })
     ));
     changed = query(ProviderElementType::I64, &[2, 3], &[0]);
-    assert_eq!(
-        rejection_code(validate(&provider, true, &changed).unwrap()),
-        ProviderRejectionCode::UnknownResourceEstimate
-    );
+    assert!(matches!(
+        validate(&provider, true, &changed),
+        Some(ProviderFeasibility::Supported { .. })
+    ));
     changed = base;
     changed.inputs[0].layout = ProviderLayout::Strided;
     assert_eq!(
@@ -133,6 +135,66 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
         rejection_code(validate(&provider, true, &changed).unwrap()),
         ProviderRejectionCode::UnknownResourceEstimate
     );
+}
+
+#[test]
+fn integer_to_double_uses_word_storage_and_its_own_cast_geometry() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F64,
+    };
+    let wide = query(ProviderElementType::I64, &[2, 3], &[0]);
+    let narrow = query(ProviderElementType::I8, &[2, 3], &[0]);
+    assert_eq!(
+        crate::backend::wgpu_storage::checked_allocation_bytes(&wide.inputs[0]),
+        Some(48)
+    );
+    assert_eq!(
+        crate::backend::wgpu_storage::checked_allocation_bytes(&narrow.inputs[0]),
+        Some(24)
+    );
+    for request in [&wide, &narrow] {
+        let work = work(&provider, true, request).unwrap();
+        assert_eq!(work.estimate.output_bytes, Some(24));
+        assert_eq!(work.estimate.dispatches, Some(2));
+        assert_eq!(work.estimate.transient_bytes, None);
+        #[cfg(feature = "wgpu")]
+        assert!(work.integer_input_cast && !work.input_cast && !work.output_cast);
+    }
+    // Omit-NaN is a no-op on integer values, so it uses the same route.
+    let mut omit = wide.clone();
+    omit.workload.sum.as_mut().unwrap().missing = ReductionNaN::Omit;
+    assert_eq!(
+        work(&provider, true, &omit).unwrap().estimate.dispatches,
+        work(&provider, true, &wide).unwrap().estimate.dispatches
+    );
+    let mut native = wide.clone();
+    let controls = native.workload.sum.as_mut().unwrap();
+    controls.output = SumOutputClass::Native;
+    controls.accumulation_class = NumericClass::Int64;
+    controls.publication_class = NumericClass::Int64;
+    assert_eq!(
+        rejection_code(validate(&provider, true, &native).unwrap()),
+        ProviderRejectionCode::UnknownResourceEstimate
+    );
+}
+
+#[test]
+fn integer_cast_dispatches_use_integer_shader_geometry_not_floating_cast_geometry() {
+    let geometry = ProviderSumGeometry {
+        max_buffer_bytes: 1 << 20,
+        max_binding_bytes: 1 << 20,
+        nd_chunk_elements: 128,
+        cast_chunk_elements: 128,
+        integer_cast_chunk_elements: 2,
+        dimension_2_max_output_elements: 1024,
+        global_chunk_elements: 1024,
+        global_group_elements: 1024,
+    };
+    let mut work = floating::dimension_work(2, 1, 6, 3, 24, geometry).unwrap();
+    floating::add_integer_input_cast(&mut work, 6, geometry).unwrap();
+    assert_eq!(work.estimate.dispatches, Some(4));
+    #[cfg(feature = "wgpu")]
+    assert_eq!(work.queue_submissions, 4);
 }
 
 #[test]
@@ -221,6 +283,7 @@ fn two_dimensional_launch_geometry_admits_exact_adapter_boundary() {
         max_binding_bytes: u64::MAX,
         nd_chunk_elements: 128,
         cast_chunk_elements: 128,
+        integer_cast_chunk_elements: 128,
         dimension_2_max_output_elements: 1024,
         global_chunk_elements: 1024,
         global_group_elements: 1024,

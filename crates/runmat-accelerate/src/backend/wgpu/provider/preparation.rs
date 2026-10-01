@@ -125,6 +125,14 @@ impl WgpuProvider {
                 .key(),
             );
         }
+        if work.integer_input_cast {
+            keys.push(
+                PipelineRecipe::integer_sum_cast(
+                    crate::backend::wgpu::config::effective_workgroup_size(),
+                )
+                .key(),
+            );
+        }
         if work.nan_map {
             keys.push(
                 PipelineRecipe::fusion(

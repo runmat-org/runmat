@@ -6,6 +6,69 @@ use runmat_accelerate_api::{
 
 #[test]
 #[ignore = "requires an actual shader-f64 WGPU adapter; execute explicitly for qualification"]
+fn actual_integer_sum_conversion_preparation_tracks_its_distinct_pipeline() {
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostNumericDataOwned, ProviderSumWorkload,
+        ProviderWorkload,
+    };
+    use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
+
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    assert_eq!(
+        provider.precision(),
+        runmat_accelerate_api::ProviderPrecision::F64
+    );
+    let query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new(runmat_builtins::SUM_CATALOG_ENTRY.identity.name),
+        family: ProviderOperationFamily::Reduction,
+        inputs: vec![ProviderRepresentation {
+            element_type: ProviderElementType::I64,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![2, 3],
+            residency: ProviderResidency::Host,
+        }],
+        outputs: vec![],
+        workload: ProviderWorkload {
+            elements: Some(6),
+            sum: Some(ProviderSumWorkload {
+                axes: vec![0],
+                missing: ReductionNaN::Include,
+                output: SumOutputClass::Double,
+                input_class: NumericClass::Int64,
+                input_domain: NumericDomain::Real,
+                accumulation_class: NumericClass::Double,
+                publication_class: NumericClass::Double,
+            }),
+            ..Default::default()
+        },
+    };
+    let before = provider.sum_preparation_snapshot(&query).unwrap();
+    assert_eq!(before.state, Some(CandidatePreparationState::Cold));
+    assert!(before.cold_pipelines >= 1);
+    let input = provider
+        .upload_integer(&HostIntegerTensorView {
+            data: HostIntegerDataView::I64(&[1, 2, 3, 4, 5, 6]),
+            shape: &[2, 3],
+        })
+        .unwrap();
+    let output = futures::executor::block_on(provider.reduce_sum_dim(&input, 0)).unwrap();
+    assert_eq!(
+        futures::executor::block_on(provider.download_numeric(&output))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F64(vec![3.0, 7.0, 11.0])
+    );
+    let after = provider.sum_preparation_snapshot(&query).unwrap();
+    assert_eq!(after.identity, before.identity);
+    assert_eq!(after.state, Some(CandidatePreparationState::Warm));
+    assert_eq!(after.cold_pipelines, 0);
+    output.release().unwrap();
+    input.release().unwrap();
+}
+
+#[test]
+#[ignore = "requires an actual shader-f64 WGPU adapter; execute explicitly for qualification"]
 fn actual_omit_sum_preparation_covers_map_and_reduction_pipelines() {
     use runmat_accelerate_api::{
         GpuTensorStorage, HostNumericDataView, HostNumericTensorView, ProviderSumWorkload,

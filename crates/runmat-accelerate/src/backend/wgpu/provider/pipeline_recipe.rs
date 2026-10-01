@@ -60,6 +60,14 @@ impl PipelineRecipe {
         }
     }
 
+    pub fn integer_sum_cast(workgroup: u32) -> Self {
+        Self {
+            shader: crate::backend::wgpu::shaders::integer::floating_sum_cast_shader(workgroup),
+            layout: "runmat-integer-sum-floating-cast-bgl".into(),
+            workgroup,
+        }
+    }
+
     pub fn key(&self) -> u64 {
         key::compute_pipeline_hash_bytes(self.shader.as_bytes(), &self.layout, Some(self.workgroup))
     }

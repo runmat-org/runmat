@@ -157,8 +157,8 @@ impl WgpuProvider {
                 return Ok(output);
             }
             let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-            let shader =
-                crate::backend::wgpu::shaders::integer::floating_sum_cast_shader(workgroup_size);
+            let recipe = super::pipeline_recipe::PipelineRecipe::integer_sum_cast(workgroup_size);
+            let shader = &recipe.shader;
             let layout =
                 emission
                     .device()
@@ -180,11 +180,7 @@ impl WgpuProvider {
                 "runmat-integer-sum-floating-cast-module",
                 &shader,
             );
-            let key = self.compute_pipeline_hash_bytes(
-                shader.as_bytes(),
-                "runmat-integer-sum-floating-cast-bgl",
-                Some(workgroup_size),
-            );
+            let key = recipe.key();
             let pipeline = self.get_or_create_pipeline(
                 emission,
                 key,

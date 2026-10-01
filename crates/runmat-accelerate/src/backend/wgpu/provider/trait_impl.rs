@@ -169,6 +169,9 @@ impl AccelProvider for WgpuProvider {
             cast_chunk_elements: crate::backend::wgpu::config::elementwise_chunk_capacity(
                 self.workgroup_config.scalar,
             )?,
+            integer_cast_chunk_elements: crate::backend::wgpu::config::elementwise_chunk_capacity(
+                crate::backend::wgpu::config::effective_workgroup_size(),
+            )?,
             dimension_2_max_output_elements: u64::from(
                 self.adapter_limits.max_compute_workgroups_per_dimension,
             )
@@ -1890,7 +1893,12 @@ impl AccelProvider for WgpuProvider {
                 .into());
             }
             if entry.integer_type().is_some() {
-                return self.integer_floating_sum_dim_exec(a, dim);
+                let checkpoint = sum_submission_checkpoint();
+                let result = self.integer_floating_sum_dim_exec(a, dim);
+                if result.is_ok() && entry.len != 0 {
+                    confirm_sum_kernel_submission(self, checkpoint);
+                }
+                return result;
             }
             let checkpoint = sum_submission_checkpoint();
             let result = if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
@@ -2089,7 +2097,12 @@ impl AccelProvider for WgpuProvider {
                 .into());
             }
             if entry.integer_type().is_some() {
-                return self.integer_floating_sum_global_exec(a);
+                let checkpoint = sum_submission_checkpoint();
+                let result = self.integer_floating_sum_global_exec(a);
+                if result.is_ok() && entry.len > 1 {
+                    confirm_sum_kernel_submission(self, checkpoint);
+                }
+                return result;
             }
             let checkpoint = sum_submission_checkpoint();
             let result = if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {

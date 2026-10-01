@@ -29,6 +29,9 @@ pub struct ProviderSumGeometry {
     pub nd_chunk_elements: u64,
     /// Elements per floating conversion dispatch for this provider instance.
     pub cast_chunk_elements: u64,
+    /// Elements per integer-word to F64 sum conversion dispatch. This uses
+    /// the integer shader's workgroup, which may differ from floating casts.
+    pub integer_cast_chunk_elements: u64,
     /// Maximum output elements admitted by one 2-D dimensional reduction
     /// dispatch, using its fixed reduction workgroup and the adapter limit.
     pub dimension_2_max_output_elements: u64,

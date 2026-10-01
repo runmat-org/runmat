@@ -107,6 +107,8 @@ pub(super) fn work(
         #[cfg(feature = "wgpu")]
         input_cast: false,
         #[cfg(feature = "wgpu")]
+        integer_input_cast: false,
+        #[cfg(feature = "wgpu")]
         output_cast: false,
         #[cfg(feature = "wgpu")]
         nan_map: false,
