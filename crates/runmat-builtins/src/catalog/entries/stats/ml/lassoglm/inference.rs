@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
-    if request.arguments.len() < 3 || request.arguments.len().saturating_sub(3) % 2 != 0 {
+    if request.arguments.len() < 3 || !request.arguments.len().saturating_sub(3).is_multiple_of(2) {
         diagnostics.push(argument_error(
             "RM-CATALOG-LASSOGLM-ARITY",
             "lassoglm requires X, Y, distr, and optional name-value pairs",

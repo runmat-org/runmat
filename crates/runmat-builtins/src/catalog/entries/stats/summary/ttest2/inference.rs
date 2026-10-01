@@ -70,9 +70,7 @@ fn selected_dim(
     }
     let mut selected = Some(None);
     for index in (2..request.arguments.len()).step_by(2) {
-        let Some(name) = request.literals.literal_args.get(index) else {
-            return None;
-        };
+        let name = request.literals.literal_args.get(index)?;
         let Some(name) = text(name) else {
             if !matches!(name, LiteralValue::Unknown) || known_nontext(request.arguments.get(index))
             {
@@ -93,9 +91,7 @@ fn selected_dim(
         let value = request.literals.literal_args.get(index + 1);
         match option {
             Ttest2OptionName::Dim => {
-                let Some(value) = value else {
-                    return None;
-                };
+                let value = value?;
                 let Some(number) = LiteralContext::numeric_from_literal(value) else {
                     if !matches!(value, LiteralValue::Unknown)
                         || known_nonnumeric(request.arguments.get(index + 1))
@@ -143,9 +139,7 @@ fn selected_dim(
                 }
             }
             Ttest2OptionName::Tail | Ttest2OptionName::VarType => {
-                let Some(value) = value else {
-                    return None;
-                };
+                let value = value?;
                 if let Some(value) = text(value) {
                     let valid = match option {
                         Ttest2OptionName::Tail => Ttest2Tail::from_public(value).is_some(),
