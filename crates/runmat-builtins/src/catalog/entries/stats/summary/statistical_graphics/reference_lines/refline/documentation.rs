@@ -66,7 +66,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[OWNER],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Explicit and fitted line geometry, class extensions, graphics errors", location: "crates/runmat-runtime/src/builtins/stats/summary/refline.rs" }],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Explicit line geometry, class extensions and graphics errors", location: "crates/runmat-runtime/src/builtins/stats/summary/refline/tests.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Scaled centered least-squares coefficients", location: "crates/runmat-runtime/src/builtins/stats/summary/refline/fit.rs" },
+        ],
         notes: &["Host graphics result; admitted resident coefficients materialize at the checked floating boundary."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),

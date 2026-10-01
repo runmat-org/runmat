@@ -51,7 +51,7 @@ const COEFFS_STYLE_INPUT: [BuiltinParamDescriptor; 2] = [COEFFS, STYLE];
 const SLOPE_INTERCEPT_STYLE_INPUT: [BuiltinParamDescriptor; 3] = [SLOPE, INTERCEPT, STYLE];
 const AX_STYLE_INPUT: [BuiltinParamDescriptor; 2] = [AX, STYLE];
 const OUTPUT: [BuiltinParamDescriptor; 1] = [HANDLE];
-const SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
     BuiltinSignatureDescriptor {
         label: "refline()",
         inputs: &EMPTY,
@@ -95,6 +95,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
     BuiltinSignatureDescriptor {
         label: "h = refline(m, b)",
         inputs: &SLOPE_INTERCEPT_INPUT,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = refline(m, b, LineSpec)",
+        inputs: &SLOPE_INTERCEPT_STYLE_INPUT,
         outputs: &OUTPUT,
     },
     BuiltinSignatureDescriptor {
