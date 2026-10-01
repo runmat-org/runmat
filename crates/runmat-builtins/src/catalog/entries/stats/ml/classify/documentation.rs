@@ -5,6 +5,31 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification.rs"),
 };
 
+const ADMISSION: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Predictor and label admission",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification/header.rs"),
+};
+const LABELS: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Exact label identities and output families",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification/labels.rs"),
+};
+const PRIORS: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Prior admission and normalization",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification/prior.rs"),
+};
+const MODEL: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Discriminant model preparation",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification/model.rs"),
+};
+const PREDICTION: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Prediction and requested numerical outputs",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification/prediction.rs"),
+};
+const COEFFICIENTS: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Pairwise discriminant coefficients",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification/coefficients.rs"),
+};
+
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("classify"), slug: Some("classify"),
@@ -54,12 +79,15 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[SOURCE, ADMISSION, LABELS, PRIORS, MODEL, PREDICTION, COEFFICIENTS],
         verification: &[
-            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Labels, integer roles, priors, and discriminants", location: "crates/runmat-runtime/src/builtins/stats/ml/classification.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Requested outputs, priors, and discriminants", location: "crates/runmat-runtime/src/builtins/stats/ml/classification/tests/core.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Label families", location: "crates/runmat-runtime/src/builtins/stats/ml/classification/tests/labels.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact integer roles", location: "crates/runmat-runtime/src/builtins/stats/ml/classification/tests/integer.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Preflight, provider failures, and borrowed allocations", location: "crates/runmat-runtime/src/builtins/stats/ml/classification/tests/provider.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Classification from MATLAB-syntax scripts", location: "crates/runmat-vm/tests/stats_ml.rs" },
         ],
-        notes: &["The legacy editable JSON remains until full field reconciliation and exporter qualification."],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
