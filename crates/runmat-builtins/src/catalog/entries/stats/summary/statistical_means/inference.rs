@@ -244,6 +244,13 @@ fn broadcast_shape(
     right: &ShapeFact,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) -> ShapeFact {
+    if let (Some(left_rank), Some(right_rank)) = (left.rank(), right.rank()) {
+        if matches!(left, ShapeFact::Ranked { .. }) || matches!(right, ShapeFact::Ranked { .. }) {
+            return ShapeFact::Ranked {
+                rank: left_rank.max(right_rank).max(2),
+            };
+        }
+    }
     let (Some(mut left), Some(mut right)) = (left.known_dims(), right.known_dims()) else {
         return ShapeFact::Unknown;
     };
@@ -273,6 +280,14 @@ fn broadcast_shape(
 fn reduced_shape(input: &ShapeFact, selector: &Selector) -> ShapeFact {
     if matches!(selector, Selector::All) {
         return ShapeFact::Scalar;
+    }
+    if let ShapeFact::Ranked { rank } = input {
+        return match selector {
+            Selector::Default => ShapeFact::Ranked { rank: *rank },
+            Selector::Dimensions(_) => ShapeFact::Ranked { rank: *rank },
+            Selector::All => ShapeFact::Scalar,
+            Selector::Dynamic => ShapeFact::Unknown,
+        };
     }
     if matches!(selector, Selector::Dynamic) {
         return if input.element_count() == Some(1) {
@@ -317,4 +332,20 @@ fn reduced_shape(input: &ShapeFact, selector: &Selector) -> ShapeFact {
 
 fn error(code: &'static str, message: impl Into<String>) -> InferenceDiagnostic {
     InferenceDiagnostic::error(code, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbolic_ranks_never_expand_into_dimension_vectors() {
+        let huge = ShapeFact::Ranked { rank: usize::MAX };
+        let scalar = ShapeFact::Scalar;
+        let mut diagnostics = Vec::new();
+        assert_eq!(broadcast_shape(&huge, &scalar, &mut diagnostics), huge);
+        assert_eq!(reduced_shape(&huge, &Selector::Default), huge);
+        assert_eq!(reduced_shape(&huge, &Selector::Dimensions(vec![1])), huge);
+        assert_eq!(reduced_shape(&huge, &Selector::All), ShapeFact::Scalar);
+    }
 }

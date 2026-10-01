@@ -14,7 +14,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Missing flags `\"includenan\"`/`\"includemissing\"` and `\"omitnan\"`/`\"omitmissing\"` have paired behavior.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "The current implementation computes on the host after materializing resident input. Resident GPU execution and placement/performance qualification remain open.",
+            "The host implementation retains scaled real or complex residual components until each slice is reduced. Eligible unweighted, same-owner floating GPU pairs enter a resident route; other automatic forms materialize on the host. Resident weighted and mixed-input routes and performance qualification remain open.",
         ]},
     ],
     examples: &[

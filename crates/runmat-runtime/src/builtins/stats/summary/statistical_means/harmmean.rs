@@ -26,6 +26,11 @@ pub(crate) async fn harmmean_builtin(
             kind.name(),
         )?;
     }
+    if let Value::GpuTensor(handle) = &value {
+        if let Some(result) = resident::try_reduce(kind, handle, &options).await? {
+            return Ok(result);
+        }
+    }
     let (values, shape, dtype) = data::materialize(kind, value).await?.real_values(kind)?;
     host::reduce(kind, values, shape, dtype, &options)
 }

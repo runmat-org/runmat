@@ -1,9 +1,10 @@
 //! Host materialization at an admitted numerical boundary. Integer components
 //! remain exact until a mathematical operation needs floating-point values.
+use super::numerics::ScaledMagnitude;
 use super::options::{invalid, ReductionKind};
 use crate::builtins::common::tensor;
 use crate::{gather_if_needed_async, BuiltinResult};
-use runmat_value::{IntValue, NumericDType, NumericScalar, Tensor, Value};
+use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
 
 #[derive(Clone, Copy)]
 pub(super) enum Component {
@@ -19,10 +20,10 @@ impl Component {
         }
     }
 
-    fn difference(self, other: Self) -> f64 {
+    fn normalized_difference(self, other: Self, scale: f64) -> f64 {
         match (self, other) {
-            (Self::Integer(left), Self::Integer(right)) => (left - right) as f64,
-            _ => self.value() - other.value(),
+            (Self::Integer(left), Self::Integer(right)) => (left - right) as f64 / scale,
+            _ => self.value() / scale - other.value() / scale,
         }
     }
 }
@@ -32,12 +33,14 @@ impl From<NumericScalar> for Component {
         match value {
             NumericScalar::F64(value) => Self::Floating(value),
             NumericScalar::F32(value) => Self::Floating(f64::from(value)),
-            integer => Self::Integer(
-                integer
-                    .into_int_value()
-                    .expect("nonfloating numeric scalar is an integer")
-                    .to_i128(),
-            ),
+            NumericScalar::I8(value) => Self::Integer(i128::from(value)),
+            NumericScalar::I16(value) => Self::Integer(i128::from(value)),
+            NumericScalar::I32(value) => Self::Integer(i128::from(value)),
+            NumericScalar::I64(value) => Self::Integer(i128::from(value)),
+            NumericScalar::U8(value) => Self::Integer(i128::from(value)),
+            NumericScalar::U16(value) => Self::Integer(i128::from(value)),
+            NumericScalar::U32(value) => Self::Integer(i128::from(value)),
+            NumericScalar::U64(value) => Self::Integer(i128::from(value)),
         }
     }
 }
@@ -56,14 +59,34 @@ impl Point {
         }
     }
 
-    pub(super) fn magnitude(self) -> f64 {
-        self.real.value().hypot(self.imaginary.value())
+    pub(super) fn scaled_magnitude(self) -> ScaledMagnitude {
+        ScaledMagnitude::from_components(self.real.value(), self.imaginary.value())
     }
 
-    pub(super) fn difference_magnitude(self, other: Self) -> f64 {
-        self.real
-            .difference(other.real)
-            .hypot(self.imaginary.difference(other.imaginary))
+    pub(super) fn scaled_difference(self, other: Self) -> ScaledMagnitude {
+        let components = [
+            self.real.value(),
+            self.imaginary.value(),
+            other.real.value(),
+            other.imaginary.value(),
+        ];
+        if components.iter().any(|component| !component.is_finite()) {
+            return ScaledMagnitude::from_components(
+                self.real.value() - other.real.value(),
+                self.imaginary.value() - other.imaginary.value(),
+            );
+        }
+        let scale = components
+            .into_iter()
+            .fold(0.0_f64, |largest, component| largest.max(component.abs()));
+        if scale == 0.0 {
+            return ScaledMagnitude::from_normalized(0.0, 0.0, 0.0);
+        }
+        ScaledMagnitude::from_normalized(
+            scale,
+            self.real.normalized_difference(other.real, scale),
+            self.imaginary.normalized_difference(other.imaginary, scale),
+        )
     }
 }
 
@@ -99,9 +122,13 @@ impl HostData {
         Ok((values, self.shape, dtype))
     }
 
-    pub(super) fn magnitudes(self) -> (Vec<f64>, Vec<usize>, NumericDType) {
+    pub(super) fn scaled_magnitudes(self) -> (Vec<ScaledMagnitude>, Vec<usize>, NumericDType) {
         let dtype = self.result_dtype();
-        let values = self.points.into_iter().map(Point::magnitude).collect();
+        let values = self
+            .points
+            .into_iter()
+            .map(Point::scaled_magnitude)
+            .collect();
         (values, self.shape, dtype)
     }
 }
@@ -155,6 +182,20 @@ pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinRes
                 complex: true,
             })
         }
+        Value::CharArray(chars) if kind == ReductionKind::RootMeanSquare => {
+            let shape = tensor::default_shape_for(&chars.shape, chars.data.len());
+            let points = chars
+                .to_column_major()
+                .into_iter()
+                .map(|character| Point::real(Component::Floating(f64::from(character as u32))))
+                .collect();
+            Ok(HostData {
+                points,
+                shape,
+                dtype: NumericDType::F64,
+                complex: false,
+            })
+        }
         other => {
             let input = tensor::value_into_tensor_for(kind.name(), other)
                 .map_err(|source| invalid(kind, &source.to_string()))?;
@@ -204,8 +245,4 @@ pub(super) fn integer_control(value: &Value) -> bool {
 
 pub(super) fn exact_integer_weight(value: &Value) -> bool {
     integer_control(value)
-}
-
-pub(super) fn integer_weight_nonnegative(value: &IntValue) -> bool {
-    value.to_i128() >= 0
 }

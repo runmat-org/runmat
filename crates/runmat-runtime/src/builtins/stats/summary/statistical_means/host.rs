@@ -2,6 +2,7 @@
 //! kernels are separate from geometry so each public identity uses one route.
 use super::data::HostData;
 use super::numerics;
+use super::numerics::ScaledMagnitude;
 use super::options::{invalid, Axes, MissingMode, Options, ReductionKind};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::BuiltinResult;
@@ -21,19 +22,24 @@ struct Geometry {
 impl Geometry {
     fn new(kind: ReductionKind, shape: &[usize], axes: &Axes) -> BuiltinResult<Self> {
         let mut input_shape = shape.to_vec();
-        input_shape.resize(2, 1);
+        if input_shape.len() < 2 {
+            input_shape.resize(2, 1);
+        }
         let selected = match axes {
             Axes::Default => vec![input_shape
                 .iter()
                 .position(|extent| *extent > 1)
                 .unwrap_or(0)],
             Axes::All => (0..input_shape.len()).collect(),
-            Axes::Dims(dimensions) => dimensions.iter().map(|axis| axis - 1).collect(),
+            Axes::Dims(dimensions) => dimensions
+                .iter()
+                .filter_map(|axis| {
+                    let zero_based = axis - 1;
+                    (zero_based < input_shape.len()).then_some(zero_based)
+                })
+                .collect(),
         };
-        let rank = input_shape
-            .len()
-            .max(selected.iter().max().map_or(2, |axis| axis + 1));
-        input_shape.resize(rank, 1);
+        let rank = input_shape.len();
         let mut reduced = vec![false; rank];
         for axis in selected {
             reduced[axis] = true;
@@ -99,6 +105,9 @@ pub(super) fn reduce(
     dtype: NumericDType,
     options: &Options,
 ) -> BuiltinResult<Value> {
+    if !matches!(kind, ReductionKind::Geometric | ReductionKind::Harmonic) {
+        return Err(invalid(kind, "non-RMS reduction called with RMS data"));
+    }
     let geometry = Geometry::new(kind, &shape, &options.axes)?;
     if checked_len(&geometry.input_shape) != Some(values.len()) {
         return Err(invalid(kind, "input storage does not match its shape"));
@@ -120,9 +129,36 @@ pub(super) fn reduce(
                 ReductionKind::Geometric => numerics::geometric_mean(&values),
                 ReductionKind::Harmonic => numerics::harmonic_mean(&values),
                 ReductionKind::RootMeanSquare | ReductionKind::RootMeanSquaredError => {
-                    numerics::root_mean_square(&values)
+                    unreachable!("RMS data has a separate scaled reduction")
                 }
             }
+        })
+        .collect();
+    output_value(kind, output, geometry.output_shape, dtype)
+}
+
+pub(super) fn reduce_rms(
+    kind: ReductionKind,
+    values: Vec<ScaledMagnitude>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+    options: &Options,
+) -> BuiltinResult<Value> {
+    let geometry = Geometry::new(kind, &shape, &options.axes)?;
+    if checked_len(&geometry.input_shape) != Some(values.len()) {
+        return Err(invalid(kind, "input storage does not match its shape"));
+    }
+    let mut buckets = vec![Vec::<ScaledMagnitude>::new(); geometry.output_len];
+    for (linear, value) in values.into_iter().enumerate() {
+        buckets[geometry.destination(linear)].push(value);
+    }
+    let output = buckets
+        .into_iter()
+        .map(|mut values| {
+            if options.missing == MissingMode::Omit {
+                values.retain(|value| !value.is_nan());
+            }
+            numerics::root_mean_square_scaled(&values)
         })
         .collect();
     output_value(kind, output, geometry.output_shape, dtype)
@@ -132,7 +168,13 @@ pub(super) fn residuals(
     left: HostData,
     right: HostData,
     kind: ReductionKind,
-) -> BuiltinResult<(Vec<f64>, Vec<usize>, NumericDType, Vec<usize>, Vec<usize>)> {
+) -> BuiltinResult<(
+    Vec<ScaledMagnitude>,
+    Vec<usize>,
+    NumericDType,
+    Vec<usize>,
+    Vec<usize>,
+)> {
     let dtype = if left.dtype == NumericDType::F32 && right.dtype == NumericDType::F32 {
         NumericDType::F32
     } else {
@@ -140,9 +182,9 @@ pub(super) fn residuals(
     };
     let plan = BroadcastPlan::new(&left.shape, &right.shape)
         .map_err(|source| invalid(kind, &source.to_string()))?;
-    let mut values = vec![0.0; plan.len()];
+    let mut values = vec![ScaledMagnitude::from_normalized(0.0, 0.0, 0.0); plan.len()];
     for (destination, l, r) in plan.iter() {
-        values[destination] = left.points[l].difference_magnitude(right.points[r]);
+        values[destination] = left.points[l].scaled_difference(right.points[r]);
     }
     Ok((
         values,
@@ -160,7 +202,7 @@ enum Weights {
 }
 
 pub(super) fn weighted_rmse(
-    values: Vec<f64>,
+    values: Vec<ScaledMagnitude>,
     shape: Vec<usize>,
     left_shape: &[usize],
     right_shape: &[usize],
@@ -215,7 +257,7 @@ pub(super) fn weighted_rmse(
             "weight shape must match an input, result, or operating axis",
         ));
     };
-    let mut buckets = vec![Vec::<(f64, f64)>::new(); geometry.output_len];
+    let mut buckets = vec![Vec::<(ScaledMagnitude, f64)>::new(); geometry.output_len];
     for (linear, value) in values.into_iter().enumerate() {
         let weight = match &weights {
             Weights::Scalar(weight) => *weight,
@@ -226,7 +268,7 @@ pub(super) fn weighted_rmse(
     }
     let output = buckets
         .into_iter()
-        .map(|bucket| numerics::weighted_root_mean_square(&bucket, options.missing))
+        .map(|bucket| numerics::weighted_root_mean_square_scaled(&bucket, options.missing))
         .collect();
     output_value(kind, output, geometry.output_shape, dtype)
 }

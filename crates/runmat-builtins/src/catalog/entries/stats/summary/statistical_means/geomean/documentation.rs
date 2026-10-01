@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "The selected dimensions become singleton dimensions. An empty reduction slice produces NaN; `\"omitnan\"` produces NaN when no observations remain.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "The host implementation reduces each selected slice. Resident execution and performance qualification remain in progress; the current runtime materializes resident input rather than claiming a resident geometric-mean kernel.",
+            "The host implementation reduces each selected slice. Eligible floating GPU arrays enter an owner-checked resident provider route; unsupported automatic residency materializes on the host, while explicit device intent requires a supported route. Resident execution and performance qualification remain in progress.",
         ]},
     ],
     examples: &[BuiltinExample {

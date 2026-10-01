@@ -34,6 +34,20 @@ pub(crate) async fn rmse_builtin(
     }
     if let Some(weights) = options.weights.as_ref() {
         admit_data(kind, weights)?;
+        if matches!(weights, Value::Complex(_, _) | Value::ComplexTensor(_))
+            || matches!(weights, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_storage(handle)
+                    != runmat_accelerate_api::GpuTensorStorage::Real)
+        {
+            return Err(options::invalid(kind, "weights must be real"));
+        }
+    }
+    if let (Value::GpuTensor(forecast_handle), Value::GpuTensor(actual_handle)) =
+        (&forecast, &actual)
+    {
+        if let Some(result) = resident::try_rmse(forecast_handle, actual_handle, &options).await? {
+            return Ok(result);
+        }
     }
     let forecast = data::materialize(kind, forecast).await?;
     let actual = data::materialize(kind, actual).await?;
@@ -51,6 +65,6 @@ pub(crate) async fn rmse_builtin(
             weights,
         )
     } else {
-        host::reduce(kind, values, shape, dtype, &options)
+        host::reduce_rms(kind, values, shape, dtype, &options)
     }
 }

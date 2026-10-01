@@ -2,6 +2,18 @@ use super::{data, geomean, harmmean, options, rms, rmse};
 use futures::executor::block_on;
 use runmat_value::{IntValue, NumericDType, Tensor, Value};
 
+fn scalar(value: Value) -> f64 {
+    match value {
+        Value::Num(value) => value,
+        Value::Tensor(value) => match value.numeric_value_at(0).expect("scalar result storage") {
+            runmat_value::NumericScalar::F64(number) => number,
+            runmat_value::NumericScalar::F32(number) => f64::from(number),
+            other => other.into_int_value().expect("integer result").to_f64(),
+        },
+        other => panic!("unexpected scalar result: {other:?}"),
+    }
+}
+
 fn tensor(values: Vec<f64>, shape: Vec<usize>, dtype: NumericDType) -> Value {
     Value::Tensor(Tensor::new_with_dtype(values, shape, dtype).unwrap())
 }
@@ -36,4 +48,106 @@ fn malformed_weighted_selector_is_rejected() {
         vec![Value::from("all"), Value::from("Weights"), Value::Num(1.0)],
     ));
     assert!(result.is_err());
+}
+
+#[test]
+fn geometric_input_domain_is_checked_before_a_result_is_published() {
+    let input = tensor(vec![-1.0, 4.0], vec![2, 1], NumericDType::F64);
+    assert!(block_on(geomean::geomean_builtin(input, vec![])).is_err());
+}
+
+#[test]
+fn rms_accepts_character_code_units_in_column_major_order() {
+    let input = Value::CharArray(runmat_value::CharArray::new_row("AB"));
+    let result = block_on(rms::rms_builtin(input, vec![Value::from("all")])).unwrap();
+    assert!((scalar(result) - ((65.0f64.powi(2) + 66.0f64.powi(2)) / 2.0).sqrt()).abs() < 1e-12);
+}
+
+#[test]
+fn rms_scaling_avoids_squaring_overflow() {
+    let large = f64::MAX / 2.0;
+    let input = tensor(vec![large, large], vec![2, 1], NumericDType::F64);
+    let result = block_on(rms::rms_builtin(input, vec![])).unwrap();
+    assert_eq!(scalar(result), large);
+}
+
+#[test]
+fn complex_rms_scales_components_before_forming_magnitudes() {
+    let large = f64::MAX;
+    let input = Value::ComplexTensor(
+        runmat_value::ComplexTensor::new(vec![(large, large), (0.0, 0.0)], vec![2, 1]).unwrap(),
+    );
+    let result = block_on(rms::rms_builtin(input, vec![])).unwrap();
+    assert_eq!(scalar(result), large);
+}
+
+#[test]
+fn rmse_scales_residual_components_before_subtraction_overflows() {
+    let large = f64::MAX;
+    let forecast = tensor(vec![large, 0.0, 0.0, 0.0], vec![4, 1], NumericDType::F64);
+    let actual = tensor(vec![-large, 0.0, 0.0, 0.0], vec![4, 1], NumericDType::F64);
+    let result = block_on(rmse::rmse_builtin(forecast, actual, vec![])).unwrap();
+    assert_eq!(scalar(result), large);
+}
+
+#[test]
+fn weighted_rmse_broadcasts_weights_from_unexpanded_forecast() {
+    let forecast = tensor(vec![1.0, 2.0], vec![2, 1], NumericDType::F64);
+    let actual = tensor(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2], NumericDType::F64);
+    let weights = tensor(vec![1.0, 3.0], vec![2, 1], NumericDType::F64);
+    let result = block_on(rmse::rmse_builtin(
+        forecast,
+        actual,
+        vec![Value::Num(1.0), Value::from("Weights"), weights],
+    ))
+    .unwrap();
+    let Value::Tensor(output) = result else {
+        panic!("expected per-column values")
+    };
+    assert_eq!(output.shape, vec![1, 2]);
+    for value in output.materialize_f64() {
+        assert!((value - (13.0_f64 / 4.0).sqrt()).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn nd_default_vector_and_all_preserve_full_rank() {
+    let input = tensor(
+        (1..=12).map(f64::from).collect(),
+        vec![2, 2, 3],
+        NumericDType::F64,
+    );
+    let default = block_on(rms::rms_builtin(input.clone(), vec![])).unwrap();
+    let Value::Tensor(default) = default else {
+        panic!("expected N-D result")
+    };
+    assert_eq!(default.shape, vec![1, 2, 3]);
+    let vecdim = Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap());
+    let across_axes = block_on(rms::rms_builtin(input.clone(), vec![vecdim])).unwrap();
+    let Value::Tensor(across_axes) = across_axes else {
+        panic!("expected N-D result")
+    };
+    assert_eq!(across_axes.shape, vec![1, 2, 1]);
+    let all = block_on(rms::rms_builtin(input, vec![Value::from("all")])).unwrap();
+    let expected = ((1..=12).map(|value| f64::from(value * value)).sum::<f64>() / 12.0).sqrt();
+    assert!((scalar(all) - expected).abs() < 1e-12);
+}
+
+#[test]
+fn empty_nd_shapes_and_far_trailing_axis_do_not_allocate_by_axis_value() {
+    let empty = tensor(vec![], vec![0, 2, 3], NumericDType::F64);
+    let result = block_on(rms::rms_builtin(empty.clone(), vec![])).unwrap();
+    let Value::Tensor(result) = result else {
+        panic!("expected empty N-D result")
+    };
+    assert_eq!(result.shape, vec![0, 1, 3]);
+    assert_eq!(result.len(), 0);
+    assert!(scalar(block_on(rms::rms_builtin(empty, vec![Value::from("all")])).unwrap()).is_nan());
+    let input = tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::F64);
+    let far_axis = Value::Int(IntValue::U64(u64::MAX));
+    let result = block_on(rms::rms_builtin(input, vec![far_axis])).unwrap();
+    let Value::Tensor(result) = result else {
+        panic!("expected unchanged shape")
+    };
+    assert_eq!(result.shape, vec![2, 2]);
 }

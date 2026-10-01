@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Real single and double are documented data classes. Typed integer observations are a RunMat-mode extension and return double; floating inputs retain their class.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "Resident acceleration remains under qualification. The current host reduction materializes resident input and does not claim a resident harmonic-mean kernel.",
+            "Eligible floating GPU arrays enter an owner-checked resident provider route using scaled reciprocals. Unsupported automatic residency materializes on the host; explicit device intent requires a supported route. Resident performance and edge-case qualification remain in progress.",
         ]},
     ],
     examples: &[BuiltinExample {

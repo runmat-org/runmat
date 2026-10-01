@@ -17,6 +17,11 @@ pub(crate) async fn rms_builtin(value: Value, rest: Vec<Value>) -> crate::Builti
         )?;
     }
     let options = options::parse(kind, rest).await?;
-    let (values, shape, dtype) = data::materialize(kind, value).await?.magnitudes();
-    host::reduce(kind, values, shape, dtype, &options)
+    if let Value::GpuTensor(handle) = &value {
+        if let Some(result) = resident::try_reduce(kind, handle, &options).await? {
+            return Ok(result);
+        }
+    }
+    let (values, shape, dtype) = data::materialize(kind, value).await?.scaled_magnitudes();
+    host::reduce_rms(kind, values, shape, dtype, &options)
 }

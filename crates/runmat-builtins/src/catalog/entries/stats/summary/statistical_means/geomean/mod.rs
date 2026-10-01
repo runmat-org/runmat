@@ -163,7 +163,7 @@ pub const GEOMEAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
-        residency: BuiltinResidencyPolicy::GatherToHost,
+        residency: BuiltinResidencyPolicy::Dynamic,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::MaterializeArguments,
     },
