@@ -4,7 +4,6 @@ use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelProvider, HostIntegerDataView, HostIntegerTensorView,
     HostLogicalTensorView, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
 };
-use std::error::Error as _;
 
 #[test]
 fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
