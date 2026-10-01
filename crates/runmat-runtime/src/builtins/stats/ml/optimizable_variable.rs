@@ -75,9 +75,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "optimizableVariable",
-    category = "stats/ml",
-    summary = "Create Bayesian optimization variable metadata.",
-    keywords = "optimizableVariable,bayesopt,optimization,variable,Type,Transform,Optimize",
     accel = "cpu",
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::optimizable_variable"

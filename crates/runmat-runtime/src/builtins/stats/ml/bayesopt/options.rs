@@ -77,6 +77,15 @@ impl BayesoptOptions {
         args.into_iter()
             .map(|(kind, value)| {
                 let value = if matches!(&value, Value::GpuTensor(_)) {
+                    // A resident numeric value cannot decode to a public text
+                    // acquisition name. Reject it before another option's
+                    // download can obscure the owning argument error.
+                    if kind == BayesoptOption::AcquisitionFunctionName {
+                        return Err(bayesopt_error(
+                            "bayesopt: AcquisitionFunctionName must be a text scalar",
+                            &ERROR_INVALID_ARGUMENT,
+                        ));
+                    }
                     PreparedValue::Resident(value)
                 } else {
                     let parsed = parse_option(kind, &value)?;

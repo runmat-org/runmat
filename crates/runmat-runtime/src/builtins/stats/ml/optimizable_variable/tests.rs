@@ -85,6 +85,62 @@ fn invalid_host_type_precedes_resident_range_download() {
 }
 
 #[test]
+fn numeric_resident_text_options_fail_before_range_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    for option in ["Type", "Transform"] {
+        let error = block_on(optimizable_variable_builtin(
+            Value::String("depth".into()),
+            Value::GpuTensor(resident.handle.clone()),
+            vec![
+                Value::String("Optimize".into()),
+                Value::GpuTensor(resident.handle.clone()),
+                Value::String(option.into()),
+                Value::GpuTensor(resident.handle.clone()),
+            ],
+        ))
+        .expect_err("numeric resident text control must be rejected");
+        assert_eq!(error.identifier(), ERROR_INVALID_OPTION.identifier);
+        assert!(error.message().contains(option));
+        assert_eq!(provider.downloads(), 0);
+        resident
+            .probe
+            .with_data(&resident.handle, |_| ())
+            .expect("borrowed range and controls remain live");
+    }
+}
+
+#[test]
+fn overridden_numeric_resident_type_does_not_change_effective_option() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    let result = block_on(optimizable_variable_builtin(
+        Value::String("depth".into()),
+        Value::Tensor(Tensor::new(vec![1.0, 10.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("Type".into()),
+            Value::GpuTensor(resident.handle.clone()),
+            Value::String("Type".into()),
+            Value::String("real".into()),
+        ],
+    ))
+    .expect("last effective Type determines admission");
+    assert_eq!(
+        object(result).properties.get("Type"),
+        Some(&Value::String("real".into()))
+    );
+    assert_eq!(provider.downloads(), 0);
+    resident
+        .probe
+        .with_data(&resident.handle, |_| ())
+        .expect("ignored resident control remains live");
+}
+
+#[test]
 fn invalid_host_control_precedes_another_deferred_control() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = provider_fixture::RejectDownloadProvider::new();

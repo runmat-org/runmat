@@ -94,6 +94,33 @@ fn later_invalid_host_control_precedes_earlier_resident_control_download() {
 }
 
 #[test]
+fn numeric_resident_acquisition_is_rejected_before_other_downloads() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    let handle = || Value::GpuTensor(resident.handle.clone());
+    let error = block_on(bayesopt_builtin(
+        Value::FunctionHandle("objective".into()),
+        variable("x", vec![0.0, 1.0], None),
+        vec![
+            Value::String("MaxObjectiveEvaluations".into()),
+            handle(),
+            Value::String("AcquisitionFunctionName".into()),
+            handle(),
+        ],
+    ))
+    .expect_err("numeric resident acquisition name is invalid before downloads");
+    assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    assert!(error.message().contains("AcquisitionFunctionName"));
+    assert_eq!(provider.downloads(), 0);
+    resident
+        .probe
+        .with_data(&resident.handle, |_| ())
+        .expect("borrowed resident control remains live");
+}
+
+#[test]
 fn failed_variable_download_keeps_nested_cause_and_borrowed_allocation() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = provider_fixture::RejectDownloadProvider::new();

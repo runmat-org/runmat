@@ -118,6 +118,20 @@ impl Options {
             .into_iter()
             .map(|(kind, value)| {
                 let value = if matches!(&value, Value::GpuTensor(_)) {
+                    // Only the final effective option is admitted. Resident
+                    // numeric storage cannot become a textual Type or Transform.
+                    if matches!(
+                        kind,
+                        OptimizableVariableOption::Type | OptimizableVariableOption::Transform
+                    ) {
+                        return Err(error(
+                            format!(
+                                "optimizableVariable: {} must be a text scalar",
+                                kind.public_name()
+                            ),
+                            &ERROR_INVALID_OPTION,
+                        ));
+                    }
                     PreparedValue::Resident(value)
                 } else {
                     PreparedValue::Host(parse_option(kind, &value)?)
