@@ -300,6 +300,11 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
             StructuralTransientScopeResourceDemand {
                 source_workload_digest,
                 operator: StructuralOperatorResourceDemand {
+                    excitation_workspace: super::excitation_workspace::derive_excitation_workspace(
+                        &prepared.active_model,
+                        &prepared.execution_step,
+                        Some(mesh),
+                    )?,
                     topology_digest: facts.topology_digest,
                     numerical_scope_digest: facts.symbolic.identity(),
                     topology: facts.topology,

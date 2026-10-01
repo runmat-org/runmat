@@ -99,6 +99,7 @@ impl StructuralFrequencyEntryResourceProjection {
                     inputs,
                     output: output.clone(),
                     operator: StructuralOperatorResourceDemand {
+                        excitation_workspace: Default::default(),
                         topology_digest: self.topology_digest,
                         numerical_scope_digest: self.numerical_scope_digest,
                         topology: self.topology.clone(),

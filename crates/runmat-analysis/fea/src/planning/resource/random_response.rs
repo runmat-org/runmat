@@ -42,6 +42,7 @@ pub struct StructuralRandomResponseResourceProjection {
     sparse: super::SparseResourceFacts,
     constraints: super::ConstraintResourceFacts,
     assembly: AssemblyResourcePolicy,
+    excitation_workspace: super::ExcitationWorkspaceResourceFacts,
     basis: crate::ModalBasisIdentity,
     operator_digest: runmat_execution::Digest,
     physical_dof_count: u64,
@@ -103,6 +104,11 @@ impl StructuralRandomResponseResourceProjection {
             })?;
         let step = workload.procedure_step().map_err(invalid_error)?;
         Ok(Self {
+            excitation_workspace: super::excitation_workspace::derive_excitation_workspace(
+                workload.model(),
+                step,
+                Some(mesh),
+            )?,
             workload: workload.clone(),
             topology_digest,
             topology: facts.topology,
@@ -277,6 +283,7 @@ impl StructuralRandomResponseResourceProjection {
             demand: FeaResourceDemand::StructuralRandomResponseInterval(
                 StructuralRandomResponseIntervalResourceDemand {
                     operator: StructuralOperatorResourceDemand {
+                        excitation_workspace: self.excitation_workspace.clone(),
                         topology_digest: self.topology_digest,
                         numerical_scope_digest: scope.operator_digest(),
                         topology: self.topology.clone(),

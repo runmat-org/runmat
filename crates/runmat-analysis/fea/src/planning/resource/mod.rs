@@ -31,6 +31,7 @@ mod buckling;
 mod connector_buffers;
 mod contract;
 mod estimate;
+mod excitation_workspace;
 mod facts;
 mod field_metadata;
 mod initial_fields;
@@ -100,8 +101,8 @@ pub use buckling::{
 pub use contract::{
     AcceleratorRequirement, AccuracyEvaluationResourceDemand, AccuracyResourceDemand,
     AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, ConstraintResourceFacts, Count,
-    FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanIdentity,
-    FeaResourcePlanningInput, FieldRecoveryResourceFacts, NumericalScalar,
+    ExcitationWorkspaceResourceFacts, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
+    FeaResourcePlanIdentity, FeaResourcePlanningInput, FieldRecoveryResourceFacts, NumericalScalar,
     ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
     ObservationPartitionPayloadLayout, ObservationPartitionResourceDemand,
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,

@@ -1,7 +1,6 @@
 use runmat_analysis_core::{
     ExcitationDistribution, ExcitationKinematics, StructuralRotationDof, StructuralTranslationDof,
 };
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -27,10 +26,6 @@ use super::{
     CanonicalStructuralLoadEntry, CanonicalStructuralLoadPlan, CanonicalStructuralLoadTerm,
     StructuralLoadPlanError,
 };
-
-const SAMPLE_PREFIX: &[u8] = b"runmat-fea-structural-sampled-value/v1\0";
-const SAMPLE_DOMAIN: &str = "fea-structural-sampled-value";
-const SAMPLE_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 1024, 1024, 32);
 
 pub(crate) struct StructuralLoadCompilation {
     pub plan: CanonicalStructuralLoadPlan,
@@ -227,7 +222,7 @@ fn compile_entries(
     let mut direct_rotational_moment_count = 0;
     let mut moment_projection = Vec::new();
     for load in excitations.iter() {
-        if !is_structural_load(&load.kind) {
+        if !load.kind.is_structural_load() {
             continue;
         }
         let mut scratch = vec![0.0; layout.total_dof_count()];
@@ -255,17 +250,6 @@ fn compile_entries(
         direct_rotational_moment_count,
         moment_projection,
     })
-}
-
-fn is_structural_load(kind: &crate::excitation::RealizedExcitationKind) -> bool {
-    matches!(
-        kind,
-        crate::excitation::RealizedExcitationKind::Force(_)
-            | crate::excitation::RealizedExcitationKind::Moment(_)
-            | crate::excitation::RealizedExcitationKind::Traction(_)
-            | crate::excitation::RealizedExcitationKind::Pressure(_)
-            | crate::excitation::RealizedExcitationKind::BodyForce(_)
-    )
 }
 
 fn terms_from_rows(
@@ -328,11 +312,15 @@ fn validate_policy(load: &RealizedExcitation) -> Result<(), StructuralLoadPlanEr
             value: "follower".into(),
         });
     }
-    if load.policy.distribution == ExcitationDistribution::TopologyField {
+    let nodal_body_field = matches!(
+        load.kind,
+        crate::excitation::RealizedExcitationKind::BodyForceField(_)
+    );
+    if (load.policy.distribution == ExcitationDistribution::TopologyField) != nodal_body_field {
         return Err(StructuralLoadPlanError::UnsupportedPolicy {
             excitation_id: load.excitation_id.0.clone(),
             policy: "distribution",
-            value: "topology_field".into(),
+            value: "topology_field is required exclusively for a spatial body-density field".into(),
         });
     }
     if matches!(
@@ -363,6 +351,7 @@ fn validate_policy(load: &RealizedExcitation) -> Result<(), StructuralLoadPlanEr
     if matches!(
         load.kind,
         crate::excitation::RealizedExcitationKind::BodyForce(_)
+            | crate::excitation::RealizedExcitationKind::BodyForceField(_)
     ) && load.policy.frame == runmat_analysis_core::CoordinateFrame::BoundaryNormalTangent
     {
         return Err(StructuralLoadPlanError::UnsupportedPolicy {
@@ -375,14 +364,8 @@ fn validate_policy(load: &RealizedExcitation) -> Result<(), StructuralLoadPlanEr
 }
 
 fn sampled_value_digest(load: &RealizedExcitation) -> Result<Digest, StructuralLoadPlanError> {
-    encode_contract(
-        SAMPLE_PREFIX,
-        SAMPLE_DOMAIN,
-        &(load.quantity, &load.sample, &load.kind),
-        SAMPLE_LIMITS,
-    )
-    .map(Digest::sha256)
-    .map_err(|error| StructuralLoadPlanError::Encoding(error.to_string()))
+    crate::excitation::sample_identity::sampled_value_digest(load)
+        .map_err(|error| StructuralLoadPlanError::Encoding(error.to_string()))
 }
 
 fn require_evidence(

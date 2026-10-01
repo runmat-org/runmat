@@ -30,7 +30,7 @@ use crate::{
         RealSparseAssembler,
     },
     constraints::CanonicalStructuralConstraintPlan,
-    excitation::{RealizedExcitationKind, RealizedExcitations},
+    excitation::RealizedExcitations,
     physics::structural::topology::{
         node_space::CanonicalStructuralNodeSpace,
         target::{
@@ -236,7 +236,7 @@ pub(super) fn assemble_mixed_structural_system(
     let mut rhs = vec![0.0; dof_count];
     let load_ownership = excitations
         .iter()
-        .filter(|load| is_structural_load(&load.kind))
+        .filter(|load| load.kind.is_structural_load())
         .map(|load| {
             let ownership = match &load.target {
                 crate::excitation::RealizedExcitationTarget::Region(target) => {
@@ -526,17 +526,6 @@ fn merge_implementations<T: Copy + PartialEq>(
         merged.push(not_applicable);
     }
     merged
-}
-
-fn is_structural_load(kind: &RealizedExcitationKind) -> bool {
-    matches!(
-        kind,
-        RealizedExcitationKind::Force(_)
-            | RealizedExcitationKind::Moment(_)
-            | RealizedExcitationKind::Traction(_)
-            | RealizedExcitationKind::Pressure(_)
-            | RealizedExcitationKind::BodyForce(_)
-    )
 }
 
 #[cfg(test)]

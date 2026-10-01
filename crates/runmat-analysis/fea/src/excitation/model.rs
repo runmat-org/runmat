@@ -20,7 +20,7 @@ impl ComplexScalar {
         }
     }
 
-    fn component(self, component: ComplexComponent) -> Self {
+    pub(super) fn component(self, component: ComplexComponent) -> Self {
         Self::real(match component {
             ComplexComponent::Real => self.real,
             ComplexComponent::Imaginary => self.imaginary,
@@ -42,7 +42,7 @@ impl ComplexVector3 {
         }
     }
 
-    fn component(self, component: ComplexComponent) -> Self {
+    pub(super) fn component(self, component: ComplexComponent) -> Self {
         Self::real(match component {
             ComplexComponent::Real => self.real,
             ComplexComponent::Imaginary => self.imaginary,
@@ -89,6 +89,7 @@ pub(crate) enum RealizedExcitationKind {
     Traction(ComplexVector3),
     Pressure(ComplexScalar),
     BodyForce(ComplexVector3),
+    BodyForceField(super::field::NodalVectorField),
     HeatGeneration(ComplexScalar),
     HeatFlux(ComplexScalar),
     TemperatureField(ComplexScalar),
@@ -103,6 +104,20 @@ pub(crate) enum RealizedExcitationKind {
     InletVelocity(ComplexVector3),
     MassFlow(ComplexScalar),
     WallMotion(ComplexVector3),
+}
+
+impl RealizedExcitationKind {
+    pub(crate) fn is_structural_load(&self) -> bool {
+        matches!(
+            self,
+            Self::Force(_)
+                | Self::Moment(_)
+                | Self::Traction(_)
+                | Self::Pressure(_)
+                | Self::BodyForce(_)
+                | Self::BodyForceField(_)
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -178,6 +193,7 @@ impl RealizedExcitationKind {
             Self::Traction(value) => Self::Traction(value.component(component)),
             Self::Pressure(value) => Self::Pressure(value.component(component)),
             Self::BodyForce(value) => Self::BodyForce(value.component(component)),
+            Self::BodyForceField(value) => Self::BodyForceField(value.component(component)),
             Self::HeatGeneration(value) => Self::HeatGeneration(value.component(component)),
             Self::HeatFlux(value) => Self::HeatFlux(value.component(component)),
             Self::TemperatureField(value) => Self::TemperatureField(value.component(component)),

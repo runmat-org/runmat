@@ -21,6 +21,7 @@ use super::*;
 
 mod curved_connector;
 mod exact_work;
+mod excitation_integration;
 mod prepared_inputs;
 mod thermal_state;
 
@@ -59,6 +60,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
                     construction_resident_bytes_admission_budget: ByteCount(65_665),
                 },
                 operator: StructuralOperatorResourceDemand {
+                    excitation_workspace: Default::default(),
                     topology_digest: Digest::sha256("topology"),
                     numerical_scope_digest: Digest::sha256("pattern"),
                     topology: TopologyResourceFacts {

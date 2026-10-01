@@ -2,7 +2,10 @@ use runmat_analysis_core::{
     SignalSampleApproach, SignalValue, StandardWaveform, StandardWaveformKind,
 };
 
-use super::{model::ComplexScalar, sample::SampledValue};
+use super::{
+    model::ComplexScalar,
+    sample::{ComplexTensor, SampledValue},
+};
 use super::{model::ComplexVector3, realize::RealizationError};
 
 pub(super) fn sample<Q>(
@@ -139,9 +142,38 @@ fn combine<Q>(
                 component(&offset[2]) + gain * component(&amplitude[2]),
             ])))
         }
-        (SignalValue::Tensor { .. }, _) => Err(RealizationError::new(
-            "FEA actions do not accept tensor waveform values",
-        )),
+        (SignalValue::Tensor { shape, values }, offset) => {
+            let offset = match offset {
+                None => None,
+                Some(SignalValue::Tensor {
+                    shape: other,
+                    values,
+                }) if other == shape => Some(values),
+                _ => {
+                    return Err(RealizationError::new(
+                        "waveform amplitude and offset shapes do not match",
+                    ))
+                }
+            };
+            if offset.is_some_and(|offset| offset.len() != values.len()) {
+                return Err(RealizationError::new(
+                    "waveform amplitude and offset counts differ",
+                ));
+            }
+            let real = values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    gain * component(value) + offset.map_or(0.0, |values| component(&values[index]))
+                })
+                .collect::<Vec<_>>();
+            let imaginary = vec![0.0; real.len()];
+            Ok(SampledValue::Tensor(ComplexTensor::new(
+                shape.clone(),
+                real,
+                imaginary,
+            )?))
+        }
         _ => Err(RealizationError::new(
             "waveform amplitude and offset shapes do not match",
         )),

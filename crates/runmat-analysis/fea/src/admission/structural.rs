@@ -8,6 +8,8 @@ use runmat_analysis_core::{
 };
 
 mod thermo_mechanical;
+#[cfg(test)]
+mod volume_source_tests;
 pub use thermo_mechanical::thermomechanical_exact_realization;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,11 +247,11 @@ fn valid_sources(operator: StructuralOperatorImplementation) -> &'static [Source
     match operator {
         StructuralOperatorImplementation::Tet4LinearElasticity
         | StructuralOperatorImplementation::Tet10LinearElasticity => &[
+            SourceImplementation::CanonicalVolumeProjection,
             SourceImplementation::CanonicalBoundaryProjection,
             SourceImplementation::CanonicalBoundaryPressureIntegration,
             SourceImplementation::BoundaryResultantMomentProjection,
             SourceImplementation::ReferencePointGeneralizedLoad,
-            SourceImplementation::UniformNodeDistribution,
         ],
         StructuralOperatorImplementation::EulerBernoulliBeam3d
         | StructuralOperatorImplementation::Mitc3TriangularShell => &[
@@ -338,13 +340,13 @@ mod tests {
     #[test]
     fn structural_source_sets_are_invariant_to_authored_order() {
         let first = structural_exact_realization(structural_input(vec![
-            SourceImplementation::UniformNodeDistribution,
+            SourceImplementation::CanonicalVolumeProjection,
             SourceImplementation::CanonicalBoundaryProjection,
         ]))
         .expect("valid structural realization");
         let reordered = structural_exact_realization(structural_input(vec![
             SourceImplementation::CanonicalBoundaryProjection,
-            SourceImplementation::UniformNodeDistribution,
+            SourceImplementation::CanonicalVolumeProjection,
         ]))
         .expect("valid reordered structural realization");
 
@@ -397,7 +399,7 @@ mod tests {
     fn admission_rejects_noncanonical_or_duplicate_structural_source_evidence() {
         let canonical = structural_exact_realization(structural_input(vec![
             SourceImplementation::CanonicalBoundaryProjection,
-            SourceImplementation::UniformNodeDistribution,
+            SourceImplementation::CanonicalVolumeProjection,
         ]))
         .expect("valid structural realization");
         assert_eq!(
@@ -431,7 +433,7 @@ mod tests {
         let mut duplicated = canonical;
         duplicated.components[0]
             .sources
-            .push(SourceImplementation::UniformNodeDistribution);
+            .push(SourceImplementation::CanonicalVolumeProjection);
         let rejection = admit_formulation(FormulationAdmissionRequest {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,

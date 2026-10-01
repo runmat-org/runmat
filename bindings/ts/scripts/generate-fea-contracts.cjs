@@ -33,6 +33,7 @@ const rustCoreOutputPath = path.resolve(
   repoRoot,
   "crates/runmat-analysis/core/src/study/output/quantity.rs"
 );
+const rustFieldLocationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/study/output.rs");
 const rustSignalPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/signal.rs");
 const rustExcitationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/excitation.rs");
 const rustGeometryUnitsPath = path.resolve(
@@ -399,6 +400,7 @@ function main() {
   const coreIdentitySource = fs.readFileSync(rustCoreIdentityPath, "utf8");
   const coreFormulationSource = fs.readFileSync(rustCoreFormulationPath, "utf8");
   const coreOutputSource = fs.readFileSync(rustCoreOutputPath, "utf8");
+  const fieldLocationSource = fs.readFileSync(rustFieldLocationPath, "utf8");
   const signalSource = fs.readFileSync(rustSignalPath, "utf8");
   const excitationSource = fs.readFileSync(rustExcitationPath, "utf8");
   const geometryUnitsSource = fs.readFileSync(rustGeometryUnitsPath, "utf8");
@@ -507,7 +509,7 @@ export interface FeaObservationSpec {
   sampling: FeaSamplingPolicy; reduction: FeaReductionPolicy | null; storage: FeaObservationStoragePolicy;
   purpose: "publication" | "solver_control" | "visualization" | "downstream_state"; cost: FeaObservationCostEstimate;
 }
-export type FeaFieldLocationContract = "node" | "cell" | "element" | "integration_point" | "face" | "edge" | "interface" | "connector" | "reference_point" | "mode" | "global";
+${formatTypeUnion("FeaFieldLocationContract", readEnumValues(fieldLocationSource, "FieldLocation"))}
 export type FeaObservationTarget = { spatial: FeaExcitationTarget } | { point: { position: FeaPosition } } | { path: { positions: FeaPosition[] } } | { connector: { connector_id: string } } | { constraint: { constraint_id: string } } | "whole_model";
 export interface FeaReductionPolicy { spatial: "none" | "integral" | "average" | "root_mean_square" | "euclidean_norm" | "minimum" | "maximum" | "resultant" | "moment"; series: "none" | "minimum" | "maximum" | "absolute_maximum" | "root_mean_square" | "mean" | "variance" | "envelope"; extrema_ties: "first_canonical" | "all_locations"; }
 export interface FeaObservationStoragePolicy { precision: FeaSignalPrecision; compression: "lossless" | { error_bounded: { maximum_relative_error: number } } | "none"; retention: FeaRetentionPolicy; partial_access: "manifest_and_chunks" | "whole_artifact"; }
@@ -574,7 +576,7 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "export interface FeaInterfaceInput { interface_id: string; primary: FeaRegionTarget; secondary: FeaRegionTarget; kind: FeaInterfaceKind; }",
     "export interface FeaMaterialInput { material_id: string; name?: string; mechanical: { youngs_modulus_pa: number; poisson_ratio: number; density_kg_per_m3?: number }; thermal?: { reference_temperature_k?: number; modulus_temp_coeff_per_k?: number; conductivity_w_per_mk?: number; specific_heat_j_per_kgk?: number; expansion_coefficient_per_k?: number }; acoustic?: { density_kg_per_m3?: number; speed_of_sound_m_per_s?: number; damping_ratio?: number }; electrical?: { reference_temperature_k?: number; conductivity_s_per_m?: number; resistive_heating_coefficient?: number; relative_permittivity?: number; relative_permeability?: number; conductivity_frequency_response?: { frequency_hz: number; conductivity_scale: number; dispersive_loss_scale?: number; relative_permittivity_scale?: number; relative_permeability_scale?: number }[] }; plastic?: { yield_strain: number; hardening_modulus_ratio: number; saturation_exponent: number }; }",
     "export interface FeaMaterialAssignmentInput { region: string; material: string; expected_material?: string; confidence?: \"verified\" | \"probable\" | \"inferred\"; }",
-    "export type FeaSignalShape = \"scalar\" | \"vector3\" | { tensor: number[] } | { topology_field: { topology_id: string; component_count: number } };",
+    "export type FeaSignalShape = \"scalar\" | \"vector3\" | { tensor: number[] } | { topology_field: { topology_id: string; location: FeaFieldLocationContract; component_count: number } };",
     "export type FeaSignalValue<Q> = { scalar: Q } | { vector3: [Q, Q, Q] } | { tensor: { shape: number[]; values: Q[] } };",
     "export type FeaSignalOrdinate<Q> = { real: FeaSignalValue<Q> } | { complex: { real: FeaSignalValue<Q>; imaginary: FeaSignalValue<Q> } };",
     "export type FeaTabulatedSignalDomain = \"time_seconds\" | \"frequency_hertz\" | { study_parameter: { parameter_id: string } };",

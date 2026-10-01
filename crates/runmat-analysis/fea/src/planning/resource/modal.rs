@@ -342,6 +342,13 @@ pub fn build_structural_modal_resource_plan(
             receipt_output: prepared.receipt_output.clone(),
             state_profiles_output: prepared.state_profiles_output.clone(),
             operator: StructuralOperatorResourceDemand {
+                excitation_workspace: super::excitation_workspace::derive_excitation_workspace(
+                    workload.model(),
+                    workload
+                        .procedure_step()
+                        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+                    mesh,
+                )?,
                 topology_digest: facts.topology_digest,
                 numerical_scope_digest,
                 topology: facts.topology,

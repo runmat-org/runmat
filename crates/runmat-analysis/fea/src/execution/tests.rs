@@ -771,6 +771,7 @@ fn topology_signal_realization_requires_exact_entity_shape() {
         quantity: PhysicalQuantityKind::Temperature,
         shape: SignalShape::TopologyField {
             topology_id: digest("mesh").to_string(),
+            location: runmat_analysis_core::FieldLocation::Node,
             component_count: 1,
         },
         topology_entity_count: Some(4),

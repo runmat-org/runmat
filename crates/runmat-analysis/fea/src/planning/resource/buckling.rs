@@ -223,6 +223,13 @@ pub fn build_structural_buckling_resource_plan(
             result_output: prepared.result_output,
             receipt_output: prepared.receipt_output,
             operator: StructuralOperatorResourceDemand {
+                excitation_workspace: super::excitation_workspace::derive_excitation_workspace(
+                    workload.model(),
+                    workload
+                        .procedure_step()
+                        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+                    Some(mesh),
+                )?,
                 topology_digest: facts.topology_digest,
                 numerical_scope_digest: scope_digest,
                 topology: facts.topology,

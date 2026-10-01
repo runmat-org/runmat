@@ -6,6 +6,8 @@ use crate::{
 };
 
 mod generator;
+#[cfg(test)]
+mod topology_field_tests;
 
 use generator::validate_generator;
 pub(crate) use generator::validate_generator_invocation;
@@ -62,17 +64,20 @@ fn invalid<T>(signal_id: &str, detail: impl Into<String>) -> Result<T, AnalysisV
 }
 
 fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> {
-    let expected_shape = signal
+    let mut expected_shape = signal
         .shape
         .component_extents()
         .ok_or_else(|| "signal shape must be complete and non-empty where required".to_string())?;
-    if matches!(&signal.shape, SignalShape::TopologyField { .. })
-        && !matches!(
-            &signal.representation,
-            SignalRepresentation::Artifact(_) | SignalRepresentation::Generator(_)
-        )
+    if let SignalShape::TopologyField {
+        component_count, ..
+    } = &signal.shape
     {
-        return Err("topology-field signals must be artifact-backed or generated".to_string());
+        if let Some(shape) = concrete_topology_shape(&signal.representation)? {
+            if shape.len() != 2 || shape[0] == 0 || shape[1] != *component_count {
+                return Err("topology-field values require exact [entity_count, component_count] tensors with positive entity count".to_string());
+            }
+            expected_shape = shape;
+        }
     }
     if !expected_shape.is_empty() && signal.frame.is_none() {
         return Err("vector, tensor, and topology-field signals require a frame".to_string());
@@ -130,6 +135,36 @@ fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> 
             validate_generator(generator)
         }
     }
+}
+
+// The mesh-bound entity count is inferred once from concrete data. Existing table and
+// waveform validation then requires every ordinate/offset to have this exact shape;
+// topology realization is responsible for matching the rows to the bound mesh.
+fn concrete_topology_shape<Q: FiniteQuantity>(
+    representation: &SignalRepresentation<Q>,
+) -> Result<Option<Vec<usize>>, String> {
+    let value = match representation {
+        SignalRepresentation::Constant(value) => value,
+        SignalRepresentation::Waveform(waveform) => &waveform.amplitude,
+        SignalRepresentation::Tabulated(table) => {
+            let knot = table
+                .knots
+                .first()
+                .ok_or_else(|| "topology-field table requires ordinates".to_string())?;
+            let ordinate = match &knot.value {
+                SignalKnotValue::Continuous(value) => value,
+                SignalKnotValue::Jump { left_limit, .. } => left_limit,
+            };
+            match ordinate {
+                SignalOrdinate::Real(value) | SignalOrdinate::Complex { real: value, .. } => value,
+            }
+        }
+        SignalRepresentation::Artifact(_) | SignalRepresentation::Generator(_) => return Ok(None),
+    };
+    if !matches!(value, SignalValue::Tensor { .. }) {
+        return Err("concrete topology-field values must be tensors".to_string());
+    }
+    validate_value(value).map(Some)
 }
 
 fn validate_real_precision(precision: SignalPrecision) -> Result<(), String> {

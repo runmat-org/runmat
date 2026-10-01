@@ -1,4 +1,4 @@
-use runmat_analysis_core::{ExcitationAction, PhysicalSignal};
+use runmat_analysis_core::{ExcitationAction, PhysicalSignal, SignalShape};
 
 use super::{
     model::RealizedExcitationKind,
@@ -76,6 +76,18 @@ pub(super) fn realize_kind(
             pascals,
             sample
         )?),
+        ExcitationAction::BodyForce(_)
+            if matches!(signal.shape(), SignalShape::TopologyField { .. }) =>
+        {
+            let PhysicalSignal::BodyForceDensity(signal) = signal else {
+                return Err(quantity_mismatch());
+            };
+            RealizedExcitationKind::BodyForceField(super::field::NodalVectorField::sample(
+                signal,
+                sample,
+                |value| value.newtons_per_cubic_meter,
+            )?)
+        }
         ExcitationAction::BodyForce(_) => RealizedExcitationKind::BodyForce(vector_action!(
             signal,
             PhysicalSignal::BodyForceDensity,

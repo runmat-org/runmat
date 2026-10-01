@@ -89,9 +89,10 @@ pub(super) fn structural_source_implementations(
                     SourceImplementation::BoundaryResultantMomentProjection
                 }
                 (
-                    RealizedExcitationKind::BodyForce(_),
+                    RealizedExcitationKind::BodyForce(_)
+                    | RealizedExcitationKind::BodyForceField(_),
                     StructuralProjectionBasis::CanonicalSolid,
-                ) => SourceImplementation::UniformNodeDistribution,
+                ) => SourceImplementation::CanonicalVolumeProjection,
                 (
                     RealizedExcitationKind::Force(_)
                     | RealizedExcitationKind::Moment(_)
@@ -179,6 +180,10 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::Traction(_), StructuralProjectionBasis::Synthetic) => {
                 (StructuralLoadKind::Traction, false)
             }
+            (RealizedExcitationKind::BodyForceField(_), basis) => (
+                StructuralLoadKind::BodyForce,
+                basis == StructuralProjectionBasis::CanonicalSolid,
+            ),
             (RealizedExcitationKind::BodyForce(_), StructuralProjectionBasis::CanonicalSolid)
             | (
                 RealizedExcitationKind::BodyForce(_),
@@ -326,7 +331,9 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
         RealizedExcitationKind::Moment(_) => StructuralLoadKind::Moment,
         RealizedExcitationKind::Traction(_) => StructuralLoadKind::Traction,
         RealizedExcitationKind::Pressure(_) => StructuralLoadKind::Pressure,
-        RealizedExcitationKind::BodyForce(_) => StructuralLoadKind::BodyForce,
+        RealizedExcitationKind::BodyForce(_) | RealizedExcitationKind::BodyForceField(_) => {
+            StructuralLoadKind::BodyForce
+        }
         RealizedExcitationKind::HeatGeneration(_) => StructuralLoadKind::HeatGeneration,
         RealizedExcitationKind::HeatFlux(_) => StructuralLoadKind::HeatFlux,
         RealizedExcitationKind::TemperatureField(_) => StructuralLoadKind::TemperatureField,

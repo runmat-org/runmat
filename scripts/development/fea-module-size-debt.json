@@ -21,7 +21,7 @@
   "crates/runmat-analysis/fea/src/execution/transient_result.rs": 833,
   "crates/runmat-analysis/core/src/study/sequence.rs": 726,
   "crates/runmat-analysis/fea/src/planning/resource/post_process.rs": 697,
-  "crates/runmat-analysis/core/src/problem/signal.rs": 800,
+  "crates/runmat-analysis/core/src/problem/signal.rs": 762,
   "crates/runmat-analysis/fea/src/execution/transient_workload.rs": 787,
   "crates/runmat-runtime/src/analysis/structural_study/publication.rs": 667,
   "crates/runmat-runtime/src/analysis/structural_study.rs": 711,

@@ -10,6 +10,10 @@ use runmat_execution::Digest;
 
 use crate::{AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult};
 
+#[cfg(test)]
+#[path = "materialized_signal/topology_tests.rs"]
+mod topology_tests;
+
 /// Derive the same provider-neutral numerical content identity used by generated realizations.
 ///
 /// Authorship and callable provenance deliberately do not enter this digest. Knot discontinuities
@@ -86,11 +90,17 @@ fn canonicalize_typed_table<Q: CanonicalQuantity>(
             } => vec![left_limit, right_limit],
         })
         .collect::<Vec<_>>();
-    let values = canonical_table_values(&signal.shape, &ordinates, signal.precision)?;
+    let topology_entity_count = table_entity_count(&signal.shape, &ordinates)?;
+    let values = canonical_table_values(
+        &signal.shape,
+        &ordinates,
+        signal.precision,
+        topology_entity_count,
+    )?;
     CanonicalSignalContent {
         quantity,
         shape: &signal.shape,
-        topology_entity_count: None,
+        topology_entity_count: topology_entity_count.map(|count| count as u64),
         domain: &domain,
         knots: &knots,
         precision: signal.precision,
@@ -103,24 +113,71 @@ fn canonicalize_typed_table<Q: CanonicalQuantity>(
     .map_err(Into::into)
 }
 
+fn table_entity_count<Q>(
+    shape: &SignalShape,
+    ordinates: &[&SignalOrdinate<Q>],
+) -> AnalysisBridgeResult<Option<usize>> {
+    let SignalShape::TopologyField {
+        component_count, ..
+    } = shape
+    else {
+        return Ok(None);
+    };
+    let value = match ordinates.first().copied() {
+        Some(SignalOrdinate::Real(value)) => value,
+        Some(SignalOrdinate::Complex { real, .. }) => real,
+        None => {
+            return Err(AnalysisBridgeError::Invalid(
+                "topology-field table is empty".into(),
+            ))
+        }
+    };
+    match value {
+        SignalValue::Tensor { shape, .. }
+            if shape.len() == 2
+                && shape[0] > 0
+                && shape[1] == *component_count
+                && *component_count > 0 =>
+        {
+            Ok(Some(shape[0]))
+        }
+        _ => Err(AnalysisBridgeError::Invalid(
+            "topology-field ordinate requires entity-by-component values".into(),
+        )),
+    }
+}
+
 fn canonical_table_values<Q: CanonicalQuantity>(
     shape: &SignalShape,
     ordinates: &[&SignalOrdinate<Q>],
     precision: runmat_analysis_core::SignalPrecision,
+    topology_entity_count: Option<usize>,
 ) -> AnalysisBridgeResult<CanonicalSignalValues> {
     let mut real = Vec::new();
     let mut imaginary = Vec::new();
     for &ordinate in ordinates {
         match ordinate {
             SignalOrdinate::Real(value) if imaginary.is_empty() => {
-                append_signal_value(shape, value, precision, &mut real)?;
+                append_signal_value(shape, value, precision, topology_entity_count, &mut real)?;
             }
             SignalOrdinate::Complex {
                 real: real_value,
                 imaginary: imaginary_value,
             } if real.is_empty() || !imaginary.is_empty() => {
-                append_signal_value(shape, real_value, precision, &mut real)?;
-                append_signal_value(shape, imaginary_value, precision, &mut imaginary)?;
+                append_signal_value(
+                    shape,
+                    real_value,
+                    precision,
+                    topology_entity_count,
+                    &mut real,
+                )?;
+                append_signal_value(
+                    shape,
+                    imaginary_value,
+                    precision,
+                    topology_entity_count,
+                    &mut imaginary,
+                )?;
             }
             _ => {
                 return Err(AnalysisBridgeError::Invalid(
@@ -152,6 +209,7 @@ fn append_signal_value<Q: CanonicalQuantity>(
     declared_shape: &SignalShape,
     value: &SignalValue<Q>,
     precision: runmat_analysis_core::SignalPrecision,
+    topology_entity_count: Option<usize>,
     output: &mut Vec<u64>,
 ) -> AnalysisBridgeResult<()> {
     match (declared_shape, value) {
@@ -170,10 +228,18 @@ fn append_signal_value<Q: CanonicalQuantity>(
                 output.push(canonical_component_bits(*value, precision)?);
             }
         }
-        (SignalShape::TopologyField { .. }, _) => {
-            return Err(AnalysisBridgeError::Invalid(
-                "topology-field tables require mesh-aware canonicalization".into(),
-            ))
+        (
+            SignalShape::TopologyField {
+                component_count, ..
+            },
+            SignalValue::Tensor { shape, values },
+        ) if topology_entity_count.is_some_and(|count| shape == &[count, *component_count])
+            && declared_shape.realized_component_count(topology_entity_count)
+                == Some(values.len()) =>
+        {
+            for value in values {
+                output.push(canonical_component_bits(*value, precision)?);
+            }
         }
         _ => {
             return Err(AnalysisBridgeError::Invalid(
@@ -206,8 +272,8 @@ fn canonical_component_bits<Q: CanonicalQuantity>(
 /// Convert a verified canonical realization into the typed table consumed by solver admission.
 ///
 /// The canonical artifact remains the reusable execution result. This projection contains no
-/// callable or runtime handle and is restricted to mesh-independent shapes; topology fields stay
-/// artifact-backed until the selected solver has an explicit field projection contract.
+/// callable or runtime handle. Topology fields retain their association and exact entity rows;
+/// the physics owner must validate their topology identity against the selected solver mesh.
 pub fn materialize_signal_for_solver(
     authored: &PhysicalSignal,
     admitted: &AdmittedSignalGenerator,
@@ -293,19 +359,18 @@ fn materialize_typed_signal<Q: CanonicalQuantity>(
             "canonical signal realization changes its generator sampling contract",
         ));
     }
-    let component_count = match &authored.shape {
-        SignalShape::Scalar => 1,
-        SignalShape::Vector3 => 3,
-        SignalShape::Tensor(extents) => extents
-            .iter()
-            .try_fold(1_usize, |count, extent| count.checked_mul(*extent))
-            .ok_or_else(|| AnalysisBridgeError::Invalid("signal tensor shape overflows".into()))?,
-        SignalShape::TopologyField { .. } => {
-            return Err(AnalysisBridgeError::Invalid(
-                "topology-field generators require mesh-aware artifact projection".into(),
-            ))
-        }
-    };
+    let entity_count = realization
+        .topology_entity_count
+        .map(usize::try_from)
+        .transpose()
+        .map_err(|_| AnalysisBridgeError::Invalid("signal entity count overflows".into()))?;
+    let component_count = authored
+        .shape
+        .realized_component_count(entity_count)
+        .filter(|count| *count > 0)
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid("signal shape or entity count is invalid".into())
+        })?;
     let mut ordinates =
         ordinates::<Q>(&authored.shape, component_count, &realization.values)?.into_iter();
     let knots = realization
@@ -362,6 +427,11 @@ fn ordinates<Q: CanonicalQuantity>(
     values: &CanonicalSignalValues,
 ) -> AnalysisBridgeResult<Vec<SignalOrdinate<Q>>> {
     let make = |bits: &[u64]| -> AnalysisBridgeResult<Vec<SignalValue<Q>>> {
+        if component_count == 0 || !bits.len().is_multiple_of(component_count) {
+            return Err(AnalysisBridgeError::Identity(
+                "canonical signal has an incomplete ordinate",
+            ));
+        }
         bits.chunks_exact(component_count)
             .map(|sample| signal_value(shape, sample))
             .collect()
@@ -405,6 +475,17 @@ fn signal_value<Q: CanonicalQuantity>(
             shape: extents.clone(),
             values,
         }),
+        SignalShape::TopologyField {
+            component_count, ..
+        } if *component_count > 0
+            && !values.is_empty()
+            && values.len().is_multiple_of(*component_count) =>
+        {
+            Ok(SignalValue::Tensor {
+                shape: vec![values.len() / component_count, *component_count],
+                values,
+            })
+        }
         _ => Err(AnalysisBridgeError::Identity(
             "canonical signal sample differs from its declared shape",
         )),

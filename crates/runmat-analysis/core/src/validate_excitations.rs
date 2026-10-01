@@ -210,6 +210,12 @@ fn validate_action_policy(
     if !distribution_valid {
         return Err("distribution is incompatible with the excitation action".to_string());
     }
+    if matches!(action, ExcitationAction::BodyForce(_))
+        && (matches!(signal.shape(), SignalShape::TopologyField { .. })
+            != (excitation.distribution == ExcitationDistribution::TopologyField))
+    {
+        return Err("spatial body-density signals require topology-field distribution; uniform density requires intensity-per-volume".into());
+    }
     validate_action_target(action, &excitation.target)?;
     let scalar_directional_action = matches!(
         action,

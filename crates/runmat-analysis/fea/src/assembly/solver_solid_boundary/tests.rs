@@ -9,6 +9,8 @@ use runmat_analysis_core::{
 };
 use runmat_meshing_core::{BoundaryTriangleOrder, CanonicalMeshingContract};
 
+mod nodal_body_density;
+
 fn mesh(quadratic: bool, scale: f64) -> SolverMeshArtifact {
     let mut mesh = if quadratic {
         crate::topology::test_meshes::quadratic_slab_mesh(2)

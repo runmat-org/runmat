@@ -78,6 +78,7 @@ pub struct StructuralFrequencyEntryResourceProjection {
     sparse: super::SparseResourceFacts,
     constraints: super::ConstraintResourceFacts,
     assembly: AssemblyResourcePolicy,
+    excitation_workspace: super::ExcitationWorkspaceResourceFacts,
     solve: SolveResourcePolicy,
     modal_operator_digest: Option<Digest>,
     recovery_layout: crate::post::ComplexStructuralFieldLayout,
@@ -262,6 +263,11 @@ impl StructuralFrequencyEntryResourceProjection {
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         Ok(Self {
             workload: workload.clone(),
+            excitation_workspace: super::excitation_workspace::derive_excitation_workspace(
+                workload.model(),
+                step,
+                Some(mesh),
+            )?,
             topology_digest: facts.topology_digest,
             structural_topology: constraints.topology,
             numerical_scope_digest,
@@ -371,6 +377,7 @@ impl StructuralFrequencyEntryResourceProjection {
         let full_dofs = facts.sparse.rows.0;
         Ok(Self {
             workload: workload.clone(),
+            excitation_workspace: Default::default(),
             topology_digest: facts.topology_digest,
             structural_topology: constraints.topology,
             numerical_scope_digest,
@@ -463,6 +470,7 @@ impl StructuralFrequencyEntryResourceProjection {
                     inputs,
                     output: output.clone(),
                     operator: StructuralOperatorResourceDemand {
+                        excitation_workspace: self.excitation_workspace.clone(),
                         topology_digest: self.topology_digest,
                         numerical_scope_digest: self.numerical_scope_digest,
                         topology: self.topology.clone(),

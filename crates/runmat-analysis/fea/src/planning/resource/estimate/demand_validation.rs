@@ -1,9 +1,7 @@
 //! Family-specific operator-demand validation kept outside the resource estimator.
 
-use super::{
-    add, mul, prepared_output_is_valid, PartitioningPolicy, ResourcePlanningError,
-    SolveResourcePolicy,
-};
+use super::{add, mul, prepared_output_is_valid, PartitioningPolicy, ResourcePlanningError};
+use crate::planning::resource::SolveResourcePolicy;
 
 pub(super) fn validate_random_response_interval_demand(
     demand: &super::super::contract::StructuralRandomResponseIntervalResourceDemand,

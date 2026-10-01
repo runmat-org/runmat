@@ -47,6 +47,8 @@ mod preassembly;
 mod preassembly_tests;
 mod reconstruction;
 mod recovery;
+#[cfg(test)]
+mod rod_qualification;
 
 use assembly::TransientAssemblySampler;
 use finalization::{finish_transient_run, TransientRunFinalization};

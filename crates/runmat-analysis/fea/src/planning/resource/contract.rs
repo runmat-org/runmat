@@ -69,7 +69,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 47;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 48;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -270,6 +270,14 @@ pub enum FeaResourcePhase {
     StructuralRandomResponseAssembly(StructuralRandomResponseAssemblyRequestIdentity),
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExcitationWorkspaceResourceFacts {
+    pub active_field_count: Count,
+    pub scalar_component_count: Count,
+    pub resident_bytes_upper_bound: ByteCount,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralOperatorResourceDemand {
@@ -281,6 +289,7 @@ pub struct StructuralOperatorResourceDemand {
     pub sparse: SparseResourceFacts,
     pub constraints: ConstraintResourceFacts,
     pub assembly: AssemblyResourcePolicy,
+    pub excitation_workspace: ExcitationWorkspaceResourceFacts,
     pub solve: SolveResourcePolicy,
     pub phase_resources: PhaseResourcePolicy,
     pub field_recovery: FieldRecoveryResourceFacts,

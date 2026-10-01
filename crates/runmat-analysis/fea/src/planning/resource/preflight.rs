@@ -276,6 +276,9 @@ pub(crate) fn build_static_resource_plan(
                 inputs: prepared_inputs.cloned(),
                 state_profiles_output,
                 operator: StructuralOperatorResourceDemand {
+                    excitation_workspace: super::excitation_workspace::derive_excitation_workspace(
+                        model, step, mesh,
+                    )?,
                     topology_digest: facts.topology_digest,
                     numerical_scope_digest: facts.symbolic.identity(),
                     topology: facts.topology,

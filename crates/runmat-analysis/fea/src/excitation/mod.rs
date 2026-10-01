@@ -4,11 +4,13 @@ mod action;
 mod activation;
 mod coupling;
 mod evidence;
+pub(crate) mod field;
 mod kinematics;
 mod model;
 mod projection;
 mod realize;
 mod sample;
+pub(crate) mod sample_identity;
 mod target;
 mod time_grid;
 mod waveform;
@@ -29,6 +31,7 @@ pub(crate) use model::{
 pub(crate) use model::{ComplexScalar, RealizedExcitationPolicy};
 pub(crate) use projection::{ScalarProjectionAccumulator, SpatialProjectionAccumulator};
 pub(crate) use realize::realize_step_excitations;
+pub(crate) use realize::RealizationError;
 pub(crate) use sample::{
     expect_scalar, expect_vector3, sample_prescribed_heat_flux, sample_prescribed_potential,
     sample_prescribed_pressure, sample_prescribed_temperature, sample_signal, time_breakpoints,

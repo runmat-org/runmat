@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     AnalysisModel, Direction, ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue,
     Pressure, ProcedureStep, Signal, SignalExtrapolation, SignalInterpolation, SignalKnot,
-    SignalKnotValue, SignalOrdinate, SignalRepresentation, SignalSampleApproach, SignalValue,
+    SignalKnotValue, SignalOrdinate, SignalRepresentation, SignalSampleApproach,
     TabulatedSignalDomain, Temperature,
 };
 
@@ -12,6 +12,10 @@ use super::{
 
 mod point;
 mod static_table;
+mod values;
+
+pub(crate) use values::ComplexTensor;
+use values::{interpolate_value, ordinate_value, real_value, zero_value};
 
 use static_table::sample_static_table;
 
@@ -194,6 +198,7 @@ fn extend_time_jumps<Q>(events: &mut Vec<f64>, signal: &Signal<Q>, start: f64, e
 pub(crate) enum SampledValue {
     Scalar(ComplexScalar),
     Vector3(ComplexVector3),
+    Tensor(ComplexTensor),
 }
 
 pub(crate) fn sample_signal<Q>(
@@ -202,7 +207,7 @@ pub(crate) fn sample_signal<Q>(
     component: impl Fn(&Q) -> f64,
 ) -> Result<SampledValue, RealizationError> {
     match &signal.representation {
-        SignalRepresentation::Constant(value) => Ok(real_value(value, &component)),
+        SignalRepresentation::Constant(value) => real_value(value, &component),
         SignalRepresentation::Tabulated(table) => {
             if matches!(sample, ExcitationSamplePoint::Static) {
                 return sample_static_table(&table.knots, &component);
@@ -329,14 +334,18 @@ fn sample_prescribed_scalar<'a, Q>(
 pub(crate) fn expect_scalar(value: SampledValue) -> Result<ComplexScalar, RealizationError> {
     match value {
         SampledValue::Scalar(value) => Ok(value),
-        SampledValue::Vector3(_) => Err(RealizationError::new("excitation requires scalar signal")),
+        SampledValue::Vector3(_) | SampledValue::Tensor(_) => {
+            Err(RealizationError::new("excitation requires scalar signal"))
+        }
     }
 }
 
 pub(crate) fn expect_vector3(value: SampledValue) -> Result<ComplexVector3, RealizationError> {
     match value {
         SampledValue::Vector3(value) => Ok(value),
-        SampledValue::Scalar(_) => Err(RealizationError::new("excitation requires vector3 signal")),
+        SampledValue::Scalar(_) | SampledValue::Tensor(_) => {
+            Err(RealizationError::new("excitation requires vector3 signal"))
+        }
     }
 }
 
@@ -346,6 +355,9 @@ pub(super) fn expect_vector3_or_direction(
 ) -> Result<ComplexVector3, RealizationError> {
     match value {
         SampledValue::Vector3(value) => Ok(value),
+        SampledValue::Tensor(_) => Err(RealizationError::new(
+            "directional excitation requires scalar or vector3 signal",
+        )),
         SampledValue::Scalar(value) => {
             let direction = direction.ok_or_else(|| {
                 RealizationError::new("scalar directional excitation requires a direction")
@@ -395,18 +407,6 @@ fn sample_abscissa(
         Err(RealizationError::new(
             "excitation sample point must be finite",
         ))
-    }
-}
-
-fn real_value<Q>(value: &SignalValue<Q>, component: &impl Fn(&Q) -> f64) -> SampledValue {
-    match value {
-        SignalValue::Scalar(value) => SampledValue::Scalar(ComplexScalar::real(component(value))),
-        SignalValue::Vector3(values) => SampledValue::Vector3(ComplexVector3::real([
-            component(&values[0]),
-            component(&values[1]),
-            component(&values[2]),
-        ])),
-        SignalValue::Tensor { .. } => unreachable!("FEA actions reject tensor signal values"),
     }
 }
 
@@ -512,88 +512,4 @@ fn sample_exact_knot<Q>(
         SignalSampleApproach::RightLimit => outgoing_ordinate(&knots[index]),
     };
     ordinate_value(ordinate, component)
-}
-
-fn zero_value<Q>(
-    ordinate: &SignalOrdinate<Q>,
-    component: &impl Fn(&Q) -> f64,
-) -> Result<SampledValue, RealizationError> {
-    Ok(match ordinate_value(ordinate, component)? {
-        SampledValue::Scalar(_) => SampledValue::Scalar(ComplexScalar::real(0.0)),
-        SampledValue::Vector3(_) => SampledValue::Vector3(ComplexVector3::real([0.0; 3])),
-    })
-}
-
-fn ordinate_value<Q>(
-    ordinate: &SignalOrdinate<Q>,
-    component: &impl Fn(&Q) -> f64,
-) -> Result<SampledValue, RealizationError> {
-    Ok(match ordinate {
-        SignalOrdinate::Real(value) => real_value(value, component),
-        SignalOrdinate::Complex { real, imaginary } => complex_value(real, imaginary, component)?,
-    })
-}
-
-fn complex_value<Q>(
-    real: &SignalValue<Q>,
-    imaginary: &SignalValue<Q>,
-    component: &impl Fn(&Q) -> f64,
-) -> Result<SampledValue, RealizationError> {
-    Ok(match (real, imaginary) {
-        (SignalValue::Scalar(real), SignalValue::Scalar(imaginary)) => {
-            SampledValue::Scalar(ComplexScalar {
-                real: component(real),
-                imaginary: component(imaginary),
-            })
-        }
-        (SignalValue::Vector3(real), SignalValue::Vector3(imaginary)) => {
-            SampledValue::Vector3(ComplexVector3 {
-                real: [
-                    component(&real[0]),
-                    component(&real[1]),
-                    component(&real[2]),
-                ],
-                imaginary: [
-                    component(&imaginary[0]),
-                    component(&imaginary[1]),
-                    component(&imaginary[2]),
-                ],
-            })
-        }
-        _ => {
-            return Err(RealizationError::new(
-                "complex signal shape is not scalar or vector3",
-            ));
-        }
-    })
-}
-
-fn interpolate_value(
-    left: SampledValue,
-    right: SampledValue,
-    weight: f64,
-) -> Result<SampledValue, RealizationError> {
-    let blend = |a: f64, b: f64| a + weight * (b - a);
-    Ok(match (left, right) {
-        (SampledValue::Scalar(left), SampledValue::Scalar(right)) => {
-            SampledValue::Scalar(ComplexScalar {
-                real: blend(left.real, right.real),
-                imaginary: blend(left.imaginary, right.imaginary),
-            })
-        }
-        (SampledValue::Vector3(left), SampledValue::Vector3(right)) => {
-            let mut real = [0.0; 3];
-            let mut imaginary = [0.0; 3];
-            for index in 0..3 {
-                real[index] = blend(left.real[index], right.real[index]);
-                imaginary[index] = blend(left.imaginary[index], right.imaginary[index]);
-            }
-            SampledValue::Vector3(ComplexVector3 { real, imaginary })
-        }
-        _ => {
-            return Err(RealizationError::new(
-                "signal shape changes between samples",
-            ))
-        }
-    })
 }

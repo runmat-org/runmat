@@ -108,6 +108,7 @@ pub(super) fn build_operator_resource_plan(
             csr_column_index_bytes.0,
             csr_value_bytes.0,
             constraint_bytes.0,
+            demand.excitation_workspace.resident_bytes_upper_bound.0,
         ],
         "persistent numerical memory",
     )?;

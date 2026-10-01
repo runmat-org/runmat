@@ -268,6 +268,8 @@ pub fn build_structural_transient_block_resource_plan(
         "transient block phase residency",
     )?;
     let mut operator = operator;
+    // The exact source workspace is inherited from authoritative scope preparation.
+    // Replacing time-history phase resources below must not discard or multiply it.
     operator.solve = SolveResourcePolicy::TransientBlock {
         physical_dimension: Count(physical_dofs),
         coordinate_dimension: Count(coordinate_dofs),
