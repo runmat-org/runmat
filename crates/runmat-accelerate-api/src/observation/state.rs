@@ -329,7 +329,6 @@ impl ProviderOperationRecorder {
         self.0.with(|state| {
             if state.registered <= checkpoint {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
-                return;
             }
         });
         self.confirm_provider_execution(device_id, operation);
