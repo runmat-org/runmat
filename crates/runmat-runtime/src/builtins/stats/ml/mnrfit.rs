@@ -74,6 +74,7 @@ pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
     let response = admission::prepare(&x, y)?;
     let values = rest.into_iter().skip(1).step_by(2).collect();
     let prepared = prepare_values(names.into_iter().zip(values).collect())?;
+    prepared.preflight_host_weights(response.rows())?;
     let x = gather_value(x).await?;
     let response = response.materialize().await?;
     let options = prepared.materialize().await?;

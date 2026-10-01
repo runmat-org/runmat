@@ -1,6 +1,6 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_value::{IntValue, IntegerStorage, StringArray, StructValue, Tensor};
+use runmat_value::{IntValue, IntegerStorage, SparseTensor, StringArray, StructValue, Tensor};
 
 fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
@@ -16,6 +16,24 @@ fn output_list(value: Value) -> Vec<Value> {
         Value::OutputList(values) => values,
         other => panic!("expected output list, got {other:?}"),
     }
+}
+
+#[test]
+fn mnrfit_rejects_sparse_predictors_and_responses_at_admission() {
+    let sparse_x =
+        Value::SparseTensor(SparseTensor::new(4, 2, vec![0, 1, 1], vec![0], vec![1.0]).unwrap());
+    let sparse_y =
+        Value::SparseTensor(SparseTensor::new(4, 3, vec![0, 1, 1, 1], vec![0], vec![1.0]).unwrap());
+    let dense_x = tensor_value(vec![0.0; 8], 4, 2);
+    let dense_y = tensor_value(vec![1.0, 1.0, 2.0, 2.0], 4, 1);
+    let x_error = admission::prepare(&sparse_x, dense_y)
+        .err()
+        .expect("sparse X is not an admitted predictor matrix");
+    assert!(x_error.message().contains("X must be numeric"));
+    let y_error = admission::prepare(&dense_x, sparse_y)
+        .err()
+        .expect("sparse Y is not an admitted response");
+    assert!(y_error.message().contains("Y must be"));
 }
 
 #[test]

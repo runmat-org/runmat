@@ -106,6 +106,23 @@ fn impossible_known_matrix_and_response_shapes_never_prove_success() {
 }
 
 #[test]
+fn known_sparse_predictors_and_responses_do_not_prove_a_fit() {
+    for (argument, code) in [
+        (0, "RM-CATALOG-MNRFIT-X-STORAGE"),
+        (1, "RM-CATALOG-MNRFIT-Y-STORAGE"),
+    ] {
+        let mut call = request(numeric(4, 2), numeric(4, 3), 3);
+        call.arguments[argument].storage = StorageFact::Sparse;
+        let result = inference::infer(&call, &MNRFIT_CATALOG_ENTRY);
+        assert!(result.diagnostics.iter().any(|item| item.code == code));
+        assert!(result
+            .outputs
+            .iter()
+            .all(|value| value.kind == ValueKindFact::Unknown));
+    }
+}
+
+#[test]
 fn trailing_singletons_and_unknown_extents_remain_admissible() {
     let mut x = numeric(4, 2);
     x.shape = ShapeFact::from(vec![Some(4), Some(2), Some(1)]);

@@ -135,6 +135,48 @@ async fn mnrfit_decodes_host_controls_before_provider_effects_and_skips_ignored_
 }
 
 #[tokio::test]
+async fn mnrfit_rejects_effective_host_weight_length_before_resident_x_download() {
+    let provider = Box::leak(Box::new(FailingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let y = Value::Tensor(Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]).unwrap());
+    let bad_weights = Value::Tensor(Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap());
+
+    for controls in [
+        vec![Value::from("Weights"), bad_weights.clone()],
+        vec![
+            Value::from("Weights"),
+            Value::GpuTensor(resident.handle.clone()),
+            Value::from("Weights"),
+            bad_weights,
+        ],
+    ] {
+        let error = mnrfit_builtin(
+            Value::GpuTensor(resident.handle.clone()),
+            y.clone(),
+            controls,
+        )
+        .await
+        .expect_err("effective host Weights length must reject before X download");
+        assert_eq!(
+            error.message(),
+            "mnrfit: Weights vector length must match the number of rows in X"
+        );
+        assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
+        assert_eq!(resident.probe.retirements(), 0);
+    }
+    drop(resident.handle);
+    assert_eq!(resident.probe.retirements(), 1);
+}
+
+#[tokio::test]
 async fn mnrfit_rejects_host_visible_x_and_y_before_other_operand_download() {
     let provider = Box::leak(Box::new(FailingDownloadProvider {
         owner: TestAllocationOwner::new(),

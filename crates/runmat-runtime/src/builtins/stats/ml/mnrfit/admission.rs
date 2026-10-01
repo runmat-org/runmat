@@ -14,8 +14,14 @@ pub(super) fn preflight(x: &Value, y: &Value) -> BuiltinResult<usize> {
 }
 
 pub(super) enum PreparedResponse {
-    Host(ResponseOutcomes),
-    Resident { value: Value, rows: usize },
+    Host {
+        response: ResponseOutcomes,
+        rows: usize,
+    },
+    Resident {
+        value: Value,
+        rows: usize,
+    },
 }
 
 pub(super) fn prepare(x: &Value, y: Value) -> BuiltinResult<PreparedResponse> {
@@ -23,14 +29,23 @@ pub(super) fn prepare(x: &Value, y: Value) -> BuiltinResult<PreparedResponse> {
     if crate::dispatcher::value_contains_gpu(&y) {
         Ok(PreparedResponse::Resident { value: y, rows })
     } else {
-        Ok(PreparedResponse::Host(response_outcomes(y, rows)?))
+        Ok(PreparedResponse::Host {
+            response: response_outcomes(y, rows)?,
+            rows,
+        })
     }
 }
 
 impl PreparedResponse {
+    pub(super) fn rows(&self) -> usize {
+        match self {
+            Self::Host { rows, .. } | Self::Resident { rows, .. } => *rows,
+        }
+    }
+
     pub(super) async fn materialize(self) -> BuiltinResult<ResponseOutcomes> {
         match self {
-            Self::Host(response) => Ok(response),
+            Self::Host { response, .. } => Ok(response),
             Self::Resident { value, rows } => response_outcomes(gather_value(value).await?, rows),
         }
     }

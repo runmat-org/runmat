@@ -19,6 +19,15 @@ pub(super) struct ResponseOutcomes {
     weights: Vec<f64>,
 }
 
+pub(super) fn validate_option_weight_length(count: usize, rows: usize) -> BuiltinResult<()> {
+    if count != rows {
+        return Err(invalid(
+            "mnrfit: Weights vector length must match the number of rows in X",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum ClassNames {
     Numeric(Vec<f64>),
@@ -54,11 +63,7 @@ pub(super) fn prepare_data(
         mut weights,
     } = response;
     if let Some(option_weights) = &options.weights {
-        if option_weights.len() != rows {
-            return Err(invalid(
-                "mnrfit: Weights vector length must match the number of rows in X",
-            ));
-        }
+        validate_option_weight_length(option_weights.len(), rows)?;
         if option_weights
             .iter()
             .any(|weight| !weight.is_finite() || *weight < 0.0)

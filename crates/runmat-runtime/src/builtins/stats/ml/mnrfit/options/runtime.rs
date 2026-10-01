@@ -1,3 +1,4 @@
+use super::super::data::validate_option_weight_length;
 use super::super::{
     gather_value, invalid, numeric_vector, positive_integer, positive_scalar, scalar_text,
 };
@@ -55,6 +56,25 @@ pub(in crate::builtins::stats::ml::mnrfit) fn prepare_values(
 }
 
 impl PreparedOptions {
+    /// Validate only the effective host Weights option. Earlier valid values
+    /// may be superseded, while a final resident value remains deferred until
+    /// its owning provider has supplied the payload.
+    pub(in crate::builtins::stats::ml::mnrfit) fn preflight_host_weights(
+        &self,
+        rows: usize,
+    ) -> BuiltinResult<()> {
+        for action in self.actions.iter().rev() {
+            match action {
+                PreparedAction::Host(OptionValue::Weights(weights)) => {
+                    return validate_option_weight_length(weights.len(), rows)
+                }
+                PreparedAction::Resident(OptionName::Weights, _) => return Ok(()),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub(in crate::builtins::stats::ml::mnrfit) async fn materialize(
         self,
     ) -> BuiltinResult<Options> {

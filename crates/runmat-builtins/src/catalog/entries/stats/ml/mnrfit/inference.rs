@@ -21,6 +21,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(x) = request.arguments.first() {
+        if x.storage == StorageFact::Sparse {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-MNRFIT-X-STORAGE",
+                "X does not accept sparse storage",
+                0,
+            ));
+        }
         if !matches!(
             x.kind,
             ValueKindFact::Numeric(NumericFact {
@@ -54,6 +61,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     if let Some(y) = request.arguments.get(1) {
+        if y.storage == StorageFact::Sparse {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-MNRFIT-Y-STORAGE",
+                "Y does not accept sparse storage",
+                1,
+            ));
+        }
         let admitted = match &y.kind {
             ValueKindFact::Numeric(NumericFact {
                 domain: NumericDomain::Real,
