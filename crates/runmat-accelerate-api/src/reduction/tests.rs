@@ -6,6 +6,10 @@ use crate::{
 };
 use runmat_execution::Digest;
 use runmat_types::NumericClass;
+use runmat_types::{
+    FusionReductionContract, FusionReductionCount, FusionReductionEmpty, FusionReductionOperation,
+    FusionReductionTies, ReductionNaN,
+};
 
 fn descriptor() -> ReductionRecipeDescriptor {
     let dispatch = |logical_groups| ReductionDispatch {
@@ -13,6 +17,20 @@ fn descriptor() -> ReductionRecipeDescriptor {
         logical_groups,
     };
     ReductionRecipeDescriptor {
+        contract: FusionReductionContract {
+            operation: FusionReductionOperation::Sum,
+            input_class: NumericClass::Single,
+            accumulator_class: NumericClass::Double,
+            output_class: NumericClass::Double,
+            input_shape: vec![4, 2],
+            output_shape: vec![1, 2],
+            axes: vec![0],
+            identity: false,
+            nan_mode: ReductionNaN::Include,
+            count: FusionReductionCount::None,
+            empty: FusionReductionEmpty::PositiveZero,
+            ties: FusionReductionTies::NotApplicable,
+        },
         config: ReductionRecipeConfig {
             workgroup_size: 8,
             chunk_elements: 2,
@@ -108,6 +126,26 @@ fn checked_recipe_binds_scalar_identity_class_and_ordered_physical_input() {
     assert!(make(checked_input(7, NumericClass::Double), vec![7]).is_err());
     assert!(make(checked_input(7, NumericClass::Single), vec![]).is_err());
     assert!(recipe(descriptor()).checked_scalar().is_none());
+}
+
+#[test]
+fn owner_contract_axes_and_classes_must_match_physical_recipe() {
+    let mut bad_axis = descriptor();
+    bad_axis.contract.axes = vec![1];
+    assert!(ProviderReductionRecipe::new(Digest::sha256(b"source"), bad_axis, sources()).is_err());
+    let mut duplicate = descriptor();
+    duplicate.contract.axes = vec![0, 0];
+    assert!(ProviderReductionRecipe::new(Digest::sha256(b"source"), duplicate, sources()).is_err());
+    let mut wrong_class = descriptor();
+    wrong_class.contract.output_class = NumericClass::Single;
+    assert!(
+        ProviderReductionRecipe::new(Digest::sha256(b"source"), wrong_class, sources()).is_err()
+    );
+    let mut wrong_policy = descriptor();
+    wrong_policy.contract.count = FusionReductionCount::NonNan;
+    assert!(
+        ProviderReductionRecipe::new(Digest::sha256(b"source"), wrong_policy, sources()).is_err()
+    );
 }
 
 #[test]

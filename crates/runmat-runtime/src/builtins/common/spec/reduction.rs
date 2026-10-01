@@ -2,7 +2,10 @@
 //!
 //! This receipt is not provider capability or selected-binding evidence. It
 //! deliberately does not bless current resident-path class inconsistencies.
-use super::ReductionNaN;
+pub use runmat_types::{
+    FusionReductionContract, FusionReductionCount, FusionReductionEmpty, FusionReductionOperation,
+    FusionReductionTies,
+};
 use runmat_types::{NumericClass, NumericDomain, ValueFact};
 use runmat_value::Value;
 use std::{future::Future, pin::Pin};
@@ -140,51 +143,6 @@ impl FusionReductionDeclaration {
             prepared.resolve_stages(context.input)
         })
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub enum FusionReductionOperation {
-    Sum,
-    Mean,
-    Minimum,
-    Maximum,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub enum FusionReductionCount {
-    None,
-    SliceLength,
-    NonNan,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub enum FusionReductionEmpty {
-    PositiveZero,
-    NaN,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub enum FusionReductionTies {
-    NotApplicable,
-    FirstWithNegativeZero,
-    FirstWithPositiveZero,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct FusionReductionContract {
-    pub operation: FusionReductionOperation,
-    pub input_class: NumericClass,
-    /// Sum/mean arithmetic uses Double. Extrema only select represented input
-    /// values, so their accumulator preserves the input class without rounding.
-    pub accumulator_class: NumericClass,
-    pub output_class: NumericClass,
-    pub input_shape: Vec<usize>,
-    pub output_shape: Vec<usize>,
-    /// Zero-based owner-resolved axes, not guessed from an arbitrary operand.
-    pub axes: Vec<usize>,
-    /// Owner's scalar/no-op path forwards the value instead of adding +0.
-    pub identity: bool,
-    pub nan_mode: ReductionNaN,
-    pub count: FusionReductionCount,
-    pub empty: FusionReductionEmpty,
-    pub ties: FusionReductionTies,
 }
 
 pub fn checked_reduction_elements(shape: &[usize]) -> Option<usize> {

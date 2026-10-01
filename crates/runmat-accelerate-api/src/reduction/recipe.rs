@@ -3,12 +3,14 @@ use crate::scalar_program::{ScalarNode, ScalarProgram};
 use crate::ProviderPrecision;
 use anyhow::Result;
 use runmat_execution::Digest;
+use runmat_types::FusionReductionContract;
 use serde::Serialize;
 
 /// Construction input, not an admitted recipe. No unchecked deserialization
 /// path exists for the checked recipe or a selected submission.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReductionRecipeDescriptor {
+    pub contract: FusionReductionContract,
     pub config: ReductionRecipeConfig,
     pub inputs: Vec<ReductionInputBinding>,
     pub iteration_shape: Vec<usize>,
@@ -74,6 +76,17 @@ impl ProviderReductionRecipe {
     ) -> Result<Self> {
         validation::recipe(&descriptor, &sources)?;
         if let Some(program) = &checked_scalar {
+            let root_class = program
+                .wire()
+                .nodes
+                .iter()
+                .find(|node| node.id() == program.wire().root)
+                .map(ScalarNode::class)
+                .ok_or_else(|| anyhow::anyhow!("checked reduction root is missing"))?;
+            anyhow::ensure!(
+                root_class == descriptor.contract.input_class,
+                "checked scalar root class differs from reduction owner input"
+            );
             let declared = program
                 .wire()
                 .nodes

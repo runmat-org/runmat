@@ -151,6 +151,7 @@ pub fn build(
     };
     let sources = shader::sources(program, &inputs, &geometry, partial, config)?;
     let descriptor = ReductionRecipeDescriptor {
+        contract: contract.clone(),
         config,
         inputs: inputs
             .iter()

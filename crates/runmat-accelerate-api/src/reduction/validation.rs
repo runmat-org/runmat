@@ -2,6 +2,10 @@
 //! producer's strides, shader source, or scheduling decision.
 use super::{types::width, *};
 use anyhow::{anyhow, ensure, Result};
+use runmat_types::{
+    FusionReductionCount, FusionReductionEmpty, FusionReductionOperation, FusionReductionTies,
+    NumericClass,
+};
 
 pub(super) fn elements(shape: &[usize]) -> Result<u64> {
     if shape.contains(&0) {
@@ -21,6 +25,7 @@ pub(super) fn recipe(
     let g = &d.geometry;
     let p = d.partial;
     let w = &d.work;
+    semantic(d)?;
     ensure!(
         c.workgroup_size.is_power_of_two() && c.workgroup_size <= c.max_workgroup_size,
         "invalid reduction workgroup size"
@@ -104,6 +109,93 @@ pub(super) fn recipe(
             && !sources.pass2.trim().is_empty(),
         "missing reduction shader source"
     );
+    Ok(())
+}
+
+fn semantic(d: &ReductionRecipeDescriptor) -> Result<()> {
+    let contract = &d.contract;
+    ensure!(
+        contract.input_shape == d.iteration_shape && contract.output_shape == d.output_shape,
+        "reduction owner geometry differs from physical geometry"
+    );
+    let output_class = match d.output_precision {
+        crate::ProviderPrecision::F32 => NumericClass::Single,
+        crate::ProviderPrecision::F64 => NumericClass::Double,
+    };
+    let partial_class = match d.partial.precision {
+        crate::ProviderPrecision::F32 => NumericClass::Single,
+        crate::ProviderPrecision::F64 => NumericClass::Double,
+    };
+    ensure!(
+        contract.output_class == output_class
+            && partial_class
+                == if contract.identity {
+                    contract.input_class
+                } else {
+                    contract.accumulator_class
+                },
+        "reduction owner classes differ from physical representation"
+    );
+    let rank = contract.input_shape.len();
+    let mut reduced = vec![false; rank];
+    let mut seen = vec![false; rank];
+    for &axis in &contract.axes {
+        ensure!(axis < rank && !seen[axis], "invalid reduction owner axis");
+        seen[axis] = true;
+        if !contract.identity {
+            reduced[axis] = true;
+        }
+    }
+    let reduced_elements = contract
+        .input_shape
+        .iter()
+        .zip(&reduced)
+        .filter_map(|(&extent, &selected)| selected.then_some(extent))
+        .try_fold(1u64, |count, extent| {
+            count
+                .checked_mul(u64::try_from(extent)?)
+                .ok_or_else(|| anyhow!("reduction axis product overflow"))
+        })?;
+    let slices = contract
+        .input_shape
+        .iter()
+        .zip(&reduced)
+        .filter_map(|(&extent, &selected)| (!selected).then_some(extent))
+        .try_fold(1u64, |count, extent| {
+            count
+                .checked_mul(u64::try_from(extent)?)
+                .ok_or_else(|| anyhow!("reduction slice product overflow"))
+        })?;
+    ensure!(
+        reduced_elements == u64::from(d.geometry.reduce_elements)
+            && slices == u64::from(d.geometry.slices),
+        "reduction owner axes differ from physical dispatch"
+    );
+    let valid_policy = match contract.operation {
+        FusionReductionOperation::Sum => {
+            contract.count == FusionReductionCount::None
+                && contract.empty == FusionReductionEmpty::PositiveZero
+                && contract.ties == FusionReductionTies::NotApplicable
+        }
+        FusionReductionOperation::Mean => {
+            matches!(
+                contract.count,
+                FusionReductionCount::SliceLength | FusionReductionCount::NonNan
+            ) && contract.empty == FusionReductionEmpty::NaN
+                && contract.ties == FusionReductionTies::NotApplicable
+        }
+        FusionReductionOperation::Minimum => {
+            contract.count == FusionReductionCount::None
+                && contract.empty == FusionReductionEmpty::NaN
+                && contract.ties == FusionReductionTies::FirstWithNegativeZero
+        }
+        FusionReductionOperation::Maximum => {
+            contract.count == FusionReductionCount::None
+                && contract.empty == FusionReductionEmpty::NaN
+                && contract.ties == FusionReductionTies::FirstWithPositiveZero
+        }
+    };
+    ensure!(valid_policy, "invalid reduction owner arithmetic policy");
     Ok(())
 }
 

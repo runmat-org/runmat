@@ -8,6 +8,9 @@ pub enum ReductionNaN {
     Omit,
 }
 
+mod fusion_contract;
+pub use fusion_contract::*;
+
 /// Public entrypoint whose already-admitted numerical work uses the sum
 /// reduction. The alias retains its own binding, errors and feedback identity.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
