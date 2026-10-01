@@ -15,7 +15,7 @@ pub(super) fn parse_option_headers(args: &[Value]) -> BuiltinResult<()> {
     for pair in args.chunks_exact(2) {
         let name =
             keyword_of(&pair[0]).ok_or_else(|| invalid("kmeans: option name must be text"))?;
-        KmeansOption::from_keyword(name)
+        KmeansOption::from_keyword(&name)
             .ok_or_else(|| invalid(format!("kmeans: unsupported option '{name}'")))?;
     }
     Ok(())
@@ -30,7 +30,7 @@ pub(super) fn parse_options(args: Vec<Value>) -> BuiltinResult<Options> {
     while idx < args.len() {
         let name =
             keyword_of(&args[idx]).ok_or_else(|| invalid("kmeans: option name must be text"))?;
-        let option = KmeansOption::from_keyword(name)
+        let option = KmeansOption::from_keyword(&name)
             .ok_or_else(|| invalid(format!("kmeans: unsupported option '{name}'")))?;
         let value = &args[idx + 1];
         match option {
@@ -44,14 +44,14 @@ pub(super) fn parse_options(args: Vec<Value>) -> BuiltinResult<Options> {
             KmeansOption::Display => {
                 let display = keyword_of(value)
                     .ok_or_else(|| invalid("kmeans: Display must be 'off', 'final', or 'iter'"))?;
-                if KmeansDisplay::from_keyword(display).is_none() {
+                if KmeansDisplay::from_keyword(&display).is_none() {
                     return Err(invalid(format!("kmeans: unsupported Display '{display}'")));
                 }
             }
             KmeansOption::OnlinePhase => {
                 let flag = keyword_of(value)
                     .ok_or_else(|| invalid("kmeans: OnlinePhase must be 'off' or 'on'"))?;
-                options.online_phase = match KmeansToggle::from_keyword(flag) {
+                options.online_phase = match KmeansToggle::from_keyword(&flag) {
                     Some(KmeansToggle::Off) => false,
                     Some(KmeansToggle::On) => true,
                     None => {
@@ -78,19 +78,19 @@ pub(super) fn parse_options(args: Vec<Value>) -> BuiltinResult<Options> {
 
 fn parse_distance(value: &Value) -> BuiltinResult<Distance> {
     let text = keyword_of(value).ok_or_else(|| invalid("kmeans: Distance must be text"))?;
-    Distance::from_keyword(text)
+    Distance::from_keyword(&text)
         .ok_or_else(|| invalid(format!("kmeans: unsupported Distance '{text}'")))
 }
 
 fn parse_empty_action(value: &Value) -> BuiltinResult<EmptyAction> {
     let text = keyword_of(value).ok_or_else(|| invalid("kmeans: EmptyAction must be text"))?;
-    EmptyAction::from_keyword(text)
+    EmptyAction::from_keyword(&text)
         .ok_or_else(|| invalid(format!("kmeans: unsupported EmptyAction '{text}'")))
 }
 
 fn parse_start(value: &Value) -> BuiltinResult<StartSpec> {
     if let Some(text) = keyword_of(value) {
-        return KmeansStart::from_keyword(text)
+        return KmeansStart::from_keyword(&text)
             .map(StartSpec::Named)
             .ok_or_else(|| invalid(format!("kmeans: unsupported Start '{text}'")));
     }
@@ -203,7 +203,7 @@ fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinRe
                 let display = keyword_of(field).ok_or_else(|| {
                     invalid("kmeans: Options.Display must be 'off', 'final', or 'iter'")
                 })?;
-                if KmeansDisplay::from_keyword(display).is_none() {
+                if KmeansDisplay::from_keyword(&display).is_none() {
                     return Err(invalid(format!(
                         "kmeans: unsupported Options.Display '{display}'"
                     )));

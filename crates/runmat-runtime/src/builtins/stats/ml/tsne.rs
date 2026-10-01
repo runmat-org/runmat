@@ -239,11 +239,11 @@ fn ensure_exact_tsne_floating_options(rest: &[Value]) -> BuiltinResult<()> {
         let Some(name) = keyword_of(&pair[0]) else {
             continue;
         };
-        let Some(option) = TsneOption::from_keyword(name) else {
+        let Some(option) = TsneOption::from_keyword(&name) else {
             continue;
         };
         if option.requires_exact_integer_to_double() {
-            ensure_exact_tsne_integer_value(&pair[1], name)?;
+            ensure_exact_tsne_integer_value(&pair[1], &name)?;
         }
         if option == TsneOption::Options {
             if let Value::Struct(options) = &pair[1] {
@@ -279,7 +279,7 @@ fn preflight_option_headers(values: &[Value]) -> BuiltinResult<()> {
     }
     for pair in values.chunks_exact(2) {
         let name = keyword_of(&pair[0]).ok_or_else(|| invalid("tsne: option name must be text"))?;
-        TsneOption::from_keyword(name)
+        TsneOption::from_keyword(&name)
             .ok_or_else(|| invalid(format!("tsne: unknown option '{name}'")))?;
     }
     Ok(())

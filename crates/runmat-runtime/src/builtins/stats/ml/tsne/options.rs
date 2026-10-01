@@ -15,7 +15,7 @@ pub(super) fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
     while index < values.len() {
         let name =
             keyword_of(&values[index]).ok_or_else(|| invalid("tsne: option name must be text"))?;
-        let option = TsneOption::from_keyword(name)
+        let option = TsneOption::from_keyword(&name)
             .ok_or_else(|| invalid(format!("tsne: unknown option '{name}'")))?;
         let value = &values[index + 1];
         match option {
@@ -26,7 +26,7 @@ pub(super) fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
             }
             TsneOption::CacheSize => {
                 options.cache_size = Some(if let Some(text) = keyword_of(value) {
-                    if TsneCacheSizeKeyword::from_keyword(text)
+                    if TsneCacheSizeKeyword::from_keyword(&text)
                         == Some(TsneCacheSizeKeyword::Maximal)
                     {
                         CacheSize::Maximal

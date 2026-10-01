@@ -1,4 +1,4 @@
-use super::{internal, invalid, Options, PreparedData, MAX_WORK_CELLS};
+use super::{invalid, Options, PreparedData, MAX_WORK_CELLS};
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 use nalgebra::{DMatrix, SymmetricEigen};

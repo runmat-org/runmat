@@ -288,7 +288,10 @@ async fn ensure_exact_integer_boundary(value: &Value, role: &str) -> BuiltinResu
 async fn ensure_exact_start_boundary(rest: &[Value]) -> BuiltinResult<()> {
     let mut idx = 0;
     while idx + 1 < rest.len() {
-        if keyword_of(&rest[idx]).and_then(KmeansOption::from_keyword) == Some(KmeansOption::Start)
+        if keyword_of(&rest[idx])
+            .as_deref()
+            .and_then(KmeansOption::from_keyword)
+            == Some(KmeansOption::Start)
         {
             ensure_exact_integer_boundary(&rest[idx + 1], "Start values").await?;
         }
