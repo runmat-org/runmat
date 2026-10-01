@@ -6,6 +6,7 @@ mod corr;
 mod covariance;
 mod covariance_conversion;
 mod distributions;
+mod empirical;
 mod encoding;
 mod fitdist;
 mod fitted_distribution_facts;
@@ -27,6 +28,7 @@ pub use self::corr::*;
 pub use self::covariance::*;
 pub use self::covariance_conversion::*;
 pub use self::distributions::*;
+pub use self::empirical::*;
 pub use self::encoding::*;
 pub use self::fitdist::*;
 pub use self::kstest::*;
@@ -60,4 +62,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(ttest2::ENTRIES.iter().copied());
     values.extend(kstest::ENTRIES.iter().copied());
     values.extend(tabulate::ENTRIES.iter().copied());
+    values.extend(empirical::ENTRIES.iter().copied());
 }
