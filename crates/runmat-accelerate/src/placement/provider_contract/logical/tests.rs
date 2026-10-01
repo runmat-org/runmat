@@ -243,11 +243,7 @@ fn unknown_id_wrong_family_type_and_shape_are_not_admitted() {
     let mut query = baseline.clone();
     query.family = ProviderOperationFamily::Reduction;
     reject(&query);
-    for element_type in [
-        ProviderElementType::I64,
-        ProviderElementType::ComplexF64,
-        ProviderElementType::Logical,
-    ] {
+    for element_type in [ProviderElementType::I64, ProviderElementType::ComplexF64] {
         let mut query = baseline.clone();
         query.inputs[0].element_type = element_type;
         reject(&query);
@@ -264,6 +260,59 @@ fn unknown_id_wrong_family_type_and_shape_are_not_admitted() {
     let mut query = baseline;
     query.inputs[0].storage = ProviderStorage::Sparse;
     reject(&query);
+}
+
+#[test]
+fn native_logical_producer_and_mixed_precision_hooks_have_honest_output_bytes() {
+    let provider = InProcessProvider::new();
+    let logical = provider
+        .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+            data: &[1, 0, 1],
+            shape: &[1, 3],
+        })
+        .unwrap();
+    assert_eq!(
+        logical.physical().element_type(),
+        runmat_accelerate_api::NumericElementType::F64
+    );
+    let single = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[0.0, 2.0, 1.0]),
+            shape: &[1, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let mut request = query(Operation::Binary(LogicalBinaryOperator::And));
+    request.inputs = vec![
+        input(&[1, 3], ProviderElementType::Logical),
+        input(&[1, 3], ProviderElementType::F32),
+    ];
+    request.outputs = vec![ProviderRepresentation {
+        element_type: ProviderElementType::Logical,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: vec![1, 3],
+        residency: ProviderResidency::Device,
+    }];
+    let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(&request) else {
+        panic!("native logical and single payloads should be admitted");
+    };
+    assert_eq!(
+        estimate.output_bytes,
+        Some(3 * std::mem::size_of::<f64>() as u64)
+    );
+    assert_eq!(estimate.transient_bytes, None);
+    let output = provider.logical_and(&logical, &single).unwrap();
+    assert!(output.view().is_logical());
+    assert_eq!(
+        block_on(provider.download(&output)).unwrap().data,
+        [0.0, 0.0, 1.0]
+    );
+    request.inputs[1].layout = ProviderLayout::Strided;
+    assert!(matches!(
+        provider.query_feasibility(&request),
+        ProviderFeasibility::Rejected { .. }
+    ));
 }
 
 #[cfg(feature = "wgpu")]

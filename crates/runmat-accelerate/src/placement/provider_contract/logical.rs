@@ -106,7 +106,7 @@ pub(super) fn validate(
         HookProfile::InProcess => query.inputs.iter().all(|value| {
             matches!(
                 value.element_type,
-                ProviderElementType::F32 | ProviderElementType::F64
+                ProviderElementType::F32 | ProviderElementType::F64 | ProviderElementType::Logical
             )
         }),
         #[cfg(feature = "wgpu")]
@@ -136,8 +136,23 @@ pub(super) fn validate(
             "logical.input_type.unsupported",
         );
     }
-    if query.outputs.iter().any(|value| {
-        value.element_type != float && value.element_type != ProviderElementType::Logical
+    if query
+        .inputs
+        .iter()
+        .chain(&query.outputs)
+        .any(|value| value.layout != ProviderLayout::ColumnMajorContiguous)
+    {
+        return reject(
+            ProviderRejectionCode::UnsupportedLayout,
+            "logical.layout.contiguous_required",
+        );
+    }
+    if query.outputs.iter().any(|value| match profile {
+        HookProfile::InProcess => value.element_type != ProviderElementType::Logical,
+        #[cfg(feature = "wgpu")]
+        HookProfile::Wgpu => {
+            value.element_type != float && value.element_type != ProviderElementType::Logical
+        }
     }) {
         return reject(
             ProviderRejectionCode::UnsupportedElementType,
@@ -211,10 +226,14 @@ pub(super) fn validate(
             "logical.output_shape.mismatch",
         );
     }
-    let Some(elements) = output_shape
-        .iter()
-        .try_fold(1_u64, |total, extent| total.checked_mul(*extent))
-    else {
+    let elements = if output_shape.contains(&0) {
+        Some(0)
+    } else {
+        output_shape
+            .iter()
+            .try_fold(1_u64, |total, extent| total.checked_mul(*extent))
+    };
+    let Some(elements) = elements else {
         return reject(
             ProviderRejectionCode::InvalidShape,
             "logical.output_shape.overflow",
@@ -227,6 +246,21 @@ pub(super) fn validate(
             "logical.dispatch.length",
         );
     }
-    let _ = elements;
+    if matches!(profile, HookProfile::InProcess) {
+        // InProcess logical producers own real F64 payloads even when their
+        // public class is logical. Representation alone cannot bound all live
+        // inputs, so only the distinct output allocation is estimated here.
+        let Some(output_bytes) = elements.checked_mul(ProviderElementType::F64.byte_width()) else {
+            return reject(
+                ProviderRejectionCode::ResourceLimit,
+                "logical.output_bytes.overflow",
+            );
+        };
+        return Some(ProviderFeasibility::supported(ProviderResourceEstimate {
+            transient_bytes: None,
+            output_bytes: Some(output_bytes),
+            dispatches: Some(u32::from(elements != 0)),
+        }));
+    }
     None
 }
