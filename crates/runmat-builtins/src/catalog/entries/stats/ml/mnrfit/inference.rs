@@ -1,7 +1,7 @@
 //! Conservative solver results; observed category counts are generally runtime values.
 mod options;
 
-use super::MnrfitOption;
+use super::{MnrfitConstant, MnrfitOption};
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::{
     infer_call, standard, CallContract, CallInference, CallRequest, DimensionFact, DynamicReason,
@@ -127,11 +127,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
             continue;
         };
-        if request
-            .arguments
-            .get(index + 1)
-            .is_some_and(|value| options::definitely_invalid_value(identity, value))
-        {
+        if request.arguments.get(index + 1).is_some_and(|value| {
+            options::definitely_invalid_value(identity, value)
+                || (identity == MnrfitOption::Constant
+                    && options::definitely_invalid_constant_literal(
+                        value,
+                        request.literals.literal_args.get(index + 1),
+                    ))
+        }) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-MNRFIT-OPTION-VALUE",
                 "mnrfit option value has an unsupported type or shape",
@@ -139,8 +142,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    let b_shape =
-        grouped_response_shape(request).unwrap_or_else(|| ShapeFact::from(vec![None, None]));
+    let b_shape = grouped_response_shape(request, options::constant_state(request))
+        .unwrap_or_else(|| ShapeFact::from(vec![None, None]));
     let numerical = |shape| {
         ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
@@ -151,6 +154,33 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             StorageFact::Dense,
         )
     };
+    let covariance_shape = coefficient_count(&b_shape)
+        .map(|count| ShapeFact::from(vec![Some(count), Some(count)]))
+        .unwrap_or_else(|| ShapeFact::from(vec![None, None]));
+    let mut stat_fields = BTreeMap::new();
+    for name in ["beta", "se", "t", "p"] {
+        stat_fields.insert(name.to_string(), numerical(b_shape.clone()));
+    }
+    for name in ["covb", "coeffcorr"] {
+        stat_fields.insert(name.to_string(), numerical(covariance_shape.clone()));
+    }
+    for name in ["dfe", "s"] {
+        stat_fields.insert(
+            name.to_string(),
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })),
+        );
+    }
+    stat_fields.insert(
+        "estdisp".to_string(),
+        ValueFact::scalar(ValueKindFact::Logical),
+    );
+    stat_fields.insert(
+        "classNames".to_string(),
+        ValueFact::unknown(DynamicReason::RuntimeValue),
+    );
     let mut contract = CallContract::fixed(vec![
         numerical(b_shape),
         ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
@@ -158,7 +188,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             domain: NumericDomain::Real,
         })),
         ValueFact::proven(
-            ValueKindFact::Struct(StructFact::scalar(BTreeMap::new(), false)),
+            ValueKindFact::Struct(StructFact::scalar(stat_fields, true)),
             ShapeFact::Scalar,
             StorageFact::Opaque,
         ),
@@ -244,12 +274,15 @@ fn known_extent(extent: &DimensionFact) -> Option<usize> {
     }
 }
 
-fn grouped_response_shape(request: &CallRequest) -> Option<ShapeFact> {
-    // With no option tail, Constant is true. A vector Y needs its runtime class census;
-    // a known N-by-K numeric matrix uses K grouped-count categories.
-    if request.arguments.len() != 2 {
-        return None;
-    }
+fn coefficient_count(shape: &ShapeFact) -> Option<usize> {
+    let (rows, columns) = first_two_extents(shape)?;
+    rows.checked_mul(columns)
+}
+
+fn grouped_response_shape(request: &CallRequest, constant: Option<bool>) -> Option<ShapeFact> {
+    // A vector Y needs its runtime class census. A known N-by-K numeric matrix
+    // fixes K grouped-count categories, provided Constant is admitted and known.
+    let constant = constant?;
     let x = request.arguments.first()?;
     let y = request.arguments.get(1)?;
     if !matches!(
@@ -267,7 +300,17 @@ fn grouped_response_shape(request: &CallRequest) -> Option<ShapeFact> {
     let ShapeFact::Shaped { dims: y_dims } = &y.shape else {
         return None;
     };
-    if x_dims.len() != 2 || y_dims.len() != 2 {
+    if x_dims.len() < 2
+        || y_dims.len() < 2
+        || !x_dims
+            .iter()
+            .skip(2)
+            .all(|dim| *dim == DimensionFact::Known(1))
+        || !y_dims
+            .iter()
+            .skip(2)
+            .all(|dim| *dim == DimensionFact::Known(1))
+    {
         return None;
     }
     let (
@@ -283,7 +326,7 @@ fn grouped_response_shape(request: &CallRequest) -> Option<ShapeFact> {
         return None;
     }
     Some(ShapeFact::from(vec![
-        x_cols.checked_add(1),
+        x_cols.checked_add(usize::from(constant)),
         Some(y_cols - 1),
     ]))
 }

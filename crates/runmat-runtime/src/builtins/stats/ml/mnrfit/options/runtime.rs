@@ -4,7 +4,7 @@ use super::super::{
 };
 use super::{OptionName, Options};
 use crate::BuiltinResult;
-use runmat_builtins::MnrfitStatsetField;
+use runmat_builtins::{MnrfitConstant, MnrfitStatsetField};
 use runmat_value::Value;
 
 /// Public controls are decoded once. Only values that actually carry a resident
@@ -130,15 +130,14 @@ fn decode(name: OptionName, value: Value) -> BuiltinResult<OptionValue> {
         OptionName::Constant => {
             let constant = match text_or_logical(&value, "Constant")? {
                 BoolOrText::Bool(flag) => flag,
-                BoolOrText::Text(text) => match text.to_ascii_lowercase().as_str() {
-                    "on" => true,
-                    "off" => false,
-                    other => {
-                        return Err(invalid(format!(
-                            "mnrfit: Constant must be 'on' or 'off', got '{other}'"
-                        )));
-                    }
-                },
+                BoolOrText::Text(text) => MnrfitConstant::from_public(&text)
+                    .map(MnrfitConstant::enabled)
+                    .ok_or_else(|| {
+                        invalid(format!(
+                            "mnrfit: Constant must be 'on' or 'off', got '{}'",
+                            text.to_ascii_lowercase()
+                        ))
+                    })?,
             };
             Ok(OptionValue::Constant(constant))
         }

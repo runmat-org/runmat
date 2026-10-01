@@ -35,6 +35,28 @@ impl MnrfitOption {
     }
 }
 
+/// The public text form of the Constant switch. Runtime and static analysis
+/// share this decoder rather than maintaining separate spelling policies.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MnrfitConstant {
+    On,
+    Off,
+}
+
+impl MnrfitConstant {
+    pub fn from_public(text: &str) -> Option<Self> {
+        Some(match text.to_ascii_lowercase().as_str() {
+            "on" => Self::On,
+            "off" => Self::Off,
+            _ => return None,
+        })
+    }
+
+    pub const fn enabled(self) -> bool {
+        matches!(self, Self::On)
+    }
+}
+
 /// Recognized fields of a public `statset`-style Options struct.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MnrfitStatsetField {

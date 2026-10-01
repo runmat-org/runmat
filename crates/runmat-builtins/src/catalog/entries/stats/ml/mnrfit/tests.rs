@@ -41,6 +41,77 @@ fn grouped_counts_prove_double_coefficient_geometry() {
     assert!(matches!(result.outputs[2].kind, ValueKindFact::Struct(_)));
 }
 
+fn with_constant(mut call: CallRequest, literal: LiteralValue, fact: ValueFact) -> CallRequest {
+    call.arguments
+        .push(ValueFact::scalar(ValueKindFact::String));
+    call.arguments.push(fact);
+    call.literals
+        .literal_args
+        .extend([LiteralValue::String("Constant".into()), literal]);
+    call
+}
+
+#[test]
+fn grouped_constant_controls_coefficient_and_stats_geometry() {
+    for (literal, fact, coefficients) in [
+        (
+            LiteralValue::String("off".into()),
+            ValueFact::scalar(ValueKindFact::String),
+            2,
+        ),
+        (
+            LiteralValue::Bool(false),
+            ValueFact::scalar(ValueKindFact::Logical),
+            2,
+        ),
+        (LiteralValue::Number(1.0), numeric(1, 1), 3),
+    ] {
+        let call = with_constant(request(numeric(4, 2), numeric(4, 3), 3), literal, fact);
+        let result = inference::infer(&call, &MNRFIT_CATALOG_ENTRY);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let b_shape = ShapeFact::from(vec![Some(coefficients), Some(2)]);
+        assert_eq!(result.outputs[0].shape, b_shape);
+        let ValueKindFact::Struct(stats) = &result.outputs[2].kind else {
+            panic!("stats should be a typed struct");
+        };
+        for field in ["beta", "se", "t", "p"] {
+            assert_eq!(stats.fields[field].shape, b_shape, "{field}");
+        }
+        for field in ["covb", "coeffcorr"] {
+            assert_eq!(
+                stats.fields[field].shape,
+                ShapeFact::from(vec![Some(coefficients * 2), Some(coefficients * 2)]),
+                "{field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unknown_or_invalid_constant_never_proves_grouped_geometry() {
+    for (literal, fact, invalid) in [
+        (
+            LiteralValue::Unknown,
+            ValueFact::scalar(ValueKindFact::String),
+            false,
+        ),
+        (
+            LiteralValue::String("bogus".into()),
+            ValueFact::scalar(ValueKindFact::String),
+            true,
+        ),
+        (LiteralValue::Number(2.0), numeric(1, 1), true),
+    ] {
+        let call = with_constant(request(numeric(4, 2), numeric(4, 3), 1), literal, fact);
+        let result = inference::infer(&call, &MNRFIT_CATALOG_ENTRY);
+        assert_eq!(result.diagnostics.is_empty(), !invalid);
+        assert_eq!(result.outputs[0].kind == ValueKindFact::Unknown, invalid);
+        if !invalid {
+            assert_eq!(result.outputs[0].shape, ShapeFact::from(vec![None, None]));
+        }
+    }
+}
+
 #[test]
 fn vector_response_category_count_remains_dynamic() {
     let result = inference::infer(
