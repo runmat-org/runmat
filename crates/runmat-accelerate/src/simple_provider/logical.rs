@@ -85,7 +85,7 @@ impl<'a> FloatingView<'a> {
     }
 }
 
-trait FloatPredicate {
+trait FloatPredicate: Copy {
     fn is_finite(self) -> bool;
     fn is_nan(self) -> bool;
     fn is_infinite(self) -> bool;
