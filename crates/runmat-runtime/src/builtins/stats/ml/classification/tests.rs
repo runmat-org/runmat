@@ -6,7 +6,9 @@ use runmat_accelerate_api::{
     ThreadProviderGuard,
 };
 use runmat_builtins::builtin_function_by_name;
-use runmat_value::{IntegerStorage, NumericStorage};
+use runmat_value::{
+    CellArray, CharArray, IntegerStorage, LogicalArray, NumericStorage, StringArray, StructValue,
+};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct RejectingDownloadProvider {
