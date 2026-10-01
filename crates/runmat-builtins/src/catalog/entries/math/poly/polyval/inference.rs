@@ -129,7 +129,7 @@ fn validate_stat_fields(
         let dims = r.shape.known_dims();
         if dims.as_deref().is_some_and(|dims| {
             expected.is_some_and(|n| {
-                dims.get(0)
+                dims.first()
                     .and_then(|dim| *dim)
                     .is_some_and(|rows| rows != n)
                     || dims

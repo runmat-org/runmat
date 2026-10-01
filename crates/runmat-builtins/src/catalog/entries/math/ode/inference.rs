@@ -213,13 +213,7 @@ fn infer_callback(request: &CallRequest) -> CallInference {
     let state = request
         .arguments
         .get(2)
-        .map(|initial| {
-            ValueFact::proven(
-                double_real(),
-                initial.shape.clone(),
-                initial.storage.clone(),
-            )
-        })
+        .map(|initial| ValueFact::proven(double_real(), initial.shape.clone(), initial.storage))
         .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue));
     let mut callback = crate::infer_callable_call(
         callable,
