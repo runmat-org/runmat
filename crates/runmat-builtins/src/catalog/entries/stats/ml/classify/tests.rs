@@ -159,23 +159,32 @@ fn nonscalar_string_controls_do_not_prove_outputs() {
         1,
     );
     for control_index in [3, 4] {
-        let mut call = base.clone();
-        call.arguments
-            .resize_with(5, || ValueFact::scalar(ValueKindFact::String));
-        call.literals.literal_args.resize(5, LiteralValue::Unknown);
-        call.arguments[control_index] = ValueFact::proven(
-            ValueKindFact::String,
-            ShapeFact::from(vec![Some(1), Some(2)]),
-            StorageFact::Dense,
-        );
-        let result = inference::infer(&call, &CLASSIFY_CATALOG_ENTRY);
-        let expected = if control_index == 3 {
-            "RM.CLASSIFY.TYPE"
-        } else {
-            "RM.CLASSIFY.PRIOR"
-        };
-        assert!(result.diagnostics.iter().any(|item| item.code == expected));
-        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+        for shape in [
+            vec![Some(1), Some(2)],
+            vec![Some(2), None],
+            vec![Some(0), None],
+        ] {
+            let mut call = base.clone();
+            call.arguments
+                .resize_with(5, || ValueFact::scalar(ValueKindFact::String));
+            call.literals.literal_args.resize(5, LiteralValue::Unknown);
+            call.arguments[control_index] = ValueFact::proven(
+                ValueKindFact::String,
+                ShapeFact::from(shape.clone()),
+                StorageFact::Dense,
+            );
+            let result = inference::infer(&call, &CLASSIFY_CATALOG_ENTRY);
+            let expected = if control_index == 3 {
+                "RM.CLASSIFY.TYPE"
+            } else {
+                "RM.CLASSIFY.PRIOR"
+            };
+            assert!(
+                result.diagnostics.iter().any(|item| item.code == expected),
+                "{shape:?}"
+            );
+            assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+        }
     }
 }
 

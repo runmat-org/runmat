@@ -130,8 +130,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     if request.arguments.get(3).is_some_and(|fact| {
-        matches!(fact.kind, ValueKindFact::String)
-            && fact.shape.element_count().is_some_and(|count| count != 1)
+        matches!(fact.kind, ValueKindFact::String) && definitely_nonscalar_string(&fact.shape)
     }) {
         diagnostics.push(InferenceDiagnostic::error(
             "RM.CLASSIFY.TYPE",
@@ -203,7 +202,7 @@ fn diagnose_prior(
         }
         ValueKindFact::String | ValueKindFact::Character => {
             let nonscalar_string = matches!(prior.kind, ValueKindFact::String)
-                && prior.shape.element_count().is_some_and(|count| count != 1);
+                && definitely_nonscalar_string(&prior.shape);
             nonscalar_string
                 || match literal {
                     Some(
@@ -235,6 +234,10 @@ fn diagnose_prior(
             "prior must be empirical text, a numeric vector, or a group/prob struct",
         ));
     }
+}
+
+fn definitely_nonscalar_string(shape: &ShapeFact) -> bool {
+    matches!(shape, ShapeFact::Shaped { dims } if dims.iter().any(|dim| matches!(dim, DimensionFact::Known(extent) if *extent != 1)))
 }
 
 fn definitely_invalid_prior_groups(kind: &ValueKindFact) -> bool {
