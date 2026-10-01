@@ -1,6 +1,7 @@
 //! Typed boxplot option admission and value decoding.
-use super::groups::{char_rows, int_group_key, number_label, numeric_scalar_label};
+use super::groups::{char_rows, number_label, numeric_scalar_label};
 use super::*;
+use crate::builtins::common::grouping_keys::format_integer;
 
 #[cfg(test)]
 impl BoxplotOptions {
@@ -63,7 +64,7 @@ pub(super) fn text_vector(value: &Value, label: &str) -> BuiltinResult<Vec<Strin
             })
             .collect(),
         Value::Num(n) => Ok(vec![number_label(n)]),
-        Value::Int(i) => Ok(vec![int_group_key(i).to_string()]),
+        Value::Int(i) => Ok(vec![format_integer(i)]),
         _ => Err(invalid(format!("boxplot: {label} must be a text vector"))),
     }
 }

@@ -3,8 +3,9 @@ use super::plot::{color_for, positions_for, widths_for};
 use super::statistics::stats_for_values;
 use super::*;
 pub(super) mod labels;
-pub(super) use labels::{char_rows, int_group_key, number_label, numeric_scalar_label};
-use labels::{group_labels, validate_group_like, GroupLabel, OrderedF64};
+use crate::builtins::common::grouping_keys::{GroupIndex, KeyAtom, KeyOrder};
+pub(super) use labels::{char_rows, number_label, numeric_scalar_label};
+use labels::{group_label_text, group_labels, validate_group_like, GroupLabel};
 
 pub(super) fn validate_known_host_group(
     group: &Value,
@@ -59,9 +60,6 @@ pub(super) fn build_box_stats(
                 "boxplot: Labels length must match the number of plotted boxes",
             ));
         }
-        for (idx, (label, _)) in groups.iter_mut().enumerate() {
-            *label = GroupLabel::Text(labels[idx].clone());
-        }
     }
     let positions = positions_for(groups.len(), options)?;
     let widths = widths_for(groups.len(), options);
@@ -69,7 +67,11 @@ pub(super) fn build_box_stats(
         .into_iter()
         .enumerate()
         .map(|(idx, (label, values))| {
-            let mut stats = stats_for_values(label.text(), values, options.whisker)?;
+            let display = options
+                .labels
+                .as_ref()
+                .map_or_else(|| group_label_text(&label), |labels| labels[idx].clone());
+            let mut stats = stats_for_values(display, values, options.whisker)?;
             stats.position = positions[idx];
             stats.width = widths[idx];
             stats.color = color_for(idx, &options.box_colors);
@@ -81,14 +83,14 @@ pub(super) fn build_box_stats(
 fn ungrouped_series(tensor: &Tensor) -> Vec<(GroupLabel, Vec<f64>)> {
     let values = tensor::tensor_values_f64_cow(tensor);
     if tensor.rows == 1 || tensor.cols == 1 {
-        return vec![(GroupLabel::Text("1".to_string()), values.to_vec())];
+        return vec![(vec![KeyAtom::Text("1".to_string())], values.to_vec())];
     }
     (0..tensor.cols)
         .map(|col| {
             let values = (0..tensor.rows)
                 .map(|row| values[col * tensor.rows + row])
                 .collect::<Vec<_>>();
-            (GroupLabel::Text((col + 1).to_string()), values)
+            (vec![KeyAtom::Text((col + 1).to_string())], values)
         })
         .collect()
 }
@@ -117,59 +119,27 @@ fn grouped_series(
             "boxplot: grouping variables must have the same number of elements as X",
         ));
     }
-    let mut first_seen = Vec::<GroupLabel>::new();
-    let mut mixed_groups = BTreeMap::<GroupLabel, Vec<f64>>::new();
-    let mut floating_groups = BTreeMap::<OrderedF64, (GroupLabel, Vec<f64>)>::new();
-    let mut integer_groups = BTreeMap::<i128, (GroupLabel, Vec<f64>)>::new();
-    let floating_order = labels
+    let float_order = labels
         .iter()
         .flatten()
-        .all(|label| matches!(label, GroupLabel::Floating(_)));
+        .all(|label| matches!(label.as_slice(), [KeyAtom::Number(_)]));
     let integer_order = labels
         .iter()
         .flatten()
-        .all(|label| matches!(label, GroupLabel::Integer(_)));
-
-    for (idx, maybe_label) in labels.into_iter().enumerate() {
-        let Some(label) = maybe_label else {
-            continue;
-        };
-        if floating_order {
-            let GroupLabel::Floating(value) = label else {
-                unreachable!("floating group classification checked above");
-            };
-            floating_groups
-                .entry(value)
-                .or_insert_with(|| (GroupLabel::Floating(value), Vec::new()))
-                .1
-                .push(values[idx]);
-        } else if integer_order {
-            let GroupLabel::Integer(value) = label else {
-                unreachable!("integer group classification checked above");
-            };
-            integer_groups
-                .entry(value)
-                .or_insert_with(|| (GroupLabel::Integer(value), Vec::new()))
-                .1
-                .push(values[idx]);
-        } else {
-            if !mixed_groups.contains_key(&label) {
-                first_seen.push(label.clone());
-            }
-            mixed_groups.entry(label).or_default().push(values[idx]);
-        }
-    }
-
-    let groups = if floating_order {
-        floating_groups.into_values().collect::<Vec<_>>()
-    } else if integer_order {
-        integer_groups.into_values().collect::<Vec<_>>()
+        .all(|label| matches!(label.as_slice(), [KeyAtom::Integer(_)]));
+    let order = if float_order || integer_order {
+        KeyOrder::Sorted
     } else {
-        first_seen
-            .into_iter()
-            .filter_map(|label| mixed_groups.remove(&label).map(|values| (label, values)))
-            .collect::<Vec<_>>()
+        KeyOrder::FirstAppearance
     };
+    let grouped =
+        GroupIndex::build(labels, order).map_err(|err| invalid(format!("boxplot: {err}")))?;
+    let groups = grouped
+        .keys
+        .into_iter()
+        .zip(grouped.row_groups)
+        .map(|(key, rows)| (key, rows.into_iter().map(|row| values[row]).collect()))
+        .collect::<Vec<_>>();
 
     if groups.is_empty() && options.group_order.is_some() {
         return Err(invalid("boxplot: GroupOrder did not match any data groups"));
@@ -184,13 +154,29 @@ fn apply_group_order(
     let Some(order) = &options.group_order else {
         return Ok(());
     };
-    let mut by_label = BTreeMap::<String, Vec<(GroupLabel, Vec<f64>)>>::new();
-    for entry in groups.drain(..) {
-        by_label.entry(entry.0.text()).or_default().push(entry);
+    // GroupOrder arrives as public text. Resolve it to one exact typed key here;
+    // the presentation label must never become the internal grouping identity.
+    let mut by_label = BTreeMap::<String, Vec<usize>>::new();
+    for (index, (key, _)) in groups.iter().enumerate() {
+        by_label
+            .entry(group_label_text(key))
+            .or_default()
+            .push(index);
     }
+    let mut entries = std::mem::take(groups)
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<_>>();
     for label in order {
-        if let Some(entries) = by_label.remove(label) {
-            groups.extend(entries);
+        if let Some(indices) = by_label.get(label) {
+            if indices.len() != 1 {
+                return Err(invalid(
+                    "boxplot: GroupOrder label is ambiguous across distinct typed groups",
+                ));
+            }
+            if let Some(entry) = entries[indices[0]].take() {
+                groups.push(entry);
+            }
         }
     }
     if groups.is_empty() {

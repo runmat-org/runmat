@@ -36,6 +36,31 @@ fn heterogeneous_cell_group_keys_do_not_collapse_into_display_text() {
     assert_eq!(boxes[0].median, 1.0);
     assert_eq!(boxes[1].median, 2.0);
     assert_eq!(boxes[0].label, boxes[1].label);
+
+    let ordered = BoxplotOptions {
+        group_order: Some(vec![wide.to_string()]),
+        ..Default::default()
+    };
+    let error = build_box_stats(
+        tensor(vec![1.0, 2.0], vec![2, 1]),
+        Some(Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::Int(IntValue::U64(wide)),
+                    Value::String(wide.to_string()),
+                ],
+                2,
+                1,
+            )
+            .unwrap(),
+        )),
+        &ordered,
+    )
+    .expect_err("public text cannot resolve two distinct typed keys with one label");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
 }
 
 #[test]
@@ -451,11 +476,15 @@ fn reads_typed_integer_data_groups_and_options_exactly() {
 fn scalar_group_label_reads_typed_integer_storage_without_double_mirror() {
     let tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).unwrap();
 
-    let Some(GroupLabel::Integer(value)) = scalar_group_label(&Value::Tensor(tensor)).unwrap()
-    else {
+    let Some(label) = scalar_group_label(&Value::Tensor(tensor)).unwrap() else {
         panic!("expected exact integer label");
     };
-    assert_eq!(value, 42);
+    assert!(matches!(
+        label.as_slice(),
+        [crate::builtins::common::grouping_keys::KeyAtom::Integer(
+            IntValue::U16(42)
+        )]
+    ));
 }
 
 #[test]

@@ -25,6 +25,10 @@ const LABELS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Boxplot exact group identity",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/boxplot/groups/labels.rs"),
 };
+const KEY_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Shared exact grouping-key identity",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/common/grouping_keys/mod.rs"),
+};
 const PLOT_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Boxplot graphics rendering",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/boxplot/plot.rs"),
@@ -121,7 +125,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     links: &[SOURCE, ECDF, HISTOGRAM],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE, ADMISSION_SOURCE, OPTIONS_SOURCE, OPTION_DECODING_SOURCE, GROUPS_SOURCE, LABELS_SOURCE, PLOT_SOURCE, APPEARANCE_SOURCE],
+        implementation: &[SOURCE, ADMISSION_SOURCE, OPTIONS_SOURCE, OPTION_DECODING_SOURCE, GROUPS_SOURCE, LABELS_SOURCE, KEY_SOURCE, PLOT_SOURCE, APPEARANCE_SOURCE],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Box grouping, quartiles, options, compatibility and plotted handles", location: "crates/runmat-runtime/src/builtins/stats/summary/boxplot/tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident admission and borrowed input ownership", location: "crates/runmat-runtime/src/builtins/stats/summary/boxplot/provider_tests.rs" },

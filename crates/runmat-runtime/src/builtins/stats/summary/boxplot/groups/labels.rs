@@ -1,55 +1,22 @@
 //! Typed group labels, exact numeric identity, and multifactor decoding.
 use super::super::*;
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub(super) enum GroupLabel {
-    Floating(OrderedF64),
-    Integer(i128),
-    Logical(bool),
-    Text(String),
-    Tuple(Vec<GroupLabel>),
-}
+use crate::builtins::common::grouping_keys::KeyAtom;
 
-impl GroupLabel {
-    pub(super) fn text(&self) -> String {
-        match self {
-            Self::Floating(value) => number_label(&value.0),
-            Self::Integer(value) => value.to_string(),
-            Self::Logical(value) => value.to_string(),
-            Self::Text(value) => value.clone(),
-            Self::Tuple(parts) => parts.iter().map(Self::text).collect::<Vec<_>>().join(","),
-        }
-    }
-}
+pub(super) type GroupLabel = Vec<KeyAtom>;
 
-pub(in crate::builtins::stats::summary::boxplot) fn int_group_key(value: &IntValue) -> i128 {
-    match value {
-        IntValue::I8(value) => i128::from(*value),
-        IntValue::I16(value) => i128::from(*value),
-        IntValue::I32(value) => i128::from(*value),
-        IntValue::I64(value) => i128::from(*value),
-        IntValue::U8(value) => i128::from(*value),
-        IntValue::U16(value) => i128::from(*value),
-        IntValue::U32(value) => i128::from(*value),
-        IntValue::U64(value) => i128::from(*value),
-    }
+pub(super) fn group_label_text(label: &[KeyAtom]) -> String {
+    label
+        .iter()
+        .map(KeyAtom::label)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn numeric_group_label(value: NumericScalar) -> Option<GroupLabel> {
-    match value {
-        NumericScalar::F64(value) => value
-            .is_finite()
-            .then_some(GroupLabel::Floating(OrderedF64(value))),
-        NumericScalar::F32(value) => value
-            .is_finite()
-            .then_some(GroupLabel::Floating(OrderedF64(f64::from(value)))),
-        NumericScalar::I8(value) => Some(GroupLabel::Integer(i128::from(value))),
-        NumericScalar::I16(value) => Some(GroupLabel::Integer(i128::from(value))),
-        NumericScalar::I32(value) => Some(GroupLabel::Integer(i128::from(value))),
-        NumericScalar::I64(value) => Some(GroupLabel::Integer(i128::from(value))),
-        NumericScalar::U8(value) => Some(GroupLabel::Integer(i128::from(value))),
-        NumericScalar::U16(value) => Some(GroupLabel::Integer(i128::from(value))),
-        NumericScalar::U32(value) => Some(GroupLabel::Integer(i128::from(value))),
-        NumericScalar::U64(value) => Some(GroupLabel::Integer(i128::from(value))),
+    let key = KeyAtom::from_numeric(value)?;
+    match key {
+        KeyAtom::Number(value) if !value.is_finite() => None,
+        key => Some(vec![key]),
     }
 }
 
@@ -72,24 +39,26 @@ pub(super) fn group_labels(
                 .map(|label| {
                     label
                         .filter(|text| missing_text_label(text))
-                        .map(GroupLabel::Text)
+                        .map(|text| vec![KeyAtom::Text(text)])
                 })
                 .collect())
         }
-        Value::String(text) if expected_len == 1 => Ok(vec![Some(GroupLabel::Text(text.clone()))]),
+        Value::String(text) if expected_len == 1 => {
+            Ok(vec![Some(vec![KeyAtom::Text(text.clone())])])
+        }
         Value::StringArray(array) if array.data.len() == expected_len => Ok(array
             .data
             .iter()
-            .map(|text| missing_text_label(text).then(|| GroupLabel::Text(text.clone())))
+            .map(|text| missing_text_label(text).then(|| vec![KeyAtom::Text(text.clone())]))
             .collect()),
         Value::CharArray(array) if array.rows == expected_len => Ok(char_rows(array)
             .into_iter()
-            .map(|text| missing_text_label(&text).then_some(GroupLabel::Text(text)))
+            .map(|text| missing_text_label(&text).then_some(vec![KeyAtom::Text(text)]))
             .collect()),
         Value::CharArray(array) if array.rows == 1 && expected_len == 1 => {
             let text: String = array.data.iter().collect();
             Ok(vec![
-                missing_text_label(&text).then_some(GroupLabel::Text(text))
+                missing_text_label(&text).then_some(vec![KeyAtom::Text(text)])
             ])
         }
         _ => {
@@ -150,34 +119,34 @@ fn group_labels_from_cell(
         let mut missing = false;
         for variable in &variables {
             match &variable[row] {
-                Some(label) => parts.push(label.clone()),
+                Some(label) => parts.extend(label.iter().cloned()),
                 None => {
                     missing = true;
                     break;
                 }
             }
         }
-        labels.push((!missing).then(|| GroupLabel::Tuple(parts)));
+        labels.push((!missing).then_some(parts));
     }
     Ok(labels)
 }
 
 fn scalar_group_label(value: &Value) -> BuiltinResult<Option<GroupLabel>> {
     match value {
-        Value::String(text) => Ok(missing_text_label(text).then(|| GroupLabel::Text(text.clone()))),
+        Value::String(text) => {
+            Ok(missing_text_label(text).then(|| vec![KeyAtom::Text(text.clone())]))
+        }
         Value::StringArray(array) if array.data.len() == 1 => {
             let text = array.data[0].clone();
-            Ok(missing_text_label(&text).then_some(GroupLabel::Text(text)))
+            Ok(missing_text_label(&text).then_some(vec![KeyAtom::Text(text)]))
         }
         Value::CharArray(array) if array.rows == 1 => {
             let text: String = array.data.iter().collect();
-            Ok(missing_text_label(&text).then_some(GroupLabel::Text(text)))
+            Ok(missing_text_label(&text).then_some(vec![KeyAtom::Text(text)]))
         }
-        Value::Num(value) => Ok(value
-            .is_finite()
-            .then_some(GroupLabel::Floating(OrderedF64(*value)))),
-        Value::Int(value) => Ok(Some(GroupLabel::Integer(int_group_key(value)))),
-        Value::Bool(value) => Ok(Some(GroupLabel::Logical(*value))),
+        Value::Num(value) => Ok(value.is_finite().then_some(vec![KeyAtom::Number(*value)])),
+        Value::Int(value) => Ok(Some(vec![KeyAtom::Integer(value.clone())])),
+        Value::Bool(value) => Ok(Some(vec![KeyAtom::Logical(*value)])),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(tensor.numeric_value_at(0).and_then(numeric_group_label))
         }
@@ -231,22 +200,5 @@ pub(in crate::builtins::stats::summary::boxplot) fn numeric_scalar_label(
         NumericScalar::U16(value) => value.to_string(),
         NumericScalar::U32(value) => value.to_string(),
         NumericScalar::U64(value) => value.to_string(),
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct OrderedF64(pub(super) f64);
-
-impl Eq for OrderedF64 {}
-
-impl PartialOrd for OrderedF64 {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for OrderedF64 {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
     }
 }
