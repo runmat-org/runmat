@@ -5,13 +5,15 @@ use crate::results::accuracy::{AccuracyEvidence, AccuracyEvidenceScope, Accuracy
 use super::{
     AccuracyEvaluationRequest, AccuracySourceKind, AcousticNumericalReceiptArtifact,
     AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity,
-    ElectricalNumericalReceiptArtifact, MagneticNumericalReceiptArtifact, SolverResultIdentity,
+    ElectricalNumericalReceiptArtifact, MagneticNumericalReceiptArtifact,
+    MaxwellNumericalReceiptArtifact, SolverResultIdentity,
     StructuralLinearNumericalReceiptArtifact, StructuralModalResponseSpectrumNumericalReceipt,
     StructuralRandomResponseNumericalReceipt, ThermalNumericalReceiptArtifact,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccuracySourceReceipt {
+    MaxwellHarmonic(MaxwellNumericalReceiptArtifact),
     Magnetostatic(MagneticNumericalReceiptArtifact),
     ElectricalStatic(ElectricalNumericalReceiptArtifact),
     AcousticHarmonic(AcousticNumericalReceiptArtifact),
@@ -27,6 +29,9 @@ impl AccuracySourceReceipt {
         bytes: &[u8],
     ) -> AnalysisExecutionResult<Self> {
         let receipt = match kind {
+            AccuracySourceKind::MaxwellHarmonic => Self::MaxwellHarmonic(
+                MaxwellNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
+            ),
             AccuracySourceKind::Magnetostatic => Self::Magnetostatic(
                 MagneticNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
             ),
@@ -57,6 +62,7 @@ impl AccuracySourceReceipt {
 
     pub const fn kind(&self) -> AccuracySourceKind {
         match self {
+            Self::MaxwellHarmonic(_) => AccuracySourceKind::MaxwellHarmonic,
             Self::Magnetostatic(_) => AccuracySourceKind::Magnetostatic,
             Self::ElectricalStatic(_) => AccuracySourceKind::ElectricalStatic,
             Self::AcousticHarmonic(_) => AccuracySourceKind::AcousticHarmonic,
@@ -71,6 +77,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
         match self {
+            Self::MaxwellHarmonic(receipt) => receipt.source_workload(),
             Self::Magnetostatic(receipt) => receipt.source_workload(),
             Self::ElectricalStatic(receipt) => receipt.source_workload(),
             Self::AcousticHarmonic(receipt) => receipt.source_workload(),
@@ -83,6 +90,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_result(&self) -> SolverResultIdentity {
         match self {
+            Self::MaxwellHarmonic(receipt) => receipt.source_result(),
             Self::Magnetostatic(receipt) => receipt.source_result(),
             Self::ElectricalStatic(receipt) => receipt.source_result(),
             Self::AcousticHarmonic(receipt) => receipt.source_result(),
@@ -95,6 +103,7 @@ impl AccuracySourceReceipt {
 
     pub const fn identity(&self) -> super::NumericalReceiptIdentity {
         match self {
+            Self::MaxwellHarmonic(receipt) => receipt.identity(),
             Self::Magnetostatic(receipt) => receipt.identity(),
             Self::ElectricalStatic(receipt) => receipt.identity(),
             Self::AcousticHarmonic(receipt) => receipt.identity(),
@@ -114,6 +123,13 @@ impl AccuracySourceReceipt {
             return Err(AnalysisExecutionError::Identity(
                 "accuracy receipt differs from its admitted request",
             ));
+        }
+        if let Self::MaxwellHarmonic(receipt) = self {
+            if receipt.receipt().producer != request.producer {
+                return Err(AnalysisExecutionError::Identity(
+                    "Maxwell accuracy receipt differs from original producer",
+                ));
+            }
         }
         if let Self::Magnetostatic(receipt) = self {
             if receipt.receipt().producer != request.producer {
@@ -146,6 +162,20 @@ impl AccuracySourceReceipt {
         let mut evidence = Vec::new();
         for criterion in &request.plan.criteria {
             let measured = match self {
+                Self::MaxwellHarmonic(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound => {
+                    Some((receipt.receipt().relative_physical_residual.max(receipt.receipt().relative_charge_continuity_residual),
+                        "maximum original physical weak-equation residual and interior corner-gradient charge-continuity residual; each uses its retained original physical norm with exact zero handling; algebraic satisfaction only, not spatial field accuracy or convergence"))
+                }
+                Self::MaxwellHarmonic(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ConservationBalance => {
+                    Some((receipt.receipt().relative_complex_power_error,
+                        "complex delivered source power minus ohmic loss and 2omega magnetic-minus-electric stored energy, divided by the larger absolute physical complex term; exact zero scale uses absolute defect, no dimensional floor; equation-based power closure, not independent spatial accuracy"))
+                }
                 Self::Magnetostatic(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic
@@ -261,6 +291,7 @@ impl AccuracySourceReceipt {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
+            Self::MaxwellHarmonic(receipt) => receipt.validate(),
             Self::Magnetostatic(receipt) => receipt.validate(),
             Self::ElectricalStatic(receipt) => receipt.validate(),
             Self::AcousticHarmonic(receipt) => receipt.validate(),

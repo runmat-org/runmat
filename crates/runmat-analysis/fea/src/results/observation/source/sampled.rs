@@ -34,12 +34,20 @@ pub(crate) fn validate_sampled_authority(
     for requirement in &request.plan.requirements {
         let count = match requirement.entity_domain {
             RecoveredFieldEntityDomain::VolumeIntegrationPoints
-                if requirement.quantity != ObservationQuantity::MagneticEdgeCirculation =>
+                if !matches!(
+                    requirement.quantity,
+                    ObservationQuantity::MagneticEdgeCirculation
+                        | ObservationQuantity::ElectricEdgeCirculation
+                ) =>
             {
                 sampling.integration_samples().len()
             }
             RecoveredFieldEntityDomain::OrientedEdges
-                if requirement.quantity == ObservationQuantity::MagneticEdgeCirculation =>
+                if matches!(
+                    requirement.quantity,
+                    ObservationQuantity::MagneticEdgeCirculation
+                        | ObservationQuantity::ElectricEdgeCirculation
+                ) =>
             {
                 sampling.oriented_edges().len()
             }

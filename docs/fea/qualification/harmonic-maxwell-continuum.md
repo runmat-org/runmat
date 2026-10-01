@@ -60,7 +60,11 @@ MaxwellHarmonicWorkload and MaxwellHarmonicSolverResult retain original model,
 producer, formulation, sample/material/current identities and genuine E/B/H/D/J
 fields. Canonical cold import requires an authenticated expected result digest
 and original workload/mesh, and validates constitutive and energy/power summaries
-without assembling/solving again. This is not a native completed-study root.
+without solving again. Retained validation compares original E/B samples with
+their oriented electric edge phasors and evaluates the original physical weak
+action locally, without constructing a sparse operator or replacing fields.
+The solve and retained validation share one charge-continuity accumulator. This
+is not a native completed-study root.
 
 Local compilation preflight checks the selected maximum_resident_bytes before
 model validation, projection, property replication or sampled source expansion.
@@ -68,13 +72,36 @@ Count bounds are edges<=6T, real block dimension<=12T, support candidates<=144T,
 and15 samples per tetrahedron. Shared GMRES restart/iteration sizing is used;
 profiled metadata, sparse topology/assembly, retained and cold-validation copies
 are conservatively reserved. This is requested local heap, not measured RSS,
-exact native transport or scheduler/worker admission.
+measured process allocation or scheduler-attempt reconciliation.
 
 The authored/retained suite passes both mesh orders, source-bound cold import,
 constitutive/power checks and substitution negatives (two groups); local resource
-preflight passes three groups. Four language tests and all 123 core tests pass.
-Strict core/FEA/language library/test lint passes. These checks do not establish
-native execution, publication, restart, or production qualification.
+preflight passes three groups. Four language tests and all 124 core tests pass.
+These checks do not establish production qualification.
+
+## Native task and retained-field boundary
+
+The immutable Maxwell task carries original workload, canonical mesh and exact
+resource plan. Its worker authenticates bounded plan and source envelopes before
+decoding numerical inputs, then rederives the complete resource and execution
+identities before quadrature, sparse assembly or shared GMRES. Admission includes
+actual canonical input decode budgets, conservative result/state/receipt transport
+profiles and numerical reservations. These are requested allocations, not measured
+RSS or distributed/GPU execution evidence.
+
+The result exposes six original complex native fields: oriented electric edge
+circulation (V), E, B, H, D and conduction J. Shared interleaved storage uses
+[edges,2] or [samples,3,2], at exact original Keast15 integration points. Recovery
+copies retained values and never solves again; cold imports authenticate original
+source, producer, mesh, request, resource authority and immutable payload.
+
+Both-order native task tests execute solve, cold import, field recovery, complex
+observation evaluation, complete ElectromagneticComplex state publication and
+accuracy evaluation through shared artifact-store programs. Exact phase values
+survive cold imports and partition transport. These are native task-chain witnesses,
+not a completed authored-study root, independent spatial evidence, process-isolated
+restart, resource measurement or production release evidence. Missing mandatory
+spatial evidence remains Indeterminate and blocks production publication.
 
 ## Numerical evidence
 
@@ -98,7 +125,7 @@ taking a static limit. Exact zero forcing remains valid.
 
 ## Scope and open gates
 
-This work implements the numerical continuum and authored retained-result boundary,
+This work implements the numerical continuum, authored retained-result and native-task boundaries,
 not native completed-study/restart or production qualification. Initial uniqueness
 admission requires positive frequency and strictly positive conductivity in every
 element. A converged residual alone cannot establish uniqueness at lossless cavity
@@ -107,6 +134,6 @@ envelopes. Affine Tet4/Tet10 geometry only; curved geometry needs governed quadr
 
 Remaining full-plan work includes replacement of reduced-graph dispatch,
 incident/ports/open boundaries, dispersive/complex material laws, lossless cavities
-and waveguides, skin-effect/interfaces/frequency references, native immutable
-task/resource/accuracy/state/publication execution, numerical restart, and release.
+and waveguides, skin-effect/interfaces/frequency references, completed authored
+native study roots, numerical restart, measured execution accounting, and release.
 The older harmonic graph path supplies no continuum qualification credit.

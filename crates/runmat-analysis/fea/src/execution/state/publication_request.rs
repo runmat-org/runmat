@@ -23,6 +23,7 @@ pub enum SemanticStatePublicationSource {
     AcousticNativeFields,
     StaticElectricalNativeFields,
     MagnetostaticNativeFields,
+    MaxwellNativeFields,
     StructuralLinearization,
     ModalBasis,
     StructuralResponseEnvelope,
@@ -71,6 +72,9 @@ impl SemanticStatePublicationRequest {
                 ) | (
                     SemanticStatePublicationSource::MagnetostaticNativeFields,
                     StateKind::ElectromagneticStatic
+                ) | (
+                    SemanticStatePublicationSource::MaxwellNativeFields,
+                    StateKind::ElectromagneticComplex
                 ) | (
                     SemanticStatePublicationSource::StructuralLinearization,
                     StateKind::GeometricStiffness

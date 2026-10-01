@@ -18,10 +18,13 @@
 mod assembly;
 mod authored;
 mod complex;
+mod continuity;
 mod geometry;
 mod input;
 mod plan;
 mod recovery;
+mod retained_consistency;
+pub(crate) use retained_consistency::validate_retained_consistency;
 pub(crate) mod resources;
 mod response;
 #[cfg(test)]

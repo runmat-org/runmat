@@ -152,12 +152,13 @@ impl ObservationPublicationCatalog {
                 .map_err(invalid)?;
             for partition in &plan.partitions {
                 let indices = match context {
-                    ObservationHistorySourceContext::Magnetostatic { mesh, .. } => {
+                    ObservationHistorySourceContext::Magnetostatic { mesh, .. }
+                    | ObservationHistorySourceContext::MaxwellHarmonic { mesh, .. } => {
                         let ObservationFieldCatalogSource::SampledRecovery { sampling, .. } =
                             self.source.source()
                         else {
                             return Err(invalid(
-                                "magnetic execution context requires original sampled catalog",
+                                "sampled execution context requires original sampled catalog",
                             ));
                         };
                         sampled_observation_partition_source_indices(

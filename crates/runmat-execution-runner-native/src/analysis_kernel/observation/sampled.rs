@@ -17,16 +17,33 @@ pub(super) fn admit_source(
     runmat_analysis_core::AnalysisModel,
     SampledVolumeFieldTopology,
 )> {
-    let workload = runmat_analysis_fea::execution::MagnetostaticWorkload::from_canonical_bytes(
-        &objects.payload(),
-    )?;
-    if objects.manifest.logical_identity != workload.identity()?.digest() {
+    use runmat_analysis_fea::execution::{MagnetostaticWorkload, MaxwellHarmonicWorkload};
+    let (model, producer, workload_identity) = match objects.manifest.kind {
+        AnalysisNumericalObjectKind::MagnetostaticWorkload => {
+            let workload = MagnetostaticWorkload::from_canonical_bytes(&objects.payload())?;
+            let producer = workload.producer_identity()?;
+            let identity = workload.identity()?.digest();
+            (workload.model, producer, identity)
+        }
+        AnalysisNumericalObjectKind::MaxwellHarmonicWorkload => {
+            let workload = MaxwellHarmonicWorkload::from_canonical_bytes(&objects.payload())?;
+            let producer = workload.producer_identity()?;
+            let identity = workload.identity()?.digest();
+            (workload.model, producer, identity)
+        }
+        _ => {
+            return Err(AnalysisBridgeError::Identity(
+                "sampled observation workload kind differs",
+            ))
+        }
+    };
+    if objects.manifest.logical_identity != workload_identity {
         return Err(AnalysisBridgeError::Identity(
-            "magnetic observation original workload identity differs",
+            "sampled observation original workload identity differs",
         ));
     }
     let mesh = mesh.ok_or(AnalysisBridgeError::Identity(
-        "magnetic observation mesh absent",
+        "sampled observation mesh absent",
     ))?;
     let ObservationFieldCatalogSource::SampledRecovery {
         sampling,
@@ -35,11 +52,22 @@ pub(super) fn admit_source(
     } = catalog.source()
     else {
         return Err(AnalysisBridgeError::Identity(
-            "magnetic observation requires sampled recovery catalog",
+            "sampled observation requires sampled recovery catalog",
         ));
     };
-    let native_definitions =
-        runmat_analysis_fea::execution::magnetic_native_field_definitions(recovery_request)?;
+    let native_definitions = match objects.manifest.kind {
+        AnalysisNumericalObjectKind::MagnetostaticWorkload => {
+            runmat_analysis_fea::execution::magnetic_native_field_definitions(recovery_request)?
+        }
+        AnalysisNumericalObjectKind::MaxwellHarmonicWorkload => {
+            runmat_analysis_fea::execution::maxwell_native_field_definitions(recovery_request)?
+        }
+        _ => {
+            return Err(AnalysisBridgeError::Identity(
+                "sampled observation workload kind differs",
+            ))
+        }
+    };
     if manifest
         .fields
         .iter()
@@ -47,7 +75,7 @@ pub(super) fn admit_source(
         .ne(native_definitions.iter())
     {
         return Err(AnalysisBridgeError::Identity(
-            "magnetic observation native field definitions differ",
+            "sampled observation native field definitions differ from typed producer",
         ));
     }
     sampling
@@ -55,16 +83,11 @@ pub(super) fn admit_source(
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if sampling.rule() != VolumeFieldSamplingRule::TetrahedronKeastFifteen {
         return Err(AnalysisBridgeError::Identity(
-            "magnetic observation sampling rule differs",
+            "sampled observation sampling rule differs",
         ));
     }
     catalog.validate_sampled_selection(&source.selection)?;
-    catalog.validate_sampled_plan(
-        &source.plan,
-        &workload.model.sequence.steps[0],
-        workload.producer_identity()?,
-        mesh,
-    )?;
+    catalog.validate_sampled_plan(&source.plan, &model.sequence.steps[0], producer, mesh)?;
     let expected = ObservationPartitionPlan::derive(
         &source.plan,
         &partition.observation_id,
@@ -73,8 +96,8 @@ pub(super) fn admit_source(
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if partition != &expected {
         return Err(AnalysisBridgeError::Identity(
-            "magnetic observation partition policy differs from original workload",
+            "sampled observation partition policy differs from original workload",
         ));
     }
-    Ok((workload.model, sampling.as_ref().clone()))
+    Ok((model, sampling.as_ref().clone()))
 }

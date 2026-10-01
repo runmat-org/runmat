@@ -28,7 +28,11 @@ pub use magnetic_static::{
     MagneticNumericalReceipt, MagneticNumericalReceiptArtifact, MagnetostaticSolverResult,
     MagnetostaticWorkload, MAGNETIC_RECEIPT_MAX_ENCODED_BYTES,
 };
-pub use maxwell_harmonic::{MaxwellHarmonicSolverResult, MaxwellHarmonicWorkload};
+pub use maxwell_harmonic::{
+    maxwell_native_field_definition_inventory, maxwell_native_field_definitions,
+    MaxwellHarmonicSolverResult, MaxwellHarmonicWorkload, MaxwellNumericalReceipt,
+    MaxwellNumericalReceiptArtifact, MAXWELL_NATIVE_FIELD_COUNT, MAXWELL_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod error;
 pub use electrical_static::{
     ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,
@@ -236,11 +240,11 @@ pub use solve::{
 };
 pub use state::{
     AcousticPhasorConvention, BoundThermalStateTransfer, CanonicalAcousticStatePayload,
-    CanonicalElectricalStaticStatePayload, CanonicalSemanticState, CanonicalSemanticStateInput,
-    CanonicalSemanticStatePayload, CanonicalStateTransition, CanonicalStateTransitionInput,
-    SemanticStatePublicationProfileSource, SemanticStatePublicationRequest,
-    SemanticStatePublicationSource, StatePublicationProfileEntry, StatePublicationProfiles,
-    STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
+    CanonicalElectricalStaticStatePayload, CanonicalMaxwellStatePayload, CanonicalSemanticState,
+    CanonicalSemanticStateInput, CanonicalSemanticStatePayload, CanonicalStateTransition,
+    CanonicalStateTransitionInput, SemanticStatePublicationProfileSource,
+    SemanticStatePublicationRequest, SemanticStatePublicationSource, StatePublicationProfileEntry,
+    StatePublicationProfiles, STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
 };
 mod structural_state_profiles;
 pub use structural_state_profiles::{

@@ -5,6 +5,8 @@ mod acoustic;
 mod electrical_static;
 mod magnetic_recovery;
 mod magnetic_static;
+mod maxwell_harmonic;
+mod maxwell_recovery;
 pub use acoustic::{
     acoustic_harmonic_result_payload_bytes_upper_bound, build_acoustic_resource_plan,
     PreparedAcousticResourceFacts,
@@ -12,7 +14,9 @@ pub use acoustic::{
 pub use contract::AcousticHarmonicResourceDemand;
 pub use contract::ElectricalStaticResourceDemand;
 pub use contract::MagneticFieldRecoveryResourceDemand;
+pub use contract::MaxwellFieldRecoveryResourceDemand;
 pub use contract::{MagneticGmresResourceEnvelope, MagnetostaticResourceDemand};
+pub use contract::{MaxwellGmresResourceEnvelope, MaxwellHarmonicResourceDemand};
 pub use electrical_static::{
     build_electrical_static_resource_plan, electrical_static_result_payload_bytes_upper_bound,
     electrical_static_solver_admission, PreparedElectricalStaticResourceFacts,
@@ -24,6 +28,14 @@ pub use magnetic_recovery::{
 pub use magnetic_static::{
     build_magnetostatic_resource_plan, magnetostatic_result_payload_bytes_upper_bound,
     PreparedMagnetostaticResourceFacts,
+};
+pub use maxwell_harmonic::{
+    build_maxwell_harmonic_resource_plan, maxwell_harmonic_result_payload_bytes_upper_bound,
+    PreparedMaxwellHarmonicResourceFacts,
+};
+pub use maxwell_recovery::{
+    build_maxwell_field_recovery_resource_plan, maxwell_field_recovery_partition_count,
+    maxwell_field_recovery_shape, maxwell_recovery_source_validation_workspace,
 };
 mod result_publication;
 mod state_publication;

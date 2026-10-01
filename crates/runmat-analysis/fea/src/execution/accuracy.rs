@@ -18,6 +18,7 @@ const ACCURACY_EVALUATION_LIMITS: CanonicalLimits =
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccuracySourceKind {
+    MaxwellHarmonic,
     Magnetostatic,
     ElectricalStatic,
     AcousticHarmonic,
@@ -44,7 +45,7 @@ impl ObservationPublicationCatalog {
         }
         match (kind, self.source().source()) {
             (
-                AccuracySourceKind::Magnetostatic,
+                AccuracySourceKind::Magnetostatic | AccuracySourceKind::MaxwellHarmonic,
                 crate::results::observation::ObservationFieldCatalogSource::SampledRecovery {
                     recovery_request,
                     ..

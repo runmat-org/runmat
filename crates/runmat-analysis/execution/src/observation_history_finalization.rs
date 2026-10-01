@@ -156,8 +156,11 @@ pub fn prepare_observation_history_finalization_task(
                     frequency.canonical_bytes()?
                 }
                 AdmittedObservationWorkload::Thermal(_)
-                | AdmittedObservationWorkload::Magnetostatic(_) => {
-                    return Err(invalid("structural history cannot use a thermal workload"));
+                | AdmittedObservationWorkload::Magnetostatic(_)
+                | AdmittedObservationWorkload::MaxwellHarmonic(_) => {
+                    return Err(invalid(
+                        "structural history cannot use a nonstructural workload",
+                    ));
                 }
             };
             if workload.objects().manifest.payload_digest
@@ -213,9 +216,10 @@ pub fn prepare_observation_history_finalization_task(
         }
     };
     let context = match &decoded_workload {
-        AdmittedObservationWorkload::Magnetostatic(_) => {
+        AdmittedObservationWorkload::Magnetostatic(_)
+        | AdmittedObservationWorkload::MaxwellHarmonic(_) => {
             return Err(invalid(
-                "magnetic static history finalization is not admitted",
+                "sampled electromagnetic history finalization is not admitted",
             ));
         }
         AdmittedObservationWorkload::Thermal(workload) => {

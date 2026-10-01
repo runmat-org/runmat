@@ -81,6 +81,30 @@ pub use magnetic_study::{
 };
 mod magnetic_field_recovery;
 mod magnetic_state_profiles;
+mod maxwell_field_recovery;
+mod maxwell_harmonic_plan;
+mod maxwell_harmonic_result;
+mod maxwell_harmonic_task;
+mod maxwell_source_admission;
+mod maxwell_state_profiles;
+pub use maxwell_field_recovery::{
+    build_maxwell_recovery_metadata_resource_plan,
+    build_prepared_maxwell_field_recovery_resource_plan, decode_maxwell_recovery_source,
+    import_maxwell_recovered_fields, prepare_maxwell_field_recovery,
+    MaxwellFieldRecoveryPreparation, PreparedMaxwellFieldRecovery,
+};
+pub use maxwell_harmonic_plan::{
+    prepare_maxwell_harmonic_inputs, rederive_maxwell_harmonic_resource_plan,
+    PreparedMaxwellHarmonicInputs,
+};
+pub use maxwell_harmonic_result::{import_maxwell_harmonic_result, ImportedMaxwellHarmonicResult};
+pub use maxwell_harmonic_task::{
+    prepare_maxwell_harmonic_task, MaxwellHarmonicTaskPreparation, PreparedMaxwellHarmonicTask,
+};
+pub use maxwell_source_admission::{
+    decode_admitted_maxwell_resource_plan, require_maxwell_source_decode_budget,
+};
+pub use maxwell_state_profiles::maxwell_state_publication_profiles;
 mod magnetostatic_plan;
 mod magnetostatic_result;
 mod magnetostatic_task;

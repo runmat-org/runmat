@@ -58,6 +58,17 @@ pub(super) fn execute(
         Ok(())
     };
     let state = match publication.source {
+        SemanticStatePublicationSource::MaxwellNativeFields => {
+            let result =
+                runmat_analysis_fea::execution::MaxwellHarmonicSolverResult::from_canonical_bytes(
+                    &solver_result.payload(),
+                )?;
+            result.validate_publication_request(&publication)?;
+            check_profile(SemanticStatePublicationProfileSource::MaxwellNativeFields(
+                &result,
+            ))?;
+            CanonicalSemanticState::from_maxwell_publication(&publication, &result)?
+        }
         SemanticStatePublicationSource::MagnetostaticNativeFields => {
             let result =
                 runmat_analysis_fea::execution::MagnetostaticSolverResult::from_canonical_bytes(

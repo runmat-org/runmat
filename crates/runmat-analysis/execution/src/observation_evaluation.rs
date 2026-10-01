@@ -185,6 +185,7 @@ fn admit_recovery_source(
     match (&workload, source_request.source) {
         (AdmittedObservationWorkload::Linear(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::Magnetostatic(_), FieldRecoverySource::SolverResult(_))
+        | (AdmittedObservationWorkload::MaxwellHarmonic(_), FieldRecoverySource::SolverResult(_))
         | (
             AdmittedObservationWorkload::Frequency(_),
             FieldRecoverySource::StructuralFrequencyEntry(_),

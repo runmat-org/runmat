@@ -63,6 +63,9 @@ pub fn prepare_semantic_state_publication(
             SemanticStatePublicationSource::MagnetostaticNativeFields,
             AnalysisWorkKind::SolveMagnetostatic
         ) | (
+            SemanticStatePublicationSource::MaxwellNativeFields,
+            AnalysisWorkKind::SolveMaxwellHarmonic
+        ) | (
             SemanticStatePublicationSource::ThermalPrimaryField,
             AnalysisWorkKind::SolveThermal
         ) | (
@@ -101,6 +104,10 @@ pub fn prepare_semantic_state_publication(
             crate::electrical_state_profiles::decode_electrical_source(&preparation.source_result)
         })
         .transpose()?;
+    let maxwell_source = (preparation.source
+        == SemanticStatePublicationSource::MaxwellNativeFields)
+        .then(|| crate::maxwell_state_profiles::decode_maxwell_source(&preparation.source_result))
+        .transpose()?;
     let magnetic_source = (preparation.source
         == SemanticStatePublicationSource::MagnetostaticNativeFields)
         .then(|| crate::magnetic_state_profiles::decode_magnetic_source(&preparation.source_result))
@@ -120,6 +127,29 @@ pub fn prepare_semantic_state_publication(
             ));
         }
         manifest.identity()
+    } else if let Some(result) = &maxwell_source {
+        let topology = Digest::from_bytes(*result.response().mesh_digest.bytes());
+        if result.producer_identity() != preparation.source_host.workload.step
+            || result
+                .sampling_topology()
+                .identity()
+                .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?
+                .discretization_digest()
+                != preparation.topology_digest
+            || !preparation.source_host.workload.inputs.iter().any(|input| {
+                input.kind == AnalysisNumericalObjectKind::MaxwellHarmonicWorkload
+                    && input.logical_identity == result.source_workload().digest()
+            })
+            || !preparation.source_host.workload.inputs.iter().any(|input| {
+                input.kind == AnalysisNumericalObjectKind::Mesh
+                    && input.logical_identity == topology
+            })
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "Maxwell state source differs from original workload/mesh/sample topology",
+            ));
+        }
+        result.identity()?
     } else if let Some(result) = &magnetic_source {
         if result.producer() != preparation.source_host.workload.step
             || result
@@ -205,6 +235,22 @@ pub fn prepare_semantic_state_publication(
         source_result,
     )?;
     let request_bytes = request.canonical_bytes()?;
+    if let Some(result) = &maxwell_source {
+        result.validate_publication_request(&request)?;
+        let catalog =
+            StatePublicationProfiles::from_canonical_bytes(&preparation.source_profiles.payload())?;
+        if preparation.source_profiles.manifest.kind
+            != AnalysisNumericalObjectKind::StatePublicationProfiles
+            || preparation.source_profiles.manifest.logical_identity != catalog.identity()
+            || catalog
+                != result
+                    .state_publication_profiles(preparation.source_result.manifest.payload_digest)?
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "Maxwell publication profiles differ from original completed source",
+            ));
+        }
+    }
     if let Some(result) = &magnetic_source {
         result.validate_publication_request(&request)?;
         let catalog =

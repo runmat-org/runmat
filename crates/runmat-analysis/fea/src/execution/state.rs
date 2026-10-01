@@ -22,8 +22,10 @@ pub use resource_profile::SemanticStatePublicationProfileSource;
 mod acoustic;
 mod electrical;
 mod magnetic;
+mod maxwell;
 pub use electrical::CanonicalElectricalStaticStatePayload;
 pub use magnetic::CanonicalMagnetostaticStatePayload;
+pub use maxwell::CanonicalMaxwellStatePayload;
 mod payload;
 mod thermal;
 mod thermal_transfer;
@@ -112,6 +114,7 @@ impl CanonicalSemanticState {
                     self.kind,
                     StateKind::Thermal
                         | StateKind::ElectromagneticStatic
+                        | StateKind::ElectromagneticComplex
                         | StateKind::AcousticComplex
                         | StateKind::ModalBasis
                         | StateKind::StructuralComplex
@@ -180,6 +183,31 @@ impl CanonicalSemanticState {
                     return Err(AnalysisExecutionError::Invalid(
                         "magnetostatic state declaration differs from retained authored authority"
                             .into(),
+                    ));
+                }
+            }
+            CanonicalSemanticStatePayload::MaxwellHarmonic { state } => {
+                if self.kind != StateKind::ElectromagneticComplex
+                    || self.completeness != StateCompleteness::Complete
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "Maxwell payload requires complete electromagnetic-complex state".into(),
+                    ));
+                }
+                state.validate_for(self.topology_digest, self.source_result, self.producer)?;
+                if !state
+                    .result
+                    .publication_declarations()
+                    .iter()
+                    .any(|declaration| {
+                        declaration.state_id == self.state_id
+                            && declaration.kind == self.kind
+                            && declaration.completeness == self.completeness
+                            && declaration.persistence == self.persistence
+                    })
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "Maxwell state declaration differs from retained authored authority".into(),
                     ));
                 }
             }

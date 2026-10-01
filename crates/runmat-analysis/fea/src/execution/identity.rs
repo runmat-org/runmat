@@ -361,6 +361,13 @@ impl AccuracyIdentity {
 }
 
 impl NumericalPlanIdentity {
+    /// Original electric-phasor Maxwell workload and mesh, never worker placement.
+    pub fn from_maxwell_harmonic_workload(
+        workload: AnalysisWorkloadIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("maxwell-harmonic-numerical-plan", &(workload, topology))
+    }
     /// Canonical magnetic edge/gauge workload and original mesh, not placement or chunks.
     pub fn from_magnetostatic_workload(
         workload: AnalysisWorkloadIdentity,

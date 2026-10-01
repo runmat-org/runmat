@@ -29,7 +29,7 @@ pub(crate) struct MaxwellNumericalReservation {
 
 /// Select only the borrowed authored policy before any model validation or
 /// projection. Exact singleton/family validation follows admission in compilation.
-pub(super) fn require_selected_ceiling(
+pub(crate) fn require_selected_ceiling(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,

@@ -87,7 +87,9 @@ pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, F
             PhysicalDimension::ELECTRIC_CURRENT.multiply(PhysicalDimension::TIME)?,
             1,
         ),
-        Q::MagneticEdgeCirculation => (quantity.physical_dimension(), 1),
+        Q::MagneticEdgeCirculation | Q::ElectricEdgeCirculation => {
+            (quantity.physical_dimension(), 1)
+        }
         Q::MagneticVectorPotential => (
             PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH)?,
             3,

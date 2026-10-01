@@ -10,6 +10,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::AcousticHarmonic(demand) => demand.topology_digest,
             FeaResourceDemand::ElectricalStatic(demand) => demand.topology_digest,
             FeaResourceDemand::Magnetostatic(demand) => demand.topology_digest,
+            FeaResourceDemand::MaxwellHarmonic(demand) => demand.topology_digest,
+            FeaResourceDemand::MaxwellFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::MagneticFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::SemanticStatePublication(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralLinearPipeline(demand) => demand.operator.topology_digest,
@@ -50,6 +52,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn observations(&self) -> Option<&ObservationResourceFacts> {
         match &self.demand {
+            FeaResourceDemand::MaxwellFieldRecovery(_) => None,
             FeaResourceDemand::MagneticFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
@@ -57,6 +60,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::AcousticHarmonic(_) => None,
             FeaResourceDemand::ElectricalStatic(_) => None,
             FeaResourceDemand::Magnetostatic(_) => None,
+            FeaResourceDemand::MaxwellHarmonic(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => {
                 Some(&demand.operator.observations)
@@ -98,6 +102,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn partitioning(&self) -> &PartitioningPolicy {
         match &self.demand {
+            FeaResourceDemand::MaxwellFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::MagneticFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::AccuracyEvaluation(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ResultPublication(_) => &PartitioningPolicy::Monolithic,
@@ -105,6 +110,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::AcousticHarmonic(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ElectricalStatic(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::Magnetostatic(_) => &PartitioningPolicy::Monolithic,
+            FeaResourceDemand::MaxwellHarmonic(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::SemanticStatePublication(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralModalExtraction(demand) => &demand.operator.partitioning,
@@ -149,6 +155,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn structural_operator(&self) -> Option<&StructuralOperatorResourceDemand> {
         match &self.demand {
+            FeaResourceDemand::MaxwellFieldRecovery(_) => None,
             FeaResourceDemand::MagneticFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
@@ -156,6 +163,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::AcousticHarmonic(_) => None,
             FeaResourceDemand::ElectricalStatic(_) => None,
             FeaResourceDemand::Magnetostatic(_) => None,
+            FeaResourceDemand::MaxwellHarmonic(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&demand.operator),
@@ -185,6 +193,7 @@ impl FeaResourcePlanningInput {
 
     pub fn structural_operator_mut(&mut self) -> Option<&mut StructuralOperatorResourceDemand> {
         match &mut self.demand {
+            FeaResourceDemand::MaxwellFieldRecovery(_) => None,
             FeaResourceDemand::MagneticFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
@@ -192,6 +201,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::AcousticHarmonic(_) => None,
             FeaResourceDemand::ElectricalStatic(_) => None,
             FeaResourceDemand::Magnetostatic(_) => None,
+            FeaResourceDemand::MaxwellHarmonic(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&mut demand.operator),

@@ -4,7 +4,108 @@ use runmat_analysis_core::*;
 use runmat_meshing_core::{fixtures, ElementOrder};
 const FREQUENCY: f64 = 1e8;
 
-fn workload() -> MaxwellHarmonicWorkload {
+#[test]
+fn receipt_evidence_never_qualifies_missing_maxwell_discretization() {
+    use crate::execution::{AccuracyEvaluationRequest, AccuracySourceKind, AccuracySourceReceipt};
+    use crate::results::accuracy::{
+        evaluate_accuracy, publication_gate, AccuracyStatus, PublicationDecision,
+    };
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let workload = workload();
+        let mesh = mesh(order);
+        let result = workload.execute(&mesh).unwrap();
+        let receipt = MaxwellNumericalReceiptArtifact::new(&workload, &result, &mesh).unwrap();
+        let source = AccuracySourceReceipt::from_canonical_bytes(
+            AccuracySourceKind::MaxwellHarmonic,
+            &receipt.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        let mut plan = AccuracyPlan::experimental_baseline("maxwell_accuracy");
+        plan.criteria = [
+            (
+                "residual",
+                ErrorContributionKind::Algebraic,
+                RequiredAccuracyEvidence::ResidualBound,
+            ),
+            (
+                "power",
+                ErrorContributionKind::Algebraic,
+                RequiredAccuracyEvidence::ConservationBalance,
+            ),
+            (
+                "spatial",
+                ErrorContributionKind::SpatialDiscretization,
+                RequiredAccuracyEvidence::ConvergenceStudy,
+            ),
+        ]
+        .into_iter()
+        .map(|(id, contribution, evidence)| AccuracyCriterion {
+            criterion_id: id.into(),
+            target: AccuracyTarget::GlobalEquilibrium,
+            contribution,
+            evidence,
+            tolerance: AccuracyTolerance::Relative(1e-7),
+            mandatory: true,
+        })
+        .collect();
+        let request = AccuracyEvaluationRequest::new(
+            receipt.receipt().producer,
+            AccuracySourceKind::MaxwellHarmonic,
+            receipt.source_result(),
+            None,
+            FormulationRequirement::Experimental,
+            plan,
+        )
+        .unwrap();
+        let evidence = source.evidence(&request).unwrap();
+        assert_eq!(evidence.len(), 2);
+        let evaluated = evaluate_accuracy(&request.plan, &evidence).unwrap();
+        assert_eq!(evaluated.report().status, AccuracyStatus::Indeterminate);
+        for contribution in &evaluated.report().contributions {
+            assert_eq!(
+                contribution.status,
+                if contribution.criterion_id == "spatial" {
+                    AccuracyStatus::Indeterminate
+                } else {
+                    AccuracyStatus::Satisfied
+                }
+            );
+        }
+        assert_eq!(
+            publication_gate(
+                &request.plan,
+                FormulationRequirement::Production,
+                &evaluated
+            )
+            .unwrap()
+            .decision,
+            PublicationDecision::Block
+        );
+        let mut algebraic = request.plan.clone();
+        algebraic.criteria.truncate(2);
+        assert_eq!(
+            evaluate_accuracy(&algebraic, &evidence)
+                .unwrap()
+                .report()
+                .status,
+            AccuracyStatus::Satisfied
+        );
+        let mut foreign = workload.clone();
+        foreign.model.sequence.sequence_id = "foreign".into();
+        let foreign_request = AccuracyEvaluationRequest::new(
+            foreign.producer_identity().unwrap(),
+            request.source_kind,
+            request.source_result,
+            None,
+            request.formulation_requirement,
+            request.plan.clone(),
+        )
+        .unwrap();
+        assert!(source.evidence(&foreign_request).is_err());
+    }
+}
+
+pub(super) fn workload() -> MaxwellHarmonicWorkload {
     let mut model = crate::physics::magnetic::test_support::authored_model(1.0);
     model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(FREQUENCY),
@@ -47,10 +148,41 @@ fn workload() -> MaxwellHarmonicWorkload {
         relative_residual_target: 1e-10,
     }
 }
-fn mesh(order: ElementOrder) -> SolverMeshArtifact {
+pub(super) fn mesh(order: ElementOrder) -> SolverMeshArtifact {
     match order {
         ElementOrder::Tet4 => fixtures::slab_mesh(2),
         ElementOrder::Tet10 => fixtures::quadratic_slab_mesh(2),
+    }
+}
+#[test]
+fn original_maxwell_receipt_roundtrip_rejects_balance_phase_and_source_substitution() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = mesh(order);
+        let workload = workload();
+        let result = workload.execute(&mesh).unwrap();
+        let receipt = MaxwellNumericalReceiptArtifact::new(&workload, &result, &mesh).unwrap();
+        let bytes = receipt.canonical_bytes().unwrap();
+        assert!(bytes.len() as u64 <= MAXWELL_RECEIPT_MAX_ENCODED_BYTES);
+        let cold = MaxwellNumericalReceiptArtifact::from_canonical_bytes(&bytes).unwrap();
+        cold.validate_against(&workload, &result, &mesh).unwrap();
+        assert_eq!(receipt, cold);
+        for (field, value) in [
+            ("relative_physical_residual", serde_json::json!(1.0)),
+            (
+                "relative_charge_continuity_residual",
+                serde_json::json!(1.0),
+            ),
+            ("reactive_power_var", serde_json::json!(1.0)),
+            ("integration_samples", serde_json::json!(1)),
+            ("angular_frequency_rad_per_s", serde_json::json!(0.0)),
+        ] {
+            let mut wire = serde_json::to_value(&cold).unwrap();
+            wire["receipt"][field] = value;
+            assert!(serde_json::from_value::<MaxwellNumericalReceiptArtifact>(wire).is_err());
+        }
+        let mut foreign = workload.clone();
+        foreign.relative_residual_target *= 2.0;
+        assert!(cold.validate_against(&foreign, &result, &mesh).is_err());
     }
 }
 #[test]

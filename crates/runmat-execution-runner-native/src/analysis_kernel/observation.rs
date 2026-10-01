@@ -136,10 +136,15 @@ pub(super) fn execute_observation_partition(
         &invocation,
         AnalysisNumericalObjectKind::MagnetostaticWorkload,
     )?;
+    let maxwell_workload = optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::MaxwellHarmonicWorkload,
+    )?;
     if usize::from(linear_workload.is_some())
         + usize::from(frequency_workload.is_some())
         + usize::from(thermal_workload.is_some())
         + usize::from(magnetic_workload.is_some())
+        + usize::from(maxwell_workload.is_some())
         != 1
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -207,7 +212,7 @@ pub(super) fn execute_observation_partition(
         .transpose()?;
     let mut thermal_projection = None;
     let mut sampled_topology = None;
-    let (model, backend) = if let Some(workload_objects) = magnetic_workload {
+    let (model, backend) = if let Some(workload_objects) = magnetic_workload.or(maxwell_workload) {
         let (model, sampling) = sampled::admit_source(
             workload_objects,
             &catalog,
@@ -279,7 +284,7 @@ pub(super) fn execute_observation_partition(
     if sampled_topology.is_some() && (accelerator.is_some() || request.event_attribution.is_some())
     {
         return Err(AnalysisBridgeError::Identity(
-            "sampled static observations require serial final evaluation",
+            "sampled observations require serial final evaluation",
         ));
     }
     let input_facts = prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?;

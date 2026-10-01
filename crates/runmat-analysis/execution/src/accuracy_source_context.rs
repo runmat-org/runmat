@@ -3,6 +3,7 @@
 mod acoustic;
 mod electrical;
 mod magnetic;
+mod maxwell;
 mod structural;
 use runmat_analysis_fea::{
     execution::{
@@ -41,6 +42,9 @@ pub fn validate_accuracy_source_context(
     }
     if let AccuracySourceReceipt::Magnetostatic(receipt) = receipt {
         return magnetic::validate(request, receipt, observations, inputs);
+    }
+    if let AccuracySourceReceipt::MaxwellHarmonic(receipt) = receipt {
+        return maxwell::validate(request, receipt, observations, inputs);
     }
     let AccuracySourceReceipt::Thermal(receipt) = receipt else {
         return structural::validate(request, receipt, observations, inputs);

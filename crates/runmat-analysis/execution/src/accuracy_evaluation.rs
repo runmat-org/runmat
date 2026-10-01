@@ -63,6 +63,7 @@ pub fn prepare_accuracy(
     let expected_work_kind = match preparation.source_kind {
         AccuracySourceKind::ElectricalStatic => AnalysisWorkKind::SolveElectricalStatic,
         AccuracySourceKind::Magnetostatic => AnalysisWorkKind::SolveMagnetostatic,
+        AccuracySourceKind::MaxwellHarmonic => AnalysisWorkKind::SolveMaxwellHarmonic,
         AccuracySourceKind::Thermal => AnalysisWorkKind::SolveThermal,
         AccuracySourceKind::AcousticHarmonic => AnalysisWorkKind::SolveAcousticHarmonic,
         AccuracySourceKind::StructuralLinear => AnalysisWorkKind::Solve,
@@ -128,6 +129,7 @@ pub fn prepare_accuracy(
             | AccuracySourceKind::AcousticHarmonic
             | AccuracySourceKind::ElectricalStatic
             | AccuracySourceKind::Magnetostatic
+            | AccuracySourceKind::MaxwellHarmonic
     ) {
         preparation.source_context_inputs.push(
             crate::accuracy_source_context::prepare_accuracy_source_contract(
@@ -247,6 +249,22 @@ pub fn prepare_accuracy(
 
 fn receipt_matches_solve(receipt: &AccuracySourceReceipt, host: &AnalysisHostWorkload) -> bool {
     match receipt {
+        AccuracySourceReceipt::MaxwellHarmonic(maxwell) => {
+            let mut workloads =
+                host.workload.inputs.iter().filter(|input| {
+                    input.kind == AnalysisNumericalObjectKind::MaxwellHarmonicWorkload
+                });
+            let mut meshes = host
+                .workload
+                .inputs
+                .iter()
+                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
+            matches!(workloads.next(), Some(input) if input.logical_identity == maxwell.source_workload().digest())
+                && workloads.next().is_none()
+                && matches!(meshes.next(), Some(input) if input.logical_identity == maxwell.receipt().topology_digest)
+                && meshes.next().is_none()
+                && maxwell.receipt().producer == host.workload.step
+        }
         AccuracySourceReceipt::Magnetostatic(magnetic) => {
             let mut workloads =
                 host.workload.inputs.iter().filter(|input| {

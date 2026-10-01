@@ -10,10 +10,20 @@ pub(super) fn admit_sampled(
     sampling: &SampledVolumeFieldTopology,
 ) -> AnalysisBridgeResult<AdmittedObservation> {
     let (workload, mesh) = admit_recovery_source(preparation, source_request, source_fields)?;
-    let AdmittedObservationWorkload::Magnetostatic(magnetic) = &workload else {
-        return Err(AnalysisBridgeError::Identity(
-            "sampled recovery requires its original supported workload",
-        ));
+    let (producer, native_definitions) = match &workload {
+        AdmittedObservationWorkload::Magnetostatic(magnetic) => (
+            magnetic.producer_identity()?,
+            runmat_analysis_fea::execution::magnetic_native_field_definitions(source_request)?,
+        ),
+        AdmittedObservationWorkload::MaxwellHarmonic(maxwell) => (
+            maxwell.producer_identity()?,
+            runmat_analysis_fea::execution::maxwell_native_field_definitions(source_request)?,
+        ),
+        _ => {
+            return Err(AnalysisBridgeError::Identity(
+                "sampled recovery requires its original supported workload",
+            ))
+        }
     };
     let mesh = mesh.ok_or(AnalysisBridgeError::Identity(
         "sampled observation mesh absent",
@@ -32,8 +42,7 @@ pub(super) fn admit_sampled(
             "sampled recovery differs from its original retained numerical result",
         ));
     }
-    let native_definitions =
-        runmat_analysis_fea::execution::magnetic_native_field_definitions(source_request)?;
+
     if source_fields
         .manifest
         .fields
@@ -42,19 +51,19 @@ pub(super) fn admit_sampled(
         .ne(native_definitions.iter())
     {
         return Err(AnalysisBridgeError::Identity(
-            "magnetic observation native field definitions differ",
+            "sampled observation native field definitions differ",
         ));
     }
     sampling
         .validate_for_mesh(&mesh)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if sampling.rule() != VolumeFieldSamplingRule::TetrahedronKeastFifteen
-        || magnetic.producer_identity()? != source_request.producer
+        || producer != source_request.producer
         || !preparation.accelerator_requests.is_empty()
         || source_fields.output.logical_identity != source_fields.manifest.identity.digest()
     {
         return Err(AnalysisBridgeError::Identity(
-            "magnetic source producer, native layout, output or serial envelope differs",
+            "sampled source producer, native layout, output or serial envelope differs",
         ));
     }
     let catalog = ObservationFieldCatalog::sampled_recovery(
@@ -76,12 +85,7 @@ pub(super) fn admit_sampled(
         preparation.limits,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    catalog.validate_sampled_plan(
-        &plan,
-        &preparation.step,
-        magnetic.producer_identity()?,
-        &mesh,
-    )?;
+    catalog.validate_sampled_plan(&plan, &preparation.step, producer, &mesh)?;
     let selected = catalog
         .canonical_selected_fields(&plan, ObservationSelectionCoordinate::SampledRecovery)?;
     let selection = ObservationFieldSelection::sampled_recovery(

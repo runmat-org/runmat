@@ -2,9 +2,9 @@
 use super::{
     assembly::MaxwellAssembly,
     complex::{dot_conjugate, vector_norm_squared},
+    continuity::ChargeContinuity,
     topology, ComplexPhasor, MaxwellError, MaxwellFieldSample, MaxwellResponse,
 };
-use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn recover(
     assembled: &MaxwellAssembly<'_>,
@@ -19,28 +19,8 @@ pub(super) fn recover(
         .edge_space
         .exterior_edge_indices(&assembled.projection)
         .map_err(topology)?;
-    let boundary_nodes: BTreeSet<_> = exterior
-        .into_iter()
-        .flat_map(|edge| assembled.edge_space.edges()[edge].node_indices)
-        .collect();
-    let interior_nodes: BTreeSet<_> = assembled
-        .projection
-        .elements
-        .iter()
-        .flat_map(|element| element.node_indices[..4].iter().copied())
-        .filter(|node| !boundary_nodes.contains(node))
-        .collect();
-    let node_rows: BTreeMap<_, _> = interior_nodes
-        .into_iter()
-        .enumerate()
-        .map(|(row, node)| (node, row))
-        .collect();
-    // Original quadrature-term magnitudes normalize the weak defect. Do not use
-    // cancelled term integrals: all three can vanish for a divergence-free mode.
-    let mut conducted = vec![ComplexPhasor::ZERO; node_rows.len()];
-    let mut displaced = conducted.clone();
-    let mut impressed = conducted.clone();
-    let mut charge_term_scale = vec![0.0; node_rows.len()];
+    let mut continuity =
+        ChargeContinuity::new(&assembled.projection, &assembled.edge_space, &exterior);
     let mut electric_energy = 0.0;
     let mut magnetic_energy = 0.0;
     let mut ohmic = 0.0;
@@ -78,23 +58,14 @@ pub(super) fn recover(
                     0.25 * weight * data.permeability_h_per_m * vector_norm_squared(magnetic);
                 ohmic += 0.5 * weight * data.conductivity_s_per_m * vector_norm_squared(electric);
                 source_power += dot_conjugate(electric, source) * (-0.5 * weight);
-                for (local, node) in assembled.projection.elements[index].node_indices[..4]
-                    .iter()
-                    .enumerate()
-                {
-                    if let Some(&row) = node_rows.get(node) {
-                        for axis in 0..3 {
-                            let factor = point.corner_gradients[local][axis] * weight;
-                            conducted[row] += conduction[axis] * factor;
-                            displaced[row] += displacement[axis].times_i() * (omega * factor);
-                            impressed[row] += source[axis] * factor;
-                            charge_term_scale[row] += factor.abs()
-                                * (conduction[axis].abs()
-                                    + omega * displacement[axis].abs()
-                                    + source[axis].abs());
-                        }
-                    }
-                }
+                continuity.accumulate(
+                    &assembled.projection.elements[index].node_indices[..4],
+                    &point,
+                    conduction,
+                    displacement,
+                    source,
+                    omega,
+                );
                 samples.push(MaxwellFieldSample {
                     sample_identity: authority.identity,
                     element_identity: authority.element_identity,
@@ -119,20 +90,7 @@ pub(super) fn recover(
     } else {
         (source_power - predicted).abs()
     };
-    let norm =
-        |values: &[ComplexPhasor]| values.iter().map(|v| v.norm_squared()).sum::<f64>().sqrt();
-    let charge_defect: Vec<_> = conducted
-        .iter()
-        .zip(&displaced)
-        .zip(&impressed)
-        .map(|((a, b), c)| *a + *b + *c)
-        .collect();
-    let charge_scale = charge_term_scale.iter().map(|v| v * v).sum::<f64>().sqrt();
-    let charge = if charge_scale > 0.0 {
-        norm(&charge_defect) / charge_scale
-    } else {
-        norm(&charge_defect)
-    };
+    let charge = continuity.relative_defect();
     if [
         electric_energy,
         magnetic_energy,

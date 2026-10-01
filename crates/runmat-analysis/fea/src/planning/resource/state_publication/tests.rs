@@ -21,6 +21,7 @@ fn fixture(
     .unwrap();
     let mut declaration = step.state_outputs[0].clone();
     declaration.kind = match source {
+        SemanticStatePublicationSource::MaxwellNativeFields => StateKind::ElectromagneticComplex,
         SemanticStatePublicationSource::StructuralPrimaryFields => StateKind::StructuralPrimary,
         SemanticStatePublicationSource::ThermalPrimaryField => StateKind::Thermal,
         SemanticStatePublicationSource::AcousticNativeFields => StateKind::AcousticComplex,

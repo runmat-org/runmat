@@ -4,6 +4,8 @@ mod common;
 mod electrical_static;
 mod magnetic_recovery;
 pub(super) mod magnetic_static;
+pub(super) mod maxwell_harmonic;
+mod maxwell_recovery;
 mod result_publication;
 mod state_publication;
 use common::validate_common;
@@ -54,9 +56,19 @@ pub fn build_resource_plan(
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
         (
+            FeaResourcePhase::MaxwellHarmonic(workload),
+            FeaResourceDemand::MaxwellHarmonic(demand),
+        ) if *workload == demand.workload => {
+            maxwell_harmonic::build_maxwell_harmonic_plan(input.clone(), demand)
+        }
+        (
             FeaResourcePhase::MagneticFieldRecovery(request),
             FeaResourceDemand::MagneticFieldRecovery(demand),
         ) if *request == demand.request => magnetic_recovery::build(input.clone(), demand),
+        (
+            FeaResourcePhase::MaxwellFieldRecovery(request),
+            FeaResourceDemand::MaxwellFieldRecovery(demand),
+        ) if *request == demand.request => maxwell_recovery::build(input.clone(), demand),
         (FeaResourcePhase::Magnetostatic(workload), FeaResourceDemand::Magnetostatic(demand))
             if *workload == demand.workload =>
         {

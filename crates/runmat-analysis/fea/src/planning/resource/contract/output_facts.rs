@@ -8,6 +8,19 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (Self::MaxwellFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
+                Some(&demand.output)
+            }
+            (Self::MaxwellHarmonic(demand), AnalysisNumericalObjectKind::SolverResult) => {
+                Some(&demand.result_output)
+            }
+            (Self::MaxwellHarmonic(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
+                Some(&demand.receipt_output)
+            }
+            (
+                Self::MaxwellHarmonic(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
             (Self::MagneticFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }

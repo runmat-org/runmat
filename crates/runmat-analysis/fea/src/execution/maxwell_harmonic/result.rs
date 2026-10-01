@@ -233,6 +233,13 @@ impl MaxwellHarmonicSolverResult {
                 "Maxwell retained result differs from original authored closure",
             ));
         }
+        crate::physics::maxwell::validate_retained_consistency(
+            mesh,
+            &self.data.input,
+            &self.data.response,
+            self.data.relative_residual_target,
+        )
+        .map_err(invalid)?;
         Ok(())
     }
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
@@ -271,6 +278,10 @@ impl MaxwellHarmonicSolverResult {
     pub fn response(&self) -> &MaxwellResponse {
         &self.data.response
     }
+    /// Exact original integration-point and globally oriented edge authority.
+    pub fn sampling_topology(&self) -> &crate::results::field::SampledVolumeFieldTopology {
+        &self.data.input.sampling
+    }
     pub fn input(&self) -> &MaxwellInput {
         &self.data.input
     }
@@ -287,6 +298,9 @@ impl MaxwellHarmonicSolverResult {
         &self.data.publication_declarations
     }
 }
+
+#[cfg(test)]
+mod consistency_tests;
 fn declarations(workload: &MaxwellHarmonicWorkload) -> Vec<StateOutput> {
     workload.model.sequence.steps[0]
         .state_outputs

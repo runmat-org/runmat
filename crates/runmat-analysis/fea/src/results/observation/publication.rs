@@ -182,9 +182,26 @@ impl ObservationPublicationCatalog {
                     manifest,
                     sampling,
                 },
-                ObservationHistorySourceContext::Magnetostatic { workload, mesh },
+                context @ (ObservationHistorySourceContext::Magnetostatic { .. }
+                | ObservationHistorySourceContext::MaxwellHarmonic { .. }),
             ) => {
-                let native = crate::execution::magnetic_native_field_definitions(recovery_request)?;
+                let (native, producer, model, step_id, mesh) = match context {
+                    ObservationHistorySourceContext::Magnetostatic { workload, mesh } => (
+                        crate::execution::magnetic_native_field_definitions(recovery_request)?,
+                        workload.producer_identity()?,
+                        &workload.model,
+                        &workload.step_id,
+                        mesh,
+                    ),
+                    ObservationHistorySourceContext::MaxwellHarmonic { workload, mesh } => (
+                        crate::execution::maxwell_native_field_definitions(recovery_request)?,
+                        workload.producer_identity()?,
+                        &workload.model,
+                        &workload.step_id,
+                        mesh,
+                    ),
+                    _ => return Err(invalid("sampled publication source context differs")),
+                };
                 if sampling.rule()
                     != crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen
                     || !manifest
@@ -194,22 +211,16 @@ impl ObservationPublicationCatalog {
                         .eq(native.iter())
                 {
                     return Err(invalid(
-                        "magnetic publication native definition inventory or sampling rule differs",
+                        "sampled publication native definition inventory or sampling rule differs",
                     ));
                 }
-                let producer = workload.producer_identity()?;
                 if recovery_request.producer != self.producer
                     || producer != self.producer
-                    || step.step_id != workload.step_id
-                    || !workload
-                        .model
-                        .sequence
-                        .steps
-                        .iter()
-                        .any(|authored| authored == step)
+                    || &step.step_id != step_id
+                    || !model.sequence.steps.iter().any(|authored| authored == step)
                 {
                     return Err(invalid(
-                        "sampled magnetic publication producer or original authored step differs",
+                        "sampled publication producer or original authored step differs",
                     ));
                 }
                 self.source

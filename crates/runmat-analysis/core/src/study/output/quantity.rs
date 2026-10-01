@@ -43,6 +43,8 @@ pub enum ObservationQuantity {
     ElectricCurrent,
     ElectricCurrentDensity,
     ElectricCharge,
+    /// Oriented electric edge coefficient ∫ E·dl, V; not scalar electric potential.
+    ElectricEdgeCirculation,
     /// Oriented edge coefficient ∫ A·dl, Wb; not the vector potential A in Wb/m.
     MagneticEdgeCirculation,
     MagneticVectorPotential,
@@ -126,6 +128,7 @@ impl ObservationQuantity {
             Self::MagneticEdgeCirculation => D::MAGNETIC_FLUX_DENSITY
                 .multiply(D::AREA)
                 .expect("static dimension"),
+            Self::ElectricEdgeCirculation => D::ELECTRIC_POTENTIAL,
             Self::MagneticVectorPotential => D::MAGNETIC_FLUX_DENSITY
                 .multiply(D::LENGTH)
                 .expect("static dimension"),
@@ -178,6 +181,7 @@ impl ObservationQuantity {
             "electric_current" => Self::ElectricCurrent,
             "electric_current_density" => Self::ElectricCurrentDensity,
             "electric_charge" => Self::ElectricCharge,
+            "electric_edge_circulation" => Self::ElectricEdgeCirculation,
             "magnetic_edge_circulation" => Self::MagneticEdgeCirculation,
             "magnetic_vector_potential" => Self::MagneticVectorPotential,
             "magnetic_flux_density" => Self::MagneticFluxDensity,
@@ -243,6 +247,29 @@ impl ObservationQuantity {
 #[cfg(test)]
 mod magnetic_native_quantity_tests {
     use super::*;
+    #[test]
+    fn electric_circulation_is_scalar_voltage_not_magnetic_flux_or_potential_field() {
+        let quantity = ObservationQuantity::from_source_name("electric_edge_circulation").unwrap();
+        assert_eq!(quantity, ObservationQuantity::ElectricEdgeCirculation);
+        assert_eq!(
+            quantity.canonical_value_shape(),
+            ObservationValueShape::Scalar
+        );
+        assert_eq!(
+            quantity.physical_dimension(),
+            PhysicalDimension::ELECTRIC_POTENTIAL
+        );
+        assert_ne!(quantity, ObservationQuantity::ElectricPotential);
+        assert_ne!(
+            quantity.physical_dimension(),
+            ObservationQuantity::MagneticEdgeCirculation.physical_dimension()
+        );
+        assert_eq!(
+            serde_json::from_str::<ObservationQuantity>(&serde_json::to_string(&quantity).unwrap())
+                .unwrap(),
+            quantity
+        );
+    }
     #[test]
     fn circulation_is_scalar_flux_not_vector_potential() {
         let circulation =

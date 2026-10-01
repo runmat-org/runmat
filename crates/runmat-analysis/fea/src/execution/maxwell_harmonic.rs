@@ -9,7 +9,18 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
+mod admitted;
+pub(in crate::execution) mod fields;
+mod publication;
 mod result;
+pub use fields::{
+    maxwell_native_field_definition_inventory, maxwell_native_field_definitions,
+    MAXWELL_NATIVE_FIELD_COUNT,
+};
+mod receipt;
+pub use receipt::{
+    MaxwellNumericalReceipt, MaxwellNumericalReceiptArtifact, MAXWELL_RECEIPT_MAX_ENCODED_BYTES,
+};
 pub use result::MaxwellHarmonicSolverResult;
 #[cfg(test)]
 mod tests;
