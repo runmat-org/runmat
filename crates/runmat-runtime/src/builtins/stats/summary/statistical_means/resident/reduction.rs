@@ -1,5 +1,5 @@
 //! Dimension selection and NaN-aware mean on one provider.
-use super::{admitted_real, expected_shape, provider_failure, Failure};
+use super::{admitted_real, expected_shape, provider_failure, reject_output, Failure};
 use crate::builtins::stats::summary::statistical_means::options::{
     Axes, MissingMode, ReductionKind,
 };
@@ -19,11 +19,28 @@ pub(super) fn selected_axes(shape: &[usize], axes: &Axes) -> Vec<usize> {
     }
 }
 
+fn protect_live_operands(
+    kind: ReductionKind,
+    output: GpuTensorHandle,
+    operands: &[&GpuTensorHandle],
+    stage: &'static str,
+) -> Result<GpuTensorHandle, Failure> {
+    if operands
+        .iter()
+        .any(|operand| output.shares_allocation_with(operand))
+    {
+        Err(reject_output(kind, output, stage))
+    } else {
+        Ok(output)
+    }
+}
+
 async fn sum(
     kind: ReductionKind,
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
     axes: &[usize],
+    protected: &[&GpuTensorHandle],
 ) -> Result<GpuTensorHandle, Failure> {
     let mut current = input.clone();
     for axis in axes {
@@ -32,7 +49,7 @@ async fn sum(
             .await
             .map_err(|source| provider_failure(kind, source))?;
         let expected = expected_shape(current.shape(), &Axes::Dims(vec![axis + 1]));
-        current = admitted_real(
+        let next = admitted_real(
             kind,
             provider,
             input,
@@ -40,6 +57,15 @@ async fn sum(
             &expected,
             ProviderPrecision::F64,
         )?;
+        // A singleton reduction may legitimately return a view of its input.
+        // A nontrivial reduction must allocate, and neither case may return
+        // another live operand from the surrounding mean computation.
+        let next =
+            protect_live_operands(kind, next, protected, "resident sum aliased a live operand")?;
+        if current.shape()[*axis] != 1 && next.shares_allocation_with(&current) {
+            return Err(reject_output(kind, next, "resident sum aliased its input"));
+        }
+        current = next;
     }
     Ok(current)
 }
@@ -81,12 +107,38 @@ pub(super) async fn mean(
         transformed.shape(),
         precision,
     )?;
+    let cleaned = protect_live_operands(
+        kind,
+        cleaned,
+        &[original, transformed],
+        "resident NaN map aliased an input",
+    )?;
     let mask = provider
         .not_nan_mask(original)
         .map_err(|source| provider_failure(kind, source))?;
     let mask = admitted_real(kind, provider, original, mask, original.shape(), precision)?;
-    let numerator = sum(kind, provider, &cleaned, &selected).await?;
-    let denominator = sum(kind, provider, &mask, &selected).await?;
+    let mask = protect_live_operands(
+        kind,
+        mask,
+        &[original, transformed, &cleaned],
+        "resident NaN mask aliased a live operand",
+    )?;
+    let numerator = sum(
+        kind,
+        provider,
+        &cleaned,
+        &selected,
+        &[original, transformed, &mask],
+    )
+    .await?;
+    let denominator = sum(
+        kind,
+        provider,
+        &mask,
+        &selected,
+        &[original, transformed, &cleaned, &numerator],
+    )
+    .await?;
     let result = provider
         .elem_div(&numerator, &denominator)
         .await
@@ -99,6 +151,19 @@ pub(super) async fn mean(
         &expected_shape(original.shape(), axes),
         ProviderPrecision::F64,
     )?;
+    let result = protect_live_operands(
+        kind,
+        result,
+        &[
+            original,
+            transformed,
+            &cleaned,
+            &mask,
+            &numerator,
+            &denominator,
+        ],
+        "resident division aliased a live operand",
+    )?;
     if precision == ProviderPrecision::F64 {
         return Ok(result);
     }
@@ -106,13 +171,27 @@ pub(super) async fn mean(
         .unary_single(&result)
         .await
         .map_err(|source| provider_failure(kind, source))?;
-    admitted_real(
+    let output = admitted_real(
         kind,
         provider,
         original,
         output,
         result.shape(),
         ProviderPrecision::F32,
+    )?;
+    protect_live_operands(
+        kind,
+        output,
+        &[
+            original,
+            transformed,
+            &cleaned,
+            &mask,
+            &numerator,
+            &denominator,
+            &result,
+        ],
+        "resident class cast aliased a live operand",
     )
 }
 
@@ -121,7 +200,8 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        GpuTensorStorage, HostNumericDataView, HostNumericTensorView, ProviderPrecision,
+        test_support::TestAllocationOwner, GpuTensorStorage, HostNumericDataView,
+        HostNumericTensorView, NumericElementType, ProviderPrecision,
     };
     use runmat_value::Value;
 
@@ -159,5 +239,39 @@ mod tests {
             );
             input.allocation_lease().validate_live().unwrap();
         });
+    }
+
+    #[test]
+    fn sibling_and_cast_stage_aliases_reject_only_the_returned_reference() {
+        let owner = TestAllocationOwner::new();
+        let sibling = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let rejected = protect_live_operands(
+            ReductionKind::Harmonic,
+            sibling.handle.clone(),
+            &[&sibling.handle],
+            "resident division aliased a live operand",
+        );
+        assert!(matches!(rejected, Err(Failure::Execution(_))));
+        assert_eq!(sibling.probe.retirements(), 0);
+        sibling.handle.allocation_lease().validate_live().unwrap();
+
+        let cast_operand = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let rejected = protect_live_operands(
+            ReductionKind::Harmonic,
+            cast_operand.handle.clone(),
+            &[&cast_operand.handle],
+            "resident class cast aliased a live operand",
+        );
+        assert!(matches!(rejected, Err(Failure::Execution(_))));
+        assert_eq!(cast_operand.probe.retirements(), 0);
+        cast_operand
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
     }
 }
