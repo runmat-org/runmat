@@ -2,6 +2,7 @@
 //! independently of the observation catalog's own declarations and hashes.
 mod acoustic;
 mod electrical;
+mod magnetic;
 mod structural;
 use runmat_analysis_fea::{
     execution::{
@@ -37,6 +38,9 @@ pub fn validate_accuracy_source_context(
     }
     if let AccuracySourceReceipt::ElectricalStatic(receipt) = receipt {
         return electrical::validate(request, receipt, observations, inputs);
+    }
+    if let AccuracySourceReceipt::Magnetostatic(receipt) = receipt {
+        return magnetic::validate(request, receipt, observations, inputs);
     }
     let AccuracySourceReceipt::Thermal(receipt) = receipt else {
         return structural::validate(request, receipt, observations, inputs);

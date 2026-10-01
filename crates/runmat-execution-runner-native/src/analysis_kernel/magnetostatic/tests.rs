@@ -8,6 +8,7 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::{AnalysisWorkKind, MagnetostaticSolverResult};
 use runmat_meshing_core::ElementOrder;
 
+mod accuracy;
 mod fixture;
 mod publication;
 mod reference;

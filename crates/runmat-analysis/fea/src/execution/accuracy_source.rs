@@ -5,13 +5,14 @@ use crate::results::accuracy::{AccuracyEvidence, AccuracyEvidenceScope, Accuracy
 use super::{
     AccuracyEvaluationRequest, AccuracySourceKind, AcousticNumericalReceiptArtifact,
     AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity,
-    ElectricalNumericalReceiptArtifact, SolverResultIdentity,
+    ElectricalNumericalReceiptArtifact, MagneticNumericalReceiptArtifact, SolverResultIdentity,
     StructuralLinearNumericalReceiptArtifact, StructuralModalResponseSpectrumNumericalReceipt,
     StructuralRandomResponseNumericalReceipt, ThermalNumericalReceiptArtifact,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccuracySourceReceipt {
+    Magnetostatic(MagneticNumericalReceiptArtifact),
     ElectricalStatic(ElectricalNumericalReceiptArtifact),
     AcousticHarmonic(AcousticNumericalReceiptArtifact),
     Thermal(ThermalNumericalReceiptArtifact),
@@ -26,6 +27,9 @@ impl AccuracySourceReceipt {
         bytes: &[u8],
     ) -> AnalysisExecutionResult<Self> {
         let receipt = match kind {
+            AccuracySourceKind::Magnetostatic => Self::Magnetostatic(
+                MagneticNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
+            ),
             AccuracySourceKind::ElectricalStatic => Self::ElectricalStatic(
                 ElectricalNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
             ),
@@ -53,6 +57,7 @@ impl AccuracySourceReceipt {
 
     pub const fn kind(&self) -> AccuracySourceKind {
         match self {
+            Self::Magnetostatic(_) => AccuracySourceKind::Magnetostatic,
             Self::ElectricalStatic(_) => AccuracySourceKind::ElectricalStatic,
             Self::AcousticHarmonic(_) => AccuracySourceKind::AcousticHarmonic,
             Self::Thermal(_) => AccuracySourceKind::Thermal,
@@ -66,6 +71,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
         match self {
+            Self::Magnetostatic(receipt) => receipt.source_workload(),
             Self::ElectricalStatic(receipt) => receipt.source_workload(),
             Self::AcousticHarmonic(receipt) => receipt.source_workload(),
             Self::Thermal(receipt) => receipt.source_workload,
@@ -77,6 +83,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_result(&self) -> SolverResultIdentity {
         match self {
+            Self::Magnetostatic(receipt) => receipt.source_result(),
             Self::ElectricalStatic(receipt) => receipt.source_result(),
             Self::AcousticHarmonic(receipt) => receipt.source_result(),
             Self::Thermal(receipt) => receipt.source_result(),
@@ -88,6 +95,7 @@ impl AccuracySourceReceipt {
 
     pub const fn identity(&self) -> super::NumericalReceiptIdentity {
         match self {
+            Self::Magnetostatic(receipt) => receipt.identity(),
             Self::ElectricalStatic(receipt) => receipt.identity(),
             Self::AcousticHarmonic(receipt) => receipt.identity(),
             Self::Thermal(receipt) => receipt.identity(),
@@ -106,6 +114,13 @@ impl AccuracySourceReceipt {
             return Err(AnalysisExecutionError::Identity(
                 "accuracy receipt differs from its admitted request",
             ));
+        }
+        if let Self::Magnetostatic(receipt) = self {
+            if receipt.receipt().producer != request.producer {
+                return Err(AnalysisExecutionError::Identity(
+                    "magnetic accuracy receipt differs from requested producer",
+                ));
+            }
         }
         if let Self::Thermal(receipt) = self {
             if receipt.receipt().producer != request.producer {
@@ -131,6 +146,20 @@ impl AccuracySourceReceipt {
         let mut evidence = Vec::new();
         for criterion in &request.plan.criteria {
             let measured = match self {
+                Self::Magnetostatic(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound => {
+                    Some((receipt.receipt().relative_physical_residual.max(receipt.receipt().relative_gauge_residual),
+                        "maximum of the physical curl-curl residual Euclidean norm divided by physical load norm and the weak Coulomb-gauge action Euclidean norm divided by scaled saddle right-hand-side norm; zero denominator uses the respective absolute norm; algebraic equation and gauge satisfaction only, not independent field accuracy or spatial convergence"))
+                }
+                Self::Magnetostatic(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ConservationBalance => {
+                    Some((receipt.receipt().relative_energy_work_error,
+                        "absolute twice-magnetic-energy minus source-work divided by the larger absolute retained term; zero energy and work give zero error with no dimensional floor; weak-equation energy-work closure only, not independent field accuracy or spatial convergence"))
+                }
                 Self::ElectricalStatic(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic
@@ -232,6 +261,7 @@ impl AccuracySourceReceipt {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
+            Self::Magnetostatic(receipt) => receipt.validate(),
             Self::ElectricalStatic(receipt) => receipt.validate(),
             Self::AcousticHarmonic(receipt) => receipt.validate(),
             Self::Thermal(receipt) => receipt.validate(),
@@ -247,3 +277,6 @@ mod thermal_tests;
 
 #[cfg(test)]
 mod electrical_tests;
+
+#[cfg(test)]
+mod magnetic_tests;

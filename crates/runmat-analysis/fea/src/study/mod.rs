@@ -6,6 +6,8 @@ mod compilation;
 mod electrical_planning;
 mod electrical_product;
 mod identity;
+mod magnetic_planning;
+mod magnetic_product;
 mod planning;
 mod product;
 mod thermal_planning;
@@ -33,6 +35,13 @@ pub use electrical_product::{
 pub use identity::{
     structural_study_source_digest, StructuralStudyMaterialBinding,
     StructuralStudySourceIdentityError,
+};
+pub use magnetic_planning::{
+    plan_magnetic_study, MagneticStudyPlanningError, MagneticStudyPlanningPolicy,
+};
+pub use magnetic_product::{
+    build_magnetic_study_product, plan_magnetic_study_product, MagneticStudyProduct,
+    MagneticStudyProductError, MagneticStudyProductInput,
 };
 pub use planning::{
     plan_structural_study, StructuralNumericalPlanningPolicy, StructuralStudyPlanningError,

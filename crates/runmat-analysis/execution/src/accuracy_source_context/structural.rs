@@ -77,6 +77,7 @@ pub(super) fn validate(
             Kind::StructuralRandomResponseWorkload,
         ),
         AccuracySourceKind::Thermal
+        | AccuracySourceKind::Magnetostatic
         | AccuracySourceKind::AcousticHarmonic
         | AccuracySourceKind::ElectricalStatic => {
             return Err(AnalysisBridgeError::Identity(
@@ -169,6 +170,7 @@ pub(super) fn validate(
             )
         }
         AccuracySourceKind::Thermal
+        | AccuracySourceKind::Magnetostatic
         | AccuracySourceKind::AcousticHarmonic
         | AccuracySourceKind::ElectricalStatic => {
             unreachable!("rejected above")
