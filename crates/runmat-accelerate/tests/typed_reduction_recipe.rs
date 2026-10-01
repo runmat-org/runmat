@@ -147,7 +147,27 @@ fn native_leaf_output_and_partial_types_do_not_follow_preferred_precision() {
     }
     assert!(single_sum
         .single_source()
-        .contains("RROutput { data: array<f64>"));
+        .contains("RROutput { data: array<f32>"));
+    assert_eq!(
+        single_sum.contract().output_class,
+        runmat_types::NumericClass::Single
+    );
+    assert_eq!(single_sum.work().output_payload_bytes, 8);
+    let double_sum = recipe(
+        "sum",
+        vec![array(true, &[33, 2]), array(true, &[33, 2])],
+        vec![Value::Num(1.0), Value::String("double".into())],
+        Some(PrimitiveOp::ElemMul),
+        config(),
+    );
+    assert_eq!(
+        double_sum.contract().output_class,
+        runmat_types::NumericClass::Double
+    );
+    for source in [double_sum.single_source(), double_sum.pass2_source()] {
+        assert!(source.contains("RROutput { data: array<f64>"));
+    }
+    assert_eq!(double_sum.work().output_payload_bytes, 16);
     assert_eq!(single_sum.geometry().chunks, 3);
     assert_eq!(single_sum.work().partial_payload_bytes, 2 * 3 * 16);
     assert_eq!(single_sum.work().producer_scalar_work_units, 66);
