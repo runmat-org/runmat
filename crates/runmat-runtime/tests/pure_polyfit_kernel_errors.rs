@@ -1,6 +1,7 @@
 //! Pure solver diagnostics survive a real owning provider round trip.
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
+    ProviderPolyfitBasis,
 };
 use runmat_runtime::builtins::math::poly::polyfit::{
     kernel_error::PolyfitKernelError, polyfit_host_real_for_provider,
@@ -46,6 +47,7 @@ impl AccelProvider for SolverProvider {
         y: &'a runmat_accelerate_api::GpuTensorHandle,
         degree: usize,
         weights: Option<&'a runmat_accelerate_api::GpuTensorHandle>,
+        basis: ProviderPolyfitBasis,
     ) -> runmat_accelerate_api::AccelProviderFuture<'a, runmat_accelerate_api::ProviderPolyfitResult>
     {
         Box::pin(async move {
@@ -61,6 +63,7 @@ impl AccelProvider for SolverProvider {
                 &y.data,
                 degree,
                 weights.as_ref().map(|w| w.data.as_slice()),
+                basis,
             )?;
             Ok(runmat_accelerate_api::ProviderPolyfitResult {
                 coefficients: solved.coefficients,
@@ -81,15 +84,23 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 fn pure_solver_preserves_coefficients_and_typed_validation() {
     fn native_error<T: Error + Send + Sync + 'static>() {}
     native_error::<PolyfitKernelError>();
-    let result = polyfit_host_real_for_provider(&[0., 1., 2.], &[1., 3., 5.], 1, None).unwrap();
+    let result = polyfit_host_real_for_provider(
+        &[0., 1., 2.],
+        &[1., 3., 5.],
+        1,
+        None,
+        ProviderPolyfitBasis::Original,
+    )
+    .unwrap();
     assert!((result.coefficients[0] - 2.).abs() < 1e-12);
     assert!((result.coefficients[1] - 1.).abs() < 1e-12);
     assert_eq!(result.r_matrix.len(), 4);
     assert_eq!(result.df, 1.);
     assert!(result.normr < 1e-12);
-    let error = polyfit_host_real_for_provider(&[0., 1.], &[1.], 1, None)
-        .err()
-        .unwrap();
+    let error =
+        polyfit_host_real_for_provider(&[0., 1.], &[1.], 1, None, ProviderPolyfitBasis::Original)
+            .err()
+            .unwrap();
     let runtime: runmat_runtime::RuntimeError = error.into();
     assert_eq!(runtime.identifier(), Some("RunMat:polyfit:InvalidInput"));
     assert_eq!(
@@ -101,12 +112,60 @@ fn pure_solver_preserves_coefficients_and_typed_validation() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn pure_provider_solver_uses_requested_coefficient_and_qr_basis() {
+    let x = [10.0, 11.0, 12.0, 13.0];
+    let y = [21.0, 24.0, 24.0, 28.0];
+    let original =
+        polyfit_host_real_for_provider(&x, &y, 1, None, ProviderPolyfitBasis::Original).unwrap();
+    let centered =
+        polyfit_host_real_for_provider(&x, &y, 1, None, ProviderPolyfitBasis::CenteredScaled)
+            .unwrap();
+    assert!((original.coefficients[0] - 2.1).abs() < 1e-11);
+    assert!((original.coefficients[1] - 0.1).abs() < 1e-10);
+    assert_eq!(original.mu, [0.0, 1.0]);
+    assert!((centered.coefficients[0] - 2.1 * centered.mu[1]).abs() < 1e-11);
+    assert!((centered.coefficients[1] - 24.25).abs() < 1e-11);
+    assert!((centered.mu[0] - 11.5).abs() < 1e-12);
+    assert_ne!(original.r_matrix, centered.r_matrix);
+    for (index, (original_x, observed)) in x.into_iter().zip(y).enumerate() {
+        let original_fit = original
+            .coefficients
+            .iter()
+            .fold(0.0, |acc, coefficient| acc * original_x + coefficient);
+        let normalized_x = (original_x - centered.mu[0]) / centered.mu[1];
+        let centered_fit = centered
+            .coefficients
+            .iter()
+            .fold(0.0, |acc, coefficient| acc * normalized_x + coefficient);
+        assert!(
+            (original_fit - centered_fit).abs() < 1e-10,
+            "sample {index}"
+        );
+        assert!((original_fit - observed).abs() < 1.4, "sample {index}");
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn impossible_degree_rejects_before_workspace_or_provider_work() {
-    let error = polyfit_host_real_for_provider(&[0., 1.], &[1., 3.], usize::MAX, None)
-        .err()
-        .unwrap();
+    let error = polyfit_host_real_for_provider(
+        &[0., 1.],
+        &[1., 3.],
+        usize::MAX,
+        None,
+        ProviderPolyfitBasis::Original,
+    )
+    .err()
+    .unwrap();
     assert!(matches!(error, PolyfitKernelError::InvalidArgument(_)));
-    let fit = polyfit_host_real_for_provider(&[-1., 1.], &[2., 4.], 3, None).unwrap();
+    let fit = polyfit_host_real_for_provider(
+        &[-1., 1.],
+        &[2., 4.],
+        3,
+        None,
+        ProviderPolyfitBasis::Original,
+    )
+    .unwrap();
     assert_eq!(fit.coefficients.len(), 4);
     assert_eq!(fit.r_matrix.len(), 16);
     assert_eq!(fit.df, 0.);
@@ -137,11 +196,16 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
             shape: &[2, 1],
         })
         .unwrap();
-    let combined: runmat_runtime::RuntimeError =
-        polyfit_host_real_for_provider(&[f64::NAN, 1.], &[1., 3.], usize::MAX, None)
-            .err()
-            .unwrap()
-            .into();
+    let combined: runmat_runtime::RuntimeError = polyfit_host_real_for_provider(
+        &[f64::NAN, 1.],
+        &[1., 3.],
+        usize::MAX,
+        None,
+        ProviderPolyfitBasis::Original,
+    )
+    .err()
+    .unwrap()
+    .into();
     for resident in [false, true] {
         let args = if resident {
             vec![
@@ -171,17 +235,28 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
     y.allocation_lease().validate_live().unwrap();
     // Structural length checks precede geometry; numerical weight and sample
     // values are checked only after the requested workspace is addressable.
-    let mismatch = polyfit_host_real_for_provider(&[0., 1.], &[1.], usize::MAX, None)
-        .err()
-        .unwrap();
+    let mismatch = polyfit_host_real_for_provider(
+        &[0., 1.],
+        &[1.],
+        usize::MAX,
+        None,
+        ProviderPolyfitBasis::Original,
+    )
+    .err()
+    .unwrap();
     assert_eq!(
         mismatch.to_string(),
         "polyfit: X and Y vectors must be the same length"
     );
-    let weights =
-        polyfit_host_real_for_provider(&[0., 1.], &[1., 3.], usize::MAX, Some(&[-1., 1.]))
-            .err()
-            .unwrap();
+    let weights = polyfit_host_real_for_provider(
+        &[0., 1.],
+        &[1., 3.],
+        usize::MAX,
+        Some(&[-1., 1.]),
+        ProviderPolyfitBasis::Original,
+    )
+    .err()
+    .unwrap();
     assert_eq!(weights.to_string(), combined.message());
 }
 
@@ -196,11 +271,16 @@ fn impossible_geometry_precedes_weight_values_on_all_routes_without_resident_gat
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for weights in [[-1., 1.], [f64::NAN, 1.]] {
         let data = [[0., 1.], [1., 3.], weights];
-        let expected: runmat_runtime::RuntimeError =
-            polyfit_host_real_for_provider(&data[0], &data[1], usize::MAX, Some(&weights))
-                .err()
-                .unwrap()
-                .into();
+        let expected: runmat_runtime::RuntimeError = polyfit_host_real_for_provider(
+            &data[0],
+            &data[1],
+            usize::MAX,
+            Some(&weights),
+            ProviderPolyfitBasis::Original,
+        )
+        .err()
+        .unwrap()
+        .into();
         let inputs = data
             .iter()
             .map(|values| {

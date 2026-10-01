@@ -3,13 +3,13 @@
 use num_complex::Complex64;
 #[cfg(test)]
 use runmat_accelerate_api::HostTensorView;
+use runmat_builtins::PolyfitStatField;
+#[cfg(test)]
+use runmat_builtins::POLYVAL_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, POLYVAL_ERROR_INVALID_ARGUMENT, POLYVAL_ERROR_INVALID_INPUT,
+    POLYVAL_INTEGER_COEFFICIENTS_EXTENSION, POLYVAL_INTEGER_OPTIONS_EXTENSION,
+    POLYVAL_INTEGER_POINTS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, LogicalArray, Tensor, Value};
@@ -19,256 +19,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::poly::type_resolvers::polyval_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyval";
-
-const POLYVAL_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Evaluated polynomial values at x.",
-}];
-
-const POLYVAL_OUTPUT_Y_DELTA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Evaluated polynomial values at x.",
-    },
-    BuiltinParamDescriptor {
-        name: "delta",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prediction interval values when S is supplied.",
-    },
-];
-
-const POLYVAL_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Evaluation points.",
-    },
-];
-
-const POLYVAL_INPUTS_WITH_S: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Evaluation points.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional polyfit statistics structure.",
-    },
-];
-
-const POLYVAL_INPUTS_WITH_S_MU: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Evaluation points.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional polyfit statistics structure (or []).",
-    },
-    BuiltinParamDescriptor {
-        name: "mu",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional centering/scaling vector [mean, std].",
-    },
-];
-
-const POLYVAL_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "y = polyval(p, x)",
-        inputs: &POLYVAL_INPUTS,
-        outputs: &POLYVAL_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = polyval(p, x, S)",
-        inputs: &POLYVAL_INPUTS_WITH_S,
-        outputs: &POLYVAL_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = polyval(p, x, S, mu)",
-        inputs: &POLYVAL_INPUTS_WITH_S_MU,
-        outputs: &POLYVAL_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y, delta] = polyval(p, x)",
-        inputs: &POLYVAL_INPUTS,
-        outputs: &POLYVAL_OUTPUT_Y_DELTA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y, delta] = polyval(p, x, S)",
-        inputs: &POLYVAL_INPUTS_WITH_S,
-        outputs: &POLYVAL_OUTPUT_Y_DELTA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y, delta] = polyval(p, x, S, mu)",
-        inputs: &POLYVAL_INPUTS_WITH_S_MU,
-        outputs: &POLYVAL_OUTPUT_Y_DELTA,
-    },
-];
-
-const POLYVAL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYVAL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polyval:InvalidArgument"),
-    when: "Option arguments (S/mu/output arity) are malformed or unsupported.",
-    message: "polyval: invalid argument",
-};
-
-const POLYVAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYVAL.INVALID_INPUT",
-    identifier: Some("RunMat:polyval:InvalidInput"),
-    when: "Polynomial coefficients or evaluation points cannot be interpreted as numeric inputs.",
-    message: "polyval: invalid input",
-};
-
-const POLYVAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYVAL.INTERNAL",
-    identifier: Some("RunMat:polyval:Internal"),
-    when: "Runtime fails while building output tensors, deltas, or provider fallbacks.",
-    message: "polyval: internal runtime failure",
-};
-
-const POLYVAL_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    POLYVAL_ERROR_INVALID_ARGUMENT,
-    POLYVAL_ERROR_INVALID_INPUT,
-    POLYVAL_ERROR_INTERNAL,
-];
-
-pub const POLYVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLYVAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLYVAL_ERRORS,
-};
-
-const POLYVAL_INTEGER_COEFFICIENTS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "polyval-integer-coefficients",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "polyval accepts typed-integer polynomial coefficients as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PolyvalIntegerCoefficientsExtension"),
-    };
-const POLYVAL_INTEGER_POINTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyval-integer-points",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyval accepts typed-integer query points as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyvalIntegerPointsExtension"),
-};
-const POLYVAL_INTEGER_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyval-integer-fit-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyval accepts typed-integer S or mu data as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyvalIntegerFitOptionsExtension"),
-};
-pub const POLYVAL_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    POLYVAL_INTEGER_COEFFICIENTS_EXTENSION,
-    POLYVAL_INTEGER_POINTS_EXTENSION,
-    POLYVAL_INTEGER_OPTIONS_EXTENSION,
-];
-const POLYVAL_INTEGER_COEFFICIENTS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double polynomial coefficients; RunMat admits typed integers only after exact floating conversion is proved.",
-    }];
-const POLYVAL_INTEGER_POINTS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double query points; RunMat admits typed integers only at the checked Horner-evaluation boundary.",
-    }];
-const POLYVAL_INTEGER_OPTIONS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "S or mu numeric fields",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented fit statistics and scaling vector are floating outputs of polyfit; native integer replacements are a checked RunMat extension.",
-    }];
-pub const POLYVAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = polyval(integer_p,x,___)",
-        inputs: &POLYVAL_INTEGER_COEFFICIENTS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer coefficients are independently gated before provider or host Horner evaluation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = polyval(p,integer_x,___)",
-        inputs: &POLYVAL_INTEGER_POINTS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer query points are independently gated before provider or host Horner evaluation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[y,delta] = polyval(p,x,integer_S_or_mu)",
-        inputs: &POLYVAL_INTEGER_OPTIONS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed integer fit metadata is independently gated and checked recursively before prediction-interval computation.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyval")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -319,15 +73,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polyval",
-    category = "math/poly",
-    summary = "Evaluate polynomials at specified points.",
-    keywords = "polyval,polynomial,polyfit,delta,gpu",
-    accel = "sink",
-    sink = true,
-    type_resolver(polyval_type),
-    descriptor(crate::builtins::math::poly::polyval::POLYVAL_DESCRIPTOR),
-    extensions(crate::builtins::math::poly::polyval::POLYVAL_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::poly::polyval::POLYVAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyval"
 )]
 async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -804,17 +550,17 @@ async fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<Pol
     };
     let r_value = struct_value
         .fields
-        .get("R")
+        .get(PolyfitStatField::R.public_name())
         .cloned()
         .ok_or_else(|| polyval_error("polyval: S input is missing the field 'R'"))?;
     let df_value = struct_value
         .fields
-        .get("df")
+        .get(PolyfitStatField::DegreesOfFreedom.public_name())
         .cloned()
         .ok_or_else(|| polyval_error("polyval: S input is missing the field 'df'"))?;
     let normr_value = struct_value
         .fields
-        .get("normr")
+        .get(PolyfitStatField::ResidualNorm.public_name())
         .cloned()
         .ok_or_else(|| polyval_error("polyval: S input is missing the field 'normr'"))?;
 
@@ -990,9 +736,12 @@ fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> BuiltinResult<
         ));
     }
     let mut result = vec![Complex64::new(0.0, 0.0); n];
-    for j in (0..n).rev() {
+    // The row variance is ||v / R||². Solve Rᵀ z = vᵀ by forward
+    // substitution; R is the upper-triangular factor in the same coordinate
+    // system as both the published coefficients and this Vandermonde row.
+    for j in 0..n {
         let mut acc = row[j];
-        for (k, value) in result.iter().enumerate().skip(j + 1) {
+        for (k, value) in result.iter().enumerate().take(j) {
             acc -= *value * matrix.get(k, j);
         }
         let diag = matrix.get(j, j);

@@ -826,6 +826,13 @@ pub struct ProviderPolyfitResult {
     pub mu: [f64; 2],
 }
 
+/// Coordinate system shared by the fitted coefficients and QR statistics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderPolyfitBasis {
+    Original,
+    CenteredScaled,
+}
+
 /// Numerator/denominator payload returned by provider-backed `polyder` quotient rule.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderPolyderQuotient {
@@ -2196,6 +2203,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _y: &'a GpuTensorHandle,
         _degree: usize,
         _weights: Option<&'a GpuTensorHandle>,
+        _basis: ProviderPolyfitBasis,
     ) -> AccelProviderFuture<'a, ProviderPolyfitResult> {
         Box::pin(async move {
             Err(unsupported_provider_operation(

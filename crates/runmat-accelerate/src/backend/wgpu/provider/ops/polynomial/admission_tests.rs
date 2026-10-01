@@ -44,7 +44,14 @@ fn complex_integration_is_supported_but_real_only_polynomial_hooks_are_not() {
             .unwrap_err()
     ));
     assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &futures::executor::block_on(provider.polyfit_exec(&input, &points, 1, None)).unwrap_err()
+        &futures::executor::block_on(provider.polyfit_exec(
+            &input,
+            &points,
+            1,
+            None,
+            runmat_accelerate_api::ProviderPolyfitBasis::Original,
+        ))
+        .unwrap_err()
     ));
     assert!(runmat_accelerate_api::is_unsupported_provider_operation(
         &futures::executor::block_on(provider.polyder_exec(&input)).unwrap_err()

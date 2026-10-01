@@ -7,6 +7,8 @@ use runmat_types::{
 };
 use std::collections::BTreeMap;
 
+use super::super::PolyfitStatField;
+
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if !(3..=4).contains(&request.arguments.len()) {
@@ -190,11 +192,17 @@ fn coefficient_fact(y: Option<&ValueFact>, width: Option<usize>) -> ValueFact {
 fn statistics_fact(width: Option<usize>) -> ValueFact {
     let mut fields = BTreeMap::new();
     fields.insert(
-        "R".into(),
+        PolyfitStatField::R.public_name().into(),
         double_array(ShapeFact::from(vec![width, width])),
     );
-    fields.insert("df".into(), double_scalar());
-    fields.insert("normr".into(), double_scalar());
+    fields.insert(
+        PolyfitStatField::DegreesOfFreedom.public_name().into(),
+        double_scalar(),
+    );
+    fields.insert(
+        PolyfitStatField::ResidualNorm.public_name().into(),
+        double_scalar(),
+    );
     ValueFact::proven(
         ValueKindFact::Struct(StructFact::scalar(fields, true)),
         ShapeFact::Scalar,

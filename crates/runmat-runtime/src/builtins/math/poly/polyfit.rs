@@ -2,13 +2,13 @@
 
 use log::warn;
 use num_complex::Complex64;
-use runmat_accelerate_api::ProviderPolyfitResult;
+use runmat_accelerate_api::{ProviderPolyfitBasis, ProviderPolyfitResult};
 #[cfg(test)]
 use runmat_builtins::POLYFIT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, POLYFIT_ERROR_INTERNAL, POLYFIT_ERROR_INVALID_ARGUMENT,
-    POLYFIT_ERROR_INVALID_INPUT, POLYFIT_INTEGER_WEIGHTS_EXTENSION, POLYFIT_INTEGER_X_EXTENSION,
-    POLYFIT_INTEGER_Y_EXTENSION,
+    BuiltinErrorDescriptor, PolyfitStatField, POLYFIT_ERROR_INTERNAL,
+    POLYFIT_ERROR_INVALID_ARGUMENT, POLYFIT_ERROR_INVALID_INPUT, POLYFIT_INTEGER_WEIGHTS_EXTENSION,
+    POLYFIT_INTEGER_X_EXTENSION, POLYFIT_INTEGER_Y_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
@@ -122,6 +122,12 @@ pub async fn evaluate(
     degree: Value,
     rest: &[Value],
 ) -> BuiltinResult<PolyfitEval> {
+    // The third output requests coefficients and QR statistics in centered,
+    // scaled coordinates. Without it, both are in the original X basis.
+    let basis = match crate::output_count::current_output_count() {
+        Some(count) if count >= 3 => ProviderPolyfitBasis::CenteredScaled,
+        _ => ProviderPolyfitBasis::Original,
+    };
     crate::builtins::common::validation::reject_typed_complex_integer(&x, "polyfit")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&y, "polyfit")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&degree, "polyfit")?;
@@ -153,7 +159,7 @@ pub async fn evaluate(
     }
     let deg = parse_degree(&degree)?;
 
-    if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest).await? {
+    if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest, basis).await? {
         return Ok(eval);
     }
 
@@ -182,7 +188,7 @@ pub async fn evaluate(
     }
 
     let weights = parse_weights(rest, x_data.len(), deg).await?;
-    let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref())?;
+    let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref(), basis)?;
     if is_complex_input {
         solution.is_complex = true;
     }
@@ -195,6 +201,7 @@ async fn try_gpu_polyfit(
     y: &Value,
     degree: usize,
     rest: &[Value],
+    basis: ProviderPolyfitBasis,
 ) -> BuiltinResult<Option<PolyfitEval>> {
     let x_handle = match x {
         Value::GpuTensor(handle) => handle,
@@ -257,7 +264,7 @@ async fn try_gpu_polyfit(
         .collect::<Vec<_>>();
 
     let result = match provider
-        .polyfit(x_handle, y_handle, degree, weight_handle)
+        .polyfit(x_handle, y_handle, degree, weight_handle, basis)
         .await
     {
         Ok(res) => res,
@@ -543,6 +550,7 @@ fn solve_polyfit(
     y_data: &[Complex64],
     degree: usize,
     weights: Option<&[f64]>,
+    basis: ProviderPolyfitBasis,
 ) -> PolyfitKernelResult<PolyfitSolution> {
     if x_data.len() != y_data.len() {
         return Err(PolyfitKernelError::input(
@@ -568,13 +576,18 @@ fn solve_polyfit(
     if let Some(w) = weights {
         validate_weights(w)?;
     }
-    let mean = x_data.iter().sum::<f64>() / x_data.len() as f64;
-    if !mean.is_finite() {
-        return Err(PolyfitKernelError::input(
-            "polyfit: mean of X must be finite",
-        ));
-    }
-    let scale = compute_scale(x_data, mean)?;
+    let (mean, scale) = match basis {
+        ProviderPolyfitBasis::Original => (0.0, 1.0),
+        ProviderPolyfitBasis::CenteredScaled => {
+            let mean = x_data.iter().sum::<f64>() / x_data.len() as f64;
+            if !mean.is_finite() {
+                return Err(PolyfitKernelError::input(
+                    "polyfit: mean of X must be finite",
+                ));
+            }
+            (mean, compute_scale(x_data, mean)?)
+        }
+    };
     for (idx, value) in y_data.iter().enumerate() {
         if !value.re.is_finite() || !value.im.is_finite() {
             return Err(PolyfitKernelError::input(format!(
@@ -598,8 +611,7 @@ fn solve_polyfit(
 
     let mut transformed_rhs = rhs.clone();
     householder_qr(&mut vandermonde, rows, cols, &mut transformed_rhs)?;
-    let coeff_scaled = solve_upper(&vandermonde, rows, cols, &transformed_rhs)?;
-    let coeff_original = transform_coefficients(&coeff_scaled, mean, scale);
+    let coeffs = solve_upper(&vandermonde, rows, cols, &transformed_rhs)?;
 
     let normr = residual_norm(&transformed_rhs, rows, cols);
     let df = if rows > cols {
@@ -608,10 +620,10 @@ fn solve_polyfit(
         0.0
     };
     let r_matrix = extract_upper(&vandermonde, &geometry);
-    let is_complex = coeff_original.iter().any(|c| c.im.abs() > EPS_NAN);
+    let is_complex = coeffs.iter().any(|c| c.im.abs() > EPS_NAN);
 
     Ok(PolyfitSolution {
-        coeffs: coeff_original,
+        coeffs,
         r_matrix,
         mu_mean: mean,
         mu_scale: scale,
@@ -838,21 +850,6 @@ fn extract_upper(matrix: &[f64], geometry: &SolverGeometry) -> Vec<f64> {
     output
 }
 
-fn transform_coefficients(coeffs: &[Complex64], mean: f64, scale: f64) -> Vec<Complex64> {
-    let mut poly: Vec<Complex64> = Vec::new();
-    for &coeff in coeffs {
-        let mut next = vec![Complex64::new(0.0, 0.0); poly.len() + 1];
-        for (idx, &value) in poly.iter().enumerate() {
-            next[idx + 1] += value / scale;
-            next[idx] -= value * (mean / scale);
-        }
-        next[0] += coeff;
-        poly = next;
-    }
-    poly.reverse();
-    poly
-}
-
 fn coefficients_to_value(coeffs: &[Complex64]) -> BuiltinResult<Value> {
     let all_real = coeffs
         .iter()
@@ -874,9 +871,18 @@ fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> BuiltinResult<Value>
     let tensor =
         Tensor::new(r.to_vec(), vec![n, n]).map_err(|e| polyfit_error(format!("polyfit: {e}")))?;
     let mut st = StructValue::new();
-    st.fields.insert("R".to_string(), Value::Tensor(tensor));
-    st.fields.insert("df".to_string(), Value::Num(df));
-    st.fields.insert("normr".to_string(), Value::Num(normr));
+    st.fields.insert(
+        PolyfitStatField::R.public_name().to_string(),
+        Value::Tensor(tensor),
+    );
+    st.fields.insert(
+        PolyfitStatField::DegreesOfFreedom.public_name().to_string(),
+        Value::Num(df),
+    );
+    st.fields.insert(
+        PolyfitStatField::ResidualNorm.public_name().to_string(),
+        Value::Num(normr),
+    );
     Ok(Value::Struct(st))
 }
 
@@ -903,6 +909,7 @@ pub fn polyfit_host_real_for_provider(
     y: &[f64],
     degree: usize,
     weights: Option<&[f64]>,
+    basis: ProviderPolyfitBasis,
 ) -> PolyfitKernelResult<PolyfitHostRealResult> {
     if x.len() != y.len() {
         return Err(PolyfitKernelError::input(
@@ -925,7 +932,7 @@ pub fn polyfit_host_real_for_provider(
         validate_weights(w)?;
     }
     let complex_y: Vec<Complex64> = y.iter().copied().map(|v| Complex64::new(v, 0.0)).collect();
-    let solution = solve_polyfit(x, &complex_y, degree, weights)?;
+    let solution = solve_polyfit(x, &complex_y, degree, weights, basis)?;
     let PolyfitSolution {
         coeffs,
         r_matrix,
@@ -1030,6 +1037,66 @@ pub(crate) mod tests {
         rest: &[Value],
     ) -> Result<PolyfitEval, RuntimeError> {
         block_on(super::evaluate(x, y, degree, rest))
+    }
+
+    fn scalar(value: Value) -> f64 {
+        match value {
+            Value::Num(value) => value,
+            Value::Tensor(tensor) if tensor.len() == 1 => tensor.materialize_f64()[0],
+            other => panic!("expected scalar numerical result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn coefficient_and_qr_basis_follows_requested_output_count() {
+        // Independent least-squares oracle: ybar = 24.25, slope = 2.1,
+        // intercept = 0.1, SSE = 2.7, Sxx = 5, and df = 2.
+        let x = Value::Tensor(Tensor::new(vec![10.0, 11.0, 12.0, 13.0], vec![1, 4]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![21.0, 24.0, 24.0, 28.0], vec![1, 4]).unwrap());
+        for outputs in [1, 2, 3] {
+            let _requested = crate::output_count::push_output_count(Some(outputs));
+            let fit = evaluate(
+                x.clone(),
+                y.clone(),
+                Value::Int(runmat_value::IntValue::I32(1)),
+                &[],
+            )
+            .expect("fit");
+            let coefficients = fit.coefficients();
+            let coefficient_data = match &coefficients {
+                Value::Tensor(tensor) => tensor.materialize_f64(),
+                other => panic!("expected coefficient tensor, got {other:?}"),
+            };
+            let options = if outputs == 3 {
+                vec![fit.stats(), fit.mu()]
+            } else {
+                vec![fit.stats()]
+            };
+            if outputs == 3 {
+                let mu = match fit.mu() {
+                    Value::Tensor(tensor) => tensor.materialize_f64(),
+                    other => panic!("expected mu tensor, got {other:?}"),
+                };
+                assert!((mu[0] - 11.5).abs() < 1e-12);
+                assert!((mu[1] - (5.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+                assert!((coefficient_data[0] - 2.1 * mu[1]).abs() < 1e-11);
+                assert!((coefficient_data[1] - 24.25).abs() < 1e-11);
+            } else {
+                assert!((coefficient_data[0] - 2.1).abs() < 1e-11);
+                assert!((coefficient_data[1] - 0.1).abs() < 1e-10);
+            }
+            let prediction = block_on(super::super::polyval::evaluate(
+                coefficients,
+                Value::Num(14.0),
+                &options,
+                true,
+            ))
+            .expect("prediction");
+            assert!((scalar(prediction.value()) - 29.5).abs() < 1e-10);
+            let delta = scalar(prediction.delta().expect("interval"));
+            // sqrt((SSE/df) * (1 + 1/n + (x-xbar)^2/Sxx)).
+            assert!((delta - 3.375_f64.sqrt()).abs() < 1e-9, "{delta}");
+        }
     }
 
     #[test]
@@ -1293,16 +1360,8 @@ pub(crate) mod tests {
                     return;
                 }
             };
-        let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 3.0, 7.0, 13.0], vec![4, 1]).unwrap();
-
-        let cpu_eval = evaluate(
-            Value::Tensor(x.clone()),
-            Value::Tensor(y.clone()),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[],
-        )
-        .expect("cpu polyfit");
+        let x = Tensor::new(vec![10.0, 11.0, 12.0, 13.0], vec![4, 1]).unwrap();
+        let y = Tensor::new(vec![21.0, 24.0, 24.0, 28.0], vec![4, 1]).unwrap();
 
         let trait_provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let x_view = runmat_accelerate_api::HostTensorView {
@@ -1316,92 +1375,101 @@ pub(crate) mod tests {
         let x_handle = trait_provider.upload(&x_view).expect("upload x");
         let y_handle = trait_provider.upload(&y_view).expect("upload y");
 
-        let gpu_eval = evaluate(
-            Value::GpuTensor(x_handle.clone()),
-            Value::GpuTensor(y_handle.clone()),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[],
-        )
-        .expect("gpu polyfit");
+        for output_count in [2, 3] {
+            let _requested = crate::output_count::push_output_count(Some(output_count));
+            let cpu_eval = evaluate(
+                Value::Tensor(x.clone()),
+                Value::Tensor(y.clone()),
+                Value::Int(runmat_value::IntValue::I32(1)),
+                &[],
+            )
+            .expect("cpu polyfit");
+            let gpu_eval = evaluate(
+                Value::GpuTensor(x_handle.clone()),
+                Value::GpuTensor(y_handle.clone()),
+                Value::Int(runmat_value::IntValue::I32(1)),
+                &[],
+            )
+            .expect("gpu polyfit");
 
+            let cpu_coeff = match cpu_eval.coefficients() {
+                Value::Tensor(t) => t,
+                other => panic!("expected tensor coefficients, got {other:?}"),
+            };
+            let gpu_coeff = match gpu_eval.coefficients() {
+                Value::Tensor(t) => t,
+                other => panic!("expected tensor coefficients, got {other:?}"),
+            };
+            assert_eq!(cpu_coeff.shape, gpu_coeff.shape);
+            for (a, b) in cpu_coeff
+                .materialize_f64()
+                .iter()
+                .zip(gpu_coeff.materialize_f64().iter())
+            {
+                assert!((a - b).abs() < 1e-9, "coeff mismatch {a} vs {b}");
+            }
+
+            let cpu_mu = match cpu_eval.mu() {
+                Value::Tensor(t) => t,
+                other => panic!("expected tensor mu, got {other:?}"),
+            };
+            let gpu_mu = match gpu_eval.mu() {
+                Value::Tensor(t) => t,
+                other => panic!("expected tensor mu, got {other:?}"),
+            };
+            assert_eq!(cpu_mu.shape, gpu_mu.shape);
+            for (a, b) in cpu_mu
+                .materialize_f64()
+                .iter()
+                .zip(gpu_mu.materialize_f64().iter())
+            {
+                assert!((a - b).abs() < 1e-9, "mu mismatch {a} vs {b}");
+            }
+
+            let cpu_stats = match cpu_eval.stats() {
+                Value::Struct(s) => s,
+                other => panic!("expected struct stats, got {other:?}"),
+            };
+            let gpu_stats = match gpu_eval.stats() {
+                Value::Struct(s) => s,
+                other => panic!("expected struct stats, got {other:?}"),
+            };
+            let cpu_r = match cpu_stats.fields.get("R").expect("R present") {
+                Value::Tensor(t) => t.clone(),
+                other => panic!("expected tensor R, got {other:?}"),
+            };
+            let gpu_r = match gpu_stats.fields.get("R").expect("R present") {
+                Value::Tensor(t) => t.clone(),
+                other => panic!("expected tensor R, got {other:?}"),
+            };
+            assert_eq!(cpu_r.shape, gpu_r.shape);
+            for (a, b) in cpu_r
+                .materialize_f64()
+                .iter()
+                .zip(gpu_r.materialize_f64().iter())
+            {
+                assert!((a - b).abs() < 1e-9, "R mismatch {a} vs {b}");
+            }
+            let cpu_df = match cpu_stats.fields.get("df").expect("df present") {
+                Value::Num(n) => *n,
+                other => panic!("expected numeric df, got {other:?}"),
+            };
+            let gpu_df = match gpu_stats.fields.get("df").expect("df present") {
+                Value::Num(n) => *n,
+                other => panic!("expected numeric df, got {other:?}"),
+            };
+            assert!((cpu_df - gpu_df).abs() < 1e-9);
+            let cpu_normr = match cpu_stats.fields.get("normr").expect("normr present") {
+                Value::Num(n) => *n,
+                other => panic!("expected numeric normr, got {other:?}"),
+            };
+            let gpu_normr = match gpu_stats.fields.get("normr").expect("normr present") {
+                Value::Num(n) => *n,
+                other => panic!("expected numeric normr, got {other:?}"),
+            };
+            assert!((cpu_normr - gpu_normr).abs() < 1e-9);
+        }
         drop((x_handle, y_handle));
-
-        let cpu_coeff = match cpu_eval.coefficients() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor coefficients, got {other:?}"),
-        };
-        let gpu_coeff = match gpu_eval.coefficients() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor coefficients, got {other:?}"),
-        };
-        assert_eq!(cpu_coeff.shape, gpu_coeff.shape);
-        for (a, b) in cpu_coeff
-            .materialize_f64()
-            .iter()
-            .zip(gpu_coeff.materialize_f64().iter())
-        {
-            assert!((a - b).abs() < 1e-9, "coeff mismatch {a} vs {b}");
-        }
-
-        let cpu_mu = match cpu_eval.mu() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor mu, got {other:?}"),
-        };
-        let gpu_mu = match gpu_eval.mu() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor mu, got {other:?}"),
-        };
-        assert_eq!(cpu_mu.shape, gpu_mu.shape);
-        for (a, b) in cpu_mu
-            .materialize_f64()
-            .iter()
-            .zip(gpu_mu.materialize_f64().iter())
-        {
-            assert!((a - b).abs() < 1e-9, "mu mismatch {a} vs {b}");
-        }
-
-        let cpu_stats = match cpu_eval.stats() {
-            Value::Struct(s) => s,
-            other => panic!("expected struct stats, got {other:?}"),
-        };
-        let gpu_stats = match gpu_eval.stats() {
-            Value::Struct(s) => s,
-            other => panic!("expected struct stats, got {other:?}"),
-        };
-        let cpu_r = match cpu_stats.fields.get("R").expect("R present") {
-            Value::Tensor(t) => t.clone(),
-            other => panic!("expected tensor R, got {other:?}"),
-        };
-        let gpu_r = match gpu_stats.fields.get("R").expect("R present") {
-            Value::Tensor(t) => t.clone(),
-            other => panic!("expected tensor R, got {other:?}"),
-        };
-        assert_eq!(cpu_r.shape, gpu_r.shape);
-        for (a, b) in cpu_r
-            .materialize_f64()
-            .iter()
-            .zip(gpu_r.materialize_f64().iter())
-        {
-            assert!((a - b).abs() < 1e-9, "R mismatch {a} vs {b}");
-        }
-        let cpu_df = match cpu_stats.fields.get("df").expect("df present") {
-            Value::Num(n) => *n,
-            other => panic!("expected numeric df, got {other:?}"),
-        };
-        let gpu_df = match gpu_stats.fields.get("df").expect("df present") {
-            Value::Num(n) => *n,
-            other => panic!("expected numeric df, got {other:?}"),
-        };
-        assert!((cpu_df - gpu_df).abs() < 1e-9);
-        let cpu_normr = match cpu_stats.fields.get("normr").expect("normr present") {
-            Value::Num(n) => *n,
-            other => panic!("expected numeric normr, got {other:?}"),
-        };
-        let gpu_normr = match gpu_stats.fields.get("normr").expect("normr present") {
-            Value::Num(n) => *n,
-            other => panic!("expected numeric normr, got {other:?}"),
-        };
-        assert!((cpu_normr - gpu_normr).abs() < 1e-9);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
