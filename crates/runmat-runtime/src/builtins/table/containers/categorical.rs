@@ -969,7 +969,7 @@ fn categorical_is_ordinal(object: &ObjectInstance) -> bool {
     matches!(object.properties.get("Ordinal"), Some(Value::Bool(true)))
 }
 
-fn category_label_for_code<'a>(code: f64, categories: &'a [String]) -> Option<&'a str> {
+fn category_label_for_code(code: f64, categories: &[String]) -> Option<&str> {
     if !code.is_finite() || code < 1.0 {
         return None;
     }
@@ -990,10 +990,7 @@ fn category_label_for_integer_code<'a>(
         .map(String::as_str)
 }
 
-fn category_label_ref_for_numeric_code<'a>(
-    code: NumericScalar,
-    categories: &'a [String],
-) -> Option<&'a str> {
+fn category_label_ref_for_numeric_code(code: NumericScalar, categories: &[String]) -> Option<&str> {
     match code {
         NumericScalar::F64(code) => category_label_for_code(code, categories),
         NumericScalar::F32(code) => category_label_for_code(f64::from(code), categories),

@@ -159,7 +159,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             } else {
                 args.len()
             };
-            if (args.len() - option_start) % 2 != 0 {
+            if !(args.len() - option_start).is_multiple_of(2) {
                 diagnostics.push(InferenceDiagnostic::error(
                     "OPTION",
                     "binscatter name-value controls require paired values",

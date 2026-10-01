@@ -116,10 +116,8 @@ fn preflight_host_coefficients(
     if coefficient_count == 0 {
         return Ok(());
     }
-    if !matches!(args[0], Value::GpuTensor(_)) {
-        if coefficient_pair(&args[0], owner)?.is_none() {
-            finite_scalar(&args[0], "slope", owner)?;
-        }
+    if !matches!(args[0], Value::GpuTensor(_)) && coefficient_pair(&args[0], owner)?.is_none() {
+        finite_scalar(&args[0], "slope", owner)?;
     }
     if coefficient_count == 2 && !matches!(args[1], Value::GpuTensor(_)) {
         finite_scalar(&args[1], "intercept", owner)?;
