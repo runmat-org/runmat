@@ -12,7 +12,7 @@ pub(in crate::builtins::stats::ml::perfcurve) fn suby_output(
 ) -> BuiltinResult<Value> {
     let rows = xvals.map_or(thresholds.len(), Vec::len);
     let cols = neg_classes.len();
-    let mut data = vec![0.0; rows * cols];
+    let mut data = suby_buffer(rows, cols)?;
     for col in 0..cols {
         let mut x = Vec::with_capacity(thresholds.len());
         let mut y = Vec::with_capacity(thresholds.len());
@@ -49,4 +49,27 @@ pub(in crate::builtins::stats::ml::perfcurve) fn suby_output(
     Ok(Value::Tensor(
         Tensor::new(data, vec![rows, cols]).map_err(|err| internal(format!("perfcurve: {err}")))?,
     ))
+}
+
+fn suby_buffer(rows: usize, cols: usize) -> BuiltinResult<Vec<f64>> {
+    let len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| invalid("perfcurve: requested SubY dimensions overflow"))?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(len)
+        .map_err(|_| invalid("perfcurve: requested SubY allocation exceeds available memory"))?;
+    data.resize(len, 0.0);
+    Ok(data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suby_dimensions_must_fit_before_allocation() {
+        let err = suby_buffer(usize::MAX, 2).unwrap_err();
+        assert_eq!(err.identifier.as_deref(), ERROR_INVALID_ARGUMENT.identifier);
+        assert!(err.message.contains("SubY dimensions overflow"));
+    }
 }

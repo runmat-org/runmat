@@ -63,7 +63,6 @@ mod interpolation;
 mod observations;
 mod subclasses;
 #[cfg(test)]
-#[path = "curve/tests.rs"]
 mod tests;
 
 pub(super) use core::{compute_curve, thresholds_for_scores};
