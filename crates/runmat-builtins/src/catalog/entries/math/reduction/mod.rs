@@ -8,14 +8,20 @@ mod bounds;
 mod topk;
 mod mean;
 mod sum;
+mod median;
+mod std;
+mod var;
 
 pub use self::all::*;
 pub use self::any::*;
 pub use self::bounds::*;
 pub use self::mean::*;
+pub use self::median::*;
+pub use self::std::*;
 pub use self::sum::*;
 pub use self::support::*;
 pub use self::topk::*;
+pub use self::var::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(bounds::ENTRIES.iter().copied());
@@ -24,4 +30,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(any::ENTRIES.iter().copied());
     values.extend(mean::ENTRIES.iter().copied());
     values.extend(sum::ENTRIES.iter().copied());
+    values.extend(median::ENTRIES.iter().copied());
+    values.extend(std::ENTRIES.iter().copied());
+    values.extend(var::ENTRIES.iter().copied());
 }
