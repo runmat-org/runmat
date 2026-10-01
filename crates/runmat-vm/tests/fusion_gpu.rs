@@ -1813,15 +1813,18 @@ fn fusion_feasibility_rejection_resumes_shared_runtime_before_provider_side_effe
                 event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
                     && event.reason.as_deref() == Some("fusion_execution_failed")
             }));
-            assert!(!trace.events.iter().any(|event| {
-                matches!(
-                    event.kind,
-                    runmat_accelerate::placement::PlacementEventKind::Upload
-                        | runmat_accelerate::placement::PlacementEventKind::Compile
-                        | runmat_accelerate::placement::PlacementEventKind::Queue
-                        | runmat_accelerate::placement::PlacementEventKind::Kernel
-                )
-            }));
+            assert!(
+                !trace.events.iter().any(|event| {
+                    matches!(
+                        event.kind,
+                        runmat_accelerate::placement::PlacementEventKind::Upload
+                            | runmat_accelerate::placement::PlacementEventKind::Compile
+                            | runmat_accelerate::placement::PlacementEventKind::Queue
+                            | runmat_accelerate::placement::PlacementEventKind::Kernel
+                    )
+                }),
+                "rejected CPU trace contains provider stages: {trace:#?}"
+            );
         }
         let cpu_samples = feedback
             .iter()
