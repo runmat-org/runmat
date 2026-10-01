@@ -69,10 +69,12 @@ impl NormalizeOutputPlan {
     }
 
     pub(super) fn finish(self, eval: NormalizeEval) -> BuiltinResult<Value> {
-        finish_selected(self.requested, eval, |value| self.restore(value))
+        finish_selected(self.requested, eval, |value, protected| {
+            self.restore(value, protected)
+        })
     }
 
-    fn restore(&self, value: Value) -> BuiltinResult<Value> {
+    fn restore(&self, value: Value, protected: &[&GpuTensorHandle]) -> BuiltinResult<Value> {
         let value = if self.single {
             value_to_single(value)?
         } else {
@@ -80,8 +82,12 @@ impl NormalizeOutputPlan {
         };
         match &self.source {
             Some(source) => {
-                let restored =
-                    gpu_helpers::restore_class_preserving_value(source, value, "normalize")?;
+                let restored = gpu_helpers::restore_class_preserving_value_protecting(
+                    source,
+                    value,
+                    "normalize",
+                    protected,
+                )?;
                 if runmat_accelerate_api::handle_is_explicit(source)
                     && !matches!(restored, Value::GpuTensor(_))
                 {
@@ -99,14 +105,15 @@ impl NormalizeOutputPlan {
 fn finish_selected(
     requested: RequestedOutputs,
     eval: NormalizeEval,
-    mut restore: impl FnMut(Value) -> BuiltinResult<Value>,
+    mut restore: impl FnMut(Value, &[&GpuTensorHandle]) -> BuiltinResult<Value>,
 ) -> BuiltinResult<Value> {
     let mut staged = RestoredOutputs::default();
     for value in [eval.n, eval.c, eval.s]
         .into_iter()
         .take(requested.selected_count())
     {
-        let restored = match restore(value) {
+        let protected = staged.resident_handles();
+        let restored = match restore(value, &protected) {
             Ok(value) => value,
             Err(error) => return Err(staged.reject(error)),
         };
@@ -122,6 +129,16 @@ fn finish_selected(
 struct RestoredOutputs(Vec<Value>);
 
 impl RestoredOutputs {
+    fn resident_handles(&self) -> Vec<&GpuTensorHandle> {
+        self.0
+            .iter()
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn push(&mut self, value: Value) {
         self.0.push(value);
     }
@@ -169,7 +186,7 @@ mod tests {
         ] {
             let _guard = crate::output_count::push_output_count(requested);
             let mut restorations = 0;
-            let value = finish_selected(RequestedOutputs::current(), eval(), |value| {
+            let value = finish_selected(RequestedOutputs::current(), eval(), |value, _| {
                 restorations += 1;
                 Ok(value)
             })
@@ -193,7 +210,7 @@ mod tests {
             .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
             .unwrap();
         let mut first = Some(produced.handle);
-        let error = finish_selected(RequestedOutputs::Explicit(2), eval(), |_| {
+        let error = finish_selected(RequestedOutputs::Explicit(2), eval(), |_, _| {
             if let Some(handle) = first.take() {
                 Ok(Value::GpuTensor(handle))
             } else {
@@ -208,3 +225,7 @@ mod tests {
         assert_eq!(source.probe.retirements(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "output_provider_tests.rs"]
+mod provider_tests;
