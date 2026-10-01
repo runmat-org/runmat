@@ -1,44 +1,10 @@
 //! Typed public option identities for performance curves.
 
-use super::{canonical, invalid, scalar_text, unsupported};
+use super::{invalid, scalar_text, unsupported};
 use crate::BuiltinResult;
 use runmat_value::Value;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum OptionName {
-    XCrit,
-    YCrit,
-    NegClass,
-    Weights,
-    Prior,
-    Cost,
-    TVals,
-    XVals,
-    UseNearest,
-    ProcessNaN,
-    UnsupportedBootstrap,
-}
-
-impl OptionName {
-    fn from_public(text: &str) -> Option<Self> {
-        Some(match canonical(text).as_str() {
-            "xcrit" => Self::XCrit,
-            "ycrit" => Self::YCrit,
-            "negclass" => Self::NegClass,
-            "weights" => Self::Weights,
-            "prior" => Self::Prior,
-            "cost" => Self::Cost,
-            "tvals" => Self::TVals,
-            "xvals" => Self::XVals,
-            "usenearest" => Self::UseNearest,
-            "processnan" => Self::ProcessNaN,
-            "nboot" | "alpha" | "bootstrap" | "bootstraps" | "nbootstraps" => {
-                Self::UnsupportedBootstrap
-            }
-            _ => return None,
-        })
-    }
-}
+pub(super) use runmat_builtins::PerfcurveOptionName as OptionName;
 
 pub(super) struct OptionSlot {
     name: BuiltinResult<String>,
@@ -77,7 +43,7 @@ pub(super) fn validate(rest: &[Value], slots: Vec<OptionSlot>) -> BuiltinResult<
                 Some(name) => Ok(name),
                 None => Err(invalid(format!(
                     "perfcurve: unsupported option '{}'",
-                    canonical(&spelling)
+                    OptionName::canonical_spelling(&spelling)
                 ))),
             }
         })
