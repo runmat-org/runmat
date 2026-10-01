@@ -1,6 +1,7 @@
 //! Column-major N-D host reductions. Admission, class selection, and numeric
 //! kernels are separate from geometry so each public identity uses one route.
 use super::data::HostData;
+use super::data::NonnegativeWeights;
 use super::numerics;
 use super::numerics::ScaledMagnitude;
 use super::options::{invalid, Axes, MissingMode, Options, ReductionKind};
@@ -225,7 +226,7 @@ pub(super) fn weighted_rmse(
     right_shape: &[usize],
     dtype: NumericDType,
     options: &Options,
-    weights: HostData,
+    weights: NonnegativeWeights,
 ) -> BuiltinResult<Value> {
     let kind = ReductionKind::RootMeanSquaredError;
     let geometry = Geometry::new(kind, &shape, &options.axes)?;
@@ -241,10 +242,7 @@ pub(super) fn weighted_rmse(
             "weighted RMSE requires one operating dimension",
         ));
     }
-    let (weight_values, weight_shape, _) = weights.real_values(kind)?;
-    if weight_values.iter().any(|weight| *weight < 0.0) {
-        return Err(invalid(kind, "weights must be nonnegative"));
-    }
+    let (weight_values, weight_shape) = weights.into_parts();
     let weights = if weight_values.len() == 1 {
         Weights::Scalar(weight_values[0])
     } else if same_shape(&weight_shape, &shape)

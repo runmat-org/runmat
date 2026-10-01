@@ -159,6 +159,25 @@ impl HostData {
     }
 }
 
+pub(super) struct NonnegativeWeights {
+    values: Vec<f64>,
+    shape: Vec<usize>,
+}
+
+impl NonnegativeWeights {
+    pub(super) fn from_host(data: HostData, kind: ReductionKind) -> BuiltinResult<Self> {
+        let (values, shape, _) = data.real_values(kind)?;
+        if values.iter().any(|value| *value < 0.0) {
+            return Err(invalid(kind, "weights must be nonnegative"));
+        }
+        Ok(Self { values, shape })
+    }
+
+    pub(super) fn into_parts(self) -> (Vec<f64>, Vec<usize>) {
+        (self.values, self.shape)
+    }
+}
+
 pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinResult<HostData> {
     let value = gather_if_needed_async(&value).await.map_err(|source| {
         let mut error = invalid(kind, "failed to materialize numeric input");

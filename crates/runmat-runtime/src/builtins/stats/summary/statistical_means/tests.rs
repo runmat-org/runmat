@@ -116,6 +116,24 @@ fn geometric_and_harmonic_singleton_or_trailing_axis_are_identity() {
 }
 
 #[test]
+fn integer_extension_noop_still_crosses_the_documented_double_boundary() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let input = Value::Int(IntValue::U64(4));
+    for result in [
+        block_on(geomean::geomean_builtin(
+            input.clone(),
+            vec![Value::Num(100.0)],
+        )),
+        block_on(harmmean::harmmean_builtin(input, vec![Value::Num(100.0)])),
+    ] {
+        let Value::Num(value) = result.unwrap() else {
+            panic!("integer extension must return double")
+        };
+        assert_eq!(value, 4.0);
+    }
+}
+
+#[test]
 fn rms_accepts_character_code_units_in_column_major_order() {
     let input = Value::CharArray(runmat_value::CharArray::new_row("AB"));
     let result = block_on(rms::rms_builtin(input, vec![Value::from("all")])).unwrap();
@@ -181,6 +199,19 @@ fn weighted_rmse_broadcasts_weights_from_unexpanded_forecast() {
 }
 
 #[test]
+fn negative_weights_fail_before_data_broadcast() {
+    let forecast = tensor(vec![1.0, 2.0], vec![2, 1], NumericDType::F64);
+    let actual = tensor(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::F64);
+    let error = block_on(rmse::rmse_builtin(
+        forecast,
+        actual,
+        vec![Value::from("Weights"), Value::Num(-1.0)],
+    ))
+    .unwrap_err();
+    assert!(error.message.contains("weights must be nonnegative"));
+}
+
+#[test]
 fn nd_default_vector_and_all_preserve_full_rank() {
     let input = tensor(
         (1..=12).map(f64::from).collect(),
@@ -205,6 +236,7 @@ fn nd_default_vector_and_all_preserve_full_rank() {
 
 #[test]
 fn empty_nd_shapes_and_far_trailing_axis_do_not_allocate_by_axis_value() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let empty = tensor(vec![], vec![0, 2, 3], NumericDType::F64);
     let result = block_on(rms::rms_builtin(empty.clone(), vec![])).unwrap();
     let Value::Tensor(result) = result else {

@@ -49,12 +49,17 @@ pub(crate) async fn rmse_builtin(
             return Ok(result);
         }
     }
+    let weights = if let Some(weight_value) = options.weights.clone() {
+        let weights = data::materialize(kind, weight_value).await?;
+        Some(data::NonnegativeWeights::from_host(weights, kind)?)
+    } else {
+        None
+    };
     let forecast = data::materialize(kind, forecast).await?;
     let actual = data::materialize(kind, actual).await?;
     let (values, shape, dtype, forecast_shape, actual_shape) =
         host::residuals(forecast, actual, kind)?;
-    if let Some(weights) = options.weights.clone() {
-        let weights = data::materialize(kind, weights).await?;
+    if let Some(weights) = weights {
         host::weighted_rmse(
             values,
             shape,
