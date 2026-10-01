@@ -26,8 +26,6 @@ mod tests;
 
 #[cfg(test)]
 use crate::builtins::common::random;
-#[cfg(test)]
-use admission::is_empty_option_value;
 use admission::{BorrowedOperands, OptionHeader};
 use compute::run_kmeans;
 use geometry::{
