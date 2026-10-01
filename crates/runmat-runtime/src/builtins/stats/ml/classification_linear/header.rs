@@ -14,7 +14,12 @@ struct OptionSlot {
 
 pub(super) struct FitclinearArguments {
     pub option_start: usize,
-    pub options: Vec<NamedOption>,
+    pub options: Vec<PreparedOption>,
+}
+
+pub(super) struct PreparedOption {
+    pub name: NamedOption,
+    pub predecoded: Option<FitclinearAction>,
 }
 
 pub(super) struct NamedOption {
@@ -95,16 +100,35 @@ impl HeaderInspection {
                     "fitclinear: option '{spelling}' is not supported yet"
                 )));
             }
-            options.push(NamedOption {
-                index: slot.index,
-                spelling,
-                identity,
+            options.push(PreparedOption {
+                name: NamedOption {
+                    index: slot.index,
+                    spelling,
+                    identity,
+                },
+                predecoded: None,
             });
         }
         Ok(FitclinearArguments {
             option_start: self.option_start,
             options,
         })
+    }
+}
+
+impl FitclinearArguments {
+    pub fn preflight_values(mut self, rest: &[Value]) -> BuiltinResult<Self> {
+        for option in &mut self.options {
+            if option.name.identity.ignored() {
+                option.predecoded = Some(FitclinearAction::Ignored);
+            } else {
+                let value = &rest[option.name.index + 1];
+                if !crate::dispatcher::value_contains_gpu(value) {
+                    option.predecoded = Some(decode_fit_option(&option.name, value)?);
+                }
+            }
+        }
+        Ok(self)
     }
 }
 
@@ -122,6 +146,74 @@ pub(super) fn preflight_matrix_rank(first: &Value) -> BuiltinResult<()> {
         return Err(fitclinear_invalid(
             "predict: X must be a 2-D numeric matrix",
         ));
+    }
+    Ok(())
+}
+
+pub(super) fn preflight_response_shape(
+    first: &Value,
+    rest: &[Value],
+    arguments: &FitclinearArguments,
+) -> BuiltinResult<()> {
+    let response = if is_table_value(first) {
+        if arguments.option_start == 1 {
+            rest.first().filter(|value| scalar_text(value).is_none())
+        } else {
+            None
+        }
+    } else {
+        rest.first()
+    };
+    let Some(response) = response else {
+        return Ok(());
+    };
+    let shape = match response {
+        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        _ => None,
+    };
+    let Some(shape) = shape else {
+        return Ok(());
+    };
+    if shape.len() > 2
+        || (shape.first().copied().unwrap_or(1) != 1 && shape.get(1).copied().unwrap_or(1) != 1)
+    {
+        return Err(fitclinear_invalid("predict: Y must be a vector"));
+    }
+    if !is_table_value(first) {
+        let mut axis = Some(ObservationsIn::Rows);
+        for option in &arguments.options {
+            if option.name.identity == FitclinearOption::ObservationsIn {
+                axis = match option.predecoded.as_ref() {
+                    Some(FitclinearAction::ObservationsIn(axis)) => Some(*axis),
+                    _ => None,
+                };
+            }
+        }
+        let x_shape = match first {
+            Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+            Value::LogicalArray(array) => Some(array.shape.as_slice()),
+            Value::GpuTensor(handle) => Some(handle.shape()),
+            _ => None,
+        };
+        if let (Some(axis), Some(x_shape), Some(len)) = (
+            axis,
+            x_shape,
+            shape
+                .iter()
+                .try_fold(1usize, |product, extent| product.checked_mul(*extent)),
+        ) {
+            let observations = match axis {
+                ObservationsIn::Rows => x_shape.first().copied().unwrap_or(1),
+                ObservationsIn::Columns => x_shape.get(1).copied().unwrap_or(1),
+            };
+            if observations != len {
+                return Err(fitclinear_invalid(
+                    "fitclinear: length(Y) must match the number of observations in X",
+                ));
+            }
+        }
     }
     Ok(())
 }

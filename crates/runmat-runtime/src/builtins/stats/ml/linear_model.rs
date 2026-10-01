@@ -32,6 +32,7 @@ use training::{evaluate_term, fit_ols};
 mod header;
 use header::{
     preflight_matrix_rank, preflight_response_shape, FitlmArguments, HeaderInspection, NamedOption,
+    PreparedOption,
 };
 mod admission;
 mod options;

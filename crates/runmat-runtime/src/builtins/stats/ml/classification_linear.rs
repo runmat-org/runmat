@@ -33,13 +33,18 @@ const EPS: f64 = 1.0e-12;
 mod training;
 use training::fit_models;
 mod header;
-use header::{preflight_matrix_rank, FitclinearArguments, HeaderInspection, NamedOption};
+use header::{
+    preflight_matrix_rank, preflight_response_shape, FitclinearArguments, HeaderInspection,
+    NamedOption, PreparedOption,
+};
 mod admission;
 mod options;
 mod prediction;
 mod projection;
 use admission::{build_fit_spec, is_table_value};
-use options::{class_priors, parse_fit_options, parse_formula};
+use options::{
+    class_priors, decode_fit_option, parse_fit_options, parse_formula, FitclinearAction,
+};
 pub(crate) use prediction::predict_classification_linear_object;
 use projection::fit_info_value;
 mod labels;
@@ -261,10 +266,11 @@ pub(crate) async fn fitclinear_builtin(first: Value, rest: Vec<Value>) -> Builti
     let inspection = HeaderInspection::inspect(&first, &rest);
     ensure_fitclinear_extensions(&first, &rest, &inspection)?;
     preflight_matrix_rank(&first)?;
-    let arguments = inspection.validate(rest.len())?;
+    let arguments = inspection.validate(rest.len())?.preflight_values(&rest)?;
+    preflight_response_shape(&first, &rest, &arguments)?;
     let first = gather(first).await?;
     let rest = gather_all(rest, &arguments).await?;
-    let spec = build_fit_spec(first, rest, &arguments)?;
+    let spec = build_fit_spec(first, rest, arguments)?;
     let result = fit_models(&spec)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
@@ -406,7 +412,7 @@ async fn gather_all(
         } else if arguments
             .options
             .iter()
-            .any(|option| option.index + 1 == index && option.identity.ignored())
+            .any(|option| option.name.index + 1 == index && option.name.identity.ignored())
         {
             out.push(value);
         } else {

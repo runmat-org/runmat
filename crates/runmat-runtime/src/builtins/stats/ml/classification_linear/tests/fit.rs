@@ -14,9 +14,15 @@ fn fitclinear_header_keeps_typed_options_and_ignored_payload_policy() {
         .validate(values.len())
         .unwrap();
     assert_eq!(header.option_start, 1);
-    assert_eq!(header.options[0].identity, FitclinearOption::IterationLimit);
-    assert_eq!(header.options[1].identity, FitclinearOption::BatchLimit);
-    assert!(header.options[1].identity.ignored());
+    assert_eq!(
+        header.options[0].name.identity,
+        FitclinearOption::IterationLimit
+    );
+    assert_eq!(
+        header.options[1].name.identity,
+        FitclinearOption::BatchLimit
+    );
+    assert!(header.options[1].name.identity.ignored());
 
     let invalid = vec![Value::Num(0.0), Value::from("Cost"), Value::Num(1.0)];
     assert!(HeaderInspection::inspect(&first, &invalid)
@@ -28,6 +34,60 @@ fn fitclinear_header_keeps_typed_options_and_ignored_payload_policy() {
 fn fitclinear_rejects_known_rank_before_materialization() {
     let first = tensor(vec![0.0; 8], vec![2, 2, 2]);
     assert!(preflight_matrix_rank(&first).is_err());
+}
+
+#[test]
+fn typed_fitclinear_actions_preserve_ignored_payload_and_response_orientation() {
+    let first = tensor(vec![0.0; 8], vec![2, 4]);
+    let values = vec![
+        tensor(vec![0.0, 1.0, 0.0, 1.0], vec![4, 1]),
+        Value::from("ObservationsIn"),
+        Value::from("columns"),
+        Value::from("BatchLimit"),
+        Value::from("uninspected payload"),
+    ];
+    let prepared = HeaderInspection::inspect(&first, &values)
+        .validate(values.len())
+        .unwrap()
+        .preflight_values(&values)
+        .unwrap();
+    assert!(matches!(
+        prepared.options[0].predecoded.as_ref(),
+        Some(FitclinearAction::ObservationsIn(ObservationsIn::Columns))
+    ));
+    assert!(matches!(
+        prepared.options[1].predecoded.as_ref(),
+        Some(FitclinearAction::Ignored)
+    ));
+    preflight_response_shape(&first, &values, &prepared).unwrap();
+    let wrong_y = vec![
+        tensor(vec![0.0, 1.0], vec![2, 1]),
+        values[1].clone(),
+        values[2].clone(),
+    ];
+    let wrong = HeaderInspection::inspect(&first, &wrong_y)
+        .validate(wrong_y.len())
+        .unwrap()
+        .preflight_values(&wrong_y)
+        .unwrap();
+    assert!(preflight_response_shape(&first, &wrong_y, &wrong)
+        .err()
+        .expect("known response mismatch")
+        .message()
+        .contains("length(Y)"));
+    let invalid = vec![
+        values[0].clone(),
+        Value::from("ObservationsIn"),
+        Value::from("sideways"),
+    ];
+    assert!(HeaderInspection::inspect(&first, &invalid)
+        .validate(invalid.len())
+        .unwrap()
+        .preflight_values(&invalid)
+        .err()
+        .expect("invalid orientation")
+        .message()
+        .contains("ObservationsIn"));
 }
 
 #[test]

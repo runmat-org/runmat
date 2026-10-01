@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn build_fit_spec(
     first: Value,
     mut rest: Vec<Value>,
-    arguments: &FitclinearArguments,
+    arguments: FitclinearArguments,
 ) -> BuiltinResult<FitSpec> {
     if is_table_value(&first) {
         build_table_fit_spec(first, rest, arguments)
@@ -26,10 +26,10 @@ fn build_matrix_fit_spec(
     x_value: Value,
     y_value: Value,
     rest: Vec<Value>,
-    arguments: &FitclinearArguments,
+    arguments: FitclinearArguments,
 ) -> BuiltinResult<FitSpec> {
     let mut options = FitOptions::default();
-    parse_fit_options(&rest, &arguments.options, 1, &mut options)?;
+    parse_fit_options(&rest, arguments.options, 1, &mut options)?;
     if let Some(WeightSpec::Variable(_)) = options.weights {
         return Err(fitclinear_invalid(
             "fitclinear: weights variable names require table input",
@@ -68,7 +68,7 @@ fn build_matrix_fit_spec(
 fn build_table_fit_spec(
     first: Value,
     rest: Vec<Value>,
-    arguments: &FitclinearArguments,
+    arguments: FitclinearArguments,
 ) -> BuiltinResult<FitSpec> {
     let object = match first {
         Value::Object(object) => object,
@@ -109,7 +109,7 @@ fn build_table_fit_spec(
             }
         }
     }
-    parse_fit_options(&rest, &arguments.options, 0, &mut options)?;
+    parse_fit_options(&rest, arguments.options, 0, &mut options)?;
     if options.observations_in == ObservationsIn::Columns {
         return Err(fitclinear_invalid(
             "fitclinear: ObservationsIn='columns' is not supported for table input",
