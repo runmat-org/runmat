@@ -1,6 +1,9 @@
 //! Mean provider strategies retain typed failures and own every intermediate.
 use super::*;
 
+mod admission;
+use admission::{adapt_output_class, admit_double_omitnan_stage, admit_result, desired_precision};
+
 #[cfg(test)]
 #[path = "result_tests.rs"]
 mod result_tests;
@@ -69,111 +72,6 @@ pub(super) async fn execute(
         Err(MeanProviderFailure::Unsupported) => Ok(None),
         Err(MeanProviderFailure::Execution(error)) => Err(*error),
     }
-}
-
-fn desired_precision(
-    input: &GpuTensorHandle,
-    output_class: &OutputTemplate,
-) -> Option<ProviderPrecision> {
-    match output_class {
-        OutputTemplate::Double => Some(ProviderPrecision::F64),
-        OutputTemplate::Default | OutputTemplate::Native => {
-            runmat_accelerate_api::handle_precision(input)
-        }
-    }
-}
-
-async fn adapt_output_class(
-    provider: &dyn AccelProvider,
-    input: &GpuTensorHandle,
-    output: GpuTensorHandle,
-    output_class: &OutputTemplate,
-) -> Result<GpuTensorHandle, MeanProviderFailure> {
-    let Some(target) = desired_precision(input, output_class) else {
-        return Ok(output);
-    };
-    if runmat_accelerate_api::handle_precision(&output) == Some(target) {
-        return Ok(output);
-    }
-    let cast = match target {
-        ProviderPrecision::F32 => provider.unary_single(&output).await,
-        ProviderPrecision::F64 => provider.unary_double(&output).await,
-    }
-    .map_err(mean_provider_error)?;
-    let valid = cast.shape() == output.shape()
-        && cast.device_id() == input.device_id()
-        && cast.allocation_lease().validate_live().is_ok()
-        && !cast.shares_allocation_with(&output)
-        && !cast.shares_allocation_with(input)
-        && runmat_accelerate_api::handle_storage(&cast) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(&cast) == Some(target)
-        && runmat_accelerate_api::handle_integer_type(&cast).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&cast)
-        && gpu_helpers::exact_provider_for_handle(&cast)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && gpu_helpers::gpu_class_metadata_matches(&cast, Some(target), None, false)
-        && gpu_helpers::expected_handle_numeric_element_type(&cast).is_ok();
-    if valid {
-        Ok(cast)
-    } else {
-        let mut error = mean_internal_error("mean: provider returned a malformed class adaptation");
-        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-        Err(MeanProviderFailure::Execution(Box::new(
-            gpu_helpers::reject_gpu_output(cast, error),
-        )))
-    }
-}
-
-fn admit_result(
-    provider: &dyn AccelProvider,
-    input: &GpuTensorHandle,
-    mut output: GpuTensorHandle,
-    axes: &MeanAxes,
-    dims: &[usize],
-    precision: Option<ProviderPrecision>,
-) -> BuiltinResult<GpuTensorHandle> {
-    let mut shape = input.shape().to_vec();
-    for &dim in dims {
-        shape[dim] = 1;
-    }
-    if matches!(axes, MeanAxes::All) {
-        shape = vec![1, 1];
-    }
-    // Normalize only equivalent scalar views, not non-scalar shape mismatches.
-    if output.shape() != shape
-        && output.shape().iter().all(|&dim| dim == 1)
-        && shape.iter().all(|&dim| dim == 1)
-    {
-        output = output
-            .with_view(output.view().clone().with_shape(shape.clone()))
-            .map_err(|source| {
-                let mut error = mean_internal_error(format!(
-                    "mean: cannot publish scalar reduction view: {source}"
-                ));
-                error.source = Some(Box::new(source));
-                error
-            })?;
-    }
-    let storage = runmat_accelerate_api::handle_storage(input);
-    let valid = precision.is_some()
-        && output.shape() == shape
-        && gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && runmat_accelerate_api::handle_precision(&output) == precision
-        && runmat_accelerate_api::handle_storage(&output) == storage
-        && runmat_accelerate_api::handle_integer_type(&output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&output)
-        && (!output.shares_allocation_with(input)
-            || dims.iter().all(|&dim| input.shape()[dim] == 1))
-        && gpu_helpers::expected_handle_numeric_element_type(&output).is_ok();
-    if !valid {
-        let mut error = mean_internal_error(
-            "mean: provider returned malformed reduction class, shape, owner, or alias",
-        );
-        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-        return Err(gpu_helpers::reject_gpu_output(output, error));
-    }
-    Ok(output)
 }
 
 async fn mean_gpu_try(
@@ -439,13 +337,24 @@ async fn mean_gpu_omitnan(
             .reduce_sum_dim(&sum_h, dim)
             .await
             .map_err(mean_provider_error)?;
-        sum_h = admit_double_omitnan_stage(provider, handle, next_sum, &shape, &[&sum_h])?;
+        sum_h = admit_double_omitnan_stage(
+            provider,
+            handle,
+            next_sum,
+            &shape,
+            &[&sum_h, &cnt_h, &cleaned, &mask],
+        )?;
         let next_count = provider
             .reduce_sum_dim(&cnt_h, dim)
             .await
             .map_err(mean_provider_error)?;
-        cnt_h =
-            admit_double_omitnan_stage(provider, handle, next_count, &shape, &[&cnt_h, &sum_h])?;
+        cnt_h = admit_double_omitnan_stage(
+            provider,
+            handle,
+            next_count,
+            &shape,
+            &[&cnt_h, &sum_h, &cleaned, &mask],
+        )?;
     }
 
     // mean = sum ./ count (0/0 -> NaN when all NaN)
@@ -453,44 +362,11 @@ async fn mean_gpu_omitnan(
         .elem_div(&sum_h, &cnt_h)
         .await
         .map_err(mean_provider_error)?;
-    admit_double_omitnan_stage(provider, handle, out, sum_h.shape(), &[&sum_h, &cnt_h])
-}
-
-fn admit_double_omitnan_stage(
-    provider: &dyn AccelProvider,
-    original: &GpuTensorHandle,
-    output: GpuTensorHandle,
-    shape: &[usize],
-    borrowed: &[&GpuTensorHandle],
-) -> Result<GpuTensorHandle, MeanProviderFailure> {
-    let valid = output.shape() == shape
-        && output.device_id() == original.device_id()
-        && output.allocation_lease().validate_live().is_ok()
-        && gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(&output) == Some(ProviderPrecision::F64)
-        && runmat_accelerate_api::handle_integer_type(&output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&output)
-        && gpu_helpers::gpu_class_metadata_matches(
-            &output,
-            Some(ProviderPrecision::F64),
-            None,
-            false,
-        )
-        && gpu_helpers::expected_handle_numeric_element_type(&output).is_ok()
-        && !output.shares_allocation_with(original)
-        && borrowed
-            .iter()
-            .all(|input| !output.shares_allocation_with(input));
-    if valid {
-        Ok(output)
-    } else {
-        let mut error =
-            mean_internal_error("mean: provider returned a malformed double accumulation stage");
-        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-        Err(MeanProviderFailure::Execution(Box::new(
-            gpu_helpers::reject_gpu_output(output, error),
-        )))
-    }
+    admit_double_omitnan_stage(
+        provider,
+        handle,
+        out,
+        sum_h.shape(),
+        &[&sum_h, &cnt_h, &cleaned, &mask],
+    )
 }
