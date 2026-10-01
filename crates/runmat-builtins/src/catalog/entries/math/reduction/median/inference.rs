@@ -30,7 +30,9 @@ fn infer_output(input: &ValueFact, request: &CallRequest) -> ValueFact {
         return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
     }
     let kind = match input.kind {
-        ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Real => input.kind,
+        ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Real => {
+            ValueKindFact::Numeric(numeric)
+        }
         ValueKindFact::Logical => ValueKindFact::Logical,
         _ => return ValueFact::unknown(DynamicReason::RuntimeValue),
     };
@@ -47,7 +49,7 @@ fn infer_output(input: &ValueFact, request: &CallRequest) -> ValueFact {
         return dynamic;
     }
     let storage = if input.residency == ResidencyFact::Host {
-        match (shape.element_count(), kind) {
+        match (shape.element_count(), &kind) {
             (Some(1), ValueKindFact::Numeric(numeric)) if numeric.class == NumericClass::Double => {
                 StorageFact::Scalar
             }
