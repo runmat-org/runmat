@@ -22,5 +22,6 @@ mod partition_shared;
 pub mod perfcurve;
 pub mod predict;
 pub mod regress;
+mod regularized;
 pub mod ridge;
 pub mod tsne;
