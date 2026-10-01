@@ -48,6 +48,7 @@ impl AccelProvider for RejectDownloads {
 
 #[test]
 fn unpolled_and_abandoned_gather_keep_caller_lease_live() {
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(RejectDownloads::default()));
     provider.pending.store(true, Ordering::SeqCst);
@@ -79,6 +80,7 @@ fn unpolled_and_abandoned_gather_keep_caller_lease_live() {
 
 #[test]
 fn known_invalid_controls_and_geometry_preflight_without_download() {
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(RejectDownloads::default()));
     unsafe { runmat_accelerate_api::register_provider(provider) };
@@ -182,6 +184,7 @@ fn known_invalid_controls_and_geometry_preflight_without_download() {
 
 #[test]
 fn gather_failure_retains_original_cause_and_borrowed_input() {
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(RejectDownloads::default()));
     unsafe { runmat_accelerate_api::register_provider(provider) };

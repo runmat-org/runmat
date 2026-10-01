@@ -249,7 +249,9 @@ fn qqplot_two_sample_matrices_pair_columns_and_do_not_treat_y_as_pvec() {
         get_builtin(vec![Value::Num(handles[3]), Value::String("YData".into())]).unwrap(),
     );
     assert_eq!(x1, vec![0.15000000000000002]);
-    assert_eq!(y1, vec![0.35]);
+    assert_eq!(y1.len(), 1);
+    // Convex binary64 interpolation may round by one ULP from the literal.
+    assert!(y1[0].to_bits().abs_diff(0.35_f64.to_bits()) <= 1);
     assert_eq!(x2, vec![1.5]);
     assert_eq!(y2, vec![3.5]);
 }
