@@ -72,19 +72,15 @@ impl PreparedFusionReduction for Prepared {
             // Vecdim is one public call: the host implementation keeps Double
             // scratch values between axes and applies the output template
             // only after its final stage. Nested calls publish separately.
-            let output_class = if index + 1 == dimensions.len() {
-                match parsed.output {
-                    OutputTemplate::Double => NumericClass::Double,
-                    OutputTemplate::Default | OutputTemplate::Native => input_class,
-                }
-            } else {
-                NumericClass::Double
-            };
+            let final_output_class = (index + 1 == dimensions.len()).then(|| match parsed.output {
+                OutputTemplate::Double => NumericClass::Double,
+                OutputTemplate::Default | OutputTemplate::Native => input_class,
+            });
             let Some(stage) = stage_contract(
                 current_class,
                 current_shape,
                 *dimension,
-                output_class,
+                final_output_class,
                 parsed.nan_mode,
             ) else {
                 return Ok(None);
@@ -101,7 +97,7 @@ fn stage_contract(
     input_class: NumericClass,
     shape: Vec<usize>,
     dimension: Option<usize>,
-    output_class: NumericClass,
+    final_output_class: Option<NumericClass>,
     nan_mode: ReductionNaN,
 ) -> Option<FusionReductionContract> {
     let scalar = is_scalar_shape(&shape);
@@ -119,6 +115,15 @@ fn stage_contract(
     };
     let count = checked_reduction_elements(&output_shape)?;
     let raw_double = !identity || scalar || input_class == NumericClass::Double;
+    // An out-of-rank axis returns the input tensor unchanged; it does not
+    // allocate a Double scratch tensor. A scalar identity does materialize
+    // Double in the host reduction owner. The public template is applied
+    // once after the final axis, including an all-identity vecdim call.
+    let output_class = final_output_class.unwrap_or(if raw_double {
+        NumericClass::Double
+    } else {
+        input_class
+    });
     if count == 1 && (raw_double || output_class == NumericClass::Double) {
         output_shape = vec![1, 1];
     }
@@ -222,5 +227,25 @@ mod tests {
         let nested_first = stages(&input, &[Value::Num(2.0)]).unwrap();
         assert_eq!(nested_first.len(), 1);
         assert_eq!(nested_first[0].output_class, NumericClass::Single);
+    }
+
+    #[test]
+    fn vecdim_out_of_rank_identity_preserves_intermediate_carrier() {
+        let input = single(vec![1.0; 6], vec![2, 3]);
+        let axes =
+            |first, second| Value::Tensor(Tensor::new(vec![first, second], vec![1, 2]).unwrap());
+        let identities = stages(&input, &[axes(4.0, 5.0)]).unwrap();
+        assert_eq!(identities.len(), 2);
+        assert!(identities.iter().all(|stage| stage.identity));
+        assert_eq!(identities[0].output_class, NumericClass::Single);
+        assert_eq!(identities[1].input_class, NumericClass::Single);
+        assert_eq!(identities[1].output_class, NumericClass::Single);
+
+        let mixed = stages(&input, &[axes(1.0, 4.0)]).unwrap();
+        assert!(!mixed[0].identity);
+        assert_eq!(mixed[0].output_class, NumericClass::Double);
+        assert!(mixed[1].identity);
+        assert_eq!(mixed[1].input_class, NumericClass::Double);
+        assert_eq!(mixed[1].output_class, NumericClass::Single);
     }
 }
