@@ -25,6 +25,7 @@ pub(crate) mod outliers;
 pub(crate) mod pdf;
 pub(crate) mod qqplot;
 pub(crate) mod random;
+mod reference_lines;
 pub(crate) mod refline;
 pub(crate) mod scatterhist;
 pub(crate) mod statistical_means;

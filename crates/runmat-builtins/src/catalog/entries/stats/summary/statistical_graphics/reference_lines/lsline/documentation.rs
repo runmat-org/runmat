@@ -7,7 +7,7 @@ const OWNER: BuiltinDocumentationLink = BuiltinDocumentationLink {
 };
 const DOMAIN: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Shared reference-line graphics domain",
-    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/refline.rs"),
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/reference_lines/mod.rs"),
 };
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,

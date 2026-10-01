@@ -5,6 +5,10 @@ const OWNER: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Reference-line runtime",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/refline.rs"),
 };
+const DOMAIN: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Shared reference-line graphics domain",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/reference_lines/mod.rs"),
+};
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("refline"), slug: Some("refline"),
@@ -61,14 +65,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "plot", target: BuiltinDocumentationLinkTarget::Builtin("plot") },
         BuiltinDocumentationLink { label: "xline", target: BuiltinDocumentationLinkTarget::Builtin("xline") },
         BuiltinDocumentationLink { label: "yline", target: BuiltinDocumentationLinkTarget::Builtin("yline") },
-        OWNER,
+        OWNER, DOMAIN,
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[OWNER],
+        implementation: &[OWNER, DOMAIN],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Explicit line geometry, class extensions and graphics errors", location: "crates/runmat-runtime/src/builtins/stats/summary/refline/tests.rs" },
-            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Scaled centered least-squares coefficients", location: "crates/runmat-runtime/src/builtins/stats/summary/refline/fit.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Scaled centered least-squares coefficients", location: "crates/runmat-runtime/src/builtins/stats/summary/reference_lines/fit.rs" },
         ],
         notes: &["Host graphics result; admitted resident coefficients materialize at the checked floating boundary."],
     },

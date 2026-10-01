@@ -59,7 +59,7 @@ fn validate_lsline_args(args: &[Value]) -> BuiltinResult<()> {
 )]
 pub(crate) async fn lsline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     validate_lsline_args(&args)?;
-    super::refline::run_reference_lines(args, ReferenceLineOwner::Lsline).await
+    super::reference_lines::run_reference_lines(args, ReferenceLineOwner::Lsline).await
 }
 
 #[cfg(test)]

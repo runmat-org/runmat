@@ -188,6 +188,22 @@ fn refline_spans_existing_plot_or_explicit_axes_limits() {
 }
 
 #[test]
+fn refline_explicit_finite_endpoints_survive_intermediate_product_overflow() {
+    let _guard = setup();
+    crate::builtins::plotting::xlim::xlim_builtin(vec![tensor(vec![2.0, 2.5], 1, 2)]).unwrap();
+    let handle = block_on(refline_builtin(vec![
+        Value::Num(1.0e308),
+        Value::Num(-1.0e308),
+    ]))
+    .expect("finite fused endpoints");
+    let Value::Num(handle) = handle else {
+        panic!("expected line handle")
+    };
+    assert_eq!(x_data(handle), vec![2.0, 2.5]);
+    assert_eq!(y_data(handle), vec![1.0e308, 1.5e308]);
+}
+
+#[test]
 fn refline_targets_axes_and_accepts_style_args() {
     let _guard = setup();
     configure_subplot(1, 2, 0).unwrap();
