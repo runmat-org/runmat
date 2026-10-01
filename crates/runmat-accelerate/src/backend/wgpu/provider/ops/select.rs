@@ -75,7 +75,7 @@ impl WgpuProvider {
                             .ok_or_else(|| anyhow!("select input size overflow"))?,
                 "select input allocation and view disagree"
             );
-            super::backend_shared::fusion_operand_layout(handle, &entry, plan.shape())?;
+            super::backend_shared::fusion_operand_layout(handle, entry, plan.shape())?;
         }
         let output = self.fused_elementwise_exec(
             &crate::backend::wgpu::shaders::select::shader(self.precision),
