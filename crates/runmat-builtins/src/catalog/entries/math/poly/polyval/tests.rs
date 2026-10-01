@@ -104,6 +104,34 @@ fn unknown_placement_does_not_prove_result_class_or_owner() {
 }
 
 #[test]
+fn host_complex_operands_prove_complex_double_output() {
+    let mut coefficients = numeric(ShapeFact::from(vec![Some(1), Some(3)]));
+    coefficients.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Complex,
+    });
+    let points = numeric(ShapeFact::from(vec![Some(2), Some(2)]));
+    let result = crate::infer_catalog_call(
+        &POLYVAL_CATALOG_ENTRY,
+        &request(vec![coefficients, points], 1),
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), Some(2)])
+    );
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().domain,
+        NumericDomain::Complex
+    );
+    assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
+}
+
+#[test]
 fn invalid_coefficient_matrix_and_short_mu_are_diagnosed() {
     let coeffs = numeric(ShapeFact::from(vec![Some(2), Some(2)]));
     let points = numeric(ShapeFact::Scalar);

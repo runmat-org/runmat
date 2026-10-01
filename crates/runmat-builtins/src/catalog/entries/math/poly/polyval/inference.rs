@@ -211,13 +211,21 @@ fn numeric_output(
     if let Some(coefficients) = coefficients {
         if matches!(coefficients.residency, ResidencyFact::Host)
             && matches!(points.residency, ResidencyFact::Host)
-            && (delta || (real_or_logical(coefficients) && real_or_logical(points)))
         {
-            result.kind = ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            });
-            result.residency = ResidencyFact::Host;
+            let domain = if delta || (real_or_logical(coefficients) && real_or_logical(points)) {
+                Some(NumericDomain::Real)
+            } else if complex_numeric(coefficients) || complex_numeric(points) {
+                Some(NumericDomain::Complex)
+            } else {
+                None
+            };
+            if let Some(domain) = domain {
+                result.kind = ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain,
+                });
+                result.residency = ResidencyFact::Host;
+            }
         }
     }
     result
@@ -230,6 +238,16 @@ fn real_or_logical(value: &ValueFact) -> bool {
             domain: NumericDomain::Real,
             ..
         }) | ValueKindFact::Logical
+    )
+}
+
+fn complex_numeric(value: &ValueFact) -> bool {
+    matches!(
+        value.kind,
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Complex,
+            ..
+        })
     )
 }
 
