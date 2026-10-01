@@ -117,6 +117,26 @@ mod tests {
     use crate::BuiltinConstantKind;
 
     #[test]
+    fn compiled_primary_inventory_is_unique_valid_and_resolvable() {
+        let entries = builtin_catalog_entries();
+        let errors = crate::validate_builtin_catalog(entries);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let mut names = std::collections::BTreeSet::new();
+        for entry in entries {
+            assert!(names.insert(entry.identity.name.to_ascii_lowercase()));
+            let resolved = builtin_catalog_primary_entry_by_name(entry.identity.name)
+                .expect("every compiled primary entry must be indexed");
+            assert!(std::ptr::eq(*entry, resolved));
+        }
+        eprintln!(
+            "compiled catalog inventory: {} primary entries, {} aliases, {} constants",
+            entries.len(),
+            builtin_catalog_aliases().len(),
+            builtin_constant_catalog_entries().len(),
+        );
+    }
+
+    #[test]
     fn primary_name_index_is_case_insensitive_without_changing_canonical_spelling() {
         let entry = builtin_catalog_entries()
             .first()

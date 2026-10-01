@@ -20,8 +20,8 @@ pub const BAYESOPT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::HostCallback,
             EffectKind::Clock,
+            EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
             EffectKind::Unknown,
