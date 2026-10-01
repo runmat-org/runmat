@@ -1,5 +1,28 @@
 //! Name-value identity admission for multinomial fitting.
 
+mod runtime;
+
+pub(super) use runtime::parse_options;
+
+#[derive(Clone, Debug)]
+pub(super) struct Options {
+    pub(super) constant: bool,
+    pub(super) weights: Option<Vec<f64>>,
+    pub(super) max_iter: usize,
+    pub(super) tol_x: f64,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            constant: true,
+            weights: None,
+            max_iter: 100,
+            tol_x: 1.0e-6,
+        }
+    }
+}
+
 use super::{invalid, scalar_text};
 use crate::BuiltinResult;
 pub(super) use runmat_builtins::MnrfitOption as OptionName;
