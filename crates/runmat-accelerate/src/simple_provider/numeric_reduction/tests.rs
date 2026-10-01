@@ -135,3 +135,44 @@ fn native_double_both_dimensions_and_empty_second_axis_have_exact_geometry() {
         );
     }
 }
+
+#[test]
+fn native_means_preserve_single_and_double_without_a_host_roundtrip() {
+    let provider = InProcessProvider::new();
+    for data in [
+        HostNumericDataView::F32(&[1.0, 3.0, 5.0, 7.0]),
+        HostNumericDataView::F64(&[1.0, 3.0, 5.0, 7.0]),
+    ] {
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data,
+                shape: &[2, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let first = block_on(provider.reduce_mean_dim(&input, 0)).unwrap();
+        let second = block_on(provider.reduce_mean_dim(&input, 1)).unwrap();
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(first.shape(), &[1, 2]);
+        assert_eq!(second.shape(), &[2, 1]);
+        assert_eq!(
+            first.physical().element_type(),
+            input.physical().element_type()
+        );
+        assert_eq!(
+            second.physical().element_type(),
+            input.physical().element_type()
+        );
+        match block_on(provider.download_numeric(&first)).unwrap().data {
+            HostNumericDataOwned::F32(values) => assert_eq!(values, [2.0, 6.0]),
+            HostNumericDataOwned::F64(values) => assert_eq!(values, [2.0, 6.0]),
+            other => panic!("mean changed physical class: {other:?}"),
+        }
+        match block_on(provider.download_numeric(&second)).unwrap().data {
+            HostNumericDataOwned::F32(values) => assert_eq!(values, [3.0, 5.0]),
+            HostNumericDataOwned::F64(values) => assert_eq!(values, [3.0, 5.0]),
+            other => panic!("mean changed physical class: {other:?}"),
+        }
+    }
+}

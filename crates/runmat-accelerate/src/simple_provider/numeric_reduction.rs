@@ -13,6 +13,23 @@ impl InProcessProvider {
         input: &GpuTensorHandle,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
+        self.native_additive_dim(input, dim, false)
+    }
+
+    pub(super) fn native_mean_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+    ) -> Result<GpuTensorHandle> {
+        self.native_additive_dim(input, dim, true)
+    }
+
+    fn native_additive_dim(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        mean: bool,
+    ) -> Result<GpuTensorHandle> {
         ensure!(
             input.shape().len() == 2,
             "reduce_sum_dim: only 2D supported"
@@ -56,14 +73,26 @@ impl InProcessProvider {
                         values.len() == count,
                         "reduce_sum_dim: payload extent mismatch"
                     );
-                    InProcessNumericData::F32(sum_typed(values, rows, cols, dim, layout))
+                    let mut reduced = sum_typed(values, rows, cols, dim, layout);
+                    if mean {
+                        for value in &mut reduced {
+                            *value /= input.shape()[dim] as f32;
+                        }
+                    }
+                    InProcessNumericData::F32(reduced)
                 }
                 InProcessNumericData::F64(values) => {
                     ensure!(
                         values.len() == count,
                         "reduce_sum_dim: payload extent mismatch"
                     );
-                    InProcessNumericData::F64(sum_typed(values, rows, cols, dim, layout))
+                    let mut reduced = sum_typed(values, rows, cols, dim, layout);
+                    if mean {
+                        for value in &mut reduced {
+                            *value /= input.shape()[dim] as f64;
+                        }
+                    }
+                    InProcessNumericData::F64(reduced)
                 }
                 InProcessNumericData::Integer(_) => {
                     return Err(runmat_accelerate_api::unsupported_provider_operation(

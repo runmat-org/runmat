@@ -4,6 +4,7 @@ use allocation_state::{integer_registry, numeric_registry, registry};
 mod power;
 mod select;
 mod logical;
+mod nan;
 mod logarithms;
 mod remainder;
 mod unary;
@@ -6175,6 +6176,14 @@ impl AccelProvider for InProcessProvider {
     fn logical_isinf(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.unary_predicate_impl(a, logical::UnaryPredicate::Infinite)
     }
+
+    fn map_nan_to_zero(&self, input: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.nan_map_impl(input, nan::NanMap::Zero)
+    }
+
+    fn not_nan_mask(&self, input: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.nan_map_impl(input, nan::NanMap::NumericMask)
+    }
     fn elem_hypot<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -8087,43 +8096,7 @@ impl AccelProvider for InProcessProvider {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
                 return self.reduce_integer_mean_native_dim(a, dim).await;
             }
-            if a.shape().len() != 2 {
-                return Err(anyhow::anyhow!("reduce_mean_dim: only 2D supported"));
-            }
-            let rows = a.shape()[0];
-            let cols = a.shape()[1];
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out = if dim == 0 {
-                let mut v = vec![0.0f64; cols];
-                for c in 0..cols {
-                    let mut s = 0.0;
-                    for r in 0..rows {
-                        s += abuf[r + c * rows];
-                    }
-                    v[c] = s / (rows as f64);
-                }
-                v
-            } else {
-                let mut v = vec![0.0f64; rows];
-                for r in 0..rows {
-                    let mut s = 0.0;
-                    for c in 0..cols {
-                        s += abuf[r + c * rows];
-                    }
-                    v[r] = s / (cols as f64);
-                }
-                v
-            };
-            drop(guard);
-            let shape = if dim == 0 {
-                vec![1, cols]
-            } else {
-                vec![rows, 1]
-            };
-            self.allocate_tensor(out, shape)
+            self.native_mean_dim(a, dim)
         })
     }
 
