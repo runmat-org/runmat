@@ -101,8 +101,8 @@ struct PreparedModel {
 #[derive(Clone, Debug)]
 struct PredictionResult {
     labels: Vec<usize>,
-    posterior: Tensor,
-    logp: Tensor,
+    posterior: Option<Tensor>,
+    logp: Option<Tensor>,
 }
 
 #[runtime_builtin(
@@ -267,19 +267,23 @@ fn classify_compute(
         ));
     }
     let prepared = prepare_model(&training, labels, discriminant, prior)?;
-    let predictions = predict_rows(&prepared, &sample)?;
+    let predictions = predict_rows(&prepared, &sample, output_limit >= 3, output_limit >= 4)?;
     let class = labels_value(&prepared.classes, prepared.kind, &predictions.labels)?;
     if output_limit == 1 {
         return Ok(vec![class]);
     }
-    let training_predictions = predict_rows(&prepared, &training)?;
+    let training_predictions = predict_rows(&prepared, &training, false, false)?;
     let err = apparent_error(&prepared, &training_predictions.labels);
     let mut outputs = vec![class, Value::Num(err)];
     if output_limit >= 3 {
-        outputs.push(Value::Tensor(predictions.posterior));
+        outputs.push(Value::Tensor(predictions.posterior.ok_or_else(|| {
+            internal_error("classify: posterior output was not materialized")
+        })?));
     }
     if output_limit >= 4 {
-        outputs.push(Value::Tensor(predictions.logp));
+        outputs.push(Value::Tensor(predictions.logp.ok_or_else(|| {
+            internal_error("classify: log-density output was not materialized")
+        })?));
     }
     if output_limit >= 5 {
         outputs.push(coeff_value(&prepared)?);
@@ -467,15 +471,47 @@ fn invert_covariance(
     Ok((inverse, det.abs().ln()))
 }
 
-fn predict_rows(model: &PreparedModel, data: &FloatingMatrix) -> BuiltinResult<PredictionResult> {
+fn predict_rows(
+    model: &PreparedModel,
+    data: &FloatingMatrix,
+    need_posterior: bool,
+    need_logp: bool,
+) -> BuiltinResult<PredictionResult> {
     let rows = data.rows;
     let class_count = model.classes.len();
-    let mut label_indices = Vec::with_capacity(rows);
-    let mut posterior_data = vec![0.0; rows * class_count];
-    let mut logp_data = vec![0.0; rows];
+    let mut label_indices = Vec::new();
+    label_indices
+        .try_reserve_exact(rows)
+        .map_err(|err| internal_error(format!("classify: cannot allocate labels: {err}")))?;
+    let mut posterior_data = if need_posterior {
+        let count = rows
+            .checked_mul(class_count)
+            .ok_or_else(|| internal_error("classify: posterior shape overflows"))?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(count)
+            .map_err(|err| internal_error(format!("classify: cannot allocate posterior: {err}")))?;
+        values.resize(count, 0.0);
+        Some(values)
+    } else {
+        None
+    };
+    let mut logp_data = if need_logp {
+        let mut values = Vec::new();
+        values.try_reserve_exact(rows).map_err(|err| {
+            internal_error(format!("classify: cannot allocate log density: {err}"))
+        })?;
+        values.resize(rows, 0.0);
+        Some(values)
+    } else {
+        None
+    };
     for row in 0..rows {
         let x = row_vector(data, row);
-        let mut scores = Vec::with_capacity(class_count);
+        let mut scores = Vec::new();
+        scores.try_reserve_exact(class_count).map_err(|err| {
+            internal_error(format!("classify: cannot allocate class scores: {err}"))
+        })?;
         for class_index in 0..class_count {
             scores.push(discriminant_score(model, class_index, &x)?);
         }
@@ -487,24 +523,40 @@ fn predict_rows(model: &PreparedModel, data: &FloatingMatrix) -> BuiltinResult<P
             .ok_or_else(|| internal_error("classify: no classes"))?;
         label_indices.push(best);
         if model.discriminant == DiscriminantType::Mahalanobis {
-            for class_index in 0..class_count {
-                posterior_data[row + class_index * rows] = f64::NAN;
+            if let Some(posterior) = &mut posterior_data {
+                for class_index in 0..class_count {
+                    posterior[row + class_index * rows] = f64::NAN;
+                }
             }
-            logp_data[row] = f64::NAN;
-        } else {
+            if let Some(logp) = &mut logp_data {
+                logp[row] = f64::NAN;
+            }
+        } else if need_posterior || need_logp {
             let logp = log_sum_exp(&scores);
-            logp_data[row] = logp;
-            for class_index in 0..class_count {
-                posterior_data[row + class_index * rows] = (scores[class_index] - logp).exp();
+            if let Some(values) = &mut logp_data {
+                values[row] = logp;
+            }
+            if let Some(posterior) = &mut posterior_data {
+                for class_index in 0..class_count {
+                    posterior[row + class_index * rows] = (scores[class_index] - logp).exp();
+                }
             }
         }
     }
     Ok(PredictionResult {
         labels: label_indices,
-        posterior: Tensor::new(posterior_data, vec![rows, class_count])
-            .map_err(|err| internal_error(format!("classify: {err}")))?,
-        logp: Tensor::new(logp_data, vec![rows, 1])
-            .map_err(|err| internal_error(format!("classify: {err}")))?,
+        posterior: posterior_data
+            .map(|values| {
+                Tensor::new(values, vec![rows, class_count])
+                    .map_err(|err| internal_error(format!("classify: {err}")))
+            })
+            .transpose()?,
+        logp: logp_data
+            .map(|values| {
+                Tensor::new(values, vec![rows, 1])
+                    .map_err(|err| internal_error(format!("classify: {err}")))
+            })
+            .transpose()?,
     })
 }
 
@@ -648,7 +700,13 @@ fn prior_from_struct(
 
 fn coeff_value(model: &PreparedModel) -> BuiltinResult<Value> {
     let k = model.classes.len();
-    let mut entries = Vec::with_capacity(k * k);
+    let entry_count = k
+        .checked_mul(k)
+        .ok_or_else(|| internal_error("classify: coefficient cell shape overflows"))?;
+    let mut entries = Vec::new();
+    entries
+        .try_reserve_exact(entry_count)
+        .map_err(|err| internal_error(format!("classify: cannot allocate coefficients: {err}")))?;
     for row in 0..k {
         for col in 0..k {
             let coeff = pairwise_coeff(model, row, col)?;
@@ -692,12 +750,19 @@ fn pairwise_coeff(
     i: usize,
     j: usize,
 ) -> BuiltinResult<(f64, Vec<f64>, Vec<f64>)> {
+    let quadratic_len = model
+        .cols
+        .checked_mul(model.cols)
+        .ok_or_else(|| internal_error("classify: quadratic coefficient shape overflows"))?;
     if i == j {
-        return Ok((
-            0.0,
-            vec![0.0; model.cols],
-            vec![0.0; model.cols * model.cols],
-        ));
+        let mut quadratic = Vec::new();
+        quadratic.try_reserve_exact(quadratic_len).map_err(|err| {
+            internal_error(format!(
+                "classify: cannot allocate quadratic coefficients: {err}"
+            ))
+        })?;
+        quadratic.resize(quadratic_len, 0.0);
+        return Ok((0.0, vec![0.0; model.cols], quadratic));
     }
     let class_i = &model.classes[i];
     let class_j = &model.classes[j];
@@ -725,15 +790,18 @@ fn pairwise_coeff(
                     - (mean_j.transpose() * inv_j * &mean_j)[(0, 0)])
     };
     let quadratic = if model.discriminant.uses_shared_covariance() {
-        DMatrix::<f64>::zeros(model.cols, model.cols)
+        let mut values = Vec::new();
+        values.try_reserve_exact(quadratic_len).map_err(|err| {
+            internal_error(format!(
+                "classify: cannot allocate quadratic coefficients: {err}"
+            ))
+        })?;
+        values.resize(quadratic_len, 0.0);
+        values
     } else {
-        (inv_j - inv_i) * 0.5
+        ((inv_j - inv_i) * 0.5).iter().copied().collect()
     };
-    Ok((
-        const_term,
-        linear_vec.iter().copied().collect(),
-        quadratic.iter().copied().collect(),
-    ))
+    Ok((const_term, linear_vec.iter().copied().collect(), quadratic))
 }
 
 fn log_prior_ratio(left: f64, right: f64) -> f64 {
