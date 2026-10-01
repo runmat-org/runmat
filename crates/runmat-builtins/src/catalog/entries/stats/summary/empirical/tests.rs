@@ -246,7 +246,7 @@ fn ambiguous_axes_forms_and_known_invalid_controls_never_prove_outputs() {
             &CDFPLOT_CATALOG_ENTRY,
         )
     };
-    for result in [cdfplot(vector), cdfplot(numeric_scalar)] {
+    for result in [cdfplot(vector.clone()), cdfplot(numeric_scalar)] {
         assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
         assert!(matches!(result.outputs[1].kind, ValueKindFact::Unknown));
     }
