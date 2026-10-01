@@ -19,6 +19,7 @@ mod order_statistics;
 mod outlier_detection;
 mod pdf;
 mod random;
+mod statistical_graphics;
 mod statistical_means;
 mod tabulate;
 mod ttest2;
@@ -39,6 +40,7 @@ pub use self::order_statistics::*;
 pub use self::outlier_detection::*;
 pub use self::pdf::*;
 pub use self::random::*;
+pub use self::statistical_graphics::*;
 pub use self::statistical_means::*;
 pub use self::tabulate::*;
 pub use self::ttest2::*;
@@ -63,4 +65,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(kstest::ENTRIES.iter().copied());
     values.extend(tabulate::ENTRIES.iter().copied());
     values.extend(empirical::ENTRIES.iter().copied());
+    values.extend(statistical_graphics::ENTRIES.iter().copied());
 }
