@@ -88,7 +88,9 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
         .fields
         .remove("breaks")
         .ok_or_else(|| interp_error(name, format!("{name}: pp struct is missing breaks")))?;
-    let breaks = vector_from_value(breaks_value, "breaks", name).await?;
+    let breaks_host = materialize_if_resident(breaks_value).await?;
+    ensure_exact_integer_field(&breaks_host, name, "breaks")?;
+    let breaks = vector_from_value(breaks_host, "breaks", name).await?;
     validate_breaks(&breaks, name)?;
 
     let coefs_value = st
@@ -96,6 +98,7 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
         .remove("coefs")
         .ok_or_else(|| interp_error(name, format!("{name}: pp struct is missing coefs")))?;
     let coefs_host = materialize_if_resident(coefs_value).await?;
+    ensure_exact_integer_field(&coefs_host, name, "coefs")?;
     let coefs_tensor = tensor::value_into_tensor_for(name, coefs_host)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
 
@@ -103,6 +106,15 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
     let order = scalar_field(&st, "order", name).await?;
     let component_shape = component_shape_field(&st, name).await?;
     let dim = PiecewisePolynomial::component_dim(&component_shape, name)?;
+    let rows = pieces
+        .checked_mul(dim)
+        .ok_or_else(|| interp_error(name, format!("{name}: coefficient shape overflow")))?;
+    if coefs_tensor.shape.as_slice() != [rows, order] {
+        return Err(interp_error(
+            name,
+            format!("{name}: pp coefficients must be a {rows}-by-{order} matrix"),
+        ));
+    }
     let coefs = tensor::tensor_into_values_f64(coefs_tensor);
     PiecewisePolynomial::from_parts(breaks, coefs, pieces, order, dim, component_shape, name)
 }
@@ -113,7 +125,7 @@ async fn component_shape_field(st: &StructValue, name: &'static str) -> BuiltinR
         .get("dim")
         .ok_or_else(|| interp_error(name, format!("{name}: pp struct is missing dim")))?;
     let gathered = materialize_if_resident(value.clone()).await?;
-    ensure_exact_integer_metadata(&gathered, name, "dim")?;
+    ensure_exact_integer_field(&gathered, name, "dim")?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
     if !is_vector_shape(&tensor.shape) {
@@ -160,7 +172,7 @@ async fn scalar_field(st: &StructValue, field: &str, name: &'static str) -> Buil
         .get(field)
         .ok_or_else(|| interp_error(name, format!("{name}: pp struct is missing {field}")))?;
     let gathered = materialize_if_resident(value.clone()).await?;
-    ensure_exact_integer_metadata(&gathered, name, field)?;
+    ensure_exact_integer_field(&gathered, name, field)?;
     let Some(raw) = tensor::scalar_f64_from_value_async(&gathered)
         .await
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?
@@ -186,24 +198,8 @@ async fn scalar_field(st: &StructValue, field: &str, name: &'static str) -> Buil
     Ok(count as usize)
 }
 
-fn ensure_exact_integer_metadata(
-    value: &Value,
-    name: &'static str,
-    field: &str,
-) -> BuiltinResult<()> {
-    let exact = crate::builtins::common::validation::integer_is_exact_f64;
-    let representable = match value {
-        Value::Int(integer) => exact(integer),
-        Value::Tensor(tensor) => tensor.integer_storage().is_none_or(|storage| {
-            (0..storage.len()).all(|index| {
-                storage
-                    .value_at(index)
-                    .is_some_and(|integer| exact(&integer))
-            })
-        }),
-        _ => true,
-    };
-    if representable {
+fn ensure_exact_integer_field(value: &Value, name: &'static str, field: &str) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
         Ok(())
     } else {
         Err(interp_error(

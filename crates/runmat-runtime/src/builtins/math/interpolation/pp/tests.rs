@@ -88,6 +88,104 @@ fn pp_metadata_rejects_lossy_integer_dimensions_before_evaluation() {
 }
 
 #[test]
+fn external_pp_requires_piece_major_coefficient_matrix_geometry() {
+    let series = NumericSeries {
+        x: vec![0.0, 1.0],
+        y: vec![10.0, 11.0, 20.0, 22.0],
+        series: 2,
+        component_shape: vec![2],
+        sample_axis: SampleAxis::Last,
+    };
+    let public = pp_to_value(build_pchip_pp(&series, "pchip").unwrap(), "pchip").unwrap();
+    let Value::Struct(ref fields) = public else {
+        panic!("generated pp must be a struct");
+    };
+    let Some(Value::Tensor(coefs)) = fields.fields.get("coefs") else {
+        panic!("generated coefficients must be a tensor");
+    };
+    assert_eq!(coefs.shape, vec![2, 4]);
+
+    let parsed = futures::executor::block_on(pp_from_value(public.clone(), "ppval"))
+        .expect("piece-major vector-valued pp");
+    let query = QueryPoints {
+        values: vec![0.0, 1.0],
+        shape: vec![1, 2],
+    };
+    let Value::Tensor(result) = evaluate_pp(
+        &parsed,
+        &query,
+        &Extrapolation::Extrapolate,
+        PpOutputLayout::ComponentLeading,
+        "ppval",
+    )
+    .unwrap() else {
+        panic!("two components and two queries produce a tensor");
+    };
+    assert_eq!(result.materialize_f64(), vec![10.0, 20.0, 11.0, 22.0]);
+
+    for shape in [vec![4, 2], vec![1, 8]] {
+        let Value::Struct(mut malformed) = public.clone() else {
+            unreachable!();
+        };
+        malformed.insert(
+            "coefs",
+            Value::Tensor(Tensor::new(coefs.materialize_f64(), shape).unwrap()),
+        );
+        let error = futures::executor::block_on(pp_from_value(Value::Struct(malformed), "ppval"))
+            .expect_err("same-count noncanonical coefficient geometry must reject");
+        assert!(error.message().contains("2-by-4 matrix"));
+    }
+}
+
+#[test]
+fn external_pp_rejects_inexact_integer_breaks_and_coefficients() {
+    let public = pp_to_value(
+        build_spline_pp(&scalar_series(&[1.0, 4.0, 9.0]), "spline").unwrap(),
+        "spline",
+    )
+    .unwrap();
+    let inexact = (1_u64 << 53) + 1;
+    for field in ["breaks", "coefs"] {
+        let Value::Struct(mut malformed) = public.clone() else {
+            unreachable!();
+        };
+        let (storage, shape) = if field == "breaks" {
+            (IntegerStorage::U64(vec![1, 2, inexact]), vec![1, 3])
+        } else {
+            (
+                IntegerStorage::U64(vec![0, 0, 0, 0, 0, 0, 0, inexact]),
+                vec![2, 4],
+            )
+        };
+        malformed.insert(
+            field,
+            Value::Tensor(Tensor::new_integer(storage, shape).unwrap()),
+        );
+        let error = futures::executor::block_on(pp_from_value(Value::Struct(malformed), "ppval"))
+            .expect_err("integer payload must not round during external PP admission");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    let Value::Struct(mut exact) = public else {
+        unreachable!();
+    };
+    let exact_wide = 1_u64 << 54;
+    exact.insert(
+        "coefs",
+        Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![0, 0, 0, 0, 0, 0, 0, exact_wide]),
+                vec![2, 4],
+            )
+            .unwrap(),
+        ),
+    );
+    let parsed = futures::executor::block_on(pp_from_value(Value::Struct(exact), "ppval"))
+        .expect("representable integers above flintmax stay admitted");
+    assert_eq!(parsed.coefs[7], exact_wide as f64);
+}
+
+#[test]
 fn pchip_preserves_monotone_samples() {
     let series = scalar_series(&[0.0, 1.0, 1.5, 1.75]);
     let pp = build_pchip_pp(&series, "pchip").expect("pchip");
