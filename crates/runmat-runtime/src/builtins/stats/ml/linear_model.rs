@@ -2,13 +2,13 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, PREDICT_ERROR_INTERNAL as ERROR_PREDICT_INTERNAL,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, FitlmOption,
+    FITLM_ERROR_INTERNAL as ERROR_FITLM_INTERNAL,
+    FITLM_ERROR_INVALID_ARGUMENT as ERROR_FITLM_INVALID_ARGUMENT,
+    FITLM_ERROR_NUMERICAL as ERROR_FITLM_NUMERICAL, FITLM_INTEGER_CONTROL_EXTENSION,
+    FITLM_INTEGER_PREDICTOR_EXTENSION, FITLM_INTEGER_RESPONSE_EXTENSION,
+    FITLM_INTEGER_SELECTOR_EXTENSION, FITLM_INTEGER_WEIGHTS_EXTENSION,
+    FITLM_RESIDENT_FALLBACK_EXTENSION, PREDICT_ERROR_INTERNAL as ERROR_PREDICT_INTERNAL,
     PREDICT_ERROR_INVALID_ARGUMENT as ERROR_PREDICT_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
@@ -27,182 +27,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const FITLM_NAME: &str = "fitlm";
 const PREDICT_NAME: &str = "predict";
 const EPS: f64 = 1.0e-12;
-
-const OUTPUT_MDL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mdl",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "LinearModel object containing coefficients, fitted values, residuals, and summary statistics.",
-}];
-
-const PARAM_TBL_OR_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "tblOrX",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input table or predictor matrix.",
-};
-
-const PARAM_Y_OR_SPEC: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "yOrSpec",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Response vector, response variable name, model formula, or model specification.",
-};
-
-const PARAM_REST: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Model specification and name-value options such as Intercept, ResponseVar, PredictorVars, VarNames, Exclude, and Weights.",
-};
-
-const FITLM_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_TBL_OR_X, PARAM_Y_OR_SPEC];
-const FITLM_INPUTS_FULL: [BuiltinParamDescriptor; 3] =
-    [PARAM_TBL_OR_X, PARAM_Y_OR_SPEC, PARAM_REST];
-const FITLM_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "mdl = fitlm(tbl)",
-        inputs: &[PARAM_TBL_OR_X],
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "mdl = fitlm(tbl, modelspec)",
-        inputs: &FITLM_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "mdl = fitlm(X, y)",
-        inputs: &FITLM_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "mdl = fitlm(___, Name, Value)",
-        inputs: &FITLM_INPUTS_FULL,
-        outputs: &OUTPUT_MDL,
-    },
-];
-
-const ERROR_FITLM_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITLM.INVALID_ARGUMENT",
-    identifier: Some("RunMat:fitlm:InvalidArgument"),
-    when: "Inputs, model specifications, dimensions, or name-value options are malformed or unsupported.",
-    message: "fitlm: invalid argument",
-};
-
-const ERROR_FITLM_NUMERICAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITLM.NUMERICAL",
-    identifier: Some("RunMat:fitlm:Numerical"),
-    when: "The linear model cannot be fit numerically.",
-    message: "fitlm: numerical failure",
-};
-
-const ERROR_FITLM_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITLM.INTERNAL",
-    identifier: Some("RunMat:fitlm:Internal"),
-    when: "RunMat cannot construct a LinearModel result.",
-    message: "fitlm: internal error",
-};
-
-const FITLM_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ERROR_FITLM_INVALID_ARGUMENT,
-    ERROR_FITLM_NUMERICAL,
-    ERROR_FITLM_INTERNAL,
-];
-
-pub const FITLM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FITLM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FITLM_ERRORS,
-};
-
-macro_rules! fitlm_integer_extension {
-    ($name:ident, $id:literal, $description:literal, $error:literal) => {
-        const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-            id: $id,
-            mode: BuiltinExtensionMode::RunMatOnly,
-            description: $description,
-            error_identifier: Some($error),
-        };
-    };
-}
-fitlm_integer_extension!(
-    FITLM_INTEGER_PREDICTOR_EXTENSION,
-    "fitlm-integer-predictor-data",
-    "fitlm with typed-integer predictor data is a RunMat extension",
-    "RunMat:compatibility:FitlmIntegerPredictorExtension"
-);
-fitlm_integer_extension!(
-    FITLM_INTEGER_RESPONSE_EXTENSION,
-    "fitlm-integer-response-data",
-    "fitlm with typed-integer response data is a RunMat extension",
-    "RunMat:compatibility:FitlmIntegerResponseExtension"
-);
-fitlm_integer_extension!(
-    FITLM_INTEGER_WEIGHTS_EXTENSION,
-    "fitlm-integer-weights",
-    "fitlm with typed-integer observation weights is a RunMat extension",
-    "RunMat:compatibility:FitlmIntegerWeightsExtension"
-);
-fitlm_integer_extension!(
-    FITLM_INTEGER_SELECTOR_EXTENSION,
-    "fitlm-integer-selectors",
-    "fitlm with typed-integer Exclude or selector controls is a RunMat extension",
-    "RunMat:compatibility:FitlmIntegerSelectorExtension"
-);
-fitlm_integer_extension!(
-    FITLM_INTEGER_CONTROL_EXTENSION,
-    "fitlm-integer-controls",
-    "fitlm with a typed-integer Intercept control is a RunMat extension",
-    "RunMat:compatibility:FitlmIntegerControlExtension"
-);
-fitlm_integer_extension!(
-    FITLM_RESIDENT_FALLBACK_EXTENSION,
-    "fitlm-resident-fallback",
-    "fitlm gathers resident inputs and returns a host linear-model object",
-    "RunMat:compatibility:FitlmResidentFallbackExtension"
-);
-pub const FITLM_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
-    FITLM_INTEGER_PREDICTOR_EXTENSION,
-    FITLM_INTEGER_RESPONSE_EXTENSION,
-    FITLM_INTEGER_WEIGHTS_EXTENSION,
-    FITLM_INTEGER_SELECTOR_EXTENSION,
-    FITLM_INTEGER_CONTROL_EXTENSION,
-    FITLM_RESIDENT_FALLBACK_EXTENSION,
-];
-
-macro_rules! fitlm_integer_input {
-    ($name:ident, $role:literal, $notes:literal) => {
-        const $name: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-            name: $role,
-            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-            availability: BuiltinIntegerInputAvailability::RunMatOnly,
-            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-            notes: $notes,
-        }];
-    };
-}
-fitlm_integer_input!(FITLM_INTEGER_PREDICTOR_INPUT, "X or active table predictors", "The compatibility target documents single or double predictors. RunMat mode admits all eight integer classes at an exact binary64 fitting boundary.");
-fitlm_integer_input!(FITLM_INTEGER_RESPONSE_INPUT, "y or active table response", "The compatibility target documents single or double matrix responses and numeric/logical table responses, but not typed integers. RunMat mode requires exact binary64 representation.");
-fitlm_integer_input!(FITLM_INTEGER_WEIGHTS_INPUT, "Weights", "The compatibility target documents single or double weights. RunMat mode admits typed integers only at an exact binary64 weighting boundary.");
-fitlm_integer_input!(FITLM_INTEGER_SELECTOR_INPUT, "Exclude and numeric selectors", "Typed-integer structural selectors are parsed exactly as one-based indices or logical-style masks after independent extension admission.");
-fitlm_integer_input!(FITLM_INTEGER_CONTROL_INPUT, "Intercept", "A typed-integer Intercept scalar is a RunMat-only exact zero/nonzero control and does not cross through binary64.");
-
-pub const FITLM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
-    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(integer_X,y,...) or fitlm(table_with_integer_predictors,...)", inputs: &FITLM_INTEGER_PREDICTOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Predictors are gated before provider access; admitted resident data gathers exactly and the returned model is currently host-resident with binary64 properties." },
-    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(X,integer_y,...) or fitlm(table_with_integer_response,...)", inputs: &FITLM_INTEGER_RESPONSE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Responses are independently gated and checked before binary64 least-squares computation." },
-    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(...,Weights=integer_weights)", inputs: &FITLM_INTEGER_WEIGHTS_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Integer weights remain authoritative through admission and must be nonnegative, finite, shape-matched, and exactly representable as double." },
-    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(...,Exclude=integer_indices,...) ", inputs: &FITLM_INTEGER_SELECTOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "One-based integer selectors are decoded exactly in every supported integer class." },
-    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(...,Intercept=integer_scalar)", inputs: &FITLM_INTEGER_CONTROL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Zero disables and every nonzero exact integer enables the intercept." },
-];
-
-fn fitlm_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
 
 fn fitlm_error(
     message: impl Into<String>,
@@ -345,13 +169,7 @@ struct OlsFit {
 
 #[runtime_builtin(
     name = "fitlm",
-    category = "stats/ml",
-    summary = "Fit an ordinary least-squares linear regression model.",
-    keywords = "fitlm,linear model,regression,least squares,statistics,machine learning",
-    type_resolver(fitlm_type),
-    descriptor(crate::builtins::stats::ml::linear_model::FITLM_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::linear_model::FITLM_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::linear_model::FITLM_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::linear_model"
 )]
 async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -401,30 +219,33 @@ fn ensure_fitlm_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
         let Some(name) = scalar_text(&pair[0]) else {
             continue;
         };
-        if name.eq_ignore_ascii_case("Weights") {
-            if is_typed_integer_value(&pair[1]) {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &FITLM_INTEGER_WEIGHTS_EXTENSION,
-                    FITLM_NAME,
-                )?;
+        match FitlmOption::from_public_name(&name) {
+            Some(FitlmOption::Weights) => {
+                if is_typed_integer_value(&pair[1]) {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &FITLM_INTEGER_WEIGHTS_EXTENSION,
+                        FITLM_NAME,
+                    )?;
+                }
+                weights_name = scalar_text(&pair[1]);
             }
-            weights_name = scalar_text(&pair[1]);
-        } else if name.eq_ignore_ascii_case("Exclude") {
-            if is_typed_integer_value(&pair[1]) {
+            Some(FitlmOption::Exclude) if is_typed_integer_value(&pair[1]) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &FITLM_INTEGER_SELECTOR_EXTENSION,
                     FITLM_NAME,
                 )?;
             }
-        } else if name.eq_ignore_ascii_case("ResponseVar") {
-            response_name = scalar_text(&pair[1]);
-        } else if name.eq_ignore_ascii_case("PredictorVars") {
-            predictor_names = text_list(&pair[1], "PredictorVars").ok();
-        } else if name.eq_ignore_ascii_case("Intercept") && is_typed_integer_value(&pair[1]) {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &FITLM_INTEGER_CONTROL_EXTENSION,
-                FITLM_NAME,
-            )?;
+            Some(FitlmOption::ResponseVar) => response_name = scalar_text(&pair[1]),
+            Some(FitlmOption::PredictorVars) => {
+                predictor_names = text_list(&pair[1], "PredictorVars").ok();
+            }
+            Some(FitlmOption::Intercept) if is_typed_integer_value(&pair[1]) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FITLM_INTEGER_CONTROL_EXTENSION,
+                    FITLM_NAME,
+                )?;
+            }
+            _ => {}
         }
     }
 
@@ -796,33 +617,32 @@ fn parse_fit_name_values(values: &[Value], options: &mut FitOptions) -> BuiltinR
         let name = scalar_text(&values[index])
             .ok_or_else(|| fitlm_invalid("fitlm: option name must be text"))?;
         let value = &values[index + 1];
-        if name.eq_ignore_ascii_case("Intercept") {
-            options.intercept = bool_scalar(value, "Intercept")?;
-        } else if name.eq_ignore_ascii_case("ResponseVar") {
-            options.response_var = Some(
-                scalar_text(value)
-                    .ok_or_else(|| fitlm_invalid("fitlm: ResponseVar must be text"))?,
-            );
-        } else if name.eq_ignore_ascii_case("PredictorVars") {
-            options.predictor_vars = Some(text_list(value, "PredictorVars")?);
-        } else if name.eq_ignore_ascii_case("VarNames") {
-            options.var_names = Some(text_list(value, "VarNames")?);
-        } else if name.eq_ignore_ascii_case("Exclude") {
-            options.exclude = Some(exclude_spec(value)?);
-        } else if name.eq_ignore_ascii_case("Weights") {
-            options.weights = Some(if let Some(name) = scalar_text(value) {
-                WeightSpec::Variable(name)
-            } else {
-                WeightSpec::Values(numeric_vector(value, "Weights")?)
-            });
-        } else if name.eq_ignore_ascii_case("RobustOpts")
-            || name.eq_ignore_ascii_case("CategoricalVars")
-        {
-            return Err(fitlm_invalid(format!(
-                "fitlm: option '{name}' is not supported yet"
-            )));
-        } else {
-            return Err(fitlm_invalid(format!("fitlm: unknown option '{name}'")));
+        match FitlmOption::from_public_name(&name) {
+            Some(FitlmOption::Intercept) => options.intercept = bool_scalar(value, "Intercept")?,
+            Some(FitlmOption::ResponseVar) => {
+                options.response_var = Some(
+                    scalar_text(value)
+                        .ok_or_else(|| fitlm_invalid("fitlm: ResponseVar must be text"))?,
+                );
+            }
+            Some(FitlmOption::PredictorVars) => {
+                options.predictor_vars = Some(text_list(value, "PredictorVars")?);
+            }
+            Some(FitlmOption::VarNames) => options.var_names = Some(text_list(value, "VarNames")?),
+            Some(FitlmOption::Exclude) => options.exclude = Some(exclude_spec(value)?),
+            Some(FitlmOption::Weights) => {
+                options.weights = Some(if let Some(name) = scalar_text(value) {
+                    WeightSpec::Variable(name)
+                } else {
+                    WeightSpec::Values(numeric_vector(value, "Weights")?)
+                });
+            }
+            Some(FitlmOption::RobustOpts | FitlmOption::CategoricalVars) => {
+                return Err(fitlm_invalid(format!(
+                    "fitlm: option '{name}' is not supported yet"
+                )));
+            }
+            None => return Err(fitlm_invalid(format!("fitlm: unknown option '{name}'"))),
         }
         index += 2;
     }
@@ -1841,19 +1661,7 @@ fn chars_to_string(chars: &CharArray) -> String {
 }
 
 fn is_name_value_option(value: &Value) -> bool {
-    scalar_text(value).is_some_and(|text| {
-        matches!(
-            text.to_ascii_lowercase().as_str(),
-            "intercept"
-                | "responsevar"
-                | "predictorvars"
-                | "varnames"
-                | "exclude"
-                | "weights"
-                | "robustopts"
-                | "categoricalvars"
-        )
-    })
+    scalar_text(value).is_some_and(|text| FitlmOption::from_public_name(&text).is_some())
 }
 
 fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
