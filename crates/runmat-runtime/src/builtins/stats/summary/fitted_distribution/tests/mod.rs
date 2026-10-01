@@ -71,4 +71,5 @@ mod fit;
 mod generic;
 mod pdf;
 mod random;
+#[cfg(feature = "wgpu")]
 mod wgpu;
