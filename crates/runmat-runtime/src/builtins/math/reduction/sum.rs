@@ -601,12 +601,18 @@ async fn sum_gpu_with_omitnan(
     handle: GpuTensorHandle,
     parsed: &ParsedArguments,
 ) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_is_logical(&handle)
-        || (matches!(parsed.output, OutputTemplate::Native)
-            && runmat_accelerate_api::handle_integer_type(&handle).is_some())
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
     {
-        // Logical and integer values cannot contain NaN. Native integer sums
-        // retain exact storage; logical sums use their ordinary numeric route.
+        // Complex omission is a pairwise numerical policy; the real-only
+        // provider NaN map cannot implement it by transforming lanes alone.
+        return sum_gpu_fallback(&handle, parsed).await;
+    }
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_integer_type(&handle).is_some()
+    {
+        // Logical and integer values cannot contain NaN. Both ordinary
+        // floating and native integer sums use their usual resident route.
         let include = ParsedArguments {
             selection: parsed.selection.clone(),
             nan_mode: ReductionNaN::Include,
@@ -786,10 +792,14 @@ async fn sum_gpu_fallback(
     handle: &GpuTensorHandle,
     parsed: &ParsedArguments,
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-    let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
-    let reduced = sum_tensor(&tensor, &resolved, parsed.nan_mode)?;
-    Ok(tensor::tensor_into_value(reduced))
+    match gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await? {
+        Value::ComplexTensor(tensor) => sum_host_complex_tensor(tensor, parsed),
+        Value::Complex(real, imaginary) => sum_host_complex_scalar(real, imaginary, parsed),
+        Value::GpuTensor(_) => Err(sum_internal_error(
+            "sum: exact-owner gather left the input resident",
+        )),
+        host => sum_host(host, parsed),
+    }
 }
 
 fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<ResolvedDims> {
@@ -929,7 +939,12 @@ fn sum_tensor(
         output.push(result);
     }
 
-    Tensor::new(output, output_shape).map_err(|e| sum_internal_error(format!("sum: {e}")))
+    let result_shape = if dims.dims_in_bounds.len() == shape.len() {
+        vec![1, 1]
+    } else {
+        output_shape
+    };
+    Tensor::new(output, result_shape).map_err(|e| sum_internal_error(format!("sum: {e}")))
 }
 
 fn sum_complex_tensor(
@@ -1018,7 +1033,12 @@ fn sum_complex_tensor(
         output.push(result);
     }
 
-    ComplexTensor::new(output, output_shape).map_err(|e| sum_internal_error(format!("sum: {e}")))
+    let result_shape = if dims.dims_in_bounds.len() == shape.len() {
+        vec![1, 1]
+    } else {
+        output_shape
+    };
+    ComplexTensor::new(output, result_shape).map_err(|e| sum_internal_error(format!("sum: {e}")))
 }
 
 fn linear_to_multi(index: usize, shape: &[usize], out: &mut [usize]) {
@@ -1118,7 +1138,7 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
         },
         _ => {
             if let Some(dtype) = meta.numeric_dtype {
-                coerce_value_to_dtype(value, dtype).await
+                coerce_value_to_dtype(value, dtype, meta.source.as_ref()).await
             } else {
                 Ok(value)
             }
@@ -1126,7 +1146,11 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
     }
 }
 
-async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
+async fn coerce_value_to_dtype(
+    value: Value,
+    dtype: NumericDType,
+    borrowed_source: Option<&GpuTensorHandle>,
+) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
         NumericDType::F32
@@ -1178,9 +1202,34 @@ async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResu
                 Ok(Value::GpuTensor(handle))
             }
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
-                Ok(Value::Tensor(tensor))
+                if dtype == NumericDType::F32
+                    && runmat_accelerate_api::handle_storage(&handle)
+                        == runmat_accelerate_api::GpuTensorStorage::Real
+                {
+                    if let Some(cast) =
+                        provider_output::cast_public_single(&handle, borrowed_source).await?
+                    {
+                        return provider_output::publish(cast, &handle);
+                    }
+                }
+                match gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await? {
+                    Value::Tensor(tensor) => {
+                        Ok(Value::Tensor(tensor::coerce_tensor_dtype(tensor, dtype)))
+                    }
+                    Value::ComplexTensor(tensor) if dtype == NumericDType::F32 => {
+                        let shape = tensor.shape.clone();
+                        ComplexTensor::from_f64_values_with_dtype(
+                            tensor.materialize_f64(),
+                            shape,
+                            dtype,
+                        )
+                        .map(Value::ComplexTensor)
+                        .map_err(sum_internal_error)
+                    }
+                    other => Err(sum_internal_error(format!(
+                        "sum: unexpected gathered output class {other:?}"
+                    ))),
+                }
             }
             other => Ok(other),
         },
@@ -1725,6 +1774,101 @@ pub(crate) mod tests {
             let gathered = test_support::gather(explicit).expect("gather explicit");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
             assert_eq!(values(&gathered), vec![3.0, 7.0]);
+        });
+    }
+
+    #[test]
+    fn sum_single_accumulates_in_double_before_default_and_explicit_output_classes() {
+        let input = Tensor::from_f32(vec![16_777_216.0, 1.0, -16_777_216.0], vec![3, 1]).unwrap();
+        let host_default = sum_builtin(Value::Tensor(input.clone()), Vec::new()).unwrap();
+        let host_double =
+            sum_builtin(Value::Tensor(input.clone()), vec![Value::from("double")]).unwrap();
+        assert_eq!(
+            values(&test_support::gather(host_default).unwrap()),
+            vec![1.0]
+        );
+        assert_eq!(
+            values(&test_support::gather(host_double).unwrap()),
+            vec![1.0]
+        );
+        test_support::with_test_provider(|provider| {
+            let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
+            for options in [vec![], vec![Value::from("double")]] {
+                let result = sum_builtin(Value::GpuTensor(handle.clone()), options).unwrap();
+                assert!(matches!(&result, Value::GpuTensor(_)));
+                let gathered = test_support::gather(result).unwrap();
+                assert_eq!(values(&gathered), vec![1.0]);
+            }
+        });
+    }
+
+    #[test]
+    fn sum_all_normalizes_nd_single_and_complex_scalar_shape() {
+        let single = Tensor::from_f32(vec![1.0; 8], vec![2, 2, 2]).unwrap();
+        let Value::Tensor(host) =
+            sum_builtin(Value::Tensor(single.clone()), vec![Value::from("all")]).unwrap()
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(host.shape, [1, 1]);
+        assert_eq!(host.numeric_dtype(), NumericDType::F32);
+        test_support::with_test_provider(|provider| {
+            let handle = gpu_helpers::upload_tensor(provider, &single).unwrap();
+            let gathered = test_support::gather(
+                sum_builtin(Value::GpuTensor(handle), vec![Value::from("all")]).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(gathered.shape, [1, 1]);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(values(&gathered), vec![8.0]);
+        });
+
+        let complex = ComplexTensor::from_f32(vec![(1.0, 2.0); 8], vec![2, 2, 2]).unwrap();
+        let Value::ComplexTensor(host) = sum_builtin(
+            Value::ComplexTensor(complex.clone()),
+            vec![Value::from("all")],
+        )
+        .unwrap() else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(host.shape, [1, 1]);
+        assert_eq!(host.materialize_f64(), vec![(8.0, 16.0)]);
+        test_support::with_test_provider(|provider| {
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+            let result = sum_builtin(Value::GpuTensor(handle), vec![Value::from("all")]).unwrap();
+            let Value::ComplexTensor(gathered) =
+                block_on(gpu_helpers::gather_value_async(&result)).unwrap()
+            else {
+                panic!("expected complex resident reduction");
+            };
+            assert_eq!(gathered.shape, [1, 1]);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.materialize_f64(), vec![(8.0, 16.0)]);
+        });
+    }
+
+    #[test]
+    fn sum_complex_resident_include_and_omitnan_follow_pairwise_host_policy() {
+        let input =
+            ComplexTensor::from_f32(vec![(1.0, 2.0), (f32::NAN, 3.0), (4.0, 5.0)], vec![3, 1])
+                .unwrap();
+        test_support::with_test_provider(|provider| {
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let include = sum_builtin(Value::GpuTensor(handle.clone()), Vec::new()).unwrap();
+            let Value::ComplexTensor(include) =
+                block_on(gpu_helpers::gather_value_async(&include)).unwrap()
+            else {
+                panic!("expected complex include result");
+            };
+            let include = include.materialize_f64();
+            assert!(include[0].0.is_nan() && include[0].1.is_nan());
+            let omit = sum_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")]).unwrap();
+            let Value::ComplexTensor(omit) =
+                block_on(gpu_helpers::gather_value_async(&omit)).unwrap()
+            else {
+                panic!("expected complex omit result");
+            };
+            assert_eq!(omit.materialize_f64(), vec![(5.0, 7.0)]);
         });
     }
 

@@ -1782,10 +1782,21 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if self.get_entry_raw(a)?.integer_type().is_some() {
+            let entry = self.get_entry_raw(a)?;
+            if entry.storage == GpuTensorStorage::ComplexInterleaved {
                 Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "ordinary integer sum requires a floating integer reduction kernel",
+                    "complex sum requires a complex floating reduction kernel",
                 ))
+            } else if self.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "double-accumulating sum requires shader-f64 support",
+                ))
+            } else if entry.integer_type().is_some() {
+                self.integer_floating_sum_dim_exec(a, dim)
+            } else if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
+                self.single_double_sum_dim_exec(a, dim)
+            } else if a.shape().len() > 2 {
+                self.reduce_nd_sum_f64_exec(a, dim)
             } else {
                 self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
             }
@@ -1944,10 +1955,19 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if self.get_entry_raw(a)?.integer_type().is_some() {
+            let entry = self.get_entry_raw(a)?;
+            if entry.storage == GpuTensorStorage::ComplexInterleaved {
                 Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "ordinary integer sum requires a floating integer reduction kernel",
+                    "complex sum requires a complex floating reduction kernel",
                 ))
+            } else if self.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "double-accumulating sum requires shader-f64 support",
+                ))
+            } else if entry.integer_type().is_some() {
+                self.integer_floating_sum_global_exec(a)
+            } else if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
+                self.single_double_sum_global_exec(a)
             } else {
                 self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
             }

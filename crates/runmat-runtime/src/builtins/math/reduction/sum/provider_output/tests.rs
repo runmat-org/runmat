@@ -30,8 +30,8 @@ fn reduction_rejects_shape_class_owner_and_borrowed_alias_without_retiring_input
         .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
     for (shape, element) in [
-        (vec![2, 1], NumericElementType::F32),
-        (vec![1, 2], NumericElementType::F64),
+        (vec![2, 1], NumericElementType::F64),
+        (vec![1, 2], NumericElementType::F32),
     ] {
         let output = provider
             .0
@@ -69,7 +69,7 @@ fn reduction_rejects_shape_class_owner_and_borrowed_alias_without_retiring_input
     assert_eq!(complex.probe.retirements(), 1);
     let other_owner = TestAllocationOwner::new();
     let foreign = other_owner
-        .allocate_zeroed(vec![1, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     admit_reduction(
         provider,
@@ -97,6 +97,31 @@ fn reduction_rejects_shape_class_owner_and_borrowed_alias_without_retiring_input
     .unwrap_err();
     assert_eq!(input.probe.retirements(), 0);
     input.handle.allocation_lease().validate_live().unwrap();
+}
+
+#[test]
+fn single_reduction_admits_double_intermediate_before_public_class_adaptation() {
+    let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider
+        .0
+        .allocate_zeroed(vec![3, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let output = provider
+        .0
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let admitted = admit_reduction(
+        provider,
+        &input.handle,
+        &input.handle,
+        output.handle,
+        Some(0),
+        OutputTemplate::Native,
+    )
+    .unwrap();
+    assert_eq!(admitted.physical().element_type(), NumericElementType::F64);
+    assert_eq!(input.probe.retirements(), 0);
 }
 
 #[test]
@@ -196,14 +221,14 @@ fn failed_intermediate_retirement_rejects_the_next_output_with_cause() {
         .unwrap();
     let intermediate = provider
         .0
-        .allocate_zeroed(vec![1, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     intermediate
         .probe
         .fail_retirement("injected retirement failure");
     let next = provider
         .0
-        .allocate_zeroed(vec![1, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let error = advance_reduction(
         provider,

@@ -8,12 +8,78 @@ use std::ops::AddAssign;
 mod tests;
 
 impl InProcessProvider {
-    pub(super) fn native_sum_dim(
+    pub(super) fn ordinary_numeric_sum(
         &self,
         input: &GpuTensorHandle,
-        dim: usize,
+        dim: Option<usize>,
     ) -> Result<GpuTensorHandle> {
-        self.native_additive_dim(input, dim, false)
+        let shape = input.shape();
+        let count = shape
+            .iter()
+            .try_fold(1usize, |acc, &extent| acc.checked_mul(extent))
+            .ok_or_else(|| anyhow!("sum: extent overflow"))?;
+        if let Some(axis) = dim {
+            ensure!(axis < shape.len(), "sum: dimension out of bounds");
+        }
+        let layout = input.view().layout();
+        if let GpuTensorLayout::Transpose(info) = layout {
+            ensure!(
+                shape.len() == 2 && info.base_rows == shape[1] && info.base_cols == shape[0],
+                "sum: transpose view differs from source geometry"
+            );
+        }
+        let mut output_shape = if dim.is_some() {
+            shape.to_vec()
+        } else {
+            vec![1, 1]
+        };
+        if let Some(axis) = dim {
+            output_shape[axis] = 1;
+        }
+        let output_count = output_shape
+            .iter()
+            .try_fold(1usize, |acc, &extent| acc.checked_mul(extent))
+            .ok_or_else(|| anyhow!("sum: output extent overflow"))?;
+        let storage = input.physical().storage();
+        let lane_count = if storage == GpuTensorStorage::ComplexInterleaved {
+            2
+        } else {
+            1
+        };
+        let expected = count
+            .checked_mul(lane_count)
+            .ok_or_else(|| anyhow!("sum: payload extent overflow"))?;
+        let output_len = output_count
+            .checked_mul(lane_count)
+            .ok_or_else(|| anyhow!("sum: result extent overflow"))?;
+        let result = {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("sum: allocation owner is poisoned"))?;
+            let data = guard
+                .get(input)
+                .ok_or_else(|| anyhow!("sum: input is not a live owned allocation"))?;
+            let mut result = Vec::new();
+            result.try_reserve_exact(output_len)?;
+            result.resize(output_len, 0.0_f64);
+            match data {
+                InProcessNumericData::F32(values) => {
+                    ensure!(values.len() == expected, "sum: payload extent mismatch");
+                    accumulate_sum_as_double(values, &mut result, shape, dim, layout, lane_count);
+                }
+                InProcessNumericData::F64(values) => {
+                    ensure!(values.len() == expected, "sum: payload extent mismatch");
+                    accumulate_sum_as_double(values, &mut result, shape, dim, layout, lane_count);
+                }
+                InProcessNumericData::Integer(_) => {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "sum: floating storage is required",
+                    ))
+                }
+            }
+            result
+        };
+        self.allocate_numeric_data(InProcessNumericData::F64(result), output_shape, storage)
     }
 
     pub(super) fn native_mean_dim(
@@ -21,15 +87,10 @@ impl InProcessProvider {
         input: &GpuTensorHandle,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
-        self.native_additive_dim(input, dim, true)
+        self.native_additive_dim(input, dim)
     }
 
-    fn native_additive_dim(
-        &self,
-        input: &GpuTensorHandle,
-        dim: usize,
-        mean: bool,
-    ) -> Result<GpuTensorHandle> {
+    fn native_additive_dim(&self, input: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
         ensure!(
             input.shape().len() == 2,
             "reduce_sum_dim: only 2D supported"
@@ -74,10 +135,8 @@ impl InProcessProvider {
                         "reduce_sum_dim: payload extent mismatch"
                     );
                     let mut reduced = sum_typed(values, rows, cols, dim, layout);
-                    if mean {
-                        for value in &mut reduced {
-                            *value /= input.shape()[dim] as f32;
-                        }
+                    for value in &mut reduced {
+                        *value /= input.shape()[dim] as f32;
                     }
                     InProcessNumericData::F32(reduced)
                 }
@@ -87,10 +146,8 @@ impl InProcessProvider {
                         "reduce_sum_dim: payload extent mismatch"
                     );
                     let mut reduced = sum_typed(values, rows, cols, dim, layout);
-                    if mean {
-                        for value in &mut reduced {
-                            *value /= input.shape()[dim] as f64;
-                        }
+                    for value in &mut reduced {
+                        *value /= input.shape()[dim] as f64;
                     }
                     InProcessNumericData::F64(reduced)
                 }
@@ -103,6 +160,50 @@ impl InProcessProvider {
             (output, shape)
         };
         self.allocate_numeric_data(output, shape, GpuTensorStorage::Real)
+    }
+}
+
+fn accumulate_sum_as_double<T: Copy + Into<f64>>(
+    values: &[T],
+    output: &mut [f64],
+    shape: &[usize],
+    dim: Option<usize>,
+    layout: GpuTensorLayout,
+    lanes: usize,
+) {
+    let count = values.len() / lanes;
+    let geometry = dim.map(|axis| {
+        let before = shape[..axis].iter().product::<usize>();
+        let span = before * shape[axis];
+        (before, span)
+    });
+    for linear in 0..count {
+        let source = match layout {
+            GpuTensorLayout::Contiguous => linear,
+            GpuTensorLayout::Transpose(_) => {
+                let row = linear % shape[0];
+                let column = linear / shape[0];
+                column + row * shape[1]
+            }
+        };
+        let destination = if let Some((before, span)) = geometry {
+            (linear % before) + (linear / span) * before
+        } else {
+            0
+        };
+        if lanes == 2 {
+            let real: f64 = values[source * 2].into();
+            let imaginary: f64 = values[source * 2 + 1].into();
+            if real.is_nan() || imaginary.is_nan() {
+                output[destination * 2] = f64::NAN;
+                output[destination * 2 + 1] = f64::NAN;
+                continue;
+            }
+            output[destination * 2] += real;
+            output[destination * 2 + 1] += imaginary;
+        } else {
+            output[destination] += values[source].into();
+        }
     }
 }
 

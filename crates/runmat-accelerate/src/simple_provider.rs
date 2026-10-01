@@ -7851,13 +7851,7 @@ impl AccelProvider for InProcessProvider {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
                 return self.floating_integer_sum(a, None);
             }
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let s: f64 = abuf.iter().sum();
-            drop(guard);
-            self.allocate_tensor_with_storage(vec![s], vec![1, 1], GpuTensorStorage::Real)
+            self.ordinary_numeric_sum(a, None)
         })
     }
 
@@ -7870,10 +7864,7 @@ impl AccelProvider for InProcessProvider {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
                 return self.floating_integer_sum(a, Some(dim));
             }
-            if a.shape().len() != 2 {
-                return self.floating_sum_dim_nd(a, dim);
-            }
-            self.native_sum_dim(a, dim)
+            self.ordinary_numeric_sum(a, Some(dim))
         })
     }
 

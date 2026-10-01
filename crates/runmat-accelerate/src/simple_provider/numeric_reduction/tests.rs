@@ -6,7 +6,93 @@ use runmat_accelerate_api::{
 };
 
 #[test]
-fn native_single_reductions_preserve_class_dimensions_and_physical_transpose() {
+fn ordinary_single_global_uses_double_accumulator_before_output_class_selection() {
+    let provider = InProcessProvider::new();
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[16_777_216.0, 1.0, -16_777_216.0]),
+            shape: &[3, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    provider.reset_telemetry();
+    let global = block_on(provider.reduce_sum(&input)).unwrap();
+    let dimensional = block_on(provider.reduce_sum_dim(&input, 0)).unwrap();
+    assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    for output in [&global, &dimensional] {
+        assert_eq!(output.physical().element_type(), NumericElementType::F64);
+        assert_eq!(
+            block_on(provider.download_numeric(output)).unwrap().data,
+            HostNumericDataOwned::F64(vec![1.0])
+        );
+    }
+}
+
+#[test]
+fn ordinary_complex_single_and_double_sum_both_components_and_preserve_storage() {
+    let provider = InProcessProvider::new();
+    for input_data in [
+        HostNumericDataView::F32(&[16_777_216.0, 3.0, 1.0, 4.0, -16_777_216.0, 5.0]),
+        HostNumericDataView::F64(&[16_777_216.0, 3.0, 1.0, 4.0, -16_777_216.0, 5.0]),
+    ] {
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: input_data,
+                shape: &[3, 1],
+                storage: GpuTensorStorage::ComplexInterleaved,
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        for output in [
+            block_on(provider.reduce_sum(&input)).unwrap(),
+            block_on(provider.reduce_sum_dim(&input, 0)).unwrap(),
+        ] {
+            assert_eq!(
+                output.physical().storage(),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(output.physical().element_type(), NumericElementType::F64);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(
+                block_on(provider.download_numeric(&output)).unwrap().data,
+                HostNumericDataOwned::F64(vec![1.0, 12.0])
+            );
+        }
+    }
+    let matrix = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1., 2., 3., 4., 5., 6., 7., 8.]),
+            shape: &[2, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        })
+        .unwrap();
+    let rows = block_on(provider.reduce_sum_dim(&matrix, 1)).unwrap();
+    assert_eq!(rows.shape(), [2, 1]);
+    assert_eq!(
+        block_on(provider.download_numeric(&rows)).unwrap().data,
+        HostNumericDataOwned::F64(vec![6., 8., 10., 12.])
+    );
+}
+
+#[test]
+#[ignore = "large-count arithmetic oracle; explicitly run in numerical qualification"]
+fn logical_single_payload_count_above_f32_integer_precision_is_exact_double() {
+    let count = 16_777_217;
+    let values = vec![1.0_f32; count];
+    let mut output = [0.0_f64];
+    accumulate_sum_as_double(
+        &values,
+        &mut output,
+        &[count, 1],
+        None,
+        GpuTensorLayout::Contiguous,
+        1,
+    );
+    assert_eq!(output, [count as f64]);
+}
+
+#[test]
+fn ordinary_single_reductions_accumulate_in_double_and_preserve_dimensions() {
     let provider = InProcessProvider::new();
     let input = provider
         .upload_numeric(&HostNumericTensorView {
@@ -24,10 +110,10 @@ fn native_single_reductions_preserve_class_dimensions_and_physical_transpose() {
         let result = block_on(provider.reduce_sum_dim(&input, dim)).unwrap();
         assert_eq!(provider.telemetry_snapshot().download_bytes, before);
         assert_eq!(result.shape(), shape);
-        assert_eq!(result.physical().element_type(), NumericElementType::F32);
+        assert_eq!(result.physical().element_type(), NumericElementType::F64);
         assert_eq!(
             block_on(provider.download_numeric(&result)).unwrap().data,
-            HostNumericDataOwned::F32(values.to_vec())
+            HostNumericDataOwned::F64(values.to_vec())
         );
     }
     assert!(input
@@ -48,7 +134,7 @@ fn native_single_reductions_preserve_class_dimensions_and_physical_transpose() {
     assert_eq!(result.shape(), &[1, 2]);
     assert_eq!(
         block_on(provider.download_numeric(&result)).unwrap().data,
-        HostNumericDataOwned::F32(vec![9., 12.])
+        HostNumericDataOwned::F64(vec![9., 12.])
     );
     assert!(input.allocation_lease().validate_live().is_ok());
 }
@@ -80,7 +166,7 @@ fn double_logical_and_empty_reductions_keep_existing_contract() {
     assert_eq!(result.shape(), &[1, 3]);
     assert_eq!(
         block_on(provider.download_numeric(&result)).unwrap().data,
-        HostNumericDataOwned::F32(vec![0., 0., 0.])
+        HostNumericDataOwned::F64(vec![0., 0., 0.])
     );
     let foreign = InProcessProvider::new()
         .upload_numeric(&HostNumericTensorView {

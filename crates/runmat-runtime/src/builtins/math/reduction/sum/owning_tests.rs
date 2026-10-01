@@ -187,12 +187,17 @@ impl AccelProvider for OutputProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_is_logical(input) {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "F32-only owner cannot accumulate logical values in double",
+                ));
+            }
             let call = self.calls.fetch_add(1, Ordering::SeqCst);
             let mut shape = input.shape().to_vec();
             if !self.malformed_second_reduction || call == 0 {
                 shape[dim] = 1;
             }
-            Ok(self.output(shape, NumericElementType::F32))
+            Ok(self.output(shape, NumericElementType::F64))
         })
     }
 }

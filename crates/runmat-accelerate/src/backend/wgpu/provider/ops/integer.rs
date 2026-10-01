@@ -2645,7 +2645,7 @@ mod tests {
             })
             .expect("upload uint64");
 
-        let sum = block_on(provider.reduce_sum(&signed)).expect("public int64 sum");
+        let sum = block_on(provider.reduce_integer_sum_native(&signed)).expect("native int64 sum");
         let prod = block_on(provider.reduce_prod(&unsigned)).expect("public uint64 prod");
         let mean = block_on(provider.reduce_mean_dim(&unsigned, 0)).expect("public uint64 mean");
 

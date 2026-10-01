@@ -53,6 +53,61 @@ fn read_float_cast(logical_index: u32) -> f32 {
         .replace("@WG@", &workgroup_size.to_string())
 }
 
+pub fn floating_sum_cast_shader(workgroup_size: u32) -> String {
+    INTEGER_FLOATING_SUM_CAST_SHADER.replace("@WG@", &workgroup_size.to_string())
+}
+
+// Both 32-bit words convert exactly to f64. The scaled high word is exact;
+// adding the low word performs the sole rounding at the integer-to-f64 boundary.
+const INTEGER_FLOATING_SUM_CAST_SHADER: &str = r#"
+struct Words { data: array<u32> };
+struct Doubles { data: array<f64> };
+struct Params { len: u32, offset: u32, source_type: u32, _pad: u32 };
+@group(0) @binding(0) var<storage, read> input: Words;
+@group(0) @binding(1) var<storage, read_write> output: Doubles;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn wide_unsigned(low: u32, high: u32) -> f64 {
+    return f64(high) * 4294967296.0 + f64(low);
+}
+
+fn signed_word(word: u32, shift: u32) -> f64 {
+    return f64(bitcast<i32>(word << shift) >> shift);
+}
+
+fn integer_as_double(index: u32) -> f64 {
+    let lane = select(index, index * 2u,
+        params.source_type == 3u || params.source_type == 7u);
+    let low = input.data[lane];
+    switch params.source_type {
+        case 0u: { return signed_word(low, 24u); }
+        case 1u: { return signed_word(low, 16u); }
+        case 2u: { return f64(bitcast<i32>(low)); }
+        case 3u: {
+            let high = input.data[lane + 1u];
+            if ((high & 0x80000000u) != 0u) {
+                let magnitude_low = ~low + 1u;
+                let carry = select(0u, 1u, magnitude_low == 0u);
+                return -wide_unsigned(magnitude_low, ~high + carry);
+            }
+            return wide_unsigned(low, high);
+        }
+        case 4u: { return f64(low & 0xffu); }
+        case 5u: { return f64(low & 0xffffu); }
+        case 6u: { return f64(low); }
+        case 7u: { return wide_unsigned(low, input.data[lane + 1u]); }
+        default: { return 0.0; }
+    }
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x >= params.len) { return; }
+    let index = params.offset + id.x;
+    output.data[index] = integer_as_double(index);
+}
+"#;
+
 const INTEGER_COMPARISON_SHADER: &str = r#"
 struct Words { data: array<u32> };
 struct Output { data: array<$SCALAR> };

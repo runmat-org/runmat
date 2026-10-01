@@ -196,6 +196,39 @@ fn repeated_vector_axes_share_the_owning_idempotent_selection() {
 }
 
 #[test]
+fn full_axis_nd_single_and_complex_outputs_have_scalar_geometry() {
+    let shape = ShapeFact::from(vec![Some(2), Some(2), Some(2)]);
+    let single = call(
+        numeric(NumericClass::Single, shape.clone()),
+        vec![LiteralValue::String("all".into())],
+        1,
+    );
+    assert_eq!(
+        single.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(1)])
+    );
+    assert_eq!(
+        single.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
+
+    let mut complex = numeric(NumericClass::Single, shape);
+    complex.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Complex,
+    });
+    let result = call(complex, vec![LiteralValue::String("all".into())], 1);
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(1)])
+    );
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
+}
+
+#[test]
 fn conflicting_options_and_resident_storage_do_not_become_proven() {
     let shape = ShapeFact::from(vec![Some(3), Some(2)]);
     for controls in [

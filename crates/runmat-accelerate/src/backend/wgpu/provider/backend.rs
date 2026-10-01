@@ -115,6 +115,8 @@ mod indexing;
 mod init;
 #[path = "ops/integer.rs"]
 mod integer;
+#[path = "ops/integer_float_sum.rs"]
+mod integer_float_sum;
 #[path = "ops/interpolation.rs"]
 mod interpolation;
 #[path = "ops/io.rs"]

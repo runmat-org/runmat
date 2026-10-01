@@ -1,6 +1,6 @@
 //! Admission of each resident `sum` stage before the next provider effect.
 
-use super::{gpu_helpers, sum_internal_error, OutputTemplate};
+use super::{gpu_helpers, sum_internal_error, sum_provider_error, OutputTemplate};
 use crate::{BuiltinResult, GpuGatherRetry};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
@@ -15,41 +15,82 @@ fn malformed(detail: &str) -> crate::RuntimeError {
 
 fn physical_contract(
     input: &GpuTensorHandle,
-    provider: &'static dyn AccelProvider,
     alias: gpu_helpers::GpuOutputAliasPolicy,
-    output_class: OutputTemplate,
+    stage: OutputStage,
 ) -> gpu_helpers::UnaryGpuOutputContract {
-    if runmat_accelerate_api::handle_is_logical(input) {
-        // A logical reduction counts numeric values. Its provider intermediate
-        // uses the owner's floating precision; public double adaptation follows.
-        gpu_helpers::UnaryGpuOutputContract {
-            storage: GpuTensorStorage::Real,
-            precision: Some(provider.precision()),
-            integer: None,
-            logical: false,
-            alias,
+    let (storage, precision, integer) = match stage {
+        OutputStage::NanMap | OutputStage::Reduction(OutputTemplate::Native)
+            if runmat_accelerate_api::handle_integer_type(input).is_some() =>
+        {
+            (
+                runmat_accelerate_api::handle_storage(input),
+                runmat_accelerate_api::handle_precision(input),
+                runmat_accelerate_api::handle_integer_type(input),
+            )
         }
-    } else if runmat_accelerate_api::handle_integer_type(input).is_some()
-        && !matches!(output_class, OutputTemplate::Native)
-    {
-        // Ordinary integer reduction accumulates in double. An integer result
-        // here has already lost information to native saturation; casting it
-        // later cannot repair the numerical result.
-        gpu_helpers::UnaryGpuOutputContract {
-            storage: GpuTensorStorage::Real,
-            precision: Some(runmat_accelerate_api::ProviderPrecision::F64),
-            integer: None,
-            logical: false,
-            alias,
+        OutputStage::NanMap => (
+            runmat_accelerate_api::handle_storage(input),
+            runmat_accelerate_api::handle_precision(input),
+            None,
+        ),
+        OutputStage::PublicSingle => (
+            GpuTensorStorage::Real,
+            Some(runmat_accelerate_api::ProviderPrecision::F32),
+            None,
+        ),
+        OutputStage::Reduction(_) => (
+            runmat_accelerate_api::handle_storage(input),
+            Some(runmat_accelerate_api::ProviderPrecision::F64),
+            None,
+        ),
+    };
+    gpu_helpers::UnaryGpuOutputContract {
+        storage,
+        precision,
+        integer,
+        logical: false,
+        alias,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum OutputStage {
+    NanMap,
+    Reduction(OutputTemplate),
+    PublicSingle,
+}
+
+/// Adapt a double-accumulating result to the public single class without a
+/// host round trip when the allocation owner provides a resident cast.
+pub(super) async fn cast_public_single(
+    input: &GpuTensorHandle,
+    borrowed_source: Option<&GpuTensorHandle>,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(input) else {
+        return Ok(None);
+    };
+    match provider.unary_single(input).await {
+        Ok(output) => {
+            let output = admit(
+                provider,
+                input,
+                input,
+                output,
+                input.shape(),
+                gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                "single-class adaptation",
+                OutputStage::PublicSingle,
+            )?;
+            if borrowed_source.is_some_and(|source| output.shares_allocation_with(source)) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    malformed("single-class adaptation"),
+                ));
+            }
+            Ok(Some(output))
         }
-    } else {
-        gpu_helpers::UnaryGpuOutputContract {
-            storage: runmat_accelerate_api::handle_storage(input),
-            precision: runmat_accelerate_api::handle_precision(input),
-            integer: runmat_accelerate_api::handle_integer_type(input),
-            logical: false,
-            alias,
-        }
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Err(error) => Err(sum_provider_error(error)),
     }
 }
 
@@ -61,7 +102,7 @@ fn admit(
     expected_shape: &[usize],
     alias: gpu_helpers::GpuOutputAliasPolicy,
     detail: &str,
-    output_class: OutputTemplate,
+    stage: OutputStage,
 ) -> BuiltinResult<GpuTensorHandle> {
     // A provider may use a one-element scalar view with fewer singleton axes.
     // Normalize only that equivalent view; never reshape a nonscalar result.
@@ -80,7 +121,7 @@ fn admit(
     } else {
         output
     };
-    let contract = physical_contract(input, provider, alias, output_class);
+    let contract = physical_contract(input, alias, stage);
     let original_alias_allowed = matches!(alias, gpu_helpers::GpuOutputAliasPolicy::AllowInput)
         && original.shares_allocation_with(input);
     let valid = gpu_helpers::unary_gpu_output_matches_shape(
@@ -115,7 +156,7 @@ pub(super) fn admit_nan_map(
         input.shape(),
         gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         "NaN-map",
-        OutputTemplate::Native,
+        OutputStage::NanMap,
     )
 }
 
@@ -147,7 +188,7 @@ pub(super) fn admit_reduction(
         &shape,
         alias,
         "reduction",
-        output_class,
+        OutputStage::Reduction(output_class),
     )
 }
 

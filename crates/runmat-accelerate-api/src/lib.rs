@@ -3412,12 +3412,19 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cross not supported by provider"))
     }
+    /// Ordinary sum accumulates and returns F64 physical values for real,
+    /// logical, and integer inputs. Complex floating input retains complex
+    /// storage with F64 components. Public `single`/`native` output adaptation
+    /// happens after this numerical boundary; unsupported devices must return
+    /// a typed unsupported-operation error before a lossy reduction.
     fn reduce_sum<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_sum not supported by provider")
     }
+    /// Dimensional form of [`Self::reduce_sum`] with the reduced axis kept as
+    /// a singleton. Its intermediate class has the same F64 contract.
     fn reduce_sum_dim<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
