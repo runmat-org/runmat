@@ -1,5 +1,4 @@
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
-use runmat_builtins::shape_rules::unknown_shape;
 use runmat_builtins::{ResolveContext, Type};
 
 /// Type resolver for `mode`. Mirrors the reduction-style shape inference used by
