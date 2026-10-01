@@ -260,7 +260,6 @@ fn typed_unsupported_cast_respects_each_builtin_host_boundary_and_input_lifetime
         }
         assert!(input.handle.allocation_lease().validate_live().is_ok());
         assert_eq!(input.probe.retirements(), 0);
-        drop(output);
         assert!(provider
             .outputs
             .lock()
