@@ -61,5 +61,11 @@ pub(super) async fn eval_rhs(
             ),
         ));
     }
+    if rhs.iter().any(|value| !value.is_finite()) {
+        return Err(ode_error(
+            name,
+            format!("{name}: function value must be finite"),
+        ));
+    }
     Ok(rhs)
 }

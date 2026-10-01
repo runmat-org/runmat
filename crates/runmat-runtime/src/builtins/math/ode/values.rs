@@ -32,8 +32,5 @@ pub(super) async fn real_vector(name: &str, value: Value) -> BuiltinResult<Vec<f
             ));
         }
     };
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err(ode_error(name, format!("{name}: values must be finite")));
-    }
     Ok(values)
 }
