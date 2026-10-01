@@ -12,7 +12,7 @@ use runmat_builtins::{
     BOXPLOT_LOGICAL_OPTION_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_plot::plots::{LinePlot, LineStyle, MarkerStyle, ScatterPlot};
+use runmat_plot::plots::{LinePlot, MarkerStyle, PatchPlot, ScatterPlot};
 use runmat_value::{CellArray, CharArray, IntValue, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::{random_args::keyword_of, tensor};
@@ -22,7 +22,9 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const NAME: &str = "boxplot";
 mod admission;
+mod appearance;
 mod plan;
+use appearance::{BoxStyle, MedianStyle, NotchStyle};
 use plan::BoxplotOptionPlan;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,6 +56,11 @@ struct BoxplotOptions {
     extreme_mode: ExtremeMode,
     jitter: f64,
     compact: bool,
+    box_style: BoxStyle,
+    box_style_explicit: bool,
+    median_style: MedianStyle,
+    median_style_explicit: bool,
+    notch_style: NotchStyle,
 }
 
 #[derive(Clone, Debug)]
@@ -68,18 +75,21 @@ struct BoxStats {
     lower_whisker: f64,
     upper_whisker: f64,
     outliers: Vec<f64>,
+    observation_count: usize,
 }
 
 #[derive(Clone, Debug)]
 enum PlotPlan {
     Line(LinePlot),
     Scatter(ScatterPlot),
+    Patch(PatchPlot),
 }
 
 #[derive(Clone, Copy, Debug)]
 enum HandleKind {
     Line,
     Scatter,
+    Patch,
 }
 
 impl Default for BoxplotOptions {
@@ -100,6 +110,11 @@ impl Default for BoxplotOptions {
             extreme_mode: ExtremeMode::Clip,
             jitter: 0.0,
             compact: false,
+            box_style: BoxStyle::Outline,
+            box_style_explicit: false,
+            median_style: MedianStyle::Line,
+            median_style_explicit: false,
+            notch_style: NotchStyle::Off,
         }
     }
 }

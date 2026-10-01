@@ -29,6 +29,10 @@ const PLOT_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Boxplot graphics rendering",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/boxplot/plot.rs"),
 };
+const APPEARANCE_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Boxplot typed appearance and notch geometry",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/boxplot/appearance.rs"),
+};
 const ECDF: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "ecdf",
     target: BuiltinDocumentationLinkTarget::Builtin("ecdf"),
@@ -43,7 +47,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("boxplot"),
     slug: Some("boxplot"),
     summary: "Visualize sample quartiles, whiskers, medians, and outliers.",
-    description: "`boxplot(x)` plots one box for a vector and one box per matrix column. `boxplot(x,g)` groups vector data by numeric, text, cell, or categorical grouping variables. With an output, RunMat returns a row vector of graphics handles for the line and scatter primitives used to draw the boxes. Public numeric data, groups, and numeric option values are single or double; integer and logical forms are independently gated RunMat extensions.",
+    description: "`boxplot(x)` plots one box for a vector and one box per matrix column. `boxplot(x,g)` groups vector data by numeric, text, cell, or categorical grouping variables. With an output, RunMat returns a row vector of graphics handles for the line, scatter, and filled-patch primitives used to draw the boxes. Public numeric data, groups, and numeric option values are single or double; integer and logical forms are independently gated RunMat extensions.",
     keywords: &["boxplot", "box plot", "statistics", "quartile", "outlier", "visualization"],
     related: &["ecdf", "histogram"],
     sections: &[
@@ -58,8 +62,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Options and rendering",
             paragraphs: &[
                 "`DataLim`, `ExtremeMode`, and `Jitter` control outlier display. `ExtremeMode` clips or compresses outlier markers outside the data limits, and traditional plots default to no jitter.",
-                "Recognized options include `Labels`, `GroupOrder`, `Orientation`, `Positions`, `Widths`, `Whisker`, `Colors`, `Symbol`, `OutlierSize`, `PlotStyle`, `BoxStyle`, `MedianStyle`, `Notch`, `DataLim`, `ExtremeMode`, `Jitter`, `LabelOrientation`, `LabelVerbosity`, and factor display validation options.",
-                "`BoxStyle`, `MedianStyle`, `Notch`, and factor display layout options are accepted for compatibility; the current renderer draws an outline box, median line, whiskers, caps, and optional outlier markers.",
+                "Recognized options include `Labels`, `GroupOrder`, `Orientation`, `Positions`, `Widths`, `Whisker`, `Colors`, `ColorGroup`, `Symbol`, `OutlierSize`, `PlotStyle`, `BoxStyle`, `MedianStyle`, `Notch`, `DataLim`, `ExtremeMode`, `Jitter`, `LabelOrientation`, `LabelVerbosity`, and factor display validation options.",
+                "`BoxStyle` selects an outline or filled box; `MedianStyle` selects a line or target marker. `Notch` displays the median comparison interval as notches in traditional plots or triangle markers in compact plots. The interval endpoints are the median plus or minus 1.57 times the interquartile range divided by the square root of the non-NaN observation count. `ColorGroup` and factor display layout options are admitted but do not yet change rendered colors or layout.",
             ],
         },
         BuiltinDocumentationSection {
@@ -101,13 +105,23 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>0);" },
         },
+        BuiltinExample {
+            id: "boxplot-filled-comparison-interval", title: "Draw a filled box and median comparison markers",
+            program: "h = boxplot([1;2;3;4;5], 'BoxStyle', 'filled', 'MedianStyle', 'target', 'Notch', 'marker')",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::BrowserGraphics,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>=8);" },
+        },
     ],
     example_exemption: None,
     faqs: &[],
     links: &[SOURCE, ECDF, HISTOGRAM],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE, ADMISSION_SOURCE, OPTIONS_SOURCE, OPTION_DECODING_SOURCE, GROUPS_SOURCE, LABELS_SOURCE, PLOT_SOURCE],
+        implementation: &[SOURCE, ADMISSION_SOURCE, OPTIONS_SOURCE, OPTION_DECODING_SOURCE, GROUPS_SOURCE, LABELS_SOURCE, PLOT_SOURCE, APPEARANCE_SOURCE],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Box grouping, quartiles, options, compatibility and plotted handles", location: "crates/runmat-runtime/src/builtins/stats/summary/boxplot/tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident admission and borrowed input ownership", location: "crates/runmat-runtime/src/builtins/stats/summary/boxplot/provider_tests.rs" },

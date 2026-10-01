@@ -25,6 +25,9 @@ enum DecodedOption {
     Symbol(Option<MarkerStyle>, Option<Vec4>),
     Colors(Vec<Vec4>),
     PlotStyle(bool),
+    BoxStyle(BoxStyle),
+    MedianStyle(MedianStyle),
+    Notch(NotchStyle),
     Jitter(f64),
     DataLim(Option<(f64, f64)>),
     ExtremeMode(ExtremeMode),
@@ -136,12 +139,24 @@ impl DecodedOption {
             Self::PlotStyle(compact) => {
                 options.compact = compact;
                 if compact {
+                    if !options.box_style_explicit {
+                        options.box_style = BoxStyle::Filled;
+                    }
+                    if !options.median_style_explicit {
+                        options.median_style = MedianStyle::Target;
+                    }
                     options.widths = vec![0.25];
                     options.outlier_marker = Some(MarkerStyle::Circle);
                     options.outlier_color = None;
                     options.outlier_size = 4.0;
                     options.jitter = 0.5;
                 } else {
+                    if !options.box_style_explicit {
+                        options.box_style = BoxStyle::Outline;
+                    }
+                    if !options.median_style_explicit {
+                        options.median_style = MedianStyle::Line;
+                    }
                     if options.outlier_marker == Some(MarkerStyle::Circle) {
                         options.outlier_marker = Some(MarkerStyle::Plus);
                     }
@@ -149,6 +164,15 @@ impl DecodedOption {
                     options.jitter = 0.0;
                 }
             }
+            Self::BoxStyle(value) => {
+                options.box_style = value;
+                options.box_style_explicit = true;
+            }
+            Self::MedianStyle(value) => {
+                options.median_style = value;
+                options.median_style_explicit = true;
+            }
+            Self::Notch(value) => options.notch_style = value,
             Self::Jitter(value) => options.jitter = value,
             Self::DataLim(value) => options.data_lim = value,
             Self::ExtremeMode(value) => options.extreme_mode = value,

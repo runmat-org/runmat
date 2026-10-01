@@ -75,21 +75,24 @@ pub(super) fn decode_option(kind: BoxplotOptionKind, value: Value) -> BuiltinRes
         }),
         BoxStyle => {
             let text = text_scalar(&value, "BoxStyle")?;
-            if text != "outline" && text != "filled" {
-                return Err(invalid("boxplot: BoxStyle must be 'outline' or 'filled'"));
-            }
-            DecodedOption::Validated(kind)
+            DecodedOption::BoxStyle(
+                super::BoxStyle::parse(&text)
+                    .ok_or_else(|| invalid("boxplot: BoxStyle must be 'outline' or 'filled'"))?,
+            )
         }
         MedianStyle => {
             let text = text_scalar(&value, "MedianStyle")?;
-            if text != "line" && text != "target" {
-                return Err(invalid("boxplot: MedianStyle must be 'line' or 'target'"));
-            }
-            DecodedOption::Validated(kind)
+            DecodedOption::MedianStyle(
+                super::MedianStyle::parse(&text)
+                    .ok_or_else(|| invalid("boxplot: MedianStyle must be 'line' or 'target'"))?,
+            )
         }
         Notch => {
-            parse_on_off_marker(&value, "Notch")?;
-            DecodedOption::Validated(kind)
+            let text = text_scalar(&value, "Notch")?;
+            DecodedOption::Notch(
+                super::NotchStyle::parse(&text)
+                    .ok_or_else(|| invalid("boxplot: Notch must be 'on', 'off', or 'marker'"))?,
+            )
         }
         Jitter => {
             let jitter = scalar(&value, "Jitter")?;

@@ -43,6 +43,10 @@ pub(super) fn render_boxplot(
                     let plot_index = figure.add_scatter_plot_on_axes(plot, axes);
                     recorded.push((HandleKind::Scatter, axes, plot_index));
                 }
+                PlotPlan::Patch(plot) => {
+                    let plot_index = figure.add_patch_plot_on_axes(plot, axes);
+                    recorded.push((HandleKind::Patch, axes, plot_index));
+                }
             }
         }
         *handles_slot.borrow_mut() = recorded;
@@ -59,6 +63,11 @@ pub(super) fn render_boxplot(
                 *plot_index,
             ),
             HandleKind::Scatter => crate::builtins::plotting::state::register_scatter_handle(
+                figure_handle,
+                *axes,
+                *plot_index,
+            ),
+            HandleKind::Patch => crate::builtins::plotting::state::register_patch_handle(
                 figure_handle,
                 *axes,
                 *plot_index,
@@ -97,6 +106,11 @@ pub(super) fn axis_limits(
     for stats in boxes {
         min_data = min_data.min(stats.lower_whisker).min(stats.q1);
         max_data = max_data.max(stats.upper_whisker).max(stats.q3);
+        if options.notch_style != NotchStyle::Off {
+            let (lower, upper) = super::appearance::notch_interval(stats)?;
+            min_data = min_data.min(lower);
+            max_data = max_data.max(upper);
+        }
         for (idx, value) in stats.outliers.iter().enumerate() {
             let value = display_data_value(*value, idx, stats.outliers.len(), options);
             min_data = min_data.min(value);
@@ -162,10 +176,13 @@ pub(super) fn axis_limits(
     })
 }
 
-fn build_plot_plans(boxes: &[BoxStats], options: &BoxplotOptions) -> BuiltinResult<Vec<PlotPlan>> {
+pub(super) fn build_plot_plans(
+    boxes: &[BoxStats],
+    options: &BoxplotOptions,
+) -> BuiltinResult<Vec<PlotPlan>> {
     let mut plans = Vec::new();
     for stats in boxes {
-        add_box_lines(&mut plans, stats, options.orientation)?;
+        add_box_lines(&mut plans, stats, options)?;
         if !stats.outliers.is_empty() {
             if let Some(marker) = options.outlier_marker {
                 let (x, y) = outlier_points(stats, options);
@@ -186,7 +203,7 @@ fn build_plot_plans(boxes: &[BoxStats], options: &BoxplotOptions) -> BuiltinResu
 fn add_box_lines(
     plans: &mut Vec<PlotPlan>,
     stats: &BoxStats,
-    orientation: Orientation,
+    options: &BoxplotOptions,
 ) -> BuiltinResult<()> {
     let pos = stats.position;
     let half = stats.width * 0.5;
@@ -195,44 +212,101 @@ fn add_box_lines(
     let right = pos + half;
     let cap_left = pos - cap_half;
     let cap_right = pos + cap_half;
-    let segments = [
-        (
-            vec![left, right, right, left, left],
-            vec![stats.q1, stats.q1, stats.q3, stats.q3, stats.q1],
-            "box",
-        ),
-        (
-            vec![left, right],
-            vec![stats.median, stats.median],
-            "median",
-        ),
+    let notch = options.notch_style.effective(options.compact);
+    let (box_x, box_y) = super::appearance::box_outline(stats, notch)?;
+    if options.box_style == BoxStyle::Filled {
+        let vertices = box_x
+            .iter()
+            .zip(&box_y)
+            .take(box_x.len() - 1)
+            .map(|(&category, &data)| {
+                let (x, y) = match options.orientation {
+                    Orientation::Vertical => (category, data),
+                    Orientation::Horizontal => (data, category),
+                };
+                if !x.is_finite()
+                    || !y.is_finite()
+                    || !(x as f32).is_finite()
+                    || !(y as f32).is_finite()
+                {
+                    return Err(invalid("boxplot: filled box geometry is not representable"));
+                }
+                Ok(glam::Vec3::new(x as f32, y as f32, 0.0))
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        let count = vertices.len();
+        let mut patch = PatchPlot::new(vertices, vec![(0..count).collect()])
+            .map_err(|err| internal(format!("boxplot: {err}")))?;
+        patch.set_face_color(stats.color);
+        patch.set_edge_color(stats.color);
+        patch.set_label(Some(format!("{} box", stats.label)));
+        plans.push(PlotPlan::Patch(patch));
+    }
+    use super::appearance::SegmentKind;
+    let mut segments = vec![
+        (box_x, box_y, SegmentKind::Box),
         (
             vec![pos, pos],
             vec![stats.q1, stats.lower_whisker],
-            "lower whisker",
+            SegmentKind::LowerWhisker,
         ),
         (
             vec![pos, pos],
             vec![stats.q3, stats.upper_whisker],
-            "upper whisker",
+            SegmentKind::UpperWhisker,
         ),
         (
             vec![cap_left, cap_right],
             vec![stats.lower_whisker, stats.lower_whisker],
-            "lower cap",
+            SegmentKind::LowerCap,
         ),
         (
             vec![cap_left, cap_right],
             vec![stats.upper_whisker, stats.upper_whisker],
-            "upper cap",
+            SegmentKind::UpperCap,
         ),
     ];
-    for (x, y, suffix) in segments {
-        let (x, y) = orient_points(x, y, orientation);
+    if options.median_style == MedianStyle::Line {
+        segments.push((
+            vec![left, right],
+            vec![stats.median, stats.median],
+            SegmentKind::Median,
+        ));
+    } else {
+        let (x, y) = orient_points(vec![pos], vec![stats.median], options.orientation);
+        let mut ring = ScatterPlot::new(x.clone(), y.clone())
+            .map_err(|err| internal(format!("boxplot: {err}")))?
+            .with_style(Vec4::ONE, 8.0, MarkerStyle::Circle)
+            .with_label(format!("{} median target", stats.label));
+        ring.set_edge_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
+        ring.set_filled(true);
+        plans.push(PlotPlan::Scatter(ring));
+        let mut center = ScatterPlot::new(x, y)
+            .map_err(|err| internal(format!("boxplot: {err}")))?
+            .with_style(Vec4::new(0.0, 0.0, 0.0, 1.0), 3.0, MarkerStyle::Circle)
+            .with_label(format!("{} median center", stats.label));
+        center.set_edge_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
+        center.set_filled(true);
+        plans.push(PlotPlan::Scatter(center));
+    }
+    if notch == NotchStyle::Marker {
+        let (lower, upper) = super::appearance::notch_interval(stats)?;
+        for (value, suffix) in [(lower, "lower notch"), (upper, "upper notch")] {
+            let (x, y) = orient_points(vec![pos], vec![value], options.orientation);
+            let mut marker = ScatterPlot::new(x, y)
+                .map_err(|err| internal(format!("boxplot: {err}")))?
+                .with_style(stats.color, 7.0, MarkerStyle::Triangle)
+                .with_label(format!("{} {suffix}", stats.label));
+            marker.set_filled(true);
+            plans.push(PlotPlan::Scatter(marker));
+        }
+    }
+    for (x, y, kind) in segments {
+        let (x, y) = orient_points(x, y, options.orientation);
         let line = LinePlot::new(x, y)
             .map_err(|err| internal(format!("boxplot: {err}")))?
-            .with_style(stats.color, 1.5, LineStyle::Solid)
-            .with_label(format!("{} {}", stats.label, suffix));
+            .with_style(stats.color, 1.5, kind.line_style(options.box_style))
+            .with_label(format!("{} {}", stats.label, kind.label()));
         plans.push(PlotPlan::Line(line));
     }
     Ok(())

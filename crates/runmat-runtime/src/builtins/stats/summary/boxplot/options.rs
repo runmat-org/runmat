@@ -68,15 +68,6 @@ pub(super) fn text_vector(value: &Value, label: &str) -> BuiltinResult<Vec<Strin
     }
 }
 
-pub(super) fn parse_on_off_marker(value: &Value, label: &str) -> BuiltinResult<()> {
-    match text_scalar(value, label)?.as_str() {
-        "on" | "off" | "marker" => Ok(()),
-        _ => Err(invalid(format!(
-            "boxplot: {label} must be 'on', 'off', or 'marker'"
-        ))),
-    }
-}
-
 pub(super) fn parse_on_off(value: &Value, label: &str) -> BuiltinResult<()> {
     match text_scalar(value, label)?.as_str() {
         "on" | "off" => Ok(()),

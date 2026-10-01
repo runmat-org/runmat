@@ -333,6 +333,7 @@ fn axis_limits_remain_finite_for_extreme_and_constant_finite_data() {
         lower_whisker: -f64::MAX,
         upper_whisker: f64::MAX,
         outliers: Vec::new(),
+        observation_count: 4,
     };
     let (_, data) = super::plot::axis_limits(&[stats.clone()], &BoxplotOptions::default())
         .expect("opposite finite extrema retain finite bounds");
@@ -498,6 +499,7 @@ fn jitter_zero_keeps_outliers_centered_and_datalim_clips() {
         lower_whisker: 1.0,
         upper_whisker: 3.0,
         outliers: vec![-5.0, 12.0],
+        observation_count: 4,
     };
     let (x, y) = outlier_points(&stats, &options);
     assert_eq!(x, vec![3.0, 3.0]);
@@ -536,4 +538,89 @@ fn renders_handle_vector_and_tick_labels() {
     let figure = clone_figure(current_figure_handle()).expect("figure");
     let meta = figure.axes_metadata(0).expect("axes metadata");
     assert_eq!(meta.x_tick_labels.as_deref(), Some(&["1".to_string()][..]));
+}
+
+#[test]
+fn appearance_options_change_typed_plot_plans_and_interval_geometry() {
+    let options = BoxplotOptions::parse(vec![
+        Value::from("BoxStyle"),
+        Value::from("filled"),
+        Value::from("MedianStyle"),
+        Value::from("target"),
+        Value::from("Notch"),
+        Value::from("marker"),
+    ])
+    .unwrap();
+    assert_eq!(options.box_style, BoxStyle::Filled);
+    assert_eq!(options.median_style, MedianStyle::Target);
+    assert_eq!(options.notch_style, NotchStyle::Marker);
+    let boxes =
+        build_box_stats(tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]), None, &options).unwrap();
+    let plans = super::plot::build_plot_plans(&boxes, &options).unwrap();
+    assert_eq!(plans.len(), 10);
+    assert_eq!(
+        plans
+            .iter()
+            .filter(|p| matches!(p, PlotPlan::Patch(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        plans
+            .iter()
+            .filter(|p| matches!(p, PlotPlan::Scatter(_)))
+            .count(),
+        4
+    );
+    let (lower, upper) = appearance::notch_interval(&boxes[0]).unwrap();
+    assert!((lower - 1.3225).abs() < 1.0e-12);
+    assert!((upper - 3.6775).abs() < 1.0e-12);
+    let (_, data) = super::plot::axis_limits(&boxes, &options).unwrap();
+    let (min, max) = data.unwrap();
+    assert!(min <= lower && max >= upper);
+    let _guard = crate::builtins::plotting::lock_plot_test_context();
+    crate::builtins::plotting::reset_plot_state();
+    let handles = render_boxplot(&boxes, &options).unwrap();
+    assert_eq!(handles.len(), plans.len());
+    assert!(handles.iter().all(|handle| handle.is_finite()));
+}
+
+#[test]
+fn plot_style_controls_defaults_but_later_explicit_appearance_wins() {
+    let compact =
+        BoxplotOptions::parse(vec![Value::from("PlotStyle"), Value::from("compact")]).unwrap();
+    assert_eq!(compact.box_style, BoxStyle::Filled);
+    assert_eq!(compact.median_style, MedianStyle::Target);
+    assert_eq!(
+        NotchStyle::On.effective(compact.compact),
+        NotchStyle::Marker
+    );
+    let stats = statistics::stats_for_values("A".into(), vec![1.0, 2.0, 3.0, 4.0], 1.5).unwrap();
+    let (outline_x, outline_y) = appearance::box_outline(&stats, NotchStyle::On).unwrap();
+    assert_eq!(outline_x.len(), 11);
+    assert_eq!(outline_y.len(), outline_x.len());
+    assert_eq!(outline_x.first(), outline_x.last());
+    assert_eq!(outline_y.first(), outline_y.last());
+    let explicit = BoxplotOptions::parse(vec![
+        Value::from("PlotStyle"),
+        Value::from("compact"),
+        Value::from("BoxStyle"),
+        Value::from("outline"),
+        Value::from("MedianStyle"),
+        Value::from("line"),
+    ])
+    .unwrap();
+    assert_eq!(explicit.box_style, BoxStyle::Outline);
+    assert_eq!(explicit.median_style, MedianStyle::Line);
+    let reversed = BoxplotOptions::parse(vec![
+        Value::from("BoxStyle"),
+        Value::from("outline"),
+        Value::from("MedianStyle"),
+        Value::from("line"),
+        Value::from("PlotStyle"),
+        Value::from("compact"),
+    ])
+    .unwrap();
+    assert_eq!(reversed.box_style, BoxStyle::Outline);
+    assert_eq!(reversed.median_style, MedianStyle::Line);
 }

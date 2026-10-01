@@ -16,6 +16,7 @@ pub(super) fn stats_for_values(
         ));
     }
     finite.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    let observation_count = finite.len();
     let q1 = percentile_sorted(&finite, 0.25);
     let median = percentile_sorted(&finite, 0.5);
     let q3 = percentile_sorted(&finite, 0.75);
@@ -49,6 +50,7 @@ pub(super) fn stats_for_values(
         lower_whisker: lower_whisker.unwrap_or(median),
         upper_whisker: upper_whisker.unwrap_or(median),
         outliers,
+        observation_count,
     })
 }
 
