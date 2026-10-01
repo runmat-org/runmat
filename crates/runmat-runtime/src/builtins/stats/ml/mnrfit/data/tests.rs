@@ -99,13 +99,16 @@ fn adjacent_finite_numeric_labels_remain_distinct_classes() {
 #[test]
 fn grouped_finite_counts_reject_unrepresentable_row_and_total() {
     let overflowing_row = Tensor::new(vec![1.0e308, 1.0e308], vec![1, 2]).unwrap();
-    let err = count_outcomes(&overflowing_row).expect_err("row total must stay finite");
+    let err = count_outcomes(&overflowing_row)
+        .err()
+        .expect("row total must stay finite");
     assert!(err.message().contains("grouped count total"));
 
     let overflowing_observations =
         Tensor::new(vec![1.0e308, 1.0e308, 0.0, 0.0], vec![2, 2]).unwrap();
     let err = count_outcomes(&overflowing_observations)
-        .expect_err("aggregate observation count must stay finite");
+        .err()
+        .expect("aggregate observation count must stay finite");
     assert!(err.message().contains("grouped count total"));
 
     let omitted_missing_row = Tensor::new(vec![1.0e308, 1.0, f64::NAN, 1.0], vec![2, 2]).unwrap();

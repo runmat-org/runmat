@@ -139,7 +139,7 @@ const OUTPUT_STATS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Fit statistics structure containing beta, se, t, p, covb, coeffcorr, and dfe.",
+    description: "Fit statistics structure; its fields and shapes are described in the reference documentation.",
 };
 
 const INPUT_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -155,7 +155,7 @@ const INPUT_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Response class vector or two-column binomial counts matrix.",
+    description: "Response class vector or grouped counts matrix with one column per class.",
 };
 
 const INPUT_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -170,9 +170,10 @@ const INPUT_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
 const INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_Y];
 const INPUTS_X_Y_OPTIONS: [BuiltinParamDescriptor; 3] = [INPUT_X, INPUT_Y, INPUT_OPTIONS];
 const OUTPUTS_B: [BuiltinParamDescriptor; 1] = [OUTPUT_B];
+const OUTPUTS_B_DEV: [BuiltinParamDescriptor; 2] = [OUTPUT_B, OUTPUT_DEV];
 const OUTPUTS_B_DEV_STATS: [BuiltinParamDescriptor; 3] = [OUTPUT_B, OUTPUT_DEV, OUTPUT_STATS];
 
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "B = mnrfit(X, Y)",
         inputs: &INPUTS_X_Y,
@@ -182,6 +183,16 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         label: "B = mnrfit(X, Y, Name, Value)",
         inputs: &INPUTS_X_Y_OPTIONS,
         outputs: &OUTPUTS_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, dev] = mnrfit(X, Y)",
+        inputs: &INPUTS_X_Y,
+        outputs: &OUTPUTS_B_DEV,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, dev] = mnrfit(X, Y, Name, Value)",
+        inputs: &INPUTS_X_Y_OPTIONS,
+        outputs: &OUTPUTS_B_DEV,
     },
     BuiltinSignatureDescriptor {
         label: "[B, dev, stats] = mnrfit(X, Y)",

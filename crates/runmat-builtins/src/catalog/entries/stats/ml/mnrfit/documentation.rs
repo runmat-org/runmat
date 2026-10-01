@@ -1,5 +1,10 @@
 use crate::*;
 
+const ENTRYPOINT_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Multinomial fitting entrypoint",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit.rs"),
+};
+
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Multinomial solver implementation",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/solver.rs"),
@@ -75,7 +80,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(isstring(stats.classNames)); assert(isequal(size(B),[2 1])); assert(isfinite(dev));" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isstring(stats.classNames)); assert(isequal(stats.classNames,[\"high\",\"low\"])); assert(isequal(size(B),[2 1])); assert(isfinite(dev));" },
         },
     ],
     example_exemption: None,
@@ -88,6 +93,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "lasso", target: BuiltinDocumentationLinkTarget::Builtin("lasso") },
         BuiltinDocumentationLink { label: "fitclinear", target: BuiltinDocumentationLinkTarget::Builtin("fitclinear") },
         SOURCE,
+        ENTRYPOINT_SOURCE,
         ADMISSION_SOURCE,
         DATA_SOURCE,
         OPTIONS_SOURCE,
@@ -96,7 +102,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE, ADMISSION_SOURCE, DATA_SOURCE, OPTIONS_SOURCE, OUTPUT_SOURCE, ALLOCATION_SOURCE],
+        implementation: &[ENTRYPOINT_SOURCE, SOURCE, ADMISSION_SOURCE, DATA_SOURCE, OPTIONS_SOURCE, OUTPUT_SOURCE, ALLOCATION_SOURCE],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Multinomial fitting, class forms, and integer boundaries", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact numeric class identity, finite count totals, and weight boundaries", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/data/tests.rs" },
