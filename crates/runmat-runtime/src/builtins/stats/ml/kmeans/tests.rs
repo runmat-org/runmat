@@ -1,0 +1,396 @@
+use futures::executor::block_on;
+use runmat_value::{IntegerStorage, Tensor};
+
+use super::*;
+use runmat_builtins::{KmeansDistance, KmeansEmptyAction};
+fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+}
+
+fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+    let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+    Value::Tensor(tensor)
+}
+
+fn poisoned_int_tensor_shape(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+    let tensor = Tensor::new_integer(storage, shape).unwrap();
+    Value::Tensor(tensor)
+}
+
+#[test]
+fn public_option_spellings_decode_once_into_typed_controls() {
+    assert_eq!(
+        KmeansOption::from_keyword("DISTANCE"),
+        Some(KmeansOption::Distance)
+    );
+    assert_eq!(
+        KmeansDistance::from_keyword("city block"),
+        Some(KmeansDistance::Cityblock)
+    );
+    assert_eq!(
+        KmeansEmptyAction::from_keyword("drop"),
+        Some(KmeansEmptyAction::Drop)
+    );
+    assert_eq!(
+        KmeansStart::from_keyword("cluster"),
+        Some(KmeansStart::Cluster)
+    );
+    assert!(KmeansOption::from_keyword("unrecognized").is_none());
+}
+
+#[test]
+fn malformed_public_headers_and_geometry_fail_before_solver() {
+    assert!(parse_option_headers(&[Value::from("Distance")]).is_err());
+    assert!(parse_option_headers(&[Value::from("unknown"), Value::from("value")]).is_err());
+    assert!(preflight_observations(&Value::from("not observations")).is_err());
+    assert!(preflight_cluster_count(&tensor(vec![1.0, 2.0], 1, 2)).is_err());
+}
+
+#[test]
+fn option_parsers_read_all_integer_storage_variants() {
+    let storages = [
+        IntegerStorage::I8(vec![1]),
+        IntegerStorage::I16(vec![1]),
+        IntegerStorage::I32(vec![1]),
+        IntegerStorage::I64(vec![1]),
+        IntegerStorage::U8(vec![1]),
+        IntegerStorage::U16(vec![1]),
+        IntegerStorage::U32(vec![1]),
+        IntegerStorage::U64(vec![1]),
+    ];
+    for storage in storages {
+        let value = poisoned_int_tensor(storage, 1, 1);
+        assert_eq!(parse_positive_usize(&value, "k").unwrap(), 1);
+        assert!(bool_option(&value).unwrap());
+    }
+}
+
+fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+    let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+    Value::Tensor(tensor)
+}
+
+fn outputs(value: Value) -> Vec<Value> {
+    match value {
+        Value::OutputList(values) => values,
+        other => panic!("expected output list, got {other:?}"),
+    }
+}
+
+#[test]
+fn kmeans_documented_floating_gpu_fallback_preserves_explicit_residency() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        random::reset_rng();
+        let input = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
+            .expect("upload observations");
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
+        let output = block_on(kmeans_builtin(
+            Value::GpuTensor(handle),
+            Value::Num(2.0),
+            vec![
+                Value::from("Start"),
+                Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
+            ],
+        ))
+        .expect("documented resident kmeans");
+        assert!(matches!(output, Value::GpuTensor(_)));
+    });
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn kmeans_wgpu_fallback_enforces_explicit_residency_contract() {
+    let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .expect("actual WGPU provider");
+    random::reset_rng();
+    let input = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
+    let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
+        .expect("upload observations");
+    let handle = handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .expect("validated provenance");
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let result = block_on(kmeans_builtin(
+        Value::GpuTensor(handle.clone()),
+        Value::Num(2.0),
+        vec![
+            Value::from("Start"),
+            Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
+        ],
+    ));
+    let Value::GpuTensor(output) = result.expect("documented WGPU kmeans") else {
+        panic!("expected resident output");
+    };
+    assert!(runmat_accelerate_api::handle_is_explicit(&output));
+    assert_eq!(
+        output.device_id(),
+        runmat_accelerate_api::AccelProvider::device_id(provider)
+    );
+    assert_eq!(output.shape(), &[4, 1]);
+    assert_eq!(
+        runmat_accelerate_api::handle_precision(&output),
+        Some(runmat_accelerate_api::ProviderPrecision::F64)
+    );
+}
+
+#[test]
+fn kmeans_clusters_numeric_matrix_with_outputs() {
+    let _rng_guard = random::test_guard();
+    random::reset_rng();
+    let x = tensor(vec![0.0, 0.2, 9.8, 10.0, 0.0, 0.1, 9.9, 10.1], 4, 2);
+    let _guard = crate::output_count::push_output_count(Some(4));
+    let out = block_on(kmeans_builtin(
+        x,
+        Value::Num(2.0),
+        vec![
+            Value::from("Start"),
+            tensor(vec![0.0, 10.0, 0.0, 10.0], 2, 2),
+            Value::from("MaxIter"),
+            Value::Num(20.0),
+        ],
+    ))
+    .unwrap();
+    let out = outputs(out);
+    match &out[0] {
+        Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0]),
+        other => panic!("idx {other:?}"),
+    }
+    match &out[1] {
+        Value::Tensor(c) => {
+            assert_eq!(c.shape, vec![2, 2]);
+            assert!((c.materialize_f64()[0] - 0.1).abs() < 1.0e-12);
+            assert!((c.materialize_f64()[1] - 9.9).abs() < 1.0e-12);
+            assert!((c.materialize_f64()[2] - 0.05).abs() < 1.0e-12);
+            assert!((c.materialize_f64()[3] - 10.0).abs() < 1.0e-12);
+        }
+        other => panic!("centers {other:?}"),
+    }
+    match &out[2] {
+        Value::Tensor(sumd) => {
+            assert_eq!(sumd.shape, vec![2, 1]);
+            assert!(sumd.materialize_f64().iter().all(|v| v.is_finite()));
+        }
+        other => panic!("sumd {other:?}"),
+    }
+    match &out[3] {
+        Value::Tensor(d) => assert_eq!(d.shape, vec![4, 2]),
+        other => panic!("distances {other:?}"),
+    }
+}
+
+#[test]
+fn kmeans_reads_typed_integer_inputs_start_and_options_exactly() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let mut statset = StructValue::new();
+    statset.insert(
+        "MaxIter",
+        cleared_int_tensor(IntegerStorage::U16(vec![20]), 1, 1),
+    );
+    statset.insert(
+        "TolFun",
+        cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+    );
+    statset.insert(
+        "UseParallel",
+        cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+    );
+
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let out = block_on(kmeans_builtin(
+        poisoned_int_tensor(IntegerStorage::I16(vec![0, 0, 10, 10]), 4, 1),
+        poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
+        vec![
+            Value::from("Start"),
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 10]), 2, 1),
+            Value::from("Replicates"),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+            Value::from("Options"),
+            Value::Struct(statset),
+        ],
+    ))
+    .unwrap();
+    let out = outputs(out);
+    match &out[0] {
+        Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0]),
+        other => panic!("idx {other:?}"),
+    }
+    match &out[1] {
+        Value::Tensor(centers) => assert_eq!(centers.materialize_f64(), vec![0.0, 10.0]),
+        other => panic!("centers {other:?}"),
+    }
+}
+
+#[test]
+fn kmeans_empty_option_helpers_use_typed_integer_storage_len() {
+    let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+    let empty = Value::Tensor(empty);
+
+    assert!(is_empty_numeric(&empty));
+    assert!(is_empty_option_value(&empty));
+}
+
+#[test]
+fn kmeans_treats_vector_as_column_and_nan_rows_as_missing() {
+    let _rng_guard = random::test_guard();
+    random::reset_rng();
+    let x = tensor(vec![1.0, 2.0, f64::NAN, 20.0, 21.0], 1, 5);
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let out = block_on(kmeans_builtin(
+        x,
+        Value::Num(2.0),
+        vec![Value::from("Start"), Value::from("sample")],
+    ))
+    .unwrap();
+    let out = outputs(out);
+    match &out[0] {
+        Value::Tensor(idx) => {
+            assert_eq!(idx.shape, vec![5, 1]);
+            assert!(idx.materialize_f64()[2].is_nan());
+            assert!(idx.materialize_f64()[0].is_finite());
+            assert!(idx.materialize_f64()[4].is_finite());
+        }
+        other => panic!("idx {other:?}"),
+    }
+}
+
+#[test]
+fn kmeans_supports_cityblock_and_replicates() {
+    let _rng_guard = random::test_guard();
+    random::reset_rng();
+    let x = tensor(vec![0.0, 1.0, 10.0, 11.0], 4, 1);
+    let out = block_on(kmeans_builtin(
+        x,
+        Value::Num(2.0),
+        vec![
+            Value::from("Distance"),
+            Value::from("cityblock"),
+            Value::from("Replicates"),
+            Value::Num(2.0),
+            Value::from("Start"),
+            Value::from("plus"),
+        ],
+    ))
+    .unwrap();
+    match out {
+        Value::Tensor(idx) => assert_eq!(idx.shape, vec![4, 1]),
+        other => panic!("idx {other:?}"),
+    }
+}
+
+#[test]
+fn kmeans_infers_k_from_numeric_start_when_k_is_empty() {
+    let x = tensor(vec![0.0, 0.5, 10.0, 10.5], 4, 1);
+    let empty_k = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let out = block_on(kmeans_builtin(
+        x,
+        empty_k,
+        vec![
+            Value::from("Start"),
+            tensor(vec![0.0, 10.0], 2, 1),
+            Value::from("MaxIter"),
+            Value::Num(5.0),
+        ],
+    ))
+    .unwrap();
+    let out = outputs(out);
+    match &out[1] {
+        Value::Tensor(c) => assert_eq!(c.shape, vec![2, 1]),
+        other => panic!("centers {other:?}"),
+    }
+}
+
+#[test]
+fn kmeans_accepts_3d_numeric_starts_as_replicates() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let x = tensor(vec![0.0, 0.2, 10.0, 10.2], 4, 1);
+    let starts = poisoned_int_tensor_shape(IntegerStorage::I16(vec![0, 10, 0, 10]), vec![2, 1, 2]);
+    let _guard = crate::output_count::push_output_count(Some(3));
+    let out = block_on(kmeans_builtin(
+        x,
+        Value::Num(2.0),
+        vec![Value::from("Start"), starts],
+    ))
+    .unwrap();
+    let out = outputs(out);
+    match &out[2] {
+        Value::Tensor(sumd) => assert_eq!(sumd.shape, vec![2, 1]),
+        other => panic!("sumd {other:?}"),
+    }
+}
+
+#[test]
+fn kmeans_integer_roles_are_independently_gated_and_declared() {
+    let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 10]), 2, 1);
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(kmeans_builtin(x, Value::Num(1.0), Vec::new()))
+        .expect_err("strict mode rejects typed observation data");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:KmeansIntegerObservationDataExtension")
+    );
+    assert_eq!(KMEANS_EXTENSIONS.len(), 5);
+    assert_eq!(KMEANS_INTEGER_CAPABILITIES.len(), 5);
+}
+
+#[test]
+fn kmeans_runmat_integer_data_still_requires_exact_double_values() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let x = poisoned_int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), 1, 1);
+    let error = block_on(kmeans_builtin(x, Value::Num(1.0), Vec::new()))
+        .expect_err("wide integer data cannot cross the floating boundary");
+    assert!(error.message().contains("exactly representable as double"));
+}
+
+#[test]
+fn kmeans_supports_cluster_start_and_online_phase() {
+    let _rng_guard = random::test_guard();
+    random::reset_rng();
+    let x = tensor(vec![0.0, 0.1, 9.9, 10.0, 0.0, 0.2, 10.1, 10.0], 4, 2);
+    let out = block_on(kmeans_builtin(
+        x,
+        Value::Num(2.0),
+        vec![
+            Value::from("Start"),
+            Value::from("cluster"),
+            Value::from("OnlinePhase"),
+            Value::from("on"),
+        ],
+    ))
+    .unwrap();
+    match out {
+        Value::Tensor(idx) => assert_eq!(idx.shape, vec![4, 1]),
+        other => panic!("idx {other:?}"),
+    }
+}
+
+#[test]
+fn kmeans_rejects_bad_options() {
+    let x = tensor(vec![0.0, 1.0, 2.0], 3, 1);
+    let err = block_on(kmeans_builtin(
+        x.clone(),
+        Value::Num(2.0),
+        vec![Value::from("Distance"), Value::from("mahalanobis")],
+    ))
+    .unwrap_err();
+    assert_eq!(err.identifier(), Some("RunMat:kmeans:InvalidArgument"));
+
+    let err = block_on(kmeans_builtin(
+        x,
+        Value::Num(2.0),
+        vec![
+            Value::from("Distance"),
+            Value::from("hamming"),
+            Value::from("Start"),
+            Value::from("uniform"),
+        ],
+    ))
+    .unwrap_err();
+    assert_eq!(err.identifier(), Some("RunMat:kmeans:InvalidArgument"));
+}
