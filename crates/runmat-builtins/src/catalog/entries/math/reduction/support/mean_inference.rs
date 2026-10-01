@@ -1,4 +1,6 @@
-use super::numeric_inference::{infer_numeric_reduction_type, LiteralReductionControl};
+use super::numeric_inference::{
+    infer_numeric_reduction_type, LiteralReductionControl, ScalarResultClass,
+};
 use super::{MeanControl, MeanOutputClass};
 use crate::{ResolveContext, Type};
 use runmat_types::LiteralValue;
@@ -7,7 +9,12 @@ use runmat_types::LiteralValue;
 /// entry is installed. Option words use the same typed identity as runtime
 /// admission; any control requiring runtime values leaves the shape dynamic.
 pub fn infer_mean_type(args: &[Type], context: &ResolveContext) -> Type {
-    infer_numeric_reduction_type(args, context, mean_literal_control)
+    infer_numeric_reduction_type(
+        args,
+        context,
+        mean_literal_control,
+        ScalarResultClass::Promoted,
+    )
 }
 
 fn mean_literal_control(literal: &LiteralValue) -> Option<LiteralReductionControl> {

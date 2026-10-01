@@ -1,4 +1,6 @@
-use super::numeric_inference::{infer_numeric_reduction_type, LiteralReductionControl};
+use super::numeric_inference::{
+    infer_numeric_reduction_type, LiteralReductionControl, ScalarResultClass,
+};
 use super::{SumControl, SumOutputClass};
 use crate::{ResolveContext, Type};
 use runmat_types::LiteralValue;
@@ -6,7 +8,12 @@ use runmat_types::LiteralValue;
 /// A conservative type projection for the admitted literal `sum` grammar.
 /// Runtime-dependent controls remain dynamic until value-level admission.
 pub fn infer_sum_type(args: &[Type], context: &ResolveContext) -> Type {
-    infer_numeric_reduction_type(args, context, sum_literal_control)
+    infer_numeric_reduction_type(
+        args,
+        context,
+        sum_literal_control,
+        ScalarResultClass::Promoted,
+    )
 }
 
 fn sum_literal_control(literal: &LiteralValue) -> Option<LiteralReductionControl> {

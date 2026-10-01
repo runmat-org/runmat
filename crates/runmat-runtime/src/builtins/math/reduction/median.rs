@@ -7,12 +7,12 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 #[path = "median/resident.rs"]
 mod resident;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    infer_median_type, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Type,
+    BuiltinSignatureDescriptor, MedianControl, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -27,7 +27,7 @@ const NAME: &str = "median";
 use runmat_builtins::ResolveContext;
 
 fn median_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    reduce_numeric_type(args, ctx)
+    infer_median_type(args, ctx)
 }
 
 const MEDIAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -303,14 +303,12 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     },
 ];
 
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::median")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -444,55 +442,13 @@ async fn parse_arguments(
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
     let mut weights = None;
-    let tokens = tokens_from_values(args);
-
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
 
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            match text.as_str() {
-                "weights" => {
-                    if weights.is_some() {
-                        return Err(median_invalid_argument(
-                            "median: Weights may be specified only once",
-                        ));
-                    }
-                    let value = args.get(idx + 1).ok_or_else(|| {
-                        median_invalid_argument("median: Weights requires a value")
-                    })?;
-                    weights = Some(parse_weights(value, admission).await?);
-                    idx += 2;
-                    continue;
-                }
-                "omitnan" | "omitmissing" => {
-                    nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includenan" | "includemissing" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
-                    if axes_set && !matches!(axes, MedianAxes::Default) {
-                        return Err(median_invalid_argument(
-                            "median: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                    axes = MedianAxes::All;
-                    axes_set = true;
-                    idx += 1;
-                    continue;
-                }
-                _ => {}
-            }
-        }
-
         if let Some(keyword) = keyword_of(arg) {
-            match keyword.as_str() {
-                "weights" => {
+            match MedianControl::from_public_option(&keyword) {
+                Some(MedianControl::Weights) => {
                     if weights.is_some() {
                         return Err(median_invalid_argument(
                             "median: Weights may be specified only once",
@@ -505,17 +461,12 @@ async fn parse_arguments(
                     idx += 2;
                     continue;
                 }
-                "omitnan" | "omitmissing" => {
-                    nan_mode = ReductionNaN::Omit;
+                Some(MedianControl::Missing(mode)) => {
+                    nan_mode = mode;
                     idx += 1;
                     continue;
                 }
-                "includenan" | "includemissing" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
+                Some(MedianControl::All) => {
                     if axes_set && !matches!(axes, MedianAxes::Default) {
                         return Err(median_invalid_argument(
                             "median: 'all' cannot be combined with an explicit dimension",
@@ -526,12 +477,12 @@ async fn parse_arguments(
                     idx += 1;
                     continue;
                 }
-                "" => {
+                None if keyword.is_empty() => {
                     return Err(median_invalid_argument(
                         "median: keyword arguments must not be empty strings",
                     ));
                 }
-                _ => {
+                None => {
                     if let Some(original) = value_as_str(arg) {
                         return Err(median_invalid_argument(format!(
                             "median: unrecognised argument '{original}'"
@@ -1941,6 +1892,32 @@ pub(crate) mod tests {
             panic!("expected scalar median");
         };
         assert!(included.is_nan());
+    }
+
+    #[test]
+    fn median_typed_text_controls_preserve_conflict_diagnostics() {
+        let input = || Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap());
+        let omitted = median_builtin(input(), vec![Value::from("OMITMISSING")])
+            .expect("case-insensitive missing control");
+        assert_eq!(omitted, Value::Num(2.0));
+
+        let conflict = median_builtin(input(), vec![Value::Num(1.0), Value::from("all")])
+            .expect_err("all after dimension must conflict");
+        assert_eq!(
+            conflict.identifier(),
+            MEDIAN_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(conflict.message().contains("'all' cannot be combined"));
+
+        let missing_weight = median_builtin(input(), vec![Value::from("Weights")])
+            .expect_err("Weights requires a value");
+        assert_eq!(
+            missing_weight.identifier(),
+            MEDIAN_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(missing_weight
+            .message()
+            .contains("Weights requires a value"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

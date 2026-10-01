@@ -10,6 +10,13 @@ pub(super) enum LiteralReductionControl {
     RequiresRuntimeValue,
 }
 
+/// The scalar result boundary differs between owners. `mean` and `sum`
+/// promote by default; `median` preserves exact integer and logical scalars.
+pub(super) enum ScalarResultClass {
+    Promoted,
+    Preserved,
+}
+
 #[derive(Clone)]
 enum KnownAxes {
     Default,
@@ -30,19 +37,40 @@ pub(super) fn infer_numeric_reduction_type(
     args: &[Type],
     context: &ResolveContext,
     decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
+    scalar_class: ScalarResultClass,
 ) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
     };
     let controls = admitted_literal_controls(args.len(), context, decode_control);
     match input {
-        Type::Tensor { shape } | Type::Logical { shape } => Type::Tensor {
+        Type::Tensor { shape } => Type::Tensor {
             shape: shape.as_ref().and_then(|dims| {
                 controls
                     .as_ref()
                     .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
             }),
         },
+        Type::Logical { shape } if matches!(scalar_class, ScalarResultClass::Promoted) => {
+            Type::Tensor {
+                shape: shape.as_ref().and_then(|dims| {
+                    controls
+                        .as_ref()
+                        .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
+                }),
+            }
+        }
+        // A logical median can collapse to Bool or retain LogicalArray; the
+        // legacy Type cannot safely express both without an admitted extent.
+        Type::Logical { .. } => Type::Unknown,
+        Type::Int if matches!(scalar_class, ScalarResultClass::Preserved) && controls.is_some() => {
+            Type::Int
+        }
+        Type::Bool
+            if matches!(scalar_class, ScalarResultClass::Preserved) && controls.is_some() =>
+        {
+            Type::Bool
+        }
         Type::Int
             if controls
                 .as_ref()
