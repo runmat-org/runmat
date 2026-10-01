@@ -1,9 +1,22 @@
 use super::RidgeScaling;
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DimensionFact, InferenceDiagnostic,
-    NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    infer_call, CallContract, CallInference, CallRequest, DimensionFact, DynamicReason,
+    InferenceDiagnostic, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
+
+fn invalid_known_parameter(literal: &LiteralValue) -> bool {
+    match literal {
+        LiteralValue::Vector(values) => values.iter().any(invalid_known_parameter),
+        LiteralValue::Integer { text, .. } => text.parse::<i128>().is_ok_and(|value| value < 0),
+        LiteralValue::Number(_) | LiteralValue::Real { .. } => {
+            LiteralContext::numeric_from_literal(literal)
+                .is_some_and(|value| !value.is_finite() || value < 0.0)
+        }
+        _ => false,
+    }
+}
 
 fn vector_length(
     shape: &ShapeFact,
@@ -55,11 +68,12 @@ fn real_numeric(value: &ValueFact, argument: usize, errors: &mut Vec<InferenceDi
         ValueKindFact::Numeric(NumericFact {
             domain: NumericDomain::Real,
             ..
-        }) | ValueKindFact::Unknown
+        }) | ValueKindFact::Logical
+            | ValueKindFact::Unknown
     ) {
         errors.push(argument_error(
             "RM-CATALOG-RIDGE-CLASS",
-            "input must be real numeric",
+            "input must be real numeric or logical",
             argument,
         ));
     }
@@ -129,10 +143,27 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
         len
     });
+    if request
+        .literals
+        .literal_args
+        .get(2)
+        .is_some_and(invalid_known_parameter)
+    {
+        errors.push(argument_error(
+            "RM-CATALOG-RIDGE-K",
+            "k values must be nonnegative finite scalars",
+            2,
+        ));
+    }
     let scaled = request.arguments.get(3).and_then(|value| {
         match &value.kind {
-            ValueKindFact::Logical
-            | ValueKindFact::Numeric(NumericFact {
+            ValueKindFact::Logical if value.storage == StorageFact::Scalar => {}
+            ValueKindFact::Logical => errors.push(argument_error(
+                "RM-CATALOG-RIDGE-SCALED",
+                "scaled must be a scalar logical or numeric value",
+                3,
+            )),
+            ValueKindFact::Numeric(NumericFact {
                 domain: NumericDomain::Real,
                 ..
             })
@@ -175,14 +206,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         None if request.arguments.len() == 3 => predictors,
         None => None,
     };
-    let output = ValueFact::proven(
-        ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
-            domain: NumericDomain::Real,
-        }),
-        ShapeFact::from(vec![rows, parameters]),
-        StorageFact::Dense,
-    );
+    let output = if errors.is_empty() {
+        ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            ShapeFact::from(vec![rows, parameters]),
+            StorageFact::Dense,
+        )
+    } else {
+        ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
+    };
     let mut contract = CallContract::fixed(vec![output]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();

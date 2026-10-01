@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Inputs and result shape",
             paragraphs: &[
-                "`X` is an n-by-p real numeric matrix and `y` is a vector with n elements. `k` is a nonempty scalar or vector of finite nonnegative values. Each output column corresponds to one value of `k`, in input order.",
+                "`X` is an n-by-p real numeric or logical matrix and `y` is a vector with n elements. `k` is a nonempty scalar or vector of finite nonnegative numeric or logical values. Logical values enter the floating-point solve as zero or one. Each output column corresponds to one value of `k`, in input order.",
                 "RunMat omits rows with NaN in `X` or `y` and rejects Inf. At least two complete observations are required. The documented floating input classes are single and double; typed-integer `X`, `y`, and `k` are separately gated RunMat extensions and must be exactly representable at the binary64 solver boundary.",
             ],
         },

@@ -86,4 +86,41 @@ fn mismatched_rows_and_nonvector_parameters_have_diagnostics() {
         .diagnostics
         .iter()
         .any(|item| item.code == "RM-CATALOG-RIDGE-VECTOR"));
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn known_invalid_parameter_has_no_success_fact() {
+    let mut call = request(numeric(4, 1), numeric(4, 1), numeric(1, 1), None);
+    call.literals.literal_args[2] = LiteralValue::Number(-1.0);
+    let inferred = inference::infer(&call, &RIDGE_CATALOG_ENTRY);
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-CATALOG-RIDGE-K"));
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn logical_data_and_parameter_follow_the_admitted_host_path() {
+    let logical = ValueFact::proven(
+        ValueKindFact::Logical,
+        ShapeFact::from(vec![Some(4), Some(1)]),
+        StorageFact::Dense,
+    );
+    let logical_k = ValueFact::scalar(ValueKindFact::Logical);
+    let call = request(logical.clone(), logical, logical_k, None);
+    let inferred = inference::infer(&call, &RIDGE_CATALOG_ENTRY);
+    assert!(
+        inferred.diagnostics.is_empty(),
+        "{:?}",
+        inferred.diagnostics
+    );
+    assert!(matches!(
+        inferred.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            ..
+        })
+    ));
 }

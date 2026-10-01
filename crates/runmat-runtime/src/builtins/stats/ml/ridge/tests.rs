@@ -119,6 +119,17 @@ fn host_visible_geometry_and_flag_are_rejected_at_admission() {
 }
 
 #[test]
+fn logical_response_design_and_parameter_are_admitted() {
+    let y =
+        Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 1, 0, 1], vec![4, 1]).unwrap());
+    let x = tensor(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
+    let out = block_on(ridge_builtin(y, x, Value::Bool(false), Vec::new())).unwrap();
+    let out = tensor_out(out);
+    assert_eq!(out.shape, vec![1, 1]);
+    assert!(out.materialize_f64()[0].is_finite());
+}
+
+#[test]
 fn rank_deficient_k_zero_uses_minimum_norm_solution() {
     let y = tensor(vec![2.0, 4.0, 6.0], 3, 1);
     let x = tensor(vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0], 3, 2);

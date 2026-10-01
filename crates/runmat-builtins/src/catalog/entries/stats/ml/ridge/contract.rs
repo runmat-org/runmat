@@ -63,13 +63,6 @@ pub const RIDGE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDes
     message: "ridge: invalid argument",
 };
 
-pub const RIDGE_ERROR_NUMERICAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RIDGE.NUMERICAL",
-    identifier: Some("RunMat:ridge:Numerical"),
-    when: "The regularized normal equations cannot be solved numerically.",
-    message: "ridge: numerical solve failed",
-};
-
 pub const RIDGE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.RIDGE.INTERNAL",
     identifier: Some("RunMat:ridge:Internal"),
@@ -77,11 +70,7 @@ pub const RIDGE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     message: "ridge: internal error",
 };
 
-const ERRORS: [BuiltinErrorDescriptor; 3] = [
-    RIDGE_ERROR_INVALID_ARGUMENT,
-    RIDGE_ERROR_NUMERICAL,
-    RIDGE_ERROR_INTERNAL,
-];
+const ERRORS: [BuiltinErrorDescriptor; 2] = [RIDGE_ERROR_INVALID_ARGUMENT, RIDGE_ERROR_INTERNAL];
 
 pub const RIDGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
