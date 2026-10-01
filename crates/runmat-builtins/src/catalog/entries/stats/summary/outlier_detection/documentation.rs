@@ -26,7 +26,7 @@ pub(super) const ISOUTLIER_DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
         ] },
         BuiltinDocumentationSection { heading: "Resident arrays", paragraphs: &[
             "Floating resident input uses the owning provider's host-materialization path. Supported explicit `gpuArray` forms restore the logical mask and requested numeric thresholds through that same provider. This is not a resident outlier-detection kernel.",
-            "Automatic internal residency can gather transparently. Explicit GPU `movmedian`, `SamplePoints`, and `DataVariables` restrictions are checked before gathering.",
+            "Automatic internal residency can gather transparently. Explicit GPU `movmedian`, `SamplePoints`, and `DataVariables` restrictions are checked before gathering. A provider that cannot preserve explicit output residency returns an error rather than silently returning host results.",
         ] },
     ],
     examples: &[
@@ -64,7 +64,7 @@ pub(super) const ISOUTLIER_DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
             label: "Detection methods, integer exactness, thresholds, and resident restoration",
             location: "crates/runmat-runtime/src/builtins/stats/summary/outliers/tests.rs" }],
-        notes: &["Both legacy example forms and all substantive method, option, class, GPU, and link fields are retained; standalone example qualification is pending."],
+        notes: &["The runtime evaluates detection after owning-provider materialization. The supported explicit floating GPU route restores the mask and requested thresholds rather than running a detection kernel on device."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
@@ -83,7 +83,7 @@ pub(super) const FILLOUTLIERS_DOCUMENTATION: BuiltinDocumentation = BuiltinDocum
         ] },
         BuiltinDocumentationSection { heading: "Classes and boundaries", paragraphs: &[
             "Documented single and double input preserve their class in `B`. Typed-integer input is a RunMat-only form: it crosses into double statistics and output only if the exact input span is at most 2^53. Wider spans are rejected so distinct observations do not collapse at the floating boundary. `TF` remains logical; `L`, `U`, and `C` are double.",
-            "Typed-integer constant fill scalars, numeric `OutlierLocations` masks, and direct provider-resident inputs or arguments are independent RunMat extensions classified before gather. The current fill calculation returns host output; it does not promise resident execution or restoration.",
+            "Typed-integer constant fill scalars, numeric `OutlierLocations` masks, and direct provider-resident inputs or arguments are independent RunMat extensions classified before gather. The current fill calculation returns host output; unlike `isoutlier`, it does not restore requested outputs to the input provider.",
             "Spline-like interpolation, Grubbs/GESD detection, vector or duration windows, `SamplePoints`, `MaxNumOutliers`, and table/timetable options are unsupported instead of approximated.",
         ] },
     ],
@@ -122,7 +122,7 @@ pub(super) const FILLOUTLIERS_DOCUMENTATION: BuiltinDocumentation = BuiltinDocum
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
             label: "Replacement, output mask, integer spans, and unsupported forms",
             location: "crates/runmat-runtime/src/builtins/stats/summary/outliers/tests.rs" }],
-        notes: &["Both legacy examples, the named signatures, class boundaries, unsupported forms, and links are retained; standalone example qualification is pending."],
+        notes: &["The current fill calculation uses host materialization and does not promise provider-resident execution or output restoration."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };

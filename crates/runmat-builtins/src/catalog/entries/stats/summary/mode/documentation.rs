@@ -24,7 +24,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`mode(A,dim)` reduces one 1-based dimension, `mode(A,vecdim)` reduces several dimensions, and `mode(A,\"all\")` reduces all elements. A dimension beyond the input rank is a singleton selection and returns each value as its own mode.",
         ] },
         BuiltinDocumentationSection { heading: "Resident inputs", paragraphs: &[
-            "The current implementation gathers GPU input through its owning provider, computes frequencies and ties on the host, and uploads requested numeric outputs and tied-value cell contents back through that same provider when supported. This is a materialization boundary, not a provider-resident mode kernel.",
+            "The current implementation gathers GPU input through its owning provider, computes frequencies and ties on the host, and uploads requested numeric outputs and tied-value cell contents back through that same provider when supported. Complex GPU input is gathered and then rejected by the same complex-input diagnostic as host input. This is a materialization boundary, not a provider-resident mode kernel.",
             "A provider-side mode operation is declared, but the current runtime does not route through it. Provider support and a validated runtime route are required before claiming resident sorting/counting.",
         ] },
     ],
@@ -37,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             verification: BuiltinExampleVerification::Assertions { source: "assert(isscalar(m)); assert(m == 3);" },
         },
         BuiltinExample { id: "ties", title: "Inspect tied modal values",
-            program: "x = [1 1 2 2]; [m,f,c] = mode(x); disp(m); disp(f);",
+            program: "x = [1 1 2 2]; [m,f,c] = mode(x); disp(m); disp(f); disp(c{1});",
             display_output: Some("m = 1; f = 2; c{1} = [1; 2]"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -98,7 +98,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
             label: "Class, tie, frequency, empty, dimension and provider-restoration tests",
             location: "crates/runmat-runtime/src/builtins/stats/summary/mode.rs" }],
-        notes: &["All six legacy example forms, nine related links, frequency/tie semantics and GPU limitations are retained. The legacy claim that integer/logical results always promote to double is corrected to match the current exact runtime."],
+        notes: &["The current runtime retains exact integer and logical modal values and tied sets. Its host counting path restores supported outputs to the input provider; it does not invoke a resident mode kernel."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
