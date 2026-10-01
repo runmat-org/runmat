@@ -266,6 +266,29 @@ fn pairwise_known_shape_mismatch_is_diagnosed_without_proving_result() {
 }
 
 #[test]
+fn unresolved_single_scalar_selection_does_not_prove_output_class() {
+    let request = CallRequest {
+        arguments: vec![
+            numeric(NumericClass::Single, ShapeFact::Unknown),
+            numeric(NumericClass::Single, ShapeFact::Scalar),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Real {
+                text: "2".into(),
+                class: NumericClass::Single,
+            },
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let result = inference::infer(&request, &MIN_CATALOG_ENTRY);
+    assert!(matches!(
+        result.outputs[0].certainty,
+        CertaintyFact::Dynamic(_)
+    ));
+}
+
+#[test]
 fn empty_all_and_resident_results_are_conservative() {
     let empty = call(
         numeric(

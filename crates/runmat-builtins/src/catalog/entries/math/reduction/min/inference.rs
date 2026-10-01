@@ -153,17 +153,14 @@ fn pairwise_output(
             if a.domain == NumericDomain::Complex && a.class.integer_class().is_some() {
                 return ValueFact::unknown(DynamicReason::RuntimeValue);
             }
-            if a.domain == NumericDomain::Complex
-                && (left.shape.element_count() == Some(1) || right.shape.element_count() == Some(1))
-            {
+            let known_array_operand = left.shape.element_count().is_some_and(|count| count > 1)
+                || right.shape.element_count().is_some_and(|count| count > 1);
+            if a.domain == NumericDomain::Complex && !known_array_operand {
                 // Scalar complex comparison can return a real scalar when
                 // both imaginary components are zero. Runtime values decide.
                 return ValueFact::unknown(DynamicReason::RuntimeValue);
             }
-            if a.class == NumericClass::Single
-                && left.shape.element_count() == Some(1)
-                && right.shape.element_count() == Some(1)
-            {
+            if a.class == NumericClass::Single && !known_array_operand {
                 // Scalar selection can materialize as binary64.
                 return ValueFact::unknown(DynamicReason::RuntimeValue);
             }
