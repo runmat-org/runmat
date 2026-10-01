@@ -246,12 +246,11 @@ fn fit(
         return Err(invalid("mnrfit: X must be a nonempty numeric matrix"));
     }
     check_cancellation(runtime)?;
-    let data = prepare_data(&x, response, &options)?;
-    let fit = fit_nominal_logit(&data, options.max_iter, options.tol_x, &|| {
-        check_cancellation(runtime)
-    })?;
-    let b = coefficients_value(&fit.beta, data.cols, data.outcomes.len())?;
-    let stats = stats_value(&fit, &data)?;
+    let check = || check_cancellation(runtime);
+    let data = prepare_data(&x, response, &options, &check)?;
+    let fit = fit_nominal_logit(&data, options.max_iter, options.tol_x, &check)?;
+    let b = coefficients_value(&fit.beta, data.cols, data.outcomes.len(), &check)?;
+    let stats = stats_value(&fit, &data, &check)?;
     Ok(FitResult {
         b,
         dev: Value::Num(fit.deviance),

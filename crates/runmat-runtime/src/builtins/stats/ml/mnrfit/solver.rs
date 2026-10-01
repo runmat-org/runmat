@@ -65,8 +65,8 @@ pub(super) fn fit_nominal_logit(
             information[idx * dim + idx] += RIDGE;
         }
         let delta = solve_linear(
-            copy(&information, "information solve copy")?,
-            copy(&gradient, "gradient solve copy")?,
+            copy_checked(&information, "information solve copy", check)?,
+            copy_checked(&gradient, "gradient solve copy", check)?,
             dim,
             check,
         )?;
@@ -290,7 +290,12 @@ fn invert_matrix(
         check()?;
         let mut rhs = filled(n, 0.0, "covariance solve")?;
         rhs[col] = 1.0;
-        let solved = solve_linear(copy(&a, "covariance solve copy")?, rhs, n, check)?;
+        let solved = solve_linear(
+            copy_checked(&a, "covariance solve copy", check)?,
+            rhs,
+            n,
+            check,
+        )?;
         for row in 0..n {
             out[row + col * n] = solved[row];
         }

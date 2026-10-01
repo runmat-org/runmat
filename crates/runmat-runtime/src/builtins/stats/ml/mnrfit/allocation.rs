@@ -19,9 +19,17 @@ pub(super) fn reserved(len: usize, role: &str) -> BuiltinResult<Vec<f64>> {
     Ok(out)
 }
 
-pub(super) fn copy(values: &[f64], role: &str) -> BuiltinResult<Vec<f64>> {
+pub(super) fn copy_checked(
+    values: &[f64],
+    role: &str,
+    check: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<Vec<f64>> {
+    check()?;
     let mut out = reserved(values.len(), role)?;
-    out.extend_from_slice(values);
+    for chunk in values.chunks(16_384) {
+        check()?;
+        out.extend_from_slice(chunk);
+    }
     Ok(out)
 }
 

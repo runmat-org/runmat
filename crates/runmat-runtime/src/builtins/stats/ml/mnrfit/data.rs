@@ -1,6 +1,7 @@
 use super::*;
 use crate::builtins::common::tensor;
 use runmat_value::{CellArray, Tensor};
+use std::borrow::Cow;
 
 #[derive(Clone, Debug)]
 pub(super) struct PreparedData {
@@ -47,9 +48,12 @@ pub(super) fn prepare_data(
     x: &Tensor,
     response: ResponseOutcomes,
     options: &Options,
+    check: &impl Fn() -> BuiltinResult<()>,
 ) -> BuiltinResult<PreparedData> {
+    check()?;
     let rows = x.rows();
-    let mut design = design_matrix(x, options.constant)?;
+    let values = predictor_values(x, check)?;
+    let mut design = design_matrix(x, &values, options.constant, check)?;
     let cols = if options.constant {
         x.cols()
             .checked_add(1)
@@ -64,15 +68,17 @@ pub(super) fn prepare_data(
     } = response;
     if let Some(option_weights) = &options.weights {
         validate_option_weight_length(option_weights.len(), rows)?;
-        if option_weights
-            .iter()
-            .any(|weight| !weight.is_finite() || *weight < 0.0)
-        {
+        if invalid_weights(option_weights, check)? {
             return Err(invalid(
                 "mnrfit: weights must be nonnegative finite values with positive total",
             ));
         }
-        for (weight, option_weight) in weights.iter_mut().zip(option_weights.iter()) {
+        for (index, (weight, option_weight)) in
+            weights.iter_mut().zip(option_weights.iter()).enumerate()
+        {
+            if index.is_multiple_of(4096) {
+                check()?;
+            }
             *weight *= *option_weight;
             if !weight.is_finite() {
                 return Err(invalid(
@@ -81,19 +87,24 @@ pub(super) fn prepare_data(
             }
         }
     }
-    let kept_rows = compact_complete_cases(x, cols, &mut design, &mut outcomes, &mut weights)?;
+    let kept_rows = compact_complete_cases(
+        x,
+        &values,
+        cols,
+        &mut design,
+        &mut outcomes,
+        &mut weights,
+        check,
+    )?;
     if kept_rows == 0 {
         return Err(invalid("mnrfit: no complete observations remain"));
     }
-    if weights
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0)
-    {
+    if invalid_weights(&weights, check)? {
         return Err(invalid(
             "mnrfit: weights must be nonnegative finite values with positive total",
         ));
     }
-    let observations = finite_total(weights.iter().copied(), "weights")?;
+    let observations = finite_total(weights.iter().copied(), "weights", check)?;
     if observations <= 0.0 {
         return Err(invalid(
             "mnrfit: weights must be nonnegative finite values with positive total",
@@ -110,8 +121,49 @@ pub(super) fn prepare_data(
     })
 }
 
-fn finite_total(values: impl Iterator<Item = f64>, role: &str) -> BuiltinResult<f64> {
-    values.try_fold(0.0, |total, value| checked_finite_add(total, value, role))
+fn invalid_weights(weights: &[f64], check: &impl Fn() -> BuiltinResult<()>) -> BuiltinResult<bool> {
+    for (index, weight) in weights.iter().enumerate() {
+        if index.is_multiple_of(4096) {
+            check()?;
+        }
+        if !weight.is_finite() || *weight < 0.0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn predictor_values<'a>(
+    x: &'a Tensor,
+    check: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<Cow<'a, [f64]>> {
+    check()?;
+    if let Some(values) = x.as_f64_slice() {
+        return Ok(Cow::Borrowed(values));
+    }
+    let mut values = reserved(x.len(), "predictor conversion")?;
+    for index in 0..x.len() {
+        if index.is_multiple_of(16_384) {
+            check()?;
+        }
+        values.push(tensor::tensor_value_f64(x, index));
+    }
+    Ok(Cow::Owned(values))
+}
+
+fn finite_total(
+    values: impl Iterator<Item = f64>,
+    role: &str,
+    check: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<f64> {
+    let mut total = 0.0;
+    for (index, value) in values.enumerate() {
+        if index.is_multiple_of(4096) {
+            check()?;
+        }
+        total = checked_finite_add(total, value, role)?;
+    }
+    Ok(total)
 }
 
 fn checked_finite_add(total: f64, value: f64, role: &str) -> BuiltinResult<f64> {
@@ -125,7 +177,13 @@ fn checked_finite_add(total: f64, value: f64, role: &str) -> BuiltinResult<f64> 
     }
 }
 
-fn design_matrix(x: &Tensor, constant: bool) -> BuiltinResult<Vec<f64>> {
+fn design_matrix(
+    x: &Tensor,
+    values: &[f64],
+    constant: bool,
+    check: &impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<Vec<f64>> {
+    check()?;
     let rows = x.rows();
     let x_cols = x.cols();
     let cols = if constant {
@@ -140,14 +198,19 @@ fn design_matrix(x: &Tensor, constant: bool) -> BuiltinResult<Vec<f64>> {
     let mut out_col = 0usize;
     if constant {
         for row in 0..rows {
+            if row.is_multiple_of(16_384) {
+                check()?;
+            }
             design[row] = 1.0;
         }
         out_col = 1;
     }
-    let values = tensor::tensor_values_f64_cow(x);
     for col in 0..x_cols {
-        for row in 0..rows {
-            design[row + (out_col + col) * rows] = values[row + col * rows];
+        let source = &values[col * rows..(col + 1) * rows];
+        let destination = &mut design[(out_col + col) * rows..(out_col + col + 1) * rows];
+        for (to, from) in destination.chunks_mut(16_384).zip(source.chunks(16_384)) {
+            check()?;
+            to.copy_from_slice(from);
         }
     }
     Ok(design)
@@ -155,17 +218,22 @@ fn design_matrix(x: &Tensor, constant: bool) -> BuiltinResult<Vec<f64>> {
 
 fn compact_complete_cases(
     x: &Tensor,
+    values: &[f64],
     cols: usize,
     design: &mut Vec<f64>,
     outcomes: &mut [Vec<f64>],
     weights: &mut Vec<f64>,
+    check: &impl Fn() -> BuiltinResult<()>,
 ) -> BuiltinResult<usize> {
+    check()?;
     let rows = x.rows();
-    let values = tensor::tensor_values_f64_cow(x);
     let mut keep = Vec::new();
     keep.try_reserve_exact(rows)
         .map_err(|_| invalid("mnrfit: row selection exceeds available host resources"))?;
     for row in 0..rows {
+        if row.is_multiple_of(4096) {
+            check()?;
+        }
         let x_complete = (0..x.cols()).all(|col| values[row + col * rows].is_finite());
         let y_complete = weights[row].is_finite()
             && weights[row] > 0.0
@@ -181,18 +249,28 @@ fn compact_complete_cases(
     let mut new_design = filled(new_len, 0.0, "compacted design matrix")?;
     for col in 0..cols {
         for (new_row, old_row) in keep.iter().enumerate() {
+            if new_row.is_multiple_of(4096) {
+                check()?;
+            }
             new_design[new_row + col * keep.len()] = design[old_row + col * rows];
         }
     }
     for outcome in outcomes.iter_mut() {
+        check()?;
         let mut compacted = filled(keep.len(), 0.0, "compacted outcomes")?;
         for (new_row, old_row) in keep.iter().enumerate() {
+            if new_row.is_multiple_of(4096) {
+                check()?;
+            }
             compacted[new_row] = outcome[*old_row];
         }
         *outcome = compacted;
     }
     let mut compacted_weights = filled(keep.len(), 0.0, "compacted weights")?;
     for (new_row, old_row) in keep.iter().enumerate() {
+        if new_row.is_multiple_of(4096) {
+            check()?;
+        }
         compacted_weights[new_row] = weights[*old_row];
     }
     *weights = compacted_weights;
