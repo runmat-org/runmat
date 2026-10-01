@@ -121,6 +121,7 @@ fn schedule_error(error: JsValue) -> ExecutionServiceError {
 mod tests {
     use super::*;
     use futures::task::noop_waker;
+    use serde::Serialize;
     use serde_json::json;
     use std::future::Future;
     use std::task::{Context, Poll};
@@ -147,14 +148,15 @@ mod tests {
                 .await
                 .expect("initialize browser runtime"),
         );
-        let request = serde_wasm_bindgen::to_value(&json!({
+        let request = json!({
             "source": {
                 "kind": "text",
                 "name": "mnrfit-browser-cancel.m",
                 "text": "X = (1:65536)'; Y = mod(X,2)+1; B = mnrfit(X,Y,'IterationLimit',100000);"
             },
             "compatibility": "runmat"
-        }))
+        })
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .expect("encode execution request");
         let turns_before = TEST_POSTED_TURNS.with(std::cell::Cell::get);
         let mut execution = Box::pin(runtime.execute_request_js(request));
