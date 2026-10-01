@@ -95,6 +95,22 @@ fn algorithm_literal(request: &CallRequest, index: usize, errors: &mut Vec<Infer
             index,
         ));
     }
+    if let Some(value) = request.arguments.get(index) {
+        let invalid_shape = match (&value.kind, &value.shape) {
+            (ValueKindFact::String, shape) => shape.element_count().is_some_and(|count| count != 1),
+            (ValueKindFact::Character, ShapeFact::Shaped { dims }) if dims.len() >= 2 => {
+                matches!(&dims[0], DimensionFact::Known(rows) if *rows != 1)
+            }
+            _ => false,
+        };
+        if invalid_shape {
+            errors.push(argument_error(
+                "RM-CATALOG-LSCOV-ALG-SHAPE",
+                "algorithm must be a string scalar or character row",
+                index,
+            ));
+        }
+    }
     if let Some(keyword) = request.literals.literal_string_at(index) {
         if LscovAlgorithm::from_public_keyword(&keyword).is_none() {
             errors.push(argument_error(
@@ -181,8 +197,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     2,
                 )),
             }
-            let dimensions = matrix_dimensions(&weight.shape, 2, &mut errors);
-            if a_rows.is_some() && dimensions.iter().all(Option::is_some) {
+            let known_empty = weight.shape.element_count() == Some(0);
+            let dimensions = if known_empty {
+                [None, None]
+            } else {
+                matrix_dimensions(&weight.shape, 2, &mut errors)
+            };
+            if !known_empty && a_rows.is_some() && dimensions.iter().all(Option::is_some) {
                 let count = weight.shape.element_count();
                 let vector = dimensions[0] == Some(1) || dimensions[1] == Some(1);
                 let scalar_or_empty = count == Some(1) || count == Some(0);

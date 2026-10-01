@@ -135,3 +135,53 @@ fn nonvector_response_with_matching_element_count_still_rejects_wrong_rows() {
         ValueKindFact::Numeric(_)
     ));
 }
+
+#[test]
+fn empty_nd_weight_is_admitted_as_identity() {
+    let mut call = request(
+        numeric(3, 2, NumericDomain::Real),
+        numeric(3, 1, NumericDomain::Real),
+        1,
+    );
+    call.arguments.push(ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(0), Some(2), Some(3)]),
+        StorageFact::Dense,
+    ));
+    let inferred = inference::infer(&call, &LSCOV_CATALOG_ENTRY);
+    assert!(
+        inferred.diagnostics.is_empty(),
+        "{:?}",
+        inferred.diagnostics
+    );
+    assert_eq!(
+        inferred.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), Some(1)])
+    );
+}
+
+#[test]
+fn non_scalar_algorithm_string_is_not_a_proven_call() {
+    let mut call = request(
+        numeric(3, 2, NumericDomain::Real),
+        numeric(3, 1, NumericDomain::Real),
+        1,
+    );
+    call.arguments.push(ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Dense,
+    ));
+    let inferred = inference::infer(&call, &LSCOV_CATALOG_ENTRY);
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-CATALOG-LSCOV-ALG-SHAPE"));
+    assert!(!matches!(
+        inferred.outputs[0].kind,
+        ValueKindFact::Numeric(_)
+    ));
+}

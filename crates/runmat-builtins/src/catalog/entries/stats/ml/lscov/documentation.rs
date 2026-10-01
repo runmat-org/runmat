@@ -59,7 +59,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Weighted solve", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lscov.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Input admission and weighting", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lscov/admission.rs") },
+            BuiltinDocumentationLink { label: "Weighted fit", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lscov/fit.rs") },
+            BuiltinDocumentationLink { label: "Least-squares solver", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lscov/solver.rs") },
+            BuiltinDocumentationLink { label: "Covariance weighting transforms", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lscov/transform.rs") },
+            BuiltinDocumentationLink { label: "Response geometry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lscov/geometry.rs") },
+            BuiltinDocumentationLink { label: "Resource checks", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/lscov/resources.rs") },
+        ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Weighted and complex least-squares semantics", location: "builtins::stats::ml::lscov::tests" }],
         notes: &[],
     },

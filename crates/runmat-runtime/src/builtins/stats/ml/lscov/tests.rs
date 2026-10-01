@@ -55,6 +55,16 @@ fn rank_one_response_matches_tensor_row_vector_admission() {
     assert!((x.materialize_f64()[1] - 2.0).abs() < 1e-8);
 }
 
+#[test]
+fn empty_nd_weight_is_the_unweighted_fit() {
+    let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
+    let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
+    let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 2, 3]).unwrap());
+    let baseline = block_on(lscov_builtin(a.clone(), b.clone(), Vec::new())).unwrap();
+    let weighted = block_on(lscov_builtin(a, b, vec![empty])).unwrap();
+    assert_eq!(baseline, weighted);
+}
+
 fn outputs(value: Value) -> Vec<Value> {
     match value {
         Value::OutputList(values) => values,
