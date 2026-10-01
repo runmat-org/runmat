@@ -254,6 +254,40 @@ fn constant_type_and_dimension_options_control_admitted_facts() {
 }
 
 #[test]
+fn row_character_method_literal_is_admitted_like_scalar_string() {
+    let input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(3)]),
+        StorageFact::Dense,
+    );
+    let method = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(6)]),
+        StorageFact::Dense,
+    );
+    let inferred = inference::infer(
+        &CallRequest {
+            arguments: vec![input.clone(), method],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Character("linear".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+        },
+        &FILLMISSING_CATALOG_ENTRY,
+    );
+    assert_eq!(
+        inferred.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(inferred.outputs[0].shape, input.shape);
+    assert_eq!(inferred.outputs[1].kind, ValueKindFact::Logical);
+}
+
+#[test]
 fn singleton_tensor_keeps_its_class_while_scalar_replacement_can_stay_resident() {
     let mut input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,

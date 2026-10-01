@@ -26,12 +26,16 @@ fn admitted_method(
     if request.arguments.len() != request.literals.literal_args.len() {
         return None;
     }
-    let method = request.arguments.get(1)?;
-    if !matches!(
-        method.kind,
-        ValueKindFact::String | ValueKindFact::Character
-    ) || method.shape.element_count() != Some(1)
-    {
+    let method_fact = request.arguments.get(1)?;
+    let method_is_text = match &method_fact.kind {
+        ValueKindFact::String => method_fact.shape.element_count() == Some(1),
+        ValueKindFact::Character => method_fact
+            .shape
+            .known_dims()
+            .is_some_and(|dims| dims.first() == Some(&Some(1))),
+        _ => false,
+    };
+    if !method_is_text {
         return None;
     }
     let method = method?;
