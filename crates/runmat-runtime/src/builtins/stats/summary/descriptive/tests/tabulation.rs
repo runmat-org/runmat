@@ -1,4 +1,88 @@
 use super::*;
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
+    ThreadProviderGuard,
+};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct RejectingDownloadProvider {
+    owner: TestAllocationOwner,
+    downloads: AtomicUsize,
+}
+
+impl AccelProvider for RejectingDownloadProvider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+
+    fn device_info(&self) -> String {
+        "tabulate gather fixture".into()
+    }
+
+    fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unexpected upload")
+    }
+
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("tabulate fixture download failure") })
+    }
+
+    fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("tabulate fixture native download failure") })
+    }
+}
+
+#[tokio::test]
+async fn tabulate_gather_failure_retains_cause_and_borrowed_lease() {
+    let provider = Box::leak(Box::new(RejectingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let err = tabulate::tabulate_builtin(Value::GpuTensor(resident.handle.clone()))
+        .await
+        .expect_err("provider download must fail");
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(err.context.builtin.as_deref(), Some("tabulate"));
+    assert!(err.source.is_some());
+    assert!(err.message().contains("tabulate fixture"));
+    assert_eq!(resident.probe.retirements(), 0);
+    drop(resident.handle);
+    assert_eq!(resident.probe.retirements(), 1);
+}
+
+#[tokio::test]
+async fn tabulate_rejects_nested_resident_cell_label_before_download() {
+    let provider = Box::leak(Box::new(RejectingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let cell = runmat_value::CellArray::new(vec![Value::GpuTensor(resident.handle.clone())], 1, 1)
+        .unwrap();
+    let err = tabulate::tabulate_builtin(Value::Cell(cell))
+        .await
+        .expect_err("device tensor is not a scalar label");
+    assert!(err
+        .message()
+        .contains("cell entries must be scalar strings or scalars"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(resident.probe.retirements(), 0);
+    drop(resident.handle);
+    assert_eq!(resident.probe.retirements(), 1);
+}
 
 #[test]
 fn tabulate_expands_positive_integer_levels() {

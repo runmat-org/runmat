@@ -14,9 +14,13 @@ fn descriptive_error(name: &str, message: impl Into<String>) -> RuntimeError {
 }
 
 async fn gathered(value: Value, name: &str) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
+    gather_if_needed_async(&value).await.map_err(|cause| {
+        let mut error = descriptive_error(name, format!("{name}: {cause}"));
+        error.gpu_gather_retry = cause.gpu_gather_retry;
+        error.span = cause.span;
+        error.source = Some(Box::new(cause));
+        error
+    })
 }
 
 fn is_real_typed_integer_value(value: &Value) -> bool {

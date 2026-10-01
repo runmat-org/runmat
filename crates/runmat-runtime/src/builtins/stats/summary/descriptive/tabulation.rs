@@ -318,6 +318,14 @@ pub mod tabulate {
                 "tabulate",
             )?;
         }
+        if let Value::Cell(cell) = &value {
+            if cell.data.iter().any(crate::dispatcher::value_contains_gpu) {
+                return Err(descriptive_error(
+                    "tabulate",
+                    "tabulate: cell entries must be scalar strings or scalars",
+                ));
+            }
+        }
         let value = super::gathered(value, "tabulate").await?;
         super::tabulate_value("tabulate", value)
     }
