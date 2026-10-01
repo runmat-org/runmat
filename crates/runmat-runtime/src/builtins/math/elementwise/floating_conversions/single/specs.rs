@@ -30,9 +30,12 @@ const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration
             builtin: runmat_builtins::SINGLE_CATALOG_ENTRY.identity,
             variant: "default",
         },
-        revision: 1,
+        revision: 2,
         admit: None,
         helpers: &[],
+        scalar_operation: Some(runmat_types::ScalarOperation::Cast(
+            runmat_types::NumericClass::Single,
+        )),
     };
 
 #[runmat_macros::register_fusion_spec(

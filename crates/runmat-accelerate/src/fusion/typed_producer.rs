@@ -9,6 +9,9 @@ use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 use runmat_types::NumericClass;
 use std::collections::{HashMap, HashSet};
 
+#[path = "typed_producer/program.rs"]
+mod program;
+
 pub(crate) struct TypedProducer {
     pub body: String,
     expressions: HashMap<ValueId, String>,
@@ -25,6 +28,18 @@ impl TypedProducer {
         mut expressions: HashMap<ValueId, String>,
         roots: Option<&[ValueId]>,
     ) -> Result<Self> {
+        // The checked closed operation stream is the arithmetic authority for
+        // its admitted subset. WGSL-only declarations keep their established
+        // path until their exact numerical policy is represented there too.
+        if let Some(&[root]) = roots {
+            if let Ok(checked) = Self::emit_checked_program(plan, program, buffer_type, root) {
+                if let Ok(lowered) =
+                    Self::lower_checked_wgsl(&checked, buffer_type, expressions.clone())
+                {
+                    return Ok(lowered);
+                }
+            }
+        }
         let selected = roots
             .map(|roots| producer_indices(plan, &expressions, roots))
             .transpose()?;

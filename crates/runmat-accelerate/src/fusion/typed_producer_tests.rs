@@ -102,6 +102,13 @@ fn full_elementwise_source_and_rounding_are_unchanged() {
         ProviderPrecision::F64,
     );
     let producer = TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), None).unwrap();
+    let checked = TypedProducer::emit_checked_program(&plan, &program, ScalarType::F64, 3).unwrap();
+    assert_eq!(checked.wire().nodes.len(), 4);
+    let lowered = TypedProducer::lower_checked_wgsl(&checked, ScalarType::F64, leaves()).unwrap();
+    assert_eq!(producer.body, lowered.body);
+    let selected =
+        TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), Some(&[3])).unwrap();
+    assert_eq!(selected.body, lowered.body);
     let expected_body = "    let typed0: f64 = (f64(input0.data[i0]) + f64(input1.data[i1]));\n    let typed1: f64 = (f64(typed0) + f64(input1.data[i1]));\n";
     assert_eq!(producer.body, expected_body);
     let expected = format!(
@@ -141,6 +148,78 @@ fn full_elementwise_source_and_rounding_are_unchanged() {
         ProviderPrecision::F32,
     );
     assert!(TypedProducer::emit(&plan, &strict, ScalarType::F32, leaves(), Some(&[3])).is_err());
+}
+
+#[test]
+fn checked_program_uses_captured_cast_binding_and_exact_constant_bits() {
+    use runmat_accelerate_api::scalar_program::{ScalarLiteral, ScalarNode};
+    use runmat_types::ScalarOperation;
+
+    let cast = plan(
+        vec![FusionOp::Builtin {
+            origin: Default::default(),
+            name: "single".into(),
+            inputs: vec![0],
+            output: Some(2),
+        }],
+        2,
+    );
+    let facts = resolve(
+        &cast,
+        &[Value::Num(16_777_217.0), Value::Num(0.0)],
+        ProviderPrecision::F64,
+    );
+    let checked = TypedProducer::emit_checked_program(&cast, &facts, ScalarType::F64, 2).unwrap();
+    assert!(matches!(
+        &checked.wire().nodes[1],
+        ScalarNode::Apply {
+            operation: ScalarOperation::Cast(NumericClass::Single),
+            ..
+        }
+    ));
+    let before = TypedProducer::emit(&cast, &facts, ScalarType::F64, leaves(), Some(&[2]))
+        .unwrap()
+        .body;
+    assert!(before.contains("f32(input0.data[i0])"));
+
+    let mut signed_zero = plan(vec![add(0, 1, 2)], 2);
+    signed_zero.inputs = vec![0];
+    signed_zero.const_values.insert(1, Value::Num(-0.0));
+    let facts = resolve(&signed_zero, &[Value::Num(1.0)], ProviderPrecision::F64);
+    let checked =
+        TypedProducer::emit_checked_program(&signed_zero, &facts, ScalarType::F64, 2).unwrap();
+    assert!(matches!(
+        &checked.wire().nodes[1],
+        ScalarNode::Literal {
+            value: ScalarLiteral::F64Bits(bits),
+            ..
+        } if *bits == (-0.0f64).to_bits()
+    ));
+}
+
+#[test]
+fn unsupported_scalar_contract_does_not_change_existing_wgsl_route() {
+    let plan = plan(
+        vec![FusionOp::Builtin {
+            origin: Default::default(),
+            name: "round".into(),
+            inputs: vec![0],
+            output: Some(2),
+        }],
+        2,
+    );
+    let facts = resolve(
+        &plan,
+        &[Value::Num(2.5), Value::Num(0.0)],
+        ProviderPrecision::F64,
+    );
+    assert!(TypedProducer::emit_checked_program(&plan, &facts, ScalarType::F64, 2).is_err());
+    assert!(
+        TypedProducer::emit(&plan, &facts, ScalarType::F64, leaves(), Some(&[2]))
+            .unwrap()
+            .body
+            .contains("rm_round_f64")
+    );
 }
 
 #[test]

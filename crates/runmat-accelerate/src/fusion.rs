@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 
 use runmat_accelerate_api::ReductionFlavor;
 use runmat_runtime::builtins::common::tensor::tensor_element_len;
+use runmat_types::OperatorKind;
 use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 
@@ -2906,47 +2907,46 @@ fn primitive_expr(
     inputs: &[ValueId],
     exprs: &HashMap<ValueId, String>,
 ) -> Option<String> {
-    let binary = |exprs: &HashMap<ValueId, String>| -> Option<(String, String)> {
-        let lhs = exprs.get(inputs.first()?).cloned()?;
-        let rhs = exprs.get(inputs.get(1)?).cloned()?;
-        Some((lhs, rhs))
-    };
+    let arguments = inputs
+        .iter()
+        .map(|input| exprs.get(input).cloned())
+        .collect::<Option<Vec<_>>>()?;
     match op {
-        PrimitiveOp::Add => {
-            let (lhs, rhs) = binary(exprs)?;
-            Some(format!("({lhs} + {rhs})"))
-        }
-        PrimitiveOp::Sub => {
-            let (lhs, rhs) = binary(exprs)?;
-            Some(format!("({lhs} - {rhs})"))
-        }
+        PrimitiveOp::Add => scalar_operator_expr(OperatorKind::Add, &arguments),
+        PrimitiveOp::Sub => scalar_operator_expr(OperatorKind::Subtract, &arguments),
         PrimitiveOp::Mul | PrimitiveOp::ElemMul => {
-            let (lhs, rhs) = binary(exprs)?;
-            Some(format!("({lhs} * {rhs})"))
+            scalar_operator_expr(OperatorKind::ElementwiseMultiply, &arguments)
         }
-        PrimitiveOp::ElemDiv => {
-            let (lhs, rhs) = binary(exprs)?;
-            Some(format!("({lhs} / {rhs})"))
-        }
+        PrimitiveOp::ElemDiv => scalar_operator_expr(OperatorKind::ElementwiseDivide, &arguments),
         PrimitiveOp::ElemLeftDiv => {
-            let (lhs, rhs) = binary(exprs)?;
-            Some(format!("({rhs} / {lhs})"))
+            scalar_operator_expr(OperatorKind::ElementwiseLeftDivide, &arguments)
         }
         PrimitiveOp::Pow | PrimitiveOp::ElemPow => {
-            let (lhs, rhs) = binary(exprs)?;
+            let [lhs, rhs] = arguments.as_slice() else {
+                return None;
+            };
             if expr_is_literal(rhs.as_str(), 2.0) {
                 return Some(format!("({lhs} * {lhs})"));
             }
             Some(format!("pow({lhs}, {rhs})"))
         }
-        PrimitiveOp::Neg => {
-            let arg = exprs.get(inputs.first()?).cloned()?;
-            Some(format!("(-{arg})"))
-        }
-        PrimitiveOp::UPlus => {
-            let arg = exprs.get(inputs.first()?).cloned()?;
-            Some(format!("(+{arg})"))
-        }
+        PrimitiveOp::Neg => scalar_operator_expr(OperatorKind::UnaryMinus, &arguments),
+        PrimitiveOp::UPlus => scalar_operator_expr(OperatorKind::UnaryPlus, &arguments),
+        _ => None,
+    }
+}
+
+/// One WGSL spelling for both the legacy primitive route and checked scalar
+/// programs. Domain admission decides which operations may reach this lowerer.
+fn scalar_operator_expr(operation: OperatorKind, arguments: &[String]) -> Option<String> {
+    match (operation, arguments) {
+        (OperatorKind::Add, [a, b]) => Some(format!("({a} + {b})")),
+        (OperatorKind::Subtract, [a, b]) => Some(format!("({a} - {b})")),
+        (OperatorKind::ElementwiseMultiply, [a, b]) => Some(format!("({a} * {b})")),
+        (OperatorKind::ElementwiseDivide, [a, b]) => Some(format!("({a} / {b})")),
+        (OperatorKind::ElementwiseLeftDivide, [a, b]) => Some(format!("({b} / {a})")),
+        (OperatorKind::UnaryMinus, [a]) => Some(format!("(-{a})")),
+        (OperatorKind::UnaryPlus, [a]) => Some(format!("(+{a})")),
         _ => None,
     }
 }

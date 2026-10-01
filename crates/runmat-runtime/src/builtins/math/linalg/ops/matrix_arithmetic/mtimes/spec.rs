@@ -35,6 +35,7 @@ const FUSION_SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
     revision: 1,
     admit: None,
     helpers: &[],
+    scalar_operation: None,
 };
 
 #[runmat_macros::register_fusion_spec(

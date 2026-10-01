@@ -56,6 +56,7 @@ pub use resident_select::ResidentSelectPlan;
 pub const RESIDENT_SELECT_OPERATION_IDENTITY: &str = "provider.resident_select";
 mod numerical_domain;
 pub mod reduction;
+pub mod scalar_program;
 #[cfg(feature = "wgpu")]
 mod wgpu_access;
 #[cfg(feature = "wgpu")]

@@ -70,4 +70,8 @@ pub struct FusionSemanticDeclaration {
     pub revision: u32,
     pub admit: Option<FusionAdmission>,
     pub helpers: &'static [FusionMathHelper],
+    /// Optional closed scalar operation selected by this exact binding.
+    /// WGSL-only declarations remain on their established route until their
+    /// numerical and domain policies have an independently checked lowering.
+    pub scalar_operation: Option<runmat_types::ScalarOperation>,
 }

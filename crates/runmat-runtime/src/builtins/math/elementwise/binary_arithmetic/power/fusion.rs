@@ -15,6 +15,7 @@ pub(super) const SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaratio
     revision: 3,
     admit: Some(admit),
     helpers: &[FusionMathHelper::RealPower],
+    scalar_operation: None,
 };
 
 fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {

@@ -54,6 +54,7 @@ const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration
         revision: 1,
         admit: None,
         helpers: &[crate::builtins::common::spec::FusionMathHelper::Round],
+        scalar_operation: None,
     };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::round", semantics = FUSION_SEMANTICS)]

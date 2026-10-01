@@ -7,6 +7,7 @@ pub mod geometry;
 pub mod identity;
 pub mod integer_literal;
 pub mod rules;
+pub mod scalar_program;
 pub mod real_unary;
 pub mod reduction;
 pub mod serde_f64;
@@ -32,6 +33,7 @@ pub use reduction::{ReductionNaN, SumInvocation, SumOutputClass};
 mod floating_remainder;
 pub use floating_remainder::FloatingRemainderKind;
 pub use rules::*;
+pub use scalar_program::ScalarOperation;
 pub use source::{merge_span, Span};
 pub use symbolic::{
     parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration,
