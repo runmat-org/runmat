@@ -188,6 +188,22 @@ fn ambiguous_axes_forms_and_known_invalid_controls_never_prove_outputs() {
             1,
         ),
         infer_ecdf(
+            vec![
+                vector.clone(),
+                option_name.clone(),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Complex,
+                })),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Alpha".into()),
+                LiteralValue::Unknown,
+            ],
+            1,
+        ),
+        infer_ecdf(
             vec![vector.clone(), option_name.clone(), sample(&[2, 2])],
             vec![
                 LiteralValue::Unknown,

@@ -93,6 +93,12 @@ fn invalid_non_axes_forms_and_control_shapes_match_catalog_diagnostics() {
     ]))
     .is_err());
     assert!(block_on(ecdf_builtin(vec![
+        sample(),
+        Value::from("Alpha"),
+        Value::Complex(0.2, 0.0),
+    ]))
+    .is_err());
+    assert!(block_on(ecdf_builtin(vec![
         tensor(vec![1.0, 2.0, 3.0, 4.0]),
         Value::from("Frequency"),
         Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap()),

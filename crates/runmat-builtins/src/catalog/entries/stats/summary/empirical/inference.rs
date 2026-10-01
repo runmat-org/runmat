@@ -177,6 +177,12 @@ fn validate_ecdf_options(
                     !matches!(
                         fact.kind,
                         ValueKindFact::Numeric(_) | ValueKindFact::Unknown
+                    ) || matches!(
+                        fact.kind,
+                        ValueKindFact::Numeric(NumericFact {
+                            domain: NumericDomain::Complex,
+                            ..
+                        })
                     ) || fact.shape.element_count().is_some_and(|n| n != 1)
                 }) {
                     diagnostics.push(error("ALPHA", "ecdf Alpha must be numeric"));
