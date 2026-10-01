@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
     ThreadProviderGuard,
 };
-use runmat_value::{StringArray, StructValue};
+use runmat_value::{StringArray, StructValue, Tensor};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 struct FailingDownloadProvider {

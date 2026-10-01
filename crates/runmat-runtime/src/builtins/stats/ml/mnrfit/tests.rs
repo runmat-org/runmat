@@ -1,6 +1,6 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_value::IntegerStorage;
+use runmat_value::{IntValue, IntegerStorage, StringArray, StructValue, Tensor};
 
 fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
@@ -45,6 +45,22 @@ fn mnrfit_binary_logistic_returns_coefficients_stats() {
     };
     assert!(stats.fields.contains_key("se"));
     assert!(stats.fields.contains_key("covb"));
+}
+
+#[test]
+fn mnrfit_requested_fourth_output_is_runtime_zero_padding() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _guard = crate::output_count::push_output_count(Some(4));
+    let values = output_list(
+        block_on(mnrfit_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0, 3.0, 4.0], 5, 1),
+            tensor_value(vec![1.0, 1.0, 2.0, 2.0, 2.0], 5, 1),
+            Vec::new(),
+        ))
+        .expect("fourth output padding"),
+    );
+    assert_eq!(values.len(), 4);
+    assert!(matches!(values[3], Value::Num(0.0)));
 }
 
 #[test]

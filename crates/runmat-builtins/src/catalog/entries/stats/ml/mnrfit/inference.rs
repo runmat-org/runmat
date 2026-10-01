@@ -124,6 +124,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             StorageFact::Opaque,
         ),
     ]);
+    contract.maximum_outputs = None;
+    contract.variadic_output = Some(Box::new(ValueFact::scalar(ValueKindFact::Numeric(
+        NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        },
+    ))));
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
     let mut result = infer_call(&contract, request);

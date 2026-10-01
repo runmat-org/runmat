@@ -52,6 +52,21 @@ fn vector_response_category_count_remains_dynamic() {
 }
 
 #[test]
+fn requested_outputs_beyond_stats_follow_runtime_zero_padding() {
+    let result = inference::infer(
+        &request(numeric(4, 2), numeric(4, 3), 4),
+        &MNRFIT_CATALOG_ENTRY,
+    );
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(result.outputs.len(), 4);
+    assert_eq!(
+        result.outputs[3].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(result.outputs[3].shape, ShapeFact::Scalar);
+}
+
+#[test]
 fn impossible_known_matrix_and_response_shapes_never_prove_success() {
     let mut empty_x = numeric(4, 2);
     empty_x.shape = ShapeFact::from(vec![Some(0), None]);
