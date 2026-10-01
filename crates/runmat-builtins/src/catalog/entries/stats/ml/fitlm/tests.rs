@@ -1,9 +1,10 @@
 use super::*;
 use runmat_types::{
-    CallRequest, DynamicReason, LiteralContext, LiteralValue, NumericClass, NumericDomain,
-    NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact,
-    ValueKindFact,
+    CallRequest, ClassIdentity, DynamicReason, LiteralContext, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
+use std::collections::BTreeMap;
 
 fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>, outputs: usize) -> CallRequest {
     CallRequest {
@@ -22,6 +23,60 @@ fn numeric(rows: usize, cols: usize) -> ValueFact {
         ShapeFact::from(vec![Some(rows), Some(cols)]),
         StorageFact::Dense,
     )
+}
+
+fn object(class: Option<ClassIdentity>) -> ValueFact {
+    ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: class,
+            properties: BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: None,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    )
+}
+
+#[test]
+fn tabular_identity_is_known_only_for_table_and_timetable() {
+    for class in [
+        Some(runmat_types::standard::TABLE.owned()),
+        Some(runmat_types::standard::TIMETABLE.owned()),
+        None,
+    ] {
+        let call = request(vec![object(class)], vec![LiteralValue::Unknown], 1);
+        assert!(inference::infer(&call, &FITLM_CATALOG_ENTRY)
+            .diagnostics
+            .is_empty());
+    }
+    let other = request(
+        vec![object(Some(runmat_types::standard::LINEAR_MODEL.owned()))],
+        vec![LiteralValue::Unknown],
+        1,
+    );
+    assert!(inference::infer(&other, &FITLM_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FITLM-DATA"));
+}
+
+#[test]
+fn logical_predictors_follow_the_admitted_matrix_form() {
+    let logical = ValueFact::proven(
+        ValueKindFact::Logical,
+        ShapeFact::from(vec![Some(4), Some(1)]),
+        StorageFact::Dense,
+    );
+    let call = request(
+        vec![logical, numeric(4, 1)],
+        vec![LiteralValue::Unknown; 2],
+        1,
+    );
+    assert!(inference::infer(&call, &FITLM_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
 }
 
 #[test]

@@ -5,7 +5,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("fitlm"),
     slug: Some("fitlm"),
     summary: "Fit an ordinary least-squares linear regression model.",
-    description: "`fitlm` fits an ordinary least-squares model from a numeric predictor matrix or table and returns a host `LinearModel` object. Single and double matrix data are supported in the MATLAB compatibility subset; RunMat mode separately gates typed-integer predictors, responses, weights, selectors, and Intercept controls.",
+    description: "`fitlm` fits an ordinary least-squares model from a numeric predictor matrix or table and returns a host `LinearModel` object. Single and double matrix data are supported in the MATLAB compatibility subset; RunMat also accepts logical predictor matrices and separately gates typed-integer predictors, responses, weights, selectors, and Intercept controls.",
     keywords: &["fitlm", "linear model", "regression", "least squares", "statistics", "machine learning"],
     related: &["predict", "lasso", "ridge"],
     sections: &[

@@ -18,14 +18,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             None
         }
         Some(ValueKindFact::Unknown) => None,
-        Some(ValueKindFact::Object(object))
-            if object
-                .runtime_class
-                .as_ref()
-                .is_none_or(|class| class.is(standard::TABLE)) =>
-        {
-            Some(true)
-        }
+        Some(ValueKindFact::Object(object)) => match object.runtime_class.as_ref() {
+            Some(class) if standard::is_tabular(class) => Some(true),
+            None => None,
+            Some(_) => {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FITCLINEAR-DATA",
+                    "predictors must be a real numeric matrix or table",
+                    0,
+                ));
+                None
+            }
+        },
         Some(ValueKindFact::Numeric(numeric)) if numeric.domain == NumericDomain::Real => {
             Some(false)
         }

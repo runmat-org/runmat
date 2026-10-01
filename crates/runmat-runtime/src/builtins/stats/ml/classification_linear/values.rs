@@ -1,0 +1,255 @@
+use super::*;
+
+pub(super) fn scalar_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        _ => None,
+    }
+}
+
+pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
+    match value {
+        Value::String(text) => Ok(vec![text.clone()]),
+        Value::CharArray(array) => Ok(char_rows(array)),
+        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .map(|value| {
+                scalar_text(value).ok_or_else(|| {
+                    fitclinear_invalid(format!("fitclinear: {name} entries must be text"))
+                })
+            })
+            .collect(),
+        _ => Err(fitclinear_invalid(format!(
+            "fitclinear: {name} must be text or a text collection"
+        ))),
+    }
+}
+
+pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
+    let mut out = Vec::with_capacity(array.rows);
+    for row in 0..array.rows {
+        let start = row * array.cols;
+        out.push(array.data[start..start + array.cols].iter().collect());
+    }
+    out
+}
+
+pub(super) fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
+    match value {
+        Value::Num(value) => Ok(vec![*value]),
+        Value::Int(value) => {
+            ensure_int_exact_f64(value, name)?;
+            Ok(vec![value.to_f64()])
+        }
+        Value::Tensor(tensor) => {
+            ensure_integer_tensor_exact(tensor, name)?;
+            vector_values(tensor, name)
+        }
+        Value::LogicalArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|value| if *value == 0 { 0.0 } else { 1.0 })
+            .collect()),
+        Value::Bool(value) => Ok(vec![if *value { 1.0 } else { 0.0 }]),
+        _ => Err(fitclinear_invalid(format!(
+            "fitclinear: {name} must be numeric"
+        ))),
+    }
+}
+
+pub(super) fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
+    vector_values_predict(tensor, name).map_err(|err| fitclinear_invalid(err.message))
+}
+
+pub(super) fn vector_values_predict(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
+    if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
+        return Err(predict_invalid(format!("predict: {name} must be a vector")));
+    }
+    Ok(tensor::tensor_values_f64(tensor))
+}
+
+pub(super) fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        ensure_int_exact_f64(&integer, name)?;
+        return Ok(integer.to_f64());
+    }
+    match value {
+        Value::Num(value) => Ok(*value),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
+        Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
+        _ => Err(fitclinear_invalid(format!(
+            "fitclinear: {name} must be a numeric scalar"
+        ))),
+    }
+}
+
+pub(super) fn ensure_integer_tensor_exact(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+    if let Some(storage) = tensor.integer_storage() {
+        for value in storage.exact_values() {
+            ensure_int_exact_f64(&value, name)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn ensure_integer_tensor_exact_predict(
+    tensor: &Tensor,
+    name: &str,
+) -> BuiltinResult<()> {
+    if let Some(storage) = tensor.integer_storage() {
+        for value in storage.exact_values() {
+            if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
+                return Err(predict_invalid(format!(
+                    "predict: integer {name} must be exactly representable as double"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_int_exact_f64(value: &IntValue, name: &str) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
+        Ok(())
+    } else {
+        Err(fitclinear_invalid(format!(
+            "fitclinear: integer {name} must be exactly representable as double"
+        )))
+    }
+}
+
+pub(super) fn logical_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(fitclinear_invalid(format!(
+                "fitclinear: {name} must be logical scalar"
+            ))),
+        };
+    }
+    match value {
+        Value::Bool(value) => Ok(*value),
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
+        Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let raw = tensor::tensor_values_f64(tensor)[0];
+            if raw == 0.0 || raw == 1.0 {
+                Ok(raw != 0.0)
+            } else {
+                Err(fitclinear_invalid(format!(
+                    "fitclinear: {name} must be logical scalar"
+                )))
+            }
+        }
+        _ => Err(fitclinear_invalid(format!(
+            "fitclinear: {name} must be logical scalar"
+        ))),
+    }
+}
+
+pub(super) fn positive_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
+    let value = numeric_scalar(value, name)?;
+    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+        return Err(fitclinear_invalid(format!(
+            "fitclinear: {name} must be a positive integer"
+        )));
+    }
+    Ok(value as usize)
+}
+
+pub(super) fn is_name_value_option(value: &Value) -> bool {
+    scalar_text(value).is_some_and(|text| FitclinearOption::from_public_name(&text).is_some())
+}
+pub(super) fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
+    if columns.is_empty() {
+        return Err(fitclinear_invalid("fitclinear: no predictor columns"));
+    }
+    let rows = columns[0].len();
+    let cols = columns.len();
+    let mut data = Vec::with_capacity(rows * cols);
+    for column in columns {
+        if column.len() != rows {
+            return Err(fitclinear_invalid(
+                "fitclinear: predictor variables must have the same height",
+            ));
+        }
+        data.extend(column);
+    }
+    Tensor::new(data, vec![rows, cols])
+        .map_err(|err| fitclinear_internal(format!("fitclinear: {err}")))
+}
+
+pub(super) fn columns_to_tensor_predict(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
+    columns_to_tensor(columns).map_err(|err| predict_invalid(err.message))
+}
+
+pub(super) fn rows_to_tensor(rows: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
+    if rows.is_empty() {
+        return Err(fitclinear_invalid("fitclinear: no complete predictor rows"));
+    }
+    let row_count = rows.len();
+    let col_count = rows[0].len();
+    let mut data = Vec::with_capacity(row_count * col_count);
+    for col in 0..col_count {
+        for row in &rows {
+            data.push(row[col]);
+        }
+    }
+    Tensor::new(data, vec![row_count, col_count])
+        .map_err(|err| fitclinear_internal(format!("fitclinear: {err}")))
+}
+
+pub(super) fn beta_value(models: &[TrainedModel], predictors: usize) -> BuiltinResult<Value> {
+    let mut data = Vec::with_capacity(predictors * models.len());
+    for model in models {
+        data.extend(model.beta.iter().copied());
+    }
+    Ok(Value::Tensor(
+        Tensor::new(data, vec![predictors, models.len()])
+            .map_err(|err| fitclinear_internal(format!("fitclinear: {err}")))?,
+    ))
+}
+
+pub(super) fn row_tensor(values: Vec<f64>) -> BuiltinResult<Value> {
+    let cols = values.len();
+    Ok(Value::Tensor(Tensor::new(values, vec![1, cols]).map_err(
+        |err| fitclinear_internal(format!("fitclinear: {err}")),
+    )?))
+}
+
+pub(super) fn x_value(x: &Tensor, row: usize, col: usize) -> f64 {
+    tensor::tensor_value_f64(x, row + col * x.rows)
+}
+
+pub(super) fn dot_row(x: &Tensor, row: usize, beta: &[f64]) -> f64 {
+    beta.iter()
+        .enumerate()
+        .map(|(col, coef)| x_value(x, row, col) * coef)
+        .sum()
+}
+
+pub(super) fn soft_threshold(value: f64, threshold: f64) -> f64 {
+    if value > threshold {
+        value - threshold
+    } else if value < -threshold {
+        value + threshold
+    } else {
+        0.0
+    }
+}
+
+pub(super) fn sigmoid(value: f64) -> f64 {
+    if value >= 0.0 {
+        1.0 / (1.0 + (-value).exp())
+    } else {
+        let exp_value = value.exp();
+        exp_value / (1.0 + exp_value)
+    }
+}

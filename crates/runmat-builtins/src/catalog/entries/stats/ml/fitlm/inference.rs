@@ -22,31 +22,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ValueKindFact::Numeric(numeric)
                 if numeric.domain == runmat_types::NumericDomain::Real =>
             {
-                if request.arguments.len() < 2 {
-                    diagnostics.push(argument_error(
-                        "RM-CATALOG-FITLM-RESPONSE",
-                        "matrix fitting requires a response",
-                        1,
-                    ));
-                }
-                if matches!(&first.shape, ShapeFact::Shaped { dims } if dims.len() > 2) {
-                    diagnostics.push(argument_error(
-                        "RM-CATALOG-FITLM-RANK",
-                        "predictors must be a vector or 2-D matrix",
-                        0,
-                    ));
-                }
+                diagnose_matrix_form(request, first, &mut diagnostics);
             }
-            ValueKindFact::Object(object)
-                if object
-                    .runtime_class
-                    .as_ref()
-                    .is_none_or(|class| class.is(standard::TABLE)) => {}
-            ValueKindFact::Object(_) => diagnostics.push(argument_error(
-                "RM-CATALOG-FITLM-DATA",
-                "predictors must be a numeric matrix or table",
-                0,
-            )),
+            ValueKindFact::Logical => diagnose_matrix_form(request, first, &mut diagnostics),
+            ValueKindFact::Object(object) => match object.runtime_class.as_ref() {
+                Some(class) if standard::is_tabular(class) => {}
+                None => {}
+                Some(_) => diagnostics.push(argument_error(
+                    "RM-CATALOG-FITLM-DATA",
+                    "predictors must be a numeric matrix or table",
+                    0,
+                )),
+            },
             _ => diagnostics.push(argument_error(
                 "RM-CATALOG-FITLM-DATA",
                 "predictors must be a numeric matrix or table",
@@ -72,6 +59,27 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut result = infer_call(&contract, request);
     result.diagnostics.extend(diagnostics);
     result
+}
+
+fn diagnose_matrix_form(
+    request: &CallRequest,
+    first: &ValueFact,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) {
+    if request.arguments.len() < 2 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-FITLM-RESPONSE",
+            "matrix fitting requires a response",
+            1,
+        ));
+    }
+    if matches!(&first.shape, ShapeFact::Shaped { dims } if dims.len() > 2) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-FITLM-RANK",
+            "predictors must be a vector or 2-D matrix",
+            0,
+        ));
+    }
 }
 
 fn diagnose_known_option_names(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnostic>) {

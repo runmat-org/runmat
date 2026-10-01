@@ -28,7 +28,7 @@
     "unit": "builtins::stats::ml::linear_model::tests",
     "integration": "crates/runmat-vm/tests/stats_ml.rs"
   },
-  "description": "`fitlm` fits an ordinary least-squares linear regression model from a numeric predictor matrix or table and returns a host `LinearModel` object. The compatibility target documents single and double matrix data; RunMat mode separately gates typed-integer predictors, responses, weights, structural selectors, and Intercept controls.",
+  "description": "`fitlm` fits an ordinary least-squares linear regression model from a numeric predictor matrix or table and returns a host `LinearModel` object. The compatibility target documents single and double matrix data; RunMat also accepts logical predictor matrices and separately gates typed-integer predictors, responses, weights, structural selectors, and Intercept controls.",
   "behaviors": [
     "`fitlm(X,y)` fits a model with an intercept and one linear term per predictor column.",
     "Table input uses the last variable as the response by default, or the response from a response name, formula, or `ResponseVar` option.",
