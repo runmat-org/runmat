@@ -258,11 +258,15 @@ pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(
-            gather_if_needed_async(&arg)
-                .await
-                .map_err(|err| invalid_with_source(format!("boxplot: {err}"), err))?,
-        );
+        if value_contains_gpu(&arg)? {
+            gathered.push(
+                gather_if_needed_async(&arg)
+                    .await
+                    .map_err(|err| invalid_with_source(format!("boxplot: {err}"), err))?,
+            );
+        } else {
+            gathered.push(arg);
+        }
     }
     Ok(gathered)
 }

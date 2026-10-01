@@ -69,6 +69,17 @@ fn categorical_group_length_uses_all_codes_not_only_sample_prefix() {
 }
 
 #[test]
+fn owned_host_sample_passes_materialization_boundary_without_copy() {
+    let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+    let original_payload = tensor.as_f64_slice().unwrap().as_ptr();
+    let mut values = block_on(gather_values(vec![Value::Tensor(tensor)])).unwrap();
+    let Value::Tensor(result) = values.remove(0) else {
+        panic!("host tensor must retain its value kind");
+    };
+    assert_eq!(result.as_f64_slice().unwrap().as_ptr(), original_payload);
+}
+
+#[test]
 fn multifactor_group_identity_does_not_depend_on_joined_display_text() {
     let first =
         Value::StringArray(StringArray::new(vec!["a,b".into(), "a".into()], vec![2, 1]).unwrap());
