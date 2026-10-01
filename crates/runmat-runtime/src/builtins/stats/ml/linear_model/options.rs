@@ -2,44 +2,39 @@ use super::*;
 
 pub(super) fn parse_fit_name_values(
     values: &[Value],
+    names: &[NamedOption],
+    index_offset: usize,
     options: &mut FitOptions,
 ) -> BuiltinResult<()> {
-    if !values.len().is_multiple_of(2) {
-        return Err(fitlm_invalid("fitlm: name-value options must be paired"));
-    }
-    let mut index = 0;
-    while index < values.len() {
-        let name = scalar_text(&values[index])
-            .ok_or_else(|| fitlm_invalid("fitlm: option name must be text"))?;
-        let value = &values[index + 1];
-        match FitlmOption::from_public_name(&name) {
-            Some(FitlmOption::Intercept) => options.intercept = bool_scalar(value, "Intercept")?,
-            Some(FitlmOption::ResponseVar) => {
+    for named in names {
+        let name = named.spelling.as_str();
+        let value = &values[named.index - index_offset + 1];
+        match named.identity {
+            FitlmOption::Intercept => options.intercept = bool_scalar(value, "Intercept")?,
+            FitlmOption::ResponseVar => {
                 options.response_var = Some(
                     scalar_text(value)
                         .ok_or_else(|| fitlm_invalid("fitlm: ResponseVar must be text"))?,
                 );
             }
-            Some(FitlmOption::PredictorVars) => {
+            FitlmOption::PredictorVars => {
                 options.predictor_vars = Some(text_list(value, "PredictorVars")?);
             }
-            Some(FitlmOption::VarNames) => options.var_names = Some(text_list(value, "VarNames")?),
-            Some(FitlmOption::Exclude) => options.exclude = Some(exclude_spec(value)?),
-            Some(FitlmOption::Weights) => {
+            FitlmOption::VarNames => options.var_names = Some(text_list(value, "VarNames")?),
+            FitlmOption::Exclude => options.exclude = Some(exclude_spec(value)?),
+            FitlmOption::Weights => {
                 options.weights = Some(if let Some(name) = scalar_text(value) {
                     WeightSpec::Variable(name)
                 } else {
                     WeightSpec::Values(numeric_vector(value, "Weights")?)
                 });
             }
-            Some(FitlmOption::RobustOpts | FitlmOption::CategoricalVars) => {
+            FitlmOption::RobustOpts | FitlmOption::CategoricalVars => {
                 return Err(fitlm_invalid(format!(
                     "fitlm: option '{name}' is not supported yet"
                 )));
             }
-            None => return Err(fitlm_invalid(format!("fitlm: unknown option '{name}'"))),
         }
-        index += 2;
     }
     Ok(())
 }

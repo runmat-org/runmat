@@ -1,40 +1,37 @@
 use super::*;
 
-pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResult<()> {
-    if !values.len().is_multiple_of(2) {
-        return Err(fitctree_invalid(
-            "fitctree: name-value options must be paired",
-        ));
-    }
-    let mut index = 0usize;
-    while index < values.len() {
-        let name = scalar_text(&values[index])
-            .ok_or_else(|| fitctree_invalid("fitctree: option name must be text"))?;
-        let value = &values[index + 1];
-        match FitctreeOption::from_public_name(&name) {
-            Some(FitctreeOption::ClassNames) => {
+pub(super) fn parse_fit_options(
+    values: &[Value],
+    names: &[NamedOption],
+    index_offset: usize,
+    options: &mut FitOptions,
+) -> BuiltinResult<()> {
+    for name in names {
+        let value = &values[name.index - index_offset + 1];
+        match name.identity {
+            FitctreeOption::ClassNames => {
                 let labels = label_vector(value.clone(), "ClassNames")?;
                 options.class_names = Some(labels.labels);
             }
-            Some(FitctreeOption::PredictorNames) => {
+            FitctreeOption::PredictorNames => {
                 options.predictor_names = Some(text_list(value, "PredictorNames")?);
             }
-            Some(FitctreeOption::ResponseName) => {
+            FitctreeOption::ResponseName => {
                 options.response_name = Some(
                     scalar_text(value)
                         .ok_or_else(|| fitctree_invalid("fitctree: ResponseName must be text"))?,
                 );
             }
-            Some(FitctreeOption::MaxNumSplits) => {
+            FitctreeOption::MaxNumSplits => {
                 options.max_num_splits = Some(nonnegative_integer(value, "MaxNumSplits")?);
             }
-            Some(FitctreeOption::MinLeafSize) => {
+            FitctreeOption::MinLeafSize => {
                 options.min_leaf_size = positive_integer(value, "MinLeafSize")?;
             }
-            Some(FitctreeOption::MinParentSize) => {
+            FitctreeOption::MinParentSize => {
                 options.min_parent_size = positive_integer(value, "MinParentSize")?;
             }
-            Some(FitctreeOption::SplitCriterion) => {
+            FitctreeOption::SplitCriterion => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitctree_invalid("fitctree: SplitCriterion must be text"))?;
                 options.split_criterion = match text.to_ascii_lowercase().as_str() {
@@ -47,14 +44,14 @@ pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> B
                     }
                 };
             }
-            Some(FitctreeOption::Weights) => {
+            FitctreeOption::Weights => {
                 options.weights = Some(if let Some(name) = scalar_text(value) {
                     WeightSpec::Variable(name)
                 } else {
                     WeightSpec::Values(numeric_vector(value, "Weights")?)
                 });
             }
-            Some(FitctreeOption::ScoreTransform) => {
+            FitctreeOption::ScoreTransform => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitctree_invalid("fitctree: ScoreTransform must be text"))?;
                 if !text.eq_ignore_ascii_case("none") {
@@ -63,40 +60,32 @@ pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> B
                     ));
                 }
             }
-            Some(
-                FitctreeOption::AlgorithmForCategorical
-                | FitctreeOption::CategoricalPredictors
-                | FitctreeOption::Cost
-                | FitctreeOption::CrossVal
-                | FitctreeOption::CvPartition
-                | FitctreeOption::Holdout
-                | FitctreeOption::KFold
-                | FitctreeOption::Leaveout
-                | FitctreeOption::MaxNumCategories
-                | FitctreeOption::MergeLeaves
-                | FitctreeOption::NumBins
-                | FitctreeOption::NumVariablesToSample
-                | FitctreeOption::OptimizeHyperparameters
-                | FitctreeOption::HyperparameterOptimizationOptions
-                | FitctreeOption::PredictorSelection
-                | FitctreeOption::Prior
-                | FitctreeOption::Prune
-                | FitctreeOption::PruneCriterion
-                | FitctreeOption::Reproducible
-                | FitctreeOption::Surrogate,
-            ) => {
+            FitctreeOption::AlgorithmForCategorical
+            | FitctreeOption::CategoricalPredictors
+            | FitctreeOption::Cost
+            | FitctreeOption::CrossVal
+            | FitctreeOption::CvPartition
+            | FitctreeOption::Holdout
+            | FitctreeOption::KFold
+            | FitctreeOption::Leaveout
+            | FitctreeOption::MaxNumCategories
+            | FitctreeOption::MergeLeaves
+            | FitctreeOption::NumBins
+            | FitctreeOption::NumVariablesToSample
+            | FitctreeOption::OptimizeHyperparameters
+            | FitctreeOption::HyperparameterOptimizationOptions
+            | FitctreeOption::PredictorSelection
+            | FitctreeOption::Prior
+            | FitctreeOption::Prune
+            | FitctreeOption::PruneCriterion
+            | FitctreeOption::Reproducible
+            | FitctreeOption::Surrogate => {
                 return Err(fitctree_invalid(format!(
-                    "fitctree: option '{name}' is not supported yet"
+                    "fitctree: option '{}' is not supported yet",
+                    name.spelling
                 )));
             }
-            None => {
-                return Err(fitctree_invalid(format!(
-                    "fitctree: unknown option '{}'",
-                    name.to_ascii_lowercase()
-                )))
-            }
         }
-        index += 2;
     }
     Ok(())
 }

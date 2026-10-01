@@ -32,19 +32,17 @@ pub(super) fn class_priors(
     Ok(vec![counts[0] / total, counts[1] / total])
 }
 
-pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResult<()> {
-    if !values.len().is_multiple_of(2) {
-        return Err(fitclinear_invalid(
-            "fitclinear: name-value options must be paired",
-        ));
-    }
-    let mut index = 0usize;
-    while index < values.len() {
-        let name = scalar_text(&values[index])
-            .ok_or_else(|| fitclinear_invalid("fitclinear: option name must be text"))?;
-        let value = &values[index + 1];
-        match FitclinearOption::from_public_name(&name) {
-            Some(FitclinearOption::Learner) => {
+pub(super) fn parse_fit_options(
+    values: &[Value],
+    names: &[NamedOption],
+    index_offset: usize,
+    options: &mut FitOptions,
+) -> BuiltinResult<()> {
+    for named in names {
+        let name = named.spelling.as_str();
+        let value = &values[named.index - index_offset + 1];
+        match named.identity {
+            FitclinearOption::Learner => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: Learner must be text"))?;
                 options.learner = match text.to_ascii_lowercase().as_str() {
@@ -57,10 +55,8 @@ pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> B
                     }
                 };
             }
-            Some(FitclinearOption::Lambda) => {
-                options.lambdas = Some(numeric_vector(value, "Lambda")?)
-            }
-            Some(FitclinearOption::Regularization) => {
+            FitclinearOption::Lambda => options.lambdas = Some(numeric_vector(value, "Lambda")?),
+            FitclinearOption::Regularization => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: Regularization must be text"))?;
                 options.regularization = match text.to_ascii_lowercase().as_str() {
@@ -73,7 +69,7 @@ pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> B
                     }
                 };
             }
-            Some(FitclinearOption::Solver) => {
+            FitclinearOption::Solver => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: Solver must be text"))?;
                 options.solver = FitclinearSolver::from_public_name(&text).ok_or_else(|| {
@@ -83,7 +79,7 @@ pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> B
                     ))
                 })?;
             }
-            Some(FitclinearOption::ObservationsIn) => {
+            FitclinearOption::ObservationsIn => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: ObservationsIn must be text"))?;
                 options.observations_in = match text.to_ascii_lowercase().as_str() {
@@ -96,28 +92,28 @@ pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> B
                     }
                 };
             }
-            Some(FitclinearOption::FitBias) => options.fit_bias = logical_scalar(value, "FitBias")?,
-            Some(FitclinearOption::ClassNames) => {
+            FitclinearOption::FitBias => options.fit_bias = logical_scalar(value, "FitBias")?,
+            FitclinearOption::ClassNames => {
                 let labels = label_vector(value.clone(), "ClassNames")?;
                 options.class_names = Some(labels.labels);
             }
-            Some(FitclinearOption::PredictorNames) => {
+            FitclinearOption::PredictorNames => {
                 options.predictor_names = Some(text_list(value, "PredictorNames")?);
             }
-            Some(FitclinearOption::ResponseName) => {
+            FitclinearOption::ResponseName => {
                 options.response_name =
                     Some(scalar_text(value).ok_or_else(|| {
                         fitclinear_invalid("fitclinear: ResponseName must be text")
                     })?);
             }
-            Some(FitclinearOption::Weights) => {
+            FitclinearOption::Weights => {
                 options.weights = Some(if let Some(name) = scalar_text(value) {
                     WeightSpec::Variable(name)
                 } else {
                     WeightSpec::Values(numeric_vector(value, "Weights")?)
                 });
             }
-            Some(FitclinearOption::Prior) => {
+            FitclinearOption::Prior => {
                 if let Some(text) = scalar_text(value) {
                     match text.to_ascii_lowercase().as_str() {
                         "empirical" => options.prior = None,
@@ -132,7 +128,7 @@ pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> B
                     options.prior = Some(numeric_vector(value, "Prior")?);
                 }
             }
-            Some(FitclinearOption::ScoreTransform) => {
+            FitclinearOption::ScoreTransform => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: ScoreTransform must be text"))?;
                 options.score_transform = Some(match text.to_ascii_lowercase().as_str() {
@@ -145,45 +141,34 @@ pub(super) fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> B
                     }
                 });
             }
-            Some(FitclinearOption::IterationLimit | FitclinearOption::PassLimit) => {
+            FitclinearOption::IterationLimit | FitclinearOption::PassLimit => {
                 options.iteration_limit = positive_integer(value, &name)?;
             }
-            Some(FitclinearOption::Beta) => options.beta0 = Some(numeric_vector(value, "Beta")?),
-            Some(FitclinearOption::Bias) => options.bias0 = Some(numeric_scalar(value, "Bias")?),
-            Some(
-                FitclinearOption::BatchLimit
-                | FitclinearOption::BetaTolerance
-                | FitclinearOption::DeltaGradientTolerance
-                | FitclinearOption::GradientTolerance
-                | FitclinearOption::NumCheckConvergence
-                | FitclinearOption::PostFitBias
-                | FitclinearOption::Verbose,
-            ) => {
+            FitclinearOption::Beta => options.beta0 = Some(numeric_vector(value, "Beta")?),
+            FitclinearOption::Bias => options.bias0 = Some(numeric_scalar(value, "Bias")?),
+            FitclinearOption::BatchLimit
+            | FitclinearOption::BetaTolerance
+            | FitclinearOption::DeltaGradientTolerance
+            | FitclinearOption::GradientTolerance
+            | FitclinearOption::NumCheckConvergence
+            | FitclinearOption::PostFitBias
+            | FitclinearOption::Verbose => {
                 // Accepted for script compatibility. The CPU solver below is deterministic
                 // batch gradient descent and records convergence diagnostics in FitInfo.
             }
-            Some(
-                FitclinearOption::Cost
-                | FitclinearOption::CrossVal
-                | FitclinearOption::CvPartition
-                | FitclinearOption::Holdout
-                | FitclinearOption::KFold
-                | FitclinearOption::Leaveout
-                | FitclinearOption::OptimizeHyperparameters
-                | FitclinearOption::HyperparameterOptimizationOptions,
-            ) => {
+            FitclinearOption::Cost
+            | FitclinearOption::CrossVal
+            | FitclinearOption::CvPartition
+            | FitclinearOption::Holdout
+            | FitclinearOption::KFold
+            | FitclinearOption::Leaveout
+            | FitclinearOption::OptimizeHyperparameters
+            | FitclinearOption::HyperparameterOptimizationOptions => {
                 return Err(fitclinear_invalid(format!(
                     "fitclinear: option '{name}' is not supported yet"
                 )));
             }
-            None => {
-                return Err(fitclinear_invalid(format!(
-                    "fitclinear: unknown option '{}'",
-                    name.to_ascii_lowercase()
-                )))
-            }
         }
-        index += 2;
     }
     Ok(())
 }

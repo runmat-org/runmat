@@ -1,6 +1,38 @@
 use super::*;
 
 #[test]
+fn fitctree_header_retains_typed_options_and_rejects_malformed_pairs() {
+    let first = tensor_value(vec![0.0, 1.0], 2, 1);
+    let valid = vec![Value::Num(0.0), Value::from("MinLeafSize"), Value::Num(1.0)];
+    let header = HeaderInspection::inspect(&first, &valid)
+        .validate(valid.len())
+        .unwrap();
+    assert_eq!(header.option_start, 1);
+    assert_eq!(header.options.len(), 1);
+    assert_eq!(header.options[0].identity, FitctreeOption::MinLeafSize);
+    assert_eq!(header.options[0].index, 1);
+
+    let odd = vec![Value::Num(0.0), Value::from("MinLeafSize")];
+    assert!(HeaderInspection::inspect(&first, &odd)
+        .validate(odd.len())
+        .is_err());
+    let unknown = vec![Value::Num(0.0), Value::from("Unknown"), Value::Num(1.0)];
+    assert!(HeaderInspection::inspect(&first, &unknown)
+        .validate(unknown.len())
+        .is_err());
+    let unsupported = vec![Value::Num(0.0), Value::from("Prune"), Value::Bool(true)];
+    assert!(HeaderInspection::inspect(&first, &unsupported)
+        .validate(unsupported.len())
+        .is_err());
+}
+
+#[test]
+fn fitctree_rejects_known_rank_before_materialization() {
+    let first = Value::Tensor(Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap());
+    assert!(preflight_matrix_rank(&first).is_err());
+}
+
+#[test]
 fn structural_counts_reject_the_first_value_beyond_platform_usize() {
     let first_out_of_range = (1u128 << usize::BITS) as f64;
     assert!(nonnegative_integer(&Value::Num(first_out_of_range), "MaxNumSplits").is_err());

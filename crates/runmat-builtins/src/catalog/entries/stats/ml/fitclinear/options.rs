@@ -85,6 +85,21 @@ impl FitclinearOption {
                 | Self::HyperparameterOptimizationOptions
         )
     }
+
+    /// Accepted for script compatibility but not consumed by the current CPU solver.
+    /// These payloads must not cause resident downloads.
+    pub const fn ignored(self) -> bool {
+        matches!(
+            self,
+            Self::BatchLimit
+                | Self::BetaTolerance
+                | Self::DeltaGradientTolerance
+                | Self::GradientTolerance
+                | Self::NumCheckConvergence
+                | Self::PostFitBias
+                | Self::Verbose
+        )
+    }
 }
 
 /// The admitted solver spelling is retained as a type; model output alone uses text.

@@ -171,9 +171,6 @@ pub(super) fn positive_integer(value: &Value, name: &str) -> BuiltinResult<usize
     Ok(value as usize)
 }
 
-pub(super) fn is_name_value_option(value: &Value) -> bool {
-    scalar_text(value).is_some_and(|text| FitclinearOption::from_public_name(&text).is_some())
-}
 pub(super) fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
     if columns.is_empty() {
         return Err(fitclinear_invalid("fitclinear: no predictor columns"));

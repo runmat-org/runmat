@@ -25,6 +25,10 @@ impl FitlmOption {
             _ => return None,
         })
     }
+
+    pub const fn unsupported(self) -> bool {
+        matches!(self, Self::RobustOpts | Self::CategoricalVars)
+    }
 }
 
 #[cfg(test)]

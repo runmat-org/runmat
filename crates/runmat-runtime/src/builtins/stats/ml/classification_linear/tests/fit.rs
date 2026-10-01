@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn fitclinear_header_keeps_typed_options_and_ignored_payload_policy() {
+    let first = tensor(vec![0.0, 1.0], vec![2, 1]);
+    let values = vec![
+        Value::Num(0.0),
+        Value::from("IterationLimit"),
+        Value::Num(5.0),
+        Value::from("BatchLimit"),
+        Value::Num(20.0),
+    ];
+    let header = HeaderInspection::inspect(&first, &values)
+        .validate(values.len())
+        .unwrap();
+    assert_eq!(header.option_start, 1);
+    assert_eq!(header.options[0].identity, FitclinearOption::IterationLimit);
+    assert_eq!(header.options[1].identity, FitclinearOption::BatchLimit);
+    assert!(header.options[1].identity.ignored());
+
+    let invalid = vec![Value::Num(0.0), Value::from("Cost"), Value::Num(1.0)];
+    assert!(HeaderInspection::inspect(&first, &invalid)
+        .validate(invalid.len())
+        .is_err());
+}
+
+#[test]
+fn fitclinear_rejects_known_rank_before_materialization() {
+    let first = tensor(vec![0.0; 8], vec![2, 2, 2]);
+    assert!(preflight_matrix_rank(&first).is_err());
+}
+
+#[test]
 fn iteration_limit_rejects_the_first_value_beyond_platform_usize() {
     let first_out_of_range = (1u128 << usize::BITS) as f64;
     assert!(positive_integer(&Value::Num(first_out_of_range), "IterationLimit").is_err());

@@ -153,9 +153,6 @@ fn ensure_int_exact_f64(value: &IntValue, name: &str) -> BuiltinResult<()> {
     }
 }
 
-pub(super) fn is_name_value_option(value: &Value) -> bool {
-    scalar_text(value).is_some_and(|text| FitctreeOption::from_public_name(&text).is_some())
-}
 pub(super) fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
     if columns.is_empty() {
         return Err(fitctree_invalid("fitctree: no predictor columns"));

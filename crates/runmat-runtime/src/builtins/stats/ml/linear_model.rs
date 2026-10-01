@@ -30,6 +30,8 @@ const EPS: f64 = 1.0e-12;
 
 mod training;
 use training::{evaluate_term, fit_ols};
+mod header;
+use header::{preflight_matrix_rank, FitlmArguments, HeaderInspection};
 mod admission;
 mod options;
 mod prediction;
@@ -45,10 +47,10 @@ mod values;
 use values::{
     bool_scalar, columns_to_tensor, columns_to_tensor_predict,
     ensure_exact_fitlm_integer_scalar_boundary, ensure_exact_fitlm_integer_tensor_boundary,
-    exclude_mask, exclude_spec, has_intercept, is_name_value_option, matrix_property,
-    numeric_column, numeric_property, numeric_scalar, numeric_scalar_property, numeric_vector,
-    scalar_text, string_column, string_property, string_row, terms_from_object, terms_tensor,
-    text_list, vector_values, vector_values_predict, x_value,
+    exclude_mask, exclude_spec, has_intercept, matrix_property, numeric_column, numeric_property,
+    numeric_scalar, numeric_scalar_property, numeric_vector, scalar_text, string_column,
+    string_property, string_row, terms_from_object, terms_tensor, text_list, vector_values,
+    vector_values_predict, x_value,
 };
 
 fn fitlm_error(
@@ -196,22 +198,24 @@ struct OlsFit {
     builtin_path = "crate::builtins::stats::ml::linear_model"
 )]
 async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_fitlm_integer_extensions(&first, &rest)?;
+    let inspection = HeaderInspection::inspect(&first, &rest);
+    ensure_fitlm_integer_extensions(&first, &rest, &inspection)?;
     ensure_fitlm_resident_fallback_extension(&first, &rest)?;
+    preflight_matrix_rank(&first)?;
+    let arguments = inspection.validate(rest.len())?;
     let first = gather(first).await?;
-    let rest = gather_all(rest).await?;
-    let spec = build_fit_spec(first, rest)?;
+    let rest = gather_all(rest, &arguments).await?;
+    let spec = build_fit_spec(first, rest, &arguments)?;
     let fit = fit_ols(&spec)?;
     model_object(spec, fit).map(Value::Object)
 }
 
-fn ensure_fitlm_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    let option_start = if is_table_value(first) {
-        usize::from(
-            rest.first()
-                .is_some_and(|value| !is_name_value_option(value)),
-        )
-    } else {
+fn ensure_fitlm_integer_extensions(
+    first: &Value,
+    rest: &[Value],
+    inspection: &HeaderInspection,
+) -> BuiltinResult<()> {
+    if !is_table_value(first) {
         if is_typed_integer_value(first) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FITLM_INTEGER_PREDICTOR_EXTENSION,
@@ -224,41 +228,35 @@ fn ensure_fitlm_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
                 FITLM_NAME,
             )?;
         }
-        1 + usize::from(
-            rest.get(1)
-                .is_some_and(|value| !is_name_value_option(value)),
-        )
-    };
-
-    let option_values = rest.get(option_start..).unwrap_or(&[]);
+    }
     let mut response_name: Option<String> = None;
     let mut predictor_names: Option<Vec<String>> = None;
     let mut weights_name: Option<String> = None;
-    for pair in option_values.chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0]) else {
+    for (index, identity) in inspection.known_options() {
+        let Some(value) = rest.get(index + 1) else {
             continue;
         };
-        match FitlmOption::from_public_name(&name) {
-            Some(FitlmOption::Weights) => {
-                if is_typed_integer_value(&pair[1]) {
+        match identity {
+            FitlmOption::Weights => {
+                if is_typed_integer_value(value) {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &FITLM_INTEGER_WEIGHTS_EXTENSION,
                         FITLM_NAME,
                     )?;
                 }
-                weights_name = scalar_text(&pair[1]);
+                weights_name = scalar_text(value);
             }
-            Some(FitlmOption::Exclude) if is_typed_integer_value(&pair[1]) => {
+            FitlmOption::Exclude if is_typed_integer_value(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &FITLM_INTEGER_SELECTOR_EXTENSION,
                     FITLM_NAME,
                 )?;
             }
-            Some(FitlmOption::ResponseVar) => response_name = scalar_text(&pair[1]),
-            Some(FitlmOption::PredictorVars) => {
-                predictor_names = text_list(&pair[1], "PredictorVars").ok();
+            FitlmOption::ResponseVar => response_name = scalar_text(value),
+            FitlmOption::PredictorVars => {
+                predictor_names = text_list(value, "PredictorVars").ok();
             }
-            Some(FitlmOption::Intercept) if is_typed_integer_value(&pair[1]) => {
+            FitlmOption::Intercept if is_typed_integer_value(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &FITLM_INTEGER_CONTROL_EXTENSION,
                     FITLM_NAME,
@@ -274,7 +272,10 @@ fn ensure_fitlm_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
         };
         let names = table_variable_names_from_object(object)
             .map_err(|error| fitlm_invalid(format!("fitlm: {error}")))?;
-        let positional = rest.first().and_then(scalar_text);
+        let positional = rest
+            .first()
+            .filter(|_| inspection.option_start == 1)
+            .and_then(scalar_text);
         if response_name.is_none() {
             response_name = positional.as_ref().and_then(|text| {
                 if let Some((lhs, _)) = text.split_once('~') {
@@ -388,10 +389,14 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await
 }
 
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+async fn gather_all(values: Vec<Value>, arguments: &FitlmArguments) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
+    for (index, value) in values.into_iter().enumerate() {
+        if index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2) {
+            out.push(value);
+        } else {
+            out.push(gather(value).await?);
+        }
     }
     Ok(out)
 }

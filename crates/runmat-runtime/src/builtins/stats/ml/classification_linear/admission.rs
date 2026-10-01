@@ -1,8 +1,12 @@
 use super::*;
 
-pub(super) fn build_fit_spec(first: Value, mut rest: Vec<Value>) -> BuiltinResult<FitSpec> {
+pub(super) fn build_fit_spec(
+    first: Value,
+    mut rest: Vec<Value>,
+    arguments: &FitclinearArguments,
+) -> BuiltinResult<FitSpec> {
     if is_table_value(&first) {
-        build_table_fit_spec(first, rest)
+        build_table_fit_spec(first, rest, arguments)
     } else {
         if rest.is_empty() {
             return Err(fitclinear_invalid(
@@ -10,7 +14,7 @@ pub(super) fn build_fit_spec(first: Value, mut rest: Vec<Value>) -> BuiltinResul
             ));
         }
         let y = rest.remove(0);
-        build_matrix_fit_spec(first, y, rest)
+        build_matrix_fit_spec(first, y, rest, arguments)
     }
 }
 
@@ -22,9 +26,10 @@ fn build_matrix_fit_spec(
     x_value: Value,
     y_value: Value,
     rest: Vec<Value>,
+    arguments: &FitclinearArguments,
 ) -> BuiltinResult<FitSpec> {
     let mut options = FitOptions::default();
-    parse_fit_options(&rest, &mut options)?;
+    parse_fit_options(&rest, &arguments.options, 1, &mut options)?;
     if let Some(WeightSpec::Variable(_)) = options.weights {
         return Err(fitclinear_invalid(
             "fitclinear: weights variable names require table input",
@@ -60,7 +65,11 @@ fn build_matrix_fit_spec(
     finalize_fit_spec(x, labels, predictor_names, response_name, weights, options)
 }
 
-fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec> {
+fn build_table_fit_spec(
+    first: Value,
+    rest: Vec<Value>,
+    arguments: &FitclinearArguments,
+) -> BuiltinResult<FitSpec> {
     let object = match first {
         Value::Object(object) => object,
         _ => unreachable!("table checked"),
@@ -75,7 +84,6 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
     let variables =
         table_variables(&object).map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))?;
     let mut options = FitOptions::default();
-    let mut rest_start = 0usize;
     let mut response_name = variable_names
         .last()
         .cloned()
@@ -83,7 +91,7 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
     let mut external_y = None;
     let mut formula_predictors = None;
     if let Some(first_arg) = rest.first() {
-        if !is_name_value_option(first_arg) {
+        if arguments.option_start == 1 {
             if let Some(text) = scalar_text(first_arg) {
                 if text.contains('~') {
                     let parsed = parse_formula(&text, &variable_names)?;
@@ -99,10 +107,9 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
                     .clone()
                     .unwrap_or_else(|| "Y".to_string());
             }
-            rest_start = 1;
         }
     }
-    parse_fit_options(&rest[rest_start..], &mut options)?;
+    parse_fit_options(&rest, &arguments.options, 0, &mut options)?;
     if options.observations_in == ObservationsIn::Columns {
         return Err(fitclinear_invalid(
             "fitclinear: ObservationsIn='columns' is not supported for table input",

@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn fitlm_header_keeps_model_spec_separate_from_typed_options() {
+    let first = tensor_value(vec![0.0, 1.0], 2, 1);
+    let values = vec![
+        tensor_value(vec![1.0, 3.0], 2, 1),
+        Value::from("linear"),
+        Value::from("Intercept"),
+        Value::Bool(false),
+    ];
+    let header = HeaderInspection::inspect(&first, &values)
+        .validate(values.len())
+        .unwrap();
+    assert_eq!(header.option_start, 2);
+    assert_eq!(header.options.len(), 1);
+    assert_eq!(header.options[0].identity, FitlmOption::Intercept);
+    assert_eq!(header.options[0].index, 2);
+
+    let invalid = vec![
+        tensor_value(vec![1.0, 3.0], 2, 1),
+        Value::from("linear"),
+        Value::from("RobustOpts"),
+        Value::Bool(true),
+    ];
+    assert!(HeaderInspection::inspect(&first, &invalid)
+        .validate(invalid.len())
+        .is_err());
+}
+
+#[test]
+fn fitlm_rejects_known_rank_before_materialization() {
+    let first = Value::Tensor(Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap());
+    assert!(preflight_matrix_rank(&first).is_err());
+}
+
+#[test]
 fn logical_predictors_follow_the_numeric_matrix_training_path() {
     let x =
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 0, 1, 1], vec![4, 1]).unwrap());

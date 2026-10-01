@@ -1,8 +1,12 @@
 use super::*;
 
-pub(super) fn build_fit_spec(first: Value, mut rest: Vec<Value>) -> BuiltinResult<FitSpec> {
+pub(super) fn build_fit_spec(
+    first: Value,
+    mut rest: Vec<Value>,
+    arguments: &FitlmArguments,
+) -> BuiltinResult<FitSpec> {
     if is_table_value(&first) {
-        build_table_fit_spec(first, rest)
+        build_table_fit_spec(first, rest, arguments)
     } else {
         if rest.is_empty() {
             return Err(fitlm_invalid(
@@ -10,7 +14,7 @@ pub(super) fn build_fit_spec(first: Value, mut rest: Vec<Value>) -> BuiltinResul
             ));
         }
         let y = rest.remove(0);
-        build_matrix_fit_spec(first, y, rest)
+        build_matrix_fit_spec(first, y, rest, arguments)
     }
 }
 
@@ -22,6 +26,7 @@ fn build_matrix_fit_spec(
     x_value: Value,
     y_value: Value,
     rest: Vec<Value>,
+    arguments: &FitlmArguments,
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITLM_NAME, x_value)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
@@ -41,12 +46,10 @@ fn build_matrix_fit_spec(
     let cols = x.cols;
     let mut options = FitOptions::default();
     let mut model_spec = ModelSpec::Linear;
-    let mut index = 0;
-    if index < rest.len() && !is_name_value_option(&rest[index]) {
-        model_spec = parse_model_spec(&rest[index], cols)?;
-        index += 1;
+    if arguments.option_start == 2 {
+        model_spec = parse_model_spec(&rest[0], cols)?;
     }
-    parse_fit_name_values(&rest[index..], &mut options)?;
+    parse_fit_name_values(&rest, &arguments.options, 1, &mut options)?;
     if options.response_var.is_some() {
         return Err(fitlm_invalid(
             "fitlm: ResponseVar is only valid for table input",
@@ -96,7 +99,11 @@ fn build_matrix_fit_spec(
     })
 }
 
-fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec> {
+fn build_table_fit_spec(
+    first: Value,
+    rest: Vec<Value>,
+    arguments: &FitlmArguments,
+) -> BuiltinResult<FitSpec> {
     let object = match first {
         Value::Object(object) => object,
         _ => unreachable!("table checked"),
@@ -114,9 +121,8 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
     let mut model_spec = ModelSpec::Linear;
     let mut formula: Option<String> = None;
     let mut response_arg: Option<String> = None;
-    let mut index = 0;
-    if index < rest.len() && !is_name_value_option(&rest[index]) {
-        if let Some(text) = scalar_text(&rest[index]) {
+    if arguments.option_start == 1 {
+        if let Some(text) = scalar_text(&rest[0]) {
             if text.contains('~') {
                 formula = Some(text);
             } else if is_known_model_spec(&text) {
@@ -125,11 +131,10 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
                 response_arg = Some(text);
             }
         } else {
-            model_spec = parse_model_spec(&rest[index], variable_names.len() - 1)?;
+            model_spec = parse_model_spec(&rest[0], variable_names.len() - 1)?;
         }
-        index += 1;
     }
-    parse_fit_name_values(&rest[index..], &mut options)?;
+    parse_fit_name_values(&rest, &arguments.options, 0, &mut options)?;
     let response_name = formula
         .as_ref()
         .and_then(|text| text.split_once('~').map(|(lhs, _)| lhs.trim().to_string()))

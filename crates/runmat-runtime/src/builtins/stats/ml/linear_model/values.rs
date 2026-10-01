@@ -266,10 +266,6 @@ fn chars_to_string(chars: &CharArray) -> String {
     chars.data.iter().collect()
 }
 
-pub(super) fn is_name_value_option(value: &Value) -> bool {
-    scalar_text(value).is_some_and(|text| FitlmOption::from_public_name(&text).is_some())
-}
-
 pub(super) fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
     if columns.is_empty() {
         return Tensor::new(Vec::new(), vec![0, 0])

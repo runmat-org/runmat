@@ -32,6 +32,8 @@ const EPS: f64 = 1.0e-12;
 
 mod training;
 use training::fit_models;
+mod header;
+use header::{preflight_matrix_rank, FitclinearArguments, HeaderInspection};
 mod admission;
 mod options;
 mod prediction;
@@ -50,9 +52,9 @@ use labels::{
 };
 use values::{
     beta_value, char_rows, columns_to_tensor, columns_to_tensor_predict, dot_row,
-    ensure_integer_tensor_exact, ensure_integer_tensor_exact_predict, is_name_value_option,
-    logical_scalar, numeric_scalar, numeric_vector, positive_integer, row_tensor, rows_to_tensor,
-    scalar_text, sigmoid, soft_threshold, text_list, vector_values, vector_values_predict, x_value,
+    ensure_integer_tensor_exact, ensure_integer_tensor_exact_predict, logical_scalar,
+    numeric_scalar, numeric_vector, positive_integer, row_tensor, rows_to_tensor, scalar_text,
+    sigmoid, soft_threshold, text_list, vector_values, vector_values_predict, x_value,
 };
 
 fn fitclinear_error(
@@ -256,10 +258,13 @@ struct FitResult {
     builtin_path = "crate::builtins::stats::ml::classification_linear"
 )]
 pub(crate) async fn fitclinear_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_fitclinear_extensions(&first, &rest)?;
+    let inspection = HeaderInspection::inspect(&first, &rest);
+    ensure_fitclinear_extensions(&first, &rest, &inspection)?;
+    preflight_matrix_rank(&first)?;
+    let arguments = inspection.validate(rest.len())?;
     let first = gather(first).await?;
-    let rest = gather_all(rest).await?;
-    let spec = build_fit_spec(first, rest)?;
+    let rest = gather_all(rest, &arguments).await?;
+    let spec = build_fit_spec(first, rest, &arguments)?;
     let result = fit_models(&spec)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
@@ -283,27 +288,26 @@ fn typed_integer_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
-fn ensure_fitclinear_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_fitclinear_extensions(
+    first: &Value,
+    rest: &[Value],
+    inspection: &HeaderInspection,
+) -> BuiltinResult<()> {
     if crate::dispatcher::value_contains_gpu(first)
         || rest.iter().any(crate::dispatcher::value_contains_gpu)
     {
         enable_extension(&RESIDENT_INPUT_EXTENSION)?;
     }
-    let option_start = if is_table_value(first) {
-        ensure_table_integer_extensions(first, rest)?
+    if is_table_value(first) {
+        ensure_table_integer_extensions(first, rest, inspection)?;
     } else {
         if typed_integer_value(first) {
             enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
         }
-        1
-    };
-    let options = &rest[option_start.min(rest.len())..];
-    for pair in options.chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0]) else {
-            continue;
-        };
-        if typed_integer_value(&pair[1])
-            && FitclinearOption::from_public_name(&name) != Some(FitclinearOption::ClassNames)
+    }
+    for (index, identity) in inspection.known_options() {
+        if rest.get(index + 1).is_some_and(typed_integer_value)
+            && identity != FitclinearOption::ClassNames
         {
             enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
         }
@@ -311,9 +315,13 @@ fn ensure_fitclinear_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<
     Ok(())
 }
 
-fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<usize> {
+fn ensure_table_integer_extensions(
+    first: &Value,
+    rest: &[Value],
+    inspection: &HeaderInspection,
+) -> BuiltinResult<()> {
     let Value::Object(object) = first else {
-        return Ok(0);
+        return Ok(());
     };
     let names = table_variable_names_from_object(object)
         .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))?;
@@ -322,9 +330,7 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
     let mut response = names.last().cloned().unwrap_or_default();
     let mut predictors: Option<Vec<String>> = None;
     let mut external_y = false;
-    let mut option_start = 0;
-    if let Some(arg) = rest.first().filter(|arg| !is_name_value_option(arg)) {
-        option_start = 1;
+    if let Some(arg) = rest.first().filter(|_| inspection.option_start == 1) {
         if let Some(text) = scalar_text(arg) {
             if let Some((lhs, rhs)) = text.split_once('~') {
                 response = lhs.trim().to_string();
@@ -342,22 +348,21 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
             external_y = true;
         }
     }
-    let options = &rest[option_start..];
     let mut weight_variable = None;
-    for pair in options.chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0]) else {
+    for (index, identity) in inspection.known_options() {
+        let Some(value) = rest.get(index + 1) else {
             continue;
         };
-        match FitclinearOption::from_public_name(&name) {
-            Some(FitclinearOption::ResponseName) if !external_y => {
-                if let Some(value) = scalar_text(&pair[1]) {
+        match identity {
+            FitclinearOption::ResponseName if !external_y => {
+                if let Some(value) = scalar_text(value) {
                     response = value;
                 }
             }
-            Some(FitclinearOption::PredictorNames) => {
-                predictors = text_list(&pair[1], "PredictorNames").ok()
+            FitclinearOption::PredictorNames => {
+                predictors = text_list(value, "PredictorNames").ok()
             }
-            Some(FitclinearOption::Weights) => weight_variable = scalar_text(&pair[1]),
+            FitclinearOption::Weights => weight_variable = scalar_text(value),
             _ => {}
         }
     }
@@ -383,17 +388,30 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
     {
         enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
     }
-    Ok(option_start)
+    Ok(())
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await
 }
 
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+async fn gather_all(
+    values: Vec<Value>,
+    arguments: &FitclinearArguments,
+) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
+    for (index, value) in values.into_iter().enumerate() {
+        if index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2) {
+            out.push(value);
+        } else if arguments
+            .options
+            .iter()
+            .any(|option| option.index + 1 == index && option.identity.ignored())
+        {
+            out.push(value);
+        } else {
+            out.push(gather(value).await?);
+        }
     }
     Ok(out)
 }

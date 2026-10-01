@@ -32,6 +32,8 @@ const MAX_TREE_DEPTH: usize = 4096;
 
 mod training;
 use training::fit_tree;
+mod header;
+use header::{preflight_matrix_rank, FitctreeArguments, HeaderInspection};
 mod admission;
 mod options;
 mod prediction;
@@ -49,11 +51,10 @@ use labels::{
 };
 use values::{
     char_rows, columns_to_tensor, columns_to_tensor_predict, ensure_integer_tensor_exact,
-    ensure_integer_tensor_exact_predict, is_name_value_option, matrix_property,
-    nonnegative_integer, numeric_property, numeric_vector, positive_integer, scalar_text,
-    string_column, string_property, text_list, tree_children_tensor, tree_class_tensor,
-    tree_predictor_tensor, tree_prob_tensor, tree_threshold_tensor, vector_values,
-    vector_values_predict, x_value,
+    ensure_integer_tensor_exact_predict, matrix_property, nonnegative_integer, numeric_property,
+    numeric_vector, positive_integer, scalar_text, string_column, string_property, text_list,
+    tree_children_tensor, tree_class_tensor, tree_predictor_tensor, tree_prob_tensor,
+    tree_threshold_tensor, vector_values, vector_values_predict, x_value,
 };
 
 fn fitctree_error(
@@ -198,10 +199,13 @@ struct SplitCandidate {
     builtin_path = "crate::builtins::stats::ml::classification_tree"
 )]
 async fn fitctree_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_fitctree_extensions(&first, &rest)?;
+    let inspection = HeaderInspection::inspect(&first, &rest);
+    ensure_fitctree_extensions(&first, &rest, &inspection)?;
+    preflight_matrix_rank(&first)?;
+    let arguments = inspection.validate(rest.len())?;
     let first = gather(first).await?;
-    let rest = gather_all(rest).await?;
-    let spec = build_fit_spec(first, rest)?;
+    let rest = gather_all(rest, &arguments).await?;
+    let spec = build_fit_spec(first, rest, &arguments)?;
     let fit = fit_tree(&spec)?;
     model_object(spec, fit).map(Value::Object)
 }
@@ -217,26 +221,26 @@ fn typed_integer_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
-fn ensure_fitctree_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_fitctree_extensions(
+    first: &Value,
+    rest: &[Value],
+    inspection: &HeaderInspection,
+) -> BuiltinResult<()> {
     if crate::dispatcher::value_contains_gpu(first)
         || rest.iter().any(crate::dispatcher::value_contains_gpu)
     {
         enable_extension(&RESIDENT_INPUT_EXTENSION)?;
     }
-    let option_start = if is_table_value(first) {
-        ensure_table_integer_extensions(first, rest)?
+    if is_table_value(first) {
+        ensure_table_integer_extensions(first, rest, inspection)?;
     } else {
         if typed_integer_value(first) {
             enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
         }
-        1
-    };
-    for pair in rest[option_start.min(rest.len())..].chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0]) else {
-            continue;
-        };
-        if typed_integer_value(&pair[1])
-            && FitctreeOption::from_public_name(&name) != Some(FitctreeOption::ClassNames)
+    }
+    for (index, identity) in inspection.known_options() {
+        if rest.get(index + 1).is_some_and(typed_integer_value)
+            && identity != FitctreeOption::ClassNames
         {
             enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
         }
@@ -244,9 +248,13 @@ fn ensure_fitctree_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()
     Ok(())
 }
 
-fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<usize> {
+fn ensure_table_integer_extensions(
+    first: &Value,
+    rest: &[Value],
+    inspection: &HeaderInspection,
+) -> BuiltinResult<()> {
     let Value::Object(object) = first else {
-        return Ok(0);
+        return Ok(());
     };
     let names = table_variable_names_from_object(object)
         .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
@@ -255,9 +263,7 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
     let mut response = names.last().cloned().unwrap_or_default();
     let mut predictors: Option<Vec<String>> = None;
     let mut external_y = false;
-    let mut option_start = 0;
-    if let Some(arg) = rest.first().filter(|arg| !is_name_value_option(arg)) {
-        option_start = 1;
+    if let Some(arg) = rest.first().filter(|_| inspection.option_start == 1) {
         if let Some(text) = scalar_text(arg) {
             if let Some((lhs, rhs)) = text.split_once('~') {
                 response = lhs.trim().to_string();
@@ -276,20 +282,18 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
         }
     }
     let mut weight_variable = None;
-    for pair in rest[option_start..].chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0]) else {
+    for (index, identity) in inspection.known_options() {
+        let Some(value) = rest.get(index + 1) else {
             continue;
         };
-        match FitctreeOption::from_public_name(&name) {
-            Some(FitctreeOption::ResponseName) if !external_y => {
-                if let Some(value) = scalar_text(&pair[1]) {
+        match identity {
+            FitctreeOption::ResponseName if !external_y => {
+                if let Some(value) = scalar_text(value) {
                     response = value;
                 }
             }
-            Some(FitctreeOption::PredictorNames) => {
-                predictors = text_list(&pair[1], "PredictorNames").ok()
-            }
-            Some(FitctreeOption::Weights) => weight_variable = scalar_text(&pair[1]),
+            FitctreeOption::PredictorNames => predictors = text_list(value, "PredictorNames").ok(),
+            FitctreeOption::Weights => weight_variable = scalar_text(value),
             _ => {}
         }
     }
@@ -315,17 +319,24 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
     {
         enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
     }
-    Ok(option_start)
+    Ok(())
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await
 }
 
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+async fn gather_all(
+    values: Vec<Value>,
+    arguments: &FitctreeArguments,
+) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
+    for (index, value) in values.into_iter().enumerate() {
+        if index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2) {
+            out.push(value);
+        } else {
+            out.push(gather(value).await?);
+        }
     }
     Ok(out)
 }
