@@ -86,7 +86,7 @@ fn knnsearch_requested_outputs_preserve_padding_and_distinct_resident_allocation
         let output = block_on(knnsearch_builtin(
             Value::GpuTensor(source.clone()),
             tensor(vec![1.0], 1, 1),
-            Vec::new(),
+            vec![Value::from("NSMethod"), Value::from("exhaustive")],
         ))
         .expect("resident outputs");
         let Value::OutputList(values) = output else {
