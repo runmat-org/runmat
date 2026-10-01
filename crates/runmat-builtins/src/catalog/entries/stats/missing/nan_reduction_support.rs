@@ -17,17 +17,7 @@ pub(super) struct Alias {
 }
 
 fn is_integer(class: NumericClass) -> bool {
-    matches!(
-        class,
-        NumericClass::Int8
-            | NumericClass::Int16
-            | NumericClass::Int32
-            | NumericClass::Int64
-            | NumericClass::UInt8
-            | NumericClass::UInt16
-            | NumericClass::UInt32
-            | NumericClass::UInt64
-    )
+    class.integer_class().is_some()
 }
 
 fn keyword(value: &LiteralValue) -> Option<&str> {
@@ -55,7 +45,7 @@ fn dimension(value: &LiteralValue) -> Option<usize> {
             && *value >= 1.0
             && value.fract() == 0.0
             && *value < usize::MAX as f64)
-            .then(|| *value as usize),
+            .then_some(*value as usize),
         LiteralValue::Real { text, .. } => {
             let value = text.parse::<f64>().ok()?;
             dimension(&LiteralValue::Number(value))
@@ -71,6 +61,9 @@ fn unknown_reduction_shape(input: &ShapeFact) -> ShapeFact {
 }
 
 fn default_reduction_shape(input: &ShapeFact) -> ShapeFact {
+    if matches!(input, ShapeFact::Ranked { .. }) {
+        return input.clone();
+    }
     let Some(dims) = input.known_dims() else {
         return ShapeFact::Unknown;
     };
@@ -101,6 +94,11 @@ fn selected_reduction_shape(request: &CallRequest, input: &ShapeFact, alias: Ali
     };
     if let Some(literal) = request.literals.literal_args.get(dimension_index) {
         if let Some(dim) = dimension(literal) {
+            if matches!(input, ShapeFact::Ranked { .. })
+                || input.rank().is_some_and(|rank| dim > rank)
+            {
+                return input.clone();
+            }
             return reduction_shape(input, Some(dim));
         }
         if keyword(literal).is_none() {
@@ -219,11 +217,10 @@ pub(super) fn infer(
                     result.shape = selected_reduction_shape(request, &input.shape, alias);
                     result
                 } else {
-                    let class = if has_keyword(request, "double") {
-                        NumericClass::Double
-                    } else if alias.defaults_integer_to_double
-                        && is_integer(numeric.class)
-                        && !has_keyword(request, "native")
+                    let class = if has_keyword(request, "double")
+                        || (alias.defaults_integer_to_double
+                            && is_integer(numeric.class)
+                            && !has_keyword(request, "native"))
                     {
                         NumericClass::Double
                     } else {

@@ -11,6 +11,38 @@ fn call(input: ValueFact, outputs: usize) -> CallInference {
         &NANMEAN_CATALOG_ENTRY,
     )
 }
+
+#[test]
+fn abstract_rank_and_trailing_dimension_do_not_allocate_shape_metadata() {
+    let mut input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    input.shape = ShapeFact::Ranked { rank: usize::MAX };
+    assert_eq!(call(input.clone(), 1).outputs[0].shape, input.shape);
+    input.shape = ShapeFact::from(vec![Some(3), Some(2)]);
+    let inferred = inference::infer(
+        &CallRequest {
+            arguments: vec![
+                input.clone(),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::UInt64,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Integer {
+                    text: usize::MAX.to_string(),
+                    class: NumericClass::UInt64,
+                },
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+        &NANMEAN_CATALOG_ENTRY,
+    );
+    assert_eq!(inferred.outputs[0].shape, input.shape);
+}
 #[test]
 fn known_single_input_has_single_numeric_output_and_reduced_shape() {
     let input = ValueFact::proven(
