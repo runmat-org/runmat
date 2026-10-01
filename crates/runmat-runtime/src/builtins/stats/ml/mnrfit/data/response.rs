@@ -2,7 +2,7 @@ use super::*;
 use crate::builtins::common::tensor;
 use runmat_value::{CellArray, CharArray, Tensor};
 
-pub(super) async fn response_outcomes(
+pub(in super::super) async fn response_outcomes(
     value: Value,
     rows: usize,
     cooperation: &mut FitCooperation,
@@ -170,25 +170,27 @@ pub(super) async fn numeric_outcomes(
     let mut weights =
         filled_cooperatively(rows, 1.0, "categorical weights", &|| Ok(()), cooperation).await?;
     for (row, value) in values.iter().enumerate() {
-        cooperation.completed(1).await?;
         if value.is_nan() {
             weights[row] = 0.0;
-            continue;
-        }
-        if !value.is_finite() {
+        } else if !value.is_finite() {
             return Err(invalid("mnrfit: Y classes must be finite or NaN"));
+        } else {
+            let class_idx = classes
+                .binary_search_by(|class| {
+                    class
+                        .partial_cmp(value)
+                        .expect("numeric response classes were filtered to finite values")
+                })
+                .map_err(|_| internal("mnrfit: failed to map response class"))?;
+            if class_idx < logits {
+                outcomes[class_idx][row] = 1.0;
+            }
         }
-        let class_idx = classes
-            .binary_search_by(|class| {
-                class
-                    .partial_cmp(value)
-                    .expect("numeric response classes were filtered to finite values")
-            })
-            .map_err(|_| internal("mnrfit: failed to map response class"))?;
-        if class_idx < logits {
-            outcomes[class_idx][row] = 1.0;
+        if (row + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
         }
     }
+    cooperation.completed((rows % 16_384) as u64).await?;
     Ok(ResponseOutcomes {
         outcomes,
         classes: ClassNames::Numeric(classes),
@@ -245,14 +247,17 @@ async fn text_outcomes(
     let logits = classes.len() - 1;
     let mut outcomes = columns(logits, rows, "text outcomes", &|| Ok(()), cooperation).await?;
     for (row, value) in values.iter().enumerate() {
-        cooperation.completed(1).await?;
         let class_idx = classes
             .binary_search(value)
             .map_err(|_| internal("mnrfit: failed to map response class"))?;
         if class_idx < logits {
             outcomes[class_idx][row] = 1.0;
         }
+        if (row + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
     }
+    cooperation.completed((rows % 16_384) as u64).await?;
     Ok(ResponseOutcomes {
         outcomes,
         classes: ClassNames::Text(classes),

@@ -14,8 +14,20 @@ const ADMISSION_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/admission.rs"),
 };
 const DATA_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
-    label: "Response and design preparation",
-    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/data.rs"),
+    label: "Predictor and design preparation",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/data/prepare.rs"),
+};
+const RESPONSE_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Response class and grouped-count preparation",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/data/response.rs"),
+};
+const PROBABILITY_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Nominal probabilities and likelihoods",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/solver/probability.rs"),
+};
+const LINEAR_ALGEBRA_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Information-system solve and covariance",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/solver/linear_algebra.rs"),
 };
 const OPTIONS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Typed option admission",
@@ -104,13 +116,16 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ENTRYPOINT_SOURCE,
         ADMISSION_SOURCE,
         DATA_SOURCE,
+        RESPONSE_SOURCE,
+        PROBABILITY_SOURCE,
+        LINEAR_ALGEBRA_SOURCE,
         OPTIONS_SOURCE,
         OUTPUT_SOURCE,
         ALLOCATION_SOURCE,
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[ENTRYPOINT_SOURCE, SOURCE, ADMISSION_SOURCE, DATA_SOURCE, OPTIONS_SOURCE, OUTPUT_SOURCE, ALLOCATION_SOURCE],
+        implementation: &[ENTRYPOINT_SOURCE, SOURCE, ADMISSION_SOURCE, DATA_SOURCE, RESPONSE_SOURCE, PROBABILITY_SOURCE, LINEAR_ALGEBRA_SOURCE, OPTIONS_SOURCE, OUTPUT_SOURCE, ALLOCATION_SOURCE],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Multinomial fitting, class forms, and integer boundaries", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact numeric class identity, finite count totals, and weight boundaries", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/data/tests.rs" },

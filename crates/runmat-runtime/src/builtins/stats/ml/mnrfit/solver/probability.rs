@@ -67,7 +67,6 @@ pub(super) async fn log_likelihood(
             cooperation,
         )
         .await?;
-        cooperation.completed(1).await?;
         let mut probability_total = 0.0;
         for (index, probability) in probs.iter().enumerate() {
             probability_total += probability;
@@ -100,7 +99,11 @@ pub(super) async fn log_likelihood(
         if baseline_count > 0.0 {
             ll += baseline_count * baseline.ln();
         }
+        if (row + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
     }
+    cooperation.completed((data.rows % 16_384) as u64).await?;
     Ok(ll)
 }
 
@@ -113,7 +116,6 @@ pub(super) async fn saturated_log_likelihood(
     let mut ll = 0.0;
     for row in 0..data.rows {
         check()?;
-        cooperation.completed(1).await?;
         let weight = data.weights[row];
         let mut outcome_total = 0.0;
         for j in 0..logits {
@@ -131,6 +133,10 @@ pub(super) async fn saturated_log_likelihood(
         if baseline_p > 0.0 {
             ll += weight * baseline_p * baseline_p.max(EPS).ln();
         }
+        if (row + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
     }
+    cooperation.completed((data.rows % 16_384) as u64).await?;
     Ok(ll)
 }

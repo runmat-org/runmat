@@ -130,12 +130,14 @@ fn cancellation_during_compaction_discards_partial_work() {
     let mut weights = vec![1.0; rows];
     let probes = Cell::new(0);
     let error = block_on(compact_complete_cases(
-        &x,
-        &values,
-        1,
-        &mut design,
-        &mut outcomes,
-        &mut weights,
+        CompleteCaseBuffers {
+            x: &x,
+            values: &values,
+            cols: 1,
+            design: &mut design,
+            outcomes: &mut outcomes,
+            weights: &mut weights,
+        },
         &|| {
             let current = probes.get() + 1;
             probes.set(current);

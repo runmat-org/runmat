@@ -51,7 +51,6 @@ pub(super) async fn fit_nominal_logit(
         }
         for row in 0..data.rows {
             check()?;
-            cooperation.completed(1).await?;
             let probs =
                 row_probabilities(&data.design, row, cols, &beta, logits, check, cooperation)
                     .await?;
@@ -85,7 +84,11 @@ pub(super) async fn fit_nominal_logit(
                     }
                 }
             }
+            if (row + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
+        cooperation.completed((data.rows % 16_384) as u64).await?;
         for idx in 0..dim {
             information[idx * dim + idx] += RIDGE;
         }

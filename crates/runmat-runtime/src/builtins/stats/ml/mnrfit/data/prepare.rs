@@ -3,7 +3,7 @@ use crate::builtins::common::tensor;
 use runmat_value::Tensor;
 use std::borrow::Cow;
 
-pub(super) async fn prepare_data(
+pub(in super::super) async fn prepare_data(
     x: &Tensor,
     response: ResponseOutcomes,
     options: &Options,
@@ -50,12 +50,14 @@ pub(super) async fn prepare_data(
         cooperation.completed((weights.len() % 4096) as u64).await?;
     }
     let kept_rows = compact_complete_cases(
-        x,
-        &values,
-        cols,
-        &mut design,
-        &mut outcomes,
-        &mut weights,
+        CompleteCaseBuffers {
+            x,
+            values: &values,
+            cols,
+            design: &mut design,
+            outcomes: &mut outcomes,
+            weights: &mut weights,
+        },
         check,
         cooperation,
     )
@@ -187,17 +189,29 @@ async fn design_matrix(
     Ok(design)
 }
 
+pub(super) struct CompleteCaseBuffers<'a> {
+    pub(super) x: &'a Tensor,
+    pub(super) values: &'a [f64],
+    pub(super) cols: usize,
+    pub(super) design: &'a mut Vec<f64>,
+    pub(super) outcomes: &'a mut [Vec<f64>],
+    pub(super) weights: &'a mut Vec<f64>,
+}
+
 pub(super) async fn compact_complete_cases(
-    x: &Tensor,
-    values: &[f64],
-    cols: usize,
-    design: &mut Vec<f64>,
-    outcomes: &mut [Vec<f64>],
-    weights: &mut Vec<f64>,
+    buffers: CompleteCaseBuffers<'_>,
     check: &impl Fn() -> BuiltinResult<()>,
     cooperation: &mut FitCooperation,
 ) -> BuiltinResult<usize> {
     check()?;
+    let CompleteCaseBuffers {
+        x,
+        values,
+        cols,
+        design,
+        outcomes,
+        weights,
+    } = buffers;
     let rows = x.rows();
     let mut keep = Vec::new();
     keep.try_reserve_exact(rows)
@@ -226,8 +240,11 @@ pub(super) async fn compact_complete_cases(
         if x_complete && y_complete {
             keep.push(row);
         }
-        cooperation.completed(1).await?;
+        if (row + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
     }
+    cooperation.completed((rows % 16_384) as u64).await?;
     if keep.len() == rows {
         return Ok(rows);
     }

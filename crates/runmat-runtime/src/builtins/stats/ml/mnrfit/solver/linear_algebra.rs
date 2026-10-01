@@ -9,18 +9,21 @@ pub(super) async fn solve_linear(
 ) -> BuiltinResult<Vec<f64>> {
     for col in 0..n {
         check()?;
-        cooperation.completed(1).await?;
         let mut pivot = col;
         let mut best = a[col * n + col].abs();
         for row in col + 1..n {
-            check()?;
-            cooperation.completed(1).await?;
             let value = a[row * n + col].abs();
             if value > best {
                 best = value;
                 pivot = row;
             }
+            if (row - col).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
+        cooperation
+            .completed(((n - col - 1) % 16_384) as u64)
+            .await?;
         if best <= EPS || !best.is_finite() {
             return Err(convergence(
                 "mnrfit: information matrix is singular or ill-conditioned",
@@ -52,6 +55,7 @@ pub(super) async fn solve_linear(
             cooperation.completed(completed).await?;
             b[row] -= factor * b[col];
         }
+        cooperation.completed(1).await?;
     }
     let mut x = filled_cooperatively(n, 0.0, "solver result", check, cooperation).await?;
     for row in (0..n).rev() {
