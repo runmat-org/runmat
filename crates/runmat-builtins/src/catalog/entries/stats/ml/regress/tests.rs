@@ -147,3 +147,33 @@ fn empty_observations_cannot_prove_a_successful_fit() {
         ValueKindFact::Numeric(_)
     ));
 }
+
+#[test]
+fn discarded_calls_do_not_require_fit_geometry_but_still_validate_alpha() {
+    for (response, design) in [
+        (vec![Some(0), Some(1)], vec![Some(0), Some(2)]),
+        (vec![Some(2), Some(2)], vec![Some(3), Some(1)]),
+    ] {
+        let mut call = request(
+            numeric(ShapeFact::from(response)),
+            numeric(ShapeFact::from(design)),
+            0,
+        );
+        let inferred = inference::infer(&call, &REGRESS_CATALOG_ENTRY);
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+        assert!(inferred.outputs.is_empty());
+
+        call.arguments.push(numeric(ShapeFact::Scalar));
+        call.literals.literal_args.push(LiteralValue::Number(1.0));
+        let invalid = inference::infer(&call, &REGRESS_CATALOG_ENTRY);
+        assert!(invalid
+            .diagnostics
+            .iter()
+            .any(|item| { item.code == "RM-CATALOG-REGRESS-ALPHA-RANGE" }));
+        assert!(invalid.outputs.is_empty());
+    }
+}

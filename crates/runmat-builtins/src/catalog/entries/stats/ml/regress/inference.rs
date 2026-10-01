@@ -90,6 +90,9 @@ fn result(shape: ShapeFact) -> ValueFact {
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut errors = Vec::new();
+    // A discarded call admits numeric inputs and alpha without fitting.
+    // Fit geometry and complete-observation requirements do not apply there.
+    let fit_requested = request.outputs.requested.known_count() != Some(0);
     if !(2..=3).contains(&request.arguments.len()) {
         errors.push(argument_error(
             "RM-CATALOG-REGRESS-ARITY",
@@ -99,11 +102,19 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let response = request.arguments.first().and_then(|value| {
         real_input(value, 0, &mut errors);
-        response_length(&value.shape, &mut errors)
+        if fit_requested {
+            response_length(&value.shape, &mut errors)
+        } else {
+            None
+        }
     });
     let (rows, columns) = request.arguments.get(1).map_or((None, None), |value| {
         real_input(value, 1, &mut errors);
-        design_shape(&value.shape, &mut errors)
+        if fit_requested {
+            design_shape(&value.shape, &mut errors)
+        } else {
+            (None, None)
+        }
     });
     if rows.is_some() && response.is_some() && rows != response {
         errors.push(argument_error(

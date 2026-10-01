@@ -287,3 +287,26 @@ fn regress_rejects_bad_dimensions_and_alpha() {
     .unwrap_err();
     assert!(err.message.contains("alpha"));
 }
+
+#[test]
+fn discarded_calls_admit_without_fitting_but_still_validate_alpha() {
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    for (response, design) in [
+        (tensor(Vec::new(), 0, 1), tensor(Vec::new(), 0, 2)),
+        (
+            tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2),
+            tensor(vec![1.0, 1.0, 1.0], 3, 1),
+        ),
+    ] {
+        let result = block_on(regress_builtin(
+            response.clone(),
+            design.clone(),
+            Vec::new(),
+        ))
+        .expect("discarded call does not fit");
+        assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
+        let error = block_on(regress_builtin(response, design, vec![Value::Num(1.0)]))
+            .expect_err("discarded call still admits alpha");
+        assert!(error.message().contains("alpha"));
+    }
+}
