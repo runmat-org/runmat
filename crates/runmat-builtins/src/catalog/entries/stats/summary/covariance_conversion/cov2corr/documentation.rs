@@ -59,9 +59,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Covariance conversion output order", location: "builtins::stats::summary::covariance_conversion::tests" }],
-        notes: &["Legacy sidecar incorrectly described cov2corr as a corrcov alias; replaced with the documented Finance Toolbox output order and executable assertions. Sidecar retained until export-field parity is verified."],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Covariance validation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion/matrix_validation.rs") },
+            BuiltinDocumentationLink { label: "Correlation computation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion/computation.rs") },
+            BuiltinDocumentationLink { label: "Provider dispatch and admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion/provider.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Covariance conversion output order", location: "crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion/tests.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident conversion ownership and errors", location: "crates/runmat-runtime/src/builtins/stats/summary/covariance_conversion/provider/tests.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled covariance conversion", location: "crates/runmat-vm/tests/stats_ml.rs" },
+        ],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
