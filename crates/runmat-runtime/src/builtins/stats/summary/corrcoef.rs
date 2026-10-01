@@ -5,12 +5,13 @@ use runmat_accelerate_api::{
     CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, GpuTensorStorage,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CorrcoefOptionKey, CorrcoefRowsOption, CORRCOEF_DESCRIPTOR,
+    CORRCOEF_ERROR_ALPHA_INVALID, CORRCOEF_ERROR_COMPLEX_OUTPUTS, CORRCOEF_ERROR_INTERNAL,
+    CORRCOEF_ERROR_INVALID_ARGUMENT, CORRCOEF_ERROR_OPTION_DUPLICATE,
+    CORRCOEF_ERROR_OPTION_UNKNOWN, CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
+    CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN, CORRCOEF_ERROR_SIZE_MISMATCH,
+    CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS, CORRCOEF_INTEGER_DATA_EXTENSION,
+    CORRCOEF_LOGICAL_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, Tensor, Value};
@@ -24,240 +25,9 @@ use crate::builtins::common::tensor::{self, value_to_string};
 use crate::builtins::stats::summary::distribution_math::{
     standard_normal_inv, student_t_cdf_upper,
 };
-use crate::builtins::stats::type_resolvers::corrcoef_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "corrcoef";
-const OUTPUT_R: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "R",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Correlation coefficient matrix.",
-};
-const OUTPUT_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "P",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "P-values for testing zero correlation.",
-};
-const OUTPUT_RL: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "RL",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Lower confidence bounds for the correlation coefficients.",
-};
-const OUTPUT_RU: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "RU",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Upper confidence bounds for the correlation coefficients.",
-};
-const OUTPUTS_R: [BuiltinParamDescriptor; 1] = [OUTPUT_R];
-const OUTPUTS_R_P: [BuiltinParamDescriptor; 2] = [OUTPUT_R, OUTPUT_P];
-const OUTPUTS_FULL: [BuiltinParamDescriptor; 4] = [OUTPUT_R, OUTPUT_P, OUTPUT_RL, OUTPUT_RU];
-
-const PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input observations (rows are observations, columns are variables).",
-};
-const PARAM_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Second array with the same size as A; both arrays are vectorized.",
-};
-const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nameValuePairs",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Alpha and Rows name-value arguments.",
-};
-const INPUTS_A: [BuiltinParamDescriptor; 1] = [PARAM_A];
-const INPUTS_A_B: [BuiltinParamDescriptor; 2] = [PARAM_A, PARAM_B];
-const INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [PARAM_A, PARAM_OPTIONS];
-const INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_A, PARAM_B, PARAM_OPTIONS];
-
-const CORRCOEF_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "R = corrcoef(A)",
-        inputs: &INPUTS_A,
-        outputs: &OUTPUTS_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "R = corrcoef(A, B)",
-        inputs: &INPUTS_A_B,
-        outputs: &OUTPUTS_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, P] = corrcoef(A)",
-        inputs: &INPUTS_A,
-        outputs: &OUTPUTS_R_P,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, P] = corrcoef(A, B)",
-        inputs: &INPUTS_A_B,
-        outputs: &OUTPUTS_R_P,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, P, RL, RU] = corrcoef(A)",
-        inputs: &INPUTS_A,
-        outputs: &OUTPUTS_FULL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, P, RL, RU] = corrcoef(A, B)",
-        inputs: &INPUTS_A_B,
-        outputs: &OUTPUTS_FULL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "___ = corrcoef(A, Name, Value)",
-        inputs: &INPUTS_A_OPTIONS,
-        outputs: &OUTPUTS_FULL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "___ = corrcoef(A, B, Name, Value)",
-        inputs: &INPUTS_A_B_OPTIONS,
-        outputs: &OUTPUTS_FULL,
-    },
-];
-
-const CORRCOEF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.INVALID_ARGUMENT",
-    identifier: Some("RunMat:corrcoef:InvalidArgument"),
-    when: "Arguments are malformed or unsupported for corrcoef.",
-    message: "corrcoef: invalid argument",
-};
-
-const CORRCOEF_ERROR_COMPLEX_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.COMPLEX_OUTPUTS",
-    identifier: Some("RunMat:corrcoef:ComplexOutputs"),
-    when: "P-values or confidence bounds are requested for complex correlation coefficients.",
-    message: "corrcoef: P-values and confidence bounds are invalid for complex coefficients",
-};
-
-const CORRCOEF_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.SIZE_MISMATCH",
-    identifier: Some("RunMat:corrcoef:SizeMismatch"),
-    when: "A and B do not have the same size.",
-    message: "corrcoef: A and B must have the same size",
-};
-
-const CORRCOEF_ERROR_ALPHA_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.ALPHA_INVALID",
-    identifier: Some("RunMat:corrcoef:AlphaInvalid"),
-    when: "Alpha is not a finite single/double scalar strictly between zero and one.",
-    message: "corrcoef: Alpha must be a floating scalar in the open interval (0,1)",
-};
-
-const CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.ROWS_OPTION_UNKNOWN",
-    identifier: Some("RunMat:corrcoef:RowsOptionUnknown"),
-    when: "Rows option value is not supported.",
-    message: "corrcoef: unknown rows option",
-};
-
-const CORRCOEF_ERROR_OPTION_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.OPTION_DUPLICATE",
-    identifier: Some("RunMat:corrcoef:OptionDuplicate"),
-    when: "Alpha or Rows is specified more than once.",
-    message: "corrcoef: option specified more than once",
-};
-
-const CORRCOEF_ERROR_ROWS_OPTION_MALFORMED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.ROWS_OPTION_MALFORMED",
-    identifier: Some("RunMat:corrcoef:RowsOptionMalformed"),
-    when: "Rows keyword is not followed by a valid string option.",
-    message: "corrcoef: rows option is malformed",
-};
-
-const CORRCOEF_ERROR_OPTION_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.OPTION_UNKNOWN",
-    identifier: Some("RunMat:corrcoef:OptionUnknown"),
-    when: "An unknown option keyword is provided.",
-    message: "corrcoef: unknown option",
-};
-
-const CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.TOO_MANY_INPUT_ARRAYS",
-    identifier: Some("RunMat:corrcoef:TooManyInputArrays"),
-    when: "More than two data arrays are provided.",
-    message: "corrcoef: too many input arrays",
-};
-
-const CORRCOEF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.INTERNAL",
-    identifier: Some("RunMat:corrcoef:Internal"),
-    when: "Internal tensor conversion/allocation or corrcoef computation fails.",
-    message: "corrcoef: internal operation failed",
-};
-
-const CORRCOEF_ERRORS: [BuiltinErrorDescriptor; 10] = [
-    CORRCOEF_ERROR_INVALID_ARGUMENT,
-    CORRCOEF_ERROR_COMPLEX_OUTPUTS,
-    CORRCOEF_ERROR_SIZE_MISMATCH,
-    CORRCOEF_ERROR_ALPHA_INVALID,
-    CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN,
-    CORRCOEF_ERROR_OPTION_DUPLICATE,
-    CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
-    CORRCOEF_ERROR_OPTION_UNKNOWN,
-    CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS,
-    CORRCOEF_ERROR_INTERNAL,
-];
-
-const CORRCOEF_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "corrcoef-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "corrcoef with typed-integer observation data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CorrcoefIntegerDataExtension"),
-};
-
-const CORRCOEF_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "corrcoef-logical-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "corrcoef with logical observation data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CorrcoefLogicalDataExtension"),
-};
-
-const CORRCOEF_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    CORRCOEF_INTEGER_DATA_EXTENSION,
-    CORRCOEF_LOGICAL_DATA_EXTENSION,
-];
-
-const CORRCOEF_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A_or_B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented real or complex observation domain is single or double; RunMat mode additionally accepts all eight real and componentwise-complex integer classes.",
-    }];
-
-const CORRCOEF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "___ = corrcoef(integer_A_or_B, Name, Value)",
-        inputs: &CORRCOEF_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat preserves exact integer component differences while centering each variable before producing real or complex double correlation coefficients.",
-    }];
-
-pub const CORRCOEF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CORRCOEF_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CORRCOEF_ERRORS,
-};
 
 fn corrcoef_error_with(
     error: &'static BuiltinErrorDescriptor,
@@ -321,14 +91,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "corrcoef",
-    category = "stats/summary",
-    summary = "Compute Pearson correlation coefficients.",
-    keywords = "corrcoef,correlation,statistics,rows,alpha,p-value,confidence,gpu",
-    accel = "reduction",
-    type_resolver(corrcoef_type),
-    descriptor(crate::builtins::stats::summary::corrcoef::CORRCOEF_DESCRIPTOR),
-    extensions(CORRCOEF_EXTENSIONS),
-    integer_capabilities(CORRCOEF_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
 async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -337,6 +100,25 @@ async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs == Some(0) {
         return Ok(Value::OutputList(Vec::new()));
+    }
+    for handle in std::iter::once(&args.first)
+        .chain(args.second.as_ref())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+    {
+        if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+            let mut error =
+                corrcoef_internal_error("corrcoef: resident operand has no exact owning provider");
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+        handle.allocation_lease().validate_live().map_err(|error| {
+            corrcoef_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
+        })?;
     }
     if requested_outputs.is_none() || requested_outputs == Some(1) {
         if let Some(result) = corrcoef_try_gpu(&args).await? {
@@ -408,8 +190,8 @@ impl CorrcoefArgs {
                     format!("option '{key}' requires a value"),
                 )
             })?;
-            match key.as_str() {
-                "rows" => {
+            match CorrcoefOptionKey::parse(&key) {
+                Some(CorrcoefOptionKey::Rows) => {
                     if rows_seen {
                         return Err(corrcoef_error_with_detail(
                             &CORRCOEF_ERROR_OPTION_DUPLICATE,
@@ -425,7 +207,7 @@ impl CorrcoefArgs {
                     rows = parse_rows_option(choice.trim())?;
                     rows_seen = true;
                 }
-                "alpha" => {
+                Some(CorrcoefOptionKey::Alpha) => {
                     if alpha_seen {
                         return Err(corrcoef_error_with_detail(
                             &CORRCOEF_ERROR_OPTION_DUPLICATE,
@@ -435,7 +217,7 @@ impl CorrcoefArgs {
                     alpha = parse_alpha(&option)?;
                     alpha_seen = true;
                 }
-                _ => {
+                None => {
                     return Err(corrcoef_error_with_detail(
                         &CORRCOEF_ERROR_OPTION_UNKNOWN,
                         format!("'{key}'"),
@@ -522,7 +304,7 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     {
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider_for_handle(first_handle) {
+    let provider = match gpu_helpers::exact_provider_for_handle(first_handle) {
         Some(provider) => provider,
         None => return Ok(None),
     };
@@ -538,7 +320,7 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
             {
                 return Ok(None);
             }
-            let Some(second_provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+            let Some(second_provider) = gpu_helpers::exact_provider_for_handle(handle) else {
                 return Ok(None);
             };
             if !runmat_accelerate_api::same_provider_instance(provider, second_provider) {
@@ -555,7 +337,13 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     let _second_residency =
         maybe_second_handle.map(crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new);
     let matrix_handle = if let Some(second) = maybe_second_handle {
-        let rows = first_handle.shape().iter().copied().product::<usize>();
+        let rows = first_handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| {
+                corrcoef_error_with_detail(&CORRCOEF_ERROR_INVALID_ARGUMENT, "input shape overflow")
+            })?;
         let left = match provider.reshape(first_handle, &[rows, 1]) {
             Ok(handle) => handle,
             Err(error)
@@ -640,15 +428,13 @@ async fn value_to_numeric_input_gather(value: Value) -> BuiltinResult<NumericInp
 }
 
 fn parse_rows_option(value: &str) -> BuiltinResult<CorrcoefRows> {
-    match value {
-        "all" => Ok(CorrcoefRows::All),
-        "complete" | "completecase" | "completecases" => Ok(CorrcoefRows::Complete),
-        "pairwise" | "pairwisecomplete" | "pairwisecompletecase" | "pairwisecompletecases" => {
-            Ok(CorrcoefRows::Pairwise)
-        }
-        other => Err(corrcoef_error_with_detail(
+    match CorrcoefRowsOption::parse(value) {
+        Some(CorrcoefRowsOption::All) => Ok(CorrcoefRows::All),
+        Some(CorrcoefRowsOption::Complete) => Ok(CorrcoefRows::Complete),
+        Some(CorrcoefRowsOption::Pairwise) => Ok(CorrcoefRows::Pairwise),
+        None => Err(corrcoef_error_with_detail(
             &CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN,
-            format!("'{other}'"),
+            format!("'{value}'"),
         )),
     }
 }
@@ -1329,7 +1115,6 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Value,
     };
@@ -1359,33 +1144,6 @@ pub(crate) mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn corrcoef_type_preserves_column_count() {
-        let out = corrcoef_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(6), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)])
-            }
-        );
-    }
-
-    #[test]
-    fn corrcoef_type_vector_returns_scalar() {
-        let out = corrcoef_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(4), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[test]

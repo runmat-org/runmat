@@ -4,12 +4,12 @@ use runmat_accelerate_api::{
     AccelProvider, CovNormalization, CovRows, CovarianceOptions, GpuTensorHandle, GpuTensorStorage,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CovRowsOption, COV_DESCRIPTOR, COV_ERROR_COMPLEX_UNSUPPORTED,
+    COV_ERROR_INTERNAL, COV_ERROR_INVALID_ARGUMENT, COV_ERROR_NORMALIZATION_DUPLICATE,
+    COV_ERROR_NORMALIZATION_INVALID, COV_ERROR_ROWS_MISMATCH, COV_ERROR_ROWS_OPTION_UNKNOWN,
+    COV_ERROR_TOO_MANY_ARRAY_ARGUMENTS, COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+    COV_INTEGER_DATA_EXTENSION, COV_LOGICAL_DATA_EXTENSION, COV_TYPED_NORMALIZATION_EXTENSION,
+    COV_VECTOR_WEIGHTS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
@@ -20,370 +20,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::stats::type_resolvers::cov_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cov";
-const COV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Covariance matrix.",
-}];
-
-const COV_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input observations (rows are observations, columns are variables).",
-}];
-
-const COV_INPUTS_X_Y_OR_W: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y_or_w",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second dataset (Y) or weight vector (w), depending on shape/position.",
-    },
-];
-
-const COV_INPUTS_X_NORMALIZATION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "normalization",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0"),
-        description: "Normalization flag: 0 (unbiased) or 1 (biased).",
-    },
-];
-
-const COV_INPUTS_X_ROWS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "rows_option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"all\""),
-        description: "Rows handling mode: 'all', 'omitrows', or 'partialrows'.",
-    },
-];
-
-const COV_INPUTS_X_Y_OPT: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second dataset with matching size (or equal vector length).",
-    },
-    BuiltinParamDescriptor {
-        name: "opt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Normalization flag or rows option.",
-    },
-];
-
-const COV_INPUTS_X_Y_W: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second dataset with matching size (or equal vector length).",
-    },
-    BuiltinParamDescriptor {
-        name: "w",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Weight vector with one weight per observation row.",
-    },
-];
-
-const COV_INPUTS_X_Y_W_OPT: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second dataset with matching size (or equal vector length).",
-    },
-    BuiltinParamDescriptor {
-        name: "w",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Weight vector with one weight per observation row.",
-    },
-    BuiltinParamDescriptor {
-        name: "opt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Normalization flag or rows option.",
-    },
-];
-
-const COV_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "C = cov(X)",
-        inputs: &COV_INPUTS_X,
-        outputs: &COV_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = cov(X, Y_or_w)",
-        inputs: &COV_INPUTS_X_Y_OR_W,
-        outputs: &COV_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = cov(X, normalization)",
-        inputs: &COV_INPUTS_X_NORMALIZATION,
-        outputs: &COV_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = cov(X, rows_option)",
-        inputs: &COV_INPUTS_X_ROWS,
-        outputs: &COV_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = cov(X, Y, opt)",
-        inputs: &COV_INPUTS_X_Y_OPT,
-        outputs: &COV_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = cov(X, Y, w)",
-        inputs: &COV_INPUTS_X_Y_W,
-        outputs: &COV_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = cov(X, Y, w, opt)",
-        inputs: &COV_INPUTS_X_Y_W_OPT,
-        outputs: &COV_OUTPUT,
-    },
-];
-
-const COV_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.INVALID_ARGUMENT",
-    identifier: Some("RunMat:cov:InvalidArgument"),
-    when: "Arguments are malformed or unsupported for cov.",
-    message: "cov: invalid argument",
-};
-
-const COV_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:cov:ComplexUnsupported"),
-    when: "Any argument is complex-valued.",
-    message: "cov: complex inputs are not supported yet",
-};
-
-const COV_ERROR_ROWS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.ROWS_MISMATCH",
-    identifier: Some("RunMat:cov:RowsMismatch"),
-    when: "Two input datasets do not have the same size or equal vector lengths.",
-    message: "cov: paired inputs must have the same size",
-};
-
-const COV_ERROR_NORMALIZATION_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.NORMALIZATION_INVALID",
-    identifier: Some("RunMat:cov:NormalizationInvalid"),
-    when: "Normalization flag is non-finite, non-integer, or not 0/1.",
-    message: "cov: normalization flag is invalid",
-};
-
-const COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.WEIGHT_VECTOR_LENGTH_MISMATCH",
-    identifier: Some("RunMat:cov:WeightVectorLengthMismatch"),
-    when: "Weight vector length does not match observation row count.",
-    message: "cov: weight vector length mismatch",
-};
-
-const COV_ERROR_ROWS_OPTION_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.ROWS_OPTION_UNKNOWN",
-    identifier: Some("RunMat:cov:RowsOptionUnknown"),
-    when: "Rows option is not one of all/omitrows/partialrows.",
-    message: "cov: unknown rows option",
-};
-
-const COV_ERROR_NORMALIZATION_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.NORMALIZATION_DUPLICATE",
-    identifier: Some("RunMat:cov:NormalizationDuplicate"),
-    when: "Normalization flag is provided more than once.",
-    message: "cov: normalization flag specified more than once",
-};
-
-const COV_ERROR_TOO_MANY_ARRAY_ARGUMENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.TOO_MANY_ARRAY_ARGUMENTS",
-    identifier: Some("RunMat:cov:TooManyArrayArguments"),
-    when: "More than two data arrays (or Y plus weight) are provided.",
-    message: "cov: too many array arguments",
-};
-
-const COV_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COV.INTERNAL",
-    identifier: Some("RunMat:cov:Internal"),
-    when: "Internal tensor conversion/allocation or covariance computation fails.",
-    message: "cov: internal operation failed",
-};
-
-const COV_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    COV_ERROR_INVALID_ARGUMENT,
-    COV_ERROR_COMPLEX_UNSUPPORTED,
-    COV_ERROR_ROWS_MISMATCH,
-    COV_ERROR_NORMALIZATION_INVALID,
-    COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
-    COV_ERROR_ROWS_OPTION_UNKNOWN,
-    COV_ERROR_NORMALIZATION_DUPLICATE,
-    COV_ERROR_TOO_MANY_ARRAY_ARGUMENTS,
-    COV_ERROR_INTERNAL,
-];
-
-const COV_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cov-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cov with typed-integer observation data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CovIntegerDataExtension"),
-};
-
-const COV_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cov-logical-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cov with logical observation data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CovLogicalDataExtension"),
-};
-
-const COV_TYPED_NORMALIZATION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cov-typed-normalization",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cov with typed-integer or logical normalization is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CovTypedNormalizationExtension"),
-};
-
-const COV_VECTOR_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cov-vector-weights",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cov with a vector of observation weights is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CovVectorWeightsExtension"),
-};
-
-const COV_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    COV_INTEGER_DATA_EXTENSION,
-    COV_LOGICAL_DATA_EXTENSION,
-    COV_TYPED_NORMALIZATION_EXTENSION,
-    COV_VECTOR_WEIGHTS_EXTENSION,
-];
-
-const COV_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A_or_B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented observation domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
-    }];
-
-const COV_INTEGER_NORMALIZATION_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "w",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented scalar normalization weight is single or double; RunMat mode additionally accepts typed integer 0 or 1.",
-    }];
-
-const COV_INTEGER_VECTOR_WEIGHTS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "vector_weights",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Observation-weight vectors are a RunMat extension for every numeric class; integer vectors are validated exactly before floating weighted covariance.",
-    }];
-
-const COV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "C = cov(integer_A_or_B, w, nanflag)",
-        inputs: &COV_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat preserves exact integer differences while centering each variable before producing double covariance.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "C = cov(A, integer_w, nanflag)",
-        inputs: &COV_INTEGER_NORMALIZATION_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed integer normalization is a RunMat-only control and must equal zero or one.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "C = cov(A, integer_vector_weights, nanflag)",
-        inputs: &COV_INTEGER_VECTOR_WEIGHTS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "RunMat-only observation-weight vectors are nonnegative and finite; integer weights enter the floating weighted covariance domain and the data input determines output precision.",
-    },
-];
-
-pub const COV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COV_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COV_ERRORS,
-};
 
 fn cov_error_with(
     error: &'static BuiltinErrorDescriptor,
@@ -459,14 +98,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "cov",
-    category = "stats/summary",
-    summary = "Compute covariance matrices.",
-    keywords = "cov,covariance,statistics,weights,gpu",
-    accel = "reduction",
-    type_resolver(cov_type),
-    descriptor(crate::builtins::stats::summary::cov::COV_DESCRIPTOR),
-    extensions(COV_EXTENSIONS),
-    integer_capabilities(COV_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::cov"
 )]
 async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1027,20 +659,20 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
 }
 
 fn parse_rows_option(value: &str) -> BuiltinResult<CovRows> {
-    match value {
-        "all" => Ok(CovRows::All),
-        "omitrows" | "omit" => Ok(CovRows::OmitRows),
-        "partialrows" | "partial" | "pairwise" => Ok(CovRows::PartialRows),
-        other => Err(cov_error_with_detail(
+    match CovRowsOption::parse(value) {
+        Some(CovRowsOption::All) => Ok(CovRows::All),
+        Some(CovRowsOption::OmitRows) => Ok(CovRows::OmitRows),
+        Some(CovRowsOption::PartialRows) => Ok(CovRows::PartialRows),
+        None => Err(cov_error_with_detail(
             &COV_ERROR_ROWS_OPTION_UNKNOWN,
-            format!("'{other}'"),
+            format!("'{value}'"),
         )),
     }
 }
 
 fn parse_normalization(value: Value) -> BuiltinResult<CovNormalization> {
     match value {
-        Value::Int(i) => match i.to_i64() {
+        Value::Int(i) => match i.to_i128() {
             0 => Ok(CovNormalization::Unbiased),
             1 => Ok(CovNormalization::Biased),
             other => Err(cov_error_with_detail(
@@ -1651,7 +1283,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerStorage, Tensor};
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
@@ -1679,54 +1310,6 @@ pub(crate) mod tests {
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Tensor {
         Tensor::new_integer(storage, shape).unwrap()
-    }
-
-    #[test]
-    fn cov_type_preserves_column_count() {
-        let out = cov_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(5), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn cov_type_vector_returns_scalar() {
-        let out = cov_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
-    }
-
-    #[test]
-    fn cov_type_paired_matrices_returns_two_by_two() {
-        let out = cov_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(5), Some(3)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(5), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)])
-            }
-        );
     }
 
     #[test]

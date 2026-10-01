@@ -1,14 +1,6 @@
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
-use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
+use runmat_builtins::shape_rules::unknown_shape;
 use runmat_builtins::{ResolveContext, Type};
-
-pub fn cov_type(args: &[Type], _context: &ResolveContext) -> Type {
-    square_summary_type(args)
-}
-
-pub fn corrcoef_type(args: &[Type], _context: &ResolveContext) -> Type {
-    square_summary_type(args)
-}
 
 /// Type resolver for `mode`. Mirrors the reduction-style shape inference used by
 /// `mean` / `median` / `var`: the leading output (`M`) keeps the input's element
@@ -36,80 +28,6 @@ pub fn rng_type(_args: &[Type], _context: &ResolveContext) -> Type {
             "State".to_string(),
             "Type".to_string(),
         ]),
-    }
-}
-
-fn square_summary_type(args: &[Type]) -> Type {
-    let Some(first) = args.first() else {
-        return Type::Unknown;
-    };
-    let mut data: Vec<&Type> = args
-        .iter()
-        .filter(|arg| matches!(arg, Type::Tensor { .. } | Type::Logical { .. }))
-        .take(2)
-        .collect();
-    if data.is_empty() && is_numeric_scalar(first) {
-        data.push(first);
-    }
-    if data.is_empty() {
-        return Type::Unknown;
-    }
-    let total = match data.len() {
-        1 => variable_count(data[0]),
-        2 => Some(2),
-        _ => None,
-    };
-    match total {
-        Some(count) => numeric_tensor_from_shape(vec![Some(count), Some(count)]),
-        None => Type::Tensor {
-            shape: Some(unknown_shape(2)),
-        },
-    }
-}
-
-fn variable_count(ty: &Type) -> Option<usize> {
-    match ty {
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            variable_count_from_shape(shape)
-        }
-        Type::Tensor { shape: None } | Type::Logical { shape: None } => None,
-        Type::Num | Type::Int | Type::Bool => Some(1),
-        Type::Unknown => None,
-        _ => None,
-    }
-}
-
-fn variable_count_from_shape(shape: &[Option<usize>]) -> Option<usize> {
-    match shape.len() {
-        0 => Some(1),
-        1 => Some(1),
-        _ => {
-            let rows = shape.get(0).and_then(|v| *v);
-            let cols = shape.get(1).and_then(|v| *v);
-            if rows == Some(1) || cols == Some(1) {
-                Some(1)
-            } else {
-                cols
-            }
-        }
-    }
-}
-
-fn numeric_tensor_from_shape(shape: Vec<Option<usize>>) -> Type {
-    if element_count_if_known(&shape) == Some(1) {
-        Type::Num
-    } else {
-        Type::Tensor { shape: Some(shape) }
-    }
-}
-
-fn is_numeric_scalar(ty: &Type) -> bool {
-    match ty {
-        Type::Num | Type::Int | Type::Bool => true,
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            element_count_if_known(shape.as_slice()) == Some(1)
-        }
-        _ => false,
     }
 }
 

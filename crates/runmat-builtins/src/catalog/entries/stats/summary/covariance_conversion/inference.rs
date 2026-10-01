@@ -93,7 +93,7 @@ fn output(input: &ValueFact, shape: ShapeFact, class: Option<NumericClass>) -> V
             fact
         }
     };
-    if !matches!(input.residency, ResidencyFact::Host) {
+    if !matches!(&input.residency, ResidencyFact::Host) {
         // A provider hook can keep results resident, but a supported
         // host-materialization path can also be selected at execution.
         fact.residency = ResidencyFact::Unknown;

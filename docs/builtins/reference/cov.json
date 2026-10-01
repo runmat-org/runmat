@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Runs on the GPU when rows='all'. Observation weight vectors are supported when the provider accepts resident real weights or a host weight vector can be uploaded temporarily; omitrows and partialrows transparently fall back to the CPU reference path."
+    "notes": "Uses the provider covariance hook when rows='all' and the input/weights are supported. Other admitted forms may materialize through the host reference path, with output placement restored according to resident-input intent."
   },
   "fusion": {
     "elementwise": false,
@@ -30,12 +30,12 @@
     "unit": "builtins::stats::summary::cov::tests",
     "integration": "builtins::stats::summary::cov::tests::cov_gpu_roundtrip"
   },
-  "description": "`cov` returns covariance matrices for numeric data with columns as variables and rows as observations. Single-matrix, paired-input, weighting, and row-handling forms follow MATLAB semantics.",
+  "description": "`cov` returns covariance matrices for numeric data with columns as variables and rows as observations. Paired inputs are vectorized into two variables; observation-weight vectors are a RunMat extension.",
   "behaviors": [
     "`cov(X)` treats each column of `X` as a variable and returns a square covariance matrix.",
-    "`cov(X, Y)` concatenates `X` and `Y` column-wise (they must have the same number of rows) before computing the covariance.",
+    "`cov(X, Y)` vectorizes compatible `X` and `Y` as two variables and returns a 2-by-2 covariance matrix.",
     "The second argument can be the normalization flag `0` (default) or `1`, matching MATLAB's unbiased and biased estimators.",
-    "You can pass a weight vector to obtain frequency-weighted covariance.",
+    "In RunMat mode, you can pass a weight vector to obtain frequency-weighted covariance.",
     "`'omitrows'` drops rows containing `NaN` or `Inf` before the covariance is computed.",
     "`'partialrows'` performs pairwise deletion: each covariance entry uses only the rows that contain finite values for that column pair."
   ],
@@ -119,8 +119,8 @@
     "label": "`crates/runmat-runtime/src/builtins/stats/summary/cov.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/cov.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray`. Expressions such as `cov(sin(X))` keep temporary results on the GPU as long as the active provider handles the operation. For rows='all', observation weight vectors can also stay on the provider path: host weights are uploaded temporarily and resident real gpuArray row or column vectors are used directly when they belong to the same provider. The builtin gathers to the CPU for `'omitrows'`, `'partialrows'`, unsupported complex/provider-mismatched resident weights, or when the provider does not implement the covariance hook. Explicitly calling `gpuArray` remains supported for MATLAB compatibility and to seed GPU residency when you are unsure about planner decisions.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray`. A supported provider hook can keep `cov` resident for rows='all'; compatible weights may be uploaded or used on their owning provider. The builtin has an admitted host-materialization route for row filtering and unsupported hooks, then restores output placement according to resident-input intent. Provider ownership and live allocation checks precede transfer. Explicit gpuArray remains supported.",
   "gpu_behavior": [
-    "RunMat invokes provider-specific GPU kernels when:\n\n1. Data inputs already reside on the GPU; 2. The rows option is `'all'`; 3. Any weight vector is either a host numeric/logical vector that can be uploaded temporarily or a real gpuArray vector on the same provider; and 4. The active provider exposes the custom `covariance` hook.\n\nIf any of these conditions is not met, RunMat gathers the data to the host, evaluates the reference implementation, and returns a dense host tensor. This guarantees MATLAB-compatible behaviour regardless of GPU support."
+    "RunMat invokes a provider covariance hook for compatible resident data when rows='all', the weights have a supported class and owner, and the provider implements the hook. Otherwise an admitted form can use the host reference path; output placement is then restored according to resident-input intent."
   ]
 }
