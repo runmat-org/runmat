@@ -1,6 +1,5 @@
 //! Pairwise distance and squareform helpers for Statistics and Machine Learning workflows.
 
-use runmat_value::{NumericScalar, NumericStorage};
 use std::cmp::Ordering;
 
 use runmat_builtins::{
@@ -12,6 +11,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
+use runmat_builtins::{SQUAREFORM_EXPLICIT_GPU_EXTENSION, SQUAREFORM_INTEGER_INPUT_EXTENSION};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, Tensor, Value};
 
@@ -24,6 +24,9 @@ const PDIST2_NAME: &str = "pdist2";
 const KNNSEARCH_NAME: &str = "knnsearch";
 const SQUAREFORM_NAME: &str = "squareform";
 const EPS: f64 = 1.0e-12;
+
+mod squareform;
+use squareform::{parse_squareform_force, squareform_compute};
 
 const OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "D",
@@ -49,14 +52,6 @@ const OUTPUT_D_I: [BuiltinParamDescriptor; 2] = [
         description: "One-based row indices from X for selected distances.",
     },
 ];
-
-const OUTPUT_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Square symmetric matrix or condensed distance vector.",
-}];
 
 const OUTPUT_IDX_D: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
@@ -115,31 +110,12 @@ const PARAM_KNNSEARCH_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Name-value options such as K, Distance, P, Cov, Scale, IncludeTies, NSMethod, BucketSize, CacheSize, and SortIndices.",
 };
 
-const PARAM_SQUAREFORM_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Condensed distance vector or square distance matrix.",
-};
-
-const PARAM_SQUAREFORM_FORCE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "force",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Conversion force option: 'tomatrix' or 'tovector'.",
-};
-
 const INPUTS_X: [BuiltinParamDescriptor; 1] = [PARAM_X];
 const INPUTS_X_OPTIONS: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_DISTANCE_OPTIONS];
 const INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_Y];
 const INPUTS_X_Y_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_Y, PARAM_PDIST2_OPTIONS];
 const INPUTS_X_Y_KNN_OPTIONS: [BuiltinParamDescriptor; 3] =
     [PARAM_X, PARAM_Y, PARAM_KNNSEARCH_OPTIONS];
-const INPUTS_Z: [BuiltinParamDescriptor; 1] = [PARAM_SQUAREFORM_INPUT];
-const INPUTS_Z_OPTIONS: [BuiltinParamDescriptor; 2] =
-    [PARAM_SQUAREFORM_INPUT, PARAM_SQUAREFORM_FORCE];
 
 const PDIST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -177,19 +153,6 @@ const KNNSEARCH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         label: "[Idx, D] = knnsearch(X, Y, Name, Value)",
         inputs: &INPUTS_X_Y_KNN_OPTIONS,
         outputs: &OUTPUT_IDX_D,
-    },
-];
-
-const SQUAREFORM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = squareform(Z)",
-        inputs: &INPUTS_Z,
-        outputs: &OUTPUT_Z,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = squareform(Z, Force)",
-        inputs: &INPUTS_Z_OPTIONS,
-        outputs: &OUTPUT_Z,
     },
 ];
 
@@ -566,50 +529,6 @@ pub const KNNSEARCH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4
     },
 ];
 
-pub const SQUAREFORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SQUAREFORM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DISTANCE_ERRORS,
-};
-
-const SQUAREFORM_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "squareform-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "squareform with typed-integer distance data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SquareformIntegerInputExtension"),
-};
-const SQUAREFORM_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "squareform-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "squareform with an explicit GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SquareformExplicitGpuInputExtension"),
-};
-pub const SQUAREFORM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    SQUAREFORM_INTEGER_INPUT_EXTENSION,
-    SQUAREFORM_EXPLICIT_GPU_EXTENSION,
-];
-
-const SQUAREFORM_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Z",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented MATLAB storage classes are single, double, and logical; RunMat additionally performs the structural conversion on typed integers without changing class or value.",
-    }];
-pub const SQUAREFORM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = squareform(integer_Z)",
-        inputs: &SQUAREFORM_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The condensed-vector and symmetric-matrix layouts are transformed directly in authoritative native storage. Automatic residency may gather transparently; an explicit GPU call remains separately gated.",
-    }];
-
 fn matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Tensor {
         shape: Some(vec![None, None]),
@@ -624,6 +543,13 @@ fn vector_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 
 fn distance_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
     distance_descriptor_error(name, message, &ERROR_INVALID_ARGUMENT)
+}
+
+fn with_distance_context(name: &'static str, mut error: RuntimeError) -> RuntimeError {
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(name);
+    }
+    error
 }
 
 fn internal_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
@@ -662,13 +588,6 @@ enum DistanceMetric {
 enum Selection {
     Smallest(usize),
     Largest(usize),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SquareformForce {
-    Auto,
-    ToMatrix,
-    ToVector,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1066,10 +985,7 @@ async fn ensure_knn_exact_f64(value: &Value, role: &str) -> BuiltinResult<()> {
     category = "stats/ml",
     summary = "Convert between condensed distance vectors and square distance matrices.",
     keywords = "squareform,distance,condensed,symmetric,statistics,machine learning",
-    type_resolver(matrix_type),
-    descriptor(crate::builtins::stats::ml::distance::SQUAREFORM_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::distance::SQUAREFORM_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::distance::SQUAREFORM_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn squareform_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1085,10 +1001,23 @@ async fn squareform_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Val
             SQUAREFORM_NAME,
         )?;
     }
-    let tensor = value_to_matrix(SQUAREFORM_NAME, value).await?;
     let force = parse_squareform_force(rest)?;
-    let output = squareform_compute(tensor, force)?;
-    Ok(Value::Tensor(output))
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(|error| with_distance_context(SQUAREFORM_NAME, error))?;
+    match gathered {
+        Value::LogicalArray(logical) => squareform::squareform_logical(logical, force),
+        Value::Bool(value) => squareform::squareform_logical(
+            runmat_value::LogicalArray::new(vec![u8::from(value)], vec![1, 1])
+                .map_err(|error| internal_error(SQUAREFORM_NAME, format!("squareform: {error}")))?,
+            force,
+        ),
+        value => {
+            let tensor = host_value_to_matrix(SQUAREFORM_NAME, value)?;
+            let output = squareform_compute(tensor, force)?;
+            Ok(Value::Tensor(output))
+        }
+    }
 }
 
 pub(super) async fn condensed_distances_from_metric_args(
@@ -1103,7 +1032,11 @@ pub(super) async fn condensed_distances_from_metric_args(
 async fn value_to_matrix(name: &'static str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
-        .map_err(|err| distance_error(name, format!("{name}: {err}")))?;
+        .map_err(|error| with_distance_context(name, error))?;
+    host_value_to_matrix(name, gathered)
+}
+
+fn host_value_to_matrix(name: &'static str, gathered: Value) -> BuiltinResult<Tensor> {
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| distance_error(name, format!("{name}: {err}")))?;
     if tensor.shape.len() > 2 {
@@ -2184,172 +2117,6 @@ fn distance_order_descending(
     }
 }
 
-fn parse_squareform_force(args: Vec<Value>) -> BuiltinResult<SquareformForce> {
-    if args.is_empty() {
-        return Ok(SquareformForce::Auto);
-    }
-    if args.len() != 1 {
-        return Err(distance_error(
-            SQUAREFORM_NAME,
-            "squareform: accepts at most one force option",
-        ));
-    }
-    let text = keyword_of(&args[0]).ok_or_else(|| {
-        distance_error(
-            SQUAREFORM_NAME,
-            "squareform: force option must be 'tomatrix' or 'tovector'",
-        )
-    })?;
-    match text.to_ascii_lowercase().as_str() {
-        "tomatrix" => Ok(SquareformForce::ToMatrix),
-        "tovector" => Ok(SquareformForce::ToVector),
-        other => Err(distance_error(
-            SQUAREFORM_NAME,
-            format!("squareform: unsupported force option '{other}'"),
-        )),
-    }
-}
-
-fn squareform_compute(tensor: Tensor, force: SquareformForce) -> BuiltinResult<Tensor> {
-    let is_vector = tensor.rows == 1 || tensor.cols == 1;
-    match force {
-        SquareformForce::ToMatrix => vector_to_square(tensor),
-        SquareformForce::ToVector => square_to_vector(tensor),
-        SquareformForce::Auto if is_vector => vector_to_square(tensor),
-        SquareformForce::Auto => square_to_vector(tensor),
-    }
-}
-
-fn vector_to_square(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if !(tensor.rows == 1 || tensor.cols == 1) {
-        return Err(distance_error(
-            SQUAREFORM_NAME,
-            "squareform: vector input is required for 'tomatrix'",
-        ));
-    }
-    let len = tensor::tensor_element_len(&tensor);
-    let size = condensed_matrix_size(len).ok_or_else(|| {
-        distance_error(
-            SQUAREFORM_NAME,
-            "squareform: vector length must be n*(n-1)/2 for an integer n",
-        )
-    })?;
-    let out_len = size
-        .checked_mul(size)
-        .ok_or_else(|| internal_error(SQUAREFORM_NAME, "squareform: output size overflow"))?;
-    let storage = tensor
-        .into_numeric_storage()
-        .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
-    let mut out = NumericStorage::zeros(storage.numeric_dtype(), out_len);
-    let mut idx = 0usize;
-    for col in 0..size {
-        for row in (col + 1)..size {
-            let value = storage.value_at(idx).ok_or_else(|| {
-                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
-            })?;
-            out.set_value(col * size + row, value)
-                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
-            out.set_value(row * size + col, value)
-                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
-            idx += 1;
-        }
-    }
-    Tensor::from_numeric_storage(out, vec![size, size])
-        .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))
-}
-
-fn square_to_vector(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if tensor.rows != tensor.cols {
-        return Err(distance_error(
-            SQUAREFORM_NAME,
-            "squareform: matrix input must be square",
-        ));
-    }
-    let size = tensor.rows;
-    let storage = tensor
-        .into_numeric_storage()
-        .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
-    for idx in 0..size {
-        let value = storage.value_at(idx * size + idx).ok_or_else(|| {
-            internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
-        })?;
-        if !squareform_scalar_is_zero(value) {
-            return Err(distance_error(
-                SQUAREFORM_NAME,
-                "squareform: matrix diagonal must be zero",
-            ));
-        }
-    }
-    let len = size
-        .checked_mul(size.saturating_sub(1))
-        .and_then(|value| value.checked_div(2))
-        .ok_or_else(|| internal_error(SQUAREFORM_NAME, "squareform: output size overflow"))?;
-    let mut out = NumericStorage::zeros(storage.numeric_dtype(), len);
-    let mut out_idx = 0usize;
-    for col in 0..size {
-        for row in (col + 1)..size {
-            let lower = storage.value_at(col * size + row).ok_or_else(|| {
-                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
-            })?;
-            let upper = storage.value_at(row * size + col).ok_or_else(|| {
-                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
-            })?;
-            if !squareform_scalars_equal(lower, upper) {
-                return Err(distance_error(
-                    SQUAREFORM_NAME,
-                    "squareform: matrix must be symmetric",
-                ));
-            }
-            out.set_value(out_idx, upper)
-                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
-            out_idx += 1;
-        }
-    }
-    Tensor::from_numeric_storage(out, vec![1, len])
-        .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))
-}
-
-fn squareform_scalar_is_zero(value: NumericScalar) -> bool {
-    match value {
-        NumericScalar::F64(value) => value.abs() <= EPS,
-        NumericScalar::F32(value) => f64::from(value).abs() <= EPS,
-        NumericScalar::I8(value) => value == 0,
-        NumericScalar::I16(value) => value == 0,
-        NumericScalar::I32(value) => value == 0,
-        NumericScalar::I64(value) => value == 0,
-        NumericScalar::U8(value) => value == 0,
-        NumericScalar::U16(value) => value == 0,
-        NumericScalar::U32(value) => value == 0,
-        NumericScalar::U64(value) => value == 0,
-    }
-}
-
-fn squareform_scalars_equal(left: NumericScalar, right: NumericScalar) -> bool {
-    match (left, right) {
-        (NumericScalar::F64(left), NumericScalar::F64(right)) => (left - right).abs() <= EPS,
-        (NumericScalar::F32(left), NumericScalar::F32(right)) => {
-            f64::from(left - right).abs() <= EPS
-        }
-        _ => left == right,
-    }
-}
-
-fn condensed_matrix_size(len: usize) -> Option<usize> {
-    if len == 0 {
-        return Some(1);
-    }
-    let discriminant = 1usize.checked_add(len.checked_mul(8)?)?;
-    let root = (discriminant as f64).sqrt().round() as usize;
-    if root.checked_mul(root)? != discriminant {
-        return None;
-    }
-    let numerator = root.checked_add(1)?;
-    if numerator % 2 != 0 {
-        return None;
-    }
-    Some(numerator / 2)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2846,6 +2613,38 @@ mod tests {
         assert_eq!(vector.shape, vec![1, 3]);
         assert_eq!(vector.numeric_dtype(), NumericDType::U8);
         assert_eq!(vector.materialize_f64(), vec![5.0, 4.0, 2.0]);
+    }
+
+    #[test]
+    fn squareform_preserves_logical_class_in_both_directions() {
+        let input = Value::LogicalArray(
+            runmat_value::LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap(),
+        );
+        let matrix = block_on(squareform_builtin(input, Vec::new())).unwrap();
+        let Value::LogicalArray(matrix) = matrix else {
+            panic!("logical vector must produce a logical matrix");
+        };
+        assert_eq!(matrix.shape, vec![3, 3]);
+        assert_eq!(matrix.data.as_slice(), &[0, 1, 0, 1, 0, 1, 0, 1, 0]);
+
+        let vector = block_on(squareform_builtin(
+            Value::LogicalArray(matrix),
+            vec![Value::from("tovector")],
+        ))
+        .unwrap();
+        let Value::LogicalArray(vector) = vector else {
+            panic!("logical matrix must produce a logical vector");
+        };
+        assert_eq!(vector.shape, vec![1, 3]);
+        assert_eq!(vector.data.as_slice(), &[1, 0, 1]);
+
+        let bad_diagonal = Value::LogicalArray(
+            runmat_value::LogicalArray::new(vec![1, 0, 0, 0], vec![2, 2]).unwrap(),
+        );
+        assert!(block_on(squareform_builtin(bad_diagonal, Vec::new()))
+            .unwrap_err()
+            .message()
+            .contains("diagonal"));
     }
 
     #[test]
