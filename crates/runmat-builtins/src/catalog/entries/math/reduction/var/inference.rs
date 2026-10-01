@@ -33,7 +33,7 @@ fn infer_output(
     if input.storage == StorageFact::Sparse {
         return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
     }
-    let class = match input.kind {
+    let class = match &input.kind {
         ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Complex => {
             diagnostics.push(InferenceDiagnostic::error(
                 "RM.VAR.COMPLEX_UNSUPPORTED",
