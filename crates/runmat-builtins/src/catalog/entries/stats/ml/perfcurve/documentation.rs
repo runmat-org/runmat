@@ -81,8 +81,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
-            BuiltinDocumentationLink { label: "Option admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve/options.rs") },
-            BuiltinDocumentationLink { label: "Curve algorithm", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve/curve.rs") },
+            BuiltinDocumentationLink { label: "Typed admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve/admission.rs") },
+            BuiltinDocumentationLink { label: "Class identity", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve/labels.rs") },
+            BuiltinDocumentationLink { label: "Observation weights and prior", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve/curve/observations.rs") },
+            BuiltinDocumentationLink { label: "Threshold and count core", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve/curve/core.rs") },
+            BuiltinDocumentationLink { label: "Interpolation and AUC", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve/curve/interpolation.rs") },
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Performance curve semantics", location: "builtins::stats::ml::perfcurve::tests" },
