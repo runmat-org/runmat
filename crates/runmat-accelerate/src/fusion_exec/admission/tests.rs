@@ -93,10 +93,10 @@ fn provider_rejection_cpu_region_reports_only_completed_work() {
 fn provider_rejection_cpu_region_failure_abandonment_and_cancel_are_not_successes() {
     runmat_gc::gc_test_context(|| {
         let (ticket, session) = rejected_fusion(None);
-        let result: Result<(), &'static str> = (|| {
+        let result: Result<(), &'static str> = {
             let _region_observation = ticket;
             Err("shared bytecode failed")
-        })();
+        };
         assert!(result.is_err());
         assert_eq!(session.profile_snapshot().feedback[0].samples, 0);
         assert_eq!(session.profile_snapshot().feedback[0].failures, 1);

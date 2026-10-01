@@ -5,8 +5,7 @@ use runmat_execution::CancellationReason;
 use runmat_value::IntegerStorage;
 use std::sync::Arc;
 
-#[path = "../bayesian_test_provider.rs"]
-mod provider_fixture;
+use crate::builtins::stats::ml::bayesian_test_provider as provider_fixture;
 
 fn variable(name: &str, range: Vec<f64>, var_type: Option<&str>) -> Value {
     let mut object = ObjectInstance::new("optimizableVariable");

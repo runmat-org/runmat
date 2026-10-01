@@ -2,8 +2,7 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
-#[path = "../bayesian_test_provider.rs"]
-mod provider_fixture;
+use crate::builtins::stats::ml::bayesian_test_provider as provider_fixture;
 
 fn object(value: Value) -> ObjectInstance {
     let Value::Object(object) = value else {
