@@ -5,6 +5,7 @@ use super::{expression::admitted_expression, primitive_expr, semantics::Resolved
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::ValueId;
 use anyhow::{anyhow, Result};
+use runmat_accelerate_api::scalar_program::ScalarProgram;
 use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 use runmat_types::NumericClass;
 use std::collections::{HashMap, HashSet};
@@ -16,8 +17,12 @@ pub(crate) struct TypedProducer {
     pub body: String,
     expressions: HashMap<ValueId, String>,
     helpers: Vec<(FusionMathHelper, ScalarType)>,
+    checked_program: Option<ScalarProgram>,
 }
 impl TypedProducer {
+    pub fn checked_program(&self) -> Option<&ScalarProgram> {
+        self.checked_program.as_ref()
+    }
     /// None preserves complete elementwise emission and its error order.
     /// Some emits only admitted pure producers of the roots, retaining original
     /// operation order and temporary names. Leaves come from the indexing owner.
@@ -159,6 +164,7 @@ impl TypedProducer {
             body,
             expressions,
             helpers,
+            checked_program: None,
         })
     }
     pub fn expression(&self, id: ValueId) -> Result<&str> {

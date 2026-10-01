@@ -6,6 +6,7 @@ use crate::fusion::{
     typed_producer::TypedProducer,
 };
 use crate::graph::ValueId;
+use runmat_accelerate_api::scalar_program::ScalarProgram;
 use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult, ProviderPrecision};
 use runmat_execution::Digest;
 use runmat_runtime::builtins::common::spec::{
@@ -37,6 +38,7 @@ pub struct ResolvedReductionProgram<'a> {
     data_classes: Vec<NumericClass>,
     execution_precision: ProviderPrecision,
     producer_work_units: u64,
+    checked_scalar: Option<ScalarProgram>,
 }
 impl<'a> ResolvedReductionProgram<'a> {
     pub fn data_inputs(&self) -> &[ReductionDataInput<'a>] {
@@ -67,6 +69,9 @@ impl<'a> ResolvedReductionProgram<'a> {
     }
     pub fn producer_work_units(&self) -> u64 {
         self.producer_work_units
+    }
+    pub fn checked_scalar(&self) -> Option<&ScalarProgram> {
+        self.checked_scalar.as_ref()
     }
 }
 
@@ -172,6 +177,9 @@ pub async fn resolve_reduction_program<'a>(
         Ok(producer) => producer,
         Err(_) => return Ok(None),
     };
+    // Only the checked stream actually used for WGSL emission can authorize
+    // portable provider execution. A legacy-only lowering remains unbound.
+    let checked_scalar = producer.checked_program().cloned();
     let expression = producer
         .expression(mapped.root)
         .map_err(ProviderExecutionError::from)?
@@ -194,6 +202,7 @@ pub async fn resolve_reduction_program<'a>(
             &producer.body,
             &preamble,
             &expression,
+            checked_scalar.as_ref().map(ScalarProgram::identity),
         ))
         .map_err(ProviderExecutionError::from_source)?,
     );
@@ -218,5 +227,6 @@ pub async fn resolve_reduction_program<'a>(
         data_classes,
         execution_precision: precision,
         producer_work_units,
+        checked_scalar,
     }))
 }

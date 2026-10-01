@@ -181,15 +181,26 @@ pub fn build(
         &inputs,
         contract,
     ))?);
-    let physical = ProviderReductionRecipe::new(
-        semantic_identity,
-        descriptor,
-        ReductionShaderSources {
-            single: sources.0,
-            pass1: sources.1,
-            pass2: sources.2,
-        },
-    )?;
+    let sources = ReductionShaderSources {
+        single: sources.0,
+        pass1: sources.1,
+        pass2: sources.2,
+    };
+    let physical = if let Some(scalar) = program.checked_scalar() {
+        ProviderReductionRecipe::new_checked(
+            semantic_identity,
+            descriptor,
+            sources,
+            scalar.clone(),
+            program
+                .data_inputs()
+                .iter()
+                .map(|input| input.value_id)
+                .collect(),
+        )?
+    } else {
+        ProviderReductionRecipe::new(semantic_identity, descriptor, sources)?
+    };
     Ok(ReductionRecipe {
         inputs,
         contract: contract.clone(),

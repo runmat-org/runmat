@@ -1,9 +1,11 @@
 use super::*;
+use crate::scalar_program::{ScalarNode, ScalarProgram, SCALAR_PROGRAM_REVISION};
 use crate::{
     test_support::TestAllocationOwner, GpuTensorLayout, GpuTensorStorage, NumericElementType,
     ProviderPrecision, TransposeInfo,
 };
 use runmat_execution::Digest;
+use runmat_types::NumericClass;
 
 fn descriptor() -> ReductionRecipeDescriptor {
     let dispatch = |logical_groups| ReductionDispatch {
@@ -74,6 +76,38 @@ fn sources() -> ReductionShaderSources {
 
 fn recipe(d: ReductionRecipeDescriptor) -> ProviderReductionRecipe {
     ProviderReductionRecipe::new(Digest::sha256(b"captured semantics"), d, sources()).unwrap()
+}
+
+fn checked_input(id: u32, class: NumericClass) -> ScalarProgram {
+    ScalarProgram::new(
+        Digest::sha256(b"captured scalar source"),
+        SCALAR_PROGRAM_REVISION,
+        vec![ScalarNode::Input { id, class }],
+        id,
+    )
+    .unwrap()
+}
+
+#[test]
+fn checked_recipe_binds_scalar_identity_class_and_ordered_physical_input() {
+    let make = |program, inputs| {
+        ProviderReductionRecipe::new_checked(
+            Digest::sha256(b"captured semantics"),
+            descriptor(),
+            sources(),
+            program,
+            inputs,
+        )
+    };
+    let first = make(checked_input(7, NumericClass::Single), vec![7]).unwrap();
+    let changed = make(checked_input(8, NumericClass::Single), vec![8]).unwrap();
+    assert_ne!(first.identity(), changed.identity());
+    assert_eq!(first.scalar_inputs(), &[7]);
+    assert_eq!(first.checked_scalar().unwrap().wire().root, 7);
+    assert!(make(checked_input(7, NumericClass::Single), vec![8]).is_err());
+    assert!(make(checked_input(7, NumericClass::Double), vec![7]).is_err());
+    assert!(make(checked_input(7, NumericClass::Single), vec![]).is_err());
+    assert!(recipe(descriptor()).checked_scalar().is_none());
 }
 
 #[test]

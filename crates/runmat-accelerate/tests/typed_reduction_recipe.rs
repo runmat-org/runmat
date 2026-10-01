@@ -120,6 +120,12 @@ fn native_leaf_output_and_partial_types_do_not_follow_preferred_precision() {
         Some(PrimitiveOp::ElemMul),
         config(),
     );
+    let checked = single_sum
+        .physical()
+        .checked_scalar()
+        .expect("the actual reduction producer must use checked lowering");
+    assert_eq!(checked.wire().root, 100);
+    assert_eq!(single_sum.physical().scalar_inputs(), &[0, 1]);
     assert!(single_sum
         .inputs()
         .iter()

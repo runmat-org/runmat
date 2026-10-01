@@ -183,6 +183,7 @@ impl TypedProducer {
             body,
             expressions,
             helpers: Vec::new(),
+            checked_program: Some(checked.clone()),
         }))
     }
 }

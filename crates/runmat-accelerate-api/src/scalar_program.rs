@@ -72,6 +72,7 @@ pub struct ScalarProgramWire {
     pub root: u32,
 }
 
+#[derive(Clone)]
 pub struct ScalarProgram {
     wire: ScalarProgramWire,
     identity: Digest,

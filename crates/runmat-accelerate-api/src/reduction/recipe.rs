@@ -1,4 +1,5 @@
 use super::*;
+use crate::scalar_program::{ScalarNode, ScalarProgram};
 use crate::ProviderPrecision;
 use anyhow::Result;
 use runmat_execution::Digest;
@@ -32,6 +33,8 @@ pub struct ProviderReductionRecipe {
     identity: Digest,
     descriptor: ReductionRecipeDescriptor,
     sources: ReductionShaderSources,
+    checked_scalar: Option<ScalarProgram>,
+    scalar_inputs: Vec<u32>,
 }
 
 impl ProviderReductionRecipe {
@@ -40,17 +43,91 @@ impl ProviderReductionRecipe {
         descriptor: ReductionRecipeDescriptor,
         sources: ReductionShaderSources,
     ) -> Result<Self> {
+        Self::construct(semantic_identity, descriptor, sources, None, Vec::new())
+    }
+
+    /// Bind one rederived scalar program to the physical recipe and the exact
+    /// ordered input slots. Providers may submit only this checked form; the
+    /// legacy constructor remains a non-executable geometry/source receipt.
+    pub fn new_checked(
+        semantic_identity: Digest,
+        descriptor: ReductionRecipeDescriptor,
+        sources: ReductionShaderSources,
+        checked_scalar: ScalarProgram,
+        scalar_inputs: Vec<u32>,
+    ) -> Result<Self> {
+        Self::construct(
+            semantic_identity,
+            descriptor,
+            sources,
+            Some(checked_scalar),
+            scalar_inputs,
+        )
+    }
+
+    fn construct(
+        semantic_identity: Digest,
+        descriptor: ReductionRecipeDescriptor,
+        sources: ReductionShaderSources,
+        checked_scalar: Option<ScalarProgram>,
+        scalar_inputs: Vec<u32>,
+    ) -> Result<Self> {
         validation::recipe(&descriptor, &sources)?;
+        if let Some(program) = &checked_scalar {
+            let declared = program
+                .wire()
+                .nodes
+                .iter()
+                .filter_map(|node| match node {
+                    ScalarNode::Input { id, class } => Some((*id, *class)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            anyhow::ensure!(
+                scalar_inputs.len() == descriptor.inputs.len()
+                    && scalar_inputs.len() == declared.len(),
+                "checked reduction scalar inputs differ from physical bindings"
+            );
+            let mut declared_ids = declared.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+            let mut mapped_ids = scalar_inputs.clone();
+            declared_ids.sort_unstable();
+            mapped_ids.sort_unstable();
+            anyhow::ensure!(
+                mapped_ids == declared_ids,
+                "checked reduction scalar input set differs from physical bindings"
+            );
+            for (id, binding) in scalar_inputs.iter().zip(&descriptor.inputs) {
+                let class = declared
+                    .iter()
+                    .find_map(|(candidate, class)| (candidate == id).then_some(class))
+                    .ok_or_else(|| anyhow::anyhow!("missing checked scalar input binding"))?;
+                let precision = match class {
+                    runmat_types::NumericClass::Single => ProviderPrecision::F32,
+                    runmat_types::NumericClass::Double => ProviderPrecision::F64,
+                    _ => anyhow::bail!("nonfloating checked scalar input"),
+                };
+                anyhow::ensure!(
+                    precision == binding.precision,
+                    "checked scalar class differs from physical binding"
+                );
+            }
+        } else {
+            anyhow::ensure!(scalar_inputs.is_empty(), "unbound reduction scalar inputs");
+        }
         let identity = Digest::sha256(serde_json::to_vec(&(
-            "typed-reduction-physical-v2",
+            "typed-reduction-physical-v3",
             semantic_identity,
             &descriptor,
             &sources,
+            checked_scalar.as_ref().map(ScalarProgram::identity),
+            &scalar_inputs,
         ))?);
         Ok(Self {
             identity,
             descriptor,
             sources,
+            checked_scalar,
+            scalar_inputs,
         })
     }
 
@@ -62,5 +139,11 @@ impl ProviderReductionRecipe {
     }
     pub fn sources(&self) -> &ReductionShaderSources {
         &self.sources
+    }
+    pub fn checked_scalar(&self) -> Option<&ScalarProgram> {
+        self.checked_scalar.as_ref()
+    }
+    pub fn scalar_inputs(&self) -> &[u32] {
+        &self.scalar_inputs
     }
 }
