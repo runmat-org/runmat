@@ -68,6 +68,29 @@ fn sample_shape_and_percentage_domain_reject_without_proven_output() {
 }
 
 #[test]
+fn known_sparse_sample_or_percentages_do_not_prove_a_handle() {
+    let mut sparse = real(vec![Some(3), Some(1)]);
+    sparse.storage = StorageFact::Sparse;
+    let sample = call(vec![sparse.clone()], 1);
+    assert!(!sample.diagnostics.is_empty());
+    assert!(matches!(sample.outputs[0].kind, ValueKindFact::Unknown));
+
+    let percentages = call(
+        vec![
+            real(vec![Some(3), Some(1)]),
+            real(vec![Some(0), Some(0)]),
+            sparse,
+        ],
+        1,
+    );
+    assert!(!percentages.diagnostics.is_empty());
+    assert!(matches!(
+        percentages.outputs[0].kind,
+        ValueKindFact::Unknown
+    ));
+}
+
+#[test]
 fn possible_axes_and_excess_outputs_remain_conservative() {
     let possible_axes = call(vec![real(vec![Some(1), Some(1)])], 1);
     assert_eq!(

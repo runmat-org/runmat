@@ -17,6 +17,9 @@ fn handles() -> ValueFact {
 }
 
 fn admissible_sample(fact: &ValueFact, optional_empty_y: bool) -> Result<(), &'static str> {
+    if fact.storage == StorageFact::Sparse {
+        return Err("qqplot requires dense sample data");
+    }
     match &fact.kind {
         ValueKindFact::Numeric(number) if number.domain == NumericDomain::Real => {}
         ValueKindFact::Logical | ValueKindFact::Unknown => {}
@@ -42,6 +45,9 @@ fn admissible_sample(fact: &ValueFact, optional_empty_y: bool) -> Result<(), &'s
 }
 
 fn admissible_percentages(fact: &ValueFact) -> Result<(), &'static str> {
+    if fact.storage == StorageFact::Sparse {
+        return Err("qqplot percentages must be dense");
+    }
     match &fact.kind {
         ValueKindFact::Numeric(number) if number.domain == NumericDomain::Real => {}
         ValueKindFact::Logical | ValueKindFact::Unknown => {}
