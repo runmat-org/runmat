@@ -5,6 +5,7 @@ mod contract;
 mod entity;
 mod partition;
 mod partition_set;
+mod sampling;
 mod topology;
 mod view;
 
@@ -24,6 +25,10 @@ pub use partition_set::{
     RecoveredFieldPartitionDescriptor, RecoveredFieldPartitionSelection,
     RecoveredFieldPartitionSet, RecoveredFieldPartitionSetIdentity,
     RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
+};
+pub use sampling::{
+    SampledOrientedEdge, SampledVolumeFieldTopology, VolumeFieldIntegrationSample,
+    VolumeFieldSamplingRule,
 };
 pub use topology::StructuralRecoveredFieldTopology;
 pub use view::{CanonicalFieldPartitions, RecoveredFieldView};

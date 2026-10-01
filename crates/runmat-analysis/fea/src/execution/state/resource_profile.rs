@@ -19,6 +19,7 @@ use crate::pipeline::{
 
 mod acoustic;
 mod electrical;
+mod magnetic;
 #[cfg(test)]
 mod tests;
 mod thermal;
@@ -35,6 +36,7 @@ pub enum SemanticStatePublicationProfileSource<'a> {
     Thermal(&'a ThermalSolverResultManifest),
     AcousticNativeFields(&'a crate::execution::AcousticHarmonicSolverResult),
     StaticElectricalNativeFields(&'a crate::execution::ElectricalStaticSolverResult),
+    MagnetostaticNativeFields(&'a crate::execution::MagnetostaticSolverResult),
 }
 
 impl SemanticStatePublicationRequest {
@@ -46,6 +48,10 @@ impl SemanticStatePublicationRequest {
     ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
         self.validate()?;
         match (self.source, source) {
+            (
+                SemanticStatePublicationSource::MagnetostaticNativeFields,
+                SemanticStatePublicationProfileSource::MagnetostaticNativeFields(result),
+            ) => magnetic::profile(self, result),
             (
                 SemanticStatePublicationSource::StaticElectricalNativeFields,
                 SemanticStatePublicationProfileSource::StaticElectricalNativeFields(result),

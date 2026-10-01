@@ -129,11 +129,18 @@ fn from_counts(
     let krylov = sum(&[workspace, mul(mul(dimension, 10)?, 16)?, 4096])?;
     let numerical = add(matrices, krylov)?;
 
-    // Retained response: edge identity pairs+circulations (72 logical bytes),
-    // 15 samples/tet, each identity+13 physical scalars (136 logical bytes).
-    // Double slots for Vec capacity and a concurrent retained-result clone.
+    // Retained response plus explicit storage topology: physical edge slots72,
+    // oriented edge topology96, physical sample136 + explicit sample104, and
+    // node identities32 and element identity+four corners160 logical bytes. Four slots cover growth
+    // and a concurrent retained-result clone, never presumed to share arrays.
     // This does not reserve encoded result payloads or native field publication.
-    let retained = sum(&[4096, mul(edges, 288)?, mul(samples, 544)?])?;
+    let retained = sum(&[
+        4096,
+        mul(edges, 672)?,
+        mul(samples, 960)?,
+        mul(nodes, 128)?,
+        mul(elements, 640)?,
+    ])?;
     let total = sum(&[
         support,
         mul(projection_bytes, 3)?,

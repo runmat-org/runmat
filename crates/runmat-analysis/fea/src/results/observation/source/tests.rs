@@ -73,6 +73,7 @@ fn structural_selection_binds_producer_through_recovery_request() {
             nodes: 1,
             volume_elements: 0,
             volume_integration_points: 0,
+            oriented_edges: 0,
             beam_elements: 1,
             shell_elements: 0,
             connectors: 0,

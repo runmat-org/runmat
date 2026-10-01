@@ -183,6 +183,7 @@ fn is_electromagnetic(quantity: ObservationQuantity) -> bool {
             | ObservationQuantity::ElectricCurrent
             | ObservationQuantity::ElectricCurrentDensity
             | ObservationQuantity::ElectricCharge
+            | ObservationQuantity::MagneticEdgeCirculation
             | ObservationQuantity::MagneticVectorPotential
             | ObservationQuantity::MagneticFluxDensity
             | ObservationQuantity::MagneticFieldIntensity

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,
-    CanonicalThermalStatePayload,
+    CanonicalMagnetostaticStatePayload, CanonicalThermalStatePayload,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -22,6 +22,9 @@ pub enum CanonicalSemanticStatePayload {
     },
     ElectricalStatic {
         state: Box<CanonicalElectricalStaticStatePayload>,
+    },
+    Magnetostatic {
+        state: Box<CanonicalMagnetostaticStatePayload>,
     },
     StructuralFrequency {
         publication: Box<crate::execution::StructuralFrequencyPublicationManifest>,
@@ -42,6 +45,12 @@ pub enum CanonicalSemanticStatePayload {
 }
 
 impl CanonicalSemanticStatePayload {
+    pub fn magnetostatic(&self) -> Option<&CanonicalMagnetostaticStatePayload> {
+        match self {
+            Self::Magnetostatic { state } => Some(state),
+            _ => None,
+        }
+    }
     pub fn electrical_static(&self) -> Option<&CanonicalElectricalStaticStatePayload> {
         match self {
             Self::ElectricalStatic { state } => Some(state.as_ref()),

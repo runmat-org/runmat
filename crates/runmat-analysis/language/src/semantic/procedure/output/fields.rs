@@ -87,6 +87,7 @@ pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, F
             PhysicalDimension::ELECTRIC_CURRENT.multiply(PhysicalDimension::TIME)?,
             1,
         ),
+        Q::MagneticEdgeCirculation => (quantity.physical_dimension(), 1),
         Q::MagneticVectorPotential => (
             PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH)?,
             3,
@@ -130,6 +131,10 @@ mod quantity_tests {
             ("electric_displacement", 3),
             ("electric_energy_density", 1),
             ("joule_power_density", 1),
+            ("magnetic_edge_circulation", 1),
+            ("magnetic_vector_potential", 3),
+            ("magnetic_flux_density", 3),
+            ("magnetic_field_intensity", 3),
         ] {
             let quantity = ObservationQuantity::from_source_name(name).unwrap();
             let scalar = FeaType::Quantity(quantity.physical_dimension());

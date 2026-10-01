@@ -304,34 +304,7 @@ impl RecoveredFieldDefinition {
         if self.field_id.trim().is_empty() {
             return Err(RecoveredFieldError::EmptyIdentifier);
         }
-        if !matches!(
-            (self.location, self.entity_domain),
-            (FieldLocation::Node, RecoveredFieldEntityDomain::Nodes)
-                | (
-                    FieldLocation::Element,
-                    RecoveredFieldEntityDomain::VolumeElements
-                )
-                | (
-                    FieldLocation::IntegrationPoint,
-                    RecoveredFieldEntityDomain::VolumeIntegrationPoints
-                )
-                | (
-                    FieldLocation::Element,
-                    RecoveredFieldEntityDomain::BeamElements
-                )
-                | (
-                    FieldLocation::Element,
-                    RecoveredFieldEntityDomain::ShellElements
-                )
-                | (
-                    FieldLocation::Connector,
-                    RecoveredFieldEntityDomain::Connectors
-                )
-                | (
-                    FieldLocation::Constraint,
-                    RecoveredFieldEntityDomain::ConstraintGroups
-                )
-        ) {
+        if !self.entity_domain.accepts_location(self.location) {
             return Err(RecoveredFieldError::CatalogUnsupportedLocation);
         }
         if self.value_shape.component_count().is_none()

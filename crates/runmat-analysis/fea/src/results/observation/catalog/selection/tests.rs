@@ -46,6 +46,7 @@ fn structural_selection_preserves_catalog_order_and_all_required_samples() {
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: projection.elements.len() * 4,
+            oriented_edges: 0,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

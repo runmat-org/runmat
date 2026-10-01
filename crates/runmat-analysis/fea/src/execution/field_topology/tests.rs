@@ -16,6 +16,7 @@ fn generic_entity_contract_has_no_old_domain_or_count_decoding() {
         nodes: 4,
         volume_elements: 1,
         volume_integration_points: 4,
+        oriented_edges: 0,
         beam_elements: 0,
         shell_elements: 0,
         connectors: 0,

@@ -24,6 +24,8 @@ struct ResultData {
     formulation: AnalysisRunIdentity,
     mesh_digest: Digest,
     projection_digest: Digest,
+    sampling_topology: crate::results::field::SampledVolumeFieldTopology,
+    publication_declarations: Vec<runmat_analysis_core::StateOutput>,
     element_order: runmat_meshing_core::ElementOrder,
     relative_residual_target: f64,
     response: MagnetostaticResponse,
@@ -54,6 +56,19 @@ impl MagnetostaticSolverResult {
                 formulation,
                 mesh_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
                 projection_digest: projection.projection_digest,
+                sampling_topology: crate::results::field::SampledVolumeFieldTopology::derive(
+                    mesh,
+                    crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen,
+                )
+                .map_err(invalid)?,
+                publication_declarations: workload.model.sequence.steps[0]
+                    .state_outputs
+                    .iter()
+                    .filter(|d| {
+                        d.persistence != runmat_analysis_core::StatePersistence::CheckpointOnly
+                    })
+                    .cloned()
+                    .collect(),
                 element_order: mesh.resolved_request.element_order,
                 relative_residual_target: workload.relative_residual_target,
                 response,
@@ -67,6 +82,42 @@ impl MagnetostaticSolverResult {
         let d = &self.data;
         let r = &d.response;
         let t = d.relative_residual_target;
+        d.sampling_topology.validate().map_err(invalid)?;
+        if d.sampling_topology.mesh_digest() != d.mesh_digest
+            || d.sampling_topology.projection_digest() != d.projection_digest
+            || d.sampling_topology.rule()
+                != crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen
+            || d.publication_declarations.iter().any(|output| {
+                output.kind != runmat_analysis_core::StateKind::ElectromagneticStatic
+                    || output.completeness != runmat_analysis_core::StateCompleteness::Complete
+                    || output.persistence == runmat_analysis_core::StatePersistence::CheckpointOnly
+                    || output.state_id.0.trim().is_empty()
+            })
+            || d.publication_declarations
+                .iter()
+                .map(|d| &d.state_id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != d.publication_declarations.len()
+            || !r.edge_node_identities.iter().copied().eq(d
+                .sampling_topology
+                .oriented_edges()
+                .iter()
+                .map(|e| e.node_identities))
+            || r.samples.len() != d.sampling_topology.integration_samples().len()
+            || r.samples
+                .iter()
+                .zip(d.sampling_topology.integration_samples())
+                .any(|(a, b)| {
+                    a.element_identity != b.element_identity
+                        || a.position_m != b.position_m
+                        || a.volume_weight_m3 != b.volume_weight_m3
+                })
+        {
+            return Err(invalid(
+                "magnetic retained sampling topology or authored declarations differ",
+            ));
+        }
         if d.formulation.family() != PhysicsFamily::Electromagnetic
             || d.formulation.procedure() != AnalysisProcedure::Static
             || d.formulation.solution_space() != SolutionSpace::Direct
@@ -141,6 +192,9 @@ impl MagnetostaticSolverResult {
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
         let d = &self.data;
+        d.sampling_topology
+            .validate_for_mesh(mesh)
+            .map_err(invalid)?;
         let compiled = crate::physics::magnetic::compile_canonical_input(
             &workload.model,
             mesh,
@@ -157,6 +211,15 @@ impl MagnetostaticSolverResult {
             || d.mesh_digest != Digest::from_bytes(*mesh.canonical_digest.bytes())
             || d.projection_digest != p.projection_digest
             || d.element_order != mesh.resolved_request.element_order
+            || !d
+                .publication_declarations
+                .iter()
+                .eq(workload.model.sequence.steps[0]
+                    .state_outputs
+                    .iter()
+                    .filter(|d| {
+                        d.persistence != runmat_analysis_core::StatePersistence::CheckpointOnly
+                    }))
         {
             return Err(invalid(
                 "magnetic result belongs to a different workload or topology",
@@ -253,6 +316,21 @@ impl MagnetostaticSolverResult {
     }
     pub fn response(&self) -> &MagnetostaticResponse {
         &self.data.response
+    }
+    pub fn producer(&self) -> StepIdentity {
+        self.data.producer
+    }
+    pub fn mesh_digest(&self) -> Digest {
+        self.data.mesh_digest
+    }
+    pub fn element_order(&self) -> runmat_meshing_core::ElementOrder {
+        self.data.element_order
+    }
+    pub fn sampling_topology(&self) -> &crate::results::field::SampledVolumeFieldTopology {
+        &self.data.sampling_topology
+    }
+    pub fn publication_declarations(&self) -> &[runmat_analysis_core::StateOutput] {
+        &self.data.publication_declarations
     }
 }
 

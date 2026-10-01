@@ -68,6 +68,7 @@ impl StructuralRecoveredFieldTopology {
             volume_integration_points: mesh
                 .map(|mesh| mesh.topology.volume_elements.len().saturating_mul(4))
                 .unwrap_or(0),
+            oriented_edges: 0,
             beam_elements,
             shell_elements,
             connectors: model.connectors.len(),

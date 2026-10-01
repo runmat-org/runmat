@@ -12,6 +12,10 @@ pub enum FieldTopologyIdentity {
     VolumeMesh {
         mesh_digest: StableDigest,
     },
+    SampledVolumeMesh {
+        mesh_digest: StableDigest,
+        sampling_digest: Digest,
+    },
     Structural {
         topology: CanonicalStructuralTopologyIdentity,
     },
@@ -21,6 +25,15 @@ impl FieldTopologyIdentity {
     pub fn discretization_digest(self) -> Digest {
         match self {
             Self::VolumeMesh { mesh_digest } => Digest::from_bytes(*mesh_digest.bytes()),
+            Self::SampledVolumeMesh {
+                mesh_digest,
+                sampling_digest,
+            } => {
+                let mut bytes = b"runmat-fea-sampled-volume-field-topology/v1\0".to_vec();
+                bytes.extend_from_slice(mesh_digest.bytes());
+                bytes.extend_from_slice(sampling_digest.bytes());
+                Digest::sha256(bytes)
+            }
             Self::Structural { topology } => topology.discretization_digest(),
         }
     }
@@ -31,6 +44,15 @@ impl FieldTopologyIdentity {
                 mesh_digest != StableDigest::ZERO
                     && self.discretization_digest() != Digest::sha256([])
             }
+            Self::SampledVolumeMesh {
+                mesh_digest,
+                sampling_digest,
+            } => {
+                mesh_digest != StableDigest::ZERO
+                    && Digest::from_bytes(*mesh_digest.bytes()) != Digest::sha256([])
+                    && sampling_digest != Digest::from_bytes([0; 32])
+                    && sampling_digest != Digest::sha256([])
+            }
             Self::Structural { topology } => topology.has_valid_identity(),
         }
     }
@@ -40,9 +62,11 @@ impl FieldTopologyIdentity {
     ) -> AnalysisExecutionResult<CanonicalStructuralTopologyIdentity> {
         match self {
             Self::Structural { topology } => Ok(topology),
-            Self::VolumeMesh { .. } => Err(AnalysisExecutionError::Invalid(
-                "structural recovery requires structural topology authority".into(),
-            )),
+            Self::VolumeMesh { .. } | Self::SampledVolumeMesh { .. } => {
+                Err(AnalysisExecutionError::Invalid(
+                    "structural recovery requires structural topology authority".into(),
+                ))
+            }
         }
     }
 }

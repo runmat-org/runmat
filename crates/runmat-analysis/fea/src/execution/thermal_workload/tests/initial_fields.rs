@@ -49,6 +49,7 @@ fn solved_temperature_binding(
             nodes: mesh.topology.nodes.len(),
             volume_elements: mesh.topology.volume_elements.len(),
             volume_integration_points: 0,
+            oriented_edges: 0,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

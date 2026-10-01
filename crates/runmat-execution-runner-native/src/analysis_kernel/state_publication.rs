@@ -1,6 +1,9 @@
 use super::*;
 use runmat_analysis_fea::execution::SemanticStatePublicationProfileSource;
 
+#[cfg(test)]
+mod magnetic_tests;
+
 pub(super) fn execute(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
@@ -55,6 +58,17 @@ pub(super) fn execute(
         Ok(())
     };
     let state = match publication.source {
+        SemanticStatePublicationSource::MagnetostaticNativeFields => {
+            let result =
+                runmat_analysis_fea::execution::MagnetostaticSolverResult::from_canonical_bytes(
+                    &solver_result.payload(),
+                )?;
+            result.validate_publication_request(&publication)?;
+            check_profile(
+                SemanticStatePublicationProfileSource::MagnetostaticNativeFields(&result),
+            )?;
+            CanonicalSemanticState::from_magnetostatic_publication(&publication, &result)?
+        }
         SemanticStatePublicationSource::StaticElectricalNativeFields => {
             let result =
                 runmat_analysis_fea::execution::ElectricalStaticSolverResult::from_canonical_bytes(

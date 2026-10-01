@@ -228,6 +228,7 @@ pub(in crate::execution) fn native_electrical_entity_counts(
         nodes: result.response().ordered_node_ids.len(),
         volume_elements: result.response().ordered_element_ids.len(),
         volume_integration_points: 0,
+        oriented_edges: 0,
         beam_elements: 0,
         shell_elements: 0,
         connectors: 0,

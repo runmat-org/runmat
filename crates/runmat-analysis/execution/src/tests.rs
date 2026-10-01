@@ -1889,6 +1889,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: projection.elements.len() * 4,
+            oriented_edges: 0,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

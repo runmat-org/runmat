@@ -21,7 +21,9 @@ mod resource_profile;
 pub use resource_profile::SemanticStatePublicationProfileSource;
 mod acoustic;
 mod electrical;
+mod magnetic;
 pub use electrical::CanonicalElectricalStaticStatePayload;
+pub use magnetic::CanonicalMagnetostaticStatePayload;
 mod payload;
 mod thermal;
 mod thermal_transfer;
@@ -153,6 +155,33 @@ impl CanonicalSemanticState {
                     ));
                 }
                 state.validate_for(self.topology_digest, self.source_result, self.producer)?;
+            }
+            CanonicalSemanticStatePayload::Magnetostatic { state } => {
+                if self.kind != StateKind::ElectromagneticStatic
+                    || self.completeness != StateCompleteness::Complete
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "magnetostatic payload requires complete electromagnetic-static state"
+                            .into(),
+                    ));
+                }
+                state.validate_for(self.topology_digest, self.source_result, self.producer)?;
+                if !state
+                    .result
+                    .publication_declarations()
+                    .iter()
+                    .any(|declaration| {
+                        declaration.state_id == self.state_id
+                            && declaration.kind == self.kind
+                            && declaration.completeness == self.completeness
+                            && declaration.persistence == self.persistence
+                    })
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "magnetostatic state declaration differs from retained authored authority"
+                            .into(),
+                    ));
+                }
             }
             CanonicalSemanticStatePayload::StructuralFrequency { publication } => {
                 if self.kind != StateKind::StructuralComplex {

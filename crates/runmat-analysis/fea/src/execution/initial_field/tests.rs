@@ -68,6 +68,7 @@ fn source_artifact(
             nodes: 4,
             volume_elements: 1,
             volume_integration_points: 4,
+            oriented_edges: 0,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

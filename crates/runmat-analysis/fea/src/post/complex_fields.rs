@@ -75,6 +75,7 @@ pub fn complex_structural_field_layout(
         nodes: cardinality.nodes,
         volume_elements: cardinality.volume_elements,
         volume_integration_points: cardinality.volume_elements.saturating_mul(4),
+        oriented_edges: 0,
         beam_elements: cardinality.beam_elements,
         shell_elements: cardinality.shell_elements,
         connectors: cardinality.connectors,

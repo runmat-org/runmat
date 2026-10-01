@@ -1,5 +1,6 @@
 //! Recovered-field entity domains and complete storage cardinalities.
 use super::RecoveredFieldError;
+use runmat_analysis_core::FieldLocation;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -8,10 +9,26 @@ pub enum RecoveredFieldEntityDomain {
     Nodes,
     VolumeElements,
     VolumeIntegrationPoints,
+    OrientedEdges,
     BeamElements,
     ShellElements,
     Connectors,
     ConstraintGroups,
+}
+
+impl RecoveredFieldEntityDomain {
+    pub(super) const fn accepts_location(self, location: FieldLocation) -> bool {
+        match self {
+            Self::Nodes => matches!(location, FieldLocation::Node),
+            Self::OrientedEdges => matches!(location, FieldLocation::Edge),
+            Self::VolumeElements | Self::BeamElements | Self::ShellElements => {
+                matches!(location, FieldLocation::Element)
+            }
+            Self::VolumeIntegrationPoints => matches!(location, FieldLocation::IntegrationPoint),
+            Self::Connectors => matches!(location, FieldLocation::Connector),
+            Self::ConstraintGroups => matches!(location, FieldLocation::Constraint),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -20,6 +37,7 @@ pub struct RecoveredFieldEntityCounts {
     pub nodes: usize,
     pub volume_elements: usize,
     pub volume_integration_points: usize,
+    pub oriented_edges: usize,
     pub beam_elements: usize,
     pub shell_elements: usize,
     pub connectors: usize,
@@ -32,6 +50,7 @@ impl RecoveredFieldEntityCounts {
             RecoveredFieldEntityDomain::Nodes => self.nodes,
             RecoveredFieldEntityDomain::VolumeElements => self.volume_elements,
             RecoveredFieldEntityDomain::VolumeIntegrationPoints => self.volume_integration_points,
+            RecoveredFieldEntityDomain::OrientedEdges => self.oriented_edges,
             RecoveredFieldEntityDomain::BeamElements => self.beam_elements,
             RecoveredFieldEntityDomain::ShellElements => self.shell_elements,
             RecoveredFieldEntityDomain::Connectors => self.connectors,

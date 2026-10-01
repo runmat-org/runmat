@@ -95,6 +95,7 @@ fn native_thermal_worker_consumes_source_bound_cold_initial_field() {
                 nodes: producer.ordered_node_ids.len(),
                 volume_elements: producer.ordered_element_ids.len(),
                 volume_integration_points: 0,
+                oriented_edges: 0,
                 beam_elements: 0,
                 shell_elements: 0,
                 connectors: 0,

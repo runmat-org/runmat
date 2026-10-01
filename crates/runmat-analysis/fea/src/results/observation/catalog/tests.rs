@@ -131,6 +131,7 @@ fn structural_catalog_binds_recovery_request_and_selected_field_inventory() {
             nodes: 1,
             volume_elements: 0,
             volume_integration_points: 0,
+            oriented_edges: 0,
             beam_elements: 1,
             shell_elements: 0,
             connectors: 0,

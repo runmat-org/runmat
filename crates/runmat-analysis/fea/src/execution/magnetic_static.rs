@@ -10,6 +10,8 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
+pub(in crate::execution) mod fields;
+mod publication;
 mod result;
 pub use result::MagnetostaticSolverResult;
 #[cfg(test)]

@@ -85,6 +85,7 @@ impl StructuralObservationTopology {
             nodes: self.nodes.len(),
             volume_elements: self.volume_elements.len(),
             volume_integration_points: self.volume_integration_points.len(),
+            oriented_edges: 0,
             beam_elements: self.beam_elements.len(),
             shell_elements: self.shell_elements.len(),
             connectors: 0,
@@ -260,6 +261,9 @@ impl StructuralObservationTopology {
             )),
             RecoveredFieldEntityDomain::Nodes => Err(ObservationError::Invalid(
                 "nodal field domain cannot resolve element topology".into(),
+            )),
+            RecoveredFieldEntityDomain::OrientedEdges => Err(ObservationError::Unsupported(
+                "oriented edges require sampled volume topology, not structural element topology",
             )),
         }
     }

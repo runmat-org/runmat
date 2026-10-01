@@ -43,6 +43,8 @@ pub enum ObservationQuantity {
     ElectricCurrent,
     ElectricCurrentDensity,
     ElectricCharge,
+    /// Oriented edge coefficient ∫ A·dl, Wb; not the vector potential A in Wb/m.
+    MagneticEdgeCirculation,
     MagneticVectorPotential,
     MagneticFluxDensity,
     MagneticFieldIntensity,
@@ -121,6 +123,9 @@ impl ObservationQuantity {
             Self::ElectricCharge => D::ELECTRIC_CURRENT
                 .multiply(D::TIME)
                 .expect("static dimension"),
+            Self::MagneticEdgeCirculation => D::MAGNETIC_FLUX_DENSITY
+                .multiply(D::AREA)
+                .expect("static dimension"),
             Self::MagneticVectorPotential => D::MAGNETIC_FLUX_DENSITY
                 .multiply(D::LENGTH)
                 .expect("static dimension"),
@@ -173,6 +178,7 @@ impl ObservationQuantity {
             "electric_current" => Self::ElectricCurrent,
             "electric_current_density" => Self::ElectricCurrentDensity,
             "electric_charge" => Self::ElectricCharge,
+            "magnetic_edge_circulation" => Self::MagneticEdgeCirculation,
             "magnetic_vector_potential" => Self::MagneticVectorPotential,
             "magnetic_flux_density" => Self::MagneticFluxDensity,
             "magnetic_field_intensity" => Self::MagneticFieldIntensity,
@@ -231,6 +237,31 @@ impl ObservationQuantity {
             }
             _ => ObservationValueShape::Scalar,
         }
+    }
+}
+
+#[cfg(test)]
+mod magnetic_native_quantity_tests {
+    use super::*;
+    #[test]
+    fn circulation_is_scalar_flux_not_vector_potential() {
+        let circulation =
+            ObservationQuantity::from_source_name("magnetic_edge_circulation").unwrap();
+        assert_eq!(circulation, ObservationQuantity::MagneticEdgeCirculation);
+        assert_eq!(
+            circulation.canonical_value_shape(),
+            ObservationValueShape::Scalar
+        );
+        assert_eq!(
+            circulation.physical_dimension(),
+            PhysicalDimension::MAGNETIC_FLUX_DENSITY
+                .multiply(PhysicalDimension::AREA)
+                .unwrap()
+        );
+        assert_ne!(
+            circulation.physical_dimension(),
+            ObservationQuantity::MagneticVectorPotential.physical_dimension()
+        );
     }
 }
 
