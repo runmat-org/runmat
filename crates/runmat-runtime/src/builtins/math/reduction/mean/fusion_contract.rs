@@ -124,10 +124,11 @@ fn stage_contract(
     } else {
         input_class
     });
-    // The published Double scalar becomes Value::Num. Single publication
-    // remains a Tensor and preserves its N-D shape, even when one element
-    // remains after a reduction.
-    if count == 1 && final_output_class == Some(NumericClass::Double) {
+    // mean_host converts any one-element Double scratch tensor into Num,
+    // regardless of its rank. Final Single publication then reconstructs
+    // a [1,1] tensor from that scalar; a final Double result remains Num.
+    // Intermediate stages retain their tensor geometry until the next axis.
+    if count == 1 && final_output_class.is_some() {
         output_shape = vec![1, 1];
     }
     Some(FusionReductionContract {
@@ -257,20 +258,20 @@ mod tests {
         let input = single(vec![3.0, 5.0], vec![1, 1, 2]);
         let axes = |dims: Vec<f64>| Value::Tensor(Tensor::new(dims, vec![1, 2]).unwrap());
         let one = stages(&input, &[Value::Num(3.0)]).unwrap();
-        assert_eq!(one[0].output_shape, vec![1, 1, 1]);
+        assert_eq!(one[0].output_shape, vec![1, 1]);
         assert_eq!(one[0].output_class, NumericClass::Single);
         let Value::Tensor(one_actual) =
             futures::executor::block_on(mean_builtin(input.clone(), vec![Value::Num(3.0)]))
                 .unwrap()
         else {
-            panic!("Single one-element mean remains a tensor");
+            panic!("Single one-element mean is republished as a tensor");
         };
         assert_eq!(one_actual.shape, one[0].output_shape);
         let pair = stages(&input, &[axes(vec![3.0, 4.0])]).unwrap();
         assert_eq!(pair[0].output_shape, vec![1, 1, 1]);
         assert_eq!(pair[0].output_class, NumericClass::Double);
         assert_eq!(pair[1].input_shape, vec![1, 1, 1]);
-        assert_eq!(pair[1].output_shape, vec![1, 1, 1]);
+        assert_eq!(pair[1].output_shape, vec![1, 1]);
         assert_eq!(pair[1].output_class, NumericClass::Single);
         let Value::Tensor(pair_actual) =
             futures::executor::block_on(mean_builtin(input.clone(), vec![axes(vec![3.0, 4.0])]))
@@ -285,5 +286,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(double[1].output_shape, vec![1, 1]);
+        let double_actual = futures::executor::block_on(mean_builtin(
+            input,
+            vec![axes(vec![3.0, 4.0]), Value::String("double".into())],
+        ))
+        .unwrap();
+        assert!(matches!(double_actual, Value::Num(4.0)));
     }
 }
