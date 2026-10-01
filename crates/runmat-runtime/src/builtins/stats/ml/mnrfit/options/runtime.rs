@@ -225,3 +225,48 @@ fn text_or_logical(value: &Value, label: &str) -> BuiltinResult<BoolOrText> {
         _ => Err(invalid(format!("mnrfit: {label} must be text or logical"))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::task::noop_waker;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use runmat_value::Tensor;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::task::{Context, Poll};
+
+    #[test]
+    fn host_weight_conversion_cooperates_before_provider_materialization() {
+        let source = CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let budget = crate::execution::CpuCooperationBudget::with_test_turn(
+            crate::execution::CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            || Box::pin(std::future::pending()),
+        );
+        let mut cooperation = FitCooperation::with_budget(&runtime, budget);
+        let weights = Value::Tensor(
+            Tensor::new(vec![1.0; 20_000], vec![20_000, 1]).expect("host weight vector"),
+        );
+        let mut prepared = Box::pin(prepare_values(
+            vec![(OptionName::Weights, weights)],
+            &mut cooperation,
+        ));
+        let waker = noop_waker();
+        assert!(prepared
+            .as_mut()
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending());
+        source.cancel(CancellationReason::User);
+        let Poll::Ready(Err(error)) = prepared.as_mut().poll(&mut Context::from_waker(&waker))
+        else {
+            panic!("cancellation must stop host Weights conversion");
+        };
+        assert!(error.message().contains("cancelled"));
+    }
+}
