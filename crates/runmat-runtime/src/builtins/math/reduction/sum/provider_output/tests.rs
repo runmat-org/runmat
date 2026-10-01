@@ -53,11 +53,29 @@ fn sum_receipt_requires_actual_submit_and_ignores_unrelated_outer_operation() {
         ProviderObservationStatus::Failed(ProviderObservationFailure::ExecutionUnproven)
     ));
 
+    let mut upload_only = ProviderOperationReceipt::new();
+    upload_only.require_provider_execution(provider.device_id(), sum.clone());
+    let output = new_output();
+    with_provider_observation(Some(upload_only.recorder()), || {
+        // An earlier upload may submit, but a provider hook that returns a
+        // plausible output without a reduction kernel has no sum witness.
+        upload_only.recorder().submission().unwrap().complete();
+        super::super::publish_submitted_sum(provider, output.handle, &input.handle).unwrap()
+    });
+    assert!(matches!(
+        upload_only.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    ));
+
     let mut submitted = ProviderOperationReceipt::new();
     submitted.require_provider_execution(provider.device_id(), sum);
     let output = new_output();
     with_provider_observation(Some(submitted.recorder()), || {
         submitted.recorder().submission().unwrap().complete();
+        submitted.recorder().confirm_submitted_provider_execution(
+            provider.device_id(),
+            &super::super::sum_observation_identity(),
+        );
         super::super::publish_submitted_sum(provider, output.handle, &input.handle).unwrap()
     });
     submitted.publish().unwrap();

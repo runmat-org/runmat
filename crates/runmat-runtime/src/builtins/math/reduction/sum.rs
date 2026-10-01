@@ -690,21 +690,11 @@ fn sum_observation_identity() -> runmat_accelerate_api::ProviderOperationIdentit
 }
 
 fn publish_submitted_sum(
-    provider: &'static dyn AccelProvider,
+    _provider: &'static dyn AccelProvider,
     output: GpuTensorHandle,
     input: &GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    let published = provider_output::publish(output, input)?;
-    if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation() {
-        let identity = sum_observation_identity();
-        if recorder.expects_operation(&identity) {
-            // The enclosing receipt separately owns the provider's actual
-            // submission/fence completion. This witness follows validated
-            // reduction publication, never just a returned resident handle.
-            recorder.confirm_submitted_provider_execution(provider.device_id(), &identity);
-        }
-    }
-    Ok(published)
+    provider_output::publish(output, input)
 }
 
 fn sum_provider_error(

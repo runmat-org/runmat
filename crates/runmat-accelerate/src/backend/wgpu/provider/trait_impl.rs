@@ -12,6 +12,20 @@ use runmat_accelerate_api::{
     ProviderNdgridRequest, ProviderNdgridResult, ProviderTrapezoidSpacing,
 };
 
+/// The reduction hook, rather than its caller, certifies the selected sum
+/// kernel. Host uploads and publication casts may also submit commands, so a
+/// submission observed only at the public binding cannot prove reduction work.
+fn confirm_sum_kernel_submission(provider: &WgpuProvider) {
+    if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation() {
+        let identity = runmat_accelerate_api::ProviderOperationIdentity::new(
+            runmat_builtins::SUM_CATALOG_ENTRY.identity.name,
+        );
+        if recorder.expects_operation(&identity) {
+            recorder.confirm_submitted_provider_execution(provider.device_id_exec(), &identity);
+        }
+    }
+}
+
 impl AccelProvider for WgpuProvider {
     fn resident_network_adjoint_supported(
         &self,
@@ -1854,15 +1868,24 @@ impl AccelProvider for WgpuProvider {
             if entry.integer_type().is_some() {
                 return self.integer_floating_sum_dim_exec(a, dim);
             }
-            if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
-                return self.single_double_sum_dim_exec(a, dim);
-            }
-            let result = if a.shape().len() > 2 {
-                self.reduce_nd_sum_f64_exec(a, dim)
+            let result = if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
+                self.single_double_sum_dim_exec(a, dim)
             } else {
-                self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+                let result = if a.shape().len() > 2 {
+                    self.reduce_nd_sum_f64_exec(a, dim)
+                } else {
+                    self.reduce_dim_sum_mean_exec(
+                        a,
+                        dim,
+                        crate::backend::wgpu::types::DimReduceOp::Sum,
+                    )
+                };
+                result.map_err(runmat_accelerate_api::ProviderExecutionError::from)
             };
-            result.map_err(runmat_accelerate_api::ProviderExecutionError::from)
+            if result.is_ok() && entry.len != 0 {
+                confirm_sum_kernel_submission(self);
+            }
+            result
         })
     }
     fn reduce_integer_sum_native<'a>(
@@ -2043,11 +2066,16 @@ impl AccelProvider for WgpuProvider {
             if entry.integer_type().is_some() {
                 return self.integer_floating_sum_global_exec(a);
             }
-            if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
-                return self.single_double_sum_global_exec(a);
+            let result = if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
+                self.single_double_sum_global_exec(a)
+            } else {
+                self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+            };
+            if result.is_ok() && entry.len > 1 {
+                confirm_sum_kernel_submission(self);
             }
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
-                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+            result
         })
     }
 
