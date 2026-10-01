@@ -51,6 +51,8 @@ impl FusionReductionContext<'_> {
 
 pub type FusionReductionFuture<'a> =
     Pin<Box<dyn Future<Output = crate::BuiltinResult<Option<FusionReductionContract>>> + 'a>>;
+pub type FusionReductionStagesFuture<'a> =
+    Pin<Box<dyn Future<Output = crate::BuiltinResult<Option<Vec<FusionReductionContract>>>> + 'a>>;
 pub struct FusionReductionDeclaration {
     pub revision: u32,
     pub prepare: FusionReductionPreparer,
@@ -60,6 +62,18 @@ pub struct FusionReductionDeclaration {
 /// Resolving the final, domain-refined fact is pure and does not parse again.
 pub trait PreparedFusionReduction {
     fn resolve(&self, input: &ValueFact) -> crate::BuiltinResult<Option<FusionReductionContract>>;
+
+    /// Ordered arithmetic stages for one public reduction call. The default
+    /// covers reductions whose public operation is one physical reduction.
+    /// A multi-axis owner may preserve intermediate class and publication
+    /// boundaries by returning several contracts from its parsed controls.
+    fn resolve_stages(
+        &self,
+        input: &ValueFact,
+    ) -> crate::BuiltinResult<Option<Vec<FusionReductionContract>>> {
+        self.resolve(input)
+            .map(|contract| contract.map(|stage| vec![stage]))
+    }
 }
 
 pub struct FusionReductionControls<'a> {
@@ -104,6 +118,26 @@ impl FusionReductionDeclaration {
                 return Ok(None);
             };
             prepared.resolve(context.input)
+        })
+    }
+
+    pub fn resolve_stages<'a>(
+        &'a self,
+        context: FusionReductionContext<'a>,
+    ) -> FusionReductionStagesFuture<'a> {
+        Box::pin(async move {
+            if context.real_floating_input().is_none() {
+                return Ok(None);
+            }
+            let Some(prepared) = (self.prepare)(FusionReductionControls {
+                values: context.controls,
+                requested_outputs: context.requested_outputs,
+            })
+            .await?
+            else {
+                return Ok(None);
+            };
+            prepared.resolve_stages(context.input)
         })
     }
 }

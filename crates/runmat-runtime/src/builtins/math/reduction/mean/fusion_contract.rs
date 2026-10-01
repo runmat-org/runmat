@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
-    revision: 2,
+    revision: 3,
     prepare,
 };
 fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
@@ -32,6 +32,19 @@ impl PreparedFusionReduction for Prepared {
         &self,
         input: &runmat_types::ValueFact,
     ) -> BuiltinResult<Option<FusionReductionContract>> {
+        let Some(mut stages) = self.resolve_stages(input)? else {
+            return Ok(None);
+        };
+        if stages.len() != 1 {
+            return Ok(None);
+        }
+        Ok(stages.pop())
+    }
+
+    fn resolve_stages(
+        &self,
+        input: &runmat_types::ValueFact,
+    ) -> BuiltinResult<Option<Vec<FusionReductionContract>>> {
         let Some((input_class, shape)) = (FusionReductionContext {
             input,
             controls: &[],
@@ -41,63 +54,92 @@ impl PreparedFusionReduction for Prepared {
             return Ok(None);
         };
         let parsed = &self.0;
-        let mut dimensions = match &parsed.axes {
-            MeanAxes::Default => vec![default_dimension_from_shape(&shape)],
-            MeanAxes::Dim(dim) => vec![*dim],
-            MeanAxes::Vec(dims) => dims.clone(),
-            MeanAxes::All => Vec::new(),
-        };
-        dimensions.sort_unstable();
-        dimensions.dedup();
-        // Multiple mean dimensions are sequential host reductions, not one
-        // global sum/count (especially with omitnan). No false combined receipt.
-        if matches!(parsed.axes, MeanAxes::Vec(_)) && dimensions.len() != 1 {
-            return Ok(None);
-        }
-        let scalar = is_scalar_shape(&shape);
-        let all = matches!(parsed.axes, MeanAxes::All);
-        let (axes, mut output_shape, identity) = if all && !scalar {
-            ((0..shape.len()).collect(), vec![1, 1], false)
-        } else {
-            let dim = if all { 1 } else { dimensions[0] };
-            if scalar {
-                (vec![0], vec![1, 1], true)
-            } else if let Some(output) = reduction_shape(&shape, dim) {
-                (vec![dim - 1], output, false)
-            } else {
-                (vec![], shape.clone(), true)
+        let dimensions = match &parsed.axes {
+            MeanAxes::Default => vec![Some(default_dimension_from_shape(&shape))],
+            MeanAxes::Dim(dim) => vec![Some(*dim)],
+            MeanAxes::Vec(dims) => {
+                let mut dims = dims.clone();
+                dims.sort_unstable();
+                dims.dedup();
+                dims.into_iter().map(Some).collect()
             }
+            MeanAxes::All => vec![None],
         };
-        let output_class = match parsed.output {
-            OutputTemplate::Double => NumericClass::Double,
-            OutputTemplate::Default | OutputTemplate::Native => input_class,
-        };
-        let Some(count) = checked_reduction_elements(&output_shape) else {
-            return Ok(None);
-        };
-        let raw_double = !identity || scalar || input_class == NumericClass::Double;
-        if count == 1 && (raw_double || output_class == NumericClass::Double) {
-            output_shape = vec![1, 1];
-        }
-        Ok(Some(FusionReductionContract {
-            operation: FusionReductionOperation::Mean,
-            input_class,
-            accumulator_class: NumericClass::Double,
-            output_class,
-            input_shape: shape,
-            output_shape,
-            axes,
-            identity,
-            nan_mode: parsed.nan_mode,
-            count: if parsed.nan_mode == ReductionNaN::Omit {
-                FusionReductionCount::NonNan
+        let mut current_class = input_class;
+        let mut current_shape = shape;
+        let mut stages = Vec::with_capacity(dimensions.len());
+        for (index, dimension) in dimensions.iter().enumerate() {
+            // Vecdim is one public call: the host implementation keeps Double
+            // scratch values between axes and applies the output template
+            // only after its final stage. Nested calls publish separately.
+            let output_class = if index + 1 == dimensions.len() {
+                match parsed.output {
+                    OutputTemplate::Double => NumericClass::Double,
+                    OutputTemplate::Default | OutputTemplate::Native => input_class,
+                }
             } else {
-                FusionReductionCount::SliceLength
-            },
-            empty: FusionReductionEmpty::NaN,
-            ties: FusionReductionTies::NotApplicable,
-        }))
+                NumericClass::Double
+            };
+            let Some(stage) = stage_contract(
+                current_class,
+                current_shape,
+                *dimension,
+                output_class,
+                parsed.nan_mode,
+            ) else {
+                return Ok(None);
+            };
+            current_class = stage.output_class;
+            current_shape = stage.output_shape.clone();
+            stages.push(stage);
+        }
+        Ok(Some(stages))
     }
+}
+
+fn stage_contract(
+    input_class: NumericClass,
+    shape: Vec<usize>,
+    dimension: Option<usize>,
+    output_class: NumericClass,
+    nan_mode: ReductionNaN,
+) -> Option<FusionReductionContract> {
+    let scalar = is_scalar_shape(&shape);
+    let (axes, mut output_shape, identity) = if dimension.is_none() && !scalar {
+        ((0..shape.len()).collect(), vec![1, 1], false)
+    } else {
+        let dim = dimension.unwrap_or(1);
+        if scalar {
+            (vec![0], vec![1, 1], true)
+        } else if let Some(output) = reduction_shape(&shape, dim) {
+            (vec![dim - 1], output, false)
+        } else {
+            (vec![], shape.clone(), true)
+        }
+    };
+    let count = checked_reduction_elements(&output_shape)?;
+    let raw_double = !identity || scalar || input_class == NumericClass::Double;
+    if count == 1 && (raw_double || output_class == NumericClass::Double) {
+        output_shape = vec![1, 1];
+    }
+    Some(FusionReductionContract {
+        operation: FusionReductionOperation::Mean,
+        input_class,
+        accumulator_class: NumericClass::Double,
+        output_class,
+        input_shape: shape,
+        output_shape,
+        axes,
+        identity,
+        nan_mode,
+        count: if nan_mode == ReductionNaN::Omit {
+            FusionReductionCount::NonNan
+        } else {
+            FusionReductionCount::SliceLength
+        },
+        empty: FusionReductionEmpty::NaN,
+        ties: FusionReductionTies::NotApplicable,
+    })
 }
 
 #[cfg(test)]
@@ -108,6 +150,15 @@ mod tests {
     fn receipt(value: &Value, controls: &[Value]) -> Option<FusionReductionContract> {
         let fact = value_fact(value);
         futures::executor::block_on(DECLARATION.resolve(FusionReductionContext {
+            input: &fact,
+            controls,
+            requested_outputs: 1,
+        }))
+        .unwrap()
+    }
+    fn stages(value: &Value, controls: &[Value]) -> Option<Vec<FusionReductionContract>> {
+        let fact = value_fact(value);
+        futures::executor::block_on(DECLARATION.resolve_stages(FusionReductionContext {
             input: &fact,
             controls,
             requested_outputs: 1,
@@ -146,5 +197,30 @@ mod tests {
         assert!(result.materialize_f64()[0].is_sign_negative());
         let dimensions = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
         assert!(receipt(&input, &[dimensions]).is_none());
+    }
+
+    #[test]
+    fn vecdim_receipt_keeps_double_scratch_until_single_publication() {
+        let input = single(vec![1.0; 2 * 3 * 4], vec![2, 3, 4]);
+        let axes = Value::Tensor(Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap());
+        let controls = [axes.clone(), Value::String("native".into())];
+        let sequence = stages(&input, &controls).expect("ordered mean stages");
+        assert_eq!(sequence.len(), 2);
+        assert_eq!(sequence[0].axes, vec![1]);
+        assert_eq!(sequence[0].input_class, NumericClass::Single);
+        assert_eq!(sequence[0].accumulator_class, NumericClass::Double);
+        assert_eq!(sequence[0].output_class, NumericClass::Double);
+        assert_eq!(sequence[0].output_shape, sequence[1].input_shape);
+        assert_eq!(sequence[1].axes, vec![2]);
+        assert_eq!(sequence[1].input_class, NumericClass::Double);
+        assert_eq!(sequence[1].output_class, NumericClass::Single);
+        assert!(receipt(&input, &controls).is_none());
+
+        let double = stages(&input, &[axes, Value::String("double".into())]).unwrap();
+        assert_eq!(double[0].output_class, NumericClass::Double);
+        assert_eq!(double[1].output_class, NumericClass::Double);
+        let nested_first = stages(&input, &[Value::Num(2.0)]).unwrap();
+        assert_eq!(nested_first.len(), 1);
+        assert_eq!(nested_first[0].output_class, NumericClass::Single);
     }
 }
