@@ -2,21 +2,17 @@
 
 use std::cmp::Ordering;
 
+use runmat_builtins::{BuiltinErrorDescriptor, BuiltinExtensionDescriptor};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    DistanceControlKind, DistanceMetricKind, DistanceSelectionKind,
-    PDIST2_INTEGER_CONTROL_EXTENSION, PDIST2_INTEGER_DATA_EXTENSION,
-    PDIST2_INTEGER_SELECTION_EXTENSION, PDIST_INTEGER_CONTROL_EXTENSION,
-    PDIST_INTEGER_DATA_EXTENSION, SQUAREFORM_EXPLICIT_GPU_EXTENSION,
-    SQUAREFORM_INTEGER_INPUT_EXTENSION,
+    DistanceControlKind, DistanceMetricKind, DistanceSelectionKind, KnnMetric, KnnOption,
+    KnnSearchMethod, DISTANCE_ERROR_INTERNAL, DISTANCE_ERROR_INVALID_ARGUMENT,
+    KNN_GPU_FAST_DISTANCE_EXTENSION, KNN_GPU_INCLUDE_TIES_EXTENSION, KNN_GPU_NSMETHOD_EXTENSION,
+    KNN_GPU_SORT_INDICES_EXTENSION, KNN_INTEGER_DATA_EXTENSION,
+    KNN_INTEGER_FLOATING_CONTROL_EXTENSION, KNN_INTEGER_LOGICAL_CONTROL_EXTENSION,
+    KNN_INTEGER_STRUCTURAL_EXTENSION, PDIST2_INTEGER_CONTROL_EXTENSION,
+    PDIST2_INTEGER_DATA_EXTENSION, PDIST2_INTEGER_SELECTION_EXTENSION,
+    PDIST_INTEGER_CONTROL_EXTENSION, PDIST_INTEGER_DATA_EXTENSION,
+    SQUAREFORM_EXPLICIT_GPU_EXTENSION, SQUAREFORM_INTEGER_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, Tensor, Value};
@@ -34,283 +30,8 @@ const EPS: f64 = 1.0e-12;
 mod squareform;
 use squareform::{parse_squareform_force, squareform_compute};
 
-const OUTPUT_IDX_D: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Idx",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based indices of nearest rows in X, or cell array of index vectors when IncludeTies is true.",
-    },
-    BuiltinParamDescriptor {
-        name: "D",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Distances to nearest rows in X, or cell array of distance vectors when IncludeTies is true.",
-    },
-];
-
-const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Observation matrix with observations in rows.",
-};
-
-const PARAM_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Second observation matrix with observations in rows.",
-};
-
-const PARAM_KNNSEARCH_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name-value options such as K, Distance, P, Cov, Scale, IncludeTies, NSMethod, BucketSize, CacheSize, and SortIndices.",
-};
-
-const INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_Y];
-const INPUTS_X_Y_KNN_OPTIONS: [BuiltinParamDescriptor; 3] =
-    [PARAM_X, PARAM_Y, PARAM_KNNSEARCH_OPTIONS];
-
-const KNNSEARCH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Idx = knnsearch(X, Y)",
-        inputs: &INPUTS_X_Y,
-        outputs: &OUTPUT_IDX_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Idx, D] = knnsearch(X, Y, Name, Value)",
-        inputs: &INPUTS_X_Y_KNN_OPTIONS,
-        outputs: &OUTPUT_IDX_D,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DISTANCE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:distance:InvalidArgument"),
-    when: "Inputs, dimensions, metrics, metric parameters, or selection options are malformed.",
-    message: "distance helper: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DISTANCE.INTERNAL",
-    identifier: Some("RunMat:distance:Internal"),
-    when: "RunMat cannot allocate or construct a distance output.",
-    message: "distance helper: internal error",
-};
-
-const DISTANCE_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const KNNSEARCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &KNNSEARCH_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DISTANCE_ERRORS,
-};
-
-const KNN_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "knnsearch-integer-observation-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "knnsearch with typed-integer X or Y data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KnnsearchIntegerObservationDataExtension"),
-};
-const KNN_INTEGER_STRUCTURAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "knnsearch-integer-structural-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "knnsearch with typed-integer K or BucketSize is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KnnsearchIntegerStructuralControlExtension"),
-};
-const KNN_INTEGER_FLOATING_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "knnsearch-integer-floating-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "knnsearch with typed-integer P, Cov, Scale, or CacheSize is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:KnnsearchIntegerFloatingControlExtension"),
-    };
-const KNN_INTEGER_LOGICAL_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "knnsearch-integer-logical-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "knnsearch with typed-integer IncludeTies or SortIndices is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:KnnsearchIntegerLogicalControlExtension"),
-    };
-const KNN_GPU_NSMETHOD_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "knnsearch-gpu-nonexhaustive-search",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "an explicit GPU knnsearch call without NSMethod='exhaustive' is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KnnsearchGpuNonexhaustiveSearchExtension"),
-};
-const KNN_GPU_INCLUDE_TIES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "knnsearch-gpu-include-ties",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "an explicit GPU knnsearch call with nondefault IncludeTies is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KnnsearchGpuIncludeTiesExtension"),
-};
-const KNN_GPU_SORT_INDICES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "knnsearch-gpu-sort-indices",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "an explicit GPU knnsearch call with nondefault SortIndices is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KnnsearchGpuSortIndicesExtension"),
-};
-const KNN_GPU_FAST_DISTANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "knnsearch-gpu-fast-distance",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "an explicit GPU knnsearch call with a fast distance variant is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KnnsearchGpuFastDistanceExtension"),
-};
-
-pub const KNNSEARCH_EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
-    KNN_INTEGER_DATA_EXTENSION,
-    KNN_INTEGER_STRUCTURAL_EXTENSION,
-    KNN_INTEGER_FLOATING_CONTROL_EXTENSION,
-    KNN_INTEGER_LOGICAL_CONTROL_EXTENSION,
-    KNN_GPU_NSMETHOD_EXTENSION,
-    KNN_GPU_INCLUDE_TIES_EXTENSION,
-    KNN_GPU_SORT_INDICES_EXTENSION,
-    KNN_GPU_FAST_DISTANCE_EXTENSION,
-];
-
-const KNN_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented class is single or double; every admitted typed value must be exact at the binary64 distance boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented class is single or double; every admitted typed value must be exact at the binary64 distance boundary.",
-    },
-];
-const KNN_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "K",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat decodes K exactly as a positive output-shape count.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "BucketSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat decodes BucketSize exactly as a positive search-structure count.",
-    },
-];
-const KNN_INTEGER_FLOATING_INPUTS: [BuiltinIntegerInputCapability; 4] = [
-    BuiltinIntegerInputCapability {
-        name: "P",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The Minkowski exponent crosses a checked binary64 numerical boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Cov",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The covariance matrix crosses a checked binary64 numerical boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Scale",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The scale vector crosses a checked binary64 numerical boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "CacheSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented numeric storage class is double; RunMat requires an exact binary64 value.",
-    },
-];
-const KNN_INTEGER_LOGICAL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "IncludeTies",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public documentation specifies false or true; typed numeric toggles remain conservatively RunMat-only.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "SortIndices",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented class is logical; typed numeric toggles remain RunMat-only.",
-    },
-];
-
-pub const KNNSEARCH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[Idx, D] = knnsearch(integer_X, integer_Y, ...)",
-        inputs: &KNN_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Idx is a MATLAB-compatible double index output. The current host fallback may restore numeric outputs to the source provider when supported.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "knnsearch(X, Y, K/BucketSize=integer_control)",
-        inputs: &KNN_INTEGER_STRUCTURAL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "These controls are decoded directly from exact storage even though their public MATLAB storage classes are single and double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "knnsearch(X, Y, P/Cov/Scale/CacheSize=integer_value)",
-        inputs: &KNN_INTEGER_FLOATING_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Each independently gated typed control must be exactly representable before conversion to the floating search domain.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "knnsearch(X, Y, IncludeTies/SortIndices=integer_toggle)",
-        inputs: &KNN_INTEGER_LOGICAL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Only exact zero and one are accepted after this typed-logical extension is admitted.",
-    },
-];
-
-fn matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Tensor {
-        shape: Some(vec![None, None]),
-    }
-}
-
 fn distance_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
-    distance_descriptor_error(name, message, &ERROR_INVALID_ARGUMENT)
+    distance_descriptor_error(name, message, &DISTANCE_ERROR_INVALID_ARGUMENT)
 }
 
 fn with_distance_context(name: &'static str, mut error: RuntimeError) -> RuntimeError {
@@ -321,7 +42,7 @@ fn with_distance_context(name: &'static str, mut error: RuntimeError) -> Runtime
 }
 
 fn internal_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
-    distance_descriptor_error(name, message, &ERROR_INTERNAL)
+    distance_descriptor_error(name, message, &DISTANCE_ERROR_INTERNAL)
 }
 
 fn distance_descriptor_error(
@@ -538,22 +259,17 @@ async fn ensure_distance_exact_f64(
 
 #[runtime_builtin(
     name = "knnsearch",
-    category = "stats/ml",
-    summary = "Find k-nearest neighbors in an observation matrix.",
-    keywords = "knnsearch,nearest neighbor,k nearest,statistics,machine learning,distance",
-    type_resolver(matrix_type),
-    descriptor(crate::builtins::stats::ml::distance::KNNSEARCH_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::distance::KNNSEARCH_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::distance::KNNSEARCH_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_knnsearch_extensions(&x, &y, &rest)?;
-    ensure_knnsearch_exact_boundaries(&x, &y, &rest).await?;
     let output_source = crate::builtins::common::gpu_helpers::select_resident_output_source(
         [&x, &y].into_iter().filter_map(knn_gpu_source),
         KNNSEARCH_NAME,
     )?;
+    ensure_knnsearch_exact_boundaries(&x, &y, &rest).await?;
+    let (metric_args, options) = parse_knnsearch_options(rest).await?;
     let x = value_to_matrix(KNNSEARCH_NAME, x).await?;
     let y = value_to_matrix(KNNSEARCH_NAME, y).await?;
     if x.cols != y.cols {
@@ -562,7 +278,6 @@ async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResul
             "knnsearch: X and Y must have the same number of columns",
         ));
     }
-    let (metric_args, options) = parse_knnsearch_options(rest).await?;
     if options.k > x.rows {
         return Err(distance_error(
             KNNSEARCH_NAME,
@@ -645,29 +360,33 @@ fn ensure_knnsearch_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinR
     let mut explicit_exhaustive = false;
     let mut idx = 0;
     while idx + 1 < rest.len() {
-        let Some(name) = keyword_of(&rest[idx]) else {
+        let Some(option) = keyword_of(&rest[idx])
+            .as_deref()
+            .and_then(KnnOption::from_keyword)
+        else {
             idx += 1;
             continue;
         };
         let value = &rest[idx + 1];
         if explicit_gpu {
-            match name.as_str() {
-                "includeties" if logical_scalar_is(value, true) => {
+            match option {
+                KnnOption::IncludeTies if logical_scalar_is(value, true) => {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &KNN_GPU_INCLUDE_TIES_EXTENSION,
                         KNNSEARCH_NAME,
                     )?;
                 }
-                "sortindices" if logical_scalar_is(value, false) => {
+                KnnOption::SortIndices if logical_scalar_is(value, false) => {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &KNN_GPU_SORT_INDICES_EXTENSION,
                         KNNSEARCH_NAME,
                     )?;
                 }
-                "distance"
-                    if keyword_of(value).is_some_and(|distance| {
-                        matches!(distance.as_str(), "fasteuclidean" | "fastseuclidean")
-                    }) =>
+                KnnOption::Distance
+                    if keyword_of(value)
+                        .as_deref()
+                        .and_then(KnnMetric::from_keyword)
+                        .is_some_and(|metric| metric.fast_alias) =>
                 {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &KNN_GPU_FAST_DISTANCE_EXTENSION,
@@ -677,27 +396,32 @@ fn ensure_knnsearch_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinR
                 _ => {}
             }
         }
-        match name.as_str() {
-            "k" | "bucketsize" if knn_typed_integer(value) => {
+        match option {
+            KnnOption::K | KnnOption::BucketSize if knn_typed_integer(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &KNN_INTEGER_STRUCTURAL_EXTENSION,
                     KNNSEARCH_NAME,
                 )?;
             }
-            "p" | "cov" | "scale" | "cachesize" if knn_typed_integer(value) => {
+            KnnOption::P | KnnOption::Cov | KnnOption::Scale | KnnOption::CacheSize
+                if knn_typed_integer(value) =>
+            {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &KNN_INTEGER_FLOATING_CONTROL_EXTENSION,
                     KNNSEARCH_NAME,
                 )?;
             }
-            "includeties" | "sortindices" if knn_typed_integer(value) => {
+            KnnOption::IncludeTies | KnnOption::SortIndices if knn_typed_integer(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &KNN_INTEGER_LOGICAL_CONTROL_EXTENSION,
                     KNNSEARCH_NAME,
                 )?;
             }
-            "nsmethod" => {
-                explicit_exhaustive = keyword_of(value).as_deref() == Some("exhaustive");
+            KnnOption::NsMethod => {
+                explicit_exhaustive = keyword_of(value)
+                    .as_deref()
+                    .and_then(KnnSearchMethod::from_keyword)
+                    == Some(KnnSearchMethod::Exhaustive);
             }
             _ => {}
         }
@@ -737,7 +461,14 @@ async fn ensure_knnsearch_exact_boundaries(
     let mut idx = 0;
     while idx + 1 < rest.len() {
         if keyword_of(&rest[idx])
-            .is_some_and(|name| matches!(name.as_str(), "p" | "cov" | "scale" | "cachesize"))
+            .as_deref()
+            .and_then(KnnOption::from_keyword)
+            .is_some_and(|option| {
+                matches!(
+                    option,
+                    KnnOption::P | KnnOption::Cov | KnnOption::Scale | KnnOption::CacheSize
+                )
+            })
         {
             ensure_knn_exact_f64(&rest[idx + 1], "floating option").await?;
         }
@@ -1090,9 +821,12 @@ async fn parse_knnsearch_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>,
     let mut include_ties = false;
     let mut sort_indices = true;
     let mut metric_name: Option<Value> = None;
-    let mut metric_keyword = "euclidean".to_string();
+    let mut metric = KnnMetric {
+        kind: DistanceMetricKind::Euclidean,
+        fast_alias: false,
+    };
     let mut metric_parameter: Option<Value> = None;
-    let mut ns_method: Option<String> = None;
+    let mut ns_method: Option<KnnSearchMethod> = None;
     let mut idx = 0usize;
     while idx < args.len() {
         let name = keyword_of(&args[idx]).ok_or_else(|| {
@@ -1108,23 +842,29 @@ async fn parse_knnsearch_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>,
             ));
         }
         let value = args[idx + 1].clone();
-        match name.as_str() {
-            "k" => k = parse_positive_integer(KNNSEARCH_NAME, &value, "K")?,
-            "includeties" => include_ties = parse_logical_scalar(&value, "IncludeTies")?,
-            "sortindices" => sort_indices = parse_logical_scalar(&value, "SortIndices")?,
-            "distance" => {
+        let option = KnnOption::from_keyword(&name).ok_or_else(|| {
+            distance_error(
+                KNNSEARCH_NAME,
+                format!("knnsearch: unsupported option '{name}'"),
+            )
+        })?;
+        match option {
+            KnnOption::K => k = parse_positive_integer(KNNSEARCH_NAME, &value, "K")?,
+            KnnOption::IncludeTies => include_ties = parse_logical_scalar(&value, "IncludeTies")?,
+            KnnOption::SortIndices => sort_indices = parse_logical_scalar(&value, "SortIndices")?,
+            KnnOption::Distance => {
                 let distance = keyword_of(&value).ok_or_else(|| {
                     distance_error(KNNSEARCH_NAME, "knnsearch: Distance must be text")
                 })?;
-                let normalized = match distance.as_str() {
-                    "fasteuclidean" => "euclidean",
-                    "fastseuclidean" => "seuclidean",
-                    other => other,
-                };
-                metric_keyword = normalized.to_string();
-                metric_name = Some(Value::from(normalized));
+                metric = KnnMetric::from_keyword(&distance).ok_or_else(|| {
+                    distance_error(
+                        KNNSEARCH_NAME,
+                        format!("knnsearch: unsupported distance metric '{distance}'"),
+                    )
+                })?;
+                metric_name = Some(Value::from(metric.kind.canonical_name()));
             }
-            "p" | "cov" | "scale" => {
+            KnnOption::P | KnnOption::Cov | KnnOption::Scale => {
                 if metric_parameter.is_some() {
                     return Err(distance_error(
                         KNNSEARCH_NAME,
@@ -1133,21 +873,18 @@ async fn parse_knnsearch_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>,
                 }
                 metric_parameter = Some(value);
             }
-            "nsmethod" => {
+            KnnOption::NsMethod => {
                 let method = keyword_of(&value).ok_or_else(|| {
                     distance_error(KNNSEARCH_NAME, "knnsearch: NSMethod must be text")
                 })?;
-                match method.as_str() {
-                    "exhaustive" | "kdtree" => ns_method = Some(method),
-                    other => {
-                        return Err(distance_error(
-                            KNNSEARCH_NAME,
-                            format!("knnsearch: unsupported NSMethod '{other}'"),
-                        ))
-                    }
-                }
+                ns_method = Some(KnnSearchMethod::from_keyword(&method).ok_or_else(|| {
+                    distance_error(
+                        KNNSEARCH_NAME,
+                        format!("knnsearch: unsupported NSMethod '{method}'"),
+                    )
+                })?);
             }
-            "cachesize" => {
+            KnnOption::CacheSize => {
                 if keyword_of(&value).as_deref() != Some("maximal") {
                     let raw = scalar_parameter(KNNSEARCH_NAME, &value, "CacheSize").await?;
                     if !raw.is_finite() || raw <= 0.0 {
@@ -1158,24 +895,13 @@ async fn parse_knnsearch_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>,
                     }
                 }
             }
-            "bucketsize" => {
+            KnnOption::BucketSize => {
                 parse_positive_integer(KNNSEARCH_NAME, &value, "BucketSize")?;
-            }
-            other => {
-                return Err(distance_error(
-                    KNNSEARCH_NAME,
-                    format!("knnsearch: unsupported option '{other}'"),
-                ))
             }
         }
         idx += 2;
     }
-    if matches!(ns_method.as_deref(), Some("kdtree"))
-        && !matches!(
-            metric_keyword.as_str(),
-            "euclidean" | "cityblock" | "chebychev" | "chebyshev" | "cheby" | "minkowski"
-        )
-    {
+    if ns_method == Some(KnnSearchMethod::KdTree) && !metric.allows_kdtree() {
         return Err(distance_error(
             KNNSEARCH_NAME,
             "knnsearch: NSMethod='kdtree' is only valid for euclidean, cityblock, chebychev, or minkowski distances",
@@ -1906,600 +1632,4 @@ fn distance_order_descending(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_value::IntegerStorage;
-    use runmat_value::NumericDType;
-
-    fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
-    }
-
-    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
-    }
-
-    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        Value::Tensor(tensor)
-    }
-
-    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        Value::Tensor(tensor)
-    }
-
-    fn tensor_out(value: Value) -> Tensor {
-        match value {
-            Value::Tensor(tensor) => tensor,
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn knnsearch_documented_floating_gpu_fallback_preserves_explicit_residency() {
-        crate::builtins::common::test_support::with_test_provider(|provider| {
-            let x = Tensor::new(vec![0.0, 2.0, 5.0], vec![3, 1]).unwrap();
-            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x)
-                .expect("upload observations");
-            let handle = handle
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
-                .expect("validated provenance");
-            let output = block_on(knnsearch_builtin(
-                Value::GpuTensor(handle),
-                tensor(vec![1.0, 4.0], 2, 1),
-                vec![Value::from("NSMethod"), Value::from("exhaustive")],
-            ))
-            .expect("documented resident knnsearch");
-            assert!(matches!(output, Value::GpuTensor(_)));
-        });
-    }
-
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn knnsearch_wgpu_fallback_enforces_explicit_residency_contract() {
-        let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
-        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        )
-        .expect("actual WGPU provider");
-        let x = Tensor::new(vec![0.0, 2.0, 5.0], vec![3, 1]).unwrap();
-        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x)
-            .expect("upload observations");
-        let handle = handle
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
-            .expect("validated provenance");
-        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let result = block_on(knnsearch_builtin(
-            Value::GpuTensor(handle.clone()),
-            tensor(vec![1.0, 4.0], 2, 1),
-            vec![Value::from("NSMethod"), Value::from("exhaustive")],
-        ));
-        let Value::GpuTensor(output) = result.expect("documented WGPU knnsearch") else {
-            panic!("expected resident output");
-        };
-        assert!(runmat_accelerate_api::handle_is_explicit(&output));
-        assert_eq!(
-            output.device_id(),
-            runmat_accelerate_api::AccelProvider::device_id(provider)
-        );
-        assert_eq!(output.shape(), &[2, 1]);
-        assert_eq!(
-            runmat_accelerate_api::handle_precision(&output),
-            Some(runmat_accelerate_api::ProviderPrecision::F64)
-        );
-    }
-
-    #[test]
-    fn pdist_default_and_cityblock_use_condensed_order() {
-        let x = tensor(vec![0.0, 3.0, 4.0, 0.0, 0.0, 4.0, 0.0, 2.0], 4, 2);
-        let out = block_on(pdist_builtin(x.clone(), Vec::new())).unwrap();
-        let data = tensor_out(out).materialize_f64();
-        assert!((data[0] - 5.0).abs() < 1.0e-10);
-        assert!((data[1] - 4.0).abs() < 1.0e-10);
-        assert!((data[2] - 2.0).abs() < 1.0e-10);
-        assert!((data[3] - 17.0_f64.sqrt()).abs() < 1.0e-10);
-        assert!((data[4] - 13.0_f64.sqrt()).abs() < 1.0e-10);
-        assert!((data[5] - 20.0_f64.sqrt()).abs() < 1.0e-10);
-
-        let out = block_on(pdist_builtin(x, vec![Value::from("cityblock")])).unwrap();
-        assert_eq!(
-            tensor_out(out).materialize_f64(),
-            vec![7.0, 4.0, 2.0, 5.0, 5.0, 6.0]
-        );
-    }
-
-    #[test]
-    fn pdist_supports_parameterized_metrics() {
-        let x = tensor(vec![0.0, 3.0, 4.0, 0.0, 4.0, 0.0], 3, 2);
-        let out = block_on(pdist_builtin(
-            x.clone(),
-            vec![Value::from("minkowski"), Value::Num(1.0)],
-        ))
-        .unwrap();
-        assert_eq!(tensor_out(out).materialize_f64(), vec![7.0, 4.0, 5.0]);
-
-        let out = block_on(pdist_builtin(
-            x,
-            vec![Value::from("seuclidean"), tensor(vec![1.0, 4.0], 1, 2)],
-        ))
-        .unwrap();
-        assert!((tensor_out(out).materialize_f64()[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
-
-        let out = block_on(pdist2_builtin(
-            tensor(vec![0.0, 3.0, 0.0, 4.0], 2, 2),
-            tensor(vec![0.0, 6.0], 1, 2),
-            vec![Value::from("seuclidean")],
-        ))
-        .unwrap();
-        assert!((tensor_out(out).materialize_f64()[0] - 4.5_f64.sqrt()).abs() < 1.0e-10);
-    }
-
-    #[test]
-    fn distance_helpers_read_typed_integer_inputs_and_parameters_exactly() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2);
-        let out = block_on(pdist_builtin(
-            x,
-            vec![
-                Value::from("minkowski"),
-                cleared_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-            ],
-        ))
-        .unwrap();
-        assert_eq!(tensor_out(out).materialize_f64(), vec![7.0, 4.0, 5.0]);
-
-        let out = block_on(pdist_builtin(
-            int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2),
-            vec![
-                Value::from("seuclidean"),
-                poisoned_int_tensor(IntegerStorage::U16(vec![1, 4]), 1, 2),
-            ],
-        ))
-        .unwrap();
-        assert!((tensor_out(out).materialize_f64()[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
-
-        let out = block_on(pdist_builtin(
-            int_tensor(IntegerStorage::I16(vec![0, 1, 0, 2]), 2, 2),
-            vec![
-                Value::from("mahalanobis"),
-                poisoned_int_tensor(IntegerStorage::U16(vec![1, 0, 0, 1]), 2, 2),
-            ],
-        ))
-        .unwrap();
-        assert!((tensor_out(out).materialize_f64()[0] - 5.0_f64.sqrt()).abs() < 1.0e-10);
-    }
-
-    #[test]
-    fn nan_rows_propagate_and_invalid_covariance_is_rejected() {
-        let x = tensor(vec![0.0, f64::NAN, 0.0, 1.0], 2, 2);
-        let out = block_on(pdist_builtin(x, vec![Value::from("hamming")])).unwrap();
-        assert!(tensor_out(out).materialize_f64()[0].is_nan());
-
-        let err = block_on(pdist_builtin(
-            tensor(vec![0.0, 1.0, 0.0, 1.0], 2, 2),
-            vec![
-                Value::from("mahalanobis"),
-                tensor(vec![1.0, 2.0, 0.0, 1.0], 2, 2),
-            ],
-        ))
-        .expect_err("asymmetric covariance should fail");
-        assert!(err.to_string().contains("symmetric positive definite"));
-    }
-
-    #[test]
-    fn pdist2_matrix_and_selection_modes_work() {
-        let x = tensor(vec![0.0, 2.0, 0.0, 0.0], 2, 2);
-        let y = tensor(vec![1.0, 3.0, 0.0, 0.0], 2, 2);
-        let out = block_on(pdist2_builtin(
-            x.clone(),
-            y.clone(),
-            vec![Value::from("squaredeuclidean")],
-        ))
-        .unwrap();
-        assert_eq!(tensor_out(out).materialize_f64(), vec![1.0, 1.0, 9.0, 1.0]);
-
-        let out = block_on(pdist2_builtin(
-            x,
-            y,
-            vec![
-                Value::from("euclidean"),
-                Value::from("Smallest"),
-                Value::Num(1.0),
-            ],
-        ))
-        .unwrap();
-        let tensor = tensor_out(out);
-        assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0]);
-    }
-
-    #[test]
-    fn pdist2_selection_reads_typed_integer_count_exactly() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let out = block_on(pdist2_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 0, 0]), 2, 2),
-            poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 0, 0]), 2, 2),
-            vec![
-                Value::from("euclidean"),
-                Value::from("Smallest"),
-                cleared_int_tensor(IntegerStorage::U64(vec![1]), 1, 1),
-            ],
-        ))
-        .unwrap();
-        let tensor = tensor_out(out);
-        assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0]);
-
-        assert!(parse_positive_integer(
-            PDIST2_NAME,
-            &Value::Num(usize::MAX as f64),
-            "pdist2 selection count"
-        )
-        .is_err());
-        assert!(parse_positive_integer(
-            PDIST2_NAME,
-            &Value::Num(usize::MAX as f64 + 1.0),
-            "pdist2 selection count"
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn pdist2_selection_extension_uses_typed_case_insensitive_keyword() {
-        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        for spelling in ["Smallest", "smallest", "LARGEST"] {
-            let error = block_on(pdist2_builtin(
-                tensor(vec![0.0, 2.0], 2, 1),
-                tensor(vec![1.0], 1, 1),
-                vec![
-                    Value::from(spelling),
-                    cleared_int_tensor(IntegerStorage::U16(vec![1]), 1, 1),
-                ],
-            ))
-            .expect_err("typed selection count must be gated before the provider or CPU work");
-            assert_eq!(
-                error.identifier(),
-                Some("RunMat:compatibility:Pdist2IntegerSelectionCountExtension")
-            );
-        }
-    }
-
-    #[test]
-    fn knnsearch_returns_indices_then_distances() {
-        let x = tensor(vec![0.0, 2.0, 5.0, 0.0, 0.0, 0.0], 3, 2);
-        let y = tensor(vec![1.0, 4.0, 0.0, 0.0], 2, 2);
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(knnsearch_builtin(
-            x,
-            y,
-            vec![Value::from("K"), Value::Num(2.0)],
-        ))
-        .unwrap();
-        let Value::OutputList(values) = out else {
-            panic!("expected output list");
-        };
-        let idx = tensor_out(values[0].clone());
-        let dist = tensor_out(values[1].clone());
-        assert_eq!(idx.shape, vec![2, 2]);
-        assert_eq!(dist.shape, vec![2, 2]);
-        assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 2.0, 2.0]);
-        assert_eq!(dist.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0]);
-    }
-
-    #[test]
-    fn knnsearch_supports_metrics_and_ties() {
-        let x = tensor(vec![0.0, 2.0, -2.0, 0.0, 0.0, 0.0], 3, 2);
-        let y = tensor(vec![0.0, 0.0], 1, 2);
-        let out = block_on(knnsearch_builtin(
-            x.clone(),
-            y.clone(),
-            vec![
-                Value::from("Distance"),
-                Value::from("cityblock"),
-                Value::from("K"),
-                Value::Num(2.0),
-            ],
-        ))
-        .unwrap();
-        let idx = tensor_out(out);
-        assert_eq!(idx.shape, vec![1, 2]);
-        assert_eq!(idx.materialize_f64(), vec![1.0, 2.0]);
-
-        let out = block_on(knnsearch_builtin(
-            x,
-            y,
-            vec![
-                Value::from("K"),
-                Value::Num(2.0),
-                Value::from("IncludeTies"),
-                Value::Bool(true),
-            ],
-        ))
-        .unwrap();
-        let Value::Cell(cells) = out else {
-            panic!("expected cell output");
-        };
-        assert_eq!(cells.shape, vec![1, 1]);
-        let Value::Tensor(tied) = &cells.data[0] else {
-            panic!("expected tensor in cell");
-        };
-        assert_eq!(tied.shape, vec![1, 3]);
-        assert_eq!(tied.materialize_f64(), vec![1.0, 2.0, 3.0]);
-    }
-
-    #[test]
-    fn knnsearch_options_read_typed_integer_storage_exactly() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let out = block_on(knnsearch_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 5, 0, 0, 0]), 3, 2),
-            poisoned_int_tensor(IntegerStorage::I16(vec![1, 4, 0, 0]), 2, 2),
-            vec![
-                Value::from("K"),
-                cleared_int_tensor(IntegerStorage::U16(vec![2]), 1, 1),
-                Value::from("IncludeTies"),
-                cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
-                Value::from("SortIndices"),
-                cleared_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-                Value::from("CacheSize"),
-                cleared_int_tensor(IntegerStorage::U32(vec![16]), 1, 1),
-                Value::from("BucketSize"),
-                cleared_int_tensor(IntegerStorage::U32(vec![8]), 1, 1),
-            ],
-        ))
-        .unwrap();
-        let idx = tensor_out(out);
-        assert_eq!(idx.shape, vec![2, 2]);
-        assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 2.0, 2.0]);
-    }
-
-    #[test]
-    fn knnsearch_integer_data_and_controls_are_mode_gated() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(knnsearch_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1]), 2, 1),
-            tensor(vec![0.0], 1, 1),
-            Vec::new(),
-        ))
-        .expect_err("strict mode rejects typed observation data");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:KnnsearchIntegerObservationDataExtension")
-        );
-        assert_eq!(KNNSEARCH_EXTENSIONS.len(), 8);
-        assert_eq!(KNNSEARCH_INTEGER_CAPABILITIES.len(), 4);
-    }
-
-    #[test]
-    fn knnsearch_runmat_floating_integer_controls_require_exact_double_values() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let error = block_on(knnsearch_builtin(
-            tensor(vec![0.0, 1.0], 2, 1),
-            tensor(vec![0.0], 1, 1),
-            vec![
-                Value::from("Distance"),
-                Value::from("minkowski"),
-                Value::from("P"),
-                poisoned_int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), 1, 1),
-            ],
-        ))
-        .expect_err("wide integer P cannot cross the floating boundary");
-        assert!(error.message().contains("exactly representable as double"));
-    }
-
-    #[test]
-    fn knnsearch_handles_nan_rows_empty_queries_and_option_validation() {
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(knnsearch_builtin(
-            tensor(vec![0.0, f64::NAN, 2.0], 3, 1),
-            tensor(vec![1.0], 1, 1),
-            vec![Value::from("K"), Value::Num(2.0)],
-        ))
-        .unwrap();
-        let Value::OutputList(values) = out else {
-            panic!("expected output list");
-        };
-        assert_eq!(
-            tensor_out(values[0].clone()).materialize_f64(),
-            vec![1.0, 3.0]
-        );
-        assert_eq!(
-            tensor_out(values[1].clone()).materialize_f64(),
-            vec![1.0, 1.0]
-        );
-
-        let out = block_on(knnsearch_builtin(
-            tensor(vec![0.0, 2.0], 2, 1),
-            tensor(Vec::new(), 0, 1),
-            vec![Value::from("K"), Value::Num(1.0)],
-        ))
-        .unwrap();
-        let Value::OutputList(values) = out else {
-            panic!("expected output list");
-        };
-        assert_eq!(tensor_out(values[0].clone()).shape, vec![0, 1]);
-        assert_eq!(tensor_out(values[1].clone()).shape, vec![0, 1]);
-
-        let out = block_on(knnsearch_builtin(
-            tensor(vec![0.0, 2.0, -2.0], 3, 1),
-            tensor(vec![0.0], 1, 1),
-            vec![
-                Value::from("K"),
-                Value::Num(2.0),
-                Value::from("IncludeTies"),
-                Value::Bool(true),
-                Value::from("SortIndices"),
-                Value::Bool(false),
-            ],
-        ))
-        .unwrap();
-        assert!(matches!(out, Value::OutputList(values) if matches!(&values[0], Value::Cell(_))));
-
-        let err = block_on(knnsearch_builtin(
-            tensor(vec![1.0, 0.0], 2, 1),
-            tensor(vec![1.0], 1, 1),
-            vec![
-                Value::from("Distance"),
-                Value::from("cosine"),
-                Value::from("NSMethod"),
-                Value::from("kdtree"),
-            ],
-        ))
-        .expect_err("kdtree should reject cosine distance");
-        assert!(err.to_string().contains("NSMethod='kdtree'"));
-    }
-
-    #[test]
-    fn squareform_converts_both_directions() {
-        let vector = tensor(
-            vec![
-                5.0,
-                4.0,
-                2.0,
-                17.0_f64.sqrt(),
-                13.0_f64.sqrt(),
-                20.0_f64.sqrt(),
-            ],
-            1,
-            6,
-        );
-        let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
-        assert_eq!(matrix.shape, vec![4, 4]);
-        assert_eq!(
-            matrix.materialize_f64(),
-            vec![
-                0.0,
-                5.0,
-                4.0,
-                2.0,
-                5.0,
-                0.0,
-                17.0_f64.sqrt(),
-                13.0_f64.sqrt(),
-                4.0,
-                17.0_f64.sqrt(),
-                0.0,
-                20.0_f64.sqrt(),
-                2.0,
-                13.0_f64.sqrt(),
-                20.0_f64.sqrt(),
-                0.0,
-            ]
-        );
-
-        let vector =
-            tensor_out(block_on(squareform_builtin(Value::Tensor(matrix), Vec::new())).unwrap());
-        assert_eq!(vector.shape, vec![1, 6]);
-        assert_eq!(
-            vector.materialize_f64(),
-            vec![
-                5.0,
-                4.0,
-                2.0,
-                17.0_f64.sqrt(),
-                13.0_f64.sqrt(),
-                20.0_f64.sqrt(),
-            ]
-        );
-    }
-
-    #[test]
-    fn squareform_reads_typed_integer_storage_exactly() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
-        let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
-        assert_eq!(matrix.shape, vec![3, 3]);
-        assert_eq!(matrix.numeric_dtype(), NumericDType::U8);
-        assert_eq!(
-            matrix.materialize_f64(),
-            vec![0.0, 5.0, 4.0, 5.0, 0.0, 2.0, 4.0, 2.0, 0.0]
-        );
-
-        let matrix = poisoned_int_tensor(IntegerStorage::U8(vec![0, 5, 4, 5, 0, 2, 4, 2, 0]), 3, 3);
-        let vector = tensor_out(block_on(squareform_builtin(matrix, Vec::new())).unwrap());
-        assert_eq!(vector.shape, vec![1, 3]);
-        assert_eq!(vector.numeric_dtype(), NumericDType::U8);
-        assert_eq!(vector.materialize_f64(), vec![5.0, 4.0, 2.0]);
-    }
-
-    #[test]
-    fn squareform_preserves_logical_class_in_both_directions() {
-        let input = Value::LogicalArray(
-            runmat_value::LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap(),
-        );
-        let matrix = block_on(squareform_builtin(input, Vec::new())).unwrap();
-        let Value::LogicalArray(matrix) = matrix else {
-            panic!("logical vector must produce a logical matrix");
-        };
-        assert_eq!(matrix.shape, vec![3, 3]);
-        assert_eq!(matrix.data.as_slice(), &[0, 1, 0, 1, 0, 1, 0, 1, 0]);
-
-        let vector = block_on(squareform_builtin(
-            Value::LogicalArray(matrix),
-            vec![Value::from("tovector")],
-        ))
-        .unwrap();
-        let Value::LogicalArray(vector) = vector else {
-            panic!("logical matrix must produce a logical vector");
-        };
-        assert_eq!(vector.shape, vec![1, 3]);
-        assert_eq!(vector.data.as_slice(), &[1, 0, 1]);
-
-        let bad_diagonal = Value::LogicalArray(
-            runmat_value::LogicalArray::new(vec![1, 0, 0, 0], vec![2, 2]).unwrap(),
-        );
-        assert!(block_on(squareform_builtin(bad_diagonal, Vec::new()))
-            .unwrap_err()
-            .message()
-            .contains("diagonal"));
-    }
-
-    #[test]
-    fn squareform_gates_typed_integer_extension_in_strict_mode() {
-        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
-        let error = block_on(squareform_builtin(vector, Vec::new()))
-            .expect_err("typed-integer squareform must be gated in strict mode");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:SquareformIntegerInputExtension")
-        );
-    }
-
-    #[test]
-    fn seuclidean_scale_reads_typed_integer_storage_length_without_mirror() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let out = block_on(pdist_builtin(
-            int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2),
-            vec![
-                Value::from("seuclidean"),
-                cleared_int_tensor(IntegerStorage::U16(vec![1, 4]), 1, 2),
-            ],
-        ))
-        .unwrap();
-        assert!((tensor_out(out).materialize_f64()[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
-    }
-
-    #[test]
-    fn count_and_logical_parsers_read_all_integer_storage_variants() {
-        let storages = [
-            IntegerStorage::I8(vec![1]),
-            IntegerStorage::I16(vec![1]),
-            IntegerStorage::I32(vec![1]),
-            IntegerStorage::I64(vec![1]),
-            IntegerStorage::U8(vec![1]),
-            IntegerStorage::U16(vec![1]),
-            IntegerStorage::U32(vec![1]),
-            IntegerStorage::U64(vec![1]),
-        ];
-        for storage in storages {
-            let value = poisoned_int_tensor(storage, 1, 1);
-            assert_eq!(
-                parse_positive_integer(KNNSEARCH_NAME, &value, "K").unwrap(),
-                1
-            );
-            assert!(parse_logical_scalar(&value, "IncludeTies").unwrap());
-        }
-    }
-}
+mod tests;

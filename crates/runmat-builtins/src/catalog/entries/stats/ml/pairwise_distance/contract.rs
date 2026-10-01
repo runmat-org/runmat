@@ -73,31 +73,17 @@ const PDIST2_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &OUTPUTS_D_I,
     },
 ];
-const ERRORS: [BuiltinErrorDescriptor; 2] = [
-    BuiltinErrorDescriptor {
-        code: "RM.DISTANCE.INVALID_ARGUMENT",
-        identifier: Some("RunMat:distance:InvalidArgument"),
-        when: "Inputs, dimensions, metrics, metric parameters, or selection options are malformed.",
-        message: "distance helper: invalid argument",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DISTANCE.INTERNAL",
-        identifier: Some("RunMat:distance:Internal"),
-        when: "RunMat cannot allocate or construct a distance output.",
-        message: "distance helper: internal error",
-    },
-];
 pub const PDIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PDIST_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
+    errors: &super::super::distance_errors::DISTANCE_ERRORS,
 };
 pub const PDIST2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PDIST2_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
+    errors: &super::super::distance_errors::DISTANCE_ERRORS,
 };
 
 pub const PDIST_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {

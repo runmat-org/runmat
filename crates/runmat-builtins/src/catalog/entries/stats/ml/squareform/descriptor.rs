@@ -37,25 +37,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &OUTPUTS,
     },
 ];
-const ERRORS: [BuiltinErrorDescriptor; 2] = [
-    BuiltinErrorDescriptor {
-        code: "RM.DISTANCE.INVALID_ARGUMENT",
-        identifier: Some("RunMat:distance:InvalidArgument"),
-        when: "The shape, diagonal, symmetry, or conversion direction is invalid.",
-        message: "distance helper: invalid argument",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DISTANCE.INTERNAL",
-        identifier: Some("RunMat:distance:Internal"),
-        when: "RunMat cannot allocate or construct a distance output.",
-        message: "distance helper: internal error",
-    },
-];
 pub const SQUAREFORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
+    errors: &super::super::distance_errors::DISTANCE_ERRORS,
 };
 
 pub const SQUAREFORM_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =

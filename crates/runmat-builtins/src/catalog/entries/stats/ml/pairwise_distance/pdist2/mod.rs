@@ -5,4 +5,5 @@ mod inference;
 mod tests;
 
 pub use entry::PDIST2_CATALOG_ENTRY;
+
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&PDIST2_CATALOG_ENTRY];
