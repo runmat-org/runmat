@@ -18,6 +18,9 @@ pub enum ProviderPreparationProgram<'a> {
     FloatingCast {
         target: crate::ProviderPrecision,
     },
+    /// Ordinary sum after the runtime has resolved its typed controls.
+    /// The associated workload carries the axes, classes and missing policy.
+    Sum,
 }
 
 /// Resolved physical route, distinct from an operation's numerical capability.
@@ -34,6 +37,7 @@ impl ProviderPreparationProgram<'_> {
             Self::FloatingCast { target } => {
                 Some(ProviderPreparationRoute::FloatingCast { target })
             }
+            Self::Sum => None,
             // Elementwise already carries its complete expression workload.
             Self::Elementwise { .. } => None,
         }

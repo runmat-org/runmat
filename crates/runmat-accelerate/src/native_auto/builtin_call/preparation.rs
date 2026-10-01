@@ -27,6 +27,9 @@ impl ArgumentOperation {
             Self::FloatingCast(target) => Some(
                 runmat_accelerate_api::ProviderPreparationProgram::FloatingCast { target: *target },
             ),
+            Self::AdmittedSum { .. } => {
+                Some(runmat_accelerate_api::ProviderPreparationProgram::Sum)
+            }
             _ => None,
         }
     }

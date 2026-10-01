@@ -298,6 +298,34 @@ impl Drop for ProviderOperationReceipt {
 pub struct ProviderOperationRecorder(Arc<Shared>, #[cfg(feature = "wgpu")] ProgressOwner);
 
 impl ProviderOperationRecorder {
+    /// Domain owners can ignore an unrelated outer operation's receipt when
+    /// they execute as a nested helper. A matching operation still validates
+    /// its actual provider registration when it confirms execution.
+    pub fn expects_operation(&self, operation: &crate::ProviderOperationIdentity) -> bool {
+        self.0.with(|state| {
+            state
+                .expected_execution
+                .as_ref()
+                .is_some_and(|(_, expected)| expected == operation)
+        })
+    }
+
+    /// A provider operation that requires a real device launch cannot be
+    /// certified by a returned resident alias or a mock hook with no submit.
+    pub fn confirm_submitted_provider_execution(
+        &self,
+        device_id: u32,
+        operation: &crate::ProviderOperationIdentity,
+    ) {
+        self.0.with(|state| {
+            if state.registered == 0 {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+                return;
+            }
+        });
+        self.confirm_provider_execution(device_id, operation);
+    }
+
     /// The operation owner must mark fallback even if it subsequently restores
     /// a resident result. A later selected-route event cannot undo invalidation.
     pub fn execution_disposition(&self, disposition: ProviderExecutionDisposition) {

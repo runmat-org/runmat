@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision, ReductionFlavor};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, SumControl, SumOutputClass as OutputTemplate, SUM_ERROR_INTERNAL,
-    SUM_ERROR_INVALID_ARGUMENT, SUM_ERROR_INVALID_INPUT,
+    BuiltinErrorDescriptor, SumControl, SumOutputClass as OutputTemplate, SUM_CATALOG_ENTRY,
+    SUM_ERROR_INTERNAL, SUM_ERROR_INVALID_ARGUMENT, SUM_ERROR_INVALID_INPUT,
 };
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 const NAME: &str = "sum";
@@ -537,7 +537,7 @@ async fn sum_gpu_include(
                 None,
                 parsed.output,
             )?;
-            return provider_output::publish(output, &handle);
+            return publish_submitted_sum(provider, output, &handle);
         }
         let mut current = handle.clone();
         for &dim in &resolved.dims_in_bounds {
@@ -559,7 +559,7 @@ async fn sum_gpu_include(
                 parsed.output,
             )?;
         }
-        return provider_output::publish(current, &handle);
+        return publish_submitted_sum(provider, current, &handle);
     }
 
     if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape()) {
@@ -573,7 +573,7 @@ async fn sum_gpu_include(
                     None,
                     parsed.output,
                 )?;
-                return provider_output::publish(reduced, &handle);
+                return publish_submitted_sum(provider, reduced, &handle);
             }
             Err(error) if error.is_unsupported() => {}
             Err(error) => return Err(sum_provider_error(error)),
@@ -605,7 +605,7 @@ async fn sum_gpu_include(
             }
         }
     }
-    provider_output::publish(current, &handle)
+    publish_submitted_sum(provider, current, &handle)
 }
 
 async fn sum_gpu_with_omitnan(
@@ -682,7 +682,29 @@ async fn sum_gpu_with_omitnan(
             }
         }
     }
-    provider_output::publish(current, &handle)
+    publish_submitted_sum(provider, current, &handle)
+}
+
+fn sum_observation_identity() -> runmat_accelerate_api::ProviderOperationIdentity {
+    runmat_accelerate_api::ProviderOperationIdentity::new(SUM_CATALOG_ENTRY.identity.name)
+}
+
+fn publish_submitted_sum(
+    provider: &'static dyn AccelProvider,
+    output: GpuTensorHandle,
+    input: &GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    let published = provider_output::publish(output, input)?;
+    if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation() {
+        let identity = sum_observation_identity();
+        if recorder.expects_operation(&identity) {
+            // The enclosing receipt separately owns the provider's actual
+            // submission/fence completion. This witness follows validated
+            // reduction publication, never just a returned resident handle.
+            recorder.confirm_submitted_provider_execution(provider.device_id(), &identity);
+        }
+    }
+    Ok(published)
 }
 
 fn sum_provider_error(
@@ -810,6 +832,7 @@ async fn sum_gpu_fallback(
     handle: &GpuTensorHandle,
     parsed: &ParsedArguments,
 ) -> BuiltinResult<Value> {
+    mark_sum_runtime_fallback();
     match gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await? {
         Value::ComplexTensor(tensor) => sum_host_complex_tensor(tensor, parsed),
         Value::Complex(real, imaginary) => sum_host_complex_scalar(real, imaginary, parsed),
@@ -817,6 +840,16 @@ async fn sum_gpu_fallback(
             "sum: exact-owner gather left the input resident",
         )),
         host => sum_host(host, parsed),
+    }
+}
+
+fn mark_sum_runtime_fallback() {
+    if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation() {
+        if recorder.expects_operation(&sum_observation_identity()) {
+            recorder.execution_disposition(
+                runmat_accelerate_api::observation::ProviderExecutionDisposition::SharedRuntimeFallback,
+            );
+        }
     }
 }
 

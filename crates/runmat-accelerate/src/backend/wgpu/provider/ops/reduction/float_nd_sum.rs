@@ -32,6 +32,16 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 "#;
 
 impl WgpuProvider {
+    pub(crate) fn nd_sum_pipeline_key(&self) -> u64 {
+        let workgroup = crate::backend::wgpu::config::effective_workgroup_size();
+        let shader = SHADER.replace("@WG@", &workgroup.to_string());
+        self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            "runmat-nd-sum-f64-bgl",
+            Some(workgroup),
+        )
+    }
+
     pub(crate) fn reduce_nd_sum_f64_exec(
         &self,
         input: &GpuTensorHandle,

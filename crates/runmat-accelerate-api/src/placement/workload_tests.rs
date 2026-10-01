@@ -26,6 +26,7 @@ fn preparation_route_is_explicit_and_round_trips_without_shader_payload() {
         .route(),
         None
     );
+    assert_eq!(ProviderPreparationProgram::Sum.route(), None);
     for target in [ProviderPrecision::F32, ProviderPrecision::F64] {
         let workload = ProviderWorkload {
             preparation_route: ProviderPreparationProgram::FloatingCast { target }.route(),

@@ -12,6 +12,8 @@ mod global;
 pub(crate) struct SumWork {
     pub estimate: ProviderResourceEstimate,
     #[cfg(feature = "wgpu")]
+    pub kernel: SumKernelRoute,
+    #[cfg(feature = "wgpu")]
     pub scalar_visits: u64,
     #[cfg(feature = "wgpu")]
     pub queue_submissions: u32,
@@ -19,6 +21,14 @@ pub(crate) struct SumWork {
     pub allocations: u32,
     #[cfg(feature = "wgpu")]
     pub uniform_bytes: u64,
+}
+
+#[cfg(feature = "wgpu")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub(crate) enum SumKernelRoute {
+    Global,
+    Dimension2,
+    DimensionN,
 }
 
 pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
@@ -45,6 +55,29 @@ pub(crate) fn physical_work(
     query: &ProviderFeasibilityQuery,
 ) -> Option<SumWork> {
     analyze(provider, true, query)?.ok()
+}
+
+#[cfg(feature = "wgpu")]
+pub(crate) fn observation_capability(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+    use runmat_accelerate_api::observation::{
+        ProviderObservationCapability, ProviderObservationOverhead,
+    };
+    let Some(work) = physical_work(provider, query) else {
+        return ProviderObservationCapability::Unsupported;
+    };
+    if work.queue_submissions == 0 {
+        return ProviderObservationCapability::Unsupported;
+    }
+    ProviderObservationCapability::Supported(ProviderObservationOverhead {
+        submissions: work.queue_submissions,
+        requested_peak_buffer_bytes: u64::from(work.queue_submissions)
+            * crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
+        clear_commands: work.queue_submissions,
+        map_callbacks: work.queue_submissions,
+    })
 }
 
 fn analyze(
@@ -254,6 +287,12 @@ fn work(
             output_bytes: Some(requested_output_bytes),
             transient_bytes: None,
             dispatches: Some(dispatches),
+        },
+        #[cfg(feature = "wgpu")]
+        kernel: if input.shape.len() == 2 {
+            SumKernelRoute::Dimension2
+        } else {
+            SumKernelRoute::DimensionN
         },
         #[cfg(feature = "wgpu")]
         scalar_visits: elements.saturating_add(output_elements),

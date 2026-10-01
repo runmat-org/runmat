@@ -39,6 +39,9 @@ impl WgpuProvider {
                 };
                 return self.preparation_keys_snapshot("wgpu-floating-cast-preparation-v1", keys);
             }
+            ProviderPreparationProgram::Sum => {
+                return self.sum_preparation_snapshot(query);
+            }
         };
         let work = crate::placement::fusion_physical_work(self, query)?;
         let mut keys = Vec::new();
@@ -91,6 +94,44 @@ impl WgpuProvider {
         keys.sort_unstable();
         keys.dedup();
         self.preparation_keys_snapshot("wgpu-fusion-preparation-v1", keys)
+    }
+
+    fn sum_preparation_snapshot(
+        &self,
+        query: &ProviderFeasibilityQuery,
+    ) -> Option<ProviderPreparationSnapshot> {
+        let work = crate::placement::sum_physical_work(self, query)?;
+        let initialized = match work.kernel {
+            crate::placement::SumKernelRoute::Global => {
+                self.pipelines.reduce_global.is_initialized()
+            }
+            crate::placement::SumKernelRoute::Dimension2 => {
+                self.pipelines.reduce_dim_sum_mean.is_initialized()
+            }
+            crate::placement::SumKernelRoute::DimensionN => {
+                return self
+                    .preparation_keys_snapshot("wgpu-sum-nd-v1", vec![self.nd_sum_pipeline_key()]);
+            }
+        };
+        let identity = Digest::sha256(
+            serde_json::to_vec(&(
+                "wgpu-sum-prebuilt-v1",
+                query.workload.sum.as_ref()?,
+                work.kernel,
+                self.device_id_exec(),
+            ))
+            .ok()?,
+        );
+        Some(ProviderPreparationSnapshot {
+            identity,
+            state: Some(if initialized {
+                CandidatePreparationState::Warm
+            } else {
+                CandidatePreparationState::Cold
+            }),
+            cold_pipelines: u32::from(!initialized),
+            warm_pipelines: u32::from(initialized),
+        })
     }
 
     fn preparation_keys_snapshot(

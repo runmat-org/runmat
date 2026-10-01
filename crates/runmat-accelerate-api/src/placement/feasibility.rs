@@ -61,8 +61,14 @@ pub struct ProviderFeasibilityQuery {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderResourceEstimate {
+    /// Peak simultaneously requested live bytes for the modeled route, not
+    /// physical pool capacity or total device use. None is an unproven bound.
     pub transient_bytes: Option<u64>,
+    /// Requested bytes retained by the published result, when its physical
+    /// storage and ownership are proven by the provider's route.
     pub output_bytes: Option<u64>,
+    /// Number of actual compute submissions for the complete modeled route;
+    /// none means the physical dispatch inventory is unresolved.
     pub dispatches: Option<u32>,
 }
 

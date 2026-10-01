@@ -1,4 +1,8 @@
 use super::*;
+use runmat_accelerate_api::observation::{
+    with_provider_observation, ProviderObservationFailure, ProviderObservationStatus,
+    ProviderOperationReceipt,
+};
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelDownloadFuture, HostTensorView, NumericElementType,
     ThreadProviderGuard,
@@ -19,6 +23,77 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
+}
+
+#[test]
+fn sum_receipt_requires_actual_submit_and_ignores_unrelated_outer_operation() {
+    let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let sum = super::super::sum_observation_identity();
+    let input = provider
+        .0
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let new_output = || {
+        provider
+            .0
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap()
+    };
+
+    let mut unsubmitted = ProviderOperationReceipt::new();
+    unsubmitted.require_provider_execution(provider.device_id(), sum.clone());
+    let output = new_output();
+    with_provider_observation(Some(unsubmitted.recorder()), || {
+        super::super::publish_submitted_sum(provider, output.handle, &input.handle).unwrap()
+    });
+    assert!(unsubmitted.publish().is_err());
+    assert!(matches!(
+        unsubmitted.status(),
+        ProviderObservationStatus::Failed(ProviderObservationFailure::ExecutionUnproven)
+    ));
+
+    let mut submitted = ProviderOperationReceipt::new();
+    submitted.require_provider_execution(provider.device_id(), sum);
+    let output = new_output();
+    with_provider_observation(Some(submitted.recorder()), || {
+        submitted.recorder().submission().unwrap().complete();
+        super::super::publish_submitted_sum(provider, output.handle, &input.handle).unwrap()
+    });
+    submitted.publish().unwrap();
+    assert!(matches!(
+        submitted.status(),
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+
+    let mut unrelated = ProviderOperationReceipt::new();
+    unrelated.require_provider_execution(
+        provider.device_id(),
+        runmat_accelerate_api::ProviderOperationIdentity::new("fixture.other"),
+    );
+    let output = new_output();
+    with_provider_observation(Some(unrelated.recorder()), || {
+        super::super::publish_submitted_sum(provider, output.handle, &input.handle).unwrap()
+    });
+    assert!(unrelated.publish().is_err());
+    assert!(matches!(
+        unrelated.status(),
+        ProviderObservationStatus::Failed(ProviderObservationFailure::ExecutionUnproven)
+    ));
+
+    let mut fallback = ProviderOperationReceipt::new();
+    fallback.require_provider_execution(
+        provider.device_id(),
+        super::super::sum_observation_identity(),
+    );
+    with_provider_observation(
+        Some(fallback.recorder()),
+        super::super::mark_sum_runtime_fallback,
+    );
+    assert!(matches!(
+        fallback.status(),
+        ProviderObservationStatus::Failed(ProviderObservationFailure::SharedRuntimeFallback)
+    ));
 }
 
 #[test]

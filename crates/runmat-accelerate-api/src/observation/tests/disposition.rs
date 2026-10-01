@@ -112,3 +112,31 @@ fn exact_identity_accepts_same_owner_facade_without_pointer_identity() {
         ProviderObservationStatus::Completed { submissions: 0, .. }
     ));
 }
+
+#[test]
+fn submitted_operation_witness_requires_a_real_registered_submission() {
+    let sum = crate::ProviderOperationIdentity::new("fixture.sum");
+    let other = crate::ProviderOperationIdentity::new("fixture.other");
+    let mut unsubmitted = ProviderOperationReceipt::new();
+    unsubmitted.require_provider_execution(7, sum.clone());
+    let recorder = unsubmitted.recorder();
+    assert!(recorder.expects_operation(&sum));
+    assert!(!recorder.expects_operation(&other));
+    recorder.confirm_submitted_provider_execution(7, &sum);
+    assert!(unsubmitted.publish().is_err());
+    assert!(matches!(
+        unsubmitted.status(),
+        ProviderObservationStatus::Failed(ProviderObservationFailure::ExecutionUnproven)
+    ));
+
+    let mut submitted = ProviderOperationReceipt::new();
+    submitted.require_provider_execution(7, sum.clone());
+    let recorder = submitted.recorder();
+    recorder.submission().unwrap().complete();
+    recorder.confirm_submitted_provider_execution(7, &sum);
+    submitted.publish().unwrap();
+    assert!(matches!(
+        submitted.status(),
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+}

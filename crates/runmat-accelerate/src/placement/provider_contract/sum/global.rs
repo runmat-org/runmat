@@ -107,6 +107,8 @@ pub(super) fn work(
             dispatches: Some(dispatches),
         },
         #[cfg(feature = "wgpu")]
+        kernel: SumKernelRoute::Global,
+        #[cfg(feature = "wgpu")]
         scalar_visits,
         #[cfg(feature = "wgpu")]
         queue_submissions: dispatches,
