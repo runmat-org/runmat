@@ -309,7 +309,11 @@ fn lassoglm_gates_integer_roles_before_gather_and_rejects_lossy_data() {
         &floating,
         &tensor(vec![1.0, 2.0], vec![2, 1]),
         &distr,
-        &[Value::from("NumLambda"), Value::Int(IntValue::U16(20))],
+        &admit_options(vec![
+            Value::from("NumLambda"),
+            Value::Int(IntValue::U16(20)),
+        ])
+        .unwrap(),
     )
     .expect_err("strict mode must reject integer controls before gather");
     assert_eq!(

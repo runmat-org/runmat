@@ -200,7 +200,7 @@ fn lasso_gates_integer_roles_before_gather_and_rejects_lossy_data() {
     let err = ensure_extensions(
         &tensor(vec![1.0, 2.0], vec![2, 1]),
         &tensor(vec![1.0, 2.0], vec![2, 1]),
-        &[Value::from("MaxIter"), Value::Int(IntValue::U16(20))],
+        &admit_options(vec![Value::from("MaxIter"), Value::Int(IntValue::U16(20))]).unwrap(),
     )
     .expect_err("strict mode must reject integer controls before gather");
     assert_eq!(

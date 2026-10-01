@@ -77,7 +77,10 @@ fn omitnan_sum_retires_cleaned_owner_on_cancel_and_failure_without_gathering() {
             nan_mode: ReductionNaN::Omit,
             output: OutputTemplate::Double,
         };
-        let mut future = Box::pin(sum_gpu_with_omitnan(input.handle.clone(), &parsed));
+        let mut future = Box::pin(super::omit::sum_gpu_with_omitnan(
+            input.handle.clone(),
+            &parsed,
+        ));
         let waker = futures::task::noop_waker();
         match (fail, future.as_mut().poll(&mut Context::from_waker(&waker))) {
             (false, Poll::Pending) => {}
@@ -244,8 +247,11 @@ fn malformed_nan_map_fails_before_reduction_and_retires_result() {
         nan_mode: ReductionNaN::Omit,
         output: OutputTemplate::Default,
     };
-    let error = futures::executor::block_on(sum_gpu_with_omitnan(input.handle.clone(), &parsed))
-        .unwrap_err();
+    let error = futures::executor::block_on(super::omit::sum_gpu_with_omitnan(
+        input.handle.clone(),
+        &parsed,
+    ))
+    .unwrap_err();
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     assert_eq!(provider.results.lock().unwrap()[0].retirements(), 1);
