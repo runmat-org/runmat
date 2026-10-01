@@ -9,14 +9,14 @@ use runmat_types::MemberAccess;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, GRIDDED_INTEGER_GRID_EXTENSION, GRIDDED_INTEGER_QUERY_EXTENSION,
+    GRIDDED_INTEGER_VALUES_EXTENSION, GRIDDED_INTERPOLANT_CLASS_IDENTITY,
+    GRIDDED_INTERPOLANT_ERROR_INTERNAL as ERROR_INTERNAL,
+    GRIDDED_INTERPOLANT_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT,
+    GRIDDED_INTERPOLANT_ERROR_UNSUPPORTED_METHOD as ERROR_UNSUPPORTED_METHOD,
 };
+#[cfg(test)]
+use runmat_builtins::{GRIDDED_INTERPOLANT_EXTENSIONS, GRIDDED_INTERPOLANT_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, IntValue, IntegerStorage, NumericDType, ObjectInstance, Tensor, Value,
@@ -35,8 +35,7 @@ use super::pp::{
 };
 
 const BUILTIN_NAME: &str = "griddedInterpolant";
-const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("griddedInterpolant");
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity = GRIDDED_INTERPOLANT_CLASS_IDENTITY;
 const BUILTIN_SUBSREF: &str = "griddedInterpolant.subsref";
 const GRID_VECTORS: &str = "GridVectors";
 const VALUES: &str = "Values";
@@ -127,220 +126,6 @@ impl QueryPlan {
     }
 }
 
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "F",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Gridded interpolant object.",
-}];
-
-const SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Indexed value or property.",
-}];
-
-const INPUTS_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description:
-        "Grid vectors or full grids, values, interpolation method, and extrapolation method.",
-}];
-
-const SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "griddedInterpolant object.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "F = griddedInterpolant",
-        inputs: &[],
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = griddedInterpolant(V)",
-        inputs: &INPUTS_VARIADIC,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = griddedInterpolant(x, v)",
-        inputs: &INPUTS_VARIADIC,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = griddedInterpolant(gridVecs, V)",
-        inputs: &INPUTS_VARIADIC,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = griddedInterpolant(X1, X2, ..., Xn, V)",
-        inputs: &INPUTS_VARIADIC,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = griddedInterpolant(___, Method)",
-        inputs: &INPUTS_VARIADIC,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = griddedInterpolant(___, Method, ExtrapolationMethod)",
-        inputs: &INPUTS_VARIADIC,
-        outputs: &OUTPUT,
-    },
-];
-
-const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = griddedInterpolant.subsref(obj, S)",
-    inputs: &SUBSREF_INPUTS,
-    outputs: &SUBSREF_OUTPUT,
-}];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GRIDDEDINTERPOLANT.INVALID_INPUT",
-    identifier: Some("RunMat:griddedInterpolant:InvalidInput"),
-    when: "Grid, value, method, or query inputs are invalid.",
-    message: "griddedInterpolant: invalid input",
-};
-
-const ERROR_UNSUPPORTED_METHOD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GRIDDEDINTERPOLANT.UNSUPPORTED_METHOD",
-    identifier: Some("RunMat:griddedInterpolant:UnsupportedMethod"),
-    when: "The requested interpolation or extrapolation method is not implemented by RunMat.",
-    message: "griddedInterpolant: unsupported interpolation method",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GRIDDEDINTERPOLANT.INTERNAL",
-    identifier: Some("RunMat:griddedInterpolant:Internal"),
-    when: "Object construction, property access, or interpolation output construction fails.",
-    message: "griddedInterpolant: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ERROR_INVALID_INPUT,
-    ERROR_UNSUPPORTED_METHOD,
-    ERROR_INTERNAL,
-];
-
-pub const GRIDDED_INTERPOLANT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const GRIDDED_INTERPOLANT_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &ERRORS,
-};
-
-const GRIDDED_INTEGER_GRID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "griddedinterpolant-integer-grid",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "griddedInterpolant with typed-integer sample grids is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GriddedInterpolantIntegerGridExtension"),
-};
-
-const GRIDDED_INTEGER_VALUES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "griddedinterpolant-integer-values",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "griddedInterpolant with typed-integer sample values is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GriddedInterpolantIntegerValuesExtension"),
-};
-
-const GRIDDED_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "griddedinterpolant-integer-query",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "griddedInterpolant with typed-integer query coordinates is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GriddedInterpolantIntegerQueryExtension"),
-};
-
-pub const GRIDDED_INTERPOLANT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    GRIDDED_INTEGER_GRID_EXTENSION,
-    GRIDDED_INTEGER_VALUES_EXTENSION,
-    GRIDDED_INTEGER_QUERY_EXTENSION,
-];
-
-const GRIDDED_INTEGER_GRID_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x, X_i, or gridVecs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes must be exactly representable at the binary64 interpolation-coordinate boundary.",
-    }];
-
-const GRIDDED_INTEGER_VALUES_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "v, V, or Values",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes must be exactly representable before the object stores ordinary double Values.",
-    }];
-
-const GRIDDED_INTEGER_QUERY_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Xq, Xq_i, or query grid vectors",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All query syntaxes admit the same eight integer classes only when every coordinate is exactly representable as binary64.",
-    }];
-
-pub const GRIDDED_INTERPOLANT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "F = griddedInterpolant(integer_grid, V, ...)",
-        inputs: &GRIDDED_INTEGER_GRID_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer sample grids cross one checked binary64 boundary; the constructor returns an interpolant object whose GridVectors are floating arrays.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "F = griddedInterpolant(grid, integer_V, ...)",
-        inputs: &GRIDDED_INTEGER_VALUES_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer sample values cross one checked binary64 boundary, are stored as double Values, and produce double evaluations.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = F(integer_query)",
-        inputs: &GRIDDED_INTEGER_QUERY_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer query coordinates cross one checked binary64 boundary; output precision continues to follow the interpolant Values class.",
-    },
-];
-
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
@@ -371,10 +156,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Interpolant object construction and evaluation are runtime sinks.",
 };
-
-fn gridded_interpolant_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
 
 fn gridded_error(
     descriptor: &'static BuiltinErrorDescriptor,
@@ -441,19 +222,7 @@ fn ensure_gridded_interpolant_class_registered() {
 
 #[runtime_builtin(
     name = "griddedInterpolant",
-    category = "math/interpolation",
-    summary = "Create a gridded data interpolant object.",
-    keywords = "griddedInterpolant,interpolation,grid,linear,nearest,object",
-    type_resolver(gridded_interpolant_type),
-    descriptor(
-        crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_DESCRIPTOR
-    ),
-    extensions(
-        crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_EXTENSIONS
-    ),
-    integer_capabilities(
-        crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
 async fn gridded_interpolant_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -466,10 +235,7 @@ async fn gridded_interpolant_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "griddedInterpolant.subsref",
-    type_resolver(gridded_interpolant_type),
-    descriptor(
-        crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_SUBSREF_DESCRIPTOR
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
 async fn gridded_interpolant_subsref(obj: Value, subscript: Value) -> BuiltinResult<Value> {
