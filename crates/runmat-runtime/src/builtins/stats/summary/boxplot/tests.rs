@@ -325,6 +325,15 @@ fn axis_limits_remain_finite_for_extreme_and_constant_finite_data() {
         .expect("constant maximum has a representable neighboring bound");
     assert_eq!(data, Some((f64::MAX.next_down(), f64::MAX)));
 
+    stats.q1 = -f64::MAX;
+    stats.median = -f64::MAX;
+    stats.q3 = -f64::MAX;
+    stats.lower_whisker = -f64::MAX;
+    stats.upper_whisker = -f64::MAX;
+    let (_, data) = super::plot::axis_limits(&[stats.clone()], &BoxplotOptions::default())
+        .expect("constant negative maximum has a representable neighboring bound");
+    assert_eq!(data, Some((-f64::MAX, (-f64::MAX).next_up())));
+
     stats.position = f64::MAX;
     stats.width = f64::MAX;
     let error = super::plot::axis_limits(&[stats], &BoxplotOptions::default())

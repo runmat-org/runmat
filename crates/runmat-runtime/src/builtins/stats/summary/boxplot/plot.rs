@@ -117,16 +117,18 @@ pub(super) fn axis_limits(
     if min_data == max_data {
         let lower = min_data - 0.5;
         let upper = max_data + 0.5;
-        min_data = if lower.is_finite() && lower < min_data {
-            lower
-        } else {
-            min_data.next_down()
-        };
-        max_data = if upper.is_finite() && upper > max_data {
-            upper
-        } else {
-            max_data.next_up()
-        };
+        let next_lower = min_data.next_down();
+        let next_upper = max_data.next_up();
+        if lower.is_finite() && lower < min_data {
+            min_data = lower;
+        } else if next_lower.is_finite() {
+            min_data = next_lower;
+        }
+        if upper.is_finite() && upper > max_data {
+            max_data = upper;
+        } else if next_upper.is_finite() {
+            max_data = next_upper;
+        }
     } else {
         let span = max_data - min_data;
         if span.is_finite() {
