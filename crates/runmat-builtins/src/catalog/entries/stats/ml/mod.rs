@@ -16,6 +16,7 @@ mod lasso;
 mod lassoglm;
 mod linkage;
 mod lscov;
+mod mnrfit;
 mod optimizable_variable;
 mod pairwise_distance;
 mod perfcurve;
@@ -40,6 +41,7 @@ pub use self::lasso::*;
 pub use self::lassoglm::*;
 pub use self::linkage::*;
 pub use self::lscov::*;
+pub use self::mnrfit::*;
 pub use self::optimizable_variable::*;
 pub use self::pairwise_distance::*;
 pub use self::perfcurve::*;
@@ -71,4 +73,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(optimizable_variable::ENTRIES.iter().copied());
     values.extend(classify::ENTRIES.iter().copied());
     values.extend(perfcurve::ENTRIES.iter().copied());
+    values.extend(mnrfit::ENTRIES.iter().copied());
 }

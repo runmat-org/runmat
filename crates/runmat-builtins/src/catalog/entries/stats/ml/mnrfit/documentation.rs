@@ -103,7 +103,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Provider failure and host admission", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/provider_tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Integer regression semantics", location: "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs" },
         ],
-        notes: &["The legacy editable sidecar remains until field parity, exporter output, and example execution are qualified."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

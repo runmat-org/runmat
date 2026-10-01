@@ -103,7 +103,7 @@ async fn mnrfit_in_runtime(
     ensure_extensions(&x, &y, &rest, &inspected)?;
     let names = options::validate(&rest, inspected)?;
     let response = admission::prepare(&x, y)?;
-    let values = rest.into_iter().skip(1).step_by(2).collect();
+    let values = rest.into_iter().skip(1).step_by(2);
     let prepared = prepare_values(names.into_iter().zip(values).collect())?;
     prepared.preflight_host_weights(response.rows())?;
     let x = gather_value(x).await?;

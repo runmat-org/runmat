@@ -396,7 +396,7 @@ fn numeric_outcomes(
                     .partial_cmp(value)
                     .expect("numeric response classes were filtered to finite values")
             })
-            .ok_or_else(|| internal("mnrfit: failed to map response class"))?;
+            .map_err(|_| internal("mnrfit: failed to map response class"))?;
         if class_idx < logits {
             outcomes[class_idx][row] = 1.0;
         }
@@ -440,7 +440,7 @@ fn text_outcomes(
     for (row, value) in values.iter().enumerate() {
         let class_idx = classes
             .binary_search(value)
-            .ok_or_else(|| internal("mnrfit: failed to map response class"))?;
+            .map_err(|_| internal("mnrfit: failed to map response class"))?;
         if class_idx < logits {
             outcomes[class_idx][row] = 1.0;
         }
