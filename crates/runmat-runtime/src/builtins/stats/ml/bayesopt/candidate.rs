@@ -209,6 +209,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn candidate_identity_keeps_text_categories_distinct_from_numeric_values() {
+        let numeric = VariableValue::Numeric(1.0);
+        let text = VariableValue::Categorical("1.00000000000000000".into());
+        assert_ne!(numeric.key(), text.key());
+        assert_eq!(
+            VariableValue::Numeric(-0.0).key(),
+            VariableValue::Numeric(0.0).key()
+        );
+    }
+
+    #[test]
     fn wide_finite_real_range_does_not_make_nan_candidates() {
         let lower = -f64::MAX;
         let upper = f64::MAX;

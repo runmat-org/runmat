@@ -155,17 +155,6 @@ fn failed_variable_download_keeps_nested_cause_and_borrowed_allocation() {
         .expect("failed gather must not retire caller allocation");
 }
 
-#[test]
-fn candidate_identity_keeps_text_categories_distinct_from_numeric_values() {
-    let numeric = VariableValue::Numeric(1.0);
-    let text = VariableValue::Categorical("1.00000000000000000".into());
-    assert_ne!(numeric.key(), text.key());
-    assert_eq!(
-        VariableValue::Numeric(-0.0).key(),
-        VariableValue::Numeric(0.0).key()
-    );
-}
-
 fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     let tensor = Tensor::new_integer(storage, shape).unwrap();
     Value::Tensor(tensor)
@@ -192,27 +181,27 @@ fn option_parsers_read_all_integer_storage_variants() {
         );
         assert_eq!(option_unit_f64(&value, "ExplorationRatio").unwrap(), 1.0);
     }
+}
 
-    #[test]
-    fn cancelled_invocation_stops_before_search_or_callback() {
-        let source = CancellationSource::new();
-        let runtime = crate::context::RuntimeContext::with_cancellation(
-            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
-            source.token(),
-        );
-        source.cancel(CancellationReason::User);
-        let error = block_on(bayesopt_in_runtime(
-            Some(&runtime),
-            None,
-            Value::Num(0.0),
-            Value::Num(0.0),
-            vec![],
-        ))
-        .expect_err("cancelled call must not invoke objective");
-        assert!(error
-            .identifier()
-            .is_some_and(|identifier| identifier.ends_with(":Cancelled")));
-    }
+#[test]
+fn cancelled_invocation_stops_before_search_or_callback() {
+    let source = CancellationSource::new();
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+        source.token(),
+    );
+    source.cancel(CancellationReason::User);
+    let error = block_on(bayesopt_in_runtime(
+        Some(&runtime),
+        None,
+        Value::Num(0.0),
+        Value::Num(0.0),
+        vec![],
+    ))
+    .expect_err("cancelled call must not invoke objective");
+    assert!(error
+        .identifier()
+        .is_some_and(|identifier| identifier.ends_with(":Cancelled")));
 }
 
 fn categorical_variable(name: &str, categories: Vec<&str>) -> Value {
