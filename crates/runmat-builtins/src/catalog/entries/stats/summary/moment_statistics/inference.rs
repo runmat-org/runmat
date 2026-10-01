@@ -78,6 +78,7 @@ pub(super) fn infer(
         }
     };
     output.storage = match output.shape.element_count() {
+        Some(1) if class == Some(NumericClass::Single) => StorageFact::Dense,
         Some(1) => StorageFact::Scalar,
         Some(_) => StorageFact::Dense,
         None => StorageFact::Unknown,
@@ -359,6 +360,33 @@ mod tests {
                     DimensionFact::Known(4),
                 ],
             }
+        );
+    }
+
+    #[test]
+    fn single_element_single_remains_a_typed_tensor() {
+        let request = CallRequest {
+            arguments: vec![ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Single,
+                    domain: NumericDomain::Real,
+                }),
+                ShapeFact::from(vec![Some(3), Some(1)]),
+                StorageFact::Dense,
+            )],
+            literals: LiteralContext::new(vec![LiteralValue::Unknown]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let result = infer(
+            &request,
+            &super::super::MAD_CATALOG_ENTRY,
+            MomentStatisticKind::MeanAbsoluteDeviation,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].storage, StorageFact::Dense);
+        assert_eq!(
+            result.outputs[0].numeric().unwrap().class,
+            NumericClass::Single
         );
     }
 }
