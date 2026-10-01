@@ -33,7 +33,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Tape lifetime and supported differentiation",
             paragraphs: &[
                 "A bounded reverse-mode tape is active only while the callback is being polled or dropped. Nested callbacks keep distinct graphs, and a suspended callback does not expose its tape to another invocation. The callback may call dlgradient on a scalar traced loss to differentiate host dlarray values and supported dlnetwork learnables.",
-                "The current tape records host dlarray plus, minus, elementwise times and rdivide, matrix mtimes, scalar sum over all elements, and supported fully connected, ReLU, ELU, and softmax forward chains. Complex, sparse, general higher-rank broadcast gradients, recurrent or custom layers, and provider-resident tape kernels remain outside this subset. A GPU-backed dlarray can be wrapped without download outside a tape, but dlfeval rejects it when tracing would require an unavailable resident kernel.",
+                "The host tape records dlarray plus, minus, elementwise times and rdivide, matrix mtimes, scalar sum over all elements, and admitted sequential network operations including convolution1d, LSTM/BiLSTM, layer normalization, global average pooling1d, fully connected, ReLU, ELU, and softmax. Complex, sparse, general higher-rank broadcast gradients, custom layers, and resident operations without an admitted adjoint remain outside this subset. A GPU-backed dlarray can be wrapped without download outside a tape, but dlfeval rejects it when tracing would require an unavailable resident kernel.",
             ],
         },
     ],

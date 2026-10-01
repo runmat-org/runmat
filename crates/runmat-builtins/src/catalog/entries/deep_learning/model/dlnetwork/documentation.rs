@@ -25,14 +25,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("dlnetwork"),
     slug: Some("dlnetwork"),
     summary: "Create a value-backed network from supported sequential layers.",
-    description: "`dlnetwork(layers)` stores a supported layer collection or `layerGraph` in a network object with layer names, learnables, state, and input/output names. RunMat currently executes a sequential feed-forward subset rather than arbitrary Deep Learning Toolbox architectures.",
+    description: "`dlnetwork(layers)` stores a supported layer collection or `layerGraph` in a network object with layer names, learnables, state, and input/output names. RunMat executes admitted sequential layer sequences; arbitrary branching architectures and custom layers are not supported.",
     keywords: &["dlnetwork", "deep learning", "network", "learnables", "forward"],
     related: &["forward", "dlfeval", "dlgradient", "layerGraph", "fullyConnectedLayer"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Layers and initialization",
             paragraphs: &[
-                "A layer object, cell collection, or layer graph can supply the layers. The supported forward sequence uses `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`. Branching graph connections, recurrent, convolutional, normalization, sequence and image-input layers, custom layers, and general training graphs are not executed by this constructor.",
+                "A layer object, cell collection, or layer graph can supply the layers. Admitted sequential execution covers feature and sequence inputs, fully connected and convolution1d transforms, LSTM and bidirectional LSTM, layer normalization, global average pooling1d, ReLU, ELU, softmax, and classification or regression output layers. Geometry, format, parameters, and state still determine whether a particular sequence can execute. Branching graph connections, image-input and custom layers, and arbitrary training graphs are not supported.",
                 "The result stores `Layers`, `LayerNames`, `InputNames`, `OutputNames`, `Connections`, and `Initialized`. `Learnables` is an editable table projected from parameter values in `Layers`, not a second parameter store. `State` is a validated table projected from the network's single private state store. Supplied fully connected weights and bias are retained. With the default `Initialize=true`, missing fully connected weights receive deterministic values based on the preceding feature width and missing bias values are zero. Missing parameters of other layer families keep the network uninitialized until admitted initializers or replacements supply them. `Initialize=false` retains missing parameters and marks the network uninitialized; `forward` requires initialized parameters.",
                 "The supported `OutputNames` option names the final layer of this single-output sequential network. Unknown options and a name that does not identify that final layer are rejected. InputNames is derived from the first layer, not an accepted constructor option.",
                 "A vector-valued feature input can be stored as layer metadata in RunMat mode, but this sequential forward implementation requires one feature dimension and rejects a vector width when it must execute or initialize a following fully connected layer.",
@@ -42,7 +42,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Placement and learnables",
             paragraphs: &[
                 "Construction creates host metadata without downloading nested numeric learnables. A resident weight remains owned by its input layer until a consumer explicitly prepares that weight. The constructor does not run a GPU kernel or start a training tape.",
-                "Within `dlfeval`, supported fully connected learnables can be traced for `dlgradient` in custom training loops. This does not imply support for every network architecture or provider-resident training operation.",
+                "Within `dlfeval`, admitted host sequential layers and learnables can be traced for `dlgradient` in custom training loops. The resident differentiation subset is narrower; this does not imply support for every network architecture or provider-resident training operation.",
                 "Assigning a complete `Learnables` table validates parameter identities, storage, and dimensions before changing the value network. Empty parameter values mark it uninitialized; replacing every required value can initialize it. Parameter values in GPU storage remain resident during projection and assignment.",
             ],
         },
