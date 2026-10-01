@@ -40,7 +40,7 @@ fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
     }
 }
 
-fn exact_integer_as_f64(value: &IntValue, label: &str) -> BuiltinResult<f64> {
+pub(super) fn exact_integer_as_f64(value: &IntValue, label: &str) -> BuiltinResult<f64> {
     if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(value.to_f64())
     } else {

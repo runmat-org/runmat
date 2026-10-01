@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
     ThreadProviderGuard,
 };
-use runmat_value::StructValue;
+use runmat_value::{StringArray, StructValue};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 struct FailingDownloadProvider {
@@ -129,6 +129,59 @@ async fn mnrfit_decodes_host_controls_before_provider_effects_and_skips_ignored_
     .expect_err("selected resident option must retain provider failure");
     assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 1);
     assert!(error.source.is_some());
+    assert_eq!(resident.probe.retirements(), 0);
+    drop(resident.handle);
+    assert_eq!(resident.probe.retirements(), 1);
+}
+
+#[tokio::test]
+async fn mnrfit_rejects_host_visible_x_and_y_before_other_operand_download() {
+    let provider = Box::leak(Box::new(FailingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+
+    for invalid_y in [
+        Value::Int(runmat_value::IntValue::I64(1)),
+        Value::StringArray(
+            StringArray::new(
+                vec!["a".into(), "b".into(), "a".into(), "b".into()],
+                vec![2, 2],
+            )
+            .unwrap(),
+        ),
+    ] {
+        mnrfit_builtin(
+            Value::GpuTensor(resident.handle.clone()),
+            invalid_y,
+            Vec::new(),
+        )
+        .await
+        .expect_err("known-invalid Y must reject before X download");
+        assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
+    }
+    for invalid_x in [
+        Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 1, 2]).unwrap()),
+        Value::Int(runmat_value::IntValue::I64((1_i64 << 53) + 1)),
+    ] {
+        mnrfit_builtin(
+            invalid_x,
+            Value::GpuTensor(resident.handle.clone()),
+            Vec::new(),
+        )
+        .await
+        .expect_err("known-invalid X must reject before Y download");
+        assert_eq!(provider.downloads.load(AtomicOrdering::SeqCst), 0);
+    }
+    let valid_x = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1, 1]).unwrap());
+    let valid_y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1, 1]).unwrap());
+    admission::preflight(&valid_x, &valid_y).expect("trailing singleton axes preserve 2-D forms");
     assert_eq!(resident.probe.retirements(), 0);
     drop(resident.handle);
     assert_eq!(resident.probe.retirements(), 1);

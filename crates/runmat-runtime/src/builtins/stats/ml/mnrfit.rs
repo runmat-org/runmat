@@ -1,5 +1,6 @@
 //! Multinomial logistic regression compatibility helper.
 
+mod admission;
 mod data;
 mod numeric;
 mod options;
@@ -68,6 +69,7 @@ pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
     let inspected = options::inspect(&rest);
     ensure_extensions(&x, &y, &rest, &inspected)?;
     let names = options::validate(&rest, inspected)?;
+    admission::preflight(&x, &y)?;
     let values = rest.into_iter().skip(1).step_by(2).collect();
     let prepared = prepare_values(names.into_iter().zip(values).collect())?;
     let x = gather_value(x).await?;
