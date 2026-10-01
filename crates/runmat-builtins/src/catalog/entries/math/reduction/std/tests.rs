@@ -1,0 +1,171 @@
+use super::*;
+use runmat_types::{
+    CallInference, CallRequest, CertaintyFact, DynamicReason, LiteralContext, LiteralValue,
+    NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ResidencyFact,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
+};
+
+fn numeric(class: NumericClass, shape: ShapeFact) -> ValueFact {
+    ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Real,
+        }),
+        shape,
+        StorageFact::Dense,
+    )
+}
+
+fn call(input: ValueFact, controls: Vec<LiteralValue>, outputs: usize) -> CallInference {
+    let mut arguments = vec![input];
+    arguments.extend(controls.iter().map(|literal| match literal {
+        LiteralValue::String(_) | LiteralValue::Character(_) | LiteralValue::Keyword(_) => {
+            ValueFact::scalar(ValueKindFact::String)
+        }
+        _ => numeric(NumericClass::Double, ShapeFact::Scalar),
+    }));
+    let mut literals = vec![LiteralValue::Unknown];
+    literals.extend(controls);
+    inference::infer(
+        &CallRequest {
+            arguments,
+            literals: LiteralContext::new(literals),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(outputs)),
+        },
+        &STD_CATALOG_ENTRY,
+    )
+}
+
+#[test]
+fn descriptor_preserves_public_forms_defaults_errors_and_integer_policy() {
+    let labels: Vec<_> = STD_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|signature| signature.label)
+        .collect();
+    for form in [
+        "S = std(A)",
+        "S = std(A, w)",
+        "S = std(A, w, dim)",
+        "S = std(A, w, vecdim)",
+        "S = std(A, w, \"all\")",
+        "S = std(A, nanflag)",
+        "S = std(A, w, nanflag)",
+        "S = std(A, w, dim, nanflag)",
+        "S = std(A, w, nanflag, dim)",
+        "S = std(A, w, [], nanflag)",
+    ] {
+        assert!(labels.contains(&form), "missing {form}");
+    }
+    let normalization = STD_DESCRIPTOR
+        .signatures
+        .iter()
+        .flat_map(|signature| signature.inputs)
+        .find(|input| input.name == "w")
+        .expect("normalization descriptor");
+    assert_eq!(normalization.default, Some("0"));
+    let missing = STD_DESCRIPTOR
+        .signatures
+        .iter()
+        .flat_map(|signature| signature.inputs)
+        .find(|input| input.name == "nanflag")
+        .expect("missing-data descriptor");
+    assert_eq!(missing.default, Some("\"includemissing\""));
+    assert_eq!(STD_DESCRIPTOR.errors.len(), 4);
+    for code in [
+        STD_ERROR_INVALID_ARGUMENT.code,
+        STD_ERROR_INVALID_INPUT.code,
+        STD_ERROR_COMPLEX_UNSUPPORTED.code,
+        STD_ERROR_INTERNAL.code,
+    ] {
+        assert!(STD_DESCRIPTOR.errors.iter().any(|error| error.code == code));
+    }
+    assert_eq!(STD_INTEGER_CAPABILITIES.len(), 2);
+    assert_eq!(STD_EXTENSIONS.len(), 1);
+}
+
+#[test]
+fn proven_double_shape_and_invalid_controls_remain_conservative() {
+    let shape = ShapeFact::from(vec![Some(3), Some(4)]);
+    let second = call(
+        numeric(NumericClass::Double, shape.clone()),
+        vec![LiteralValue::Number(0.0), LiteralValue::Number(2.0)],
+        1,
+    );
+    assert_eq!(
+        second.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), Some(1)])
+    );
+    assert_eq!(
+        second.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+
+    for controls in [
+        vec![
+            LiteralValue::String("all".into()),
+            LiteralValue::Number(2.0),
+        ],
+        vec![
+            LiteralValue::Number(0.0),
+            LiteralValue::Number(2.0),
+            LiteralValue::Number(2.0),
+        ],
+        vec![
+            LiteralValue::Number(0.0),
+            LiteralValue::Vector(vec![2.0, 2.0]),
+        ],
+    ] {
+        let result = call(numeric(NumericClass::Double, shape.clone()), controls, 1);
+        assert!(matches!(
+            result.outputs[0].certainty,
+            CertaintyFact::Dynamic(_)
+        ));
+    }
+}
+
+#[test]
+fn single_output_class_and_resident_placement_are_not_overclaimed() {
+    let shape = ShapeFact::from(vec![Some(3), Some(2)]);
+    let single = call(numeric(NumericClass::Single, shape.clone()), vec![], 1);
+    assert_eq!(
+        single.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(2)])
+    );
+    assert!(matches!(
+        single.outputs[0].certainty,
+        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+    ));
+
+    let mut resident = numeric(NumericClass::Double, shape);
+    resident.residency = ResidencyFact::Device { provider: None };
+    let result = call(resident, vec![], 2);
+    assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
+    assert_eq!(result.outputs[0].storage, StorageFact::Unknown);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-CALL-ARITY"));
+}
+
+#[test]
+fn integer_and_complex_inputs_report_owning_diagnostics() {
+    let integer = call(numeric(NumericClass::UInt64, ShapeFact::Scalar), vec![], 1);
+    assert!(integer
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == STD_ERROR_INVALID_INPUT.code));
+    let complex = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let result = call(complex, vec![], 1);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == STD_ERROR_COMPLEX_UNSUPPORTED.code));
+}

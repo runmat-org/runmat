@@ -3,220 +3,12 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderNanMode, ProviderStdNormalization,
 };
 use runmat_builtins::{
-    infer_std_type, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, DispersionControl, DispersionNormalization as StdNormalization,
-    Type,
+    BuiltinErrorDescriptor, DispersionControl, DispersionNormalization as StdNormalization,
+    STD_ERROR_COMPLEX_UNSUPPORTED, STD_ERROR_INTERNAL, STD_ERROR_INVALID_ARGUMENT,
+    STD_ERROR_INVALID_INPUT, STD_TYPED_INTEGER_CONTROL_EXTENSION,
 };
 use runmat_value::{Tensor, Value};
 const NAME: &str = "std";
-
-const TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "std-typed-integer-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "std with a typed-integer normalization or dimension control is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StdTypedIntegerControlExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TYPED_INTEGER_CONTROL_EXTENSION];
-
-use runmat_builtins::ResolveContext;
-
-fn std_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    infer_std_type(args, ctx)
-}
-
-const STD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Standard deviation reduction result.",
-}];
-
-const STD_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single- or double-precision input array.",
-};
-
-const STD_PARAM_W: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "w",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("0"),
-    description: "Normalization flag or empty placeholder ([]).",
-};
-
-const STD_PARAM_AXES: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "axes",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("[]"),
-    description: "Dimension selector, vector of dimensions, or \"all\".",
-};
-
-const STD_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nanflag",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"includemissing\""),
-    description:
-        "Missing-value mode: \"includemissing\"/\"includenan\" or \"omitmissing\"/\"omitnan\".",
-};
-
-const STD_INPUTS_A: [BuiltinParamDescriptor; 1] = [STD_PARAM_A];
-const STD_INPUTS_A_W: [BuiltinParamDescriptor; 2] = [STD_PARAM_A, STD_PARAM_W];
-const STD_INPUTS_A_W_AXES: [BuiltinParamDescriptor; 3] = [STD_PARAM_A, STD_PARAM_W, STD_PARAM_AXES];
-const STD_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [STD_PARAM_A, STD_PARAM_NANFLAG];
-const STD_INPUTS_A_W_NANFLAG: [BuiltinParamDescriptor; 3] =
-    [STD_PARAM_A, STD_PARAM_W, STD_PARAM_NANFLAG];
-const STD_INPUTS_A_W_AXES_NANFLAG: [BuiltinParamDescriptor; 4] =
-    [STD_PARAM_A, STD_PARAM_W, STD_PARAM_AXES, STD_PARAM_NANFLAG];
-const STD_INPUTS_A_W_NANFLAG_AXES: [BuiltinParamDescriptor; 4] =
-    [STD_PARAM_A, STD_PARAM_W, STD_PARAM_NANFLAG, STD_PARAM_AXES];
-const STD_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
-    BuiltinSignatureDescriptor {
-        label: "S = std(A)",
-        inputs: &STD_INPUTS_A,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, w)",
-        inputs: &STD_INPUTS_A_W,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, w, dim)",
-        inputs: &STD_INPUTS_A_W_AXES,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, w, vecdim)",
-        inputs: &STD_INPUTS_A_W_AXES,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, w, \"all\")",
-        inputs: &STD_INPUTS_A_W_AXES,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, nanflag)",
-        inputs: &STD_INPUTS_A_NANFLAG,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, w, nanflag)",
-        inputs: &STD_INPUTS_A_W_NANFLAG,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, w, dim, nanflag)",
-        inputs: &STD_INPUTS_A_W_AXES_NANFLAG,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, w, nanflag, dim)",
-        inputs: &STD_INPUTS_A_W_NANFLAG_AXES,
-        outputs: &STD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = std(A, w, [], nanflag)",
-        inputs: &STD_INPUTS_A_W_AXES_NANFLAG,
-        outputs: &STD_OUTPUT,
-    },
-];
-
-const STD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STD.INVALID_ARGUMENT",
-    identifier: Some("RunMat:std:InvalidArgument"),
-    when: "Argument grammar, dimensions, normalization, or missing-value selectors are invalid.",
-    message: "std: invalid argument",
-};
-
-const STD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STD.INVALID_INPUT",
-    identifier: Some("RunMat:std:InvalidInput"),
-    when: "Input values are outside the supported floating std reduction domains, including integer data.",
-    message: "std: invalid input",
-};
-
-const STD_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STD.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:std:ComplexUnsupported"),
-    when: "Input value is complex for a path that currently supports only real reductions.",
-    message: "std: complex inputs are not supported yet",
-};
-
-const STD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STD.INTERNAL",
-    identifier: Some("RunMat:std:Internal"),
-    when: "Execution fails due to conversion, provider, upload, allocation, or fallback internals.",
-    message: "std: internal reduction failure",
-};
-
-const STD_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    STD_ERROR_INVALID_ARGUMENT,
-    STD_ERROR_INVALID_INPUT,
-    STD_ERROR_COMPLEX_UNSUPPORTED,
-    STD_ERROR_INTERNAL,
-];
-
-pub const STD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STD_ERRORS,
-};
-
-const REJECTED_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data domain is single, double, datetime, duration, table, or timetable; every typed-integer data class is rejected before host or provider dispatch.",
-    }];
-
-const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "normalization_or_dimension",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat mode accepts exact host typed-integer normalization and dimension controls; MATLAB-compatible modes retain the documented floating control surface.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "S = std(A, args...) with integer A",
-        inputs: &REJECTED_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer data is invalid in every compatibility mode, including resident integer data, and no integer output contract exists.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "S = std(A, normalization_or_dimension, ...) with floating A",
-        inputs: &INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed-integer controls are a mode-gated RunMat extension; values are decoded exactly on the host, while the floating data reduction may still execute on a provider.",
-    },
-];
 
 use runmat_macros::runtime_builtin;
 
@@ -319,14 +111,7 @@ enum NormParse {
 
 #[runtime_builtin(
     name = "std",
-    category = "math/reduction",
-    summary = "Compute sample or population standard deviation across array data.",
-    keywords = "std,standard deviation,statistics,gpu,omitmissing,omitnan,all",
-    accel = "reduction",
-    type_resolver(std_type),
-    descriptor(crate::builtins::math::reduction::std::STD_DESCRIPTOR),
-    extensions(crate::builtins::math::reduction::std::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::reduction::std::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::std"
 )]
 pub(crate) async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -341,7 +126,7 @@ pub(crate) async fn std_with_nan_policy(
     reject_integer_data_input(&value)?;
     if rest.iter().any(is_real_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &TYPED_INTEGER_CONTROL_EXTENSION,
+            &STD_TYPED_INTEGER_CONTROL_EXTENSION,
             NAME,
         )?;
     }
@@ -1024,51 +809,6 @@ pub(crate) mod tests {
             block_on(super::std_builtin(Value::Tensor(tensor), args))
                 .expect("RunMat extension mode");
         }
-    }
-
-    #[test]
-    fn std_type_reduces_first_dim() {
-        let out = std_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(2)])
-            }
-        );
-    }
-
-    #[test]
-    fn std_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = STD_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"S = std(A)"));
-        assert!(labels.contains(&"S = std(A, w)"));
-        assert!(labels.contains(&"S = std(A, w, dim)"));
-        assert!(labels.contains(&"S = std(A, w, vecdim)"));
-        assert!(labels.contains(&"S = std(A, w, \"all\")"));
-        assert!(labels.contains(&"S = std(A, nanflag)"));
-        assert!(labels.contains(&"S = std(A, w, nanflag)"));
-        assert!(labels.contains(&"S = std(A, w, dim, nanflag)"));
-        assert!(labels.contains(&"S = std(A, w, nanflag, dim)"));
-        assert!(!labels.iter().any(|label| label.contains("outtype")));
-        assert!(!labels.iter().any(|label| label.contains("\"like\"")));
-    }
-
-    #[test]
-    fn std_descriptor_errors_have_stable_codes() {
-        let codes: Vec<&str> = STD_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
-        assert!(codes.contains(&"RM.STD.INVALID_ARGUMENT"));
-        assert!(codes.contains(&"RM.STD.INVALID_INPUT"));
-        assert!(codes.contains(&"RM.STD.COMPLEX_UNSUPPORTED"));
-        assert!(codes.contains(&"RM.STD.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

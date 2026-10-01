@@ -2,11 +2,44 @@ use super::dispersion_options::{
     std_normalization_literal, var_normalization_literal, NormalizationLiteral,
 };
 use super::numeric_inference::{
-    infer_numeric_reduction_type, EmptyAxesPolicy, LiteralReductionControl, ScalarResultClass,
+    admitted_literal_controls, infer_numeric_reduction_type, inferred_shape_fact, EmptyAxesPolicy,
+    KnownControls, LiteralReductionControl, ScalarResultClass,
 };
 use super::DispersionControl;
 use crate::{ResolveContext, Type};
-use runmat_types::LiteralValue;
+use runmat_types::{LiteralValue, ShapeFact};
+
+pub(crate) fn admitted_std_controls(
+    argument_count: usize,
+    context: &ResolveContext,
+) -> Option<KnownControls> {
+    admitted_literal_controls(
+        argument_count,
+        context,
+        std_literal_control,
+        Some(std_normalization_literal),
+        1,
+        EmptyAxesPolicy::Default,
+    )
+}
+
+pub(crate) fn admitted_var_controls(
+    argument_count: usize,
+    context: &ResolveContext,
+) -> Option<KnownControls> {
+    admitted_literal_controls(
+        argument_count,
+        context,
+        var_literal_control,
+        Some(var_normalization_literal),
+        1,
+        EmptyAxesPolicy::Reject,
+    )
+}
+
+pub(crate) fn inferred_dispersion_shape(source: &ShapeFact, controls: &KnownControls) -> ShapeFact {
+    inferred_shape_fact(source, controls)
+}
 
 /// Literal type projection shared by std and var, retaining their distinct
 /// normalization and text grammars.

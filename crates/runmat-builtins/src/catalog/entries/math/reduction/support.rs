@@ -11,6 +11,9 @@ mod numeric_inference;
 mod sum_inference;
 mod sum_options;
 
+pub(super) use dispersion_inference::{
+    admitted_std_controls, admitted_var_controls, inferred_dispersion_shape,
+};
 pub use dispersion_inference::{infer_std_type, infer_var_type};
 pub use dispersion_options::{DispersionControl, DispersionNormalization};
 pub(super) use mean_inference::{admitted_mean_controls, inferred_mean_shape};
