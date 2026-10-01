@@ -13,7 +13,7 @@ use runmat_builtins::{
     ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, IntValue, StringArray, Tensor, Value};
+use runmat_value::{CellArray, IntValue, NumericDType, StringArray, Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
@@ -565,30 +565,35 @@ where
     F: Fn(&[f64]) -> f64,
 {
     let shape = normalize_shape(&input);
-    let axes = resolved_axes(&shape, options.axes);
-    if axes.is_empty() {
-        return Tensor::new(tensor::tensor_into_values_f64(input), shape)
-            .map(tensor::tensor_into_value)
-            .map_err(|err| descriptive_error(name, format!("{name}: {err}")));
-    }
-    let rank = shape.len().max(axes.iter().copied().max().unwrap_or(0) + 1);
-    let mut padded_shape = shape;
-    padded_shape.resize(rank, 1);
-    let mut out_shape = padded_shape.clone();
-    for &axis in &axes {
-        out_shape[axis] = 1;
-    }
+    let output_dtype = match input.numeric_dtype() {
+        NumericDType::F32 => NumericDType::F32,
+        _ => NumericDType::F64,
+    };
+    // Dimensions beyond the physical rank are singleton reductions. Keep the
+    // existing shape and evaluate the statistic on each singleton instead of
+    // materializing rank-proportional metadata for a large dimension value.
+    let axes: Vec<_> = resolved_axes(&shape, options.axes)
+        .into_iter()
+        .filter(|axis| *axis < shape.len())
+        .collect();
+    let out_shape = {
+        let mut out_shape = shape.clone();
+        for &axis in &axes {
+            out_shape[axis] = 1;
+        }
+        out_shape
+    };
     let out_len = tensor::element_count(&out_shape);
-    let in_strides = strides_for(&padded_shape);
+    let in_strides = strides_for(&shape);
     let out_strides = strides_for(&out_shape);
-    let mut buckets = vec![Vec::<f64>::new(); out_len.max(1)];
+    let mut buckets = vec![Vec::<f64>::new(); out_len];
     for (linear, value) in tensor::tensor_into_values_f64(input)
         .into_iter()
         .enumerate()
     {
         let mut dst = 0usize;
-        for dim in 0..rank {
-            let coord = (linear / in_strides[dim]) % padded_shape[dim];
+        for dim in 0..shape.len() {
+            let coord = (linear / in_strides[dim]) % shape[dim];
             if axes.binary_search(&dim).is_err() {
                 dst += coord * out_strides[dim];
             }
@@ -606,7 +611,7 @@ where
             op(&values)
         });
     }
-    Tensor::new(out, out_shape)
+    Tensor::new_with_dtype(out, out_shape, output_dtype)
         .map(tensor::tensor_into_value)
         .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
 }
@@ -1383,6 +1388,38 @@ mod tests {
         ))
         .unwrap();
         assert_close(tensor_values(median_mad).0[0], 1.0);
+    }
+
+    #[test]
+    fn flagged_statistics_keep_single_output_class_and_bound_far_dimensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let single = || Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+        for output in [
+            block_on(mad::mad_builtin(single(), Vec::new())).unwrap(),
+            block_on(skewness::skewness_builtin(single(), Vec::new())).unwrap(),
+            block_on(kurtosis::kurtosis_builtin(single(), Vec::new())).unwrap(),
+        ] {
+            let Value::Tensor(tensor) = output else {
+                panic!("a single result must retain its tensor carrier")
+            };
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+            assert_eq!(tensor.shape, vec![1, 1]);
+        }
+
+        let data = || Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+        let far_dim = || vec![Value::Int(IntValue::U64(1_000_000_000))];
+        let mad_result = block_on(mad::mad_builtin(data(), far_dim())).unwrap();
+        let (values, shape) = tensor_values(mad_result);
+        assert_eq!(shape, vec![3, 1]);
+        assert_eq!(values, vec![0.0; 3]);
+        for output in [
+            block_on(skewness::skewness_builtin(data(), far_dim())).unwrap(),
+            block_on(kurtosis::kurtosis_builtin(data(), far_dim())).unwrap(),
+        ] {
+            let (values, shape) = tensor_values(output);
+            assert_eq!(shape, vec![3, 1]);
+            assert!(values.iter().all(|value| value.is_nan()));
+        }
     }
 
     #[test]
