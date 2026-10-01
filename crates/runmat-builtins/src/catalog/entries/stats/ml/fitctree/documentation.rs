@@ -4,7 +4,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("fitctree"),
     slug: Some("fitctree"),
-    summary: "Fit a classification tree for multiclass labels.",
+    summary: "Fit a binary-split classification tree for multiclass labels.",
     description: "`fitctree` fits a numeric-predictor classification tree from a matrix or table and returns a `ClassificationTree` object usable with `predict`.",
     keywords: &["fitctree", "classification tree", "decision tree", "machine learning", "statistics"],
     related: &["predict", "fitlm"],
@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Inputs and class labels",
             paragraphs: &[
-                "`fitctree(X,Y)` fits a tree with observations in rows and class labels in `Y`. Table forms take a response-variable name, an additive formula such as `Y ~ A + B`, or an external response vector.",
+                "`fitctree(X,Y)` fits a tree with binary splits, observations in rows, and class labels in `Y`. Table forms take a response-variable name, an additive formula such as `Y ~ A + B`, or an external response vector containing one label per table row.",
                 "Labels may be numeric, logical, string, char, cell-string, or any of the eight signed and unsigned integer classes. ClassNames and prediction retain exact integer identity above flintmax.",
                 "Typed-integer matrix and active table predictors are separately gated RunMat extensions and must be exactly representable in binary64 at the host fitting boundary. Typed-integer weights and numerical controls use another extension gate. MATLAB-compatible mode rejects those extensions while accepting the documented floating forms.",
                 "Rows with missing response, zero weight, or all missing predictors are omitted; partially missing predictor rows remain eligible for splits on observed variables. Inf and negative weights are rejected.",
@@ -71,7 +71,16 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Argument admission and table forms", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree/admission.rs") },
+            BuiltinDocumentationLink { label: "Preflight and typed option headers", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree/header.rs") },
+            BuiltinDocumentationLink { label: "Option parsing", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree/options.rs") },
+            BuiltinDocumentationLink { label: "Numeric and integer value admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree/values.rs") },
+            BuiltinDocumentationLink { label: "Binary-split training", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree/training.rs") },
+            BuiltinDocumentationLink { label: "Exact label representation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree/labels.rs") },
+            BuiltinDocumentationLink { label: "Model result construction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree/projection.rs") },
+            BuiltinDocumentationLink { label: "Prediction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree/prediction.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Classification-tree fitting and prediction", location: "builtins::stats::ml::classification_tree::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "VM statistical models", location: "crates/runmat-vm/tests/stats_ml.rs" },

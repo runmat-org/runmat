@@ -16,7 +16,7 @@ const RESPONSE: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Optional,
     default: None,
-    description: "Response vector, response variable name, or table formula.",
+    description: "For table input, a response variable name, additive formula, or external label vector with one label per row; for matrix input, a response label vector. Labels may be numeric, logical, text, or fixed-width integer.",
 };
 const OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "options", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Variadic,
@@ -25,7 +25,7 @@ const OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
 const OUTPUT: [BuiltinParamDescriptor; 1] = [MODEL];
 const BASIC: [BuiltinParamDescriptor; 2] = [DATA, RESPONSE];
 const FULL: [BuiltinParamDescriptor; 3] = [DATA, RESPONSE, OPTIONS];
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
         label: "Mdl = fitctree(Tbl, ResponseVarName)",
         inputs: &BASIC,
@@ -33,6 +33,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
     BuiltinSignatureDescriptor {
         label: "Mdl = fitctree(Tbl, formula)",
+        inputs: &BASIC,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Mdl = fitctree(Tbl, Y)",
         inputs: &BASIC,
         outputs: &OUTPUT,
     },

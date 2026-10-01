@@ -26,10 +26,20 @@ const MODEL_OUTPUT: [BuiltinParamDescriptor; 1] = [MODEL];
 const TABLE: [BuiltinParamDescriptor; 1] = [DATA];
 const DATA_RESPONSE: [BuiltinParamDescriptor; 2] = [DATA, RESPONSE];
 const FULL: [BuiltinParamDescriptor; 3] = [DATA, RESPONSE, OPTIONS];
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "mdl = fitlm(tbl)",
         inputs: &TABLE,
+        outputs: &MODEL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "mdl = fitlm(tbl, ResponseVarName)",
+        inputs: &DATA_RESPONSE,
+        outputs: &MODEL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "mdl = fitlm(tbl, formula)",
+        inputs: &DATA_RESPONSE,
         outputs: &MODEL_OUTPUT,
     },
     BuiltinSignatureDescriptor {

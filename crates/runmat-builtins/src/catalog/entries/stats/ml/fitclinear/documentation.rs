@@ -14,7 +14,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "`fitclinear(X,Y)` fits a binary SVM-style linear classifier with observations in rows. Table input accepts a response name, an additive formula such as `Y ~ A + B`, or an external response vector.",
                 "Learner accepts `svm` and `logistic`. Logistic training uses logistic loss and returns posterior-style scores by default; SVM training returns signed-margin scores. Regularization accepts `ridge` and `lasso`. Lambda accepts a nonnegative scalar or vector, producing one coefficient column per Lambda value.",
-                "ObservationsIn accepts `rows` or `columns` for numeric matrices; tables require row observations. The supported name-value surface includes ClassNames, PredictorNames, ResponseName, Weights, Prior, FitBias, Beta, Bias, Solver, IterationLimit, PassLimit, and ScoreTransform. Cost matrices, cross-validation, partitions, and hyperparameter optimization are explicitly unsupported.",
+                "ObservationsIn accepts `rows` or `columns` for numeric matrices; tables require row observations. Operative name-value controls include ClassNames, PredictorNames, ResponseName, Weights, Prior, FitBias, Beta, Bias, Solver, IterationLimit, PassLimit, and ScoreTransform. BatchLimit, BetaTolerance, DeltaGradientTolerance, GradientTolerance, NumCheckConvergence, PostFitBias, and Verbose are accepted for script compatibility but do not alter this solver. Cost matrices, cross-validation, partitions, and hyperparameter optimization are explicitly unsupported.",
                 "Rows with NaN predictors or response, or zero weights, are omitted. Inf predictors and negative weights are rejected. The result exposes Beta, Bias, Lambda, Learner, Regularization, Solver, ScoreTransform, ResponseName, PredictorNames, ClassNames, Prior, NumObservations, NumPredictors, and ModelParameters. A second output FitInfo records Lambda, Objective, NumIterations, NumPasses, and GradientNorm.",
             ],
         },
@@ -83,7 +83,16 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Argument admission and table forms", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear/admission.rs") },
+            BuiltinDocumentationLink { label: "Preflight and typed option headers", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear/header.rs") },
+            BuiltinDocumentationLink { label: "Option parsing and ignored controls", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear/options.rs") },
+            BuiltinDocumentationLink { label: "Numeric and integer value admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear/values.rs") },
+            BuiltinDocumentationLink { label: "Host classifier training", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear/training.rs") },
+            BuiltinDocumentationLink { label: "Exact label representation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear/labels.rs") },
+            BuiltinDocumentationLink { label: "FitInfo result", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear/projection.rs") },
+            BuiltinDocumentationLink { label: "Prediction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_linear/prediction.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Linear-classifier fitting and prediction", location: "builtins::stats::ml::classification_linear::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "VM statistical models", location: "crates/runmat-vm/tests/stats_ml.rs" },
