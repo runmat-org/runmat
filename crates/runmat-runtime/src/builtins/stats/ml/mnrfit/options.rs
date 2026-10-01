@@ -2,43 +2,8 @@
 
 use super::{invalid, scalar_text};
 use crate::BuiltinResult;
+pub(super) use runmat_builtins::MnrfitOption as OptionName;
 use runmat_value::Value;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum OptionName {
-    Model,
-    Link,
-    Constant,
-    Interactions,
-    Weights,
-    IterationLimit,
-    MaxIter,
-    Tolerance,
-    TolX,
-    Options,
-    Display,
-    EstDisp,
-}
-
-impl OptionName {
-    fn from_public(text: &str) -> Option<Self> {
-        Some(match text.to_ascii_lowercase().as_str() {
-            "model" => Self::Model,
-            "link" => Self::Link,
-            "constant" => Self::Constant,
-            "interactions" => Self::Interactions,
-            "weights" => Self::Weights,
-            "iterationlimit" => Self::IterationLimit,
-            "maxiter" => Self::MaxIter,
-            "tolerance" => Self::Tolerance,
-            "tolx" => Self::TolX,
-            "options" => Self::Options,
-            "display" => Self::Display,
-            "estdisp" => Self::EstDisp,
-            _ => return None,
-        })
-    }
-}
 
 pub(super) struct OptionSlot {
     spelling: Option<String>,

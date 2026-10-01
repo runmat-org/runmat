@@ -1,0 +1,83 @@
+use crate::*;
+
+const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Multinomial solver implementation",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit.rs"),
+};
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("mnrfit"),
+    slug: Some("mnrfit"),
+    summary: "Fit nominal multinomial logistic regression coefficients.",
+    description: "`mnrfit(X,Y)` fits nominal multinomial logistic regression coefficients. Rows of `X` are observations, columns are predictors, and columns of `B` correspond to all response classes except the final sorted reference class.",
+    keywords: &["mnrfit", "multinomial", "logistic regression", "nominal", "binomial", "statistics", "machine learning"],
+    related: &["lasso", "fitclinear"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Inputs and response classes", paragraphs: &[
+            "`X` is a finite real numeric predictor matrix. Current MATLAB documents single or double `X`; typed-integer `X`, typed-integer `Y`, and logical `X` are independently gated RunMat extensions. Logical `Y` remains admitted. Integer predictors, grouped counts, weights, and tolerance values must be exactly representable at the binary64 host-solver boundary.",
+            "`Y` may be a numeric, logical, string, character, cell-string, or categorical class vector with one response per row of `X`. Classes are sorted and the last class is the reference. Alternatively, an N-by-K numeric `Y` supplies grouped response counts; columns are categories and row totals contribute observation weights. Rows with NaN in `X`, numeric `Y`, or grouped counts are omitted.",
+        ] },
+        BuiltinDocumentationSection { heading: "Solver controls and outputs", paragraphs: &[
+            "The default model includes a constant term. `Model` supports `nominal`, `Link` supports `logit`, and `Interactions` accepts `off`. `Weights` is a nonnegative finite observation-weight vector with positive total; `IterationLimit` and `Tolerance` control convergence. `EstDisp` accepts only `off`; overdispersion estimation is not implemented.",
+            "`Constant`, `MaxIter`, `TolX`, `Options`, and `Display` remain gated RunMat option extensions rather than MATLAB-compatible spellings. `Display` is accepted but does not change the solver result.",
+            "`B` has one row per model term and one column per non-reference class. `[B,dev,stats]` also returns deviance and a stats struct with `beta`, `se`, `t`, `p`, `covb`, `coeffcorr`, `dfe`, `s`, `estdisp`, and `classNames`. The solver runs on CPU; automatically resident inputs are gathered, while explicit gpuArray input is a mode-gated RunMat host-fallback extension. No resident solver kernel or fusion route is claimed.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "binary", title: "Fit a binary nominal logistic model",
+            program: "X = [0; 1; 2; 3; 4]; y = [1; 2; 1; 2; 2]; [B,dev,stats] = mnrfit(X,y); disp(B); disp(dev);",
+            display_output: Some("B has an intercept and one predictor coefficient; stats.se has the same shape."),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(B),[2 1])); assert(isequal(size(stats.se),size(B))); assert(isfinite(dev));" },
+        },
+        BuiltinExample { id: "three-class", title: "Fit a three-class nominal model",
+            program: "X = [0; 1; 0; 1; 2; 3]; y = [1; 1; 2; 2; 3; 3]; B = mnrfit(X,y,'Model','nominal'); disp(B);",
+            display_output: Some("B has two columns because the final sorted class is the reference."),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(B),[2 2])); assert(all(isfinite(B(:))));" },
+        },
+        BuiltinExample { id: "grouped", title: "Fit grouped response counts",
+            program: "X = [0; 1; 2; 3]; Y = [8 1 1; 5 3 2; 2 5 3; 1 6 4]; B = mnrfit(X,Y,'IterationLimit',200); disp(B);",
+            display_output: Some("The three Y columns contribute grouped response counts; B has two non-reference columns."),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(B),[2 2])); assert(all(isfinite(B(:))));" },
+        },
+        BuiltinExample { id: "text", title: "Fit text response labels",
+            program: "X = [0; 1; 2; 3; 4]; y = [\"low\"; \"high\"; \"low\"; \"high\"; \"high\"]; [B,dev,stats] = mnrfit(X,y,'Tolerance',1e-7); disp(stats.classNames);",
+            display_output: Some("stats.classNames contains the sorted text response classes."),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isstring(stats.classNames)); assert(isequal(size(B),[2 1])); assert(isfinite(dev));" },
+        },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Which response class is the reference class?", answer: "RunMat sorts numeric or logical response classes and uses the final sorted class as the reference for nominal coding." },
+        BuiltinDocumentationFaq { question: "Does RunMat implement ordinal models?", answer: "No. The current implementation fits nominal multinomial logistic regression; other Model values return an error." },
+        BuiltinDocumentationFaq { question: "Does RunMat estimate overdispersion?", answer: "No. EstDisp accepts only off, and stats.s is 1." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "lasso", target: BuiltinDocumentationLinkTarget::Builtin("lasso") },
+        BuiltinDocumentationLink { label: "fitclinear", target: BuiltinDocumentationLinkTarget::Builtin("fitclinear") },
+        SOURCE,
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[SOURCE],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Multinomial fitting, class forms, integer boundaries, and provider failure", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Integer regression semantics", location: "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs" },
+        ],
+        notes: &["The legacy editable sidecar remains until field parity, exporter output, and example execution are qualified."],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};

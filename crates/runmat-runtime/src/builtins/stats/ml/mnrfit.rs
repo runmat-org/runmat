@@ -8,13 +8,16 @@ use runmat_value::{IntValue, NumericScalar};
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    MNRFIT_ERROR_CONVERGENCE as ERROR_CONVERGENCE, MNRFIT_ERROR_INTERNAL as ERROR_INTERNAL,
+    MNRFIT_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    MNRFIT_INTEGER_CONTROL_EXTENSION as INTEGER_CONTROL_EXTENSION,
+    MNRFIT_INTEGER_PARAMETER_EXTENSION as INTEGER_PARAMETER_EXTENSION,
+    MNRFIT_INTEGER_X_EXTENSION as INTEGER_X_EXTENSION,
+    MNRFIT_INTEGER_Y_EXTENSION as INTEGER_Y_EXTENSION,
+    MNRFIT_LEGACY_OPTIONS_EXTENSION as LEGACY_OPTIONS_EXTENSION,
+    MNRFIT_LOGICAL_X_EXTENSION as LOGICAL_X_EXTENSION,
+    MNRFIT_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};
@@ -26,236 +29,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const NAME: &str = "mnrfit";
 const EPS: f64 = 1.0e-12;
 const RIDGE: f64 = 1.0e-8;
-
-const INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mnrfit-integer-x",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mnrfit with a typed-integer predictor matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MnrfitIntegerXExtension"),
-};
-const INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mnrfit-integer-y",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mnrfit with a typed-integer response array is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MnrfitIntegerYExtension"),
-};
-const INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mnrfit-integer-parameter",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mnrfit with typed-integer floating options is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MnrfitIntegerParameterExtension"),
-};
-const INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mnrfit-integer-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mnrfit with typed-integer structural controls is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MnrfitIntegerControlExtension"),
-};
-const LOGICAL_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mnrfit-logical-x",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mnrfit with logical predictor data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MnrfitLogicalXExtension"),
-};
-const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mnrfit-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mnrfit host fallback for explicit gpuArray inputs is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MnrfitResidentInputExtension"),
-};
-const LEGACY_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mnrfit-legacy-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "mnrfit Constant, MaxIter, TolX, Options, and Display option aliases are RunMat extensions",
-    error_identifier: Some("RunMat:compatibility:MnrfitLegacyOptionsExtension"),
-};
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
-    INTEGER_X_EXTENSION,
-    INTEGER_Y_EXTENSION,
-    INTEGER_PARAMETER_EXTENSION,
-    INTEGER_CONTROL_EXTENSION,
-    LOGICAL_X_EXTENSION,
-    RESIDENT_INPUT_EXTENSION,
-    LEGACY_OPTIONS_EXTENSION,
-];
-
-const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer predictors are gated before gather and checked at the binary64 solver boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The current public Y type list omits integer classes; typed-integer categories or grouped counts are a checked RunMat extension.",
-    },
-];
-const INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Weights or Tolerance",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer floating solver parameters are independently gated and require exact binary64 representation.",
-    }];
-const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "IterationLimit",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Current MATLAB documents single and double IterationLimit values; native integer controls are a gated structural extension.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = mnrfit(integer_X, integer_Y, ___)",
-        inputs: &INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer data crosses one checked binary64 host-solver boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = mnrfit(X, Y, Name, integer_parameter)",
-        inputs: &INTEGER_PARAMETER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Floating option values reject lossy integer conversion.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = mnrfit(X, Y, 'IterationLimit', integer_control)",
-        inputs: &INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Structural controls are parsed exactly; the MaxIter and Options spellings are separately gated RunMat extensions.",
-    },
-];
-
-const OUTPUT_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Coefficient matrix with one column per non-reference response category.",
-};
-
-const OUTPUT_DEV: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "dev",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Model deviance.",
-};
-
-const OUTPUT_STATS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "stats",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Fit statistics structure containing beta, se, t, p, covb, coeffcorr, and dfe.",
-};
-
-const INPUT_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Predictor matrix with observations in rows.",
-};
-
-const INPUT_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Response class vector or two-column binomial counts matrix.",
-};
-
-const INPUT_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "NameValue",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description:
-        "Name-value options such as Model, Link, Constant, Weights, IterationLimit, Tolerance, and Options.",
-};
-
-const INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_Y];
-const INPUTS_X_Y_OPTIONS: [BuiltinParamDescriptor; 3] = [INPUT_X, INPUT_Y, INPUT_OPTIONS];
-const OUTPUTS_B: [BuiltinParamDescriptor; 1] = [OUTPUT_B];
-const OUTPUTS_B_DEV_STATS: [BuiltinParamDescriptor; 3] = [OUTPUT_B, OUTPUT_DEV, OUTPUT_STATS];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "B = mnrfit(X, Y)",
-        inputs: &INPUTS_X_Y,
-        outputs: &OUTPUTS_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = mnrfit(X, Y, Name, Value)",
-        inputs: &INPUTS_X_Y_OPTIONS,
-        outputs: &OUTPUTS_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, dev, stats] = mnrfit(X, Y)",
-        inputs: &INPUTS_X_Y,
-        outputs: &OUTPUTS_B_DEV_STATS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, dev, stats] = mnrfit(X, Y, Name, Value)",
-        inputs: &INPUTS_X_Y_OPTIONS,
-        outputs: &OUTPUTS_B_DEV_STATS,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MNRFIT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:mnrfit:InvalidArgument"),
-    when: "Inputs, response values, dimensions, or options are malformed.",
-    message: "mnrfit: invalid argument",
-};
-
-const ERROR_CONVERGENCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MNRFIT.CONVERGENCE",
-    identifier: Some("RunMat:mnrfit:Convergence"),
-    when: "The multinomial logistic solver cannot make numerical progress.",
-    message: "mnrfit: convergence failure",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MNRFIT.INTERNAL",
-    identifier: Some("RunMat:mnrfit:Internal"),
-    when: "RunMat cannot allocate or construct mnrfit outputs.",
-    message: "mnrfit: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 3] =
-    [ERROR_INVALID_ARGUMENT, ERROR_CONVERGENCE, ERROR_INTERNAL];
-
-pub const MNRFIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-fn mnrfit_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
 
 fn error(message: impl Into<String>, descriptor: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(NAME);
@@ -333,13 +106,7 @@ struct FitResult {
 
 #[runtime_builtin(
     name = "mnrfit",
-    category = "stats/ml",
-    summary = "Fit nominal multinomial logistic regression coefficients.",
-    keywords = "mnrfit,multinomial,logistic regression,nominal,binomial,statistics,machine learning",
-    type_resolver(mnrfit_type),
-    descriptor(crate::builtins::stats::ml::mnrfit::MNRFIT_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::mnrfit::EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::mnrfit::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::mnrfit"
 )]
 pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
