@@ -1,5 +1,6 @@
 use super::numeric_inference::{
-    infer_numeric_reduction_type, LiteralReductionControl, ScalarResultClass,
+    infer_numeric_reduction_type, LiteralReductionControl, LiteralReductionOutput,
+    ScalarResultClass,
 };
 use super::{SumControl, SumOutputClass};
 use crate::{ResolveContext, Type};
@@ -22,9 +23,10 @@ fn sum_literal_control(literal: &LiteralValue) -> Option<LiteralReductionControl
     Some(match SumControl::from_literal(literal)? {
         SumControl::All => LiteralReductionControl::All,
         SumControl::Missing(_) => LiteralReductionControl::Missing,
-        SumControl::Output(class) => LiteralReductionControl::Output {
-            native: class == SumOutputClass::Native,
-        },
+        SumControl::Output(class) => LiteralReductionControl::Output(match class {
+            SumOutputClass::Double => LiteralReductionOutput::Double,
+            SumOutputClass::Native => LiteralReductionOutput::Native,
+        }),
     })
 }
 

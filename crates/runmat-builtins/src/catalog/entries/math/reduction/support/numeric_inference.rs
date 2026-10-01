@@ -7,8 +7,15 @@ use runmat_types::LiteralValue;
 pub(super) enum LiteralReductionControl {
     All,
     Missing,
-    Output { native: bool },
+    Output(LiteralReductionOutput),
     RequiresRuntimeValue,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LiteralReductionOutput {
+    Default,
+    Double,
+    Native,
 }
 
 /// The scalar result boundary differs between owners. `mean` and `sum`
@@ -30,9 +37,9 @@ enum KnownAxes {
     All,
 }
 
-struct KnownControls {
+pub(crate) struct KnownControls {
     axes: KnownAxes,
-    native_output: bool,
+    pub(crate) output: Option<LiteralReductionOutput>,
 }
 
 /// Prove only class and shape facts supported by a complete, ordered literal
@@ -91,9 +98,9 @@ pub(super) fn infer_numeric_reduction_type(
         }
         Type::Int if matches!(scalar_class, ScalarResultClass::FloatingOnly) => Type::Unknown,
         Type::Int
-            if controls
-                .as_ref()
-                .is_some_and(|controls| controls.native_output) =>
+            if controls.as_ref().is_some_and(|controls| {
+                controls.output == Some(LiteralReductionOutput::Native)
+            }) =>
         {
             Type::Int
         }
@@ -102,7 +109,7 @@ pub(super) fn infer_numeric_reduction_type(
     }
 }
 
-fn admitted_literal_controls(
+pub(super) fn admitted_literal_controls(
     argument_count: usize,
     context: &ResolveContext,
     decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
@@ -112,7 +119,7 @@ fn admitted_literal_controls(
     let mut axes = KnownAxes::Default;
     let mut axes_set = false;
     let mut output_set = false;
-    let mut native_output = false;
+    let mut output = None;
     let mut normalization_consumed = false;
     for index in option_start..argument_count {
         let literal = context.literal_args.get(index)?;
@@ -126,11 +133,11 @@ fn admitted_literal_controls(
                     axes_set = true;
                 }
                 LiteralReductionControl::Missing => {}
-                LiteralReductionControl::Output { native } => {
+                LiteralReductionControl::Output(class) => {
                     if output_set {
                         return None;
                     }
-                    native_output = native;
+                    output = Some(class);
                     output_set = true;
                 }
                 LiteralReductionControl::RequiresRuntimeValue => return None,
@@ -156,10 +163,7 @@ fn admitted_literal_controls(
         axes = selection;
         axes_set = true;
     }
-    Some(KnownControls {
-        axes,
-        native_output,
-    })
+    Some(KnownControls { axes, output })
 }
 
 fn axes_literal(literal: &LiteralValue) -> Option<KnownAxes> {
@@ -223,7 +227,33 @@ fn reduce_known_dimensions(
     let mut shape = source.to_vec();
     for dimension in dimensions {
         let index = dimension.checked_sub(1)?;
-        *shape.get_mut(index)? = Some(1);
+        if let Some(extent) = shape.get_mut(index) {
+            *extent = Some(1);
+        }
     }
     Some(shape)
+}
+
+pub(super) fn inferred_shape_fact(
+    source: &runmat_types::ShapeFact,
+    controls: &KnownControls,
+) -> runmat_types::ShapeFact {
+    use runmat_types::ShapeFact;
+    if matches!(controls.axes, KnownAxes::All) {
+        return ShapeFact::Scalar;
+    }
+    if matches!(source, ShapeFact::Ranked { .. }) {
+        return source.clone();
+    }
+    let Some(dims) = source.known_dims() else {
+        return ShapeFact::Unknown;
+    };
+    inferred_shape(&dims, controls.axes.clone()).map_or_else(
+        || {
+            source
+                .rank()
+                .map_or(ShapeFact::Unknown, |rank| ShapeFact::Ranked { rank })
+        },
+        ShapeFact::from,
+    )
 }
