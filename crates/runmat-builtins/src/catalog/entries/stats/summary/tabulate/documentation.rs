@@ -14,8 +14,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["histcounts", "mode"],
     sections: &[
         BuiltinDocumentationSection { heading: "Grouping and percentages", paragraphs: &[
-            "Positive whole-number floating inputs include zero-count levels from 1 through the greatest level under the bounded expansion policy. A larger floating level is rejected before constructing the table. Other real values are sorted and grouped by exact value. NaNs are excluded from both the table and percentage denominator.",
-            "Integer observations of all eight classes group without conversion through double. Small positive-level domains include missing levels; larger domains report observed integer levels. Counts and percentages are double, while integer labels remain exact in the first cell column, including `uint64` values above `flintmax`.",
+            "Positive whole-number floating inputs include zero-count levels from 1 through the greatest level, up to 1,000,000 levels. A larger floating level is rejected before constructing the table. Other real values are sorted and grouped by exact value. NaNs are excluded from both the table and percentage denominator.",
+            "Integer observations of all eight classes group without conversion through double. Positive-level domains up to 1,000,000 levels include missing levels; larger domains report observed integer levels. Counts and percentages are double, while integer labels remain exact in the first cell column, including `uint64` values above `flintmax`.",
             "Logical arrays, string arrays, and cell arrays of scalar labels return a cell table. Character rows are treated as a sequence of character labels. Scalar logical values follow the scalar numeric path.",
         ] },
         BuiltinDocumentationSection { heading: "Residency and compatibility", paragraphs: &[
@@ -54,13 +54,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[SOURCE, BuiltinDocumentationLink { label: "Descriptive statistics and provider materialization", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs") }],
         verification: &[BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,
             label: "Numeric, integer, logical, text, missing, and provider-boundary tests",
             location: "crates/runmat-runtime/src/builtins/stats/summary/descriptive/tests/tabulation.rs",
         }],
-        notes: &["The catalog and legacy JSON sidecar remain duplicated until field reconciliation and exporter qualification."],
+        notes: &["Tabulation runs on the host after resident input materialization; borrowed provider allocations remain owned by their caller."],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

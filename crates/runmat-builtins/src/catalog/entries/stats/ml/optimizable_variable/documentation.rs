@@ -27,7 +27,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample {
             id: "example-1", title: "Real variable",
-            program: "v = optimizableVariable(\"depth\", [1 10]);",
+            program: "v = optimizableVariable(\"depth\", [1 10]); disp(v);",
             display_output: Some("v is an optimizableVariable object with a real Range of [1 10]."),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable,
@@ -37,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "example-2", title: "Categorical variable",
-            program: "v = optimizableVariable(\"kernel\", [\"linear\" \"rbf\"], \"Type\", \"categorical\");",
+            program: "v = optimizableVariable(\"kernel\", [\"linear\" \"rbf\"], \"Type\", \"categorical\"); disp(v);",
             display_output: Some("v has the two categorical choices linear and rbf."),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable,
@@ -58,6 +58,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "Variable constructor and range admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/optimizable_variable.rs") },
+            BuiltinDocumentationLink { label: "Range validation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/optimizable_variable/range.rs") },
+            BuiltinDocumentationLink { label: "Typed options", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/optimizable_variable/options.rs") },
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Variable construction and range tests", location: "builtins::stats::ml::optimizable_variable::tests" },
@@ -65,5 +67,5 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         notes: &[],
     },
     introduced: None,
-    status: Some(BuiltinDocumentationStatus::Stable),
+    status: Some(BuiltinDocumentationStatus::Partial),
 };

@@ -29,7 +29,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample {
             id: "example-1", title: "Minimize a scalar objective over two real variables",
-            program: "x = optimizableVariable('x',[-1 1]); y = optimizableVariable('y',[-1 1]);\nobjective = @(X) X.x^2 + X.y^2;\nresults = bayesopt(objective, {x y}, 'MaxObjectiveEvaluations', 24, 'NumSeedPoints', 6);",
+            program: "x = optimizableVariable('x',[-1 1]); y = optimizableVariable('y',[-1 1]);\nobjective = @(X) X.x^2 + X.y^2;\nresults = bayesopt(objective, {x y}, 'MaxObjectiveEvaluations', 24, 'NumSeedPoints', 6);\ndisp(results);",
             display_output: Some("results contains trace tables and the best observed point."),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable,
@@ -39,7 +39,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "example-2", title: "Filter candidates with XConstraintFcn",
-            program: "x = optimizableVariable('x',[-1 1]);\nobjective = @(X) X.x^2; isFeasible = @(X) X.x >= 0;\nresults = bayesopt(objective, x, 'XConstraintFcn', isFeasible, 'MaxObjectiveEvaluations', 8);",
+            program: "x = optimizableVariable('x',[-1 1]);\nobjective = @(X) X.x^2; isFeasible = @(X) X.x >= 0;\nresults = bayesopt(objective, x, 'XConstraintFcn', isFeasible, 'MaxObjectiveEvaluations', 8);\ndisp(results);",
             display_output: Some("Only feasible candidate rows are evaluated by the objective."),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable,
@@ -61,7 +61,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "Variable and option admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt.rs") },
-            BuiltinDocumentationLink { label: "Candidate search and Gaussian-process surrogate", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt.rs") },
+            BuiltinDocumentationLink { label: "Admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/admission.rs") },
+            BuiltinDocumentationLink { label: "Options", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/options.rs") },
+            BuiltinDocumentationLink { label: "Optimization loop", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/optimizer.rs") },
+            BuiltinDocumentationLink { label: "Candidate search", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/candidate.rs") },
+            BuiltinDocumentationLink { label: "Gaussian-process surrogate", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/surrogate.rs") },
+            BuiltinDocumentationLink { label: "Callbacks", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/callbacks.rs") },
+            BuiltinDocumentationLink { label: "Results", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/result.rs") },
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Bayesian optimization and callback tests", location: "builtins::stats::ml::bayesopt::tests" },
@@ -69,5 +75,5 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         notes: &[],
     },
     introduced: None,
-    status: Some(BuiltinDocumentationStatus::Stable),
+    status: Some(BuiltinDocumentationStatus::Partial),
 };
