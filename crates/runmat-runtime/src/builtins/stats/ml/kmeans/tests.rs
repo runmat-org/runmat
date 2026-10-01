@@ -39,6 +39,21 @@ fn public_option_spellings_decode_once_into_typed_controls() {
 }
 
 #[test]
+fn cosine_and_correlation_prepare_large_and_small_finite_rows() {
+    let x = tensor(vec![1.0e200, 1.0e-200, 2.0e200, 2.0e-200], 2, 2);
+    for metric in [Distance::Cosine, Distance::Correlation] {
+        let prepared = prepare_data(x.clone(), metric).expect("finite observations");
+        assert_eq!(prepared.rows.len(), 2);
+        for row in &prepared.rows {
+            assert!(row.iter().all(|value| value.is_finite()));
+            assert!((row.iter().map(|value| value * value).sum::<f64>() - 1.0).abs() < 1.0e-13);
+        }
+        assert!((prepared.rows[0][0] - prepared.rows[1][0]).abs() < 1.0e-13);
+        assert!((prepared.rows[0][1] - prepared.rows[1][1]).abs() < 1.0e-13);
+    }
+}
+
+#[test]
 fn malformed_public_headers_and_geometry_fail_before_solver() {
     assert!(parse_option_headers(&[Value::from("Distance")]).is_err());
     assert!(parse_option_headers(&[Value::from("unknown"), Value::from("value")]).is_err());

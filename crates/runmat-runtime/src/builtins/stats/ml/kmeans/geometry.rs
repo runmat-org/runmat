@@ -1,6 +1,6 @@
 use super::{
-    internal, invalid, Distance, KmeansStart, Options, PreparedData, StartSpec, EPS,
-    MAX_WORK_CELLS, NAME,
+    internal, invalid, Distance, KmeansStart, Options, PreparedData, StartSpec, MAX_WORK_CELLS,
+    NAME,
 };
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
@@ -130,31 +130,10 @@ pub(super) fn tensor_rows_cols(tensor: &Tensor) -> (usize, usize) {
 
 fn transform_row(row: &[f64], distance: Distance) -> BuiltinResult<Vec<f64>> {
     match distance {
-        Distance::Cosine => {
-            let norm = row.iter().map(|value| value * value).sum::<f64>().sqrt();
-            if norm <= EPS {
-                Ok(vec![f64::NAN; row.len()])
-            } else {
-                Ok(row.iter().map(|value| value / norm).collect())
-            }
-        }
-        Distance::Correlation => {
-            if row.is_empty() {
-                return Ok(Vec::new());
-            }
-            let mean = row.iter().sum::<f64>() / row.len() as f64;
-            let centered = row.iter().map(|value| value - mean).collect::<Vec<_>>();
-            let norm = centered
-                .iter()
-                .map(|value| value * value)
-                .sum::<f64>()
-                .sqrt();
-            if norm <= EPS {
-                Ok(vec![f64::NAN; row.len()])
-            } else {
-                Ok(centered.into_iter().map(|value| value / norm).collect())
-            }
-        }
+        Distance::Cosine | Distance::Correlation => Ok(
+            super::super::pairwise_metric::unit_direction(row, distance == Distance::Correlation)
+                .unwrap_or_else(|| vec![f64::NAN; row.len()]),
+        ),
         Distance::Hamming => {
             if row.iter().any(|value| *value != 0.0 && *value != 1.0) {
                 return Err(invalid("kmeans: Hamming distance requires binary X values"));

@@ -72,6 +72,33 @@ fn output_dimension_and_class_are_known_but_nan_filtered_rows_are_not() {
 
 #[test]
 fn unknown_and_invalid_options_do_not_invent_shapes() {
+    let dynamic_name = infer(
+        vec![observations(8, 4), text(), scalar()],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Number(3.0),
+        ],
+        1,
+    );
+    assert_eq!(
+        dynamic_name.outputs[0].shape,
+        ShapeFact::from(vec![None, None])
+    );
+    let nontext_name = infer(
+        vec![observations(8, 4), scalar(), scalar()],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(7.0),
+            LiteralValue::Number(3.0),
+        ],
+        1,
+    );
+    assert_eq!(
+        nontext_name.outputs[0].shape,
+        ShapeFact::from(vec![None, None])
+    );
+    assert!(!nontext_name.diagnostics.is_empty());
     let dynamic = infer(
         vec![observations(8, 4), text(), scalar()],
         vec![

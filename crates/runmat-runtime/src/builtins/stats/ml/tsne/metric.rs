@@ -100,26 +100,43 @@ fn chebychev(left: &[f64], right: &[f64]) -> f64 {
 }
 
 fn cosine_distance(left: &[f64], right: &[f64]) -> f64 {
+    directional_distance(left, right, false)
+}
+
+fn correlation_distance(left: &[f64], right: &[f64]) -> f64 {
+    directional_distance(left, right, true)
+}
+
+fn directional_distance(left: &[f64], right: &[f64], center: bool) -> f64 {
+    let Some(left) = super::super::pairwise_metric::unit_direction(left, center) else {
+        return 1.0;
+    };
+    let Some(right) = super::super::pairwise_metric::unit_direction(right, center) else {
+        return 1.0;
+    };
     let dot = left
         .iter()
         .zip(right.iter())
         .map(|(a, b)| a * b)
         .sum::<f64>();
-    let nl = left.iter().map(|value| value * value).sum::<f64>().sqrt();
-    let nr = right.iter().map(|value| value * value).sum::<f64>().sqrt();
-    if nl == 0.0 || nr == 0.0 {
-        1.0
-    } else {
-        (1.0 - dot / (nl * nr)).max(0.0)
-    }
+    (1.0 - dot).max(0.0)
 }
 
-fn correlation_distance(left: &[f64], right: &[f64]) -> f64 {
-    let ml = left.iter().sum::<f64>() / left.len().max(1) as f64;
-    let mr = right.iter().sum::<f64>() / right.len().max(1) as f64;
-    let centered_l = left.iter().map(|value| value - ml).collect::<Vec<_>>();
-    let centered_r = right.iter().map(|value| value - mr).collect::<Vec<_>>();
-    cosine_distance(&centered_l, &centered_r)
+#[cfg(test)]
+mod directional_tests {
+    use super::{correlation_distance, cosine_distance};
+
+    #[test]
+    fn scale_changes_do_not_change_finite_angular_distances() {
+        for scale in [1.0e200, 1.0e-200] {
+            let left = [scale, 2.0 * scale];
+            let right = [2.0 * scale, scale];
+            let cosine = cosine_distance(&left, &right);
+            let correlation = correlation_distance(&left, &right);
+            assert!((cosine - 0.2).abs() < 1.0e-13);
+            assert!((correlation - 2.0).abs() < 1.0e-13);
+        }
+    }
 }
 
 fn hamming_distance(left: &[f64], right: &[f64]) -> f64 {

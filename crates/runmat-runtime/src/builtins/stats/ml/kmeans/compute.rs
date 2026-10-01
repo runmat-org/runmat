@@ -334,10 +334,8 @@ fn centroid_for(rows: &[Vec<f64>], members: &[usize], distance: Distance) -> Vec
                 *value /= members.len() as f64;
             }
             match distance {
-                Distance::Cosine => normalize_or_nan(center),
-                Distance::Correlation => {
-                    let mean = center.iter().sum::<f64>() / center.len() as f64;
-                    normalize_or_nan(center.into_iter().map(|value| value - mean).collect())
+                Distance::Cosine | Distance::Correlation => {
+                    normalize_or_nan(center, distance == Distance::Correlation)
                 }
                 _ => center,
             }
@@ -345,16 +343,9 @@ fn centroid_for(rows: &[Vec<f64>], members: &[usize], distance: Distance) -> Vec
     }
 }
 
-fn normalize_or_nan(mut row: Vec<f64>) -> Vec<f64> {
-    let norm = row.iter().map(|value| value * value).sum::<f64>().sqrt();
-    if norm <= EPS {
-        row.fill(f64::NAN);
-    } else {
-        for value in &mut row {
-            *value /= norm;
-        }
-    }
-    row
+fn normalize_or_nan(row: Vec<f64>, center: bool) -> Vec<f64> {
+    super::super::pairwise_metric::unit_direction(&row, center)
+        .unwrap_or_else(|| vec![f64::NAN; row.len()])
 }
 
 fn sum_distances(k: usize, idx: &[usize], distances: &[Vec<f64>]) -> Vec<f64> {

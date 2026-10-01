@@ -105,13 +105,25 @@ fn options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnostic>) ->
         ));
     }
     for index in (1..request.arguments.len().saturating_sub(1)).step_by(2) {
-        let Some(name) = request
-            .literals
-            .literal_args
-            .get(index)
-            .and_then(literal_text)
-        else {
-            continue;
+        let name = match request.literals.literal_args.get(index) {
+            Some(LiteralValue::Unknown) | None => {
+                // This selector may be NumDimensions. A later known selector
+                // can still override it, in the same order as runtime options.
+                dimensions = None;
+                continue;
+            }
+            Some(value) => match literal_text(value) {
+                Some(name) => name,
+                None => {
+                    dimensions = None;
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-TSNE-OPTION-TYPE",
+                        "tsne option names must be text",
+                        index,
+                    ));
+                    continue;
+                }
+            },
         };
         let Some(option) = TsneOption::from_keyword(name) else {
             diagnostics.push(argument_error(
