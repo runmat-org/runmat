@@ -1,0 +1,73 @@
+//! Public reference-line behavior, compatibility and visible examples.
+use crate::*;
+
+const OWNER: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Reference-line runtime",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/refline.rs"),
+};
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("refline"), slug: Some("refline"),
+    summary: "Add a reference line y = m*x + b to the current or specified axes.",
+    description: "`refline` appends straight reference lines to the current or specified axes and returns the created line handle or handles when requested. With no coefficients it fits eligible scatter-style series; with explicit coefficients it draws `y = m*x + b` over the axes' x span.",
+    keywords: &["refline", "reference line", "statistics", "plotting"],
+    related: &["lsline", "plot", "xline", "yline"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Fitted and explicit forms", paragraphs: &[
+            "`refline()` and `refline(ax)` add least-squares lines for visible scatter and marker-only line series. `refline([m b])` and `refline(m,b)` draw explicit coefficients instead of fitting data.",
+            "The line uses explicit `XLim` where present. Automatic axes derive a finite span from visible data and fall back to `[0,1]` when none exists.",
+            "Optional LineSpec and line Name/Value controls such as `Color`, `LineStyle`, `LineWidth`, and `DisplayName` are RunMat extensions, parsed by the same line-style domain as ordinary plotting.",
+        ] },
+        BuiltinDocumentationSection { heading: "Classes, compatibility, and residency", paragraphs: &[
+            "The compatibility target documents single and double coefficients. In RunMat mode, all eight typed-integer classes are accepted after exact binary64 checks; logical coefficients are a separate extension. Explicit resident coefficients have their own RunMat-only gate.",
+            "Automatic resident coefficients gather through their owner for the checked graphics boundary. This host graphics operation does not claim a numeric GPU kernel; its returned line handle is host-resident and supports `get` and `set` for line properties.",
+            "Malformed coefficients and styles fail before axes mutation. Once graphics publication begins, callback and presentation failures follow the shared plotting error policy; this is not a transaction over existing figure state.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "refline-fit", title: "Fit a scatter plot",
+            program: "x = [1 2 3]; y = [2 4 6]; scatter(x,y); h = refline;",
+            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isgraphics(h)); assert(isequal(get(h,'YData'),[2 6]));" },
+        },
+        BuiltinExample { id: "refline-slope-intercept", title: "Draw a supplied slope and intercept",
+            program: "h = refline(2,1);",
+            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isgraphics(h)); assert(isequal(get(h,'XData'),[0 1])); assert(isequal(get(h,'YData'),[1 3]));" },
+        },
+        BuiltinExample { id: "refline-vector-style", title: "Style an explicit coefficient vector",
+            program: "h = refline([0.5 3],'--r','DisplayName','reference');",
+            display_output: None, compatibility: BuiltinExampleCompatibility::RunMat,
+            harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isgraphics(h)); assert(isequal(get(h,'YData'),[3 3.5]));" },
+        },
+        BuiltinExample { id: "refline-axes", title: "Target another axes",
+            program: "ax = subplot(1,2,2); h = refline(ax,[1 0]);",
+            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isgraphics(h)); assert(isequal(get(h,'YData'),get(h,'XData')));" },
+        },
+    ],
+    example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq { question: "Does refline compute a least-squares fit?", answer: "Yes, when called without coefficients. With `m` and `b`, it draws that line and does not fit a model." }],
+    links: &[
+        BuiltinDocumentationLink { label: "lsline", target: BuiltinDocumentationLinkTarget::Builtin("lsline") },
+        BuiltinDocumentationLink { label: "plot", target: BuiltinDocumentationLinkTarget::Builtin("plot") },
+        BuiltinDocumentationLink { label: "xline", target: BuiltinDocumentationLinkTarget::Builtin("xline") },
+        BuiltinDocumentationLink { label: "yline", target: BuiltinDocumentationLinkTarget::Builtin("yline") },
+        OWNER,
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[OWNER],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Explicit and fitted line geometry, class extensions, graphics errors", location: "crates/runmat-runtime/src/builtins/stats/summary/refline.rs" }],
+        notes: &["Host graphics result; admitted resident coefficients materialize at the checked floating boundary."],
+    },
+    introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
+};

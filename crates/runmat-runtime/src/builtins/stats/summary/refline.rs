@@ -1,14 +1,10 @@
 //! Reference-line compatibility helper.
 
+#[cfg(test)]
+use runmat_builtins::REFLINE_ERROR_INVALID_ARGUMENT;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, ReferenceLineOwner, REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION,
+    REFLINE_INTEGER_COEFFICIENT_EXTENSION, REFLINE_LOGICAL_COEFFICIENT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle, PlotElement};
@@ -28,226 +24,117 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "refline";
 
-const OUTPUT_HANDLE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Line graphics handle.",
-};
-
-const PARAM_AX: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::AxesHandle,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Target axes handle.",
-};
-
-const PARAM_COEFFS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "coeffs",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Two-element vector [slope intercept].",
-};
-
-const PARAM_SLOPE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "m",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Line slope.",
-};
-
-const PARAM_INTERCEPT: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "b",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Line y-intercept.",
-};
-
-const PARAM_STYLE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "style",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Optional LineSpec or line Name/Value pairs.",
-};
-
-const INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
-const INPUTS_COEFFS: [BuiltinParamDescriptor; 1] = [PARAM_COEFFS];
-const INPUTS_SLOPE_INTERCEPT: [BuiltinParamDescriptor; 2] = [PARAM_SLOPE, PARAM_INTERCEPT];
-const INPUTS_AX_STYLE: [BuiltinParamDescriptor; 2] = [PARAM_AX, PARAM_STYLE];
-const INPUTS_COEFFS_STYLE: [BuiltinParamDescriptor; 2] = [PARAM_COEFFS, PARAM_STYLE];
-const INPUTS_SLOPE_INTERCEPT_STYLE: [BuiltinParamDescriptor; 3] =
-    [PARAM_SLOPE, PARAM_INTERCEPT, PARAM_STYLE];
-const OUTPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [OUTPUT_HANDLE];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "refline()",
-        inputs: &INPUTS_EMPTY,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "refline(coeffs)",
-        inputs: &INPUTS_COEFFS,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "refline(m, b)",
-        inputs: &INPUTS_SLOPE_INTERCEPT,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "refline(___, LineSpec, Name, Value)",
-        inputs: &INPUTS_COEFFS_STYLE,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "refline(ax, ___)",
-        inputs: &INPUTS_AX_STYLE,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = refline(___)",
-        inputs: &INPUTS_SLOPE_INTERCEPT_STYLE,
-        outputs: &OUTPUTS_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = refline(ax, ___)",
-        inputs: &INPUTS_AX_STYLE,
-        outputs: &OUTPUTS_HANDLE,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REFLINE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:refline:InvalidArgument"),
-    when: "Axes handle, coefficient inputs, or style options are malformed.",
-    message: "refline: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REFLINE.INTERNAL",
-    identifier: Some("RunMat:refline:Internal"),
-    when: "RunMat cannot construct or register the reference line.",
-    message: "refline: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const REFLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const REFLINE_INTEGER_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "refline-integer-coefficients",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "refline accepts typed-integer slope/intercept coefficients as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ReflineIntegerCoefficientsExtension"),
-    };
-const REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "refline-explicit-gpu-coefficients",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "refline accepts explicitly GPU-resident coefficients as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ReflineExplicitGpuCoefficientsExtension"),
-    };
-const REFLINE_LOGICAL_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "refline-logical-coefficients",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "refline accepts logical slope/intercept coefficients as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ReflineLogicalCoefficientsExtension"),
-    };
-pub const REFLINE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    REFLINE_INTEGER_COEFFICIENT_EXTENSION,
-    REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION,
-    REFLINE_LOGICAL_COEFFICIENT_EXTENSION,
-];
-const REFLINE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "m",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents single and double slopes. RunMat admits typed integers only at a checked binary64 graphics boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "b/coeffs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The intercept or two-element coefficient vector follows the same independently gated checked floating boundary.",
-    },
-];
-pub const REFLINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = refline(integer_coeffs) or refline(integer_m,integer_b)",
-        inputs: &REFLINE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Slope/intercept arithmetic and line geometry are explicit floating boundaries. Automatic residency gathers transparently; explicit undocumented GPU coefficients are independently gated.",
-    }];
-
-fn refline_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
-    Type::Unknown
+trait ReferenceLineRuntimeErrors {
+    fn invalid(self, message: impl Into<String>) -> RuntimeError;
+    fn internal(self, message: impl Into<String>) -> RuntimeError;
+    fn invalid_with_source(self, message: impl Into<String>, cause: RuntimeError) -> RuntimeError;
+    fn internal_with_source(self, message: impl Into<String>, cause: RuntimeError) -> RuntimeError;
 }
 
-fn error(descriptor: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(NAME);
-    if let Some(identifier) = descriptor.identifier {
-        builder = builder.with_identifier(identifier);
+impl ReferenceLineRuntimeErrors for ReferenceLineOwner {
+    fn invalid(self, message: impl Into<String>) -> RuntimeError {
+        self.error(self.invalid_descriptor(), message)
     }
-    builder.build()
+
+    fn internal(self, message: impl Into<String>) -> RuntimeError {
+        self.error(self.internal_descriptor(), message)
+    }
+
+    fn invalid_with_source(self, message: impl Into<String>, cause: RuntimeError) -> RuntimeError {
+        self.sourced_error(self.invalid_descriptor(), message, cause)
+    }
+
+    fn internal_with_source(self, message: impl Into<String>, cause: RuntimeError) -> RuntimeError {
+        self.sourced_error(self.internal_descriptor(), message, cause)
+    }
 }
 
-fn invalid_argument(message: impl Into<String>) -> RuntimeError {
-    error(&ERROR_INVALID_ARGUMENT, message)
+trait ReferenceLineErrorBuilder {
+    fn error(
+        self,
+        descriptor: &'static BuiltinErrorDescriptor,
+        message: impl Into<String>,
+    ) -> RuntimeError;
+    fn sourced_error(
+        self,
+        descriptor: &'static BuiltinErrorDescriptor,
+        message: impl Into<String>,
+        cause: RuntimeError,
+    ) -> RuntimeError;
 }
 
+impl ReferenceLineErrorBuilder for ReferenceLineOwner {
+    fn error(
+        self,
+        descriptor: &'static BuiltinErrorDescriptor,
+        message: impl Into<String>,
+    ) -> RuntimeError {
+        let mut builder = build_runtime_error(message).with_builtin(self.name());
+        if let Some(identifier) = descriptor.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    }
+
+    fn sourced_error(
+        self,
+        descriptor: &'static BuiltinErrorDescriptor,
+        message: impl Into<String>,
+        cause: RuntimeError,
+    ) -> RuntimeError {
+        let span = cause.span;
+        let mut builder = build_runtime_error(message)
+            .with_builtin(self.name())
+            .with_gpu_gather_retry(cause.gpu_gather_retry())
+            .with_source(cause);
+        if let Some(span) = span {
+            builder = builder.with_span(span);
+        }
+        if let Some(identifier) = descriptor.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    }
+}
+
+#[cfg(test)]
 fn internal_error(message: impl Into<String>) -> RuntimeError {
-    error(&ERROR_INTERNAL, message)
+    ReferenceLineOwner::Refline.internal(message)
 }
 
 #[runtime_builtin(
     name = "refline",
-    category = "stats/summary",
-    summary = "Add a reference line y = m*x + b to the current or specified axes.",
-    keywords = "refline,reference line,statistics,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(refline_type),
-    descriptor(crate::builtins::stats::summary::refline::REFLINE_DESCRIPTOR),
-    extensions(crate::builtins::stats::summary::refline::REFLINE_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::summary::refline::REFLINE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::refline"
 )]
 pub(crate) async fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (target, mut args) = split_optional_axes(args)?;
-    normalize_refline_coefficients(&mut args).await?;
-    apply_axes_target(target, NAME).map_err(|err| {
-        if err.identifier().is_some() {
-            err
-        } else {
-            invalid_argument(err.message)
-        }
-    })?;
+    run_reference_lines(args, ReferenceLineOwner::Refline).await
+}
 
-    let (plan, style_args) = parse_refline_coefficients(&args)?;
-    let style = parse_line_style_args(style_args, &LineStyleParseOptions::generic(NAME))
-        .map_err(|err| invalid_argument(err.message))?;
+pub(super) async fn run_reference_lines(
+    args: Vec<Value>,
+    owner: ReferenceLineOwner,
+) -> BuiltinResult<Value> {
+    let (target, mut args) = split_optional_axes(args)?;
+    let coefficient_count = coefficient_count(&args, owner)?;
+    let style = parse_line_style_args(
+        &args[coefficient_count..],
+        &LineStyleParseOptions::generic(owner.name()),
+    )
+    .map_err(|err| {
+        let message = err.message.clone();
+        owner.invalid_with_source(message, err)
+    })?;
+    normalize_refline_coefficients(&mut args, owner, coefficient_count).await?;
+    let (plan, style_args) = parse_refline_coefficients(&args, owner)?;
+    debug_assert_eq!(style_args.len(), args.len() - coefficient_count);
+    apply_axes_target(target, owner.name()).map_err(|err| {
+        if matches!(owner, ReferenceLineOwner::Refline) && err.identifier().is_some() {
+            return err;
+        }
+        let message = err.message.clone();
+        owner.internal_with_source(message, err)
+    })?;
     let axes = current_axes_state();
     let figure_handle = axes.handle;
 
@@ -255,37 +142,41 @@ pub(crate) async fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ReflinePlan::Explicit { slope, intercept } => vec![ReflineLineSpec {
             slope,
             intercept,
-            x_span: refline_x_span(figure_handle, axes.active_index)?,
+            x_span: refline_x_span(figure_handle, axes.active_index, owner)?,
         }],
-        ReflinePlan::LeastSquares => least_squares_specs(figure_handle, axes.active_index).await?,
+        ReflinePlan::LeastSquares => {
+            least_squares_specs(figure_handle, axes.active_index, owner).await?
+        }
     };
     if specs.is_empty() {
-        return Ok(Value::Tensor(
-            Tensor::new(Vec::new(), vec![0, 0])
-                .map_err(|err| internal_error(format!("refline: {err}")))?,
-        ));
+        return Ok(Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).map_err(
+            |err| owner.internal(format!("{}: {err}", owner.name())),
+        )?));
     }
 
     let lines = specs
         .iter()
-        .map(|spec| line_from_spec(*spec, &style))
+        .map(|spec| line_from_spec(*spec, &style, owner))
         .collect::<BuiltinResult<Vec<_>>>()?;
     let mut lines = Some(lines);
 
     let plot_indices_slot = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_out = std::rc::Rc::clone(&plot_indices_slot);
-    let render_result =
-        append_active_plot(NAME, PlotRenderOptions::default(), move |figure, axes| {
-            let lines = lines
-                .take()
-                .ok_or_else(|| internal_error("refline: lines already rendered"))?;
+    let render_result = append_active_plot(
+        owner.name(),
+        PlotRenderOptions::default(),
+        move |figure, axes| {
+            let lines = lines.take().ok_or_else(|| {
+                owner.internal(format!("{}: lines already rendered", owner.name()))
+            })?;
             let mut indices = plot_indices_out.borrow_mut();
             for line in lines {
                 let index = figure.add_line_plot_on_axes(line, axes);
                 indices.push((axes, index));
             }
             Ok(())
-        });
+        },
+    );
 
     if let Err(err) = render_result {
         if !crate::builtins::plotting::state::presentation_unavailable(&err) {
@@ -301,7 +192,7 @@ pub(crate) async fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         })
         .collect::<Vec<_>>();
     if handles.is_empty() {
-        return Err(internal_error("refline: line was not registered"));
+        return Err(owner.internal(format!("{}: line was not registered", owner.name())));
     }
     if handles.len() == 1 {
         return Ok(Value::Num(handles[0]));
@@ -309,53 +200,102 @@ pub(crate) async fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
     let len = handles.len();
     Ok(Value::Tensor(Tensor::new(handles, vec![len, 1]).map_err(
-        |err| internal_error(format!("refline: {err}")),
+        |err| owner.internal(format!("{}: {err}", owner.name())),
     )?))
 }
 
-async fn normalize_refline_coefficients(args: &mut [Value]) -> BuiltinResult<()> {
+fn coefficient_count(args: &[Value], owner: ReferenceLineOwner) -> BuiltinResult<usize> {
+    if matches!(owner, ReferenceLineOwner::Lsline) {
+        return if args.is_empty() {
+            Ok(0)
+        } else {
+            Err(owner.invalid("lsline: expected zero inputs or one axes handle"))
+        };
+    }
+    let Some(first) = args.first() else {
+        return Ok(0);
+    };
+    let first_len = coefficient_element_count(first, owner)?;
+    if matches!(first, Value::Tensor(_) | Value::GpuTensor(_)) && !matches!(first_len, 1 | 2) {
+        return Err(owner.invalid("refline: coefficients must be scalar or a two-element vector"));
+    }
+    if first_len == 2 {
+        Ok(1)
+    } else if args.len() >= 2 {
+        let second = &args[1];
+        if matches!(second, Value::Tensor(_) | Value::GpuTensor(_))
+            && coefficient_element_count(second, owner)? != 1
+        {
+            return Err(owner.invalid("refline: intercept must be scalar"));
+        }
+        Ok(2)
+    } else {
+        Err(owner
+            .invalid("refline: expected coefficients as [slope intercept] or slope, intercept"))
+    }
+}
+
+fn coefficient_element_count(value: &Value, owner: ReferenceLineOwner) -> BuiltinResult<usize> {
+    if let Value::GpuTensor(handle) = value {
+        if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
+            return Err(owner.invalid("refline: coefficients must be real numeric values"));
+        }
+    }
+    Ok(match value {
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor),
+        Value::GpuTensor(handle) => handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| {
+                owner.invalid(format!("{}: coefficient shape overflows", owner.name()))
+            })?,
+        _ => 1,
+    })
+}
+
+async fn normalize_refline_coefficients(
+    args: &mut [Value],
+    owner: ReferenceLineOwner,
+    coefficient_count: usize,
+) -> BuiltinResult<()> {
     use crate::builtins::common::validation::{
         native_integer_value_is_exact_f64_async, value_has_logical_class,
         value_has_native_integer_class,
     };
-    let Some(first) = args.first() else {
-        return Ok(());
-    };
-    let first_len = match first {
-        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor),
-        Value::GpuTensor(handle) => handle.shape().iter().product(),
-        _ => 1,
-    };
-    let count = if first_len == 2 { 1 } else { args.len().min(2) };
-    for value in args.iter_mut().take(count) {
+    for value in args.iter_mut().take(coefficient_count) {
         if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
         {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION,
-                NAME,
+                owner.name(),
             )?;
         }
         if value_has_logical_class(value) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &REFLINE_LOGICAL_COEFFICIENT_EXTENSION,
-                NAME,
+                owner.name(),
             )?;
         }
         if value_has_native_integer_class(value) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &REFLINE_INTEGER_COEFFICIENT_EXTENSION,
-                NAME,
+                owner.name(),
             )?;
             if !native_integer_value_is_exact_f64_async(value).await? {
-                return Err(invalid_argument(
-                    "refline: integer coefficients must be exactly representable as double",
-                ));
+                return Err(owner.invalid(format!(
+                    "{}: integer coefficients must be exactly representable as double",
+                    owner.name()
+                )));
             }
         }
         if matches!(value, Value::GpuTensor(_)) {
             *value = crate::dispatcher::gather_if_needed_async(value)
                 .await
-                .map_err(|err| invalid_argument(format!("refline: {err}")))?;
+                .map_err(|err| {
+                    let message = format!("{}: {err}", owner.name());
+                    owner.invalid_with_source(message, err)
+                })?;
         }
     }
     Ok(())
@@ -390,11 +330,14 @@ fn split_optional_axes(args: Vec<Value>) -> BuiltinResult<(AxesTarget, Vec<Value
     Ok((None, rest))
 }
 
-fn parse_refline_coefficients(args: &[Value]) -> BuiltinResult<(ReflinePlan, &[Value])> {
+fn parse_refline_coefficients(
+    args: &[Value],
+    owner: ReferenceLineOwner,
+) -> BuiltinResult<(ReflinePlan, &[Value])> {
     match args {
         [] => Ok((ReflinePlan::LeastSquares, &[])),
         [coeffs, rest @ ..] => {
-            if let Some(pair) = coefficient_pair(coeffs)? {
+            if let Some(pair) = coefficient_pair(coeffs, owner)? {
                 return Ok((
                     ReflinePlan::Explicit {
                         slope: pair.0,
@@ -404,18 +347,19 @@ fn parse_refline_coefficients(args: &[Value]) -> BuiltinResult<(ReflinePlan, &[V
                 ));
             }
             if rest.is_empty() {
-                return Err(invalid_argument(
-                    "refline: expected coefficients as [slope intercept] or slope, intercept",
-                ));
+                return Err(owner.invalid(format!(
+                    "{}: expected coefficients as [slope intercept] or slope, intercept",
+                    owner.name()
+                )));
             }
-            let slope = finite_scalar(coeffs, "slope")?;
-            let intercept = finite_scalar(&rest[0], "intercept")?;
+            let slope = finite_scalar(coeffs, "slope", owner)?;
+            let intercept = finite_scalar(&rest[0], "intercept", owner)?;
             Ok((ReflinePlan::Explicit { slope, intercept }, &rest[1..]))
         }
     }
 }
 
-fn coefficient_pair(value: &Value) -> BuiltinResult<Option<(f64, f64)>> {
+fn coefficient_pair(value: &Value, owner: ReferenceLineOwner) -> BuiltinResult<Option<(f64, f64)>> {
     match value {
         Value::Tensor(tensor) => {
             if tensor_utils::tensor_element_len(tensor) != 2 {
@@ -424,9 +368,10 @@ fn coefficient_pair(value: &Value) -> BuiltinResult<Option<(f64, f64)>> {
             let slope = tensor_utils::tensor_value_f64(tensor, 0);
             let intercept = tensor_utils::tensor_value_f64(tensor, 1);
             if !slope.is_finite() || !intercept.is_finite() {
-                return Err(invalid_argument(
-                    "refline: coefficients must contain finite slope and intercept",
-                ));
+                return Err(owner.invalid(format!(
+                    "{}: coefficients must contain finite slope and intercept",
+                    owner.name()
+                )));
             }
             Ok(Some((slope, intercept)))
         }
@@ -434,18 +379,22 @@ fn coefficient_pair(value: &Value) -> BuiltinResult<Option<(f64, f64)>> {
     }
 }
 
-fn finite_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
+fn finite_scalar(value: &Value, name: &str, owner: ReferenceLineOwner) -> BuiltinResult<f64> {
     let value = value_as_f64(value)
-        .ok_or_else(|| invalid_argument(format!("refline: {name} must be numeric")))?;
+        .ok_or_else(|| owner.invalid(format!("{}: {name} must be numeric", owner.name())))?;
     if !value.is_finite() {
-        return Err(invalid_argument(format!("refline: {name} must be finite")));
+        return Err(owner.invalid(format!("{}: {name} must be finite", owner.name())));
     }
     Ok(value)
 }
 
-fn refline_x_span(handle: FigureHandle, axes_index: usize) -> BuiltinResult<(f64, f64)> {
+fn refline_x_span(
+    handle: FigureHandle,
+    axes_index: usize,
+    owner: ReferenceLineOwner,
+) -> BuiltinResult<(f64, f64)> {
     if let Some(limits) = axes_metadata_snapshot(handle, axes_index)
-        .map_err(|err| internal_error(format!("refline: {err}")))?
+        .map_err(|err| owner.internal(format!("{}: {err}", owner.name())))?
         .x_limits
         .filter(|limits| valid_span(*limits))
     {
@@ -466,8 +415,9 @@ fn refline_x_span(handle: FigureHandle, axes_index: usize) -> BuiltinResult<(f64
 async fn least_squares_specs(
     handle: FigureHandle,
     axes_index: usize,
+    owner: ReferenceLineOwner,
 ) -> BuiltinResult<Vec<ReflineLineSpec>> {
-    let x_span = refline_x_span(handle, axes_index)?;
+    let x_span = refline_x_span(handle, axes_index, owner)?;
     let Some(figure) = clone_figure(handle) else {
         return Ok(Vec::new());
     };
@@ -490,14 +440,17 @@ async fn least_squares_specs(
         let data = match plot {
             PlotElement::Scatter(plot) => {
                 Some(plot.export_scene_xy_data().await.map_err(|err| {
-                    internal_error(format!("refline: unable to read scatter data: {err}"))
+                    owner.internal(format!(
+                        "{}: unable to read scatter data: {err}",
+                        owner.name()
+                    ))
                 })?)
             }
             PlotElement::Line(plot)
                 if plot.marker.is_some() && matches!(plot.line_style, LineStyle::None) =>
             {
                 Some(plot.export_scene_xy_data().await.map_err(|err| {
-                    internal_error(format!("refline: unable to read line data: {err}"))
+                    owner.internal(format!("{}: unable to read line data: {err}", owner.name()))
                 })?)
             }
             _ => None,
@@ -505,7 +458,7 @@ async fn least_squares_specs(
         let Some((x, y)) = data else {
             continue;
         };
-        if let Some((slope, intercept)) = least_squares_coefficients(&x, &y)? {
+        if let Some((slope, intercept)) = least_squares_coefficients(&x, &y, owner)? {
             specs.push(ReflineLineSpec {
                 slope,
                 intercept,
@@ -517,7 +470,11 @@ async fn least_squares_specs(
     Ok(specs)
 }
 
-fn least_squares_coefficients(x: &[f64], y: &[f64]) -> BuiltinResult<Option<(f64, f64)>> {
+fn least_squares_coefficients(
+    x: &[f64],
+    y: &[f64],
+    owner: ReferenceLineOwner,
+) -> BuiltinResult<Option<(f64, f64)>> {
     let mut n = 0usize;
     let mut sum_x = 0.0;
     let mut sum_y = 0.0;
@@ -552,9 +509,10 @@ fn least_squares_coefficients(x: &[f64], y: &[f64]) -> BuiltinResult<Option<(f64
     };
     let intercept = mean_y - slope * mean_x;
     if !slope.is_finite() || !intercept.is_finite() {
-        return Err(invalid_argument(
-            "refline: least-squares coefficients must be finite",
-        ));
+        return Err(owner.invalid(format!(
+            "{}: least-squares coefficients must be finite",
+            owner.name()
+        )));
     }
     Ok(Some((slope, intercept)))
 }
@@ -562,19 +520,21 @@ fn least_squares_coefficients(x: &[f64], y: &[f64]) -> BuiltinResult<Option<(f64
 fn line_from_spec(
     spec: ReflineLineSpec,
     style: &crate::builtins::plotting::style::ParsedLineStyle,
+    owner: ReferenceLineOwner,
 ) -> BuiltinResult<LinePlot> {
     let y_span = (
         spec.slope * spec.x_span.0 + spec.intercept,
         spec.slope * spec.x_span.1 + spec.intercept,
     );
     if !y_span.0.is_finite() || !y_span.1.is_finite() {
-        return Err(invalid_argument(
-            "refline: computed line coordinates must be finite",
-        ));
+        return Err(owner.invalid(format!(
+            "{}: computed line coordinates must be finite",
+            owner.name()
+        )));
     }
 
     let mut line = LinePlot::new(vec![spec.x_span.0, spec.x_span.1], vec![y_span.0, y_span.1])
-        .map_err(|err| internal_error(format!("refline: {err}")))?
+        .map_err(|err| owner.internal(format!("{}: {err}", owner.name())))?
         .with_style(
             style.appearance.color,
             style.appearance.line_width,
@@ -681,6 +641,23 @@ mod tests {
             panic!("expected line handle");
         };
         assert_eq!(y_data(handle), vec![3.0, 2.5]);
+    }
+
+    #[test]
+    fn invalid_style_does_not_retarget_axes() {
+        let _guard = setup();
+        configure_subplot(1, 2, 1).unwrap();
+        let figure = current_figure_handle();
+        let target = encode_axes_handle(figure, 0);
+        let before = current_axes_state().active_index;
+        let err = block_on(refline_builtin(vec![
+            Value::Num(target),
+            tensor(vec![1.0, 0.0], 1, 2),
+            Value::String("Color".into()),
+        ]))
+        .expect_err("a name without its value must fail before axes mutation");
+        assert_eq!(err.identifier(), REFLINE_ERROR_INVALID_ARGUMENT.identifier);
+        assert_eq!(current_axes_state().active_index, before);
     }
 
     #[test]
