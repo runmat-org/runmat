@@ -123,19 +123,22 @@ pub fn integer_is_exact_f64(value: &IntValue) -> bool {
 }
 
 pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {
+    fn storage_exact(storage: &runmat_value::IntegerStorage) -> bool {
+        (0..storage.len()).all(|index| {
+            storage
+                .value_at(index)
+                .is_some_and(|value| integer_is_exact_f64(&value))
+        })
+    }
+
     let exact = integer_is_exact_f64;
     match value {
         Value::Int(value) => exact(value),
-        Value::Tensor(tensor) => tensor
+        Value::Tensor(tensor) => tensor.integer_storage().is_none_or(storage_exact),
+        Value::SparseTensor(tensor) => tensor.integer_storage().is_none_or(storage_exact),
+        Value::ComplexTensor(tensor) => tensor
             .integer_storage()
-            .is_none_or(|storage| storage.exact_values().iter().all(exact)),
-        Value::SparseTensor(tensor) => tensor
-            .integer_storage()
-            .is_none_or(|storage| storage.exact_values().iter().all(exact)),
-        Value::ComplexTensor(tensor) => tensor.integer_storage().is_none_or(|storage| {
-            storage.real.exact_values().iter().all(exact)
-                && storage.imag.exact_values().iter().all(exact)
-        }),
+            .is_none_or(|storage| storage_exact(&storage.real) && storage_exact(&storage.imag)),
         Value::Cell(cell) => cell.data.iter().all(native_integer_value_is_exact_f64),
         Value::Struct(value) => value.fields.values().all(native_integer_value_is_exact_f64),
         Value::StructArray(value) => {

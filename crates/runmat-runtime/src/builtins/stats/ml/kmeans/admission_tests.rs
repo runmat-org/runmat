@@ -304,6 +304,39 @@ fn ignored_nested_resident_metadata_is_protected_without_inheriting_explicit_int
 }
 
 #[test]
+fn consumed_explicit_scalar_control_prevents_implicit_host_output_fallback() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let owner = TestAllocationOwner::new();
+    let source = owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let control = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let explicit_control = control
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    let provider = RestoreProvider::new(UploadBehavior::Unsupported, owner);
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let host = Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap());
+
+    let ignored_control = BorrowedOperands::new();
+    let fallback = restore_kmeans_value(host.clone(), Some(&source.handle), &ignored_control)
+        .expect("unsupported automatic upload permits host fallback");
+    assert_eq!(fallback, host);
+
+    let mut consumed_control = BorrowedOperands::new();
+    consumed_control.protect_value(&Value::GpuTensor(explicit_control.clone()));
+    consumed_control.record_consumed(&Value::GpuTensor(explicit_control));
+    let error = restore_kmeans_value(host, Some(&source.handle), &consumed_control).unwrap_err();
+    assert!(error.message().contains("failed to restore GPU result"));
+    assert!(std::error::Error::source(&error).is_some());
+    assert_eq!(source.probe.retirements(), 0);
+    assert_eq!(control.probe.retirements(), 0);
+}
+
+#[test]
 fn later_upload_failure_retires_first_staged_output_and_preserves_cause() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let owner = TestAllocationOwner::new();

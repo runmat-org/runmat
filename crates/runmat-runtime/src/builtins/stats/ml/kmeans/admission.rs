@@ -316,6 +316,10 @@ impl BorrowedOperands {
     }
 
     pub(super) fn record_consumed(&mut self, value: &Value) {
+        // A numerical operand actually materialized for clustering carries its
+        // explicit device intent into the result. Merely present metadata,
+        // including ignored statset fields, is protected from aliasing but
+        // does not determine result placement.
         if let Value::GpuTensor(handle) = value {
             self.intent_sources.push(handle.clone());
         }

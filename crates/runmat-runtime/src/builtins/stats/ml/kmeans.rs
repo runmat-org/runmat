@@ -308,7 +308,14 @@ fn ensure_kmeans_extensions(x: &Value, k: &Value, options: &[OptionHeader]) -> B
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(with_kmeans_context)
+    // Admission leaves only direct numeric operands here. Keep owned host
+    // payloads in place; route resident operands through the shared owner-
+    // validating download path.
+    if matches!(&value, Value::GpuTensor(_)) {
+        gather_if_needed_async(&value)
+            .await
+            .map_err(with_kmeans_context)
+    } else {
+        Ok(value)
+    }
 }
