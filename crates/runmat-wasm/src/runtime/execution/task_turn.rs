@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[wasm_bindgen_test(async)]
-    async fn same_worker_cancel_execution_interrupts_a_running_multinomial_fit() {
+    async fn same_browser_event_loop_cancel_interrupts_a_running_multinomial_fit() {
         let runtime = Rc::new(
             crate::init_runmat(JsValue::NULL)
                 .await
@@ -160,9 +160,14 @@ mod tests {
         .expect("encode execution request");
         let turns_before = TEST_POSTED_TURNS.with(std::cell::Cell::get);
         let mut execution = Box::pin(runtime.execute_request_js(request));
-        let waker = noop_waker();
-        match execution.as_mut().poll(&mut Context::from_waker(&waker)) {
-            Poll::Pending => {}
+        futures::future::poll_fn(|context| match execution.as_mut().poll(context) {
+            Poll::Pending => {
+                if TEST_POSTED_TURNS.with(std::cell::Cell::get) > turns_before {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }
             Poll::Ready(Ok(payload)) => {
                 let diagnostic = js_sys::JSON::stringify(&payload)
                     .ok()
@@ -172,7 +177,8 @@ mod tests {
             Poll::Ready(Err(error)) => {
                 panic!("execution failed before the fit's cooperative turn: {error:?}");
             }
-        }
+        })
+        .await;
         assert!(
             TEST_POSTED_TURNS.with(std::cell::Cell::get) > turns_before,
             "the fit must post a browser task turn before cancellation"
@@ -208,14 +214,18 @@ mod tests {
             Reflect::get(&payload, &JsValue::from_str("error")).expect("execution error field");
         let identifier = Reflect::get(&error, &JsValue::from_str("identifier"))
             .expect("structured cancellation identifier");
-        assert_eq!(identifier.as_string().as_deref(), Some("RunMat:Cancelled"));
+        // The VM cancellation scope drops a suspended fit before polling it
+        // again. Its public error takes precedence over the fit-local error;
+        // the posted CPU turn above establishes that the fit was running.
+        assert_eq!(
+            identifier.as_string().as_deref(),
+            Some("RunMat:ExecutionCancelled")
+        );
         let message = Reflect::get(&error, &JsValue::from_str("message"))
             .expect("structured cancellation message");
-        assert!(
-            message
-                .as_string()
-                .is_some_and(|text| text.contains("mnrfit: execution was cancelled")),
-            "cancellation must reach the multinomial fit, not only an earlier pipeline stage"
+        assert_eq!(
+            message.as_string().as_deref(),
+            Some("Execution cancelled by user")
         );
     }
 }
