@@ -411,6 +411,55 @@ fn metric_parameter_matches(metric: DistanceMetricKind, option: KnnOption) -> bo
     )
 }
 
+pub(super) fn preflight_knn_metric_parameter(
+    metric: DistanceMetricKind,
+    parameter: Option<&Value>,
+    columns: usize,
+) -> BuiltinResult<()> {
+    let Some(parameter) = parameter else {
+        return Ok(());
+    };
+    let Some((rows, cols, len)) = parameter_geometry(parameter) else {
+        return Err(distance_error(
+            KNNSEARCH_NAME,
+            "knnsearch: distance parameter must be a numeric scalar, vector, or matrix",
+        ));
+    };
+    match metric {
+        DistanceMetricKind::Minkowski
+            if len == 1 && !matches!(parameter, Value::Bool(_) | Value::LogicalArray(_)) =>
+        {
+            Ok(())
+        }
+        DistanceMetricKind::Seuclidean if len == columns => Ok(()),
+        DistanceMetricKind::Mahalanobis if rows == columns && cols == columns => Ok(()),
+        _ => Err(distance_error(
+            KNNSEARCH_NAME,
+            "knnsearch: distance parameter shape does not match the selected metric",
+        )),
+    }
+}
+
+fn parameter_geometry(value: &Value) -> Option<(usize, usize, usize)> {
+    let shape = match value {
+        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::LogicalArray(array) => array.shape.as_slice(),
+        Value::GpuTensor(handle)
+            if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real =>
+        {
+            handle.shape()
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Some((1, 1, 1)),
+        _ => return None,
+    };
+    match shape {
+        [] => Some((1, 1, 1)),
+        [rows] => Some((*rows, 1, *rows)),
+        [rows, columns] => Some((*rows, *columns, rows.checked_mul(*columns)?)),
+        _ => None,
+    }
+}
+
 fn preflight_numeric_cache_size(value: &Value) -> BuiltinResult<()> {
     let number = match value {
         Value::Num(number) => Some(*number),

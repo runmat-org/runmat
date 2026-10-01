@@ -625,6 +625,19 @@ fn knn_preflights_options_and_geometry_before_provider_access() {
     .unwrap_err();
     assert!(bad_k.message().contains("K must be <="));
 
+    let bad_scale = block_on(knnsearch_builtin(
+        x.clone(),
+        y.clone(),
+        vec![
+            Value::from("Distance"),
+            Value::from("seuclidean"),
+            Value::from("Scale"),
+            tensor(vec![1.0, 2.0], 1, 2),
+        ],
+    ))
+    .unwrap_err();
+    assert!(bad_scale.message().contains("parameter shape"));
+
     let bad_columns = block_on(knnsearch_builtin(
         x,
         tensor(vec![1.0, 2.0], 1, 2),
@@ -632,6 +645,24 @@ fn knn_preflights_options_and_geometry_before_provider_access() {
     ))
     .unwrap_err();
     assert!(bad_columns.message().contains("same number of columns"));
+}
+
+#[test]
+fn knn_rejects_complex_resident_observations_from_physical_type() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let complex = runmat_value::ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1])
+            .expect("complex observations");
+        let resident =
+            crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &complex)
+                .expect("resident complex observations");
+        let error = block_on(knnsearch_builtin(
+            Value::GpuTensor(resident),
+            tensor(vec![0.0], 1, 1),
+            Vec::new(),
+        ))
+        .expect_err("complex storage must be rejected before host gather");
+        assert!(error.message().contains("real numeric or logical storage"));
+    });
 }
 
 #[test]

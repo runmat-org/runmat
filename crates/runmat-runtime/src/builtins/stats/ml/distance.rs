@@ -36,7 +36,7 @@ mod tests;
 use metric_compute::{condensed_distances, distance_matrix};
 use options::{
     parse_knnsearch_options, parse_metric, parse_metric_kind, parse_metric_name,
-    split_pdist2_options, validate_numeric_cache_sizes,
+    preflight_knn_metric_parameter, split_pdist2_options, validate_numeric_cache_sizes,
 };
 #[cfg(test)]
 use options::{parse_logical_scalar, parse_positive_integer};
@@ -277,7 +277,12 @@ async fn ensure_distance_exact_f64(
 )]
 async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_knnsearch_options(&rest)?;
-    preflight_knnsearch_geometry(&x, &y, parsed.options.k)?;
+    let columns = preflight_knnsearch_geometry(&x, &y, parsed.options.k)?;
+    preflight_knn_metric_parameter(
+        parsed.metric.kind,
+        parsed.metric_parameter.as_ref(),
+        columns,
+    )?;
     ensure_knnsearch_extensions(&x, &y, &rest)?;
     let output_source = crate::builtins::common::gpu_helpers::select_resident_output_source(
         [&x, &y].into_iter().filter_map(knn_gpu_source),
@@ -310,7 +315,7 @@ async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResul
     restore_knnsearch_value(value, output_source.as_ref())
 }
 
-fn preflight_knnsearch_geometry(x: &Value, y: &Value, k: usize) -> BuiltinResult<()> {
+fn preflight_knnsearch_geometry(x: &Value, y: &Value, k: usize) -> BuiltinResult<usize> {
     let (x_rows, x_columns) = preflight_observation_shape(x)?;
     let (_, y_columns) = preflight_observation_shape(y)?;
     if x_columns != y_columns {
@@ -325,14 +330,22 @@ fn preflight_knnsearch_geometry(x: &Value, y: &Value, k: usize) -> BuiltinResult
             "knnsearch: K must be <= size(X,1)",
         ));
     }
-    Ok(())
+    Ok(x_columns)
 }
 
 fn preflight_observation_shape(value: &Value) -> BuiltinResult<(usize, usize)> {
     let shape = match value {
         Value::Tensor(tensor) => tensor.shape.as_slice(),
         Value::LogicalArray(array) => array.shape.as_slice(),
-        Value::GpuTensor(handle) => handle.shape(),
+        Value::GpuTensor(handle) => {
+            if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
+                return Err(distance_error(
+                    KNNSEARCH_NAME,
+                    "knnsearch: observations must have real numeric or logical storage",
+                ));
+            }
+            handle.shape()
+        }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Ok((1, 1)),
         _ => {
             return Err(distance_error(
@@ -341,7 +354,7 @@ fn preflight_observation_shape(value: &Value) -> BuiltinResult<(usize, usize)> {
             ))
         }
     };
-    match shape {
+    let geometry = match shape {
         [] => Ok((1, 1)),
         [rows] => Ok((*rows, 1)),
         [rows, columns] => Ok((*rows, *columns)),
@@ -349,7 +362,12 @@ fn preflight_observation_shape(value: &Value) -> BuiltinResult<(usize, usize)> {
             KNNSEARCH_NAME,
             "knnsearch: input must be a numeric vector or 2-D matrix",
         )),
-    }
+    }?;
+    geometry
+        .0
+        .checked_mul(geometry.1)
+        .ok_or_else(|| distance_error(KNNSEARCH_NAME, "knnsearch: observation shape overflow"))?;
+    Ok(geometry)
 }
 
 fn knn_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {
