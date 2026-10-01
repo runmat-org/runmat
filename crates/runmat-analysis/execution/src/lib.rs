@@ -73,11 +73,18 @@ mod electrical_static_result;
 mod electrical_static_task;
 mod electrical_study;
 mod magnetic_study;
+mod maxwell_study;
+mod sampled_study_observations;
 mod static_em_study;
 pub use magnetic_study::{
     import_magnetic_study_completion, import_magnetic_study_root, prepare_magnetic_study_root,
     CompletedMagneticStudy, MagneticStudyCoordinator, MagneticStudyPhase, MagneticStudyPreparation,
     MagneticStudyResultClosure, MagneticStudyResultPhase, PreparedMagneticStudyRoot,
+};
+pub use maxwell_study::{
+    import_maxwell_study_completion, import_maxwell_study_root, prepare_maxwell_study_root,
+    CompletedMaxwellStudy, MaxwellStudyCoordinator, MaxwellStudyPhase, MaxwellStudyPreparation,
+    MaxwellStudyResultClosure, MaxwellStudyResultPhase, PreparedMaxwellStudyRoot,
 };
 mod magnetic_field_recovery;
 mod magnetic_state_profiles;

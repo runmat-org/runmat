@@ -219,7 +219,6 @@ pub(super) const RESULTS_FIELDS: &[&str] = &[
     "thermal_results",
     "transient_results",
     "nonlinear_results",
-    "electromagnetic_results",
     "structural_frequency_results",
     "diagnostics",
     "run_status",

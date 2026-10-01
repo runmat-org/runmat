@@ -157,7 +157,6 @@ pub(super) fn admit_linear_static_result(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,

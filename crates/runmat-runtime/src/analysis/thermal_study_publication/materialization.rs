@@ -108,7 +108,6 @@ pub(in crate::analysis) fn admit(
         }),
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence: accuracy.solver_convergence,
         result_quality: accuracy.result_quality,

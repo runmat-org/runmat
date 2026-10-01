@@ -128,70 +128,7 @@ fn electromagnetic_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormul
     if procedure != AnalysisProcedure::HarmonicResponse {
         return Vec::new();
     }
-    let mut realizations = super::maxwell::registered_realizations();
-    for topology in [
-        TopologyImplementation::CanonicalSolverMeshTet4,
-        TopologyImplementation::CanonicalSolverMeshTet10,
-    ] {
-        for source in [
-            SourceImplementation::CanonicalEdgeProjection,
-            SourceImplementation::OrdinalDistribution,
-            SourceImplementation::SyntheticProfileFallback,
-            SourceImplementation::UnmappedFallback,
-        ] {
-            for boundary_transfer in [
-                BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                BoundaryTransferImplementation::CanonicalGroundWithOrdinalInsulationProfile,
-                BoundaryTransferImplementation::ImplicitNaturalBoundaryAndGaugeAnchor,
-                BoundaryTransferImplementation::UnmappedFallback,
-            ] {
-                realizations.push(ExactFormulationRealization {
-                    components: vec![ExactFormulationComponent {
-                        spatial_operator: SpatialOperatorImplementation::ReducedEdgeGraphCurlCurl,
-                        constitutive: ConstitutiveImplementation::ReducedFrequencyMaterialResponse,
-                        recovery: RecoveryImplementation::ReducedEdgeGraphFlux,
-                        topologies: vec![topology, TopologyImplementation::OrientedEdgeIncidence],
-                        sources: vec![source],
-                    }],
-                    temporals: vec![
-                        TemporalImplementation::ElectromagneticReducedEdgeGraphHarmonicSolve,
-                    ],
-                    coupling: CouplingImplementation::Uncoupled,
-                    boundary_transfers: vec![boundary_transfer],
-                });
-            }
-        }
-    }
-    for source in [
-        SourceImplementation::OrdinalDistribution,
-        SourceImplementation::SyntheticProfileFallback,
-        SourceImplementation::UnmappedFallback,
-    ] {
-        for boundary_transfer in [
-            BoundaryTransferImplementation::GlobalCountProfile,
-            BoundaryTransferImplementation::ImplicitNaturalBoundaryAndGaugeAnchor,
-            BoundaryTransferImplementation::UnmappedFallback,
-        ] {
-            realizations.push(ExactFormulationRealization {
-                components: vec![ExactFormulationComponent {
-                    spatial_operator: SpatialOperatorImplementation::ReducedEdgeGraphCurlCurl,
-                    constitutive: ConstitutiveImplementation::ReducedFrequencyMaterialResponse,
-                    recovery: RecoveryImplementation::ReducedEdgeGraphFlux,
-                    topologies: vec![
-                        TopologyImplementation::DofAdjacency,
-                        TopologyImplementation::OrientedEdgeIncidence,
-                    ],
-                    sources: vec![source],
-                }],
-                temporals: vec![
-                    TemporalImplementation::ElectromagneticReducedEdgeGraphHarmonicSolve,
-                ],
-                coupling: CouplingImplementation::Uncoupled,
-                boundary_transfers: vec![boundary_transfer],
-            });
-        }
-    }
-    realizations
+    super::maxwell::registered_realizations()
 }
 
 fn acoustic_realizations() -> Vec<ExactFormulationRealization> {

@@ -52,33 +52,15 @@ pub(super) fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String
         issue_codes.push("RM.FEA.STUDY.EXECUTION_PLAN_INVALID".to_string());
     }
     for execution in &spec.execution.steps {
-        if let AnalysisSolverOptions::ElectromagneticPotential(options) = &execution.solver_options
-        {
-            if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
-                issue_codes
-                    .push("RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID".to_string());
-            }
-            if !options.harmonic_tolerance.is_finite() || options.harmonic_tolerance <= 0.0 {
-                issue_codes
-                    .push("RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID".to_string());
-            }
-            if options.harmonic_max_iterations == 0 {
-                issue_codes.push(
-                    "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID".to_string(),
-                );
-            }
-            if options.sweep_enabled
-                && !options
-                    .sweep_frequency_hz
-                    .iter()
-                    .all(|frequency_hz| frequency_hz.is_finite() && *frequency_hz > 0.0)
+        if let AnalysisSolverOptions::MaxwellHarmonic(options) = &execution.solver_options {
+            if !options.residual_target.is_finite()
+                || options.residual_target <= 0.0
+                || options.residual_target >= 1.0
             {
-                issue_codes
-                    .push("RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID".to_string());
+                issue_codes.push("RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID".into());
             }
         }
     }
-
     issue_codes
 }
 
@@ -111,15 +93,6 @@ pub(super) fn study_issue_message(code: &str) -> &'static str {
         "RM.FEA.STUDY.MODEL_INVALID" => "study model failed FEA validation",
         "RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID" => {
             "electromagnetic execution options.residual_target must be finite and positive"
-        }
-        "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID" => {
-            "electromagnetic execution options.harmonic_tolerance must be finite and positive"
-        }
-        "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID" => {
-            "electromagnetic execution options.harmonic_max_iterations must be greater than zero"
-        }
-        "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID" => {
-            "electromagnetic execution options.sweep_frequency_hz must contain finite positive values when sweep_enabled is true"
         }
         _ => "unrecognized study validation issue",
     }

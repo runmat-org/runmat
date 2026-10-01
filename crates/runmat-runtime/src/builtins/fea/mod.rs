@@ -1250,10 +1250,6 @@ fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery
             "includenonlinearresults" => {
                 query.include_nonlinear_results = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
-            "includeelectromagneticresults" => {
-                query.include_electromagnetic_results =
-                    exact_bool_from_value(RESULTS_NAME, pair.value)?;
-            }
             other => {
                 return Err(builtin_error(
                     RESULTS_NAME,
@@ -4563,7 +4559,6 @@ mod tests {
             thermal_results: None,
             transient_results: None,
             nonlinear_results: None,
-            electromagnetic_results: None,
             model_validity: crate::analysis::QualityGate::Pass,
             solver_convergence: crate::analysis::QualityGate::Pass,
             result_quality: crate::analysis::QualityGate::Pass,
@@ -4701,7 +4696,6 @@ mod tests {
                     crate::analysis::TransientIntegrationMethod::NewmarkAverageAcceleration,
             }),
             nonlinear_results: None,
-            electromagnetic_results: None,
             model_validity: crate::analysis::QualityGate::Pass,
             solver_convergence: crate::analysis::QualityGate::Pass,
             result_quality: crate::analysis::QualityGate::Pass,

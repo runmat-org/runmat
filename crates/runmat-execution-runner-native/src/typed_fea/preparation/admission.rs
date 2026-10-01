@@ -8,6 +8,7 @@ pub(super) enum PreparedFamily {
     Acoustic,
     Electrical,
     Magnetic,
+    Maxwell,
     Structural,
     Thermal,
 }
@@ -28,6 +29,36 @@ pub(super) fn select_family(
     let [step] = sequence.steps.as_slice() else {
         return Err(unsupported());
     };
+    if step.family == PhysicsFamily::Electromagnetic
+        && step.procedure == AnalysisProcedure::HarmonicResponse
+        && step.solution_space == SolutionSpace::Direct
+        && step.restart == RestartPolicy::Fresh
+        && step.state_inputs.is_empty()
+        && step.activations.is_empty()
+        && sequence.dependencies.is_empty()
+        && sequence.transitions.is_empty()
+        && sequence.branches.is_empty()
+    {
+        let Some(ElectromagneticDomain::Harmonic {
+            reference_frequency,
+        }) = electromagnetic
+        else {
+            return Err(unsupported());
+        };
+        let runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies) =
+            &step.independent_domain
+        else {
+            return Err(unsupported());
+        };
+        if frequencies.len() != 1
+            || !frequencies[0].is_finite()
+            || frequencies[0] <= 0.0
+            || frequencies[0] != reference_frequency.hertz
+        {
+            return Err(unsupported());
+        }
+        return Ok(PreparedFamily::Maxwell);
+    }
     if step.family == PhysicsFamily::Electromagnetic
         && step.procedure == AnalysisProcedure::Static
         && step.solution_space == SolutionSpace::Direct
@@ -74,7 +105,7 @@ pub(super) fn select_family(
 }
 
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, equation-selected static electrical/magnetic, or acoustic harmonic step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, equation-selected static electrical/magnetic, singleton Maxwell harmonic, or acoustic harmonic step".into()
 }
 
 #[cfg(test)]
@@ -89,6 +120,67 @@ mod tests {
                 equation: runmat_analysis_core::StaticElectricalEquation::Electrostatics,
             }),
         )
+    }
+
+    #[test]
+    fn maxwell_dispatch_requires_exact_singleton_fresh_harmonic_intent() {
+        let domain = ElectromagneticDomain::Harmonic {
+            reference_frequency: runmat_analysis_core::Frequency::new(2000.0),
+        };
+        let mut step = ProcedureStep::electromagnetic_harmonic("field");
+        step.independent_domain =
+            runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![2000.0]);
+        let sequence = AnalysisSequence::from_steps("field", vec![step.clone()]);
+        assert_eq!(
+            super::select_family(&sequence, Some(&domain)).unwrap(),
+            PreparedFamily::Maxwell
+        );
+        assert!(super::select_family(&sequence, None).is_err());
+        assert!(super::select_family(
+            &sequence,
+            Some(&ElectromagneticDomain::Magnetostatic {
+                formulation:
+                    runmat_analysis_core::MagnetostaticFormulation::MagneticVectorPotential,
+            })
+        )
+        .is_err());
+        for frequencies in [
+            vec![],
+            vec![1.0],
+            vec![2000.0, 3000.0],
+            vec![f64::NAN],
+            vec![0.0],
+        ] {
+            let mut changed = step.clone();
+            changed.independent_domain =
+                runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies);
+            assert!(super::select_family(
+                &AnalysisSequence::from_steps("field", vec![changed]),
+                Some(&domain)
+            )
+            .is_err());
+        }
+        let mut resumed = step.clone();
+        resumed.restart = RestartPolicy::ResumeCheckpoint {
+            checkpoint_id: "missing".into(),
+            required_state_digest: "missing".into(),
+        };
+        let mut reduced = step.clone();
+        reduced.solution_space = SolutionSpace::ModalReduced;
+        let mut static_step = step.clone();
+        static_step.procedure = AnalysisProcedure::Static;
+        for steps in [
+            vec![resumed],
+            vec![reduced],
+            vec![static_step],
+            vec![step.clone(), step],
+        ] {
+            assert!(super::select_family(
+                &AnalysisSequence::from_steps("field", steps),
+                Some(&domain)
+            )
+            .is_err());
+        }
     }
 
     #[test]

@@ -1,45 +1,13 @@
 use runmat_analysis_core::{
     AnalysisExcitation, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
-    AnalysisSequence, CoordinateFrame, ElectricCurrent, ElectromagneticDomain, EvidenceConfidence,
-    ExcitationAction, ExcitationCase, ExcitationCaseActivation, ExcitationCaseId,
-    ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget, Force,
-    MaterialAssignment, MaterialElectricalModel, PhysicalSignal, PhysicsFamily, Pressure,
-    ProcedureStep, ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence,
-    SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot, SignalOrdinate,
-    SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
-    TabulatedSignal, TabulatedSignalDomain, Velocity,
+    AnalysisSequence, CoordinateFrame, EvidenceConfidence, ExcitationAction, ExcitationCase,
+    ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution, ExcitationId,
+    ExcitationKinematics, ExcitationTarget, Force, MaterialAssignment, PhysicalSignal,
+    PhysicsFamily, Pressure, ProcedureStep, ProjectionRequirement, RegionTarget, Signal,
+    SignalApproximationEvidence, SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot,
+    SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape,
+    SignalValue, TabulatedSignal, TabulatedSignalDomain, Velocity,
 };
-
-fn magnetic_ground(
-    id: &str,
-    region: impl Into<String>,
-) -> runmat_analysis_core::AnalysisConstraint {
-    runmat_analysis_core::AnalysisConstraint::Magnetic(runmat_analysis_core::MagneticConstraint {
-        constraint_id: id.to_string(),
-        kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
-            target: runmat_analysis_core::RegionTarget::authored(region),
-        },
-    })
-}
-
-fn test_electrical_material() -> MaterialElectricalModel {
-    MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 1.0,
-        resistive_heating_coefficient: 0.0,
-        relative_permittivity: 1.0,
-        relative_permeability: 1.0,
-        conductivity_frequency_response: Vec::new(),
-    }
-}
-
-fn magnetic_insulation(id: &str, region: &str) -> runmat_analysis_core::AnalysisBoundary {
-    runmat_analysis_core::AnalysisBoundary {
-        boundary_id: id.to_string(),
-        target: runmat_analysis_core::RegionTarget::authored(region),
-        operator: runmat_analysis_core::BoundaryOperator::MagneticInsulation,
-    }
-}
 
 fn fluid_constraint(
     id: &str,
@@ -129,38 +97,6 @@ fn replace_with_force(model: &mut AnalysisModel, id: &str, region_id: &str, forc
     }];
 }
 
-fn replace_with_electric_current(
-    model: &mut AnalysisModel,
-    id: &str,
-    region_id: &str,
-    current_a: f64,
-) {
-    let signal_id = SignalId(format!("{id}.signal"));
-    let case_id = ExcitationCaseId(format!("{id}.case"));
-    model.signals = vec![PhysicalSignal::ElectricCurrent(Signal {
-        signal_id: signal_id.clone(),
-        shape: SignalShape::Scalar,
-        frame: None,
-        representation: SignalRepresentation::Constant(SignalValue::Scalar(ElectricCurrent::new(
-            current_a,
-        ))),
-        precision: SignalPrecision::Real64,
-        evidence: exact_signal_evidence(1),
-        provenance: SignalProvenance::Authored,
-    })];
-    model.excitations = vec![ExcitationAction::ElectricCurrent(excitation(
-        id,
-        ExcitationTarget::Region(RegionTarget::volume(region_id)),
-        signal_id,
-        ExcitationDistribution::Concentrated,
-    ))];
-    model.excitation_cases = vec![ExcitationCase {
-        case_id,
-        action_ids: vec![ExcitationId(id.to_string())],
-        activation: ExcitationCaseActivation::Always,
-    }];
-}
-
 fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [(f64, f64); 2]) {
     let signal_id = SignalId(id.to_string());
     let excitation_id = ExcitationId(format!("{id}.excitation"));
@@ -217,7 +153,6 @@ use runmat_analysis_fea::{
     FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
     FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
     FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
     FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
@@ -234,17 +169,17 @@ use runmat_runtime::analysis::{
     analysis_plan_study_op, analysis_plan_study_sweep_op, analysis_results_by_run_id_op,
     analysis_results_compare_op, analysis_results_op, analysis_run_acoustic_with_options_op,
     analysis_run_cfd_with_options_op, analysis_run_cht_with_options_op,
-    analysis_run_electromagnetic_with_options_op, analysis_run_fsi_with_options_op,
-    analysis_run_linear_static_op, analysis_run_linear_static_with_options,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
-    analysis_run_study_op, analysis_run_study_sweep_op, analysis_run_thermal_with_options_op,
-    analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
-    analysis_validate_study_op, analysis_validate_study_sweep_op, AnalysisChtRunOptions,
-    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisModalRunOptions,
-    AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
-    AnalysisRunOptions, AnalysisRunResult, AnalysisSolverOptions, AnalysisStructuralTimeStepPolicy,
-    AnalysisStudySpec, AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery,
-    FallbackEvent, FallbackReason, FallbackStage, FormulationRequirement, ModalFrequencyBasis,
+    analysis_run_fsi_with_options_op, analysis_run_linear_static_op,
+    analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
+    analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
+    analysis_trends_op, analysis_validate, analysis_validate_study_op,
+    analysis_validate_study_sweep_op, AnalysisChtRunOptions, AnalysisExecutionPlan,
+    AnalysisExecutionStep, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisRunOptions, AnalysisRunResult,
+    AnalysisSolverOptions, AnalysisStructuralTimeStepPolicy, AnalysisStudySpec,
+    AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery, FallbackEvent,
+    FallbackReason, FallbackStage, FormulationRequirement, ModalFrequencyBasis,
     ModalFrequencyUnits, PrecisionMode, PreconditionerMode, ProductionPublicationReasonCode,
     QualityGate, QualityPolicy, QualityReasonCode, RunStatus,
 };
@@ -1915,120 +1850,6 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
-    let mut model = contract_linear_static_model();
-    model.sequence.steps[0] =
-        runmat_analysis_core::ProcedureStep::electromagnetic_harmonic("electromagnetic");
-    model.materials[0].electrical = Some(test_electrical_material());
-    let region_id = model.constraints[0]
-        .target()
-        .expect("target")
-        .region_id
-        .clone();
-    model.constraints = vec![magnetic_ground("bc_em_snapshot_ground", region_id)];
-    model.boundaries.clear();
-    replace_with_electric_current(&mut model, "load_em_snapshot_coil", "node:2", 120.0);
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: runmat_analysis_core::Frequency::new(60.0),
-    });
-    model.materials[0].electrical = Some(test_electrical_material());
-    model.constraints = vec![magnetic_ground("em_contract_ground", "em_contract_region")];
-    model.boundaries = vec![magnetic_insulation(
-        "em_contract_insulation",
-        "em_contract_region",
-    )];
-    replace_with_electric_current(
-        &mut model,
-        "em_contract_source",
-        "em_contract_region",
-        120.0,
-    );
-
-    let envelope = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-contract-run-em-1".to_string()), None),
-    )
-    .expect("electromagnetic run should return typed payload");
-    assert_eq!(envelope.operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.op_version, "fea.run_electromagnetic/v1");
-    assert_experimental_result_identity(
-        &envelope.data,
-        PhysicsFamily::Electromagnetic,
-        AnalysisProcedure::HarmonicResponse,
-    );
-    assert_ne!(envelope.data.run_status, RunStatus::Rejected);
-    assert!(envelope.data.electromagnetic_results.is_some());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_EM_STATIC"));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_EM_SWEEP"));
-    let em_payload = envelope
-        .data
-        .electromagnetic_results
-        .as_ref()
-        .expect("electromagnetic payload expected");
-    assert_eq!(em_payload.sweep_frequency_hz.len(), 1);
-    assert_eq!(em_payload.sweep_peak_flux_density.len(), 1);
-    assert_eq!(em_payload.sweep_solve_quality.len(), 1);
-    assert!(em_payload.resonance_peak_frequency_hz.is_some());
-    assert!(em_payload.resonance_quality_factor.is_none());
-    assert_eq!(
-        em_payload.vector_potential_real.field_id,
-        FEA_FIELD_EM_VECTOR_POTENTIAL_REAL
-    );
-    assert_eq!(
-        em_payload.vector_potential_imag.field_id,
-        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG
-    );
-    assert_eq!(em_payload.vector_potential_real.shape.len(), 2);
-    assert_eq!(em_payload.vector_potential_real.shape[1], 3);
-    assert_eq!(
-        em_payload.vector_potential_imag.shape,
-        em_payload.vector_potential_real.shape
-    );
-    match &em_payload.vector_potential_real.values {
-        AnalysisFieldValues::HostF64(values) => {
-            assert_eq!(
-                values.len(),
-                em_payload
-                    .vector_potential_real
-                    .shape
-                    .iter()
-                    .product::<usize>()
-            );
-        }
-        AnalysisFieldValues::DeviceRef(_) => {
-            panic!("CPU EM vector potential should be returned as host values")
-        }
-    }
-
-    let mut unsupported_static = model;
-    unsupported_static.sequence.steps[0].procedure = AnalysisProcedure::Static;
-    let error = analysis_run_electromagnetic_with_options_op(
-        &unsupported_static,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-contract-run-em-static".to_string()), None),
-    )
-    .expect_err("electromagnetic static must not dispatch to harmonic electromagnetic math");
-    assert_eq!(error.operation, "fea.run_electromagnetic");
-    assert_eq!(error.op_version, "fea.run_electromagnetic/v1");
-    assert_eq!(error.error_code, "RM.FEA.RUN_ELECTROMAGNETIC.REQUIRES_STEP");
-}
-
-#[test]
 fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
     let model = fixture_model(FixtureId::NonlinearLoadPathMix);
     let envelope = analysis_run_nonlinear_with_options_op(
@@ -2060,7 +1881,6 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(
             Some("trace-contract-nonlinear-diagnostics-2".to_string()),
@@ -2078,68 +1898,6 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
     assert!(diagnostics.iter().all(|diag| {
         diag.code == "FEA_NONLINEAR_CONVERGENCE" || diag.code == "FEA_NONLINEAR_COST"
     }));
-}
-
-#[test]
-fn electromagnetic_contract_snapshot_matches_expected_shape() {
-    let mut model = contract_linear_static_model();
-    model.sequence.steps[0] =
-        runmat_analysis_core::ProcedureStep::electromagnetic_harmonic("electromagnetic");
-    model.materials[0].electrical = Some(test_electrical_material());
-    let region_id = model.constraints[0]
-        .target()
-        .expect("target")
-        .region_id
-        .clone();
-    model.constraints = vec![magnetic_ground("bc_em_snapshot_ground", region_id)];
-    model.boundaries.clear();
-    replace_with_electric_current(&mut model, "load_em_snapshot_coil", "node:2", 120.0);
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: runmat_analysis_core::Frequency::new(60.0),
-    });
-
-    let envelope = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-contract-em-snapshot-1".to_string()), None),
-    )
-    .expect("electromagnetic run should succeed");
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(Some("trace-contract-em-snapshot-2".to_string()), None),
-    )
-    .expect("electromagnetic results should succeed");
-
-    let contract_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/data/electromagnetic_contract_snapshot.json");
-    let expected: Value = serde_json::from_str(
-        &fs::read_to_string(&contract_path).expect("read electromagnetic contract snapshot"),
-    )
-    .expect("parse electromagnetic contract snapshot");
-
-    let electromagnetic = serde_json::to_value(
-        results
-            .data
-            .electromagnetic_results
-            .as_ref()
-            .expect("electromagnetic payload expected"),
-    )
-    .expect("serialize electromagnetic payload");
-    let summary = serde_json::to_value(&results.data.summary).expect("serialize summary");
-
-    let expected_em_keys = sorted_object_keys(
-        expected
-            .get("electromagnetic_results")
-            .expect("snapshot electromagnetic_results"),
-    );
-    let expected_summary_keys =
-        sorted_object_keys(expected.get("summary").expect("snapshot summary"));
-
-    assert_eq!(sorted_object_keys(&electromagnetic), expected_em_keys);
-    assert_eq!(sorted_object_keys(&summary), expected_summary_keys);
 }
 
 #[test]
@@ -2606,7 +2364,6 @@ fn analysis_results_contract_is_v1_and_filterable() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-3b-results".to_string()), None),
     )
@@ -2648,7 +2405,6 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-3c-results".to_string()), None),
     )
@@ -2685,7 +2441,6 @@ fn analysis_results_modal_query_controls_are_typed() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-modal-results-4".to_string()), None),
     )
@@ -2720,7 +2475,6 @@ fn analysis_results_modal_query_controls_are_typed() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-modal-results-5".to_string()), None),
     )
@@ -2759,7 +2513,6 @@ fn analysis_results_transient_query_controls_are_typed() {
             include_transient_results: false,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-transient-results-2".to_string()), None),
     )
@@ -2785,7 +2538,6 @@ fn analysis_results_transient_query_controls_are_typed() {
             include_transient_results: true,
             transient_snapshot_indices: vec![999],
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-transient-results-3".to_string()), None),
     )
@@ -3492,4 +3244,33 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::SolverBackendFallback));
+}
+
+#[test]
+fn retired_electromagnetic_proxy_operation_contract_cannot_deserialize() {
+    let removed = serde_json::json!({
+        "solver": "electromagnetic_potential",
+        "options": {
+            "deterministic_mode": true, "precision_mode": "fp64",
+            "quality_policy": "strict", "residual_target": 1e-6,
+            "harmonic_tolerance": 1e-7, "harmonic_max_iterations": 96,
+            "sweep_enabled": true, "sweep_frequency_hz": [60.0]
+        }
+    });
+    assert!(serde_json::from_value::<AnalysisSolverOptions>(removed).is_err());
+}
+
+#[test]
+fn maxwell_operation_contract_selects_genuine_complex_defaults() {
+    let options =
+        AnalysisSolverOptions::defaults_for(&ProcedureStep::electromagnetic_harmonic("field"))
+            .unwrap();
+    let wire = serde_json::to_value(&options).unwrap();
+    assert_eq!(wire["solver"], "maxwell_harmonic");
+    assert_eq!(
+        serde_json::from_value::<AnalysisSolverOptions>(wire).unwrap(),
+        options
+    );
+    // Authored CAD/worker execution and retained cold-root evidence are covered by
+    // native analysis_process_conformance/maxwell_authored, not this scalar smoke test.
 }

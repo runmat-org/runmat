@@ -12,8 +12,7 @@ pub use solver_compatibility::{
 };
 
 use runmat_analysis_core::{
-    AnalysisField, AnalysisProcedure, FormulationRequirement, InitialConditionTarget, SignalId,
-    SignalSampleApproach,
+    AnalysisField, FormulationRequirement, InitialConditionTarget, SignalId, SignalSampleApproach,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
@@ -559,57 +558,6 @@ impl TryFrom<StructuralInitialStateEvidenceData> for StructuralInitialStateEvide
         })
     }
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaElectromagneticRunResult {
-    pub run: FeaRunResult,
-    pub reference_frequency_hz: f64,
-    pub applied_current_a: f64,
-    pub vector_potential_real_field: AnalysisField,
-    pub vector_potential_imag_field: AnalysisField,
-    pub magnetic_flux_density_real_field: AnalysisField,
-    pub magnetic_flux_density_imag_field: AnalysisField,
-    pub magnetic_flux_density_magnitude_field: AnalysisField,
-    pub magnetic_field_real_field: AnalysisField,
-    pub magnetic_field_imag_field: AnalysisField,
-    pub current_density_real_field: AnalysisField,
-    pub current_density_imag_field: AnalysisField,
-    pub electric_field_real_field: AnalysisField,
-    pub electric_field_imag_field: AnalysisField,
-    pub power_loss_density_field: AnalysisField,
-    pub energy_density_field: AnalysisField,
-    pub residual_real_field: AnalysisField,
-    pub residual_imag_field: AnalysisField,
-    pub electric_flux_density_real_field: AnalysisField,
-    pub electric_flux_density_imag_field: AnalysisField,
-    pub poynting_vector_real_field: AnalysisField,
-    pub poynting_vector_imag_field: AnalysisField,
-    pub max_residual_norm: f64,
-    pub solve_quality: f64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ElectromagneticSolveOptions {
-    pub formulation_requirement: FormulationRequirement,
-    pub procedure: AnalysisProcedure,
-    pub residual_target: f64,
-    pub harmonic_tolerance: f64,
-    pub harmonic_max_iterations: usize,
-    pub solver_mesh: Option<SolverMeshArtifact>,
-}
-
-impl Default for ElectromagneticSolveOptions {
-    fn default() -> Self {
-        Self {
-            formulation_requirement: FormulationRequirement::Production,
-            procedure: AnalysisProcedure::HarmonicResponse,
-            residual_target: 1.0e-6,
-            harmonic_tolerance: 1.0e-7,
-            harmonic_max_iterations: 96,
-            solver_mesh: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaNonlinearRunResult {
     pub run: FeaRunResult,

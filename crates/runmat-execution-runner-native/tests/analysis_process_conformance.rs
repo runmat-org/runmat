@@ -65,6 +65,9 @@ mod magnetic;
 #[cfg(feature = "occt-native")]
 #[path = "analysis_process_conformance/magnetic_authored.rs"]
 mod magnetic_authored;
+#[cfg(feature = "occt-native")]
+#[path = "analysis_process_conformance/maxwell_authored.rs"]
+mod maxwell_authored;
 #[path = "analysis_process_conformance/modal_transient.rs"]
 mod modal_transient;
 #[path = "analysis_process_conformance/publication_chain.rs"]
@@ -134,6 +137,14 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--maxwell-authored-only") {
+        #[cfg(feature = "occt-native")]
+        maxwell_authored::run().await;
+        #[cfg(not(feature = "occt-native"))]
+        panic!("Maxwell authored conformance requires occt-native");
+        #[cfg(feature = "occt-native")]
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--electrothermal-only") {
         electrothermal::run().await;
         return;
@@ -156,6 +167,8 @@ async fn parent() {
     }
     #[cfg(feature = "occt-native")]
     magnetic_authored::run().await;
+    #[cfg(feature = "occt-native")]
+    maxwell_authored::run().await;
     magnetic::run().await;
     let directory = tempfile::tempdir().unwrap();
     let (host, program, input_objects, resource_plan) =

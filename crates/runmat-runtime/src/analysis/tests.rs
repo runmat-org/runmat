@@ -9,18 +9,17 @@ use chrono::Utc;
 use runmat_accelerate_api::{AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_analysis_core::{
     AnalysisExcitation, AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId,
-    AnalysisProcedure, AnalysisSequence, BeamElementModel, BeamSectionModel,
-    ConductivityFrequencyPoint, CoordinateFrame, CoupledPhysicsFamily, Direction, DynamicViscosity,
-    ElectricPotential, ElectromagneticDomain, EvidenceConfidence, ExcitationAction, ExcitationCase,
-    ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution, ExcitationId,
-    ExcitationKinematics, ExcitationTarget, Frequency, MassDensity, MaterialAssignment,
-    MaterialElasticityModel, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel, PhysicalSignal, PhysicsFamily, ProcedureStep, ProjectionRequirement,
-    RegionTarget, Signal, SignalApproximationEvidence, SignalExtrapolation, SignalId,
-    SignalInterpolation, SignalKnot, SignalOrdinate, SignalPrecision, SignalProvenance,
-    SignalRepresentation, SignalShape, SignalValue, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode, TabulatedSignal, TabulatedSignalDomain, Temperature,
-    TurbulenceIntensity, Velocity,
+    AnalysisProcedure, AnalysisSequence, BeamElementModel, BeamSectionModel, CoordinateFrame,
+    CoupledPhysicsFamily, Direction, DynamicViscosity, ElectricPotential, ElectromagneticDomain,
+    EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
+    ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
+    Frequency, MassDensity, MaterialAssignment, MaterialElasticityModel, MaterialElectricalModel,
+    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicalSignal, PhysicsFamily,
+    ProcedureStep, ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence,
+    SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot, SignalOrdinate,
+    SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
+    StructuralElement, StructuralElementKind, StructuralModel, StructuralNode, TabulatedSignal,
+    TabulatedSignalDomain, Temperature, TurbulenceIntensity, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
@@ -57,14 +56,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
     FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
     FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-    FEA_FIELD_EM_ELECTRIC_FIELD_REAL, FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_POYNTING_VECTOR_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -206,29 +199,6 @@ fn fixed_constraint(
             },
         },
     )
-}
-
-fn magnetic_ground(
-    id: impl Into<String>,
-    region: impl Into<String>,
-) -> runmat_analysis_core::AnalysisConstraint {
-    runmat_analysis_core::AnalysisConstraint::Magnetic(runmat_analysis_core::MagneticConstraint {
-        constraint_id: id.into(),
-        kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
-            target: runmat_analysis_core::RegionTarget::authored(region),
-        },
-    })
-}
-
-fn magnetic_insulation(
-    id: impl Into<String>,
-    region: impl Into<String>,
-) -> runmat_analysis_core::AnalysisBoundary {
-    runmat_analysis_core::AnalysisBoundary {
-        boundary_id: id.into(),
-        target: runmat_analysis_core::RegionTarget::authored(region),
-        operator: runmat_analysis_core::BoundaryOperator::MagneticInsulation,
-    }
 }
 
 fn sample_cfd_constraints(
@@ -795,12 +765,15 @@ fn test_model_for_geometry(
                     "step_default_electromagnetic",
                 )],
             );
-            model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Magnetic(
-                runmat_analysis_core::MagneticConstraint {
-                    constraint_id: "bc_default_em_ground".to_string(),
-                    kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
-                        target: RegionTarget::boundary("root"),
-                    },
+            model.sequence.steps[0].independent_domain =
+                runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![60.0]);
+            model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Electrical(
+                runmat_analysis_core::ElectricalConstraint {
+                    constraint_id: "bc_default_em_pec".to_string(),
+                    kind:
+                        runmat_analysis_core::ElectricalConstraintKind::ElectricPerfectConductor {
+                            target: RegionTarget::boundary("root"),
+                        },
                 },
             )];
             model.boundaries.clear();
@@ -1305,9 +1278,8 @@ fn analysis_validate_study_preserves_typed_model_failure_detail() {
 fn analysis_validate_study_rejects_solver_options_for_a_different_procedure() {
     let _guard = analysis_test_guard();
     let mut spec = sample_linear_static_study_spec();
-    spec.execution.steps[0].solver_options = AnalysisSolverOptions::ElectromagneticPotential(
-        AnalysisElectromagneticRunOptions::default(),
-    );
+    spec.execution.steps[0].solver_options =
+        AnalysisSolverOptions::MaxwellHarmonic(AnalysisMaxwellRunOptions::default());
 
     let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
         .expect("study validation should return typed output");
@@ -1321,52 +1293,6 @@ fn analysis_validate_study_rejects_solver_options_for_a_different_procedure() {
     assert!(envelope.data.issues.iter().any(|issue| {
         issue.code == "RM.FEA.STUDY.EXECUTION_PLAN_INVALID"
             && issue.message.contains("canonical model procedure step")
-    }));
-}
-
-#[test]
-fn analysis_validate_study_rejects_invalid_electromagnetic_options() {
-    let _guard = analysis_test_guard();
-    let mut spec = sample_electromagnetic_study_spec();
-    spec.execution.steps[0].solver_options =
-        AnalysisSolverOptions::ElectromagneticPotential(AnalysisElectromagneticRunOptions {
-            sweep_enabled: true,
-            sweep_frequency_hz: vec![60.0, -10.0],
-            residual_target: 0.0,
-            harmonic_tolerance: f64::NAN,
-            harmonic_max_iterations: 0,
-            ..AnalysisElectromagneticRunOptions::default()
-        });
-
-    let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
-        .expect("study validation should return typed output");
-
-    assert!(!envelope.data.valid);
-    assert!(envelope
-        .data
-        .issue_codes
-        .iter()
-        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID"));
-    assert!(envelope
-        .data
-        .issue_codes
-        .iter()
-        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID"));
-    assert!(envelope
-        .data
-        .issue_codes
-        .iter()
-        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID"));
-    assert!(envelope
-        .data
-        .issue_codes
-        .iter()
-        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"));
-    assert!(envelope.data.issues.iter().any(|issue| {
-        issue.code == "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"
-            && issue
-                .message
-                .contains("must contain finite positive values")
     }));
 }
 
@@ -1415,38 +1341,6 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
         .evidence_artifact_path
         .contains("plan_sha256_"));
     drop(env_guard);
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_plan_study_surfaces_electromagnetic_run_operation_and_options() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("plan-electromagnetic-study-evidence");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let mut spec = sample_electromagnetic_study_spec();
-    spec.execution.steps[0].solver_options =
-        AnalysisSolverOptions::ElectromagneticPotential(AnalysisElectromagneticRunOptions {
-            sweep_enabled: true,
-            sweep_frequency_hz: vec![40.0, 60.0, 120.0],
-            ..AnalysisElectromagneticRunOptions::default()
-        });
-
-    let envelope = analysis_plan_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study plan should succeed");
-
-    assert_eq!(
-        envelope.data.steps[0].run_operation,
-        "fea.run_electromagnetic"
-    );
-    assert_eq!(
-        envelope.data.steps[0].run_op_version,
-        "fea.run_electromagnetic/v1"
-    );
-    assert_eq!(
-        envelope.data.steps[0].execution.solver_options,
-        spec.execution.steps[0].solver_options
-    );
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -2155,131 +2049,6 @@ fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
 }
 
 #[test]
-fn analysis_run_study_honors_typed_electromagnetic_solver_options() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let mut spec = sample_electromagnetic_study_spec();
-    spec.execution.steps[0].solver_options =
-        AnalysisSolverOptions::ElectromagneticPotential(AnalysisElectromagneticRunOptions {
-            sweep_enabled: true,
-            sweep_frequency_hz: vec![30.0, 60.0, 120.0],
-            residual_target: 5.0e-7,
-            harmonic_tolerance: 1.2345e-4,
-            harmonic_max_iterations: 64,
-            ..AnalysisElectromagneticRunOptions::default()
-        });
-
-    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study run should succeed");
-
-    assert_eq!(envelope.operation, "fea.run_study");
-    assert_eq!(envelope.op_version, "fea.run_study/v1");
-    assert_eq!(
-        envelope.data.steps[0].procedure_step.family,
-        PhysicsFamily::Electromagnetic
-    );
-    assert_eq!(
-        envelope.data.steps[0].execution.backend,
-        ComputeBackend::Cpu
-    );
-    let AnalysisSolverOptions::ElectromagneticPotential(resolved_options) =
-        &envelope.data.steps[0].execution.solver_options
-    else {
-        panic!("electromagnetic study should return resolved options")
-    };
-    let AnalysisSolverOptions::ElectromagneticPotential(requested_options) =
-        &spec.execution.steps[0].solver_options
-    else {
-        panic!("test should configure electromagnetic options")
-    };
-    assert_eq!(
-        resolved_options.sweep_enabled,
-        requested_options.sweep_enabled
-    );
-    assert_eq!(
-        resolved_options.sweep_frequency_hz,
-        requested_options.sweep_frequency_hz
-    );
-    assert_eq!(
-        resolved_options.residual_target,
-        requested_options.residual_target
-    );
-    assert_eq!(
-        resolved_options.harmonic_tolerance,
-        requested_options.harmonic_tolerance
-    );
-    assert_eq!(
-        resolved_options.harmonic_max_iterations,
-        requested_options.harmonic_max_iterations
-    );
-    assert_eq!(
-        envelope.data.steps[0].run_operation,
-        "fea.run_electromagnetic"
-    );
-    assert_eq!(
-        envelope.data.steps[0].run_op_version,
-        "fea.run_electromagnetic/v1"
-    );
-
-    let persisted = storage::load_run_result(&envelope.data.steps[0].run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let em_payload = persisted
-        .electromagnetic_results
-        .as_ref()
-        .expect("electromagnetic payload should be present");
-    assert_eq!(em_payload.sweep_frequency_hz.len(), 3);
-    assert_eq!(em_payload.sweep_peak_flux_density.len(), 3);
-    assert_eq!(em_payload.sweep_solve_quality.len(), 3);
-    let harmonic_diag = persisted
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_EM_HARMONIC_COUPLING")
-        .expect("harmonic coupling diagnostic should be present");
-    assert!(harmonic_diag.message.contains("tolerance=0.00012345"));
-    assert!(harmonic_diag.message.contains("iterations="));
-    assert_eq!(
-        persisted.solver_convergence,
-        envelope.data.solver_convergence
-    );
-    assert_eq!(persisted.result_quality, envelope.data.result_quality);
-    assert_eq!(
-        persisted.quality_reasons,
-        envelope.data.steps[0].quality_reasons
-    );
-    assert_eq!(persisted.provenance, envelope.data.steps[0].provenance);
-}
-
-#[test]
-fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let spec = sample_electromagnetic_study_spec();
-
-    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study run should succeed");
-
-    assert_eq!(
-        envelope.data.steps[0].procedure_step.family,
-        PhysicsFamily::Electromagnetic
-    );
-    let expected_options = AnalysisElectromagneticRunOptions::default();
-    assert_eq!(
-        envelope.data.steps[0].execution.solver_options,
-        AnalysisSolverOptions::ElectromagneticPotential(expected_options)
-    );
-    assert_eq!(
-        envelope.data.steps[0].run_operation,
-        "fea.run_electromagnetic"
-    );
-    assert_eq!(
-        envelope.data.steps[0].run_op_version,
-        "fea.run_electromagnetic/v1"
-    );
-}
-
-#[test]
 fn analysis_run_study_sweep_executes_multiple_studies() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
@@ -2294,10 +2063,11 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
     let (solver_mesh_root, solver_mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("run-study-sweep-solver-mesh");
     linear.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
-    let electromagnetic = sample_electromagnetic_study_spec();
+    let mut secondary = linear.clone();
+    secondary.study_id = "study_secondary_structural".into();
     let sweep_spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_001".to_string(),
-        studies: vec![linear, electromagnetic],
+        studies: vec![linear, secondary],
         fail_fast: true,
     };
 
@@ -2324,10 +2094,10 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
         .data
         .run_entries
         .iter()
-        .any(|entry| entry.result.steps[0].procedure_step.family
-            == PhysicsFamily::Electromagnetic
-            && entry.result.steps[0].procedure_step.procedure
-                == AnalysisProcedure::HarmonicResponse));
+        .any(
+            |entry| entry.result.steps[0].procedure_step.family == PhysicsFamily::Structural
+                && entry.result.steps[0].procedure_step.procedure == AnalysisProcedure::Static
+        ));
     assert!(envelope
         .data
         .run_entries
@@ -2360,9 +2130,12 @@ fn analysis_complete_study_sweep_rejects_missing_and_substituted_outcomes() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let context = OperationContext::new(None, None);
-    let actual = sample_electromagnetic_study_spec();
+    let mut actual = sample_linear_static_study_spec();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("sweep-substitution-mesh");
+    actual.solver_mesh_artifact_path = Some(mesh_path.display().to_string());
     let run = analysis_run_study_op(&actual, context.clone())
-        .expect("electromagnetic study should produce a composable result");
+        .expect("structural study should produce a composable result");
     let mut expected = actual;
     expected.study_id = "different_authored_study".into();
     let spec = AnalysisStudySweepSpec {
@@ -2388,6 +2161,7 @@ fn analysis_complete_study_sweep_rejects_missing_and_substituted_outcomes() {
         substituted.error_code,
         "RM.FEA.RUN_STUDY_SWEEP.RESULT_SUBSTITUTED"
     );
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
@@ -3227,7 +3001,6 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-2".to_string()), None),
     )
@@ -3312,20 +3085,6 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             "thermal",
             "temperature_gradient",
             Some("K/m"),
-            AnalysisFieldLocation::Element,
-        ),
-        (
-            FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
-            "em",
-            "vector_potential_real",
-            Some("Wb/m"),
-            AnalysisFieldLocation::Edge,
-        ),
-        (
-            FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL.to_string(),
-            "em",
-            "electric_flux_density_real",
-            Some("C/m^2"),
             AnalysisFieldLocation::Element,
         ),
         (
@@ -3582,7 +3341,6 @@ fn analysis_results_describes_structural_l2_fields() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-structural-fields-2".to_string()), None),
     )
@@ -3688,7 +3446,6 @@ fn analysis_results_describes_beam_resultant_fields() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-beam-fields-2".to_string()), None),
     )
@@ -3774,7 +3531,6 @@ fn analysis_results_unavailable_beam_continuum_field_maps_typed_error() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-4".to_string()), None),
     )
@@ -5946,566 +5702,6 @@ fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
 }
 
 #[test]
-fn analysis_run_electromagnetic_rejects_models_without_em_step() {
-    let model = sample_model();
-    let err = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-em-run-missing-step".to_string()), None),
-    )
-    .expect_err("electromagnetic run should fail without electromagnetic step");
-    assert_eq!(err.operation, "fea.run_electromagnetic");
-    assert_eq!(err.op_version, "fea.run_electromagnetic/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_ELECTROMAGNETIC.REQUIRES_STEP");
-}
-
-fn configure_valid_em_authoring(model: &mut AnalysisModel) {
-    for material in &mut model.materials {
-        if material.electrical.is_none() {
-            material.electrical = Some(test_electrical_material());
-        }
-    }
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    model.constraints = vec![magnetic_ground("em_ground", "em_region")];
-    model.boundaries = vec![magnetic_insulation("em_insulation", "em_region")];
-    model.signals.clear();
-    model.excitations.clear();
-    model.excitation_cases.clear();
-    append_constant_excitation(
-        model,
-        "em_source",
-        "em_region",
-        ConstantExcitation::ElectricCurrent {
-            real_amperes: 120.0,
-            imaginary_amperes: 0.0,
-            frequency_hz: None,
-        },
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_missing_electrical_material() {
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    configure_valid_em_authoring(&mut model);
-    for material in &mut model.materials {
-        material.electrical = None;
-    }
-
-    let err = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-em-run-missing-material".to_string()), None),
-    )
-    .expect_err("electromagnetic run should reject missing electrical material");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_missing_current_source() {
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    configure_valid_em_authoring(&mut model);
-    model.signals.clear();
-    model.excitations.clear();
-    model.excitation_cases.clear();
-    append_constant_excitation(
-        &mut model,
-        "structural_force",
-        "em_region",
-        ConstantExcitation::Force([1.0, 0.0, 0.0]),
-    );
-
-    let err = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-em-run-missing-source".to_string()), None),
-    )
-    .expect_err("electromagnetic run should reject missing current source");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_checks_sources_at_requested_frequencies() {
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    configure_valid_em_authoring(&mut model);
-    let PhysicalSignal::ElectricCurrent(signal) = &mut model.signals[0] else {
-        panic!("electromagnetic fixture should author a current signal");
-    };
-    signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
-        domain: TabulatedSignalDomain::FrequencyHertz,
-        knots: vec![
-            SignalKnot::continuous(
-                60.0,
-                SignalOrdinate::Real(SignalValue::Scalar(
-                    runmat_analysis_core::ElectricCurrent::new(0.0),
-                )),
-            ),
-            SignalKnot::continuous(
-                120.0,
-                SignalOrdinate::Real(SignalValue::Scalar(
-                    runmat_analysis_core::ElectricCurrent::new(120.0),
-                )),
-            ),
-        ],
-        interpolation: SignalInterpolation::Linear,
-        extrapolation: SignalExtrapolation::HoldEndpoint,
-    });
-
-    let err = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisElectromagneticRunOptions {
-            sweep_enabled: true,
-            sweep_frequency_hz: vec![60.0, 120.0],
-            ..AnalysisElectromagneticRunOptions::default()
-        },
-        OperationContext::new(Some("trace-em-run-frequency-source".to_string()), None),
-    )
-    .expect_err("a zero source at an executed frequency should be rejected");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_moment_excitations() {
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    configure_valid_em_authoring(&mut model);
-    replace_with_moment_excitation(&mut model, "em_moment");
-
-    let err = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-em-run-moment-load".to_string()), None),
-    )
-    .expect_err("electromagnetic run should reject structural moment excitations");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_SOURCE"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_missing_em_boundary() {
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    configure_valid_em_authoring(&mut model);
-    model.boundaries.clear();
-    model.constraints = vec![fixed_constraint("structural_fixed", "em_region")];
-
-    let err = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-em-run-missing-boundary".to_string()), None),
-    )
-    .expect_err("electromagnetic run should reject missing EM boundary");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_harmonic_contract_emits_typed_payload() {
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 5.8e7,
-        resistive_heating_coefficient: 0.0039,
-        relative_permittivity: 3.2,
-        relative_permeability: 1.8,
-        conductivity_frequency_response: vec![
-            ConductivityFrequencyPoint {
-                frequency_hz: 40.0,
-                conductivity_scale: 1.06,
-                dispersive_loss_scale: Some(0.02),
-                relative_permittivity_scale: Some(1.04),
-                relative_permeability_scale: Some(1.02),
-            },
-            ConductivityFrequencyPoint {
-                frequency_hz: 60.0,
-                conductivity_scale: 1.0,
-                dispersive_loss_scale: Some(0.03),
-                relative_permittivity_scale: Some(1.0),
-                relative_permeability_scale: Some(1.0),
-            },
-            ConductivityFrequencyPoint {
-                frequency_hz: 240.0,
-                conductivity_scale: 0.91,
-                dispersive_loss_scale: Some(0.04),
-                relative_permittivity_scale: Some(0.96),
-                relative_permeability_scale: Some(0.98),
-            },
-        ],
-    });
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    configure_valid_em_authoring(&mut model);
-    let envelope = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-em-run-static".to_string()), None),
-    )
-    .expect("electromagnetic run should return static EM payload");
-    assert_eq!(envelope.operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.op_version, "fea.run_electromagnetic/v1");
-    assert_ne!(envelope.data.run_status, RunStatus::Rejected);
-    assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab
-    );
-    assert!(envelope.data.electromagnetic_results.is_some());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_EM_STATIC"));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_HARMONIC_COUPLING"
-            && diag.message.contains("formulation=edge_curl_curl_harmonic")
-            && diag.message.contains("edge_dof_count=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_MAXWELL_EDGE_TOPOLOGY"
-            && diag.message.contains("incidence_element_count=")
-            && diag.message.contains("incidence_orientation_count=")
-            && diag
-                .message
-                .contains("incidence_operator_pair_coverage_ratio=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_FORMULATION"
-            && diag
-                .message
-                .contains("formulation_family=frequency_domain_maxwell")
-            && diag
-                .message
-                .contains("active_formulation=full_wave_harmonic")
-            && diag
-                .message
-                .contains("includes_magnetostatic_curl_curl=true")
-            && diag
-                .message
-                .contains("includes_magnetoquasistatic_eddy_current=true")
-            && diag
-                .message
-                .contains("includes_full_wave_displacement_current=true")
-            && diag.message.contains("formulation_coverage_ratio=1")
-            && diag
-                .message
-                .contains("material_frequency_response_coverage_ratio=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_SOURCE_ENERGY"
-            && diag.message.contains("source_region_coverage_ratio=")
-            && diag
-                .message
-                .contains("source_region_energy_consistency_ratio=")
-            && diag.message.contains("energy_imbalance_ratio=")
-            && diag.message.contains("boundary_energy_ratio=")
-    }));
-    let em_cost_diag = envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_EM_COST")
-        .expect("EM cost diagnostic must be present");
-    assert!(em_cost_diag.message.contains("prepared_build_ms="));
-    assert!(em_cost_diag.message.contains("solve_ms="));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_EM_SWEEP"));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_KNOWN_ANSWER"
-            && diag.message.contains("basis=homogeneous_current_line")
-            && diag
-                .message
-                .contains("homogeneous_material_residual_ratio=")
-            && diag
-                .message
-                .contains("source_energy_consistency_residual_ratio=")
-            && diag.message.contains("gauge_anchor_residual_ratio=")
-            && diag.message.contains("known_answer_coverage_ratio=")
-    }));
-    let em_payload = envelope
-        .data
-        .electromagnetic_results
-        .as_ref()
-        .expect("electromagnetic payload expected");
-    assert_eq!(em_payload.sweep_frequency_hz.len(), 1);
-    assert_eq!(em_payload.sweep_peak_flux_density.len(), 1);
-    assert_eq!(em_payload.sweep_solve_quality.len(), 1);
-    assert!(em_payload.resonance_peak_frequency_hz.is_some());
-    assert!(em_payload.resonance_peak_flux_density.is_some());
-    assert_eq!(
-        em_payload.vector_potential_real.field_id,
-        FEA_FIELD_EM_VECTOR_POTENTIAL_REAL
-    );
-    assert_eq!(
-        em_payload.vector_potential_imag.field_id,
-        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG
-    );
-    assert_eq!(em_payload.vector_potential_real.shape.len(), 2);
-    assert_eq!(em_payload.vector_potential_real.shape[1], 3);
-    assert_eq!(
-        em_payload.vector_potential_imag.shape,
-        em_payload.vector_potential_real.shape
-    );
-    match &em_payload.vector_potential_real.values {
-        AnalysisFieldValues::HostF64(values) => {
-            assert_eq!(
-                values.len(),
-                em_payload
-                    .vector_potential_real
-                    .shape
-                    .iter()
-                    .product::<usize>()
-            );
-        }
-        AnalysisFieldValues::DeviceRef(_) => {
-            panic!("CPU EM vector potential should be returned as host values")
-        }
-    }
-    assert_eq!(
-        em_payload.magnetic_flux_density_real.field_id,
-        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL
-    );
-    assert_eq!(
-        em_payload.current_density_real.field_id,
-        FEA_FIELD_EM_CURRENT_DENSITY_REAL
-    );
-    assert_eq!(
-        em_payload.electric_field_real.field_id,
-        FEA_FIELD_EM_ELECTRIC_FIELD_REAL
-    );
-    assert_eq!(
-        em_payload.energy_density.field_id,
-        FEA_FIELD_EM_ENERGY_DENSITY
-    );
-    assert_eq!(
-        em_payload.residual_real.field_id,
-        FEA_FIELD_EM_RESIDUAL_REAL
-    );
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("em results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("EM descriptor should be present")
-    };
-    for field_id in [
-        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
-        FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
-        FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-        FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-        FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
-        FEA_FIELD_EM_POYNTING_VECTOR_REAL,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
-    }
-    assert_eq!(
-        descriptor(FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE).kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(
-        descriptor(FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE).component_count,
-        None
-    );
-    assert_eq!(
-        descriptor(FEA_FIELD_EM_ENERGY_DENSITY).kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(
-        descriptor(FEA_FIELD_EM_RESIDUAL_REAL).kind,
-        AnalysisFieldKind::Scalar
-    );
-    let em_diag = envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_EM_STATIC")
-        .expect("EM static diagnostic must be present");
-    assert!(em_diag.message.contains("relative_permittivity_mean="));
-    assert!(em_diag.message.contains("relative_permeability_mean="));
-    assert!(em_diag
-        .message
-        .contains("conductivity_frequency_scale_mean="));
-    assert!(em_diag
-        .message
-        .contains("conductivity_frequency_response_coverage_ratio="));
-    assert!(em_diag
-        .message
-        .contains("relative_permittivity_frequency_scale_mean="));
-    assert!(em_diag
-        .message
-        .contains("relative_permittivity_frequency_response_coverage_ratio="));
-    assert!(em_diag
-        .message
-        .contains("relative_permeability_frequency_scale_mean="));
-    assert!(em_diag
-        .message
-        .contains("relative_permeability_frequency_response_coverage_ratio="));
-    assert!(em_diag.message.contains("dispersive_loss_scale_mean="));
-    assert!(em_diag
-        .message
-        .contains("dispersive_phase_attenuation_mean="));
-    assert!(em_diag
-        .message
-        .contains("dispersive_phase_conductivity_attenuation_ratio="));
-}
-
-#[test]
-fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 5.8e7,
-        resistive_heating_coefficient: 0.0039,
-        relative_permittivity: 3.2,
-        relative_permeability: 1.8,
-        conductivity_frequency_response: vec![
-            ConductivityFrequencyPoint {
-                frequency_hz: 40.0,
-                conductivity_scale: 1.06,
-                dispersive_loss_scale: Some(0.02),
-                relative_permittivity_scale: Some(1.04),
-                relative_permeability_scale: Some(1.02),
-            },
-            ConductivityFrequencyPoint {
-                frequency_hz: 60.0,
-                conductivity_scale: 1.0,
-                dispersive_loss_scale: Some(0.03),
-                relative_permittivity_scale: Some(1.0),
-                relative_permeability_scale: Some(1.0),
-            },
-            ConductivityFrequencyPoint {
-                frequency_hz: 240.0,
-                conductivity_scale: 0.91,
-                dispersive_loss_scale: Some(0.04),
-                relative_permittivity_scale: Some(0.96),
-                relative_permeability_scale: Some(0.98),
-            },
-        ],
-    });
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    configure_valid_em_authoring(&mut model);
-    let envelope = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisElectromagneticRunOptions {
-            sweep_enabled: true,
-            sweep_frequency_hz: vec![20.0, 40.0, 60.0, 120.0, 240.0],
-            residual_target: 5.0e-7,
-            harmonic_tolerance: 1.2345e-4,
-            harmonic_max_iterations: 64,
-            ..AnalysisElectromagneticRunOptions::default()
-        },
-        OperationContext::new(Some("trace-em-run-sweep".to_string()), None),
-    )
-    .expect("electromagnetic sweep run should succeed");
-    let payload = envelope
-        .data
-        .electromagnetic_results
-        .as_ref()
-        .expect("electromagnetic payload expected");
-    assert_eq!(payload.sweep_frequency_hz.len(), 5);
-    assert_eq!(payload.sweep_peak_flux_density.len(), 5);
-    assert_eq!(payload.sweep_solve_quality.len(), 5);
-    assert!(payload.resonance_peak_frequency_hz.is_some());
-    assert!(payload.resonance_peak_flux_density.is_some());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .filter(|diag| diag.code == "FEA_EM_SWEEP")
-        .any(|diag| diag.message.contains("sweep_count=5")));
-    let harmonic_diag = envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_EM_HARMONIC_COUPLING")
-        .expect("harmonic coupling diagnostic should be present");
-    assert!(harmonic_diag.message.contains("tolerance=0.00012345"));
-    assert!(harmonic_diag.message.contains("iterations="));
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    let err = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisElectromagneticRunOptions {
-            harmonic_max_iterations: 0,
-            ..AnalysisElectromagneticRunOptions::default()
-        },
-        OperationContext::new(
-            Some("trace-em-run-invalid-harmonic-controls".to_string()),
-            None,
-        ),
-    )
-    .expect_err("electromagnetic run should reject zero harmonic_max_iterations");
-    assert_eq!(err.operation, "fea.run_electromagnetic");
-    assert_eq!(err.op_version, "fea.run_electromagnetic/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS");
-}
-
-#[test]
 fn analysis_run_thermal_returns_temperature_payload() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("thermal-payload");
@@ -7133,7 +6329,6 @@ fn analysis_results_query_can_exclude_nonlinear_payload() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: false,
-            include_electromagnetic_results: false,
         },
         OperationContext::new(None, None),
     )
@@ -8768,7 +7963,6 @@ fn analysis_results_query_can_exclude_modal_payload() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -8813,7 +8007,6 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -8913,103 +8106,17 @@ fn analysis_results_include_transient_payload_for_transient_runs() {
     let _ = fs::remove_dir_all(mesh_root);
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
-fn analysis_results_include_electromagnetic_fields_for_em_runs() {
+fn analysis_generate_study_run_mesh_figure_requires_typed_maxwell_completion() {
     let _guard = analysis_test_guard();
     let spec = sample_electromagnetic_study_spec();
-    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study should run");
-
-    let results = analysis_results_by_run_id_op(
-        &run.data.steps[0].run_id,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("electromagnetic results should load");
-    let field_ids = results
-        .data
-        .field_descriptors
-        .iter()
-        .map(|field| field.field_id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(field_ids.contains(&FEA_FIELD_EM_VECTOR_POTENTIAL_REAL));
-    assert!(field_ids.contains(&FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE));
-}
-
-#[cfg(feature = "plot-core")]
-fn solver_topology_counts(run_id: &str) -> (usize, usize) {
-    let persisted = storage::load_run_result(run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let topology = persisted
-        .render_topology
-        .as_ref()
-        .expect("run should persist render topology");
-    (
-        topology
-            .meshes
-            .iter()
-            .map(|mesh| mesh.vertices.len())
-            .sum::<usize>(),
-        topology
-            .meshes
-            .iter()
-            .map(|mesh| mesh.triangles.len())
-            .sum::<usize>(),
-    )
-}
-
-#[cfg(feature = "plot-core")]
-fn assert_solver_topology_mesh(figure: &AnalysisGeneratedFigure, run_id: &str) {
-    let (vertex_count, triangle_count) = solver_topology_counts(run_id);
-    assert!(matches!(
-        figure.kind,
-        AnalysisGeneratedFigureKind::MeshResult
-    ));
-    let mesh_counts = figure
-        .figure
-        .plots()
-        .filter_map(|plot| match plot {
-            runmat_plot::plots::PlotElement::Mesh(mesh) => Some(mesh),
-            _ => None,
-        })
-        .map(|mesh| (mesh.vertices().len(), mesh.triangles().len()))
-        .collect::<Vec<_>>();
-    assert!(
-        mesh_counts.contains(&(vertex_count, triangle_count)),
-        "expected a rendered mesh to match solver topology vertices={} and triangles={}, got {:?}",
-        vertex_count,
-        triangle_count,
-        mesh_counts
+    let error = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect_err("no EM plot may be synthesized from the retired scalar proxy");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_STUDY.STATIC_EM_TYPED_EXECUTION_REQUIRED"
     );
-}
-
-#[cfg(feature = "plot-core")]
-#[test]
-fn analysis_generate_study_run_mesh_figure_uses_solver_topology_for_em_run() {
-    let _guard = analysis_test_guard();
-    let mut spec = sample_electromagnetic_study_spec();
-    let (solver_mesh_root, solver_mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("em-field-figures-solver-mesh");
-    spec.geometry.revision = 1;
-    spec.model.geometry_revision = spec.geometry.revision;
-    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
-    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study should run");
-
-    let figure = analysis_generate_study_run_mesh_figure(
-        &spec,
-        &run.data.steps[0].run_id,
-        AnalysisFigureGenerationOptions {
-            mesh_source: AnalysisFigureMeshSource::Solver,
-            ..AnalysisFigureGenerationOptions::default()
-        },
-    )
-    .expect("study mesh figure should be generated");
-
-    assert_solver_topology_mesh(&figure, &run.data.steps[0].run_id);
-    let _ = fs::remove_dir_all(solver_mesh_root);
 }
 
 #[test]
@@ -9042,7 +8149,6 @@ fn analysis_results_query_can_exclude_transient_payload() {
             include_transient_results: false,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -9086,7 +8192,6 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
             include_transient_results: true,
             transient_snapshot_indices: vec![999],
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -9098,4 +8203,43 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
     );
     assert_eq!(err.operation, "fea.results");
     assert_eq!(err.op_version, "fea.results/v1");
+}
+
+#[test]
+fn retired_electromagnetic_proxy_solver_contract_is_rejected() {
+    let old = serde_json::json!({
+        "solver": "electromagnetic_potential",
+        "options": {
+            "deterministic_mode": true, "precision_mode": "fp64",
+            "quality_policy": "strict", "residual_target": 1e-6,
+            "harmonic_tolerance": 1e-7, "harmonic_max_iterations": 96,
+            "sweep_enabled": false, "sweep_frequency_hz": []
+        }
+    });
+    assert!(serde_json::from_value::<AnalysisSolverOptions>(old).is_err());
+}
+
+#[test]
+fn scalar_study_execution_requires_authenticated_maxwell_completion() {
+    let _guard = analysis_test_guard();
+    let spec = sample_electromagnetic_study_spec();
+    assert!(matches!(
+        spec.execution.steps[0].solver_options,
+        AnalysisSolverOptions::MaxwellHarmonic(_)
+    ));
+    let error = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect_err("scalar model path must not synthesize Maxwell fields");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_STUDY.STATIC_EM_TYPED_EXECUTION_REQUIRED"
+    );
+}
+
+#[test]
+fn electromagnetic_harmonic_defaults_select_genuine_maxwell_without_vector_potential() {
+    let step = ProcedureStep::electromagnetic_harmonic("phasor");
+    assert!(matches!(
+        AnalysisSolverOptions::defaults_for(&step).unwrap(),
+        AnalysisSolverOptions::MaxwellHarmonic(_)
+    ));
 }

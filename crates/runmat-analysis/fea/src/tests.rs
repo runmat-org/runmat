@@ -20,19 +20,18 @@ use crate::{
     fixtures::{
         append_fixture_temperature_field, append_fixture_terminal_voltage, fixture_model,
         mixed_solid_beam_model, mixed_solid_beam_shell_model, replace_fixture_excitations,
-        replace_fixture_with_electric_current, FixtureExcitation, FixtureExcitationKind, FixtureId,
+        FixtureExcitation, FixtureExcitationKind, FixtureId,
     },
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{
         nonlinear::NonlinearSolveOptions,
         transient::{StructuralTimeStepPolicy, TransientSolveOptions},
     },
-    ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext, FeaRunResult,
-    LinearStaticSolveOptions, ModalSolveOptions, ModalTruncationPolicy, ThermalProcedureControl,
-    ThermalSolveOptions, FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS,
-    FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO, FEA_FIELD_MODAL_EFFECTIVE_MASS,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    ComputeBackend, FeaContactInterfaceContext, FeaRunResult, LinearStaticSolveOptions,
+    ModalSolveOptions, ModalTruncationPolicy, ThermalProcedureControl, ThermalSolveOptions,
+    FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
+    FEA_FIELD_MODAL_EFFECTIVE_MASS, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_MODAL_TOTAL_FREE_MASS,
     FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
@@ -71,19 +70,7 @@ fn static_excitations(
     .expect("test model excitations should realize at the static sample")
 }
 
-fn test_electrical_material() -> MaterialElectricalModel {
-    MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 1.0,
-        resistive_heating_coefficient: 0.0,
-        relative_permittivity: 1.0,
-        relative_permeability: 1.0,
-        conductivity_frequency_response: Vec::new(),
-    }
-}
-use runmat_analysis_core::{
-    AnalysisProcedure, ElectromagneticDomain, Frequency, MaterialElectricalModel, ProcedureStep,
-};
+use runmat_analysis_core::{AnalysisProcedure, ProcedureStep};
 use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
@@ -117,13 +104,6 @@ fn experimental_thermal_options() -> ThermalSolveOptions {
     ThermalSolveOptions {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..ThermalSolveOptions::default()
-    }
-}
-
-fn experimental_electromagnetic_options() -> ElectromagneticSolveOptions {
-    ElectromagneticSolveOptions {
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-        ..ElectromagneticSolveOptions::default()
     }
 }
 
@@ -631,45 +611,6 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
     )
     .expect("nonlinear solve should consume the canonical mesh");
     assert_eq!(nonlinear.displacement_snapshots[0].shape, vec![4, 3]);
-
-    let mut electromagnetic_model = model.clone();
-    replace_fixture_with_electric_current(&mut electromagnetic_model, "coil_current", "tip", 120.0);
-    electromagnetic_model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    electromagnetic_model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
-    for material in &mut electromagnetic_model.materials {
-        material.electrical = Some(test_electrical_material());
-    }
-    let electromagnetic = crate::run_electromagnetic_with_options(
-        &electromagnetic_model,
-        ComputeBackend::Cpu,
-        ElectromagneticSolveOptions {
-            solver_mesh: Some(mesh),
-            ..experimental_electromagnetic_options()
-        },
-    )
-    .expect("electromagnetic solve should consume the canonical mesh");
-    let topology_diagnostic = electromagnetic
-        .run
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "FEA_EM_MAXWELL_EDGE_TOPOLOGY")
-        .expect("electromagnetic solve should report its mesh topology");
-    assert!(
-        topology_diagnostic
-            .message
-            .contains("full_topology_edge_count=6"),
-        "{}",
-        topology_diagnostic.message
-    );
-    assert!(
-        topology_diagnostic
-            .message
-            .contains("full_topology_element_count=1"),
-        "{}",
-        topology_diagnostic.message
-    );
 }
 
 #[test]
@@ -2811,197 +2752,6 @@ fn thermal_pipeline_requires_a_canonical_solver_mesh() {
     assert!(error
         .to_string()
         .contains("requires a canonical solver mesh"));
-}
-
-#[test]
-fn electromagnetic_pipeline_rejects_moment_loads_before_domain_validation() {
-    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let err = crate::run_electromagnetic_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        experimental_electromagnetic_options(),
-    )
-    .expect_err("electromagnetic solve should reject structural moment loads");
-    let message = err.to_string();
-
-    assert!(message.contains("moment loads are structural loads"));
-    assert!(message.contains("electromagnetic"));
-    assert!(message.contains("load_id=tip_moment_z"));
-}
-
-#[test]
-fn electromagnetic_pipeline_rejects_a_model_without_the_requested_step() {
-    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    model.sequence.steps = vec![ProcedureStep::structural_static("structural")];
-    for material in &mut model.materials {
-        material.electrical = Some(test_electrical_material());
-    }
-
-    let error = crate::run_electromagnetic_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        experimental_electromagnetic_options(),
-    )
-    .expect_err("electromagnetic execution must select its exact procedure step");
-
-    assert!(error
-        .to_string()
-        .contains("exactly one matching procedure step, but none was found"));
-}
-
-#[test]
-fn legacy_harmonic_entry_points_reject_static_electrical_intent() {
-    for equation in [
-        runmat_analysis_core::StaticElectricalEquation::Electrostatics,
-        runmat_analysis_core::StaticElectricalEquation::SteadyConduction,
-    ] {
-        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-        replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
-        model.electromagnetic = Some(ElectromagneticDomain::Static { equation });
-        model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
-        for material in &mut model.materials {
-            material.electrical = Some(test_electrical_material());
-        }
-        let error = crate::run_electromagnetic_with_options(
-            &model,
-            ComputeBackend::Cpu,
-            experimental_electromagnetic_options(),
-        )
-        .expect_err("static intent must not enter the legacy harmonic solver");
-        assert!(error
-            .to_string()
-            .contains("does not admit static electrical intent"));
-        let error = crate::run_electromagnetic_frequency_response(
-            &model,
-            ComputeBackend::Cpu,
-            experimental_electromagnetic_options(),
-            &[60.0],
-        )
-        .expect_err("static intent must not be converted to a harmonic frequency sweep");
-        assert!(error
-            .to_string()
-            .contains("does not admit static electrical intent"));
-    }
-}
-
-#[test]
-fn electromagnetic_pipeline_consumes_electric_current_without_structural_admission() {
-    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
-    for material in &mut model.materials {
-        material.electrical = Some(test_electrical_material());
-    }
-
-    let result = crate::run_electromagnetic_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        experimental_electromagnetic_options(),
-    )
-    .expect("electromagnetic admission must own the electric-current source");
-
-    assert_eq!(
-        result.run.identity.family(),
-        runmat_analysis_core::PhysicsFamily::Electromagnetic
-    );
-    assert!(result
-        .run
-        .identity
-        .realization()
-        .components
-        .iter()
-        .any(|component| component
-            .sources
-            .contains(&runmat_analysis_core::SourceImplementation::OrdinalDistribution)));
-}
-
-#[test]
-fn electromagnetic_frequency_response_publishes_exact_complex_resultant_history() {
-    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    replace_fixture_with_electric_current(&mut model, "coil_current", "tip", 120.0);
-    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    let mut step = ProcedureStep::electromagnetic_harmonic("em");
-    step.independent_domain =
-        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![40.0, 60.0, 80.0]);
-    let mut observation = history_observation(
-        "flux_resultant",
-        runmat_analysis_core::ObservationQuantity::MagneticFluxDensity,
-        runmat_analysis_core::SamplingPolicy::FrequencyHertz(vec![40.0, 60.0, 80.0]),
-        runmat_analysis_core::FieldLocation::Element,
-    );
-    let spec = observation.spec_mut().unwrap();
-    spec.output_location = runmat_analysis_core::FieldLocation::Global;
-    spec.complex_representation = runmat_analysis_core::ComplexRepresentation::Complex;
-    spec.storage.precision = runmat_analysis_core::SignalPrecision::Complex128;
-    spec.reduction = Some(runmat_analysis_core::ReductionPolicy {
-        spatial: runmat_analysis_core::SpatialReduction::Resultant,
-        series: runmat_analysis_core::SeriesReduction::None,
-        extrema_ties: runmat_analysis_core::ExtremaTiePolicy::FirstCanonical,
-    });
-    step.observations = vec![observation];
-    model.sequence.steps = vec![step];
-    for material in &mut model.materials {
-        material.electrical = Some(test_electrical_material());
-    }
-    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
-        runmat_meshing_core::ElementOrder::Tet4,
-    );
-    let missing_topology = crate::run_electromagnetic_frequency_response(
-        &model,
-        ComputeBackend::Cpu,
-        experimental_electromagnetic_options(),
-        &[],
-    )
-    .unwrap_err();
-    assert!(missing_topology
-        .to_string()
-        .contains("require canonical solver-mesh topology"));
-    let response = crate::run_electromagnetic_frequency_response(
-        &model,
-        ComputeBackend::Cpu,
-        ElectromagneticSolveOptions {
-            solver_mesh: Some(mesh),
-            ..experimental_electromagnetic_options()
-        },
-        &[],
-    )
-    .expect("frequency observations should drive the exact solve plan");
-
-    assert_eq!(response.plan().frequencies_hz(), &[40.0, 60.0, 80.0]);
-    assert_eq!(response.runs().len(), 3);
-    let history = &response.primary().run.observation_histories[0];
-    assert_eq!(history.samples().len(), 3);
-    assert_eq!(
-        history
-            .samples()
-            .iter()
-            .map(|sample| sample.coordinate)
-            .collect::<Vec<_>>(),
-        vec![
-            crate::results::field::RecoveredFieldSample::FrequencyHertz(40.0),
-            crate::results::field::RecoveredFieldSample::FrequencyHertz(60.0),
-            crate::results::field::RecoveredFieldSample::FrequencyHertz(80.0),
-        ]
-    );
-    assert!(history
-        .samples()
-        .iter()
-        .all(|sample| sample.result.field.shape == vec![3, 2]));
-    assert!(response.primary().run.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "FEA_EM_SWEEP"
-            && diagnostic
-                .message
-                .contains(&response.plan().identity().digest().to_string())
-    }));
 }
 
 #[test]
@@ -5673,44 +5423,6 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
             ScopedLocalExecutionError::NestedExecution
         ))
     ));
-}
-
-#[test]
-fn electromagnetic_coefficients_are_independent_of_assignment_confidence() {
-    let mut audited_model = fixture_model(FixtureId::MultiMaterialAssembly);
-    replace_fixture_with_electric_current(&mut audited_model, "coil_current", "tip", 120.0);
-    audited_model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
-        reference_frequency: Frequency::new(60.0),
-    });
-    audited_model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
-    for (index, material) in audited_model.materials.iter_mut().enumerate() {
-        let mut electrical = test_electrical_material();
-        electrical.conductivity_s_per_m *= (index + 1) as f64;
-        electrical.relative_permittivity += index as f64;
-        electrical.relative_permeability += 0.25 * index as f64;
-        material.electrical = Some(electrical);
-    }
-    let mut verified_model = audited_model.clone();
-    for assignment in &mut verified_model.material_assignments {
-        assignment.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
-    }
-    let mesh = multi_region_tetrahedron_solver_mesh();
-    let options = || ElectromagneticSolveOptions {
-        solver_mesh: Some(mesh.clone()),
-        ..experimental_electromagnetic_options()
-    };
-
-    let mut audited =
-        crate::run_electromagnetic_with_options(&audited_model, ComputeBackend::Cpu, options())
-            .expect("heterogeneous electromagnetic solve with audited assignments");
-    let mut verified =
-        crate::run_electromagnetic_with_options(&verified_model, ComputeBackend::Cpu, options())
-            .expect("heterogeneous electromagnetic solve with verified assignments");
-
-    assert_eq!(audited.run.identity, verified.run.identity);
-    audited.run.diagnostics.clear();
-    verified.run.diagnostics.clear();
-    assert_eq!(audited, verified);
 }
 
 fn component_peak(values: &[f64], component: usize) -> f64 {

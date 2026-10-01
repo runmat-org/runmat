@@ -1822,8 +1822,8 @@ fn region_hash(region_id: &str) -> u64 {
 mod tests {
     use super::*;
     use crate::fixtures::{
-        fixture_model, mixed_solid_beam_model, replace_fixture_excitations,
-        replace_fixture_with_electric_current, FixtureExcitation, FixtureExcitationKind, FixtureId,
+        fixture_model, mixed_solid_beam_model, replace_fixture_excitations, FixtureExcitation,
+        FixtureExcitationKind, FixtureId,
     };
     use runmat_meshing_core::{
         ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
@@ -3929,10 +3929,20 @@ mod tests {
         let first_sample = static_excitations(&model);
         let second_sample = scaled_force_excitations(&first_sample, 2.0);
 
-        let first = assemble_linear_system(&model, &first_sample, None)
-            .expect("first sampled load should assemble");
-        let second = assemble_linear_system(&model, &second_sample, None)
-            .expect("second sampled load should assemble");
+        let first = assemble_structural_system(
+            &model,
+            &first_sample,
+            None,
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .expect("first sampled load should assemble");
+        let second = assemble_structural_system(
+            &model,
+            &second_sample,
+            None,
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .expect("second sampled load should assemble");
 
         assert_eq!(
             first.operator.operators().stiffness(),
@@ -3998,43 +4008,6 @@ mod tests {
                 "{error:?}"
             );
         }
-    }
-
-    #[test]
-    fn nonstructural_scaffolding_ignores_explicit_structural_connectivity() {
-        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-        replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
-        model.constraints.clear();
-
-        let excitations = static_excitations(&model);
-        let summary = assemble_linear_system(&model, &excitations, None)
-            .expect("nonstructural scaffolding must not select explicit structural assembly");
-
-        assert_eq!(summary.load_count, 1);
-        assert_eq!(summary.structural_beam_element_count, 0);
-        assert!(summary.structural_formulations.is_empty());
-        assert!(summary
-            .operator
-            .load()
-            .iter()
-            .any(|value| value.abs() > 0.0));
-
-        let mesh_summary = assemble_linear_system(&model, &excitations, Some(tetrahedron4_mesh()))
-            .expect("a solver mesh must not route a nonstructural source through mechanics");
-        assert!(mesh_summary.structural_formulations.is_empty());
-        assert_eq!(
-            mesh_summary.structural_sources,
-            vec![SourceImplementation::NotApplicable]
-        );
-        assert_eq!(
-            mesh_summary.structural_boundary_transfers,
-            vec![BoundaryTransferImplementation::NotApplicable]
-        );
-        assert!(mesh_summary
-            .operator
-            .load()
-            .iter()
-            .any(|value| value.abs() > 0.0));
     }
 
     #[test]

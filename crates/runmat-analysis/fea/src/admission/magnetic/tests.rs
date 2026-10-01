@@ -42,17 +42,23 @@ fn magnetic_identity_axis_splicing_and_production_forgery_fail_closed() {
         match axis {
             0 => {
                 forged.components[0].spatial_operator =
-                    SpatialOperatorImplementation::ReducedEdgeGraphCurlCurl
+                    SpatialOperatorImplementation::MaxwellLowestOrderEdgeCurlCurlComplexMass
             }
             1 => {
                 forged.components[0].constitutive =
                     ConstitutiveImplementation::ElementOwnedIsotropicPermittivity
             }
-            2 => forged.components[0].recovery = RecoveryImplementation::ReducedEdgeGraphFlux,
+            2 => {
+                forged.components[0].recovery =
+                    RecoveryImplementation::MaxwellSolverMeshElectricFluxFieldPower
+            }
             3 => {
                 forged.components[0].topologies.remove(1);
             }
-            4 => forged.components[0].sources = vec![SourceImplementation::CanonicalEdgeProjection],
+            4 => {
+                forged.components[0].sources =
+                    vec![SourceImplementation::CanonicalBoundaryProjection]
+            }
             5 => {
                 forged.boundary_transfers =
                     vec![BoundaryTransferImplementation::ImplicitNaturalBoundaryAndGaugeAnchor]

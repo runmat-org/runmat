@@ -31,11 +31,6 @@ pub use frequency::{
     FrequencyResponsePlan, FrequencyResponsePlanEntry, FrequencyResponsePlanEntryIdentity,
     FrequencyResponsePlanIdentity,
 };
-pub use pipeline::electromagnetic::{run_electromagnetic, run_electromagnetic_with_options};
-pub use pipeline::electromagnetic_frequency::{
-    run_electromagnetic_frequency_response, ElectromagneticFrequencySummary,
-    FeaElectromagneticFrequencyResponse,
-};
 pub use pipeline::linear_static::{
     run_linear_static, run_linear_static_from_thermal_state,
     run_linear_static_from_thermal_state_with_prepared_constraint_plan,

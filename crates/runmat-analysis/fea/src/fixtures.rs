@@ -20,7 +20,7 @@ use runmat_analysis_core::{
 };
 #[cfg(test)]
 use runmat_analysis_core::{
-    ElectricCurrent, ElectricPotential, Position, ReferencePoint, Temperature, Traction,
+    ElectricPotential, Position, ReferencePoint, Temperature, Traction,
 };
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind, UnitSystem};
 
@@ -218,49 +218,6 @@ pub fn mixed_solid_beam_shell_model(attached_coordinates_m: [f64; 3]) -> Analysi
         },
     );
     model
-}
-
-#[cfg(test)]
-pub(crate) fn replace_fixture_with_electric_current(
-    model: &mut AnalysisModel,
-    id: &str,
-    region_id: &str,
-    current_a: f64,
-) {
-    let signal_id = SignalId(format!("{id}.signal"));
-    let case_id = ExcitationCaseId(format!("{id}.case"));
-    model.signals = vec![PhysicalSignal::ElectricCurrent(Signal {
-        signal_id: signal_id.clone(),
-        shape: SignalShape::Scalar,
-        frame: None,
-        representation: SignalRepresentation::Constant(SignalValue::Scalar(ElectricCurrent::new(
-            current_a,
-        ))),
-        precision: SignalPrecision::Real64,
-        evidence: exact_signal_evidence(),
-        provenance: SignalProvenance::Authored,
-    })];
-    model.excitations = vec![ExcitationAction::ElectricCurrent(AnalysisExcitation {
-        excitation_id: ExcitationId(id.to_string()),
-        target: ExcitationTarget::Region(RegionTarget::volume(region_id)),
-        frame: CoordinateFrame::Global,
-        direction: None,
-        distribution: ExcitationDistribution::Concentrated,
-        kinematics: ExcitationKinematics::FixedFrame,
-        signal_id,
-        active_step_ids: Vec::new(),
-        combination_group: None,
-        projection: ProjectionRequirement {
-            preserve_resultant: false,
-            preserve_moment: false,
-            relative_tolerance: 1.0e-12,
-        },
-    })];
-    model.excitation_cases = vec![ExcitationCase {
-        case_id,
-        action_ids: vec![ExcitationId(id.to_string())],
-        activation: ExcitationCaseActivation::Always,
-    }];
 }
 
 #[cfg(test)]

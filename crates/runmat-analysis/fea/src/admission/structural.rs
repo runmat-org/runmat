@@ -154,7 +154,6 @@ const fn source_order(source: SourceImplementation) -> u8 {
         SourceImplementation::CanonicalVolumeProjection => 1,
         SourceImplementation::CanonicalBoundaryProjection => 2,
         SourceImplementation::CanonicalBoundaryPressureIntegration => 3,
-        SourceImplementation::CanonicalEdgeProjection => 4,
         SourceImplementation::CanonicalPointProjection => 5,
         SourceImplementation::AcousticHashedTargetGraphProjection => 6,
         SourceImplementation::BoundaryResultantMomentProjection => 7,
@@ -180,7 +179,6 @@ const fn boundary_transfer_order(transfer: BoundaryTransferImplementation) -> u8
     match transfer {
         BoundaryTransferImplementation::NotApplicable => 0,
         BoundaryTransferImplementation::CanonicalBoundaryProjection => 1,
-        BoundaryTransferImplementation::CanonicalGroundWithOrdinalInsulationProfile => 2,
         BoundaryTransferImplementation::ExplicitRegionConnectivity => 3,
         BoundaryTransferImplementation::GlobalCountProfile => 4,
         BoundaryTransferImplementation::ImplicitNaturalBoundaryAndGaugeAnchor => 5,

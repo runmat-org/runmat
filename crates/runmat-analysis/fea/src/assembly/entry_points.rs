@@ -29,26 +29,6 @@ pub(crate) fn assemble_structural_perturbation_system(
     )
 }
 
-/// Internal reduced operator used by non-structural experimental pipelines.
-/// Structural callers use `assemble_structural_system` for explicit synthetic admission.
-pub(crate) fn assemble_linear_system(
-    model: &AnalysisModel,
-    excitations: &RealizedExcitations,
-    solver_mesh: Option<SolverMeshArtifact>,
-) -> Result<AssemblySummary, LinearAssemblyError> {
-    assemble_with_mesh(
-        model,
-        excitations,
-        solver_mesh.as_ref(),
-        None,
-        None,
-        crate::planning::resource::LocalExecutionPlan::serial(),
-        StructuralCouplingInput::Authored {
-            solved_nodal_temperature_k: None,
-        },
-    )
-}
-
 pub(crate) fn assemble_structural_system(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,

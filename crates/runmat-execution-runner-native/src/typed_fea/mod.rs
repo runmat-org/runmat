@@ -10,6 +10,7 @@ mod electrical_execution;
 mod geometry;
 mod input;
 mod magnetic_execution;
+mod maxwell_execution;
 mod preparation;
 mod thermal_execution;
 
@@ -28,10 +29,11 @@ pub use acoustic_execution::CompletedAuthoredAcousticStudy;
 pub use electrical_execution::CompletedAuthoredElectricalStudy;
 pub use geometry::MaterializedFeaGeometry;
 pub use magnetic_execution::CompletedAuthoredMagneticStudy;
+pub use maxwell_execution::CompletedAuthoredMaxwellStudy;
 pub use preparation::{
     checked_fea_artifact_access, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
-    PreparedAuthoredMagneticStudy, PreparedAuthoredThermalStudy, PreparedFeaStudy,
-    PreparedFeaStudyRoot,
+    PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy, PreparedAuthoredThermalStudy,
+    PreparedFeaStudy, PreparedFeaStudyRoot,
 };
 pub use thermal_execution::CompletedAuthoredThermalStudy;
 
@@ -127,6 +129,7 @@ pub enum CompletedFeaStudyResult {
     Acoustic(Box<CompletedAuthoredAcousticStudy>),
     Electrical(Box<CompletedAuthoredElectricalStudy>),
     Magnetic(Box<CompletedAuthoredMagneticStudy>),
+    Maxwell(Box<CompletedAuthoredMaxwellStudy>),
     Structural(Box<StructuralStudyResult>),
     Thermal(Box<CompletedAuthoredThermalStudy>),
 }
@@ -137,6 +140,7 @@ impl CompletedFeaStudyResult {
             Self::Acoustic(result) => &result.mesh,
             Self::Electrical(result) => &result.mesh,
             Self::Magnetic(result) => &result.mesh,
+            Self::Maxwell(result) => &result.mesh,
             Self::Structural(result) => result.mesh(),
             Self::Thermal(result) => &result.mesh,
         }
@@ -165,6 +169,12 @@ pub async fn execute_checked_fea_locally(
             .map(Box::new)
             .map(LocalFeaExecution::Study),
         ResolvedFeaRoot::Sweep(sweep) => {
+            if sweep.study.study.sequence.steps.iter().any(|step| {
+                step.family == runmat_analysis_core::PhysicsFamily::Electromagnetic
+                    && step.procedure == runmat_analysis_core::AnalysisProcedure::HarmonicResponse
+            }) {
+                return Err("authored Maxwell sweeps are outside the qualified singleton-frequency execution envelope".into());
+            }
             let expanded = sweep
                 .sweep
                 .expand_cases(&sweep.study.study)
@@ -322,6 +332,40 @@ async fn execute_case(
             .data;
             (
                 CompletedFeaStudyResult::Magnetic(Box::new(result)),
+                publication,
+            )
+        }
+        PreparedFeaStudyRoot::Maxwell(root) => {
+            let result = maxwell_execution::execute(root, workers, options).await?;
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            let publication_options = runmat_runtime::analysis::AnalysisMaxwellRunOptions {
+                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
+                residual_target: result.completion.workload.relative_residual_target,
+            };
+            let identity =
+                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
+                    "typed-local:{}:{}",
+                    digest.to_string().trim_start_matches("sha256:"),
+                    result.completion.root.logical_digest,
+                ))?;
+            let publication = runmat_runtime::analysis::publish_maxwell_study_result(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &publication_options,
+                digest,
+                runmat_runtime::operations::OperationContext::new(None, None),
+                identity,
+            )
+            .map_err(|e| e.message)?
+            .data;
+            (
+                CompletedFeaStudyResult::Maxwell(Box::new(result)),
                 publication,
             )
         }

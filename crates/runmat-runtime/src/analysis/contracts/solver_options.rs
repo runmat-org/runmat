@@ -4,7 +4,7 @@ use super::*;
 impl AnalysisSolverOptions {
     pub(in crate::analysis) fn clear_solver_mesh_artifact_path(&mut self) {
         match self {
-            Self::ElectricalStatic(_) | Self::Magnetostatic(_) => {}
+            Self::ElectricalStatic(_) | Self::Magnetostatic(_) | Self::MaxwellHarmonic(_) => {}
             Self::StructuralLinear(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralFrequency(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralModes(options) => options.solver_mesh_artifact_path = None,
@@ -24,9 +24,6 @@ impl AnalysisSolverOptions {
                 options.solver_mesh_artifact_path = None;
             }
             Self::StructuralNonlinear(options) => options.solver_mesh_artifact_path = None,
-            Self::ElectromagneticPotential(options) => {
-                options.solver_mesh_artifact_path = None;
-            }
         }
     }
 
@@ -127,7 +124,7 @@ impl AnalysisSolverOptions {
                 AnalysisNonlinearRunOptions::default(),
             )),
             (Electromagnetic, HarmonicResponse, SolutionSpace::Direct) => Ok(
-                Self::ElectromagneticPotential(AnalysisElectromagneticRunOptions::default()),
+                Self::MaxwellHarmonic(super::super::AnalysisMaxwellRunOptions::default()),
             ),
             (family, procedure, solution_space) => Err(format!(
                 "procedure step `{}` selects unsupported execution combination {family:?}/{procedure:?}/{solution_space:?}",

@@ -102,7 +102,7 @@ fn equation_and_topology_select_four_distinct_registry_identities() {
             .unwrap();
             assert!(validate_solver_formulation_compatibility(
                 &identity,
-                SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
+                SolverMethod::GeneralGmres,
                 SolverPreconditioner::BlockJacobi
             )
             .is_err());
@@ -131,8 +131,7 @@ fn production_and_cross_equation_or_harmonic_identity_splicing_fail_closed() {
             assert!(matches!(error, FeaRunError::FormulationAdmission(rejection)
                 if rejection.reason == FormulationAdmissionRejectionReason::ProductionQualificationMissing));
             let mut mixed = realization(equation, order, CanonicalElectricalSource::SourceFree);
-            mixed.temporals =
-                vec![TemporalImplementation::ElectromagneticReducedEdgeGraphHarmonicSolve];
+            mixed.temporals = vec![TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve];
             assert!(admit_formulation(FormulationAdmissionRequest {
                 family: PhysicsFamily::Electromagnetic,
                 procedure: AnalysisProcedure::Static,

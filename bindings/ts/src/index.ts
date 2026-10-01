@@ -145,6 +145,7 @@ export type {
   FeaDomainsInput,
   FeaElementOrder,
   FeaExecutionInput,
+  FeaMaxwellHarmonicOptions,
   FeaFormulationRequirement,
   FeaExcitationCaseInput,
   FeaExcitationInput,

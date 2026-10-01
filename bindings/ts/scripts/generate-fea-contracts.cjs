@@ -9,6 +9,10 @@ const rustAnalysisContractsPath = path.resolve(
   repoRoot,
   "crates/runmat-runtime/src/analysis/contracts.rs"
 );
+const rustMaxwellRunOptionsPath = path.resolve(
+  repoRoot,
+  "crates/runmat-runtime/src/analysis/maxwell_run_options.rs"
+);
 const rustFeaProgressPath = path.resolve(
   repoRoot,
   "crates/runmat-analysis/fea/src/progress.rs"
@@ -105,7 +109,7 @@ const analysisStructTypes = [
   ["AnalysisFsiRunOptions", "FeaFluidStructureInteractionOptions", {}],
   ["ContactEnforcementOptions", "FeaContactEnforcementOptions", {}],
   ["AnalysisNonlinearRunOptions", "FeaStructuralNonlinearOptions", {}],
-  ["AnalysisElectromagneticRunOptions", "FeaElectromagneticPotentialOptions", {}],
+  ["AnalysisMaxwellRunOptions", "FeaMaxwellHarmonicOptions", {}],
 ];
 const progressStructTypes = [
   ["FeaProgressEvent", "FeaProgressEvent", { renameAll: "camelCase" }],
@@ -393,7 +397,8 @@ function formatInterface(name, fields) {
 }
 
 function main() {
-  const analysisSource = fs.readFileSync(rustAnalysisContractsPath, "utf8");
+  const analysisSource = fs.readFileSync(rustAnalysisContractsPath, "utf8")
+    + "\n" + fs.readFileSync(rustMaxwellRunOptionsPath, "utf8");
   const progressSource = fs.readFileSync(rustFeaProgressPath, "utf8");
   const sourceReportSource = fs.readFileSync(rustFeaSourceReportPath, "utf8");
   const diagnosticSource = fs.readFileSync(rustFeaDiagnosticPath, "utf8");
@@ -600,7 +605,7 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "export interface FeaResponseSpectrumInput { spectrum_id: string; abscissa: { frequency_hertz: number[] } | { period_seconds: number[] }; ordinates: number[]; damping: { ratio: number } | { quality_factor: number }; response: \"relative_displacement\" | \"relative_velocity\" | \"relative_acceleration\" | \"absolute_acceleration\" | \"pseudo_velocity\" | \"pseudo_acceleration\"; envelope: \"positive\" | \"negative\" | \"maximax\"; interpolation: \"linear_frequency\" | \"linear_period\" | \"log_log\"; extrapolation: \"reject\" | \"hold_endpoint\"; direction: { frame: FeaCoordinateFrame; vector: [number, number, number] }; modal_combination: \"srss\" | \"complete_quadratic_combination\" | \"ten_percent\" | \"absolute_sum\"; directional_combination: \"srss\" | \"absolute_sum\" | { percentage_rule: { primary: number; secondary: number } }; truncation: { minimum_cumulative_mass_ratio: number; include_residual_mode: boolean; include_rigid_response: boolean; include_missing_mass: boolean }; construction: \"authored_design\" | { derived_from_acceleration_history: { source_signal_id: string; method: \"exact_piecewise_linear\" | \"recursive_filter\" } }; evidence: { sampling_adequacy_ratio: number; max_interpolation_error: number | null }; provenance_digest: string; }",
     "export interface FeaDomainsInput { thermo_mechanical?: { reference_temperature: { kelvin: number } }; electro_thermal?: { reference_temperature: { kelvin: number } }; electromagnetic?: { static: { equation: \"electrostatics\" | \"steady_conduction\" } } | { harmonic: { reference_frequency: { hertz: number } } }; cfd?: { density: { kilograms_per_cubic_meter: number }; dynamic_viscosity: { pascal_seconds: number }; turbulence_intensity: { ratio: number } }; }",
     "export interface FeaCanonicalSequence { sequence_id: string; steps: FeaProcedureStep[]; dependencies: FeaSequenceDependency[]; transitions: FeaStateTransition[]; branches: FeaSequenceBranch[]; }",
-    "export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; requirement?: FeaFormulationRequirement } & ({ solver: \"structural_linear\"; options: FeaStructuralLinearOptions } | { solver: \"structural_modes\"; options: FeaStructuralModesOptions } | { solver: \"acoustic_helmholtz\"; options: FeaAcousticHelmholtzOptions } | { solver: \"thermal_diffusion\"; options: FeaThermalDiffusionOptions } | { solver: \"structural_transient\"; options: FeaStructuralTransientOptions } | { solver: \"incompressible_flow\"; options: FeaIncompressibleFlowOptions } | { solver: \"conjugate_heat_transfer\"; options: FeaConjugateHeatTransferOptions } | { solver: \"fluid_structure_interaction\"; options: FeaFluidStructureInteractionOptions } | { solver: \"structural_nonlinear\"; options: FeaStructuralNonlinearOptions } | { solver: \"electromagnetic_potential\"; options: FeaElectromagneticPotentialOptions } | { solver?: never; options?: never });",
+    "export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; requirement?: FeaFormulationRequirement } & ({ solver: \"structural_linear\"; options: FeaStructuralLinearOptions } | { solver: \"structural_modes\"; options: FeaStructuralModesOptions } | { solver: \"acoustic_helmholtz\"; options: FeaAcousticHelmholtzOptions } | { solver: \"thermal_diffusion\"; options: FeaThermalDiffusionOptions } | { solver: \"structural_transient\"; options: FeaStructuralTransientOptions } | { solver: \"incompressible_flow\"; options: FeaIncompressibleFlowOptions } | { solver: \"conjugate_heat_transfer\"; options: FeaConjugateHeatTransferOptions } | { solver: \"fluid_structure_interaction\"; options: FeaFluidStructureInteractionOptions } | { solver: \"structural_nonlinear\"; options: FeaStructuralNonlinearOptions } | { solver: \"maxwell_harmonic\"; options: FeaMaxwellHarmonicOptions } | { solver?: never; options?: never });",
   ].join("\n\n");
   const analysisInterfaces = analysisStructTypes.map(([rustName, tsName, options]) =>
     formatInterface(tsName, readStructFields(analysisSource, rustName, options))

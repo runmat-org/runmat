@@ -257,7 +257,6 @@ pub fn analysis_run_thermal_with_options_op(
         }),
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,

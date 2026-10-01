@@ -235,25 +235,6 @@ pub const fn response_spectrum_nodal_quantity_name(
         Quantity::PseudoAngularAcceleration => "pseudo_angular_acceleration",
     }
 }
-pub const FEA_FIELD_EM_VECTOR_POTENTIAL_REAL: &str = "em.vector_potential_real";
-pub const FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG: &str = "em.vector_potential_imag";
-pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL: &str = "em.magnetic_flux_density_real";
-pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_IMAG: &str = "em.magnetic_flux_density_imag";
-pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE: &str = "em.magnetic_flux_density_magnitude";
-pub const FEA_FIELD_EM_MAGNETIC_FIELD_REAL: &str = "em.magnetic_field_real";
-pub const FEA_FIELD_EM_MAGNETIC_FIELD_IMAG: &str = "em.magnetic_field_imag";
-pub const FEA_FIELD_EM_CURRENT_DENSITY_REAL: &str = "em.current_density_real";
-pub const FEA_FIELD_EM_CURRENT_DENSITY_IMAG: &str = "em.current_density_imag";
-pub const FEA_FIELD_EM_ELECTRIC_FIELD_REAL: &str = "em.electric_field_real";
-pub const FEA_FIELD_EM_ELECTRIC_FIELD_IMAG: &str = "em.electric_field_imag";
-pub const FEA_FIELD_EM_POWER_LOSS_DENSITY: &str = "em.power_loss_density";
-pub const FEA_FIELD_EM_ENERGY_DENSITY: &str = "em.energy_density";
-pub const FEA_FIELD_EM_RESIDUAL_REAL: &str = "em.residual_real";
-pub const FEA_FIELD_EM_RESIDUAL_IMAG: &str = "em.residual_imag";
-pub const FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL: &str = "em.electric_flux_density_real";
-pub const FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_IMAG: &str = "em.electric_flux_density_imag";
-pub const FEA_FIELD_EM_POYNTING_VECTOR_REAL: &str = "em.poynting_vector_real";
-pub const FEA_FIELD_EM_POYNTING_VECTOR_IMAG: &str = "em.poynting_vector_imag";
 
 pub fn fea_modal_mode_shape_field_id(mode_number: usize) -> String {
     format!("modal.mode_shape.{mode_number}")

@@ -4,6 +4,49 @@ use runmat_analysis_core::{FormulationAdmissionRejectionReason, FormulationMatur
 use runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh;
 
 #[test]
+fn retired_proxy_contract_tags_cannot_deserialize_into_live_formulation_authority() {
+    for tag in [
+        "reduced_electromagnetic_potential",
+        "reduced_edge_graph_curl_curl",
+    ] {
+        assert!(
+            serde_json::from_value::<SpatialOperatorImplementation>(serde_json::json!(tag))
+                .is_err()
+        );
+    }
+    assert!(
+        serde_json::from_value::<TemporalImplementation>(serde_json::json!(
+            "electromagnetic_reduced_edge_graph_harmonic_solve"
+        ))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<ConstitutiveImplementation>(serde_json::json!(
+            "reduced_frequency_material_response"
+        ))
+        .is_err()
+    );
+    for tag in [
+        "electromagnetic_potential_profile",
+        "reduced_edge_graph_flux",
+    ] {
+        assert!(serde_json::from_value::<RecoveryImplementation>(serde_json::json!(tag)).is_err());
+    }
+    assert!(
+        serde_json::from_value::<SourceImplementation>(serde_json::json!(
+            "canonical_edge_projection"
+        ))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<BoundaryTransferImplementation>(serde_json::json!(
+            "canonical_ground_with_ordinal_insulation_profile"
+        ))
+        .is_err()
+    );
+}
+
+#[test]
 fn canonical_harmonic_maxwell_is_exact_order_bound_and_distinct_from_static_and_graph() {
     let mut identities = Vec::new();
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -26,14 +69,13 @@ fn canonical_harmonic_maxwell_is_exact_order_bound_and_distinct_from_static_and_
                 .count(),
             1
         );
-        let legacy = registered
-            .iter()
-            .find(|entry| {
-                entry.realization().components[0].spatial_operator
-                    == SpatialOperatorImplementation::ReducedEdgeGraphCurlCurl
-            })
-            .unwrap();
-        assert_ne!(legacy.realization(), identity.realization());
+        assert_eq!(registered.len(), 2);
+        for entry in &registered {
+            assert_eq!(
+                entry.realization().temporals,
+                vec![TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve]
+            );
+        }
         assert_ne!(
             admit_canonical_magnetostatic(&mesh, FormulationRequirement::Experimental).unwrap(),
             identity
@@ -56,11 +98,11 @@ fn maxwell_axis_splicing_and_foreign_procedure_fail_closed() {
         for axis in 0..8 {
             let mut forged = exact.clone();
             match axis {
-                0 => forged.components[0].spatial_operator = SpatialOperatorImplementation::ReducedEdgeGraphCurlCurl,
+                0 => forged.components[0].spatial_operator = SpatialOperatorImplementation::MagneticGalerkinLowestOrderEdgeCurlCurl,
                 1 => forged.components[0].constitutive = ConstitutiveImplementation::ElementOwnedIsotropicMagneticPermeability,
-                2 => forged.components[0].recovery = RecoveryImplementation::ReducedEdgeGraphFlux,
+                2 => forged.components[0].recovery = RecoveryImplementation::MagneticSolverMeshVectorPotentialFluxFieldEnergy,
                 3 => { forged.components[0].topologies.remove(1); }
-                4 => forged.components[0].sources = vec![SourceImplementation::CanonicalEdgeProjection],
+                4 => forged.components[0].sources = vec![SourceImplementation::CanonicalBoundaryProjection],
                 5 => forged.boundary_transfers = vec![BoundaryTransferImplementation::FullExteriorTangentialPotentialGroundWithWeakCoulombGauge],
                 6 => forged.temporals = vec![TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve],
                 7 => forged.coupling = CouplingImplementation::StaggeredElectrothermalConductanceLine,

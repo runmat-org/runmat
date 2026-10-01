@@ -10,7 +10,7 @@ fn magnetic_saddle_method_cannot_claim_electrical_or_harmonic_algebra() {
     for method in [
         SolverMethod::AssembledPcg,
         SolverMethod::MatrixFreeSaddlePointGmres,
-        SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
+        SolverMethod::StructuralDirectHarmonicGmres,
     ] {
         assert!(!method_is_compatible(
             TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve,
@@ -88,7 +88,7 @@ fn nonstructural_identity(
             family != PhysicsFamily::Electromagnetic
                 || procedure != AnalysisProcedure::HarmonicResponse
                 || entry.realization().temporals
-                    == vec![TemporalImplementation::ElectromagneticReducedEdgeGraphHarmonicSolve]
+                    == vec![TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve]
         })
         .expect("nonstructural compatibility fixture must be registered")
         .realization()
@@ -123,7 +123,6 @@ fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_cla
             SolverMethod::MatrixFreePcg,
             SolverMethod::AssembledSaddlePointGmres,
             SolverMethod::MatrixFreeSaddlePointGmres,
-            SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
             SolverMethod::StructuralDirectHarmonicGmres,
             SolverMethod::DenseDirect,
         ] {
@@ -268,8 +267,8 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
         (
             PhysicsFamily::Electromagnetic,
             AnalysisProcedure::HarmonicResponse,
-            SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
-            SolverPreconditioner::BlockJacobi,
+            SolverMethod::GeneralGmres,
+            SolverPreconditioner::None,
         ),
         (
             PhysicsFamily::Acoustic,
@@ -384,7 +383,7 @@ fn persisted_run_rejects_solver_or_preconditioner_substitution() {
 
     let mut substituted_method = serde_json::to_value(&run).unwrap();
     substituted_method["solver_method"] =
-        serde_json::json!(SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab);
+        serde_json::json!("electromagnetic_edge_curl_curl_harmonic_block_bicgstab");
     assert!(serde_json::from_value::<FeaRunResult>(substituted_method).is_err());
 
     let mut substituted_preconditioner = serde_json::to_value(&run).unwrap();

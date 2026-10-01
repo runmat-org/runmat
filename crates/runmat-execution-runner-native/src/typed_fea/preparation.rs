@@ -12,16 +12,19 @@ mod acoustic;
 mod admission;
 mod electrical;
 mod magnetic;
+mod maxwell;
 mod thermal;
 pub use acoustic::PreparedAuthoredAcousticStudy;
 pub use electrical::PreparedAuthoredElectricalStudy;
 pub use magnetic::PreparedAuthoredMagneticStudy;
+pub use maxwell::PreparedAuthoredMaxwellStudy;
 pub use thermal::PreparedAuthoredThermalStudy;
 
 pub enum PreparedFeaStudyRoot {
     Acoustic(PreparedAuthoredAcousticStudy),
     Electrical(PreparedAuthoredElectricalStudy),
     Magnetic(PreparedAuthoredMagneticStudy),
+    Maxwell(PreparedAuthoredMaxwellStudy),
     Structural(crate::PreparedStructuralStudyRoot),
     Thermal(PreparedAuthoredThermalStudy),
 }
@@ -48,12 +51,15 @@ pub async fn prepare_study(
         admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?;
     if matches!(
         family,
-        admission::PreparedFamily::Acoustic | admission::PreparedFamily::Magnetic
+        admission::PreparedFamily::Acoustic
+            | admission::PreparedFamily::Magnetic
+            | admission::PreparedFamily::Maxwell
     ) && (options.backend != runmat_analysis_fea::ComputeBackend::Cpu
         || !options.accelerators.is_empty())
     {
         return Err(
-            "authored acoustic/magnetic execution has no admitted accelerator envelope".into(),
+            "authored acoustic/magnetic/Maxwell execution has no admitted accelerator envelope"
+                .into(),
         );
     }
     let revision = program_revision(source)?;
@@ -130,6 +136,28 @@ pub async fn prepare_study(
         .frozen_project()
         .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
     let root = match family {
+        admission::PreparedFamily::Maxwell => {
+            if !input_materializations.is_empty() {
+                return Err(
+                    "authored Maxwell execution does not support source materializations".into(),
+                );
+            }
+            PreparedFeaStudyRoot::Maxwell(PreparedAuthoredMaxwellStudy {
+                geometry_meshing,
+                authored_study_digest,
+                frozen_project_digest,
+                study: realized.clone(),
+                materials: resolved.material_catalog,
+                program_revision: revision.clone(),
+                artifact_access: access,
+                input_materializations,
+                planning: runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
+                    formulation_requirement: resolved.study.formulation_requirement,
+                },
+                local_execution,
+                analysis_accelerator_requests: options.accelerators.clone(),
+            })
+        }
         admission::PreparedFamily::Magnetic => {
             if !input_materializations.is_empty() {
                 return Err(

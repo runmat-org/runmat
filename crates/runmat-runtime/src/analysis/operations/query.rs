@@ -102,31 +102,6 @@ macro_rules! visit_analysis_result_fields {
                 }
             }
         }
-        if let Some(electromagnetic) = $run_result.electromagnetic_results.$as_ref() {
-            for field in [
-                $($borrow)* electromagnetic.vector_potential_real,
-                $($borrow)* electromagnetic.vector_potential_imag,
-                $($borrow)* electromagnetic.magnetic_flux_density_real,
-                $($borrow)* electromagnetic.magnetic_flux_density_imag,
-                $($borrow)* electromagnetic.magnetic_flux_density_magnitude,
-                $($borrow)* electromagnetic.magnetic_field_real,
-                $($borrow)* electromagnetic.magnetic_field_imag,
-                $($borrow)* electromagnetic.current_density_real,
-                $($borrow)* electromagnetic.current_density_imag,
-                $($borrow)* electromagnetic.electric_field_real,
-                $($borrow)* electromagnetic.electric_field_imag,
-                $($borrow)* electromagnetic.power_loss_density,
-                $($borrow)* electromagnetic.energy_density,
-                $($borrow)* electromagnetic.residual_real,
-                $($borrow)* electromagnetic.residual_imag,
-                $($borrow)* electromagnetic.electric_flux_density_real,
-                $($borrow)* electromagnetic.electric_flux_density_imag,
-                $($borrow)* electromagnetic.poynting_vector_real,
-                $($borrow)* electromagnetic.poynting_vector_imag,
-            ] {
-                $visit(field);
-            }
-        }
     }};
 }
 
@@ -1269,12 +1244,6 @@ fn analysis_results_op_with_field_inventory(
     } else {
         None
     };
-    let electromagnetic_results =
-        if query.include_electromagnetic_results && query.include_field_values {
-            run_result.electromagnetic_results.clone()
-        } else {
-            None
-        };
     let fields = if query.include_field_values {
         collected_fields
     } else {
@@ -1290,7 +1259,6 @@ fn analysis_results_op_with_field_inventory(
         thermal_results,
         transient_results,
         nonlinear_results,
-        electromagnetic_results,
         structural_frequency_results: None,
         diagnostics: if query.include_diagnostics {
             if query.diagnostic_codes.is_empty() {
@@ -1523,7 +1491,6 @@ fn analysis_structural_frequency_results_op(
             thermal_results: None,
             transient_results: None,
             nonlinear_results: None,
-            electromagnetic_results: None,
             structural_frequency_results: Some(result.as_ref().clone()),
             diagnostics: query.include_diagnostics.then(Vec::new),
             run_status: step.run_status,

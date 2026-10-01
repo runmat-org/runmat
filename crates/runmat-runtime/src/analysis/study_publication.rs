@@ -2,6 +2,8 @@
 pub use super::contracts::AnalysisElectricalRunOptions;
 #[path = "magnetic_run_options.rs"]
 mod magnetic_run_options;
+#[path = "maxwell_run_options.rs"]
+mod maxwell_run_options;
 use super::{
     complete_study_run, execution_operation, meshing, structural_study, study_result,
     study_result_manifest, AcousticStudyCompletion, AcousticStudyObjectSource,
@@ -17,7 +19,9 @@ use super::{
     ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 use super::{MagneticStudyCompletion, MagneticStudyObjectSource};
+use super::{MaxwellStudyCompletion, MaxwellStudyObjectSource};
 pub use magnetic_run_options::AnalysisMagneticRunOptions;
+pub use maxwell_run_options::AnalysisMaxwellRunOptions;
 
 #[path = "acoustic_study_publication.rs"]
 mod acoustic;
@@ -27,6 +31,9 @@ pub use electrical::publish_electrical_study_result;
 #[path = "magnetic_study_publication.rs"]
 mod magnetic;
 pub use magnetic::publish_magnetic_study_result;
+#[path = "maxwell_study_publication.rs"]
+mod maxwell;
+pub use maxwell::publish_maxwell_study_result;
 #[path = "typed_study_publication.rs"]
 mod structural;
 #[path = "thermal_study_publication.rs"]

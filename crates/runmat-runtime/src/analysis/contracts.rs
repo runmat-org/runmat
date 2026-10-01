@@ -161,37 +161,7 @@ pub struct AnalysisRunOptions {
     pub solver_mesh_artifact_path: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisElectromagneticRunOptions {
-    pub deterministic_mode: bool,
-    pub precision_mode: PrecisionMode,
-    pub quality_policy: QualityPolicy,
-    pub residual_target: f64,
-    pub harmonic_tolerance: f64,
-    pub harmonic_max_iterations: usize,
-    #[serde(default)]
-    pub solver_mesh_artifact_path: Option<String>,
-    #[serde(default)]
-    pub sweep_enabled: bool,
-    #[serde(default)]
-    pub sweep_frequency_hz: Vec<f64>,
-}
 
-impl Default for AnalysisElectromagneticRunOptions {
-    fn default() -> Self {
-        Self {
-            deterministic_mode: false,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            residual_target: 1.0e-6,
-            harmonic_tolerance: 1.0e-7,
-            harmonic_max_iterations: 96,
-            solver_mesh_artifact_path: None,
-            sweep_enabled: false,
-            sweep_frequency_hz: Vec::new(),
-        }
-    }
-}
 
 impl Default for AnalysisRunOptions {
     fn default() -> Self {
@@ -834,8 +804,6 @@ pub struct AnalysisRunResult {
     pub thermal_results: Option<ThermalResultsData>,
     pub transient_results: Option<TransientResultsData>,
     pub nonlinear_results: Option<NonlinearResultsData>,
-    #[serde(default)]
-    pub electromagnetic_results: Option<ElectromagneticResultsData>,
     pub model_validity: QualityGate,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
@@ -868,7 +836,6 @@ pub struct AnalysisResultsQuery {
     pub include_transient_results: bool,
     pub transient_snapshot_indices: Vec<usize>,
     pub include_nonlinear_results: bool,
-    pub include_electromagnetic_results: bool,
 }
 
 impl Default for AnalysisResultsQuery {
@@ -884,7 +851,6 @@ impl Default for AnalysisResultsQuery {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         }
     }
 }
@@ -897,7 +863,6 @@ impl AnalysisResultsQuery {
             include_buckling_results: false,
             include_transient_results: false,
             include_nonlinear_results: false,
-            include_electromagnetic_results: false,
             ..Self::default()
         }
     }
@@ -911,7 +876,6 @@ impl AnalysisResultsQuery {
             include_buckling_results: false,
             include_transient_results: false,
             include_nonlinear_results: false,
-            include_electromagnetic_results: false,
             ..Self::default()
         }
     }
@@ -2065,8 +2029,6 @@ pub struct AnalysisResultsData {
     pub thermal_results: Option<ThermalResultsData>,
     pub transient_results: Option<TransientResultsData>,
     pub nonlinear_results: Option<NonlinearResultsData>,
-    #[serde(default)]
-    pub electromagnetic_results: Option<ElectromagneticResultsData>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structural_frequency_results: Option<StructuralFrequencyResultsData>,
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
@@ -2116,6 +2078,7 @@ impl Default for AnalysisTrendsQuery {
 pub enum AnalysisSolverOptions {
     ElectricalStatic(super::AnalysisElectricalRunOptions),
     Magnetostatic(super::AnalysisMagneticRunOptions),
+    MaxwellHarmonic(super::AnalysisMaxwellRunOptions),
     StructuralLinear(AnalysisRunOptions),
     StructuralFrequency(AnalysisStructuralFrequencyRunOptions),
     StructuralModes(AnalysisModalRunOptions),
@@ -2129,7 +2092,6 @@ pub enum AnalysisSolverOptions {
     ConjugateHeatTransfer(AnalysisChtRunOptions),
     FluidStructureInteraction(AnalysisFsiRunOptions),
     StructuralNonlinear(AnalysisNonlinearRunOptions),
-    ElectromagneticPotential(AnalysisElectromagneticRunOptions),
 }
 
 #[path = "contracts/solver_options.rs"]
@@ -2931,47 +2893,6 @@ pub struct NonlinearResultsData {
     pub method: NonlinearMethod,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ElectromagneticResultsData {
-    pub electromagnetic_payload_version: String,
-    pub reference_frequency_hz: f64,
-    pub applied_current_a: f64,
-    pub vector_potential_real: AnalysisField,
-    pub vector_potential_imag: AnalysisField,
-    pub magnetic_flux_density_real: AnalysisField,
-    pub magnetic_flux_density_imag: AnalysisField,
-    pub magnetic_flux_density_magnitude: AnalysisField,
-    pub magnetic_field_real: AnalysisField,
-    pub magnetic_field_imag: AnalysisField,
-    pub current_density_real: AnalysisField,
-    pub current_density_imag: AnalysisField,
-    pub electric_field_real: AnalysisField,
-    pub electric_field_imag: AnalysisField,
-    pub power_loss_density: AnalysisField,
-    pub energy_density: AnalysisField,
-    pub residual_real: AnalysisField,
-    pub residual_imag: AnalysisField,
-    pub electric_flux_density_real: AnalysisField,
-    pub electric_flux_density_imag: AnalysisField,
-    pub poynting_vector_real: AnalysisField,
-    pub poynting_vector_imag: AnalysisField,
-    #[serde(default)]
-    pub sweep_frequency_hz: Vec<f64>,
-    #[serde(default)]
-    pub sweep_peak_flux_density: Vec<f64>,
-    #[serde(default)]
-    pub sweep_solve_quality: Vec<f64>,
-    #[serde(default)]
-    pub resonance_peak_frequency_hz: Option<f64>,
-    #[serde(default)]
-    pub resonance_peak_flux_density: Option<f64>,
-    #[serde(default)]
-    pub resonance_bandwidth_hz: Option<f64>,
-    #[serde(default)]
-    pub resonance_quality_factor: Option<f64>,
-    #[serde(default)]
-    pub resonance_flux_gain: Option<f64>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

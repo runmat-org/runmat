@@ -7,10 +7,12 @@ use super::StructuralStudyNumericalResult;
 mod acoustic;
 mod electrical;
 mod magnetic;
+mod maxwell;
 pub use electrical::{
     ElectricalStudyCompletion, ElectricalStudyObjectSource, ElectricalStudySource,
 };
 pub use magnetic::{MagneticStudyCompletion, MagneticStudyObjectSource, MagneticStudySource};
+pub use maxwell::{MaxwellStudyCompletion, MaxwellStudyObjectSource, MaxwellStudySource};
 pub(super) mod thermal;
 pub use acoustic::{AcousticStudyCompletion, AcousticStudyObjectSource, AcousticStudySource};
 mod thermal_completion;

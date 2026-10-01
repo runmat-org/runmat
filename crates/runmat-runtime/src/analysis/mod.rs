@@ -9,8 +9,8 @@ use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
     AnalysisModel, AnalysisProcedure, AnalysisValidationError, BoundaryOperator, ContactFriction,
-    CoordinateFrame, CoupledPhysicsFamily, ExcitationAction, MagneticConstraintKind, PhysicsFamily,
-    ProcedureStepId, StateKind, StateOutput, ThermalInterfaceTransfer,
+    CoordinateFrame, CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, ProcedureStepId,
+    StateKind, StateOutput, ThermalInterfaceTransfer,
 };
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
@@ -22,11 +22,10 @@ use runmat_analysis_fea::physics::fsi::{couple_fluid_structure, FsiCouplingOptio
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
-    run_electromagnetic_frequency_response, run_modal_with_options, run_nonlinear_with_options,
-    run_thermal_with_options, run_transient_with_options, AnalysisRunIdentity, ComputeBackend,
-    ElectromagneticSolveOptions, ExecutionBackend, FeaBucklingRunResult, FeaProgressHandler,
-    FeaRunError, FeaRunResult, ModalSolveOptions, SolverMethod, SolverPreconditioner,
-    ThermalProcedureControl, ThermalSolveOptions,
+    run_modal_with_options, run_nonlinear_with_options, run_thermal_with_options,
+    run_transient_with_options, AnalysisRunIdentity, ComputeBackend, ExecutionBackend,
+    FeaBucklingRunResult, FeaProgressHandler, FeaRunResult, ModalSolveOptions,
+    SolverMethod, SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
 };
 use runmat_geometry_core::UnitSystem;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -36,17 +35,16 @@ use crate::operations::{
     OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
 };
 use policy::{
-    breach_rate_greater_than, breach_rate_less_than, electromagnetic_sweep_thresholds_for_policy,
-    electromagnetic_thresholds_for_policy, thermo_field_coverage_min_for_policy,
+    breach_rate_greater_than, breach_rate_less_than, thermo_field_coverage_min_for_policy,
     thermo_spatial_gradient_threshold_for_policy, thermo_thresholds_for_policy,
-    ElectromagneticQualityThresholds, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
-    EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED,
-    EM_BOUNDARY_LOCALIZATION_MIN_BALANCED, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED,
-    EM_CONDITIONING_MAX_BALANCED, EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
-    EM_ENERGY_IMBALANCE_MAX_BALANCED, EM_FLUX_DIVERGENCE_MAX_BALANCED,
-    EM_GROUND_EFFECTIVENESS_MIN_BALANCED, EM_HETEROGENEITY_THRESHOLD_BALANCED,
-    EM_IMAG_RESIDUAL_MAX_BALANCED, EM_INSULATION_LEAKAGE_MAX_BALANCED,
-    EM_REAL_RESIDUAL_MAX_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED, EM_RESONANCE_Q_MIN_BALANCED,
+    EM_ASSIGNMENT_COVERAGE_MIN_BALANCED, EM_BOUNDARY_ANCHOR_MIN_BALANCED,
+    EM_BOUNDARY_ENERGY_MIN_BALANCED, EM_BOUNDARY_LOCALIZATION_MIN_BALANCED,
+    EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED, EM_CONDITIONING_MAX_BALANCED,
+    EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED, EM_ENERGY_IMBALANCE_MAX_BALANCED,
+    EM_FLUX_DIVERGENCE_MAX_BALANCED, EM_GROUND_EFFECTIVENESS_MIN_BALANCED,
+    EM_HETEROGENEITY_THRESHOLD_BALANCED, EM_IMAG_RESIDUAL_MAX_BALANCED,
+    EM_INSULATION_LEAKAGE_MAX_BALANCED, EM_REAL_RESIDUAL_MAX_BALANCED,
+    EM_REGION_CONTRAST_MAX_BALANCED, EM_RESONANCE_Q_MIN_BALANCED,
     EM_SOURCE_INTERFERENCE_MAX_BALANCED, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED,
     EM_SOURCE_OVERLAP_MAX_BALANCED, EM_SOURCE_REALIZATION_MIN_BALANCED,
     EM_SOURCE_REGION_COVERAGE_MIN_BALANCED, EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED,
@@ -82,11 +80,11 @@ mod study_completion_identity;
 mod study_contract;
 mod study_execution;
 mod study_placement;
+mod study_publication;
 mod study_result;
 mod study_result_manifest;
 mod study_sweep;
 mod thermal_execution;
-mod study_publication;
 pub use response_study_result::{
     StructuralStudyModalResponseSpectrumNumericalResult,
     StructuralStudyRandomResponseNumericalResult,
@@ -131,12 +129,12 @@ pub use study_placement::{
     StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
     StructuralStudyPlacementResult,
 };
+pub use study_publication::*;
 pub use study_result::*;
 pub use study_sweep::{
     analysis_complete_study_sweep_op, analysis_study_sweep_definition,
     analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
 };
-pub use study_publication::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeaRuntimeConfig {
@@ -369,9 +367,9 @@ pub use contracts::{
     analysis_procedure_ids, AnalysisAcousticRunOptions, AnalysisBucklingRunOptions,
     AnalysisCfdRunOptions, AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload,
     AnalysisDocumentCheckResult, AnalysisDocumentKind, AnalysisDocumentRunResult,
-    AnalysisElectromagneticRunOptions, AnalysisExecutionPlan, AnalysisExecutionStep,
-    AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor,
-    AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
+    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldBinding,
+    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
+    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
@@ -391,12 +389,12 @@ pub use contracts::{
     AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
     AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, BucklingResultsData, ContactEnforcementOptions,
-    ElectromagneticResultsData, FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis,
-    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
-    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
-    ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, StructuralFrequencyResultsData, StructuralRandomResponseResultsData,
+    AnalysisValidateResult, BucklingResultsData, ContactEnforcementOptions, FallbackEvent,
+    FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
+    PreconditionerMode, ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate,
+    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    StructuralFrequencyResultsData, StructuralRandomResponseResultsData,
     StructuralResponseSpectrumResultsData, ThermalResultsData, TransientIntegrationMethod,
     TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
     ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
@@ -2601,7 +2599,6 @@ fn analysis_admit_modal_run_with_id(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -2711,7 +2708,6 @@ fn analysis_admit_buckling_run_with_id(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -3012,7 +3008,6 @@ pub fn analysis_run_acoustic_with_options_op(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -3453,7 +3448,6 @@ pub fn analysis_run_cfd_with_options_op(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -3931,7 +3925,6 @@ pub fn analysis_run_cht_with_options_op(
         }),
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -4330,7 +4323,6 @@ pub fn analysis_run_fsi_with_options_op(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -4795,7 +4787,6 @@ fn analysis_admit_transient_run_with_id(
             integration_method: TransientIntegrationMethod::NewmarkAverageAcceleration,
         }),
         nonlinear_results: None,
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -5399,7 +5390,6 @@ pub fn analysis_run_nonlinear_with_options_op(
             backtrack_burst_count: nonlinear_run.backtrack_burst_count,
             method: NonlinearMethod::IncrementalNewtonRaphson,
         }),
-        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -5636,967 +5626,6 @@ fn persist_linear_static_run(
         context,
         result,
     )
-}
-
-pub fn analysis_run_electromagnetic_op(
-    model: &AnalysisModel,
-    backend: ComputeBackend,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_electromagnetic_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisElectromagneticRunOptions::default(),
-        context,
-    )
-}
-
-pub fn analysis_run_electromagnetic_with_options_op(
-    model: &AnalysisModel,
-    backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
-    options: AnalysisElectromagneticRunOptions,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    let _solver_context = install_fea_solver_context();
-    let electromagnetic_steps = model
-        .sequence
-        .steps
-        .iter()
-        .filter(|step| {
-            step.family == PhysicsFamily::Electromagnetic
-                && step.procedure == AnalysisProcedure::HarmonicResponse
-        })
-        .collect::<Vec<_>>();
-    let [electromagnetic_step] = electromagnetic_steps.as_slice() else {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.REQUIRES_STEP",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "FEA model must include exactly one supported electromagnetic step for fea.run_electromagnetic",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    };
-    let electromagnetic_procedure = electromagnetic_step.procedure;
-
-    let Some(em_domain) = model.electromagnetic.as_ref() else {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_MODEL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires model.electromagnetic to be configured",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    };
-    if !matches!(em_domain, runmat_analysis_core::ElectromagneticDomain::Harmonic { reference_frequency }
-        if reference_frequency.is_finite() && reference_frequency.hertz > 0.0)
-    {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_MODEL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "legacy harmonic electromagnetic operation requires explicit harmonic intent and a finite positive frequency; static electrical intent is not admitted",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    }
-    if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires residual_target to be finite and positive",
-            BTreeMap::from([(
-                "residual_target".to_string(),
-                options.residual_target.to_string(),
-            )]),
-        ));
-    }
-    if !options.harmonic_tolerance.is_finite() || options.harmonic_tolerance <= 0.0 {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires harmonic_tolerance to be finite and positive",
-            BTreeMap::from([(
-                "harmonic_tolerance".to_string(),
-                options.harmonic_tolerance.to_string(),
-            )]),
-        ));
-    }
-    if options.harmonic_max_iterations == 0 {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires harmonic_max_iterations greater than zero",
-            BTreeMap::from([(
-                "harmonic_max_iterations".to_string(),
-                options.harmonic_max_iterations.to_string(),
-            )]),
-        ));
-    }
-    validate_electromagnetic_run_model(model, &context)?;
-
-    let requested_frequency_hz = if options.sweep_enabled {
-        options.sweep_frequency_hz.as_slice()
-    } else {
-        &[]
-    };
-    let solver_mesh = resolve_solver_mesh_artifact(
-        model,
-        options.solver_mesh_artifact_path.as_deref(),
-        AnalysisOperation::Electromagnetic.name(),
-        AnalysisOperation::Electromagnetic.version(),
-        "RM.FEA.RUN_ELECTROMAGNETIC.SOLVER_MESH_INVALID",
-        &context,
-    )?;
-    let solve_options = ElectromagneticSolveOptions {
-        formulation_requirement,
-        procedure: electromagnetic_procedure,
-        residual_target: options.residual_target,
-        harmonic_tolerance: options.harmonic_tolerance,
-        harmonic_max_iterations: options.harmonic_max_iterations,
-        solver_mesh: solver_mesh.clone(),
-    };
-    let frequency_response = run_electromagnetic_frequency_response(
-        model,
-        backend,
-        solve_options,
-        requested_frequency_hz,
-    )
-    .map_err(|error| match error {
-        FeaRunError::FrequencyPlan(reason) => operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic sweep_frequency_hz must contain finite positive values",
-            BTreeMap::from([("reason".to_string(), reason.to_string())]),
-        ),
-        FeaRunError::MissingElectromagneticSource { frequency_hz } => operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires a nonzero electric-current or current-density excitation at every requested frequency",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("excitation_count".to_string(), model.excitations.len().to_string()),
-                ("frequency_hz".to_string(), frequency_hz.to_string()),
-            ]),
-        ),
-        error => map_fea_run_error(AnalysisOperation::Electromagnetic, model, &context, error),
-    })?;
-    let sweep_frequency_hz = frequency_response.plan().frequencies_hz().to_vec();
-    let sweep_metrics = frequency_response.summary().clone();
-    let sweep_peak_flux_density = sweep_metrics.peak_flux_density.clone();
-    let sweep_solve_quality = sweep_metrics.solve_quality.clone();
-    let em_run = frequency_response.into_primary();
-    let run = em_run.run.clone();
-    let solver_convergence = if run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_STATIC"
-            && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    }) {
-        QualityGate::Pass
-    } else {
-        QualityGate::Warn
-    };
-    let mut result_quality = if em_run.solve_quality >= 0.85 {
-        QualityGate::Pass
-    } else if em_run.solve_quality >= 0.6 {
-        QualityGate::Warn
-    } else {
-        QualityGate::Fail
-    };
-    let mut quality_reasons = Vec::new();
-    let em_conductivity_spread_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_STATIC",
-        "conductivity_spread_ratio",
-    );
-    let em_assignment_heterogeneity_index = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_STATIC",
-        "electromagnetic_material_heterogeneity_index",
-    );
-    let em_assignment_coverage_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_STATIC",
-        "assignment_coverage_ratio",
-    );
-    let em_assigned_coefficient_coverage_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_STATIC",
-        "assigned_coefficient_coverage_ratio",
-    );
-    let em_region_contrast_index = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_STATIC",
-        "region_coefficient_contrast_index",
-    );
-    let em_condition_number_estimate = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_STATIC",
-        "condition_number_estimate",
-    );
-    let em_source_realization_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "source_realization_ratio",
-    );
-    let em_source_region_coverage_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "source_region_coverage_ratio",
-    );
-    let em_source_material_alignment_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "source_material_alignment_ratio",
-    );
-    let em_source_overlap_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "source_overlap_ratio",
-    );
-    let em_source_interference_index = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "source_interference_index",
-    );
-    let em_boundary_anchor_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "boundary_anchor_ratio",
-    );
-    let em_boundary_condition_localization_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "boundary_condition_localization_ratio",
-    );
-    let em_ground_anchor_effectiveness_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "ground_anchor_effectiveness_ratio",
-    );
-    let em_insulation_leakage_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "insulation_leakage_ratio",
-    );
-    let em_flux_divergence_ratio =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "flux_divergence_ratio");
-    let em_energy_imbalance_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "energy_imbalance_ratio",
-    );
-    let em_boundary_energy_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "boundary_energy_ratio",
-    );
-    let em_boundary_penalty_conditioning_contribution = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "boundary_penalty_conditioning_contribution",
-    );
-    let em_source_region_energy_consistency_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_SOURCE_ENERGY",
-        "source_region_energy_consistency_ratio",
-    );
-    let em_real_residual_norm =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "real_residual_norm");
-    let em_imag_residual_norm =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "imag_residual_norm");
-    let em_sweep_count = diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "sweep_count");
-    let em_resonance_quality_factor =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "resonance_quality_factor");
-    let ElectromagneticQualityThresholds {
-        em_spread_threshold,
-        em_heterogeneity_threshold,
-        em_coverage_min_threshold,
-        em_contrast_max_threshold,
-        em_conditioning_max_threshold,
-        em_source_realization_min_threshold,
-        em_source_region_coverage_min_threshold,
-        em_source_material_alignment_min_threshold,
-        em_source_overlap_max_threshold,
-        em_source_interference_max_threshold,
-        em_boundary_anchor_min_threshold,
-        em_boundary_localization_min_threshold,
-        em_ground_effectiveness_min_threshold,
-        em_insulation_leakage_max_threshold,
-        em_divergence_max_threshold,
-        em_energy_imbalance_max_threshold,
-        em_boundary_energy_min_threshold,
-        em_boundary_penalty_contribution_max_threshold,
-        em_source_region_energy_consistency_min_threshold,
-        em_real_residual_max_threshold,
-        em_imag_residual_max_threshold,
-    } = electromagnetic_thresholds_for_policy(options.quality_policy);
-    let (em_sweep_count_min_threshold, em_resonance_q_min_threshold) =
-        electromagnetic_sweep_thresholds_for_policy(options.quality_policy);
-    let em_spread_breach = em_conductivity_spread_ratio
-        .map(|value| value > em_spread_threshold)
-        .unwrap_or(false);
-    let em_heterogeneity_breach = em_assignment_heterogeneity_index
-        .map(|value| value > em_heterogeneity_threshold)
-        .unwrap_or(false);
-    let em_coverage_breach = em_assignment_coverage_ratio
-        .map(|value| value < em_coverage_min_threshold)
-        .unwrap_or(false);
-    let em_assigned_coefficient_breach = em_assigned_coefficient_coverage_ratio
-        .map(|value| value < em_coverage_min_threshold)
-        .unwrap_or(false);
-    let em_contrast_breach = em_region_contrast_index
-        .map(|value| value > em_contrast_max_threshold)
-        .unwrap_or(false);
-    let em_conditioning_breach = em_condition_number_estimate
-        .map(|value| value > em_conditioning_max_threshold)
-        .unwrap_or(false);
-    let em_source_realization_breach = em_source_realization_ratio
-        .map(|value| value < em_source_realization_min_threshold)
-        .unwrap_or(false);
-    let em_source_region_coverage_breach = em_source_region_coverage_ratio
-        .map(|value| value < em_source_region_coverage_min_threshold)
-        .unwrap_or(false);
-    let em_source_material_alignment_breach = em_source_material_alignment_ratio
-        .map(|value| value < em_source_material_alignment_min_threshold)
-        .unwrap_or(false);
-    let em_source_overlap_breach = em_source_overlap_ratio
-        .map(|value| value > em_source_overlap_max_threshold)
-        .unwrap_or(false);
-    let em_source_interference_breach = em_source_interference_index
-        .map(|value| value > em_source_interference_max_threshold)
-        .unwrap_or(false);
-    let em_boundary_anchor_breach = em_boundary_anchor_ratio
-        .map(|value| value < em_boundary_anchor_min_threshold)
-        .unwrap_or(false);
-    let em_boundary_localization_breach = em_boundary_condition_localization_ratio
-        .map(|value| value < em_boundary_localization_min_threshold)
-        .unwrap_or(false);
-    let em_ground_effectiveness_breach = em_ground_anchor_effectiveness_ratio
-        .map(|value| value < em_ground_effectiveness_min_threshold)
-        .unwrap_or(false);
-    let em_insulation_leakage_breach = em_insulation_leakage_ratio
-        .map(|value| value > em_insulation_leakage_max_threshold)
-        .unwrap_or(false);
-    let em_divergence_breach = em_flux_divergence_ratio
-        .map(|value| value > em_divergence_max_threshold)
-        .unwrap_or(false);
-    let em_energy_imbalance_breach = em_energy_imbalance_ratio
-        .map(|value| value > em_energy_imbalance_max_threshold)
-        .unwrap_or(false);
-    let em_boundary_energy_breach = em_boundary_energy_ratio
-        .map(|value| value < em_boundary_energy_min_threshold)
-        .unwrap_or(false);
-    let em_boundary_penalty_contribution_breach = em_boundary_penalty_conditioning_contribution
-        .map(|value| value > em_boundary_penalty_contribution_max_threshold)
-        .unwrap_or(false);
-    let em_source_region_energy_consistency_breach = em_source_region_energy_consistency_ratio
-        .map(|value| value < em_source_region_energy_consistency_min_threshold)
-        .unwrap_or(false);
-    let em_real_residual_breach = em_real_residual_norm
-        .map(|value| value > em_real_residual_max_threshold)
-        .unwrap_or(false);
-    let em_imag_residual_breach = em_imag_residual_norm
-        .map(|value| value > em_imag_residual_max_threshold)
-        .unwrap_or(false);
-    let sweep_governance_active = options.sweep_enabled || !options.sweep_frequency_hz.is_empty();
-    let em_sweep_coverage_breach = sweep_governance_active
-        && em_sweep_count
-            .map(|value| value < em_sweep_count_min_threshold)
-            .unwrap_or(false);
-    let em_resonance_sharpness_breach = sweep_governance_active
-        && em_resonance_quality_factor
-            .map(|value| value < em_resonance_q_min_threshold)
-            .unwrap_or(false);
-    if (em_spread_breach
-        || em_heterogeneity_breach
-        || em_coverage_breach
-        || em_assigned_coefficient_breach
-        || em_contrast_breach
-        || em_conditioning_breach
-        || em_source_realization_breach
-        || em_source_region_coverage_breach
-        || em_source_material_alignment_breach
-        || em_source_overlap_breach
-        || em_source_interference_breach
-        || em_boundary_anchor_breach
-        || em_boundary_localization_breach
-        || em_ground_effectiveness_breach
-        || em_insulation_leakage_breach
-        || em_divergence_breach
-        || em_energy_imbalance_breach
-        || em_boundary_energy_breach
-        || em_boundary_penalty_contribution_breach
-        || em_source_region_energy_consistency_breach
-        || em_real_residual_breach
-        || em_imag_residual_breach
-        || em_sweep_coverage_breach
-        || em_resonance_sharpness_breach)
-        && result_quality == QualityGate::Pass
-    {
-        result_quality = QualityGate::Warn;
-    }
-    if solver_convergence == QualityGate::Warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverNotConverged,
-            detail: "electromagnetic solver convergence gate is warning".to_string(),
-        });
-    }
-    if result_quality != QualityGate::Pass {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticSolveQualityLow,
-            detail: "electromagnetic static solve quality below target".to_string(),
-        });
-    }
-    if em_spread_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticConductivitySpreadHigh,
-            detail: format!(
-                "electromagnetic conductivity spread ratio {} exceeds threshold {}",
-                em_conductivity_spread_ratio.unwrap_or(0.0),
-                em_spread_threshold
-            ),
-        });
-    }
-    if em_heterogeneity_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticMaterialHeterogeneityHigh,
-            detail: format!(
-                "electromagnetic material heterogeneity index {} exceeds threshold {}",
-                em_assignment_heterogeneity_index.unwrap_or(0.0),
-                em_heterogeneity_threshold
-            ),
-        });
-    }
-    if em_coverage_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticAssignmentCoverageLow,
-            detail: format!(
-                "electromagnetic assignment coverage ratio {} is below threshold {}",
-                em_assignment_coverage_ratio.unwrap_or(0.0),
-                em_coverage_min_threshold
-            ),
-        });
-    }
-    if em_assigned_coefficient_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticAssignmentCoverageLow,
-            detail: format!(
-                "electromagnetic assigned coefficient coverage ratio {} is below threshold {}",
-                em_assigned_coefficient_coverage_ratio.unwrap_or(0.0),
-                em_coverage_min_threshold
-            ),
-        });
-    }
-    if em_contrast_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticRegionContrastHigh,
-            detail: format!(
-                "electromagnetic region coefficient contrast index {} exceeds threshold {}",
-                em_region_contrast_index.unwrap_or(0.0),
-                em_contrast_max_threshold
-            ),
-        });
-    }
-    if em_conditioning_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticConditioningHigh,
-            detail: format!(
-                "electromagnetic condition-number estimate {} exceeds threshold {}",
-                em_condition_number_estimate.unwrap_or(0.0),
-                em_conditioning_max_threshold
-            ),
-        });
-    }
-    if em_source_realization_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticSourceRealizationLow,
-            detail: format!(
-                "electromagnetic source realization ratio {} is below threshold {}",
-                em_source_realization_ratio.unwrap_or(0.0),
-                em_source_realization_min_threshold
-            ),
-        });
-    }
-    if em_source_region_coverage_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticSourceRegionCoverageLow,
-            detail: format!(
-                "electromagnetic source region coverage ratio {} is below threshold {}",
-                em_source_region_coverage_ratio.unwrap_or(0.0),
-                em_source_region_coverage_min_threshold
-            ),
-        });
-    }
-    if em_source_material_alignment_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticSourceMaterialAlignmentLow,
-            detail: format!(
-                "electromagnetic source material alignment ratio {} is below threshold {}",
-                em_source_material_alignment_ratio.unwrap_or(0.0),
-                em_source_material_alignment_min_threshold
-            ),
-        });
-    }
-    if em_source_overlap_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticSourceOverlapHigh,
-            detail: format!(
-                "electromagnetic source overlap ratio {} exceeds threshold {}",
-                em_source_overlap_ratio.unwrap_or(0.0),
-                em_source_overlap_max_threshold
-            ),
-        });
-    }
-    if em_source_interference_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticSourceInterferenceHigh,
-            detail: format!(
-                "electromagnetic source interference index {} exceeds threshold {}",
-                em_source_interference_index.unwrap_or(0.0),
-                em_source_interference_max_threshold
-            ),
-        });
-    }
-    if em_boundary_anchor_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticBoundaryAnchoringLow,
-            detail: format!(
-                "electromagnetic boundary anchor ratio {} is below threshold {}",
-                em_boundary_anchor_ratio.unwrap_or(0.0),
-                em_boundary_anchor_min_threshold
-            ),
-        });
-    }
-    if em_boundary_localization_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticBoundaryLocalizationLow,
-            detail: format!(
-                "electromagnetic boundary condition localization ratio {} is below threshold {}",
-                em_boundary_condition_localization_ratio.unwrap_or(0.0),
-                em_boundary_localization_min_threshold
-            ),
-        });
-    }
-    if em_ground_effectiveness_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticGroundAnchorEffectivenessLow,
-            detail: format!(
-                "electromagnetic ground anchor effectiveness ratio {} is below threshold {}",
-                em_ground_anchor_effectiveness_ratio.unwrap_or(0.0),
-                em_ground_effectiveness_min_threshold
-            ),
-        });
-    }
-    if em_insulation_leakage_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticInsulationLeakageHigh,
-            detail: format!(
-                "electromagnetic insulation leakage ratio {} exceeds threshold {}",
-                em_insulation_leakage_ratio.unwrap_or(0.0),
-                em_insulation_leakage_max_threshold
-            ),
-        });
-    }
-    if em_divergence_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticFluxDivergenceHigh,
-            detail: format!(
-                "electromagnetic flux divergence ratio {} exceeds threshold {}",
-                em_flux_divergence_ratio.unwrap_or(0.0),
-                em_divergence_max_threshold
-            ),
-        });
-    }
-    if em_energy_imbalance_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticEnergyImbalanceHigh,
-            detail: format!(
-                "electromagnetic energy imbalance ratio {} exceeds threshold {}",
-                em_energy_imbalance_ratio.unwrap_or(0.0),
-                em_energy_imbalance_max_threshold
-            ),
-        });
-    }
-    if em_boundary_energy_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticBoundaryEnergyLow,
-            detail: format!(
-                "electromagnetic boundary energy ratio {} is below threshold {}",
-                em_boundary_energy_ratio.unwrap_or(0.0),
-                em_boundary_energy_min_threshold
-            ),
-        });
-    }
-    if em_boundary_penalty_contribution_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticBoundaryPenaltyConditioningHigh,
-            detail: format!(
-                "electromagnetic boundary penalty conditioning contribution {} exceeds threshold {}",
-                em_boundary_penalty_conditioning_contribution.unwrap_or(0.0),
-                em_boundary_penalty_contribution_max_threshold
-            ),
-        });
-    }
-    if em_source_region_energy_consistency_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticSourceRegionEnergyConsistencyLow,
-            detail: format!(
-                "electromagnetic source-region energy consistency ratio {} is below threshold {}",
-                em_source_region_energy_consistency_ratio.unwrap_or(0.0),
-                em_source_region_energy_consistency_min_threshold
-            ),
-        });
-    }
-    if em_real_residual_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticRealResidualHigh,
-            detail: format!(
-                "electromagnetic real residual norm {} exceeds threshold {}",
-                em_real_residual_norm.unwrap_or(0.0),
-                em_real_residual_max_threshold
-            ),
-        });
-    }
-    if em_imag_residual_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticImagResidualHigh,
-            detail: format!(
-                "electromagnetic imaginary residual norm {} exceeds threshold {}",
-                em_imag_residual_norm.unwrap_or(0.0),
-                em_imag_residual_max_threshold
-            ),
-        });
-    }
-    if em_sweep_coverage_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticSweepCoverageLow,
-            detail: format!(
-                "electromagnetic sweep count {} is below threshold {}",
-                em_sweep_count.unwrap_or(0.0),
-                em_sweep_count_min_threshold
-            ),
-        });
-    }
-    if em_resonance_sharpness_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticResonanceSharpnessLow,
-            detail: format!(
-                "electromagnetic resonance quality factor {} is below threshold {}",
-                em_resonance_quality_factor.unwrap_or(0.0),
-                em_resonance_q_min_threshold
-            ),
-        });
-    }
-
-    let numerically_acceptable = match options.quality_policy {
-        QualityPolicy::Strict => {
-            solver_convergence == QualityGate::Pass
-                && result_quality == QualityGate::Pass
-                && quality_reasons.is_empty()
-        }
-        QualityPolicy::Balanced => {
-            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
-        }
-        QualityPolicy::Exploratory => {
-            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
-        }
-    };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
-    let run_status = classify_run_status(result_quality, numerically_acceptable);
-    let solver_backend = run.solver_backend;
-    let execution_backend = run.execution_backend;
-    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
-    let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method;
-    let preconditioner = run.preconditioner;
-
-    let result = AnalysisRunResult {
-        run_id: storage::next_run_id(),
-        run,
-        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
-        modal_results: None,
-        buckling_results: None,
-        thermal_results: None,
-        transient_results: None,
-        nonlinear_results: None,
-        electromagnetic_results: Some(ElectromagneticResultsData {
-            electromagnetic_payload_version: "electromagnetic_results/v1".to_string(),
-            reference_frequency_hz: em_run.reference_frequency_hz,
-            applied_current_a: em_run.applied_current_a,
-            vector_potential_real: em_run.vector_potential_real_field,
-            vector_potential_imag: em_run.vector_potential_imag_field,
-            magnetic_flux_density_real: em_run.magnetic_flux_density_real_field,
-            magnetic_flux_density_imag: em_run.magnetic_flux_density_imag_field,
-            magnetic_flux_density_magnitude: em_run.magnetic_flux_density_magnitude_field,
-            magnetic_field_real: em_run.magnetic_field_real_field,
-            magnetic_field_imag: em_run.magnetic_field_imag_field,
-            current_density_real: em_run.current_density_real_field,
-            current_density_imag: em_run.current_density_imag_field,
-            electric_field_real: em_run.electric_field_real_field,
-            electric_field_imag: em_run.electric_field_imag_field,
-            power_loss_density: em_run.power_loss_density_field,
-            energy_density: em_run.energy_density_field,
-            residual_real: em_run.residual_real_field,
-            residual_imag: em_run.residual_imag_field,
-            electric_flux_density_real: em_run.electric_flux_density_real_field,
-            electric_flux_density_imag: em_run.electric_flux_density_imag_field,
-            poynting_vector_real: em_run.poynting_vector_real_field,
-            poynting_vector_imag: em_run.poynting_vector_imag_field,
-            sweep_frequency_hz,
-            sweep_peak_flux_density,
-            sweep_solve_quality,
-            resonance_peak_frequency_hz: sweep_metrics.resonance_peak_frequency_hz,
-            resonance_peak_flux_density: sweep_metrics.resonance_peak_flux_density,
-            resonance_bandwidth_hz: sweep_metrics.resonance_bandwidth_hz,
-            resonance_quality_factor: sweep_metrics.resonance_quality_factor,
-            resonance_flux_gain: sweep_metrics.resonance_flux_gain,
-        }),
-        model_validity: QualityGate::Pass,
-        solver_convergence,
-        result_quality,
-        run_status,
-        numerically_acceptable,
-        production_publishable,
-        quality_reasons,
-        production_publication_reasons,
-        provenance: RunProvenance {
-            requested_backend: backend,
-            execution_backend,
-            solver_backend,
-            solver_device_apply_k_ratio,
-            solver_host_sync_count,
-            precision_mode: contracts::format_precision_mode(options.precision_mode),
-            deterministic_mode: options.deterministic_mode,
-            solver_method,
-            preconditioner,
-            quality_policy: contracts::format_quality_policy(options.quality_policy),
-            fallback_events: Vec::new(),
-        },
-    };
-
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Electromagnetic.name(),
-        AnalysisOperation::Electromagnetic.version(),
-        "RM.FEA.RUN_ELECTROMAGNETIC.ARTIFACT_STORE_FAILED",
-        &context,
-        &result,
-    )?;
-
-    Ok(OperationEnvelope::new(
-        AnalysisOperation::Electromagnetic.name(),
-        AnalysisOperation::Electromagnetic.version(),
-        &context,
-        result,
-    ))
-}
-
-fn validate_electromagnetic_run_model(
-    model: &AnalysisModel,
-    context: &OperationContext,
-) -> Result<(), OperationErrorEnvelope> {
-    if let Some(material) = model.materials.iter().find(|material| {
-        material.electrical.as_ref().is_some_and(|electrical| {
-            !electrical.conductivity_s_per_m.is_finite()
-                || electrical.conductivity_s_per_m <= 0.0
-                || !electrical.relative_permittivity.is_finite()
-                || electrical.relative_permittivity <= 0.0
-                || !electrical.relative_permeability.is_finite()
-                || electrical.relative_permeability <= 0.0
-                || electrical
-                    .conductivity_frequency_response
-                    .iter()
-                    .any(|point| {
-                        !point.frequency_hz.is_finite()
-                            || point.frequency_hz <= 0.0
-                            || !point.conductivity_scale.is_finite()
-                            || point.conductivity_scale <= 0.0
-                            || point
-                                .dispersive_loss_scale
-                                .is_some_and(|value| !value.is_finite() || value < 0.0)
-                            || point
-                                .relative_permittivity_scale
-                                .is_some_and(|value| !value.is_finite() || value <= 0.0)
-                            || point
-                                .relative_permeability_scale
-                                .is_some_and(|value| !value.is_finite() || value <= 0.0)
-                    })
-        })
-    }) {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_MATERIAL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires finite positive electrical material coefficients",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("material_id".to_string(), material.material_id.clone()),
-            ]),
-        ));
-    }
-
-    let electrical_material_count = model
-        .materials
-        .iter()
-        .filter(|material| material.electrical.is_some())
-        .count();
-    if electrical_material_count == 0 {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires at least one electrical material",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                (
-                    "material_count".to_string(),
-                    model.materials.len().to_string(),
-                ),
-            ]),
-        ));
-    }
-    let electrical_material_by_id = model
-        .materials
-        .iter()
-        .filter(|material| material.electrical.is_some())
-        .map(|material| material.material_id.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    if let Some(assignment) = model.material_assignments.iter().find(|assignment| {
-        !electrical_material_by_id.contains(assignment.assigned_material_id.as_str())
-    }) {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires every material assignment to reference an assigned electrical material",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                (
-                    "material_target".to_string(),
-                    assignment.target_label().to_owned(),
-                ),
-                (
-                    "assigned_material_id".to_string(),
-                    assignment.assigned_material_id.clone(),
-                ),
-            ]),
-        ));
-    }
-
-    reject_moment_loads_for_run_family(
-        model,
-        AnalysisOperation::Electromagnetic.name(),
-        AnalysisOperation::Electromagnetic.version(),
-        "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_SOURCE",
-        "electromagnetic",
-        context,
-    )?;
-
-    let has_electromagnetic_boundary = model
-        .boundaries
-        .iter()
-        .any(|boundary| matches!(boundary.operator, BoundaryOperator::MagneticInsulation))
-        || model.constraints.iter().any(|constraint| {
-            matches!(
-                constraint,
-                AnalysisConstraint::Magnetic(value)
-                    if matches!(value.kind, MagneticConstraintKind::VectorPotentialGround { .. })
-            )
-        });
-    if !has_electromagnetic_boundary {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires magnetic insulation or vector-potential ground boundary data",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                (
-                    "boundary_condition_count".to_string(),
-                    (model.constraints.len() + model.boundaries.len()).to_string(),
-                ),
-            ]),
-        ));
-    }
-
-    Ok(())
 }
 
 fn resolve_solver_mesh_artifact(

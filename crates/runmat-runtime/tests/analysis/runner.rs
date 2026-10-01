@@ -145,11 +145,11 @@ use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
     fea_buckling_mode_shape_field_id, fea_fsi_fluid_velocity_field_id,
     fea_thermal_temperature_field_id, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
-    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_runtime::analysis::{
     AnalysisRunResult, ContactEnforcementOptions, PlasticityConstitutiveOptions,
@@ -664,8 +664,12 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
         AnalysisSolverOptions::AcousticHelmholtz(_) => {
             FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string()
         }
-        AnalysisSolverOptions::ElectromagneticPotential(_) => {
-            FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string()
+        AnalysisSolverOptions::ElectricalStatic(_)
+        | AnalysisSolverOptions::Magnetostatic(_)
+        | AnalysisSolverOptions::MaxwellHarmonic(_) => {
+            panic!(
+                "typed electromagnetic completions have no synthetic scalar-harness primary field"
+            )
         }
         AnalysisSolverOptions::IncompressibleFlow(_) => FEA_FIELD_CFD_VELOCITY.to_string(),
         AnalysisSolverOptions::ConjugateHeatTransfer(_) => FEA_FIELD_CHT_FLUID_VELOCITY.to_string(),
@@ -725,19 +729,6 @@ fn analysis_result_field<'a>(
                     .iter()
                     .find(|field| field.field_id == field_id)
             })
-        })
-        .or_else(|| {
-            run_result
-                .electromagnetic_results
-                .as_ref()
-                .and_then(|electromagnetic| {
-                    [
-                        &electromagnetic.vector_potential_real,
-                        &electromagnetic.magnetic_flux_density_magnitude,
-                    ]
-                    .into_iter()
-                    .find(|field| field.field_id == field_id)
-                })
         })
 }
 
@@ -1058,23 +1049,6 @@ fn thermal_options_for_spec(
     }
 }
 
-fn electromagnetic_options_for_spec(
-    spec: &FixtureSpec,
-    solver_mesh_artifact_path: Option<String>,
-) -> AnalysisElectromagneticRunOptions {
-    AnalysisElectromagneticRunOptions {
-        deterministic_mode: true,
-        precision_mode: PrecisionMode::Fp64,
-        quality_policy: QualityPolicy::Balanced,
-        residual_target: 1.0e-6,
-        harmonic_tolerance: 1.0e-7,
-        harmonic_max_iterations: 96,
-        solver_mesh_artifact_path,
-        sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
-        sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
-    }
-}
-
 fn transient_options_for_spec(
     spec: &FixtureSpec,
     solver_mesh_artifact_path: Option<String>,
@@ -1178,14 +1152,6 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
         }
         _ => None,
     }
-}
-
-fn electromagnetic_sweep_frequency_hz_for_fixture(spec_id: &str) -> Vec<f64> {
-    let Some(profile) = electromagnetic_profile_for_fixture(spec_id) else {
-        return Vec::new();
-    };
-    let f0 = profile.reference_frequency_hz.max(1.0);
-    vec![f0 * 0.75, f0 * 0.9, f0, f0 * 1.1, f0 * 1.25]
 }
 
 fn authored_cfd_boundaries_for_fixture(
@@ -2876,15 +2842,9 @@ fn run_fixture_cpu(
             nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisSolverOptions::ElectromagneticPotential(_) => {
-            analysis_run_electromagnetic_with_options_op(
-                model,
-                ComputeBackend::Cpu,
-                FormulationRequirement::Experimental,
-                electromagnetic_options_for_spec(spec, solver_mesh_artifact_path.clone()),
-                OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
-            )
-        }
+        AnalysisSolverOptions::ElectricalStatic(_)
+        | AnalysisSolverOptions::Magnetostatic(_)
+        | AnalysisSolverOptions::MaxwellHarmonic(_) => Err(typed_electromagnetic_required()),
     })
 }
 
@@ -3022,15 +2982,9 @@ fn run_fixture_gpu(
             nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisSolverOptions::ElectromagneticPotential(_) => {
-            analysis_run_electromagnetic_with_options_op(
-                model,
-                ComputeBackend::Gpu,
-                FormulationRequirement::Experimental,
-                electromagnetic_options_for_spec(spec, solver_mesh_artifact_path.clone()),
-                OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-            )
-        }
+        AnalysisSolverOptions::ElectricalStatic(_)
+        | AnalysisSolverOptions::Magnetostatic(_)
+        | AnalysisSolverOptions::MaxwellHarmonic(_) => Err(typed_electromagnetic_required()),
     }
     };
     boxed_fixture_run_result(match mode {
@@ -4576,7 +4530,7 @@ fn fixture_requires_solver_mesh(spec: &FixtureSpec, model: &AnalysisModel) -> bo
                 Ok(AnalysisSolverOptions::ThermalDiffusion(_))
                     | Ok(AnalysisSolverOptions::ConjugateHeatTransfer(_))
                     | Ok(AnalysisSolverOptions::FluidStructureInteraction(_))
-                    | Ok(AnalysisSolverOptions::ElectromagneticPotential(_))
+                    | Ok(AnalysisSolverOptions::MaxwellHarmonic(_))
             )
             || spec.id.starts_with("electro_thermal_joule_"))
 }
@@ -9405,7 +9359,6 @@ pub(super) fn run_fixture(
                             include_transient_results: false,
                             transient_snapshot_indices: Vec::new(),
                             include_nonlinear_results: false,
-                            include_electromagnetic_results: false,
                         },
                         OperationContext::new(Some(format!("trace-results-gpu-{}", spec.id)), None),
                     );
@@ -9746,7 +9699,6 @@ pub(super) fn run_fixture(
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
                                 include_nonlinear_results: false,
-                                include_electromagnetic_results: false,
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-gpu-by-id-{}", spec.id)),
@@ -9821,7 +9773,6 @@ pub(super) fn run_fixture(
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
                                 include_nonlinear_results: false,
-                                include_electromagnetic_results: false,
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-cpu-{}", spec.id)),
@@ -10079,4 +10030,20 @@ pub(super) fn run_fixture(
         threshold_assertions,
         failures,
     }
+}
+
+fn typed_electromagnetic_required() -> runmat_runtime::operations::OperationErrorEnvelope {
+    use runmat_runtime::operations::{
+        operation_error, OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
+    };
+    operation_error(
+        "fea.run_study", "fea.run_study/v1", &OperationContext::new(None, None),
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY.STATIC_EM_TYPED_EXECUTION_REQUIRED",
+            error_type: OperationErrorType::Contract, retryable: false,
+            severity: OperationErrorSeverity::Fatal,
+        },
+        "electromagnetic fixtures require genuine governed typed execution; scalar harness has no physical EM solver",
+        std::collections::BTreeMap::new(),
+    )
 }

@@ -8,6 +8,8 @@ mod electrical_product;
 mod identity;
 mod magnetic_planning;
 mod magnetic_product;
+mod maxwell_planning;
+mod maxwell_product;
 mod planning;
 mod product;
 mod thermal_planning;
@@ -42,6 +44,13 @@ pub use magnetic_planning::{
 pub use magnetic_product::{
     build_magnetic_study_product, plan_magnetic_study_product, MagneticStudyProduct,
     MagneticStudyProductError, MagneticStudyProductInput,
+};
+pub use maxwell_planning::{
+    plan_maxwell_study, MaxwellStudyPlanningError, MaxwellStudyPlanningPolicy,
+};
+pub use maxwell_product::{
+    build_maxwell_study_product, plan_maxwell_study_product, MaxwellStudyProduct,
+    MaxwellStudyProductError, MaxwellStudyProductInput,
 };
 pub use planning::{
     plan_structural_study, StructuralNumericalPlanningPolicy, StructuralStudyPlanningError,

@@ -171,10 +171,6 @@ const fn method_is_compatible(
                 SolverMethod::AssembledPcg | SolverMethod::MatrixFreePcg
             )
         }
-        TemporalImplementation::ElectromagneticReducedEdgeGraphHarmonicSolve => matches!(
-            method,
-            SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab
-        ),
         TemporalImplementation::AcousticDomainGraphHarmonicSolve => {
             matches!(method, SolverMethod::AcousticDomainGraphHelmholtzHarmonic)
         }
@@ -238,9 +234,6 @@ const fn preconditioner_is_compatible(
         ),
         SolverMethod::StructuralDirectHarmonicGmres => {
             matches!(preconditioner, SolverPreconditioner::Jacobi)
-        }
-        SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab => {
-            matches!(preconditioner, SolverPreconditioner::BlockJacobi)
         }
         SolverMethod::CfdVelocityPressureFiniteVolume => matches!(
             preconditioner,

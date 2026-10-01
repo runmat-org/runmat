@@ -8,11 +8,11 @@ use crate::operations::{
 use super::contracts::{AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverOptions};
 use super::{
     analysis_run_acoustic_with_options_op, analysis_run_cfd_with_options_op,
-    analysis_run_cht_with_options_op, analysis_run_electromagnetic_with_options_op,
-    analysis_run_fsi_with_options_op, analysis_run_linear_static_with_executor,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
-    analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
-    StructuralLinearExecutor, ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
+    analysis_run_cht_with_options_op, analysis_run_fsi_with_options_op,
+    analysis_run_linear_static_with_executor, analysis_run_modal_with_options_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_thermal_with_options_op,
+    analysis_run_transient_with_options_op, StructuralLinearExecutor, ANALYSIS_RUN_STUDY_OPERATION,
+    ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
 pub(super) fn execute_study_step(
@@ -25,7 +25,7 @@ pub(super) fn execute_study_step(
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
     let model = solver_model(model, procedure_step);
     match &execution.solver_options {
-        AnalysisSolverOptions::ElectricalStatic(_) | AnalysisSolverOptions::Magnetostatic(_) => Err(operation_error(
+        AnalysisSolverOptions::ElectricalStatic(_) | AnalysisSolverOptions::Magnetostatic(_) | AnalysisSolverOptions::MaxwellHarmonic(_) => Err(operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
             context,
@@ -35,7 +35,7 @@ pub(super) fn execute_study_step(
                 retryable: false,
                 severity: OperationErrorSeverity::Fatal,
             },
-            "static electromagnetic studies require their governed typed execution path",
+            "electromagnetic studies require their governed typed execution path",
             std::collections::BTreeMap::new(),
         )),
         AnalysisSolverOptions::StructuralLinear(authored_options) => {
@@ -256,24 +256,6 @@ pub(super) fn execute_study_step(
                 context.clone(),
             )?;
             Ok((run, AnalysisSolverOptions::StructuralNonlinear(options)))
-        }
-        AnalysisSolverOptions::ElectromagneticPotential(authored_options) => {
-            let mut options = authored_options.clone();
-            attach_solver_mesh_artifact_path(
-                &mut options.solver_mesh_artifact_path,
-                solver_mesh_artifact_path,
-            );
-            let run = analysis_run_electromagnetic_with_options_op(
-                &model,
-                execution.backend,
-                execution.requirement,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((
-                run,
-                AnalysisSolverOptions::ElectromagneticPotential(options),
-            ))
         }
     }
 }

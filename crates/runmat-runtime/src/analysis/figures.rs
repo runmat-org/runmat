@@ -981,46 +981,6 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
         }
     }
 
-    if let Some(em) = run.electromagnetic_results.as_ref() {
-        if !em.sweep_frequency_hz.is_empty() && !em.sweep_peak_flux_density.is_empty() {
-            figures.push(line_figure(
-                AnalysisGeneratedFigureKind::Electromagnetic,
-                "FEA electromagnetic sweep",
-                "Frequency (Hz)",
-                "Peak flux density",
-                vec![(
-                    "Peak flux".to_string(),
-                    axis_or_index(&em.sweep_frequency_hz, em.sweep_peak_flux_density.len()),
-                    em.sweep_peak_flux_density.clone(),
-                    Vec4::new(0.28, 0.74, 0.57, 1.0),
-                )],
-                vec![
-                    em.vector_potential_real.field_id.clone(),
-                    em.magnetic_flux_density_magnitude.field_id.clone(),
-                ],
-                false,
-            ));
-        }
-        if !em.sweep_frequency_hz.is_empty() && !em.sweep_solve_quality.is_empty() {
-            figures.push(line_figure(
-                AnalysisGeneratedFigureKind::Electromagnetic,
-                "FEA electromagnetic solve quality",
-                "Frequency (Hz)",
-                "Solve quality",
-                vec![(
-                    "Solve quality".to_string(),
-                    axis_or_index(&em.sweep_frequency_hz, em.sweep_solve_quality.len()),
-                    em.sweep_solve_quality.clone(),
-                    Vec4::new(0.92, 0.68, 0.28, 1.0),
-                )],
-                vec![
-                    em.vector_potential_real.field_id.clone(),
-                    em.magnetic_flux_density_magnitude.field_id.clone(),
-                ],
-                false,
-            ));
-        }
-    }
 
     figures
 }
@@ -2472,7 +2432,6 @@ mod tests {
             thermal_results: None,
             transient_results: None,
             nonlinear_results: None,
-            electromagnetic_results: None,
             model_validity: crate::analysis::contracts::QualityGate::Pass,
             solver_convergence: crate::analysis::contracts::QualityGate::Pass,
             result_quality: crate::analysis::contracts::QualityGate::Pass,
