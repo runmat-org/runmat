@@ -171,6 +171,79 @@ fn single_output_class_and_resident_placement_are_not_overclaimed() {
 }
 
 #[test]
+fn normalization_literal_keeps_single_rounding_and_var_text_policy() {
+    let shape = ShapeFact::from(vec![Some(3), Some(4)]);
+    let single_flag = call(
+        numeric(NumericClass::Double, shape.clone()),
+        vec![
+            LiteralValue::Real {
+                text: "1.00000001".into(),
+                class: NumericClass::Single,
+            },
+            LiteralValue::Number(2.0),
+        ],
+        1,
+    );
+    assert_eq!(
+        single_flag.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), Some(1)])
+    );
+    for controls in [
+        vec![
+            LiteralValue::Real {
+                text: "1.00000001".into(),
+                class: NumericClass::Double,
+            },
+            LiteralValue::Number(2.0),
+        ],
+        vec![LiteralValue::Number(2.0)],
+        vec![LiteralValue::String(" all ".into())],
+    ] {
+        let result = call(numeric(NumericClass::Double, shape.clone()), controls, 1);
+        assert!(matches!(
+            result.outputs[0].certainty,
+            CertaintyFact::Dynamic(_)
+        ));
+    }
+}
+
+#[test]
+fn platform_dimension_and_duplicate_vector_follow_owner_admission() {
+    let shape = ShapeFact::from(vec![Some(3), Some(4)]);
+    let duplicate = call(
+        numeric(NumericClass::Double, shape.clone()),
+        vec![
+            LiteralValue::Empty,
+            LiteralValue::Vector(vec![LiteralValue::Number(2.0), LiteralValue::Number(2.0)]),
+        ],
+        1,
+    );
+    assert_eq!(
+        duplicate.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), Some(1)])
+    );
+    let far = call(
+        numeric(NumericClass::Double, shape.clone()),
+        vec![
+            LiteralValue::Empty,
+            LiteralValue::Integer {
+                text: u64::MAX.to_string(),
+                class: NumericClass::UInt64,
+            },
+        ],
+        1,
+    );
+    if usize::BITS == 64 {
+        assert_eq!(far.outputs[0].shape, shape);
+    } else {
+        assert!(matches!(
+            far.outputs[0].certainty,
+            CertaintyFact::Dynamic(_)
+        ));
+    }
+}
+
+#[test]
 fn integer_and_complex_inputs_report_owning_diagnostics() {
     let integer = call(numeric(NumericClass::UInt64, ShapeFact::Scalar), vec![], 1);
     assert!(integer

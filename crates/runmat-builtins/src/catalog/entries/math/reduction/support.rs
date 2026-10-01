@@ -14,15 +14,14 @@ mod sum_options;
 pub(super) use dispersion_inference::{
     admitted_std_controls, admitted_var_controls, inferred_dispersion_shape,
 };
-pub use dispersion_inference::{infer_std_type, infer_var_type};
 pub use dispersion_options::{DispersionControl, DispersionNormalization};
 pub(super) use mean_inference::{admitted_mean_controls, inferred_mean_shape};
 pub use mean_options::{MeanControl, MeanOutputClass};
 pub(super) use median_inference::{admitted_median_controls, inferred_median_shape};
 pub use median_options::MedianControl;
-pub use min_inference::infer_min_type;
 pub(super) use min_inference::{
-    admitted_min_reduction_controls, inferred_min_shape, is_empty_placeholder,
+    admitted_min_pairwise_options, admitted_min_reduction_controls, inferred_min_shape,
+    is_empty_placeholder,
 };
 pub use min_options::{MinComparisonMethod, MinControl};
 pub use missing_policy::ReductionNaN;

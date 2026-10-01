@@ -93,6 +93,29 @@ fn reduction_proves_exact_value_and_double_index_shape() {
 }
 
 #[test]
+fn logical_reduction_uses_double_and_scalar_integer_stays_exact() {
+    let logical = ValueFact::proven(
+        ValueKindFact::Logical,
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    let result = call(logical, vec![], 1);
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    let scalar = call(numeric(NumericClass::UInt64, ShapeFact::Scalar), vec![], 2);
+    assert_eq!(
+        scalar.outputs[0].numeric().unwrap().class,
+        NumericClass::UInt64
+    );
+    assert_eq!(
+        scalar.outputs[1].numeric().unwrap().class,
+        NumericClass::Double
+    );
+}
+
+#[test]
 fn known_empty_placeholder_selects_reduction_and_unknown_rhs_does_not() {
     let shape = ShapeFact::from(vec![Some(3), Some(4)]);
     let reduction = call(
@@ -108,6 +131,13 @@ fn known_empty_placeholder_selects_reduction_and_unknown_rhs_does_not() {
         reduction.outputs[0].numeric().unwrap().class,
         NumericClass::Single
     );
+
+    let linear = call(
+        numeric(NumericClass::Double, shape.clone()),
+        vec![LiteralValue::Empty, LiteralValue::String("linear".into())],
+        2,
+    );
+    assert_eq!(linear.outputs[0].shape, ShapeFact::Scalar);
 
     let unresolved = call(
         numeric(NumericClass::Single, shape),
@@ -125,12 +155,106 @@ fn known_empty_placeholder_selects_reduction_and_unknown_rhs_does_not() {
 }
 
 #[test]
-fn known_pairwise_form_rejects_second_output_and_never_proves_reduction() {
+fn conflicting_reduction_axes_leave_facts_dynamic() {
+    let result = call(
+        numeric(
+            NumericClass::Double,
+            ShapeFact::from(vec![Some(3), Some(4)]),
+        ),
+        vec![
+            LiteralValue::Empty,
+            LiteralValue::Number(2.0),
+            LiteralValue::String("all".into()),
+        ],
+        1,
+    );
+    assert!(matches!(
+        result.outputs[0].certainty,
+        CertaintyFact::Dynamic(_)
+    ));
+}
+
+#[test]
+fn known_pairwise_form_proves_scalar_class_and_rejects_second_output() {
     let result = call(
         numeric(NumericClass::Double, ShapeFact::Scalar),
         vec![LiteralValue::Number(2.0)],
         2,
     );
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(result.outputs[0].shape, ShapeFact::Scalar);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-CALL-ARITY"));
+}
+
+#[test]
+fn pairwise_same_class_broadcast_is_proven_after_typed_option_admission() {
+    let mut request = CallRequest {
+        arguments: vec![
+            numeric(
+                NumericClass::UInt64,
+                ShapeFact::from(vec![Some(1), Some(3)]),
+            ),
+            numeric(
+                NumericClass::UInt64,
+                ShapeFact::from(vec![Some(2), Some(1)]),
+            ),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("ComparisonMethod".into()),
+            LiteralValue::String("magnitude".into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let result = inference::infer(&request, &MIN_CATALOG_ENTRY);
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), Some(3)])
+    );
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::UInt64
+    );
+
+    request.literals = LiteralContext::new(vec![
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::String("omitnan".into()),
+        LiteralValue::Unknown,
+    ]);
+    let invalid = inference::infer(&request, &MIN_CATALOG_ENTRY);
+    assert!(matches!(
+        invalid.outputs[0].certainty,
+        CertaintyFact::Dynamic(_)
+    ));
+}
+
+#[test]
+fn pairwise_known_shape_mismatch_is_diagnosed_without_proving_result() {
+    let request = CallRequest {
+        arguments: vec![
+            numeric(
+                NumericClass::Double,
+                ShapeFact::from(vec![Some(2), Some(3)]),
+            ),
+            numeric(
+                NumericClass::Double,
+                ShapeFact::from(vec![Some(4), Some(3)]),
+            ),
+        ],
+        literals: LiteralContext::new(vec![LiteralValue::Unknown, LiteralValue::Unknown]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let result = inference::infer(&request, &MIN_CATALOG_ENTRY);
     assert!(matches!(
         result.outputs[0].certainty,
         CertaintyFact::Dynamic(_)
@@ -138,7 +262,7 @@ fn known_pairwise_form_rejects_second_output_and_never_proves_reduction() {
     assert!(result
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == "RM-TYPE-CALL-ARITY"));
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-BROADCAST"));
 }
 
 #[test]

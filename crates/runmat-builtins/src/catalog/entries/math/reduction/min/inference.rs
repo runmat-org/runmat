@@ -1,11 +1,12 @@
 use super::super::support::{
-    admitted_min_reduction_controls, inferred_min_shape, is_empty_placeholder,
+    admitted_min_pairwise_options, admitted_min_reduction_controls, inferred_min_shape,
+    is_empty_placeholder,
 };
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact,
-    ValueKindFact,
+    broadcast_shape, infer_call, CallContract, CallInference, CallRequest, DynamicReason,
+    InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -22,7 +23,17 @@ fn call_family(request: &CallRequest) -> MinCallFamily {
             Some(literal) if is_empty_placeholder(literal) => {
                 MinCallFamily::Reduction { option_start: 2 }
             }
-            Some(LiteralValue::Unknown) | None => MinCallFamily::Unresolved,
+            Some(LiteralValue::Unknown | LiteralValue::Symbolic(_)) | None => {
+                match request
+                    .arguments
+                    .get(1)
+                    .and_then(|value| value.shape.element_count())
+                {
+                    Some(0) => MinCallFamily::Reduction { option_start: 2 },
+                    Some(_) => MinCallFamily::Pairwise,
+                    None => MinCallFamily::Unresolved,
+                }
+            }
             Some(_) => MinCallFamily::Pairwise,
         },
     }
@@ -43,10 +54,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             MinCallFamily::Reduction { option_start } => {
                 reduction_outputs(input, request, option_start, &mut diagnostics)
             }
-            // A pairwise call has no index output; the owning grammar still
-            // needs to admit its operands/options before any class, shape, or
-            // residency fact can be proven.
-            MinCallFamily::Pairwise => vec![ValueFact::unknown(DynamicReason::RuntimeValue)],
+            // A pairwise call has no index output. Its own option grammar and
+            // operand classes must be admitted independently of reduction.
+            MinCallFamily::Pairwise => vec![pairwise_output(input, request, &mut diagnostics)],
             // The second value may be an empty reduction placeholder or a
             // pairwise operand. Do not prove either family's output contract.
             MinCallFamily::Unresolved => {
@@ -122,4 +132,64 @@ fn reduction_outputs(
 
 fn dynamic_pair() -> Vec<ValueFact> {
     vec![ValueFact::unknown(DynamicReason::RuntimeValue); 2]
+}
+
+fn pairwise_output(
+    left: &ValueFact,
+    request: &CallRequest,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) -> ValueFact {
+    let Some(right) = request.arguments.get(1) else {
+        return ValueFact::unknown(DynamicReason::RuntimeValue);
+    };
+    if !admitted_min_pairwise_options(request.arguments.len(), &request.literals)
+        || left.storage == StorageFact::Sparse
+        || right.storage == StorageFact::Sparse
+    {
+        return ValueFact::unknown(DynamicReason::RuntimeValue);
+    }
+    let kind = match (&left.kind, &right.kind) {
+        (ValueKindFact::Numeric(a), ValueKindFact::Numeric(b)) if a == b => {
+            if a.domain == NumericDomain::Complex && a.class.integer_class().is_some() {
+                return ValueFact::unknown(DynamicReason::RuntimeValue);
+            }
+            if a.domain == NumericDomain::Complex
+                && (left.shape.element_count() == Some(1) || right.shape.element_count() == Some(1))
+            {
+                // Scalar complex comparison can return a real scalar when
+                // both imaginary components are zero. Runtime values decide.
+                return ValueFact::unknown(DynamicReason::RuntimeValue);
+            }
+            if a.class == NumericClass::Single
+                && left.shape.element_count() == Some(1)
+                && right.shape.element_count() == Some(1)
+            {
+                // Scalar selection can materialize as binary64.
+                return ValueFact::unknown(DynamicReason::RuntimeValue);
+            }
+            ValueKindFact::Numeric(*a)
+        }
+        (ValueKindFact::Logical, ValueKindFact::Logical) => ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        _ => return ValueFact::unknown(DynamicReason::RuntimeValue),
+    };
+    let shape = match broadcast_shape(&left.shape, &right.shape) {
+        Ok(shape) => shape,
+        Err(error) => {
+            diagnostics.push(error);
+            return ValueFact::unknown(DynamicReason::RuntimeValue);
+        }
+    };
+    let shape = if shape.element_count() == Some(1) {
+        ShapeFact::Scalar
+    } else {
+        shape
+    };
+    let mut result = ValueFact::proven(kind, shape, StorageFact::Unknown);
+    if left.residency != ResidencyFact::Host || right.residency != ResidencyFact::Host {
+        result.residency = ResidencyFact::Unknown;
+    }
+    result
 }

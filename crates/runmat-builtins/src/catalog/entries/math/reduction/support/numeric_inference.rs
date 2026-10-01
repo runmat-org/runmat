@@ -1,5 +1,5 @@
 use super::dispersion_options::NormalizationLiteral;
-use crate::{ResolveContext, Type};
+use crate::ResolveContext;
 use runmat_types::LiteralValue;
 
 /// Semantic control categories shared by numerical reduction inference. Each
@@ -24,13 +24,6 @@ pub(crate) enum LiteralReductionOutput {
     Native,
 }
 
-/// Scalar integer preservation differs between extrema and dispersion owners.
-#[derive(Clone, Copy)]
-pub(super) enum ScalarResultClass {
-    PreserveInteger,
-    FloatingOnly,
-}
-
 #[derive(Clone)]
 enum KnownAxes {
     Default,
@@ -42,62 +35,6 @@ enum KnownAxes {
 pub(crate) struct KnownControls {
     axes: KnownAxes,
     pub(crate) output: Option<LiteralReductionOutput>,
-}
-
-/// Prove only class and shape facts supported by a complete, ordered literal
-/// grammar. Unknown controls, conflicting axes/classes, and value-dependent
-/// options leave facts dynamic rather than guessing from any-position text.
-pub(super) fn infer_numeric_reduction_type(
-    args: &[Type],
-    context: &ResolveContext,
-    decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
-    scalar_class: ScalarResultClass,
-    decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
-    option_start: usize,
-    empty_axes: EmptyAxesPolicy,
-) -> Type {
-    let Some(input) = args.first() else {
-        return Type::Unknown;
-    };
-    let controls = admitted_literal_controls(
-        args.len(),
-        context,
-        decode_control,
-        decode_normalization,
-        option_start,
-        empty_axes,
-    );
-    match input {
-        Type::Tensor { shape } => Type::Tensor {
-            shape: shape.as_ref().and_then(|dims| {
-                controls
-                    .as_ref()
-                    .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
-            }),
-        },
-        Type::Logical { shape } => Type::Tensor {
-            shape: shape.as_ref().and_then(|dims| {
-                controls
-                    .as_ref()
-                    .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
-            }),
-        },
-        Type::Int
-            if matches!(scalar_class, ScalarResultClass::PreserveInteger) && controls.is_some() =>
-        {
-            Type::Int
-        }
-        Type::Int if matches!(scalar_class, ScalarResultClass::FloatingOnly) => Type::Unknown,
-        Type::Int
-            if controls.as_ref().is_some_and(|controls| {
-                controls.output == Some(LiteralReductionOutput::Native)
-            }) =>
-        {
-            Type::Int
-        }
-        Type::Num | Type::Int | Type::Bool if controls.is_some() => Type::Num,
-        _ => Type::Unknown,
-    }
 }
 
 pub(super) fn admitted_literal_controls(
