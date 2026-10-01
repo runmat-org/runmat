@@ -68,6 +68,63 @@ fn sum_request_for(
     .unwrap()
 }
 
+fn native_integer_sum_request() -> AdmittedBuiltinPreparation {
+    let invocation = runmat_types::SumInvocation::Sum;
+    let entry = runmat_builtins::sum_invocation_entry(invocation);
+    let runmat_builtins::BuiltinOperandPreparation::Forms([form]) = entry.placement.preparation
+    else {
+        panic!("one canonical sum preparation form")
+    };
+    let [signature] = form.signatures else {
+        panic!("one canonical variadic signature")
+    };
+    AdmittedBuiltinPreparation::new(
+        BuiltinPreparationAdmission {
+            binding: runmat_builtins::BuiltinBindingIdentity {
+                builtin: entry.identity,
+                variant: form.binding_variant,
+            },
+            form: form.id,
+            signature: *signature,
+            input_count: 2,
+            requested_outputs: Some(1),
+        },
+        vec![Value::Int(runmat_value::IntValue::I8(100))],
+    )
+    .unwrap()
+    .with_sum_reduction(AdmittedSumReduction {
+        invocation,
+        axes: vec![0],
+        missing: runmat_builtins::ReductionNaN::Include,
+        output: runmat_builtins::SumOutputClass::Native,
+        input_class: NumericClass::Int8,
+        input_domain: NumericDomain::Real,
+        accumulation_class: NumericClass::Int8,
+        publication_class: NumericClass::Int8,
+    })
+    .unwrap()
+}
+
+#[test]
+fn native_integer_sum_rejected_provider_keeps_cpu_observation() {
+    let probe = Rc::new(Probe::default());
+    let context = runtime(&probe);
+    let auto = NativeAutoOffload::new(&REJECTING_PROVIDER, ThresholdConfig::default());
+    let prepared =
+        super::super::admitted::prepare_with(&auto, &context, native_integer_sum_request())
+            .unwrap();
+    assert_eq!(probe.requests.borrow().len(), 1);
+    assert_eq!(probe.requests.borrow()[0].signature.operation, "sum");
+    let result = futures::executor::block_on(
+        prepared.execute(|_| async { Ok(Value::Int(runmat_value::IntValue::I8(100))) }),
+    );
+    assert_eq!(result.unwrap(), Value::Int(runmat_value::IntValue::I8(100)));
+    let feedback = probe.feedback.borrow();
+    assert_eq!(feedback.len(), 1);
+    assert!(feedback[0].succeeded);
+    assert_eq!(feedback[0].candidate, "cpu.shared.sum");
+}
+
 #[test]
 fn nansum_admitted_identity_and_abandonment_use_the_same_session_owner() {
     let probe = Rc::new(Probe::default());
@@ -116,6 +173,71 @@ fn admitted_cpu_route_uses_existing_session_and_finishes_after_body() {
     futures::executor::block_on(prepared.execute(|_| async { Ok(Value::Bool(true)) })).unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);
+}
+
+#[test]
+fn rejected_provider_uses_cpu_only_session_and_observes_actual_body_once() {
+    for succeeds in [true, false] {
+        let probe = Rc::new(Probe::default());
+        let context = runtime(&probe);
+        let auto = NativeAutoOffload::new(&REJECTING_PROVIDER, ThresholdConfig::default());
+        let prepared =
+            super::super::admitted::prepare_with(&auto, &context, logical_request()).unwrap();
+        let requests = probe.requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].signature.operation, "logical");
+        let candidates = &requests[0].graph.nodes[0].candidates;
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].descriptor.kind,
+            ExecutionCandidateKind::SharedRuntime
+        );
+        drop(requests);
+        assert!(probe.feedback.borrow().is_empty());
+        let result = futures::executor::block_on(prepared.execute(|_| async move {
+            if succeeds {
+                Ok(Value::Bool(true))
+            } else {
+                Err(runmat_runtime::build_runtime_error("test host failure").build())
+            }
+        }));
+        assert_eq!(result.is_ok(), succeeds);
+        let feedback = probe.feedback.borrow();
+        assert_eq!(feedback.len(), 1);
+        assert_eq!(feedback[0].succeeded, succeeds);
+    }
+}
+
+#[test]
+fn rejected_provider_unpolled_body_aborts_once_without_success_observation() {
+    let probe = Rc::new(Probe::default());
+    let context = runtime(&probe);
+    let auto = NativeAutoOffload::new(&REJECTING_PROVIDER, ThresholdConfig::default());
+    let prepared =
+        super::super::admitted::prepare_with(&auto, &context, logical_request()).unwrap();
+    drop(prepared.execute(|_| async { Ok(Value::Bool(true)) }));
+    let feedback = probe.feedback.borrow();
+    assert_eq!(feedback.len(), 1);
+    assert!(!feedback[0].succeeded);
+}
+
+#[test]
+fn rejected_provider_cancelled_body_never_reports_cpu_success() {
+    let probe = Rc::new(Probe::default());
+    let source = runmat_execution::cancellation::CancellationSource::new();
+    let context = RuntimeContext::with_cancellation(
+        Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+        source.token(),
+    )
+    .with_service_ports(RuntimeServicePorts::default().with_placement(probe.clone()));
+    let auto = NativeAutoOffload::new(&REJECTING_PROVIDER, ThresholdConfig::default());
+    let prepared =
+        super::super::admitted::prepare_with(&auto, &context, logical_request()).unwrap();
+    source.cancel(runmat_execution::CancellationReason::User);
+    let _ = futures::executor::block_on(prepared.execute(|_| async { Ok(Value::Bool(true)) }));
+    let feedback = probe.feedback.borrow();
+    assert_eq!(feedback.len(), 1);
+    assert!(!feedback[0].succeeded);
 }
 
 #[test]

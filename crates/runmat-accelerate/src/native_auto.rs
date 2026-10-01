@@ -1336,11 +1336,22 @@ impl NativeAutoOffload {
             },
             PlacementPolicy::default(),
         ) {
-            Ok(LocalPlacementOutcome::ProviderRejected { code, cpu_cost }) => {
+            Ok(LocalPlacementOutcome::ProviderRejected {
+                code,
+                cpu_cost,
+                feedback,
+            }) => {
                 evaluation.recommend_gpu = false;
                 evaluation.reason = DecisionReason::ProviderRejected;
                 evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
-                (evaluation, Some(code), Default::default())
+                (
+                    evaluation,
+                    Some(code),
+                    builtin_call::observation::BuiltinObservationPlan {
+                        feedback,
+                        ..Default::default()
+                    },
+                )
             }
             Ok(LocalPlacementOutcome::Selected {
                 selected,

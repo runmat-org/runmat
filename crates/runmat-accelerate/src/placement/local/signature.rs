@@ -1,12 +1,36 @@
 //! Inputs that distinguish execution feedback for a local placement decision.
 use super::super::residency::ResidencySummary;
 use runmat_accelerate_api::ProviderCostQuery;
+use runmat_accelerate_api::{ProviderFeasibilityQuery, ProviderRejectionCode};
 use runmat_execution::{CandidatePreparationState, Digest, PlacementResourceSnapshot};
 
 pub(super) fn with_output_resources(facts: Digest, output_bytes: Option<u64>) -> Digest {
     Digest::sha256(
         serde_json::to_vec(&("physical-output-resources-v1", facts, output_bytes))
             .expect("provider output resources must serialize"),
+    )
+}
+
+pub(super) fn rejected_runtime_facts(
+    query: &ProviderFeasibilityQuery,
+    rejection: ProviderRejectionCode,
+    cpu_preparation: CandidatePreparationState,
+    residency: &ResidencySummary,
+    resources: &PlacementResourceSnapshot,
+    host_epoch: u64,
+) -> Digest {
+    Digest::sha256(
+        serde_json::to_vec(&(
+            query,
+            rejection,
+            cpu_preparation,
+            residency.host_bytes,
+            &residency.provider_bytes,
+            residency.unknown_values,
+            resources,
+            host_epoch,
+        ))
+        .expect("rejected placement facts must serialize"),
     )
 }
 
@@ -51,6 +75,53 @@ mod tests {
         ProviderFeasibilityQuery, ProviderOperationFamily, ProviderOperationIdentity,
         ProviderWorkload,
     };
+
+    #[test]
+    fn rejected_cpu_series_is_keyed_by_typed_provider_decision() {
+        let query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("test.reduction"),
+            family: ProviderOperationFamily::Reduction,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            workload: ProviderWorkload::default(),
+        };
+        let residency = ResidencySummary::default();
+        let resources = PlacementResourceSnapshot::default();
+        let facts = |query: &ProviderFeasibilityQuery, code, preparation| {
+            rejected_runtime_facts(query, code, preparation, &residency, &resources, 7)
+        };
+        let original = facts(
+            &query,
+            ProviderRejectionCode::UnsupportedElementType,
+            CandidatePreparationState::Ready,
+        );
+        assert_ne!(
+            original,
+            facts(
+                &query,
+                ProviderRejectionCode::UnknownResourceEstimate,
+                CandidatePreparationState::Ready,
+            )
+        );
+        assert_ne!(
+            original,
+            facts(
+                &query,
+                ProviderRejectionCode::UnsupportedElementType,
+                CandidatePreparationState::Cold,
+            )
+        );
+        let mut changed = query.clone();
+        changed.workload.elements = Some(9);
+        assert_ne!(
+            original,
+            facts(
+                &changed,
+                ProviderRejectionCode::UnsupportedElementType,
+                CandidatePreparationState::Ready,
+            )
+        );
+    }
 
     #[test]
     fn semantic_identity_extends_without_erasing_existing_argument_facts() {

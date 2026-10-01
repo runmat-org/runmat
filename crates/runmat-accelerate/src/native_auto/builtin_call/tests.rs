@@ -43,6 +43,38 @@ impl AccelProvider for UploadRejectingProvider {
 }
 static PROVIDER: UploadRejectingProvider = UploadRejectingProvider;
 
+struct FeasibilityRejectingProvider;
+impl AccelProvider for FeasibilityRejectingProvider {
+    fn upload(&self, _: &HostTensorView<'_>) -> Result<runmat_accelerate_api::GpuTensorHandle> {
+        panic!("rejected candidate must not upload")
+    }
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        Box::pin(async { panic!("rejected candidate must not download") })
+    }
+    fn free(&self, _: &runmat_accelerate_api::GpuTensorHandle) -> Result<()> {
+        Ok(())
+    }
+    fn device_info(&self) -> String {
+        "feasibility-rejecting-provider".into()
+    }
+    fn precision(&self) -> ProviderPrecision {
+        ProviderPrecision::F64
+    }
+    fn query_feasibility(
+        &self,
+        _: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        runmat_accelerate_api::ProviderFeasibility::rejected(
+            runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+            "test.unsupported",
+        )
+    }
+}
+static REJECTING_PROVIDER: FeasibilityRejectingProvider = FeasibilityRejectingProvider;
+
 // These lifecycle fixtures model dense F64 output buffers with the admitted
 // element count and output arity. They do not model provider kernel execution.
 fn known_fixture_resources(

@@ -444,16 +444,25 @@ fn unknown_is_not_zero_or_exceeded_capacity_and_explicit_execution_stays_support
         output: None,
         capacity: u64::MAX,
     };
-    assert!(matches!(
-        plan(&provider, &capture, true, 0),
-        LocalPlacementOutcome::ProviderRejected {
-            code: ProviderRejectionCode::UnknownResourceEstimate,
-            ..
-        }
-    ));
-    assert!(capture.requests.borrow().is_empty());
+    let LocalPlacementOutcome::ProviderRejected {
+        code: ProviderRejectionCode::UnknownResourceEstimate,
+        feedback: Some(feedback),
+        ..
+    } = plan(&provider, &capture, true, 0)
+    else {
+        panic!("CPU-only placement session must retain an observation ticket")
+    };
+    assert_eq!(feedback.candidate, "cpu.fixture");
+    let requests = capture.requests.borrow();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].graph.nodes[0].candidates.len(), 1);
+    assert_eq!(
+        requests[0].graph.nodes[0].candidates[0].descriptor.kind,
+        ExecutionCandidateKind::SharedRuntime
+    );
+    drop(requests);
     assert!(is_provider(plan(&provider, &capture, false, 0)));
-    assert!(capture.requests.borrow().is_empty());
+    assert_eq!(capture.requests.borrow().len(), 1);
     let encoded = serde_json::to_string(&ProviderRejectionCode::UnknownResourceEstimate).unwrap();
     assert_eq!(encoded, "\"unknown_resource_estimate\"");
     assert_eq!(

@@ -7,12 +7,16 @@ use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, Digest, ExecutionCandidateDescriptor, ExecutionCandidateKind,
     ExecutionCostEstimate, PlacementGraph, PlacementGraphCandidate, PlacementGraphLimits,
-    PlacementGraphNode, PlacementPlanRequest, PlacementResourceSnapshot, PlacementSignature,
+    PlacementGraphNode, PlacementPlanRequest, PlacementSignature,
 };
 use runmat_value::Value;
 
 use super::{select_candidate, summarize_values, tensor_representation, PlacementPolicy};
 mod signature;
+mod rejected;
+mod session_facts;
+use rejected::{rejected_cpu_feedback, RejectedCpuFeedbackRequest};
+use session_facts::session_facts;
 #[cfg(test)]
 mod resource_tests;
 
@@ -60,6 +64,7 @@ pub(crate) enum LocalPlacementOutcome {
     ProviderRejected {
         code: ProviderRejectionCode,
         cpu_cost: ExecutionCostEstimate,
+        feedback: Option<Box<LocalPlacementFeedback>>,
     },
 }
 
@@ -130,9 +135,24 @@ pub(crate) fn plan_local(
     let estimate = match provider.query_feasibility(&query) {
         ProviderFeasibility::Supported { estimate } => estimate,
         ProviderFeasibility::Rejected { rejection } => {
+            let feedback = rejected_cpu_feedback(
+                provider,
+                RejectedCpuFeedbackRequest {
+                    runtime: request.runtime,
+                    compare_profitability: request.compare_profitability,
+                    operation: request.operation,
+                    semantic_identity: request.semantic_identity,
+                    query: &query,
+                    code: rejection.code,
+                    cpu: &cpu,
+                    residency: &residency,
+                    policy,
+                },
+            );
             return Ok(LocalPlacementOutcome::ProviderRejected {
                 code: rejection.code,
                 cpu_cost: cpu.cost,
+                feedback,
             });
         }
     };
@@ -140,9 +160,25 @@ pub(crate) fn plan_local(
     // query.outputs means unspecified output facts, not zero retained bytes.
     // Explicit provider execution remains supported when this estimate is absent.
     if request.compare_profitability && estimate.output_bytes.is_none() {
+        let code = ProviderRejectionCode::UnknownResourceEstimate;
+        let feedback = rejected_cpu_feedback(
+            provider,
+            RejectedCpuFeedbackRequest {
+                runtime: request.runtime,
+                compare_profitability: request.compare_profitability,
+                operation: request.operation,
+                semantic_identity: request.semantic_identity,
+                query: &query,
+                code,
+                cpu: &cpu,
+                residency: &residency,
+                policy,
+            },
+        );
         return Ok(LocalPlacementOutcome::ProviderRejected {
-            code: ProviderRejectionCode::UnknownResourceEstimate,
+            code,
             cpu_cost: cpu.cost,
+            feedback,
         });
     }
     // A logical output template cannot prove the size or freshness of its
@@ -213,24 +249,8 @@ pub(crate) fn plan_local(
     let selected = if request.compare_profitability {
         if let Some(runtime) = request.runtime {
             if let Some(service) = runtime.service_ports().placement() {
-                let capability = provider.capability_snapshot();
-                let provider_resources = provider.placement_resources();
-                let provider_digest = Digest::sha256(
-                    serde_json::to_vec(&capability)
-                        .expect("provider capability snapshot must serialize"),
-                );
-                let host_resources = runtime
-                    .service_ports()
-                    .parallel()
-                    .map(|service| service.placement_resources())
-                    .unwrap_or_default();
-                let resources = PlacementResourceSnapshot {
-                    cpu_millicores_available: host_resources.cpu_millicores_available,
-                    memory_available_bytes: host_resources.memory_available_bytes,
-                    cancellation_requested: runtime.is_cancelled(),
-                    providers: vec![provider_resources.clone()],
-                    epoch: provider_resources.epoch ^ host_resources.epoch.rotate_left(32),
-                };
+                let (resources, provider_digest, host_epoch, transactional) =
+                    session_facts(provider, runtime);
                 let signature = PlacementSignature {
                     region: cpu.region,
                     operation: request.operation.into(),
@@ -241,7 +261,7 @@ pub(crate) fn plan_local(
                                 cpu.preparation,
                                 &residency,
                                 &resources,
-                                host_resources.epoch,
+                                host_epoch,
                             ),
                             estimate.output_bytes,
                         ),
@@ -253,7 +273,6 @@ pub(crate) fn plan_local(
                         policy,
                     ),
                 };
-                let transactional = capability.concurrency.transactional_results;
                 let decision = service.plan(PlacementPlanRequest {
                     signature: signature.clone(),
                     graph: PlacementGraph {
