@@ -10,6 +10,6 @@ mod tests;
 pub use descriptor::*;
 pub use entry::SQUAREFORM_CATALOG_ENTRY;
 pub use integer::*;
-pub use options::{condensed_length, matrix_size_for_condensed_length, SquareformDirection};
+pub use options::SquareformDirection;
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&SQUAREFORM_CATALOG_ENTRY];

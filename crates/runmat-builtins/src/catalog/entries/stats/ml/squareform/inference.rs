@@ -1,4 +1,5 @@
-use super::{condensed_length, matrix_size_for_condensed_length, SquareformDirection};
+use super::super::distance_geometry::{condensed_length, matrix_size_for_condensed_length};
+use super::SquareformDirection;
 use crate::catalog::inference::argument_error;
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;

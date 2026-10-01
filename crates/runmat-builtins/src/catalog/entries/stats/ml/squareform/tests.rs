@@ -1,3 +1,4 @@
+use super::super::distance_geometry::{condensed_length, matrix_size_for_condensed_length};
 use super::*;
 use runmat_types::*;
 

@@ -11,7 +11,13 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
-use runmat_builtins::{SQUAREFORM_EXPLICIT_GPU_EXTENSION, SQUAREFORM_INTEGER_INPUT_EXTENSION};
+use runmat_builtins::{
+    DistanceControlKind, DistanceMetricKind, DistanceSelectionKind,
+    PDIST2_INTEGER_CONTROL_EXTENSION, PDIST2_INTEGER_DATA_EXTENSION,
+    PDIST2_INTEGER_SELECTION_EXTENSION, PDIST_INTEGER_CONTROL_EXTENSION,
+    PDIST_INTEGER_DATA_EXTENSION, SQUAREFORM_EXPLICIT_GPU_EXTENSION,
+    SQUAREFORM_INTEGER_INPUT_EXTENSION,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, Tensor, Value};
 
@@ -27,31 +33,6 @@ const EPS: f64 = 1.0e-12;
 
 mod squareform;
 use squareform::{parse_squareform_force, squareform_compute};
-
-const OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "D",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Pairwise distances.",
-}];
-
-const OUTPUT_D_I: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "D",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Selected pairwise distances.",
-    },
-    BuiltinParamDescriptor {
-        name: "I",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "One-based row indices from X for selected distances.",
-    },
-];
 
 const OUTPUT_IDX_D: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
@@ -86,22 +67,6 @@ const PARAM_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Second observation matrix with observations in rows.",
 };
 
-const PARAM_DISTANCE_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Distance metric and optional metric parameter.",
-};
-
-const PARAM_PDIST2_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Distance metric, metric parameter, or Smallest/Largest selection options.",
-};
-
 const PARAM_KNNSEARCH_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "options",
     ty: BuiltinParamType::Any,
@@ -110,38 +75,9 @@ const PARAM_KNNSEARCH_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Name-value options such as K, Distance, P, Cov, Scale, IncludeTies, NSMethod, BucketSize, CacheSize, and SortIndices.",
 };
 
-const INPUTS_X: [BuiltinParamDescriptor; 1] = [PARAM_X];
-const INPUTS_X_OPTIONS: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_DISTANCE_OPTIONS];
 const INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_Y];
-const INPUTS_X_Y_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_Y, PARAM_PDIST2_OPTIONS];
 const INPUTS_X_Y_KNN_OPTIONS: [BuiltinParamDescriptor; 3] =
     [PARAM_X, PARAM_Y, PARAM_KNNSEARCH_OPTIONS];
-
-const PDIST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "D = pdist(X)",
-        inputs: &INPUTS_X,
-        outputs: &OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "D = pdist(X, Distance, DistParameter)",
-        inputs: &INPUTS_X_OPTIONS,
-        outputs: &OUTPUT_D,
-    },
-];
-
-const PDIST2_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "D = pdist2(X, Y)",
-        inputs: &INPUTS_X_Y,
-        outputs: &OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "D = pdist2(X, Y, Distance, DistParameter, Name, Value)",
-        inputs: &INPUTS_X_Y_OPTIONS,
-        outputs: &OUTPUT_D_I,
-    },
-];
 
 const KNNSEARCH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -172,174 +108,12 @@ const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const DISTANCE_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
 
-pub const PDIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PDIST_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DISTANCE_ERRORS,
-};
-
-pub const PDIST2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PDIST2_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DISTANCE_ERRORS,
-};
-
 pub const KNNSEARCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &KNNSEARCH_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &DISTANCE_ERRORS,
 };
-
-const PDIST_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pdist-integer-observation-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "pdist with typed-integer observation data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PdistIntegerObservationDataExtension"),
-};
-const PDIST_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pdist-integer-numeric-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "pdist with a typed-integer distance parameter or cache size is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PdistIntegerNumericControlExtension"),
-};
-pub const PDIST_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    PDIST_INTEGER_DATA_EXTENSION,
-    PDIST_INTEGER_CONTROL_EXTENSION,
-];
-
-const PDIST2_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pdist2-integer-observation-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "pdist2 with typed-integer X or Y observation data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Pdist2IntegerObservationDataExtension"),
-};
-const PDIST2_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pdist2-integer-numeric-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "pdist2 with a typed-integer distance parameter or cache size is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Pdist2IntegerNumericControlExtension"),
-};
-const PDIST2_INTEGER_SELECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pdist2-integer-selection-count",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "pdist2 with a typed-integer Smallest or Largest count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Pdist2IntegerSelectionCountExtension"),
-};
-pub const PDIST2_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    PDIST2_INTEGER_DATA_EXTENSION,
-    PDIST2_INTEGER_CONTROL_EXTENSION,
-    PDIST2_INTEGER_SELECTION_EXTENSION,
-];
-
-const PDIST_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double observation matrices. RunMat gates typed integers before gather and requires exact binary64 conversion.",
-    }];
-const PDIST_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "DistParameter or CacheSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Documented metric parameters are single or double and CacheSize is double; typed values cross a checked floating control boundary.",
-    }];
-pub const PDIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "D = pdist(integer_X, ...)",
-        inputs: &PDIST_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "All distance metrics consume one explicit binary64 view after admission; values beyond exact binary64 range reject rather than alias.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "D = pdist(X, Distance, integer_DistParameter_or_CacheSize)",
-        inputs: &PDIST_INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed numeric controls are independently gated and must be exactly representable before metric parsing.",
-    },
-];
-
-const PDIST2_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double X observations; RunMat requires exact binary64 conversion for typed integers.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double Y observations; RunMat requires exact binary64 conversion for typed integers.",
-    },
-];
-const PDIST2_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "DistParameter or CacheSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes:
-            "Typed distance parameters and cache sizes are RunMat-only checked floating controls.",
-    }];
-const PDIST2_INTEGER_SELECTION_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Smallest or Largest",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target enumerates single and double storage for the positive selection count. RunMat decodes typed integers exactly as structural counts.",
-    }];
-pub const PDIST2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "D = pdist2(integer_X, integer_Y, ...)",
-        inputs: &PDIST2_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed observations are gated before gather and enter the floating distance domain only after exactness is proved.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "D = pdist2(X, Y, Distance, integer_DistParameter_or_CacheSize)",
-        inputs: &PDIST2_INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed numerical controls are independently gated and cross a checked binary64 boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[D,I] = pdist2(X, Y, Smallest/Largest=integer_K)",
-        inputs: &PDIST2_INTEGER_SELECTION_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The typed selection count is decoded directly from authoritative storage; distances and MATLAB-compatible indices remain double.",
-    },
-];
 
 const KNN_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "knnsearch-integer-observation-data",
@@ -535,12 +309,6 @@ fn matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     }
 }
 
-fn vector_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Tensor {
-        shape: Some(vec![Some(1), None]),
-    }
-}
-
 fn distance_error(name: &'static str, message: impl Into<String>) -> RuntimeError {
     distance_descriptor_error(name, message, &ERROR_INVALID_ARGUMENT)
 }
@@ -590,6 +358,35 @@ enum Selection {
     Largest(usize),
 }
 
+#[derive(Clone, Copy)]
+enum PairwiseDistanceBuiltin {
+    Pdist,
+    Pdist2,
+}
+
+impl PairwiseDistanceBuiltin {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Pdist => PDIST_NAME,
+            Self::Pdist2 => PDIST2_NAME,
+        }
+    }
+
+    fn data_extension(self) -> &'static BuiltinExtensionDescriptor {
+        match self {
+            Self::Pdist => &PDIST_INTEGER_DATA_EXTENSION,
+            Self::Pdist2 => &PDIST2_INTEGER_DATA_EXTENSION,
+        }
+    }
+
+    fn control_extension(self) -> &'static BuiltinExtensionDescriptor {
+        match self {
+            Self::Pdist => &PDIST_INTEGER_CONTROL_EXTENSION,
+            Self::Pdist2 => &PDIST2_INTEGER_CONTROL_EXTENSION,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct KnnOptions {
     k: usize,
@@ -601,16 +398,14 @@ struct KnnOptions {
     category = "stats/ml",
     summary = "Compute pairwise distances between rows of an observation matrix.",
     keywords = "pdist,pairwise,distance,statistics,machine learning,clustering",
-    type_resolver(vector_type),
-    descriptor(crate::builtins::stats::ml::distance::PDIST_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::distance::PDIST_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::distance::PDIST_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_pdist_integer_boundaries(PDIST_NAME, &x, None, &rest).await?;
-    let x = value_to_matrix(PDIST_NAME, x).await?;
+    ensure_pdist_integer_boundaries(PairwiseDistanceBuiltin::Pdist, &x, None, &rest).await?;
     let metric_args = strip_cache_size_option(PDIST_NAME, rest).await?;
+    parse_metric_name(PDIST_NAME, &metric_args)?;
+    let x = value_to_matrix(PDIST_NAME, x).await?;
     let metric = parse_metric(PDIST_NAME, &x, None, metric_args).await?;
     let distances = condensed_distances(PDIST_NAME, &x, &metric)?;
     Ok(Value::Tensor(distances))
@@ -621,14 +416,22 @@ async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     category = "stats/ml",
     summary = "Compute pairwise distances between two sets of observations.",
     keywords = "pdist2,pairwise,distance,nearest neighbor,statistics,machine learning",
-    type_resolver(matrix_type),
-    descriptor(crate::builtins::stats::ml::distance::PDIST2_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::distance::PDIST2_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::distance::PDIST2_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_pdist_integer_boundaries(PDIST2_NAME, &x, Some(&y), &rest).await?;
+    ensure_pdist_integer_boundaries(PairwiseDistanceBuiltin::Pdist2, &x, Some(&y), &rest).await?;
+    let (metric_args, selection) = split_pdist2_options(rest)?;
+    let metric_args = strip_cache_size_option(PDIST2_NAME, metric_args).await?;
+    parse_metric_name(PDIST2_NAME, &metric_args)?;
+    if selection.is_none()
+        && matches!(crate::output_count::current_output_count(), Some(count) if count > 1)
+    {
+        return Err(distance_error(
+            PDIST2_NAME,
+            "pdist2: second output is only available with Smallest or Largest",
+        ));
+    }
     let x = value_to_matrix(PDIST2_NAME, x).await?;
     let y = value_to_matrix(PDIST2_NAME, y).await?;
     if x.cols != y.cols {
@@ -637,28 +440,18 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
             "pdist2: X and Y must have the same number of columns",
         ));
     }
-    let (metric_args, selection) = split_pdist2_options(rest)?;
-    let metric_args = strip_cache_size_option(PDIST2_NAME, metric_args).await?;
     let metric = parse_metric(PDIST2_NAME, &x, Some(&y), metric_args).await?;
     let distances = distance_matrix(PDIST2_NAME, &x, &y, &metric)?;
     match selection {
         Some(selection) => selected_distance_outputs(&distances, selection),
-        None => {
-            if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
-                return Err(distance_error(
-                    PDIST2_NAME,
-                    "pdist2: second output is only available with Smallest or Largest",
-                ));
-            }
-            match crate::output_count::current_output_count() {
-                Some(0) => Ok(Value::OutputList(Vec::new())),
-                Some(out_count) => Ok(crate::output_count::output_list_with_padding(
-                    out_count,
-                    vec![Value::Tensor(distances)],
-                )),
-                None => Ok(Value::Tensor(distances)),
-            }
-        }
+        None => match crate::output_count::current_output_count() {
+            Some(0) => Ok(Value::OutputList(Vec::new())),
+            Some(out_count) => Ok(crate::output_count::output_list_with_padding(
+                out_count,
+                vec![Value::Tensor(distances)],
+            )),
+            None => Ok(Value::Tensor(distances)),
+        },
     }
 }
 
@@ -669,7 +462,10 @@ async fn strip_cache_size_option(
     let mut metric_args = Vec::with_capacity(args.len());
     let mut index = 0usize;
     while index < args.len() {
-        if keyword_of(&args[index]).is_some_and(|keyword| keyword.eq_ignore_ascii_case("cachesize"))
+        if keyword_of(&args[index])
+            .as_deref()
+            .and_then(DistanceControlKind::from_keyword)
+            .is_some()
         {
             let Some(value) = args.get(index + 1) else {
                 return Err(distance_error(
@@ -698,19 +494,15 @@ async fn strip_cache_size_option(
 }
 
 async fn ensure_pdist_integer_boundaries(
-    name: &'static str,
+    builtin: PairwiseDistanceBuiltin,
     x: &Value,
     y: Option<&Value>,
     rest: &[Value],
 ) -> BuiltinResult<()> {
-    let data_extension = if name == PDIST_NAME {
-        &PDIST_INTEGER_DATA_EXTENSION
-    } else {
-        &PDIST2_INTEGER_DATA_EXTENSION
-    };
+    let name = builtin.name();
     for (value, role) in std::iter::once((x, "X")).chain(y.map(|value| (value, "Y"))) {
         if knn_typed_integer(value) {
-            crate::compatibility::ensure_builtin_extension_enabled(data_extension, name)?;
+            crate::compatibility::ensure_builtin_extension_enabled(builtin.data_extension(), name)?;
             ensure_distance_exact_f64(name, value, role).await?;
         }
     }
@@ -720,24 +512,17 @@ async fn ensure_pdist_integer_boundaries(
         }
         let selector = index
             .checked_sub(1)
-            .and_then(|previous| keyword_of(&rest[previous]));
-        if name == PDIST2_NAME
-            && selector
-                .as_deref()
-                .is_some_and(|selector| matches!(selector, "smallest" | "largest"))
-        {
+            .and_then(|previous| keyword_of(&rest[previous]))
+            .as_deref()
+            .and_then(DistanceSelectionKind::from_keyword);
+        if matches!(builtin, PairwiseDistanceBuiltin::Pdist2) && selector.is_some() {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &PDIST2_INTEGER_SELECTION_EXTENSION,
                 name,
             )?;
             continue;
         }
-        let extension = if name == PDIST_NAME {
-            &PDIST_INTEGER_CONTROL_EXTENSION
-        } else {
-            &PDIST2_INTEGER_CONTROL_EXTENSION
-        };
-        crate::compatibility::ensure_builtin_extension_enabled(extension, name)?;
+        crate::compatibility::ensure_builtin_extension_enabled(builtin.control_extension(), name)?;
         ensure_distance_exact_f64(name, value, "numeric control").await?;
     }
     Ok(())
@@ -1051,7 +836,21 @@ fn host_value_to_matrix(name: &'static str, gathered: Value) -> BuiltinResult<Te
 async fn gather_value(name: &'static str, value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value)
         .await
-        .map_err(|err| distance_error(name, format!("{name}: {err}")))
+        .map_err(|error| with_distance_context(name, error))
+}
+
+fn parse_metric_name(name: &'static str, args: &[Value]) -> BuiltinResult<DistanceMetricKind> {
+    let Some(first) = args.first() else {
+        return Ok(DistanceMetricKind::Euclidean);
+    };
+    let text = keyword_of(first)
+        .ok_or_else(|| distance_error(name, format!("{name}: distance metric must be text")))?;
+    DistanceMetricKind::from_keyword(&text).ok_or_else(|| {
+        distance_error(
+            name,
+            format!("{name}: unsupported distance metric '{text}'"),
+        )
+    })
 }
 
 async fn parse_metric(
@@ -1060,28 +859,30 @@ async fn parse_metric(
     _y: Option<&Tensor>,
     args: Vec<Value>,
 ) -> BuiltinResult<DistanceMetric> {
-    if args.is_empty() {
-        return Ok(DistanceMetric::Euclidean);
-    }
-    let metric_name = keyword_of(&args[0])
-        .ok_or_else(|| distance_error(name, format!("{name}: distance metric must be text")))?;
-    let metric_name = metric_name.to_ascii_lowercase();
-    let rest = args[1..].to_vec();
-    match metric_name.as_str() {
-        "euclidean" => {
-            ensure_no_metric_parameter(name, &rest, "euclidean").map(|()| DistanceMetric::Euclidean)
+    let kind = parse_metric_name(name, &args)?;
+    let rest = if args.is_empty() {
+        Vec::new()
+    } else {
+        args[1..].to_vec()
+    };
+    match kind {
+        DistanceMetricKind::Euclidean => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
+                .map(|()| DistanceMetric::Euclidean)
         }
-        "squaredeuclidean" | "sqeuclidean" | "squared euclidean" => {
-            ensure_no_metric_parameter(name, &rest, "squaredeuclidean")
+        DistanceMetricKind::SquareEuclidean => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
                 .map(|()| DistanceMetric::SquareEuclidean)
         }
-        "cityblock" | "city block" | "manhattan" => {
-            ensure_no_metric_parameter(name, &rest, "cityblock").map(|()| DistanceMetric::Cityblock)
+        DistanceMetricKind::Cityblock => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
+                .map(|()| DistanceMetric::Cityblock)
         }
-        "chebychev" | "chebyshev" | "cheby" => {
-            ensure_no_metric_parameter(name, &rest, "chebychev").map(|()| DistanceMetric::Chebychev)
+        DistanceMetricKind::Chebychev => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
+                .map(|()| DistanceMetric::Chebychev)
         }
-        "minkowski" => {
+        DistanceMetricKind::Minkowski => {
             let p = if rest.is_empty() {
                 2.0
             } else {
@@ -1095,7 +896,7 @@ async fn parse_metric(
             }
             Ok(DistanceMetric::Minkowski(p))
         }
-        "seuclidean" | "standardizedeuclidean" | "standardized euclidean" => {
+        DistanceMetricKind::Seuclidean => {
             let scale = if rest.is_empty() {
                 variance_scale(name, x)?
             } else {
@@ -1114,7 +915,7 @@ async fn parse_metric(
             }
             Ok(DistanceMetric::Seuclidean(scale))
         }
-        "mahalanobis" | "mahal" => {
+        DistanceMetricKind::Mahalanobis => {
             let covariance = if rest.is_empty() {
                 covariance_matrix(name, x)?
             } else {
@@ -1133,24 +934,26 @@ async fn parse_metric(
                 "mahalanobis covariance",
             )?))
         }
-        "cosine" => {
-            ensure_no_metric_parameter(name, &rest, "cosine").map(|()| DistanceMetric::Cosine)
+        DistanceMetricKind::Cosine => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
+                .map(|()| DistanceMetric::Cosine)
         }
-        "correlation" => ensure_no_metric_parameter(name, &rest, "correlation")
-            .map(|()| DistanceMetric::Correlation),
-        "hamming" => {
-            ensure_no_metric_parameter(name, &rest, "hamming").map(|()| DistanceMetric::Hamming)
+        DistanceMetricKind::Correlation => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
+                .map(|()| DistanceMetric::Correlation)
         }
-        "jaccard" => {
-            ensure_no_metric_parameter(name, &rest, "jaccard").map(|()| DistanceMetric::Jaccard)
+        DistanceMetricKind::Hamming => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
+                .map(|()| DistanceMetric::Hamming)
         }
-        "spearman" => {
-            ensure_no_metric_parameter(name, &rest, "spearman").map(|()| DistanceMetric::Spearman)
+        DistanceMetricKind::Jaccard => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
+                .map(|()| DistanceMetric::Jaccard)
         }
-        other => Err(distance_error(
-            name,
-            format!("{name}: unsupported distance metric '{other}'"),
-        )),
+        DistanceMetricKind::Spearman => {
+            ensure_no_metric_parameter(name, &rest, kind.canonical_name())
+                .map(|()| DistanceMetric::Spearman)
+        }
     }
 }
 
@@ -1221,14 +1024,9 @@ fn split_pdist2_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>, Option<S
     let mut selection = None;
     let mut idx = 0usize;
     while idx < args.len() {
-        let selector = keyword_of(&args[idx]).and_then(|text| {
-            let lower = text.to_ascii_lowercase();
-            if lower == "smallest" || lower == "largest" {
-                Some(lower)
-            } else {
-                None
-            }
-        });
+        let selector = keyword_of(&args[idx])
+            .as_deref()
+            .and_then(DistanceSelectionKind::from_keyword);
         if let Some(selector) = selector {
             if selection.is_some() || idx + 1 >= args.len() {
                 return Err(distance_error(
@@ -1237,10 +1035,9 @@ fn split_pdist2_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>, Option<S
                 ));
             }
             let k = parse_positive_integer(PDIST2_NAME, &args[idx + 1], "pdist2 selection count")?;
-            selection = Some(if selector == "smallest" {
-                Selection::Smallest(k)
-            } else {
-                Selection::Largest(k)
+            selection = Some(match selector {
+                DistanceSelectionKind::Smallest => Selection::Smallest(k),
+                DistanceSelectionKind::Largest => Selection::Largest(k),
             });
             idx += 2;
         } else {
@@ -2356,6 +2153,26 @@ mod tests {
             "pdist2 selection count"
         )
         .is_err());
+    }
+
+    #[test]
+    fn pdist2_selection_extension_uses_typed_case_insensitive_keyword() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for spelling in ["Smallest", "smallest", "LARGEST"] {
+            let error = block_on(pdist2_builtin(
+                tensor(vec![0.0, 2.0], 2, 1),
+                tensor(vec![1.0], 1, 1),
+                vec![
+                    Value::from(spelling),
+                    cleared_int_tensor(IntegerStorage::U16(vec![1]), 1, 1),
+                ],
+            ))
+            .expect_err("typed selection count must be gated before the provider or CPU work");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:Pdist2IntegerSelectionCountExtension")
+            );
+        }
     }
 
     #[test]
