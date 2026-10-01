@@ -1651,19 +1651,38 @@ fn mean_complex_tensor(
             }
             Ok(current)
         }
-        MeanAxes::All => {
-            if is_scalar_shape(&tensor.shape) {
-                Ok(tensor)
-            } else {
-                let mut current = tensor;
-                let ndims = current.shape.len();
-                for dim in 1..=ndims {
-                    current = reduce_complex_tensor_mean_dim(&current, dim, nan_mode)?;
-                }
-                Ok(current)
-            }
-        }
+        MeanAxes::All => mean_complex_tensor_all(&tensor, nan_mode),
     }
+}
+
+fn mean_complex_tensor_all(
+    tensor: &ComplexTensor,
+    nan_mode: ReductionNaN,
+) -> BuiltinResult<ComplexTensor> {
+    let values = tensor.materialize_f64();
+    let mut real = 0.0;
+    let mut imaginary = 0.0;
+    let mut count = 0usize;
+    let mut saw_nan = false;
+    for (part_real, part_imaginary) in values {
+        if part_real.is_nan() || part_imaginary.is_nan() {
+            if nan_mode == ReductionNaN::Include {
+                saw_nan = true;
+                break;
+            }
+            continue;
+        }
+        real += part_real;
+        imaginary += part_imaginary;
+        count += 1;
+    }
+    let value = if saw_nan || count == 0 {
+        (f64::NAN, f64::NAN)
+    } else {
+        (real / count as f64, imaginary / count as f64)
+    };
+    ComplexTensor::new(vec![value], canonical_scalar_shape())
+        .map_err(|error| mean_internal_error(format!("mean: {error}")))
 }
 
 fn reduce_complex_tensor_mean_dim(
@@ -2937,6 +2956,52 @@ pub(crate) mod tests {
             };
             assert!(real.is_nan() && imaginary.is_nan());
             input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_rank_three_default_vecdim_and_all_use_typed_fallback() {
+        test_support::with_test_provider(|provider| {
+            let data: Vec<(f64, f64)> = (1..=8)
+                .map(|value| (f64::from(value), f64::from(value * 10)))
+                .collect();
+            let input = ComplexTensor::new(data, vec![2, 2, 2]).unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let cases = [
+                (
+                    Vec::new(),
+                    vec![1, 2, 2],
+                    vec![(1.5, 15.0), (3.5, 35.0), (5.5, 55.0), (7.5, 75.0)],
+                ),
+                (
+                    vec![Value::Tensor(
+                        Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap(),
+                    )],
+                    vec![1, 2, 1],
+                    vec![(3.5, 35.0), (5.5, 55.0)],
+                ),
+                (vec![Value::from("all")], vec![1, 1], vec![(4.5, 45.0)]),
+            ];
+            for (controls, shape, values) in cases {
+                let result = mean_builtin(Value::GpuTensor(input.clone()), controls).unwrap();
+                let Value::GpuTensor(result) = result else {
+                    panic!("rank-three complex mean must retain residency");
+                };
+                assert_eq!(result.device_id(), input.device_id());
+                let gathered =
+                    block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+                match gathered {
+                    Value::ComplexTensor(gathered) => {
+                        assert_eq!(gathered.shape, shape);
+                        assert_eq!(gathered.materialize_f64(), values);
+                    }
+                    Value::Complex(real, imaginary) if shape == [1, 1] => {
+                        assert_eq!((real, imaginary), values[0]);
+                    }
+                    other => panic!("rank-three complex mean changed class: {other:?}"),
+                }
+                input.allocation_lease().validate_live().unwrap();
+            }
         });
     }
 

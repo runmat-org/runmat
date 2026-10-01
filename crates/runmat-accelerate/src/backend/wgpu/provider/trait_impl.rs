@@ -1912,8 +1912,7 @@ impl AccelProvider for WgpuProvider {
             if entry.integer_type().is_some() {
                 self.integer_reduce_mean_dim_exec(dim, "mean", a)
             } else if entry.storage == GpuTensorStorage::ComplexInterleaved
-                && entry.shape.len() == 2
-                && dim <= 1
+                && dim < entry.shape.len()
             {
                 Err(runmat_accelerate_api::unsupported_provider_operation(
                     "complex resident mean requires a complex reduction kernel",

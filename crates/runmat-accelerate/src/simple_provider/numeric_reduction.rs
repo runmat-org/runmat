@@ -108,20 +108,24 @@ impl InProcessProvider {
 
     fn native_additive_dim(&self, input: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
         ensure!(
-            input.shape().len() == 2,
-            "reduce_sum_dim: only 2D supported"
+            dim < input.shape().len(),
+            "reduce_sum_dim: dimension out of bounds"
         );
-        ensure!(dim <= 1, "reduce_sum_dim: only dims 0 or 1 supported");
         let rows = input.shape()[0];
-        let cols = input.shape()[1];
+        let cols = input.shape().get(1).copied().unwrap_or(1);
         let layout = input.view().layout();
         if let GpuTensorLayout::Transpose(info) = layout {
             ensure!(
-                info.base_rows == cols && info.base_cols == rows,
+                input.shape().len() == 2 && info.base_rows == cols && info.base_cols == rows,
                 "reduce_sum_dim: transpose view differs from source geometry"
             );
         }
         self.admit_mean_storage(input)?;
+        ensure!(
+            input.shape().len() == 2,
+            "reduce_sum_dim: only 2D supported"
+        );
+        ensure!(dim <= 1, "reduce_sum_dim: only dims 0 or 1 supported");
         ensure!(
             input.physical().storage() == GpuTensorStorage::Real,
             "reduce_sum_dim: real storage is required"

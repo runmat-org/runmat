@@ -6,6 +6,32 @@ use runmat_accelerate_api::{
 };
 
 #[test]
+fn complex_mean_dim_reports_capability_only_after_owner_and_dimension_admission() {
+    let provider = InProcessProvider::new();
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[
+                1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0, 5.0, 50.0, 6.0, 60.0, 7.0, 70.0, 8.0,
+                80.0,
+            ]),
+            shape: &[2, 2, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        })
+        .unwrap();
+    for dim in 0..3 {
+        let error = block_on(provider.reduce_mean_dim(&input, dim)).unwrap_err();
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &error
+        ));
+    }
+    let error = block_on(provider.reduce_mean_dim(&input, 3)).unwrap_err();
+    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+        &error
+    ));
+    input.allocation_lease().validate_live().unwrap();
+}
+
+#[test]
 fn ordinary_single_global_uses_double_accumulator_before_output_class_selection() {
     let provider = InProcessProvider::new();
     let input = provider
