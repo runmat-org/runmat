@@ -18,7 +18,7 @@ use crate::{
 };
 
 const CHUNK_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-signal-chunk/v1\0";
-const RESULT_ENVELOPE_BYTES: usize = 4096;
+pub(crate) const RESULT_ENVELOPE_BYTES: usize = 4096;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

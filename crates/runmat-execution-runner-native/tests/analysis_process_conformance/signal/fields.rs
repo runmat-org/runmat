@@ -42,12 +42,6 @@ pub(super) async fn run() {
                 component_count: width,
             });
             assert_eq!(deferred.shape().realized_component_count(Some(nodes)), None);
-            let transition =
-                runmat_analysis_execution::SignalTopologyResolution::derive(&deferred, &mesh)
-                    .unwrap();
-            transition.validate_for(&deferred, &mesh).unwrap();
-            assert_eq!(transition.resolved(), &authored);
-            let authored = transition.resolved().clone();
             runmat_analysis_core::validate_physical_signals(std::slice::from_ref(&authored))
                 .unwrap();
             runmat_analysis_core::validate_physical_signals(std::slice::from_ref(&explicit))
@@ -59,7 +53,8 @@ pub(super) async fn run() {
                     scale.push((10 * node + component + 1) as f64);
                 }
             }
-            let fixture = SignalFixture::prepare(authored, explicit, scale, Some(&mesh)).await;
+            let fixture =
+                SignalFixture::prepare_named_field(deferred, explicit, scale, &mesh).await;
             assert_eq!(fixture.prepared.program.chunks.len(), 3);
             fixture
                 .prepared

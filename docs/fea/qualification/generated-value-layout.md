@@ -103,3 +103,31 @@ yet prove native whole-study deferred-input scheduling, resource admission, rest
 or cold publication of the authored-to-resolved closure. Those remain required before
 advertising executable authored spatial generators. No solver or production gate is
 promoted by semantic checking or this fixture.
+
+## Frozen deferred callable preparation
+
+`FrozenDeferredSignal` is distinct from an executable prepared materialization. It
+retains the original authored declaration, admitted named callable, complete portable
+executable, available capabilities and bounded inline-result policy, but no chunks.
+Static facts are recovered from the executable's authenticated canonical AnalysisStore
+component. Supported analysis/catalog revisions, unique ordered function inventory,
+entrypoint, capabilities and existing effect/signature rules are checked. Separately
+transported function facts cannot override that component. A self-consistent envelope
+is not external authority: transported frozen contracts must match the independently
+retained expected intent.
+
+Resolution rederives admission from those same executable facts against the mesh-bound
+declaration, preserving invocation/provenance and creating a new materialization identity.
+Only then are count-bound chunks and portable requests prepared. Cold validation of a
+resolved expectation rederives this chain from original expected intent plus authenticated
+mesh; it does not rerun user code. Direct artifact arguments and bound runtime closures
+are not admitted by this named deferred-input contract.
+
+The process matrix now exercises actual named field compilation, frozen-contract
+serialization/reopening, resolution and canonical values across all four placements.
+The ordinary vector fixture still covers a captured anonymous callable. The shared
+frozen-project fixture compiler replaces duplicated preparation. This remains a
+fixture-mesh chain, not whole-study root transport, post-mesh scheduling, mesh-specific
+sweep deduplication, publication/restart or exact preprocessing resource admission.
+In particular, thermal excitation consumers still require scalar samples: Node1
+temperature generator transport does not qualify a thermal Node1 excitation solve.

@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 mod capture;
+pub(crate) mod executable;
 
 use capture::validate_capture_contract;
 
