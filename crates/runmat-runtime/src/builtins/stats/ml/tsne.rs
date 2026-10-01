@@ -286,9 +286,12 @@ fn ensure_exact_tsne_floating_options(rest: &[AdmittedOption]) -> BuiltinResult<
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(with_tsne_context)
+    match value {
+        Value::GpuTensor(_) => gather_if_needed_async(&value)
+            .await
+            .map_err(with_tsne_context),
+        host => Ok(host),
+    }
 }
 
 fn preflight_observations(value: &Value) -> BuiltinResult<()> {

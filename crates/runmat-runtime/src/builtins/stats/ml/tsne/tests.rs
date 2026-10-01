@@ -299,6 +299,16 @@ fn tsne_rejects_lossy_integer_floating_boundaries() {
 }
 
 #[tokio::test]
+async fn tsne_host_materialization_preserves_owned_tensor_buffer() {
+    let input = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+    let buffer = input.as_f64_slice().unwrap().as_ptr();
+    let Value::Tensor(output) = gather(Value::Tensor(input)).await.unwrap() else {
+        panic!("host tensor remains a tensor");
+    };
+    assert_eq!(output.as_f64_slice().unwrap().as_ptr(), buffer);
+}
+
+#[tokio::test]
 async fn tsne_rejects_bad_initial_y_shape() {
     let err = tsne_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]),
