@@ -497,6 +497,44 @@ enum OutputKind {
     Categorical,
 }
 
+impl OutputKind {
+    fn from_public(text: &str) -> Option<Self> {
+        Some(match canonical(text).as_str() {
+            "double" => Self::Numeric(NumericDType::F64),
+            "single" => Self::Numeric(NumericDType::F32),
+            "int8" => Self::Numeric(NumericDType::I8),
+            "int16" => Self::Numeric(NumericDType::I16),
+            "int32" => Self::Numeric(NumericDType::I32),
+            "int64" => Self::Numeric(NumericDType::I64),
+            "uint8" => Self::Numeric(NumericDType::U8),
+            "uint16" => Self::Numeric(NumericDType::U16),
+            "uint32" => Self::Numeric(NumericDType::U32),
+            "uint64" => Self::Numeric(NumericDType::U64),
+            "logical" => Self::Logical,
+            "string" => Self::String,
+            "cell" | "cellstr" => Self::Cell,
+            "categorical" => Self::Categorical,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EncodingOptionName {
+    Classes,
+    OutputType,
+}
+
+impl EncodingOptionName {
+    fn from_public(text: &str) -> Option<Self> {
+        match canonical(text).as_str() {
+            "classnames" | "classes" => Some(Self::Classes),
+            "outputtype" | "typename" => Some(Self::OutputType),
+            _ => None,
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "dummyvar",
     category = "stats/summary",
@@ -698,20 +736,20 @@ fn onehotdecode_requests_broad_output(rest: &[Value]) -> bool {
     if rest.len() == 1 {
         return scalar_text(&rest[0], "onehotdecode output type")
             .ok()
-            .is_some_and(|text| {
-                matches!(canonical(&text).as_str(), "logical" | "cell" | "cellstr")
-            });
+            .and_then(|text| OutputKind::from_public(&text))
+            .is_some_and(|kind| matches!(kind, OutputKind::Logical | OutputKind::Cell));
     }
     rest.chunks_exact(2).any(|pair| {
         let Ok(name) = scalar_text(&pair[0], "onehotdecode option name") else {
             return false;
         };
-        if !matches!(canonical(&name).as_str(), "outputtype" | "typename") {
+        if EncodingOptionName::from_public(&name) != Some(EncodingOptionName::OutputType) {
             return false;
         }
         scalar_text(&pair[1], "onehotdecode output type")
             .ok()
-            .is_some_and(|text| matches!(canonical(&text).as_str(), "logical" | "cell" | "cellstr"))
+            .and_then(|text| OutputKind::from_public(&text))
+            .is_some_and(|kind| matches!(kind, OutputKind::Logical | OutputKind::Cell))
     })
 }
 
@@ -720,7 +758,9 @@ fn onehot_option_alias_requested(rest: &[Value], allows_positional_prefix: bool)
     rest[offset..].chunks_exact(2).any(|pair| {
         scalar_text(&pair[0], "onehot option name")
             .ok()
-            .is_some_and(|name| matches!(canonical(&name).as_str(), "outputtype" | "typename"))
+            .is_some_and(|name| {
+                EncodingOptionName::from_public(&name) == Some(EncodingOptionName::OutputType)
+            })
     })
 }
 
@@ -1015,19 +1055,19 @@ fn parse_onehotencode_options(rest: Vec<Value>) -> BuiltinResult<OnehotEncodeOpt
         ));
     }
     while idx < rest.len() {
-        let name = canonical(&scalar_text(&rest[idx], "option name")?);
-        match name.as_str() {
-            "classnames" | "classes" => {
+        let name = scalar_text(&rest[idx], "option name")?;
+        match EncodingOptionName::from_public(&name) {
+            Some(EncodingOptionName::Classes) => {
                 options.classes = Some(labels_from_value("onehotencode", rest[idx + 1].clone())?);
             }
-            "outputtype" | "typename" => {
+            Some(EncodingOptionName::OutputType) => {
                 let text = scalar_text(&rest[idx + 1], "OutputType")?;
                 options.output = Some(parse_output_kind("onehotencode", &text)?);
             }
-            other => {
+            None => {
                 return Err(invalid(
                     "onehotencode",
-                    format!("onehotencode: unsupported option '{other}'"),
+                    format!("onehotencode: unsupported option '{}'", canonical(&name)),
                 ))
             }
         }
@@ -1056,16 +1096,16 @@ fn parse_onehotdecode_options(rest: Vec<Value>) -> BuiltinResult<OnehotDecodeOpt
     }
     let mut idx = 0usize;
     while idx < rest.len() {
-        let name = canonical(&scalar_text(&rest[idx], "option name")?);
-        match name.as_str() {
-            "outputtype" | "typename" => {
+        let name = scalar_text(&rest[idx], "option name")?;
+        match EncodingOptionName::from_public(&name) {
+            Some(EncodingOptionName::OutputType) => {
                 let text = scalar_text(&rest[idx + 1], "OutputType")?;
                 options.output = Some(parse_output_kind("onehotdecode", &text)?);
             }
-            other => {
+            Some(EncodingOptionName::Classes) | None => {
                 return Err(invalid(
                     "onehotdecode",
-                    format!("onehotdecode: unsupported option '{other}'"),
+                    format!("onehotdecode: unsupported option '{}'", canonical(&name)),
                 ))
             }
         }
@@ -1479,26 +1519,12 @@ fn labels_to_value(
 }
 
 fn parse_output_kind(name: &str, text: &str) -> BuiltinResult<OutputKind> {
-    match canonical(text).as_str() {
-        "double" => Ok(OutputKind::Numeric(NumericDType::F64)),
-        "single" => Ok(OutputKind::Numeric(NumericDType::F32)),
-        "int8" => Ok(OutputKind::Numeric(NumericDType::I8)),
-        "int16" => Ok(OutputKind::Numeric(NumericDType::I16)),
-        "int32" => Ok(OutputKind::Numeric(NumericDType::I32)),
-        "int64" => Ok(OutputKind::Numeric(NumericDType::I64)),
-        "uint8" => Ok(OutputKind::Numeric(NumericDType::U8)),
-        "uint16" => Ok(OutputKind::Numeric(NumericDType::U16)),
-        "uint32" => Ok(OutputKind::Numeric(NumericDType::U32)),
-        "uint64" => Ok(OutputKind::Numeric(NumericDType::U64)),
-        "logical" => Ok(OutputKind::Logical),
-        "string" => Ok(OutputKind::String),
-        "cell" | "cellstr" => Ok(OutputKind::Cell),
-        "categorical" => Ok(OutputKind::Categorical),
-        other => Err(invalid(
+    OutputKind::from_public(text).ok_or_else(|| {
+        invalid(
             name,
-            format!("{name}: unsupported output type '{other}'"),
-        )),
-    }
+            format!("{name}: unsupported output type '{}'", canonical(text)),
+        )
+    })
 }
 
 fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
