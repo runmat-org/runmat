@@ -24,12 +24,11 @@ pub(crate) enum LiteralReductionOutput {
     Native,
 }
 
-/// The scalar result boundary differs between owners. `mean` and `sum`
-/// promote by default; `median` preserves exact integer and logical scalars.
+/// The legacy scalar projection differs between remaining owners. `median`
+/// preserves integer and logical scalars, while `min` preserves integers.
 /// `std` and `var` reject integer data rather than silently promoting it.
 #[derive(Clone, Copy)]
 pub(super) enum ScalarResultClass {
-    Promoted,
     Preserved,
     PreserveInteger,
     FloatingOnly,
