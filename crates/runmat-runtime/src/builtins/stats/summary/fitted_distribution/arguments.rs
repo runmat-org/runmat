@@ -17,10 +17,9 @@ pub(super) async fn parse_named_eval_parameters(
 }
 
 pub(super) async fn parse_named_random_args(
-    distribution: Value,
+    kind: DistributionKind,
     rest: Vec<Value>,
 ) -> BuiltinResult<(FittedDistribution, Vec<usize>)> {
-    let kind = parse_distribution_name_for(RANDOM_NAME, &distribution)?;
     let parameter_count = kind.parameter_names().len();
     if rest.len() < parameter_count {
         return Err(invalid_for(
@@ -99,69 +98,40 @@ pub(super) async fn parse_parameter_tensors(
     }
 }
 
-pub(super) async fn parse_fit_options(rest: Vec<Value>) -> BuiltinResult<FitOptions> {
-    if !rest.len().is_multiple_of(2) {
-        return Err(invalid("fitdist: name-value options must be paired"));
-    }
+pub(super) async fn parse_fit_options(frequency: Option<&Value>) -> BuiltinResult<FitOptions> {
     let mut options = FitOptions::default();
-    for pair in rest.chunks_exact(2) {
-        let name =
-            keyword_of(&pair[0]).ok_or_else(|| invalid("fitdist: option names must be text"))?;
-        match FittedFitOption::from_keyword(&name) {
-            Some(FittedFitOption::Frequency) => {
-                if options.frequency.is_some() {
-                    return Err(invalid("fitdist: Frequency may be specified only once"));
-                }
-                let tensor = fitdist_value_to_tensor(pair[1].clone(), "Frequency").await?;
-                options.frequency = Some(tensor::tensor_into_values_f64(tensor));
-            }
-            Some(FittedFitOption::Censoring) => {
-                return Err(invalid(
-                    "fitdist: Censoring is not supported for fitted distributions yet",
-                ))
-            }
-            Some(FittedFitOption::Options | FittedFitOption::By) => {
-                return Err(invalid(format!(
-                    "fitdist: option '{name}' is not supported yet"
-                )))
-            }
-            None => return Err(invalid(format!("fitdist: unknown option '{name}'"))),
-        }
+    if let Some(frequency) = frequency {
+        let tensor = fitdist_value_to_tensor(frequency.clone(), "Frequency").await?;
+        options.frequency = Some(tensor::tensor_into_values_f64(tensor));
     }
     Ok(options)
 }
 
-pub(super) fn ensure_fitdist_integer_extensions(data: &Value, rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn ensure_fitdist_integer_extensions(
+    data: &Value,
+    frequency: Option<&Value>,
+) -> BuiltinResult<()> {
     if is_typed_integer_value(data) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &FITDIST_INTEGER_DATA_EXTENSION,
             FITDIST_NAME,
         )?;
     }
-    for pair in rest.chunks_exact(2) {
-        if keyword_of(&pair[0])
-            .as_deref()
-            .and_then(FittedFitOption::from_keyword)
-            == Some(FittedFitOption::Frequency)
-            && is_typed_integer_value(&pair[1])
-        {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &FITDIST_INTEGER_FREQUENCY_EXTENSION,
-                FITDIST_NAME,
-            )?;
-        }
+    if frequency.is_some_and(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FITDIST_INTEGER_FREQUENCY_EXTENSION,
+            FITDIST_NAME,
+        )?;
     }
     Ok(())
 }
 
 pub(super) fn ensure_fitdist_resident_fallback_extension(
     data: &Value,
-    rest: &[Value],
+    frequency: Option<&Value>,
 ) -> BuiltinResult<()> {
     if matches!(data, Value::GpuTensor(_))
-        || rest
-            .iter()
-            .any(|value| matches!(value, Value::GpuTensor(_)))
+        || frequency.is_some_and(|value| matches!(value, Value::GpuTensor(_)))
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &FITDIST_RESIDENT_FALLBACK_EXTENSION,

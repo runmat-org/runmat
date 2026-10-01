@@ -77,10 +77,11 @@ pub(super) fn pdf_scalar_raw(kind: DistributionKind, params: &[f64], x: f64) -> 
     }
 }
 
-pub(super) fn cdf_scalar_with_tail(fit: &FittedDistribution, x: f64, upper: bool) -> f64 {
+pub(super) fn cdf_scalar_with_tail(fit: &FittedDistribution, x: f64, tail: CdfTail) -> f64 {
     if x.is_nan() {
         return f64::NAN;
     }
+    let upper = matches!(tail, CdfTail::Upper);
     match fit.kind {
         DistributionKind::Normal => {
             let [mu, sigma] = two(&fit.parameters);

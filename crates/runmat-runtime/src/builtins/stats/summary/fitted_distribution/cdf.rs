@@ -3,25 +3,21 @@ use super::*;
 pub(super) async fn evaluate_cdf_entry(
     distribution: Value,
     x: Value,
-    rest: Vec<Value>,
+    mut rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let parameter_end = if rest
+    let tail = if rest
         .last()
         .and_then(keyword_of)
         .is_some_and(|value| value.eq_ignore_ascii_case("upper"))
     {
-        rest.len() - 1
+        rest.pop();
+        CdfTail::Upper
     } else {
-        rest.len()
+        CdfTail::Lower
     };
-    admission::evaluation(
-        CDF_NAME,
-        &distribution,
-        &x,
-        &rest[..parameter_end],
-        admission::EvaluationKind::Cumulative,
-    )?;
-    evaluate_cdf(distribution, x, rest).await
+    let selection = DistributionSelection::from_value(FittedOperation::Cumulative, &distribution)?;
+    admission::evaluation(CDF_NAME, &selection, &x, &rest)?;
+    evaluate_cdf(selection, x, rest, tail).await
 }
 
 #[derive(Clone, Copy)]
@@ -31,40 +27,27 @@ pub(super) enum CdfOutputPrecision {
 }
 
 pub(super) async fn evaluate_cdf(
-    distribution: Value,
+    selection: DistributionSelection,
     input: Value,
-    mut rest: Vec<Value>,
+    rest: Vec<Value>,
+    tail: CdfTail,
 ) -> BuiltinResult<Value> {
-    let upper = rest
-        .last()
-        .and_then(keyword_of)
-        .is_some_and(|keyword| keyword.eq_ignore_ascii_case("upper"));
-    if upper {
-        rest.pop();
-    }
-
-    if matches!(distribution, Value::Object(_)) {
-        if !rest.is_empty() {
-            return Err(invalid_for(
-                CDF_NAME,
-                "cdf: fitted distribution object form accepts only x and optional 'upper'",
-            ));
+    let kind = match selection {
+        DistributionSelection::Fitted(fit) => {
+            ensure_cdf_extensions(&input, &[])?;
+            let precision = cdf_output_precision(&[&input]);
+            let gpu_source = first_gpu_source(&[&input]);
+            let x = cdf_value_to_tensor(input).await?;
+            ensure_exact_cdf_integer_boundary(&x, "x")?;
+            let shape = x.shape.clone();
+            let data = tensor::tensor_into_values_f64(x)
+                .into_iter()
+                .map(|value| cdf_scalar_with_tail(&fit, value, tail))
+                .collect();
+            return finish_cdf(shape, data, precision, gpu_source);
         }
-        ensure_cdf_extensions(&input, &[])?;
-        let precision = cdf_output_precision(&[&input]);
-        let gpu_source = first_gpu_source(&[&input]);
-        let fit = distribution_from_value_for(FittedOperation::Cumulative, &distribution)?;
-        let x = cdf_value_to_tensor(input).await?;
-        ensure_exact_cdf_integer_boundary(&x, "x")?;
-        let shape = x.shape.clone();
-        let data = tensor::tensor_into_values_f64(x)
-            .into_iter()
-            .map(|value| cdf_scalar_with_tail(&fit, value, upper))
-            .collect();
-        return finish_cdf(shape, data, precision, gpu_source);
-    }
-
-    let kind = parse_distribution_name_for(CDF_NAME, &distribution)?;
+        DistributionSelection::Named(kind) => kind,
+    };
     ensure_cdf_extensions(&input, &rest)?;
     let mut original_inputs = Vec::with_capacity(rest.len() + 1);
     original_inputs.push(&input);
@@ -90,7 +73,7 @@ pub(super) async fn evaluate_cdf(
             nlogl: f64::NAN,
             observations: f64::NAN,
         };
-        data.push(cdf_scalar_with_tail(&fit, x_values[index], upper));
+        data.push(cdf_scalar_with_tail(&fit, x_values[index], tail));
     }
     finish_cdf(shape, data, precision, gpu_source)
 }

@@ -5,19 +5,14 @@ pub(super) async fn evaluate_pdf_entry(
     x: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    admission::evaluation(
-        PDF_NAME,
-        &distribution,
-        &x,
-        &rest,
-        admission::EvaluationKind::Density,
-    )?;
-    ensure_pdf_integer_extensions(&distribution, &x, &rest).await?;
-    evaluate_pdf(distribution, x, rest).await
+    let selection = DistributionSelection::from_value(FittedOperation::Density, &distribution)?;
+    admission::evaluation(PDF_NAME, &selection, &x, &rest)?;
+    ensure_pdf_integer_extensions(&selection, &x, &rest).await?;
+    evaluate_pdf(selection, x, rest).await
 }
 
 pub(super) async fn ensure_pdf_integer_extensions(
-    distribution: &Value,
+    selection: &DistributionSelection,
     input: &Value,
     parameters: &[Value],
 ) -> BuiltinResult<()> {
@@ -25,7 +20,7 @@ pub(super) async fn ensure_pdf_integer_extensions(
         crate::compatibility::ensure_builtin_extension_enabled(&PDF_INTEGER_X_EXTENSION, PDF_NAME)?;
         ensure_exact_pdf_integer_boundary(input, "x").await?;
     }
-    if !matches!(distribution, Value::Object(_)) {
+    if matches!(selection, DistributionSelection::Named(_)) {
         for parameter in parameters
             .iter()
             .filter(|value| is_typed_integer_value(value))
@@ -54,30 +49,24 @@ pub(super) async fn ensure_exact_pdf_integer_boundary(
 }
 
 pub(super) async fn evaluate_pdf(
-    distribution: Value,
+    selection: DistributionSelection,
     input: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    if matches!(distribution, Value::Object(_)) {
-        if !rest.is_empty() {
-            return Err(invalid_for(
-                PDF_NAME,
-                "pdf: fitted distribution object form accepts exactly two inputs",
-            ));
+    let kind = match selection {
+        DistributionSelection::Fitted(fit) => {
+            let precision = cdf_output_precision(&[&input]);
+            let gpu_source = first_gpu_source(&[&input]);
+            let x = value_to_tensor(PDF_NAME, input).await?;
+            let shape = x.shape.clone();
+            let data = tensor::tensor_into_values_f64(x)
+                .into_iter()
+                .map(|value| pdf_scalar(&fit, value))
+                .collect();
+            return finish_pdf(shape, data, precision, gpu_source);
         }
-        let precision = cdf_output_precision(&[&input]);
-        let gpu_source = first_gpu_source(&[&input]);
-        let fit = distribution_from_value_for(FittedOperation::Density, &distribution)?;
-        let x = value_to_tensor(PDF_NAME, input).await?;
-        let shape = x.shape.clone();
-        let data = tensor::tensor_into_values_f64(x)
-            .into_iter()
-            .map(|value| pdf_scalar(&fit, value))
-            .collect();
-        return finish_pdf(shape, data, precision, gpu_source);
-    }
-
-    let kind = parse_distribution_name_for(PDF_NAME, &distribution)?;
+        DistributionSelection::Named(kind) => kind,
+    };
     let mut original_inputs = Vec::with_capacity(rest.len() + 1);
     original_inputs.push(&input);
     original_inputs.extend(rest.iter());

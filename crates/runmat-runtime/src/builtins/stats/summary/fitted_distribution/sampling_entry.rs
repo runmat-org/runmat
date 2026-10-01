@@ -6,16 +6,13 @@ pub(super) async fn sample_distribution(
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     check_fitted_cancellation(runtime, FittedOperation::Sampling)?;
-    admission::random(&distribution, &rest)?;
-    ensure_random_extensions(&distribution, &rest).await?;
-    let gpu_source = random_gpu_source(&distribution, &rest)?;
-    let (fit, shape) = if matches!(distribution, Value::Object(_)) {
-        (
-            distribution_from_value_for(FittedOperation::Sampling, &distribution)?,
-            parse_shape_args(&rest).await?,
-        )
-    } else {
-        parse_named_random_args(distribution, rest).await?
+    let selection = DistributionSelection::from_value(FittedOperation::Sampling, &distribution)?;
+    admission::random(&selection, &rest)?;
+    ensure_random_extensions(&selection, &rest).await?;
+    let gpu_source = random_gpu_source(&selection, &rest)?;
+    let (fit, shape) = match selection {
+        DistributionSelection::Fitted(fit) => (fit, parse_shape_args(&rest).await?),
+        DistributionSelection::Named(kind) => parse_named_random_args(kind, rest).await?,
     };
     let len = checked_output_len(&shape)?;
     let data = random_samples(&fit, len, || {
@@ -25,25 +22,19 @@ pub(super) async fn sample_distribution(
 }
 
 pub(super) fn random_gpu_source(
-    distribution: &Value,
+    selection: &DistributionSelection,
     rest: &[Value],
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let parameter_count = if matches!(distribution, Value::Object(_)) {
-        0
-    } else {
-        parse_distribution_name_for(RANDOM_NAME, distribution)?
-            .parameter_names()
-            .len()
-    };
     gpu_helpers::select_resident_output_source(
         rest.iter()
-            .take(parameter_count)
+            .take(selection.parameter_count())
             .filter_map(|value| match value {
                 Value::GpuTensor(handle) => Some(handle.clone()),
                 _ => None,
             }),
         RANDOM_NAME,
     )
+    .map_err(|error| with_fitted_context(RANDOM_NAME, error))
 }
 
 pub(super) fn finish_random(
@@ -57,7 +48,8 @@ pub(super) fn finish_random(
         return Ok(tensor::tensor_into_value(tensor));
     };
     let restored =
-        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(tensor), RANDOM_NAME)?;
+        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(tensor), RANDOM_NAME)
+            .map_err(|error| with_fitted_context(RANDOM_NAME, error))?;
     if runmat_accelerate_api::handle_is_explicit(&source)
         && !matches!(restored, Value::GpuTensor(_))
     {
@@ -70,19 +62,13 @@ pub(super) fn finish_random(
 }
 
 pub(super) async fn ensure_random_extensions(
-    distribution: &Value,
+    selection: &DistributionSelection,
     rest: &[Value],
 ) -> BuiltinResult<()> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, RANDOM_NAME)?;
     }
-    let parameter_count = if matches!(distribution, Value::Object(_)) {
-        0
-    } else {
-        parse_distribution_name_for(RANDOM_NAME, distribution)?
-            .parameter_names()
-            .len()
-    };
+    let parameter_count = selection.parameter_count();
     for (index, value) in rest.iter().enumerate() {
         if index < parameter_count {
             crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(

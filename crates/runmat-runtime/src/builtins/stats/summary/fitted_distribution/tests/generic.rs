@@ -25,20 +25,17 @@ fn fitted_gamma_inverse_polls_during_search() {
 #[test]
 fn malformed_calls_fail_at_host_visible_admission() {
     let wrong_class = Value::Object(ObjectInstance::new("UnrelatedClass"));
-    assert!(admission::evaluation(
-        PDF_NAME,
-        &wrong_class,
-        &Value::Num(0.0),
-        &[],
-        admission::EvaluationKind::Density,
+    assert!(DistributionSelection::from_value(FittedOperation::Density, &wrong_class).is_err());
+    let normal = DistributionSelection::from_value(
+        FittedOperation::Cumulative,
+        &Value::String("Normal".into()),
     )
-    .is_err());
+    .unwrap();
     assert!(admission::evaluation(
         CDF_NAME,
-        &Value::String("Normal".into()),
+        &normal,
         &Value::Num(0.0),
         &[Value::Num(0.0), Value::Num(1.0), Value::Num(2.0)],
-        admission::EvaluationKind::Cumulative,
     )
     .is_err());
     assert!(admission::fit(
@@ -47,7 +44,12 @@ fn malformed_calls_fail_at_host_visible_admission() {
         &[Value::String("Unsupported".into()), Value::Num(1.0)],
     )
     .is_err());
-    assert!(admission::random(&Value::String("Gamma".into()), &[Value::Num(2.0)],).is_err());
+    let gamma = DistributionSelection::from_value(
+        FittedOperation::Sampling,
+        &Value::String("Gamma".into()),
+    )
+    .unwrap();
+    assert!(admission::random(&gamma, &[Value::Num(2.0)]).is_err());
 }
 
 #[test]
@@ -55,26 +57,46 @@ fn malformed_fitted_object_errors_use_the_invoked_public_operation() {
     let malformed = Value::Object(ObjectInstance::new(
         runmat_types::standard::PROBABILITY_DISTRIBUTION.to_string(),
     ));
-    let pdf = admission::evaluation(
-        PDF_NAME,
-        &malformed,
-        &Value::Num(0.0),
-        &[],
-        admission::EvaluationKind::Density,
-    )
-    .unwrap_err();
+    let pdf = DistributionSelection::from_value(FittedOperation::Density, &malformed)
+        .err()
+        .unwrap();
     assert_eq!(pdf.identifier(), Some("RunMat:pdf:InvalidArgument"));
-    let cdf = admission::evaluation(
-        CDF_NAME,
-        &malformed,
-        &Value::Num(0.0),
-        &[],
-        admission::EvaluationKind::Cumulative,
-    )
-    .unwrap_err();
+    let cdf = DistributionSelection::from_value(FittedOperation::Cumulative, &malformed)
+        .err()
+        .unwrap();
     assert_eq!(cdf.identifier(), Some("RunMat:cdf:InvalidArgument"));
-    let random = admission::random(&malformed, &[]).unwrap_err();
+    let random = DistributionSelection::from_value(FittedOperation::Sampling, &malformed)
+        .err()
+        .unwrap();
     assert_eq!(random.identifier(), Some("RunMat:random:InvalidArgument"));
+}
+
+#[test]
+fn random_provider_error_context_preserves_the_original_identifier() {
+    let provider_error = build_runtime_error("provider rejected output")
+        .with_identifier("Provider:Rejected")
+        .build();
+    let contextual = with_fitted_context(RANDOM_NAME, provider_error);
+    assert_eq!(contextual.identifier(), Some("Provider:Rejected"));
+    assert_eq!(contextual.context.builtin.as_deref(), Some(RANDOM_NAME));
+}
+
+#[test]
+fn fitted_preflight_carries_typed_family_and_frequency_roles() {
+    let options = vec![Value::from("freq"), Value::Num(1.0)];
+    let admitted = admission::fit(&Value::Num(2.0), &Value::from("norm"), &options)
+        .expect("public aliases decode at admission");
+    assert_eq!(admitted.kind, DistributionKind::Normal);
+    assert!(matches!(admitted.frequency, Some(Value::Num(value)) if *value == 1.0));
+
+    let selected =
+        DistributionSelection::from_value(FittedOperation::Sampling, &Value::from("poiss"))
+            .expect("public family decodes once");
+    assert!(matches!(
+        &selected,
+        DistributionSelection::Named(DistributionKind::Poisson)
+    ));
+    assert_eq!(selected.parameter_count(), 1);
 }
 
 #[test]

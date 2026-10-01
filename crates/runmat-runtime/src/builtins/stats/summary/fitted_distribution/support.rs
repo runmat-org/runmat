@@ -8,6 +8,33 @@ pub(super) enum FittedOperation {
     Sampling,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum CdfTail {
+    Lower,
+    Upper,
+}
+
+pub(super) enum DistributionSelection {
+    Fitted(FittedDistribution),
+    Named(DistributionKind),
+}
+
+impl DistributionSelection {
+    pub(super) fn from_value(operation: FittedOperation, value: &Value) -> BuiltinResult<Self> {
+        match value {
+            Value::Object(_) => distribution_from_value_for(operation, value).map(Self::Fitted),
+            _ => parse_distribution_name_for(operation.name(), value).map(Self::Named),
+        }
+    }
+
+    pub(super) fn parameter_count(&self) -> usize {
+        match self {
+            Self::Fitted(_) => 0,
+            Self::Named(kind) => kind.parameter_names().len(),
+        }
+    }
+}
+
 impl FittedOperation {
     pub(super) const fn name(self) -> &'static str {
         match self {
