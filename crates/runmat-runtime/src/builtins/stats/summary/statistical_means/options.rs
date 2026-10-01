@@ -100,11 +100,17 @@ pub(super) async fn parse(kind: ReductionKind, args: Vec<Value>) -> BuiltinResul
         index += 1;
     }
     let axes = axes.unwrap_or(Axes::Default);
-    if weights.is_some()
-        && (matches!(axes, Axes::All)
-            || matches!(&axes, Axes::Dims(dimensions) if dimensions.len() > 1))
-    {
-        return Err(invalid(kind, "Weights cannot accompany all or vecdim"));
+    if weights.is_some() {
+        match &axes {
+            Axes::All => return Err(invalid(kind, "weights are not supported with \"all\"")),
+            Axes::Dims(dimensions) if dimensions.len() > 1 => {
+                return Err(invalid(
+                    kind,
+                    "weights are not supported with vector dimensions",
+                ));
+            }
+            Axes::Default | Axes::Dims(_) => {}
+        }
     }
     Ok(Options {
         axes,

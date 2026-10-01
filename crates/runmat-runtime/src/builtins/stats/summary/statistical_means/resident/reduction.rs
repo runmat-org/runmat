@@ -7,7 +7,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 
 pub(super) fn selected_axes(shape: &[usize], axes: &Axes) -> Vec<usize> {
     match axes {
-        Axes::Default => vec![shape.iter().position(|extent| *extent > 1).unwrap_or(0)],
+        Axes::Default => vec![shape.iter().position(|extent| *extent != 1).unwrap_or(0)],
         Axes::All => (0..shape.len()).collect(),
         Axes::Dims(dimensions) => dimensions
             .iter()

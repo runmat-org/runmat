@@ -189,7 +189,7 @@ pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinRes
         }),
         Value::ComplexTensor(tensor) => {
             let dtype = tensor.numeric_dtype();
-            let shape = tensor::default_shape_for(&tensor.shape, tensor.len());
+            let shape = preserved_shape(&tensor.shape, tensor.len());
             let points = (0..tensor.len())
                 .map(|index| {
                     let (real, imaginary) = tensor
@@ -209,7 +209,7 @@ pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinRes
             })
         }
         Value::CharArray(chars) if kind == ReductionKind::RootMeanSquare => {
-            let shape = tensor::default_shape_for(&chars.shape, chars.data.len());
+            let shape = preserved_shape(&chars.shape, chars.data.len());
             let points = chars
                 .to_column_major()
                 .into_iter()
@@ -232,7 +232,7 @@ pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinRes
 
 fn from_tensor(input: Tensor) -> BuiltinResult<HostData> {
     let dtype = input.numeric_dtype();
-    let shape = tensor::default_shape_for(&input.shape, input.len());
+    let shape = preserved_shape(&input.shape, input.len());
     let points = (0..input.len())
         .map(|index| {
             Point::real(Component::from(
@@ -248,6 +248,14 @@ fn from_tensor(input: Tensor) -> BuiltinResult<HostData> {
         dtype,
         complex: false,
     })
+}
+
+fn preserved_shape(shape: &[usize], len: usize) -> Vec<usize> {
+    if shape.is_empty() {
+        tensor::default_shape_for(shape, len)
+    } else {
+        shape.to_vec()
+    }
 }
 
 pub(super) fn integer_data(value: &Value) -> bool {

@@ -51,9 +51,68 @@ fn malformed_weighted_selector_is_rejected() {
 }
 
 #[test]
-fn geometric_input_domain_is_checked_before_a_result_is_published() {
-    let input = tensor(vec![-1.0, 4.0], vec![2, 1], NumericDType::F64);
-    assert!(block_on(geomean::geomean_builtin(input, vec![])).is_err());
+fn geometric_negative_is_nan_only_in_its_affected_slice() {
+    let input = tensor(vec![-1.0, 4.0, 9.0, 16.0], vec![2, 2], NumericDType::F64);
+    let result = block_on(geomean::geomean_builtin(input, vec![])).unwrap();
+    let Value::Tensor(result) = result else {
+        panic!("expected per-column means")
+    };
+    let values = result.materialize_f64();
+    assert!(values[0].is_nan());
+    assert_eq!(values[1], 12.0);
+}
+
+#[test]
+fn geometric_omitnan_skips_missing_but_not_negative_observations() {
+    let input = tensor(
+        vec![f64::NAN, -1.0, 9.0, 16.0, 4.0, 25.0],
+        vec![2, 3],
+        NumericDType::F64,
+    );
+    let result = block_on(geomean::geomean_builtin(
+        input,
+        vec![Value::from("omitnan")],
+    ))
+    .unwrap();
+    let Value::Tensor(result) = result else {
+        panic!("expected per-column means")
+    };
+    let values = result.materialize_f64();
+    assert!(values[0].is_nan());
+    assert_eq!(values[1], 12.0);
+    assert_eq!(values[2], 10.0);
+}
+
+#[test]
+fn geometric_and_harmonic_singleton_or_trailing_axis_are_identity() {
+    let input = tensor(vec![-3.0, 4.0], vec![2, 1], NumericDType::F64);
+    for geometric in [true, false] {
+        for dimension in [2.0, 100.0] {
+            let result = if geometric {
+                block_on(geomean::geomean_builtin(
+                    input.clone(),
+                    vec![Value::Num(dimension)],
+                ))
+            } else {
+                block_on(harmmean::harmmean_builtin(
+                    input.clone(),
+                    vec![Value::Num(dimension)],
+                ))
+            }
+            .unwrap();
+            let Value::Tensor(result) = result else {
+                panic!("expected unchanged vector")
+            };
+            assert_eq!(result.shape, vec![2, 1]);
+            let values = result.materialize_f64();
+            if geometric {
+                assert!(values[0].is_nan());
+            } else {
+                assert_eq!(values[0], -3.0);
+            }
+            assert_eq!(values[1], 4.0);
+        }
+    }
 }
 
 #[test]
@@ -92,6 +151,7 @@ fn rmse_scales_residual_components_before_subtraction_overflows() {
 
 #[test]
 fn mixed_wide_integer_and_exact_floating_observation_keep_unit_residual() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let wide = Value::Int(IntValue::U64(9_007_199_254_740_993));
     let nearby = Value::Num(9_007_199_254_740_992.0);
     let result = block_on(rmse::rmse_builtin(wide.clone(), nearby.clone(), vec![])).unwrap();
@@ -150,8 +210,9 @@ fn empty_nd_shapes_and_far_trailing_axis_do_not_allocate_by_axis_value() {
     let Value::Tensor(result) = result else {
         panic!("expected empty N-D result")
     };
-    assert_eq!(result.shape, vec![0, 1, 3]);
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.shape, vec![1, 2, 3]);
+    assert_eq!(result.len(), 6);
+    assert!(result.materialize_f64().iter().all(|value| value.is_nan()));
     assert!(scalar(block_on(rms::rms_builtin(empty, vec![Value::from("all")])).unwrap()).is_nan());
     let input = tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::F64);
     let far_axis = Value::Int(IntValue::U64(u64::MAX));

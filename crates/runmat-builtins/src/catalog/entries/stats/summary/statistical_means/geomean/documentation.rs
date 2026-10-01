@@ -11,9 +11,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Input and result class", paragraphs: &[
             "The documented data domain is real, nonnegative single or double. Typed integer data is a RunMat-mode extension; the result is double for integer data and retains single or double for floating data.",
             "The selected dimensions become singleton dimensions. An empty reduction slice produces NaN; `\"omitnan\"` produces NaN when no observations remain.",
+            "A negative observation produces NaN in its affected output slice. A slice containing both zero and infinity also produces NaN.",
+            "Selecting only singleton or trailing dimensions leaves nonnegative input values unchanged; negative observations still produce NaN.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "The host implementation reduces each selected slice. Eligible floating GPU arrays enter an owner-checked resident provider route; unsupported automatic residency materializes on the host, while explicit device intent requires a supported route. Resident execution and performance qualification remain in progress.",
+            "The host implementation reduces each selected slice. Eligible floating GPU arrays enter an owner-checked resident provider route; unsupported provider forms preserve the documented host-materialization behavior for GPU inputs. Resident execution and performance qualification remain in progress.",
         ]},
     ],
     examples: &[BuiltinExample {

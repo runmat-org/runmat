@@ -10,10 +10,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior and classes", paragraphs: &[
             "The harmonic mean is the count of observations divided by the sum of their reciprocals. A zero observation produces zero; an empty or all-omitted slice produces NaN.",
+            "Selecting only singleton or trailing dimensions leaves the input values unchanged.",
             "Real single and double are documented data classes. Typed integer observations are a RunMat-mode extension and return double; floating inputs retain their class.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "Eligible floating GPU arrays enter an owner-checked resident provider route using scaled reciprocals. Unsupported automatic residency materializes on the host; explicit device intent requires a supported route. Resident performance and edge-case qualification remain in progress.",
+            "Eligible floating GPU arrays enter an owner-checked resident provider route using scaled reciprocals. Unsupported provider forms preserve the documented host-materialization behavior for GPU inputs. Resident performance and edge-case qualification remain in progress.",
         ]},
     ],
     examples: &[BuiltinExample {

@@ -1,9 +1,6 @@
 //! Numerical kernels for real floating resident inputs. The RMS route scales
 //! each output slice before squaring, avoiding finite-input overflow.
-use super::{
-    admitted_real, contract_failure, expected_shape, provider_failure, reduction, scalar_summary,
-    Failure,
-};
+use super::{admitted_mask, admitted_real, expected_shape, provider_failure, reduction, Failure};
 use crate::builtins::stats::summary::statistical_means::options::{Options, ReductionKind};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 
@@ -22,17 +19,47 @@ pub(super) async fn run(
     {
         return Err(Failure::Unsupported);
     }
+    if kind == ReductionKind::Harmonic
+        && reduction::selected_axes(input.shape(), &options.axes)
+            .iter()
+            .all(|axis| input.shape()[*axis] == 1)
+    {
+        return Ok(input.clone());
+    }
     let result = match kind {
         ReductionKind::Geometric => {
             if runmat_accelerate_api::handle_storage(input) != GpuTensorStorage::Real {
                 return Err(Failure::Unsupported);
+            }
+            if reduction::selected_axes(input.shape(), &options.axes)
+                .iter()
+                .all(|axis| input.shape()[*axis] == 1)
+            {
+                let zero = provider
+                    .zeros_like(input, input.shape())
+                    .map_err(|source| provider_failure(kind, source))?;
+                let zero = admitted_real(kind, provider, input, zero, input.shape(), precision)?;
+                let nonnegative = provider
+                    .elem_ge(input, &zero)
+                    .await
+                    .map_err(|source| provider_failure(kind, source))?;
+                let nonnegative = admitted_mask(kind, provider, input, nonnegative, input.shape())?;
+                let nan = provider
+                    .fill_like(input, f64::NAN)
+                    .map_err(|source| provider_failure(kind, source))?;
+                let nan = admitted_real(kind, provider, input, nan, input.shape(), precision)?;
+                let output = provider
+                    .select(&nonnegative, input, &nan)
+                    .await
+                    .map_err(|source| provider_failure(kind, source))?;
+                return admitted_real(kind, provider, input, output, input.shape(), precision);
             }
             let cleaned = provider
                 .map_nan_to_zero(input)
                 .map_err(|source| provider_failure(kind, source))?;
             let cleaned = admitted_real(kind, provider, input, cleaned, input.shape(), precision)?;
             let mut minimum = cleaned;
-            for axis in 0..input.shape().len() {
+            for axis in reduction::selected_axes(input.shape(), &options.axes) {
                 let next = provider
                     .reduce_min_dim(&minimum, axis)
                     .await
@@ -44,13 +71,15 @@ pub(super) async fn run(
                 );
                 minimum = admitted_real(kind, provider, input, next, &expected, precision)?;
             }
-            let minimum = scalar_summary(kind, provider, &minimum).await?;
-            if minimum < 0.0 {
-                return Err(contract_failure(
-                    kind,
-                    "geomean input values must be nonnegative",
-                ));
-            }
+            let zero = provider
+                .zeros_like(&minimum, minimum.shape())
+                .map_err(|source| provider_failure(kind, source))?;
+            let zero = admitted_real(kind, provider, input, zero, minimum.shape(), precision)?;
+            let nonnegative = provider
+                .elem_ge(&minimum, &zero)
+                .await
+                .map_err(|source| provider_failure(kind, source))?;
+            let nonnegative = admitted_mask(kind, provider, input, nonnegative, minimum.shape())?;
             let logarithms = provider
                 .unary_log(input)
                 .await
@@ -74,8 +103,17 @@ pub(super) async fn run(
                 &expected_shape(input.shape(), &options.axes),
                 precision,
             )?;
-            provider
+            let result = provider
                 .unary_exp(&average)
+                .await
+                .map_err(|source| provider_failure(kind, source))?;
+            let result = admitted_real(kind, provider, input, result, minimum.shape(), precision)?;
+            let nan = provider
+                .fill_like(&result, f64::NAN)
+                .map_err(|source| provider_failure(kind, source))?;
+            let nan = admitted_real(kind, provider, input, nan, minimum.shape(), precision)?;
+            provider
+                .select(&nonnegative, &result, &nan)
                 .await
                 .map_err(|source| provider_failure(kind, source))?
         }

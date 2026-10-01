@@ -12,7 +12,7 @@ use super::options::{Axes, Options, ReductionKind};
 use crate::builtins::common::gpu_helpers;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
-use runmat_value::{NumericScalar, Value};
+use runmat_value::Value;
 
 #[derive(Debug)]
 enum Failure {
@@ -150,55 +150,6 @@ fn admitted_mask(
     }
 }
 
-async fn scalar_summary(
-    kind: ReductionKind,
-    provider: &'static dyn AccelProvider,
-    input: &GpuTensorHandle,
-) -> Result<f64, Failure> {
-    if !input.shape().iter().all(|extent| *extent == 1)
-        || input.allocation_lease().validate_live().is_err()
-        || runmat_accelerate_api::handle_storage(input) != GpuTensorStorage::Real
-        || runmat_accelerate_api::handle_precision(input).is_none()
-        || runmat_accelerate_api::handle_integer_type(input).is_some()
-        || runmat_accelerate_api::handle_is_logical(input)
-        || gpu_helpers::exact_provider_for_handle(input)
-            .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
-    {
-        return Err(contract_failure(
-            kind,
-            "resident scalar summary has an invalid shape or owner",
-        ));
-    }
-    let summary = gpu_helpers::gather_tensor_async(input)
-        .await
-        .map_err(|error| Failure::Execution(Box::new(error)))?;
-    if summary.len() != 1
-        || input.allocation_lease().validate_live().is_err()
-        || gpu_helpers::exact_provider_for_handle(input)
-            .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
-    {
-        return Err(contract_failure(
-            kind,
-            "resident summary was malformed or changed owner",
-        ));
-    }
-    Ok(
-        match (
-            runmat_accelerate_api::handle_precision(input),
-            summary.numeric_value_at(0),
-        ) {
-            (Some(ProviderPrecision::F64), Some(NumericScalar::F64(value))) => value,
-            (Some(ProviderPrecision::F32), Some(NumericScalar::F32(value))) => f64::from(value),
-            _ => {
-                return Err(contract_failure(
-                    kind,
-                    "resident summary changed numeric class",
-                ))
-            }
-        },
-    )
-}
-
 async fn usable_scale(
     kind: ReductionKind,
     provider: &'static dyn AccelProvider,
@@ -278,7 +229,11 @@ pub(super) async fn try_reduce(
             {
                 return Err(gpu_helpers::reject_gpu_output(output, *error));
             }
-            if output.shares_allocation_with(input) {
+            let identity = kind == ReductionKind::Harmonic
+                && reduction::selected_axes(input.shape(), &options.axes)
+                    .iter()
+                    .all(|axis| input.shape()[*axis] == 1);
+            if output.shares_allocation_with(input) && !identity {
                 let error = super::options::invalid(
                     kind,
                     "resident reduction aliased its input allocation",

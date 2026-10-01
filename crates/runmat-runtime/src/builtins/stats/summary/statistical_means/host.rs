@@ -28,7 +28,7 @@ impl Geometry {
         let selected = match axes {
             Axes::Default => vec![input_shape
                 .iter()
-                .position(|extent| *extent > 1)
+                .position(|extent| *extent != 1)
                 .unwrap_or(0)],
             Axes::All => (0..input_shape.len()).collect(),
             Axes::Dims(dimensions) => dimensions
@@ -112,8 +112,25 @@ pub(super) fn reduce(
     if checked_len(&geometry.input_shape) != Some(values.len()) {
         return Err(invalid(kind, "input storage does not match its shape"));
     }
-    if kind == ReductionKind::Geometric && values.iter().any(|value| *value < 0.0) {
-        return Err(invalid(kind, "input values must be nonnegative"));
+    let identity_axes = geometry
+        .reduced
+        .iter()
+        .enumerate()
+        .all(|(axis, selected)| !selected || geometry.input_shape[axis] == 1);
+    if identity_axes {
+        match kind {
+            ReductionKind::Harmonic => {
+                return output_value(kind, values, geometry.output_shape, dtype)
+            }
+            ReductionKind::Geometric => {
+                let output = values
+                    .into_iter()
+                    .map(|value| if value < 0.0 { f64::NAN } else { value })
+                    .collect();
+                return output_value(kind, output, geometry.output_shape, dtype);
+            }
+            ReductionKind::RootMeanSquare | ReductionKind::RootMeanSquaredError => {}
+        }
     }
     let mut buckets = vec![Vec::<f64>::new(); geometry.output_len];
     for (linear, value) in values.into_iter().enumerate() {

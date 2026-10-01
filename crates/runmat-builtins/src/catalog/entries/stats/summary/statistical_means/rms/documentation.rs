@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "The result is real. Selected dimensions become singleton dimensions. Empty slices and slices with no observations after omission return NaN.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "The host implementation uses scaled component accumulation to avoid intermediate overflow. Eligible floating GPU arrays use a per-slice scaled resident route; unsupported automatic residency materializes on the host and explicit device intent requires a supported route. Resident performance and edge-case qualification remain in progress.",
+            "The host implementation uses scaled component accumulation to avoid intermediate overflow. Eligible floating GPU arrays use a per-slice scaled resident route; unsupported provider forms preserve the documented host-materialization behavior for GPU inputs. Resident performance and edge-case qualification remain in progress.",
         ]},
     ],
     examples: &[BuiltinExample {
