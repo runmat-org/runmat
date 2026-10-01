@@ -70,7 +70,12 @@ fn flagged_statistics_keep_single_output_class_and_bound_far_dimensions() {
     }
 
     let data = || Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
-    let far_dim = || vec![Value::Int(IntValue::U64(1_000_000_000))];
+    let far_dim = || {
+        vec![
+            Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+            Value::Int(IntValue::U64(1_000_000_000)),
+        ]
+    };
     let mad_result = block_on(mad::mad_builtin(data(), far_dim())).unwrap();
     let (values, shape) = tensor_values(mad_result);
     assert_eq!(shape, vec![3, 1]);
