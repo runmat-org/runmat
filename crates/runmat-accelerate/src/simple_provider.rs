@@ -3,6 +3,7 @@ mod allocation_state;
 use allocation_state::{integer_registry, numeric_registry, registry};
 mod power;
 mod select;
+mod logical;
 mod logarithms;
 mod remainder;
 mod unary;
@@ -1821,27 +1822,6 @@ impl InProcessProvider {
 
     fn allocate_tensor(&self, data: Vec<f64>, shape: Vec<usize>) -> Result<GpuTensorHandle> {
         self.allocate_tensor_with_storage(data, shape, GpuTensorStorage::Real)
-    }
-
-    fn validate_logical_float_inputs(&self, inputs: &[&GpuTensorHandle]) -> Result<()> {
-        let guard = numeric_registry()
-            .lock_for(self.device_id)
-            .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
-        for input in inputs {
-            ensure!(
-                guard.get(input).is_some(),
-                "logical kernel input is not a live owned allocation"
-            );
-        }
-        if inputs.iter().any(|input| {
-            input.physical().element_type() != NumericElementType::F64
-                || input.physical().storage() != GpuTensorStorage::Real
-        }) {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "logical kernel requires real native F64 storage",
-            ));
-        }
-        Ok(())
     }
 
     fn allocate_logical_tensor(
@@ -6078,53 +6058,10 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let (adata, bdata) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let a_vec = guard
-                    .get(a)
-                    .ok_or_else(|| anyhow!("elem_ne: unknown buffer {}", a.buffer_id()))?
-                    .clone();
-                let b_vec = guard
-                    .get(b)
-                    .ok_or_else(|| anyhow!("elem_ne: unknown buffer {}", b.buffer_id()))?
-                    .clone();
-                (a_vec, b_vec)
-            };
-
-            let shape =
-                runtime_broadcast_shapes("ne", a.shape(), b.shape()).map_err(|e| anyhow!(e))?;
-            let total: usize = shape.iter().copied().product();
-            if total == 0 {
-                return self.allocate_logical_tensor(Vec::new(), shape);
-            }
-
-            let strides_a = runtime_compute_strides(a.shape());
-            let strides_b = runtime_compute_strides(b.shape());
-            let len_a = adata.len();
-            let len_b = bdata.len();
-
-            let mut out = Vec::with_capacity(total);
-            for idx in 0..total {
-                let lhs = if len_a == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                    *adata.get(offset).unwrap_or(&0.0)
-                };
-                let rhs = if len_b == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                    *bdata.get(offset).unwrap_or(&0.0)
-                };
-                out.push(if lhs != rhs { 1.0 } else { 0.0 });
-            }
-
-            self.allocate_logical_tensor(out, shape)
-        })
+        Box::pin(
+            async move { self.binary_predicate_impl(a, b, logical::BinaryPredicate::NotEqual) },
+        )
     }
-
     fn elem_ge<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -6338,219 +6275,23 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let (adata, bdata) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let a_vec = guard
-                    .get(a)
-                    .ok_or_else(|| anyhow!("elem_eq: unknown buffer {}", a.buffer_id()))?
-                    .clone();
-                let b_vec = guard
-                    .get(b)
-                    .ok_or_else(|| anyhow!("elem_eq: unknown buffer {}", b.buffer_id()))?
-                    .clone();
-                (a_vec, b_vec)
-            };
-
-            let shape =
-                runtime_broadcast_shapes("eq", a.shape(), b.shape()).map_err(|e| anyhow!(e))?;
-            let total: usize = shape.iter().copied().product();
-            if total == 0 {
-                return self.allocate_logical_tensor(Vec::new(), shape);
-            }
-
-            let strides_a = runtime_compute_strides(a.shape());
-            let strides_b = runtime_compute_strides(b.shape());
-            let len_a = adata.len();
-            let len_b = bdata.len();
-
-            let mut out = Vec::with_capacity(total);
-            for idx in 0..total {
-                let lhs = if len_a == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                    *adata.get(offset).unwrap_or(&0.0)
-                };
-                let rhs = if len_b == 0 {
-                    0.0
-                } else {
-                    let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                    *bdata.get(offset).unwrap_or(&0.0)
-                };
-                out.push(if lhs == rhs { 1.0 } else { 0.0 });
-            }
-
-            self.allocate_logical_tensor(out, shape)
-        })
+        Box::pin(async move { self.binary_predicate_impl(a, b, logical::BinaryPredicate::Equal) })
     }
-
     fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.validate_logical_float_inputs(&[a, b])?;
-        let (adata, bdata) = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let a_vec = guard
-                .get(a)
-                .ok_or_else(|| anyhow!("logical_and: unknown buffer {}", a.buffer_id()))?
-                .clone();
-            let b_vec = guard
-                .get(b)
-                .ok_or_else(|| anyhow!("logical_and: unknown buffer {}", b.buffer_id()))?
-                .clone();
-            (a_vec, b_vec)
-        };
-
-        let shape = runtime_broadcast_shapes("logical_and", a.shape(), b.shape())
-            .map_err(|e| anyhow!(e))?;
-        let total: usize = shape.iter().copied().product();
-        if total == 0 {
-            return self.allocate_logical_tensor(Vec::new(), shape);
-        }
-
-        let strides_a = runtime_compute_strides(a.shape());
-        let strides_b = runtime_compute_strides(b.shape());
-        let len_a = adata.len();
-        let len_b = bdata.len();
-
-        let mut out = Vec::with_capacity(total);
-        for idx in 0..total {
-            let lhs = if len_a == 0 {
-                0.0
-            } else {
-                let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                *adata.get(offset).unwrap_or(&0.0)
-            };
-            let rhs = if len_b == 0 {
-                0.0
-            } else {
-                let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                *bdata.get(offset).unwrap_or(&0.0)
-            };
-            out.push(if lhs != 0.0 && rhs != 0.0 { 1.0 } else { 0.0 });
-        }
-
-        self.allocate_logical_tensor(out, shape)
+        self.binary_predicate_impl(a, b, logical::BinaryPredicate::And)
     }
 
     fn logical_or(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.validate_logical_float_inputs(&[a, b])?;
-        let (adata, bdata) = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let a_vec = guard
-                .get(a)
-                .ok_or_else(|| anyhow!("logical_or: unknown buffer {}", a.buffer_id()))?
-                .clone();
-            let b_vec = guard
-                .get(b)
-                .ok_or_else(|| anyhow!("logical_or: unknown buffer {}", b.buffer_id()))?
-                .clone();
-            (a_vec, b_vec)
-        };
-
-        let shape =
-            runtime_broadcast_shapes("logical_or", a.shape(), b.shape()).map_err(|e| anyhow!(e))?;
-        let total: usize = shape.iter().copied().product();
-        if total == 0 {
-            return self.allocate_logical_tensor(Vec::new(), shape);
-        }
-
-        let strides_a = runtime_compute_strides(a.shape());
-        let strides_b = runtime_compute_strides(b.shape());
-        let len_a = adata.len();
-        let len_b = bdata.len();
-
-        let mut out = Vec::with_capacity(total);
-        for idx in 0..total {
-            let lhs = if len_a == 0 {
-                0.0
-            } else {
-                let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                *adata.get(offset).unwrap_or(&0.0)
-            };
-            let rhs = if len_b == 0 {
-                0.0
-            } else {
-                let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                *bdata.get(offset).unwrap_or(&0.0)
-            };
-            out.push(if lhs != 0.0 || rhs != 0.0 { 1.0 } else { 0.0 });
-        }
-
-        self.allocate_logical_tensor(out, shape)
+        self.binary_predicate_impl(a, b, logical::BinaryPredicate::Or)
     }
 
     fn logical_xor(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.validate_logical_float_inputs(&[a, b])?;
-        let (adata, bdata) = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let a_vec = guard
-                .get(a)
-                .ok_or_else(|| anyhow!("logical_xor: unknown buffer {}", a.buffer_id()))?
-                .clone();
-            let b_vec = guard
-                .get(b)
-                .ok_or_else(|| anyhow!("logical_xor: unknown buffer {}", b.buffer_id()))?
-                .clone();
-            (a_vec, b_vec)
-        };
-
-        let shape = runtime_broadcast_shapes("logical_xor", a.shape(), b.shape())
-            .map_err(|e| anyhow!(e))?;
-        let total: usize = shape.iter().copied().product();
-        if total == 0 {
-            return self.allocate_logical_tensor(Vec::new(), shape);
-        }
-
-        let strides_a = runtime_compute_strides(a.shape());
-        let strides_b = runtime_compute_strides(b.shape());
-        let len_a = adata.len();
-        let len_b = bdata.len();
-
-        let mut out = Vec::with_capacity(total);
-        for idx in 0..total {
-            let lhs = if len_a == 0 {
-                0.0
-            } else {
-                let offset = runtime_broadcast_index(idx, &shape, a.shape(), &strides_a);
-                *adata.get(offset).unwrap_or(&0.0)
-            };
-            let rhs = if len_b == 0 {
-                0.0
-            } else {
-                let offset = runtime_broadcast_index(idx, &shape, b.shape(), &strides_b);
-                *bdata.get(offset).unwrap_or(&0.0)
-            };
-            let lhs_true = lhs != 0.0;
-            let rhs_true = rhs != 0.0;
-            out.push(if lhs_true ^ rhs_true { 1.0 } else { 0.0 });
-        }
-
-        self.allocate_logical_tensor(out, shape)
+        self.binary_predicate_impl(a, b, logical::BinaryPredicate::Xor)
     }
 
     fn logical_not(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.validate_logical_float_inputs(&[a])?;
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(a)
-                .ok_or_else(|| anyhow!("logical_not: unknown buffer {}", a.buffer_id()))?
-                .clone()
-        };
-
-        let shape = a.shape().to_vec();
-        if data.is_empty() {
-            return self.allocate_logical_tensor(Vec::new(), shape);
-        }
-
-        let mut out = Vec::with_capacity(data.len());
-        for value in data {
-            out.push(if value == 0.0 { 1.0 } else { 0.0 });
-        }
-
-        self.allocate_logical_tensor(out, shape)
+        self.unary_predicate_impl(a, logical::UnaryPredicate::Not)
     }
-
     fn logical_isreal(&self, a: &GpuTensorHandle) -> Result<bool> {
         {
             let guard = registry(self.device_id).lock().unwrap();
@@ -6562,74 +6303,16 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn logical_isfinite(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.validate_logical_float_inputs(&[a])?;
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(a)
-                .ok_or_else(|| anyhow!("logical_isfinite: unknown buffer {}", a.buffer_id()))?
-                .clone()
-        };
-
-        let shape = a.shape().to_vec();
-        if data.is_empty() {
-            return self.allocate_logical_tensor(Vec::new(), shape);
-        }
-
-        let mut out = Vec::with_capacity(data.len());
-        for value in data {
-            out.push(if value.is_finite() { 1.0 } else { 0.0 });
-        }
-
-        self.allocate_logical_tensor(out, shape)
+        self.unary_predicate_impl(a, logical::UnaryPredicate::Finite)
     }
 
     fn logical_isnan(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.validate_logical_float_inputs(&[a])?;
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(a)
-                .ok_or_else(|| anyhow!("logical_isnan: unknown buffer {}", a.buffer_id()))?
-                .clone()
-        };
-
-        let shape = a.shape().to_vec();
-        if data.is_empty() {
-            return self.allocate_logical_tensor(Vec::new(), shape);
-        }
-
-        let mut out = Vec::with_capacity(data.len());
-        for value in data {
-            out.push(if value.is_nan() { 1.0 } else { 0.0 });
-        }
-
-        self.allocate_logical_tensor(out, shape)
+        self.unary_predicate_impl(a, logical::UnaryPredicate::Nan)
     }
 
     fn logical_isinf(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.validate_logical_float_inputs(&[a])?;
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(a)
-                .ok_or_else(|| anyhow!("logical_isinf: unknown buffer {}", a.buffer_id()))?
-                .clone()
-        };
-
-        let shape = a.shape().to_vec();
-        if data.is_empty() {
-            return self.allocate_logical_tensor(Vec::new(), shape);
-        }
-
-        let mut out = Vec::with_capacity(data.len());
-        for value in data {
-            out.push(if value.is_infinite() { 1.0 } else { 0.0 });
-        }
-
-        self.allocate_logical_tensor(out, shape)
+        self.unary_predicate_impl(a, logical::UnaryPredicate::Infinite)
     }
-
     fn elem_hypot<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -9994,7 +9677,7 @@ mod tests {
     }
 
     #[test]
-    fn logical_unsupported_class_does_not_hide_foreign_owner() {
+    fn logical_native_single_does_not_hide_foreign_owner() {
         let provider = InProcessProvider::new();
         let other = InProcessProvider::new();
         let input = provider
@@ -10004,9 +9687,12 @@ mod tests {
                 storage: GpuTensorStorage::Real,
             })
             .unwrap();
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-            &provider.logical_not(&input).unwrap_err()
-        ));
+        let result = provider.logical_not(&input).unwrap();
+        assert!(result.view().is_logical());
+        assert_eq!(
+            block_on(provider.download(&result)).unwrap().data,
+            vec![0.0]
+        );
         let foreign = other
             .upload(&HostTensorView {
                 data: &[1.0],
