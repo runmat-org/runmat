@@ -104,18 +104,8 @@ impl NormalizeOutputPlan {
     }
 }
 
-fn output_error(mut error: RuntimeError) -> RuntimeError {
-    // Preserve nested semantic identifiers, provider causes, spans and retry
-    // policy while adding the owning boundary's presentation when absent.
-    if error.identifier.is_none() {
-        error.identifier = runmat_builtins::NORMALIZE_ERROR_INTERNAL
-            .identifier
-            .map(str::to_owned);
-    }
-    if error.context.builtin.is_none() {
-        error.context.builtin = Some("normalize".into());
-    }
-    error
+fn output_error(error: RuntimeError) -> RuntimeError {
+    super::normalize_transfer_error(error)
 }
 
 fn finish_selected(

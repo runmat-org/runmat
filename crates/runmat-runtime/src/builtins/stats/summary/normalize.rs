@@ -16,7 +16,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 mod arguments;
 mod evaluation;
 mod output;
-use arguments::{parse_args, value_to_input};
+use arguments::{admit_args, value_to_input};
 use evaluation::evaluate;
 use output::NormalizeOutputPlan;
 
@@ -160,9 +160,11 @@ const MAX_NORMALIZE_DIM: usize = 64;
 )]
 async fn normalize_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_compatibility(&value, &rest)?;
+    let domain = arguments::InputDomain::of(&value)?;
+    let admitted = admit_args(domain, rest)?;
     let output = NormalizeOutputPlan::inspect(&value)?;
+    let parsed = admitted.materialize().await?;
     let input = value_to_input(value).await?;
-    let parsed = parse_args(&input, rest).await?;
     output.finish(evaluate(input, parsed)?)
 }
 
@@ -208,6 +210,17 @@ fn normalize_error(message: impl Into<String>) -> RuntimeError {
 
 fn normalize_internal(message: impl Into<String>) -> RuntimeError {
     normalize_descriptor_error(message, &NORMALIZE_ERROR_INTERNAL)
+}
+
+/// Keep provider and nested language failures intact at this builtin boundary.
+fn normalize_transfer_error(mut error: RuntimeError) -> RuntimeError {
+    if error.identifier.is_none() {
+        error.identifier = NORMALIZE_ERROR_INTERNAL.identifier.map(str::to_owned);
+    }
+    if error.context.builtin.is_none() {
+        error.context.builtin = Some("normalize".into());
+    }
+    error
 }
 
 fn normalize_descriptor_error(
@@ -328,3 +341,5 @@ fn real_part_tensor(tensor: &ComplexTensor) -> BuiltinResult<Tensor> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod admission_tests;

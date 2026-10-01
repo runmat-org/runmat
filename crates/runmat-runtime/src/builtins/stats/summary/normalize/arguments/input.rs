@@ -9,7 +9,7 @@ pub(in crate::builtins::stats::summary::normalize) async fn value_to_input(
 ) -> BuiltinResult<NumericInput> {
     let value = gather_if_needed_async(&value)
         .await
-        .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
+        .map_err(super::super::normalize_transfer_error)?;
     match value {
         Value::Tensor(tensor) => {
             ensure_exact_integer_tensor(&tensor, "input data")?;
