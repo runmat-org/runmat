@@ -10,6 +10,121 @@ fn vec_tensor(values: &[f64]) -> Value {
     Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
 }
 
+#[test]
+fn categorical_group_must_match_full_observation_count() {
+    let labels = Value::StringArray(
+        StringArray::new(vec!["A".into(), "B".into(), "A".into()], vec![3, 1]).unwrap(),
+    );
+    let categorical = crate::builtins::table::categorical_from_args(vec![labels]).unwrap();
+    assert_eq!(
+        group_labels(&categorical, 3).unwrap(),
+        vec![
+            Some(KeyAtom::Text("A".into())),
+            Some(KeyAtom::Text("B".into())),
+            Some(KeyAtom::Text("A".into()))
+        ]
+    );
+    for count in [2, 4] {
+        let error = group_labels(&categorical, count).expect_err("full category length must match");
+        assert_eq!(
+            error.identifier(),
+            SCATTERHIST_ERROR_INVALID_ARGUMENT.identifier
+        );
+    }
+}
+
+#[test]
+fn character_group_rows_follow_character_payload_layout() {
+    let labels =
+        Value::CharArray(runmat_value::CharArray::new(vec!['A', '1', 'B', '2'], 2, 2).unwrap());
+    assert_eq!(
+        group_labels(&labels, 2).unwrap(),
+        vec![
+            Some(KeyAtom::Text("A1".into())),
+            Some(KeyAtom::Text("B2".into()))
+        ]
+    );
+}
+
+#[test]
+fn mixed_cell_groups_keep_typed_identity_until_rendering() {
+    let labels = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::Int(IntValue::U64(1)),
+                Value::String("1".into()),
+                Value::String(String::new()),
+                Value::String("Data".into()),
+            ],
+            4,
+            1,
+        )
+        .unwrap(),
+    );
+    let group = group_labels(&labels, 4).unwrap();
+    let mut options = ScatterhistOptions {
+        group: Some(group),
+        ..Default::default()
+    };
+    let series = grouped_series(&[1.0, 2.0, 3.0, 4.0], &[1.0, 2.0, 3.0, 4.0], &options).unwrap();
+    assert_eq!(series.len(), 4);
+    assert_eq!(
+        series
+            .iter()
+            .map(|item| item.scatter_x[0])
+            .collect::<Vec<_>>(),
+        vec![1.0, 2.0, 3.0, 4.0]
+    );
+    assert_eq!(
+        series
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["1", "1", "", "Data"]
+    );
+    options.group = None;
+    let ungrouped = grouped_series(&[1.0], &[2.0], &options).unwrap();
+    assert_eq!(ungrouped.len(), 1);
+    assert_eq!(ungrouped[0].label, "Data");
+}
+
+#[test]
+fn wide_integer_groups_do_not_round_or_merge_with_text() {
+    let wide = (1u64 << 53) + 1;
+    let keys = group_labels(
+        &Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::Int(IntValue::U64(wide)),
+                    Value::String(wide.to_string()),
+                ],
+                2,
+                1,
+            )
+            .unwrap(),
+        ),
+        2,
+    )
+    .unwrap();
+    assert_eq!(
+        keys,
+        vec![
+            Some(KeyAtom::Integer(IntValue::U64(wide))),
+            Some(KeyAtom::Text(wide.to_string()))
+        ]
+    );
+    let series = grouped_series(
+        &[1.0, 2.0],
+        &[2.0, 1.0],
+        &ScatterhistOptions {
+            group: Some(keys),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(series.len(), 2);
+}
+
 fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     let tensor = Tensor::new_integer(storage, shape).unwrap();
     Value::Tensor(tensor)
@@ -102,7 +217,10 @@ fn scatterhist_numeric_parsers_read_typed_integer_storage_exactly() {
             2,
         )
         .unwrap(),
-        vec![Some(wide.to_string()), Some((wide - 1).to_string())]
+        vec![
+            Some(KeyAtom::Integer(IntValue::U64(wide))),
+            Some(KeyAtom::Integer(IntValue::U64(wide - 1)))
+        ]
     );
 }
 

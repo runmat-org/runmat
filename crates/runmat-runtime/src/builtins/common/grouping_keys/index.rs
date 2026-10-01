@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use super::KeyAtom;
 
+/// A tuple key; each component retains its typed identity until presentation.
 pub(crate) type GroupKey = Vec<KeyAtom>;
 
 /// The ordering contract selected by the builtin accepting the grouping value.

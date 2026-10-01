@@ -3,8 +3,8 @@ use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
-    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
-    ThreadProviderGuard,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned,
+    HostTensorView, NumericElementType, ThreadProviderGuard,
 };
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -14,6 +14,7 @@ struct RejectDownloads {
     owner: TestAllocationOwner,
     downloads: AtomicUsize,
     pending: AtomicBool,
+    succeed: AtomicBool,
 }
 
 impl AccelProvider for RejectDownloads {
@@ -35,15 +36,106 @@ impl AccelProvider for RejectDownloads {
             Err(std::io::Error::other("scatterhist fixture rejected download").into())
         })
     }
-    fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
         if self.pending.load(Ordering::SeqCst) {
             return Box::pin(futures::future::pending());
+        }
+        if self.succeed.load(Ordering::SeqCst) {
+            return Box::pin(async move {
+                Ok(HostNumericTensorOwned {
+                    data: HostNumericDataOwned::F64(vec![1.0; handle.shape().iter().product()]),
+                    shape: handle.shape().to_vec(),
+                    storage: GpuTensorStorage::Real,
+                })
+            });
         }
         Box::pin(async {
             Err(std::io::Error::other("scatterhist fixture rejected download").into())
         })
     }
+}
+
+#[test]
+fn nested_group_preflight_rejects_known_invalid_cells_before_any_download() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(RejectDownloads::default()));
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let scalar = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let vector = provider
+        .owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let complex = provider
+        .owner
+        .allocate_zeroed(
+            vec![1, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::ComplexInterleaved,
+        )
+        .unwrap();
+    for bad in [
+        Value::StringArray(
+            runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap(),
+        ),
+        Value::Cell(CellArray::new(vec![Value::String("nested".into())], 1, 1).unwrap()),
+        Value::GpuTensor(vector.handle.clone()),
+        Value::GpuTensor(complex.handle.clone()),
+    ] {
+        let group = Value::Cell(
+            CellArray::new(vec![Value::GpuTensor(scalar.handle.clone()), bad], 2, 1).unwrap(),
+        );
+        let observations = || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let err = block_on(scatterhist_builtin(vec![
+            observations(),
+            observations(),
+            Value::String("Group".into()),
+            group,
+        ]))
+        .expect_err("known-invalid nested group must preflight");
+        assert_eq!(
+            err.identifier(),
+            SCATTERHIST_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+    for handle in [&scalar.handle, &vector.handle, &complex.handle] {
+        handle.allocation_lease().validate_live().unwrap();
+    }
+}
+
+#[test]
+fn nested_scalar_resident_group_decodes_through_typed_key() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(RejectDownloads::default()));
+    provider.succeed.store(true, Ordering::SeqCst);
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let scalar = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let group =
+        Value::Cell(CellArray::new(vec![Value::GpuTensor(scalar.handle.clone())], 1, 1).unwrap());
+    let options = block_on(
+        ScatterhistOptionPlan::admit(vec![Value::String("Group".into()), group], 1)
+            .unwrap()
+            .evaluate(1),
+    )
+    .unwrap();
+    assert_eq!(options.group, Some(vec![Some(KeyAtom::Number(1.0))]));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    scalar.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(scalar.probe.retirements(), 0);
 }
 
 fn sample() -> Value {

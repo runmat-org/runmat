@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 use runmat_value::{IntValue, NumericScalar};
 
 /// One exact component of a grouping key.
-///
 #[derive(Clone, Debug)]
 pub(crate) enum KeyAtom {
     Missing,

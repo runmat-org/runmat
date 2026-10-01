@@ -1,6 +1,6 @@
 use runmat_value::NumericScalar;
 
-use crate::builtins::array::grouping::keys::format_integer;
+use crate::builtins::common::grouping_keys::format_integer;
 
 pub(super) fn interval(
     lower: NumericScalar,

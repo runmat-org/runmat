@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::builtins::array::grouping::groupcounts::bins::BinLevels;
-use crate::builtins::array::grouping::keys::{GroupIndex, KeyAtom, KeyOrder};
+use crate::builtins::common::grouping_keys::{GroupIndex, KeyAtom, KeyOrder};
 use crate::builtins::array::grouping::variables::{build_index, GroupColumn};
 use crate::builtins::table::{categorical_categories, categorical_observation_labels};
 use crate::BuiltinResult;

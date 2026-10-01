@@ -34,6 +34,7 @@ use runmat_plot::plots::{
 };
 use runmat_value::{CellArray, IntValue, Tensor, Value};
 
+use crate::builtins::common::grouping_keys::KeyAtom;
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
@@ -62,7 +63,7 @@ const GROUP_COLORS: [Vec4; 7] = [
 #[derive(Clone, Debug)]
 struct ScatterhistOptions {
     bins: Option<[usize; 2]>,
-    group: Option<Vec<Option<String>>>,
+    group: Option<Vec<Option<KeyAtom>>>,
     kernel: KernelMode,
     legend: Option<bool>,
     plot_group: bool,

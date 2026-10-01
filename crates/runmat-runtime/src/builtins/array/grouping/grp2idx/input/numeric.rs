@@ -5,7 +5,7 @@ use crate::BuiltinResult;
 
 use super::{ensure_vector, numeric_atom, GroupingInput};
 use crate::builtins::array::grouping::grp2idx::error;
-use crate::builtins::array::grouping::keys::KeyOrder;
+use crate::builtins::common::grouping_keys::KeyOrder;
 
 pub(super) fn tensor(value: Tensor) -> BuiltinResult<GroupingInput> {
     ensure_vector(&value.shape, "numeric")?;

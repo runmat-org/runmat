@@ -1,7 +1,7 @@
 use runmat_value::{ObjectInstance, Value};
 
 use super::VariableResult;
-use crate::builtins::array::grouping::keys::KeyAtom;
+use crate::builtins::common::grouping_keys::KeyAtom;
 
 pub(super) fn is_supported_object(value: &ObjectInstance) -> bool {
     value.is_class(runmat_types::standard::CATEGORICAL)

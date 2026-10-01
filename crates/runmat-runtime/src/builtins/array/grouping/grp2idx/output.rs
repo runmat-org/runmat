@@ -2,7 +2,7 @@ use runmat_value::{CellArray, CharArray, Tensor, Value};
 
 use crate::BuiltinResult;
 
-use super::super::keys::GroupIndex;
+use crate::builtins::common::grouping_keys::GroupIndex;
 use super::error;
 
 pub(super) fn indices(index: &GroupIndex) -> BuiltinResult<Value> {

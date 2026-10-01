@@ -13,7 +13,7 @@ enum PlannedOption {
 
 enum DecodedOption {
     Bins([usize; 2]),
-    Group(Vec<Option<String>>),
+    Group(Vec<Option<KeyAtom>>),
     Kernel(KernelMode),
     Legend(bool),
     PlotGroup(bool),
@@ -130,12 +130,18 @@ fn plan_step(
             &SCATTERHIST_GPU_INPUT_EXTENSION,
             NAME,
         )?;
+        if kind == ScatterhistOptionKind::Group {
+            preflight_group_labels(&value, observations)?;
+        }
         if let Value::GpuTensor(handle) = &value {
             validate_resident_option(kind, handle, observations)?;
         } else if kind != ScatterhistOptionKind::Group {
             return Err(invalid("scatterhist: resident values inside option containers are only supported for Group"));
         }
         return Ok(PlannedOption::Resident(kind, value));
+    }
+    if kind == ScatterhistOptionKind::Group {
+        preflight_group_labels(&value, observations)?;
     }
     Ok(PlannedOption::Host(decode_option(
         kind,

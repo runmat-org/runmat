@@ -1,6 +1,6 @@
 use runmat_value::Value;
 
-use crate::builtins::array::grouping::keys::KeyOrder;
+use crate::builtins::common::grouping_keys::KeyOrder;
 use crate::builtins::array::grouping::variables::build_index;
 use crate::{gather_if_needed_async, BuiltinResult};
 

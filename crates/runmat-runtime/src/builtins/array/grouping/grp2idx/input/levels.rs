@@ -5,7 +5,7 @@ use crate::BuiltinResult;
 
 use super::GroupingInput;
 use crate::builtins::array::grouping::grp2idx::error;
-use crate::builtins::array::grouping::keys::GroupIndex;
+use crate::builtins::common::grouping_keys::GroupIndex;
 
 pub(super) fn build(input: &GroupingInput, index: &GroupIndex) -> BuiltinResult<Value> {
     if input.categorical {

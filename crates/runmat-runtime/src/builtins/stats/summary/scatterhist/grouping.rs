@@ -6,24 +6,23 @@ pub(super) fn grouped_series(
     y: &[f64],
     options: &ScatterhistOptions,
 ) -> BuiltinResult<Vec<GroupSeries>> {
-    let labels = if options.plot_group {
-        options
-            .group
-            .clone()
-            .unwrap_or_else(|| vec![Some(String::new()); x.len()])
-    } else {
-        vec![Some(String::new()); x.len()]
-    };
-    let mut grouped: Vec<(String, GroupSeries)> = Vec::new();
-    for ((&x_value, &y_value), label) in x.iter().zip(y.iter()).zip(labels.iter()) {
+    let grouped_by_value = options.plot_group && options.group.is_some();
+    let default_key = KeyAtom::Text(String::new());
+    let mut grouped: Vec<(KeyAtom, GroupSeries)> = Vec::new();
+    for (index, (&x_value, &y_value)) in x.iter().zip(y.iter()).enumerate() {
+        let label = if grouped_by_value {
+            options
+                .group
+                .as_ref()
+                .and_then(|labels| labels.get(index))
+                .and_then(Option::as_ref)
+        } else {
+            Some(&default_key)
+        };
         let Some(label) = label else {
             continue;
         };
-        let key = if label.is_empty() {
-            "Data".to_string()
-        } else {
-            label.clone()
-        };
+        let key = label.clone();
         let idx = if let Some(idx) = grouped.iter().position(|(existing, _)| existing == &key) {
             idx
         } else {
@@ -37,7 +36,11 @@ pub(super) fn grouped_series(
             grouped.push((
                 key.clone(),
                 GroupSeries {
-                    label: key.clone(),
+                    label: if grouped_by_value {
+                        key.label()
+                    } else {
+                        "Data".to_string()
+                    },
                     scatter_x: Vec::new(),
                     scatter_y: Vec::new(),
                     marginal_x: Vec::new(),

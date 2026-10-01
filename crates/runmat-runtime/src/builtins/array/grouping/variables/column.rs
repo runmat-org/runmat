@@ -1,7 +1,7 @@
 use runmat_value::{CellArray, Value};
 
 use super::{categorical, numeric, observations, temporal, text, VariableResult};
-use crate::builtins::array::grouping::keys::KeyAtom;
+use crate::builtins::common::grouping_keys::KeyAtom;
 
 #[derive(Clone)]
 pub(crate) struct GroupColumn {

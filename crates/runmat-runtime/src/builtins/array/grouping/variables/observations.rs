@@ -4,7 +4,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::table::value_row_count;
 
 use super::{categorical, temporal, GroupColumn, VariableResult};
-use crate::builtins::array::grouping::keys::{GroupIndex, KeyAtom, KeyOrder};
+use crate::builtins::common::grouping_keys::{GroupIndex, KeyAtom, KeyOrder};
 
 pub(crate) fn build_index(
     columns: &[GroupColumn],

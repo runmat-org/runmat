@@ -1,4 +1,4 @@
-//! Exact group-key representation and ordering-independent indexing.
+//! Shared exact group-key representation and ordering-independent indexing.
 
 mod atom;
 mod index;

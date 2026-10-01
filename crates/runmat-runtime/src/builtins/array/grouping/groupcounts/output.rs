@@ -1,6 +1,6 @@
 use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Tensor, Value};
 
-use crate::builtins::array::grouping::keys::{GroupIndex, KeyAtom};
+use crate::builtins::common::grouping_keys::{GroupIndex, KeyAtom};
 use crate::builtins::array::grouping::variables::{select_group_rows, GroupColumn};
 use crate::builtins::table::{categorical_levels_for_observations, table_from_columns};
 use crate::BuiltinResult;

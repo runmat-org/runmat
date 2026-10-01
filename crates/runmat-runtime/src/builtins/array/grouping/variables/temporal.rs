@@ -1,7 +1,7 @@
 use runmat_value::{NumericScalar, ObjectInstance, Tensor, Value};
 
 use super::VariableResult;
-use crate::builtins::array::grouping::keys::KeyAtom;
+use crate::builtins::common::grouping_keys::KeyAtom;
 use crate::builtins::common::tensor::tensor_element_len;
 
 pub(super) fn is_supported_object(value: &ObjectInstance) -> bool {

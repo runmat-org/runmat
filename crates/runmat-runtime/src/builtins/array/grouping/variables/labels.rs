@@ -3,7 +3,7 @@ use runmat_value::Value;
 use crate::builtins::table::select_rows;
 
 use super::{GroupColumn, VariableResult};
-use crate::builtins::array::grouping::keys::GroupIndex;
+use crate::builtins::common::grouping_keys::GroupIndex;
 
 pub(crate) fn label_columns(
     columns: &[GroupColumn],
