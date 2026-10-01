@@ -16,6 +16,7 @@ pub fn infer_sum_type(args: &[Type], context: &ResolveContext) -> Type {
         ScalarResultClass::Promoted,
         None,
         1,
+        super::numeric_inference::EmptyAxesPolicy::Default,
     )
 }
 

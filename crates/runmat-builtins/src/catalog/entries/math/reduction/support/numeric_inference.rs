@@ -11,6 +11,12 @@ pub(super) enum LiteralReductionControl {
     RequiresRuntimeValue,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum EmptyAxesPolicy {
+    Default,
+    Reject,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LiteralReductionOutput {
     Default,
@@ -52,6 +58,7 @@ pub(super) fn infer_numeric_reduction_type(
     scalar_class: ScalarResultClass,
     decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
     option_start: usize,
+    empty_axes: EmptyAxesPolicy,
 ) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
@@ -62,6 +69,7 @@ pub(super) fn infer_numeric_reduction_type(
         decode_control,
         decode_normalization,
         option_start,
+        empty_axes,
     );
     match input {
         Type::Tensor { shape } => Type::Tensor {
@@ -115,6 +123,7 @@ pub(super) fn admitted_literal_controls(
     decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
     decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
     option_start: usize,
+    empty_axes: EmptyAxesPolicy,
 ) -> Option<KnownControls> {
     let mut axes = KnownAxes::Default;
     let mut axes_set = false;
@@ -156,7 +165,7 @@ pub(super) fn admitted_literal_controls(
                 }
             }
         }
-        let selection = axes_literal(literal)?;
+        let selection = axes_literal(literal, empty_axes)?;
         if axes_set && !matches!(axes, KnownAxes::Default) {
             return None;
         }
@@ -166,10 +175,12 @@ pub(super) fn admitted_literal_controls(
     Some(KnownControls { axes, output })
 }
 
-fn axes_literal(literal: &LiteralValue) -> Option<KnownAxes> {
+fn axes_literal(literal: &LiteralValue, empty_axes: EmptyAxesPolicy) -> Option<KnownAxes> {
     match literal {
-        LiteralValue::Empty => Some(KnownAxes::Default),
-        LiteralValue::Vector(values) if values.is_empty() => Some(KnownAxes::Default),
+        LiteralValue::Empty => matches!(empty_axes, EmptyAxesPolicy::Default)
+            .then_some(KnownAxes::Default),
+        LiteralValue::Vector(values) if values.is_empty() =>
+            matches!(empty_axes, EmptyAxesPolicy::Default).then_some(KnownAxes::Default),
         LiteralValue::Vector(values) => Some(KnownAxes::Vec(
             values
                 .iter()

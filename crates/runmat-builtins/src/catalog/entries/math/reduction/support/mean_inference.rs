@@ -14,6 +14,7 @@ pub(crate) fn admitted_mean_controls(
         mean_literal_control,
         None,
         1,
+        super::numeric_inference::EmptyAxesPolicy::Default,
     )
 }
 

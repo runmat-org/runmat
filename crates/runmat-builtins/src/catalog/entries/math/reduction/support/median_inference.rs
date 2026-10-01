@@ -1,5 +1,5 @@
 use super::numeric_inference::{
-    infer_numeric_reduction_type, LiteralReductionControl, ScalarResultClass,
+    infer_numeric_reduction_type, EmptyAxesPolicy, LiteralReductionControl, ScalarResultClass,
 };
 use super::MedianControl;
 use crate::{ResolveContext, Type};
@@ -15,6 +15,7 @@ pub fn infer_median_type(args: &[Type], context: &ResolveContext) -> Type {
         ScalarResultClass::Preserved,
         None,
         1,
+        EmptyAxesPolicy::Default,
     )
 }
 

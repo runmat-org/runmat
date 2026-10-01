@@ -1,5 +1,5 @@
 use super::numeric_inference::{
-    infer_numeric_reduction_type, LiteralReductionControl, ScalarResultClass,
+    infer_numeric_reduction_type, EmptyAxesPolicy, LiteralReductionControl, ScalarResultClass,
 };
 use super::{MinComparisonMethod, MinControl};
 use crate::{ResolveContext, Type};
@@ -30,6 +30,7 @@ fn infer_reduction(args: &[Type], context: &ResolveContext, option_start: usize)
         ScalarResultClass::PreserveInteger,
         None,
         option_start,
+        EmptyAxesPolicy::Default,
     )
 }
 

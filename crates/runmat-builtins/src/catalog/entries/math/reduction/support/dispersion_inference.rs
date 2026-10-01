@@ -2,7 +2,7 @@ use super::dispersion_options::{
     std_normalization_literal, var_normalization_literal, NormalizationLiteral,
 };
 use super::numeric_inference::{
-    infer_numeric_reduction_type, LiteralReductionControl, ScalarResultClass,
+    infer_numeric_reduction_type, EmptyAxesPolicy, LiteralReductionControl, ScalarResultClass,
 };
 use super::DispersionControl;
 use crate::{ResolveContext, Type};
@@ -18,6 +18,7 @@ pub fn infer_std_type(args: &[Type], context: &ResolveContext) -> Type {
         ScalarResultClass::FloatingOnly,
         Some(std_normalization_literal as fn(&LiteralValue) -> NormalizationLiteral),
         1,
+        EmptyAxesPolicy::Default,
     )
 }
 
@@ -29,6 +30,7 @@ pub fn infer_var_type(args: &[Type], context: &ResolveContext) -> Type {
         ScalarResultClass::FloatingOnly,
         Some(var_normalization_literal as fn(&LiteralValue) -> NormalizationLiteral),
         1,
+        EmptyAxesPolicy::Reject,
     )
 }
 
@@ -102,6 +104,34 @@ mod tests {
                 &[input(), Type::Num],
                 &ResolveContext::new(vec![LiteralValue::Unknown, LiteralValue::Number(2.0)]),
             ),
+            Type::Tensor { shape: None }
+        );
+    }
+
+    #[test]
+    fn std_and_var_disagree_on_empty_axis_after_normalization_placeholder() {
+        let arguments = [
+            input(),
+            Type::Tensor {
+                shape: Some(vec![Some(0), Some(0)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(0), Some(0)]),
+            },
+        ];
+        let literals = ResolveContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Empty,
+            LiteralValue::Empty,
+        ]);
+        assert_eq!(
+            infer_std_type(&arguments, &literals),
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(4)])
+            }
+        );
+        assert_eq!(
+            infer_var_type(&arguments, &literals),
             Type::Tensor { shape: None }
         );
     }
