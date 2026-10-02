@@ -4,6 +4,63 @@ use runmat_value::{IntegerStorage, StructValue, Tensor};
 use super::admission::is_empty_option_value;
 use super::*;
 use runmat_builtins::{KmeansDistance, KmeansEmptyAction};
+
+#[test]
+fn registered_kmeans_observes_its_invocation_cancellation_before_materialization() {
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::rc::Rc;
+
+    let source = CancellationSource::new();
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        source.token(),
+    );
+    source.cancel(CancellationReason::User);
+    let error = block_on(kmeans_builtin_registered(
+        Some(runtime),
+        tensor(vec![1.0, 2.0], 2, 1),
+        Value::Num(1.0),
+        Vec::new(),
+    ))
+    .expect_err("cancelled invocation must not prepare observations");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}
+
+#[test]
+fn preparation_yields_on_real_observation_work_and_preserves_native_values() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::cell::Cell;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+
+    let expected = prepare_data(
+        tensor(vec![1.0, 3.0, 2.0, 4.0], 2, 2),
+        Distance::SqEuclidean,
+    )
+    .expect("native preparation");
+    let source = CancellationSource::new();
+    let turns = Rc::new(Cell::new(0));
+    let counted = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let actual = block_on(geometry::prepare_data_cooperative(
+        tensor(vec![1.0, 3.0, 2.0, 4.0], 2, 2),
+        Distance::SqEuclidean,
+        &mut cooperation::KmeansCooperation::with_budget(budget),
+    ))
+    .expect("cooperative preparation");
+    assert_eq!(actual.rows, expected.rows);
+    assert_eq!(actual.original_to_valid, expected.original_to_valid);
+    assert!(turns.get() >= 4);
+}
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
 }

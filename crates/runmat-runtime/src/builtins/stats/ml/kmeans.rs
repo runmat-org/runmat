@@ -15,6 +15,7 @@ use runmat_value::Value;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 mod admission;
+mod cooperation;
 mod compute;
 mod geometry;
 mod options;
@@ -28,9 +29,10 @@ mod tests;
 use crate::builtins::common::random;
 use admission::{BorrowedOperands, OptionHeader};
 use compute::run_kmeans;
+#[cfg(test)]
+use geometry::prepare_data;
 use geometry::{
-    preflight_cluster_count, preflight_observations, prepare_data, tensor_rows_cols,
-    validate_options,
+    preflight_cluster_count, preflight_observations, tensor_rows_cols, validate_options,
 };
 #[cfg(test)]
 use options::{bool_option, is_empty_numeric, parse_positive_usize};
@@ -120,9 +122,31 @@ struct ReplicateResult {
 #[runtime_builtin(
     name = "kmeans",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::kmeans"
 )]
+pub(crate) async fn kmeans_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    k: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    kmeans_in_runtime(runtime.as_ref(), x, k, rest).await
+}
+
+#[cfg(test)]
 async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    kmeans_in_runtime(None, x, k, rest).await
+}
+
+async fn kmeans_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    x: Value,
+    k: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = cooperation::KmeansCooperation::new(runtime);
+    cooperation.completed(0).await?;
     if crate::output_count::current_output_count().is_some_and(|count| count > 4) {
         return Err(invalid("kmeans: too many output arguments; maximum is 4"));
     }
@@ -136,7 +160,7 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
     preflight_observations(&x)?;
     preflight_cluster_count(&k)?;
     ensure_kmeans_extensions(&x, &k, &headers)?;
-    let options = admission::admit_option_values(headers)?;
+    let options = admission::admit_option_values_cooperative(headers, &mut cooperation).await?;
     if !matches!(&k, Value::GpuTensor(_)) && !admission::is_empty_numeric(&k) {
         options::parse_positive_usize(&k, "k")?;
     }
@@ -151,12 +175,13 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
     }
     borrowed.record_consumed(&k);
     let k = gather(k).await?;
-    let mut options = parse_options(options, &mut borrowed).await?;
-    let data = prepare_data(x, options.distance)?;
+    let mut options = parse_options(options, &mut borrowed, &mut cooperation).await?;
+    let data = geometry::prepare_data_cooperative(x, options.distance, &mut cooperation).await?;
     let k = parse_k(&k, &options.start)?;
-    validate_options(&mut options, k, &data)?;
+    validate_options(&mut options, k, &data, &mut cooperation).await?;
     let result = run_kmeans(&data, k, &options)?;
     let value = outputs_for_count(result, &data)?;
+    cooperation.completed(0).await?;
     restore_kmeans_value(value, output_source.as_ref(), &borrowed)
 }
 

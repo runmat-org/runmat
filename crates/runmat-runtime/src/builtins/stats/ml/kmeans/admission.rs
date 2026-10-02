@@ -82,72 +82,95 @@ pub(super) fn parse_option_headers(args: Vec<Value>) -> BuiltinResult<Vec<Option
 
 /// Decode each value after compatibility admission but before provider access.
 /// The already typed option and statset identities are never parsed again.
+#[cfg(test)]
 pub(super) fn admit_option_values(headers: Vec<OptionHeader>) -> BuiltinResult<Vec<OptionInput>> {
-    headers
-        .into_iter()
-        .map(|header| {
-            let (kind, value) = match header {
-                OptionHeader::Argument { kind, value } => (kind, value),
-                OptionHeader::Statset(fields) => {
-                    return Ok(OptionInput::Statset(parse_statset(fields)?));
-                }
-            };
-            let input = match kind {
-                KmeansOption::Distance => OptionInput::Distance(
-                    Distance::from_keyword(&required_text(&value, "Distance")?)
-                        .ok_or_else(|| invalid("kmeans: unsupported Distance"))?,
-                ),
-                KmeansOption::EmptyAction => OptionInput::EmptyAction(
-                    EmptyAction::from_keyword(&required_text(&value, "EmptyAction")?)
-                        .ok_or_else(|| invalid("kmeans: unsupported EmptyAction"))?,
-                ),
-                KmeansOption::MaxIter => {
-                    preflight_scalar(&value, "MaxIter")?;
-                    OptionInput::MaxIter(value)
-                }
-                KmeansOption::Replicates => {
-                    preflight_scalar(&value, "Replicates")?;
-                    OptionInput::Replicates(value)
-                }
-                KmeansOption::Start => {
-                    if let Some(text) = keyword_of(&value) {
-                        OptionInput::Start(StartInput::Named(
-                            KmeansStart::from_keyword(&text).ok_or_else(|| {
-                                invalid(format!("kmeans: unsupported Start '{text}'"))
-                            })?,
-                        ))
+    futures::executor::block_on(admit_option_values_cooperative(
+        headers,
+        &mut super::cooperation::KmeansCooperation::new(None),
+    ))
+}
+
+pub(super) async fn admit_option_values_cooperative(
+    headers: Vec<OptionHeader>,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<OptionInput>> {
+    let mut admitted = Vec::new();
+    admitted
+        .try_reserve_exact(headers.len())
+        .map_err(|_| invalid("kmeans: options exceed available memory"))?;
+    for header in headers {
+        let (kind, value) = match header {
+            OptionHeader::Argument { kind, value } => (kind, value),
+            OptionHeader::Statset(fields) => {
+                admitted.push(OptionInput::Statset(parse_statset(fields)?));
+                cooperation.completed(1).await?;
+                continue;
+            }
+        };
+        let input = match kind {
+            KmeansOption::Distance => OptionInput::Distance(
+                Distance::from_keyword(&required_text(&value, "Distance")?)
+                    .ok_or_else(|| invalid("kmeans: unsupported Distance"))?,
+            ),
+            KmeansOption::EmptyAction => OptionInput::EmptyAction(
+                EmptyAction::from_keyword(&required_text(&value, "EmptyAction")?)
+                    .ok_or_else(|| invalid("kmeans: unsupported EmptyAction"))?,
+            ),
+            KmeansOption::MaxIter => {
+                preflight_scalar(&value, "MaxIter")?;
+                OptionInput::MaxIter(value)
+            }
+            KmeansOption::Replicates => {
+                preflight_scalar(&value, "Replicates")?;
+                OptionInput::Replicates(value)
+            }
+            KmeansOption::Start => {
+                if let Some(text) = keyword_of(&value) {
+                    OptionInput::Start(StartInput::Named(
+                        KmeansStart::from_keyword(&text).ok_or_else(|| {
+                            invalid(format!("kmeans: unsupported Start '{text}'"))
+                        })?,
+                    ))
+                } else {
+                    preflight_numeric_start(&value)?;
+                    if matches!(&value, Value::GpuTensor(_)) {
+                        OptionInput::Start(StartInput::Resident(value))
                     } else {
-                        preflight_numeric_start(&value)?;
-                        if matches!(&value, Value::GpuTensor(_)) {
-                            OptionInput::Start(StartInput::Resident(value))
-                        } else {
-                            if !numeric_value_is_exact(&value) {
-                                return Err(invalid("kmeans: typed-integer Start values must be exactly representable as double"));
-                            }
-                            OptionInput::Start(StartInput::Prepared(super::options::parse_numeric_start(value)?))
+                        if !numeric_value_is_exact(&value) {
+                            return Err(invalid("kmeans: typed-integer Start values must be exactly representable as double"));
                         }
+                        OptionInput::Start(StartInput::Prepared(
+                            super::options::parse_numeric_start_cooperative(value, cooperation)
+                                .await?,
+                        ))
                     }
                 }
-                KmeansOption::Display => {
-                    KmeansDisplay::from_keyword(&required_text(&value, "Display")?)
-                        .ok_or_else(|| invalid("kmeans: unsupported Display"))?;
-                    OptionInput::Display
-                }
-                KmeansOption::OnlinePhase => OptionInput::OnlinePhase(
-                    KmeansToggle::from_keyword(&required_text(&value, "OnlinePhase")?)
-                        .ok_or_else(|| invalid("kmeans: unsupported OnlinePhase"))?,
-                ),
-                KmeansOption::Options if is_empty_numeric(&value) => OptionInput::EmptyStatset,
-                KmeansOption::Options => return Err(invalid("kmeans: Options must be [] or a statset options struct")),
-            };
-            match &input {
-                OptionInput::MaxIter(value) => validate_host_positive(value, "MaxIter")?,
-                OptionInput::Replicates(value) => validate_host_positive(value, "Replicates")?,
-                _ => {}
             }
-            Ok(input)
-        })
-        .collect()
+            KmeansOption::Display => {
+                KmeansDisplay::from_keyword(&required_text(&value, "Display")?)
+                    .ok_or_else(|| invalid("kmeans: unsupported Display"))?;
+                OptionInput::Display
+            }
+            KmeansOption::OnlinePhase => OptionInput::OnlinePhase(
+                KmeansToggle::from_keyword(&required_text(&value, "OnlinePhase")?)
+                    .ok_or_else(|| invalid("kmeans: unsupported OnlinePhase"))?,
+            ),
+            KmeansOption::Options if is_empty_numeric(&value) => OptionInput::EmptyStatset,
+            KmeansOption::Options => {
+                return Err(invalid(
+                    "kmeans: Options must be [] or a statset options struct",
+                ))
+            }
+        };
+        match &input {
+            OptionInput::MaxIter(value) => validate_host_positive(value, "MaxIter")?,
+            OptionInput::Replicates(value) => validate_host_positive(value, "Replicates")?,
+            _ => {}
+        }
+        admitted.push(input);
+        cooperation.completed(1).await?;
+    }
+    Ok(admitted)
 }
 
 fn validate_host_positive(value: &Value, label: &str) -> BuiltinResult<()> {

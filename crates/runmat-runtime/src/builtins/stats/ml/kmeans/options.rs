@@ -9,6 +9,7 @@ use runmat_value::Value;
 pub(super) async fn parse_options(
     args: Vec<OptionInput>,
     borrowed: &mut BorrowedOperands,
+    cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Options> {
     let mut options = Options::default();
     for arg in args {
@@ -30,17 +31,18 @@ pub(super) async fn parse_options(
                 if !super::admission::numeric_value_is_exact(&value) {
                     return Err(invalid("kmeans: typed-integer Start values must be exactly representable as double"));
                 }
-                options.start = parse_numeric_start(value)?;
+                options.start = parse_numeric_start_cooperative(value, cooperation).await?;
             }
             OptionInput::Display => {}
             OptionInput::OnlinePhase(toggle) => {
                 options.online_phase = matches!(toggle, super::KmeansToggle::On)
             }
             OptionInput::Statset(fields) => {
-                apply_options_struct(&mut options, fields, borrowed).await?
+                apply_options_struct(&mut options, fields, borrowed, cooperation).await?
             }
             OptionInput::EmptyStatset => {}
         }
+        cooperation.completed(1).await?;
     }
     Ok(options)
 }
@@ -50,7 +52,10 @@ async fn materialize(value: Value, borrowed: &mut BorrowedOperands) -> BuiltinRe
     gather(value).await
 }
 
-pub(super) fn parse_numeric_start(value: Value) -> BuiltinResult<StartSpec> {
+pub(super) async fn parse_numeric_start_cooperative(
+    value: Value,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<StartSpec> {
     let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|err| invalid(format!("kmeans: {err}")))?;
     if tensor.shape.len() > 3 {
@@ -66,7 +71,6 @@ pub(super) fn parse_numeric_start(value: Value) -> BuiltinResult<StartSpec> {
     if cells > MAX_WORK_CELLS {
         return Err(invalid("kmeans: requested clustering work is too large"));
     }
-    let values = tensor::tensor_values_f64(&tensor);
     if tensor.shape.len() == 3 {
         let k = tensor.shape[0];
         let cols = tensor.shape[1];
@@ -77,7 +81,8 @@ pub(super) fn parse_numeric_start(value: Value) -> BuiltinResult<StartSpec> {
             for col in 0..cols {
                 for (row, center_row) in centers.iter_mut().enumerate().take(k) {
                     let offset = row + col * k + page * k * cols;
-                    center_row[col] = values[offset];
+                    center_row[col] = tensor::tensor_value_f64(&tensor, offset);
+                    cooperation.completed(1).await?;
                 }
             }
             pages.push(centers);
@@ -88,7 +93,8 @@ pub(super) fn parse_numeric_start(value: Value) -> BuiltinResult<StartSpec> {
         let mut centers = vec![vec![0.0; cols]; rows];
         for col in 0..cols {
             for (row, center_row) in centers.iter_mut().enumerate().take(rows) {
-                center_row[col] = values[col * rows + row];
+                center_row[col] = tensor::tensor_value_f64(&tensor, col * rows + row);
+                cooperation.completed(1).await?;
             }
         }
         Ok(StartSpec::Numeric(centers))
@@ -149,6 +155,7 @@ async fn apply_options_struct(
     options: &mut Options,
     fields: Vec<StatsetInput>,
     borrowed: &mut BorrowedOperands,
+    cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<()> {
     for field in fields {
         match field {
@@ -183,6 +190,7 @@ async fn apply_options_struct(
                 validate_tolerance(&value, "Options.TolFun")?;
             }
         }
+        cooperation.completed(1).await?;
     }
     Ok(())
 }

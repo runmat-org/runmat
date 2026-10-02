@@ -62,17 +62,29 @@ pub(super) fn preflight_cluster_count(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn prepare_data(value: Value, distance: Distance) -> BuiltinResult<PreparedData> {
+    futures::executor::block_on(prepare_data_cooperative(
+        value,
+        distance,
+        &mut super::cooperation::KmeansCooperation::new(None),
+    ))
+}
+
+pub(super) async fn prepare_data_cooperative(
+    value: Value,
+    distance: Distance,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<PreparedData> {
     let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|err| invalid(format!("kmeans: {err}")))?;
     if tensor.shape.len() > 2 {
         return Err(invalid("kmeans: X must be a numeric vector or 2-D matrix"));
     }
-    let values = tensor::tensor_values_f64_cow(&tensor);
     let (raw_rows, raw_cols) = tensor_rows_cols(&tensor);
     let vector_as_column = raw_rows == 1 || raw_cols == 1;
     let original_row_count = if vector_as_column {
-        values.len()
+        tensor::tensor_element_len(&tensor)
     } else {
         raw_rows
     };
@@ -84,9 +96,9 @@ pub(super) fn prepare_data(value: Value, distance: Distance) -> BuiltinResult<Pr
         let mut has_nan = false;
         for col in 0..cols {
             let value: f64 = if vector_as_column {
-                values[row]
+                tensor::tensor_value_f64(&tensor, row)
             } else {
-                values[col * raw_rows + row]
+                tensor::tensor_value_f64(&tensor, col * raw_rows + row)
             };
             if value.is_nan() {
                 has_nan = true;
@@ -94,7 +106,9 @@ pub(super) fn prepare_data(value: Value, distance: Distance) -> BuiltinResult<Pr
                 return Err(invalid("kmeans: X cannot contain Inf values"));
             }
             row_values.push(value);
+            cooperation.completed(1).await?;
         }
+        cooperation.completed(1).await?;
         if has_nan {
             original_to_valid.push(None);
         } else {
@@ -144,15 +158,16 @@ fn transform_row(row: &[f64], distance: Distance) -> BuiltinResult<Vec<f64>> {
     }
 }
 
-pub(super) fn validate_options(
+pub(super) async fn validate_options(
     options: &mut Options,
     k: usize,
     data: &PreparedData,
+    cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<()> {
     match &mut options.start {
         StartSpec::Numeric(centers) => {
             validate_centers(centers, k, data.cols)?;
-            transform_centers(centers, options.distance)?;
+            transform_centers(centers, options.distance, cooperation).await?;
             options.replicates = 1;
         }
         StartSpec::NumericPages(pages) => {
@@ -163,7 +178,7 @@ pub(super) fn validate_options(
             }
             for centers in &mut *pages {
                 validate_centers(centers, k, data.cols)?;
-                transform_centers(centers, options.distance)?;
+                transform_centers(centers, options.distance, cooperation).await?;
             }
             options.replicates = pages.len();
         }
@@ -193,7 +208,11 @@ pub(super) fn validate_options(
     Ok(())
 }
 
-fn transform_centers(centers: &mut [Vec<f64>], distance: Distance) -> BuiltinResult<()> {
+async fn transform_centers(
+    centers: &mut [Vec<f64>],
+    distance: Distance,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<()> {
     for center in centers {
         let transformed = transform_row(center, distance)?;
         if transformed.iter().any(|value| value.is_nan()) {
@@ -202,6 +221,7 @@ fn transform_centers(centers: &mut [Vec<f64>], distance: Distance) -> BuiltinRes
             ));
         }
         *center = transformed;
+        cooperation.completed(center.len() as u64).await?;
     }
     Ok(())
 }
