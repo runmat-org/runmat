@@ -2,16 +2,19 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod conversion;
+mod gray2rgb;
 mod im2double;
 mod im2uint16;
 mod im2uint8;
 
 pub use self::conversion::ImageIndexMode;
+pub use self::gray2rgb::*;
 pub use self::im2double::*;
 pub use self::im2uint16::*;
 pub use self::im2uint8::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(gray2rgb::ENTRIES.iter().copied());
     values.extend(im2double::ENTRIES.iter().copied());
     values.extend(im2uint16::ENTRIES.iter().copied());
     values.extend(im2uint8::ENTRIES.iter().copied());

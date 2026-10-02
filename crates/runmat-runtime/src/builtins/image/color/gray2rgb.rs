@@ -1,12 +1,10 @@
 //! `gray2rgb` compatibility helper for replicating grayscale images into RGB.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinErrorDescriptor,
+    BuiltinPreparationFormId, GRAY2RGB_DESCRIPTOR, GRAY2RGB_ERROR_INTERNAL,
+    GRAY2RGB_ERROR_INVALID_INPUT, GRAY2RGB_ERROR_TOO_MANY_INPUTS, GRAY2RGB_ERROR_TOO_MANY_OUTPUTS,
+    GRAY2RGB_EXTENSIONS, GRAY2RGB_INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Value};
@@ -16,97 +14,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::image::color::common;
-use crate::builtins::image::color::type_resolvers::gray2rgb_type;
+use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "gray2rgb";
-
-const GRAY2RGB_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "RGB",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "RGB image with replicated grayscale channels.",
-}];
-
-const GRAY2RGB_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "I",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Grayscale input image.",
-}];
-
-const GRAY2RGB_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "RGB = gray2rgb(I)",
-    inputs: &GRAY2RGB_INPUTS,
-    outputs: &GRAY2RGB_OUTPUT,
-}];
-
-const GRAY2RGB_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GRAY2RGB.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:gray2rgb:TooManyInputs"),
-    when: "More than one input argument is supplied.",
-    message: "gray2rgb: too many input arguments",
-};
-
-const GRAY2RGB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GRAY2RGB.INVALID_INPUT",
-    identifier: Some("RunMat:gray2rgb:InvalidInput"),
-    when: "Input cannot be interpreted as an MxN grayscale image.",
-    message: "gray2rgb: invalid input",
-};
-
-const GRAY2RGB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GRAY2RGB.INTERNAL",
-    identifier: Some("RunMat:gray2rgb:Internal"),
-    when: "RGB output tensor construction fails internally.",
-    message: "gray2rgb: internal conversion failure",
-};
-
-const GRAY2RGB_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    GRAY2RGB_ERROR_TOO_MANY_INPUTS,
-    GRAY2RGB_ERROR_INVALID_INPUT,
-    GRAY2RGB_ERROR_INTERNAL,
-];
-
-pub const GRAY2RGB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GRAY2RGB_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GRAY2RGB_ERRORS,
-};
-
-const GRAY2RGB_CALL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gray2rgb-callable",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "gray2rgb is a RunMat-provided image helper rather than an API in the compatibility target",
-    error_identifier: Some("RunMat:compatibility:Gray2rgbCallExtension"),
-};
-
-pub const GRAY2RGB_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GRAY2RGB_CALL_EXTENSION];
-
-const GRAY2RGB_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "I",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are replicated with their exact source class and values preserved.",
-    }];
-
-pub const GRAY2RGB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "RGB = gray2rgb(integer_I)",
-        inputs: &GRAY2RGB_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The entire callable is RunMat-only. Integer images retain their class and exact values while a third RGB plane dimension is appended; resident input gathers through its owner and returns the host helper result.",
-    }];
 
 fn gray2rgb_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     gray2rgb_error_with_message(error.message, error)
@@ -163,24 +74,74 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "gray2rgb",
-    category = "image/color",
-    summary = "Convert grayscale images to RGB.",
-    keywords = "gray2rgb,gray,grayscale,rgb,image",
-    accel = "sink",
-    type_resolver(gray2rgb_type),
-    descriptor(crate::builtins::image::color::gray2rgb::GRAY2RGB_DESCRIPTOR),
-    extensions(crate::builtins::image::color::gray2rgb::GRAY2RGB_EXTENSIONS),
-    integer_capabilities(crate::builtins::image::color::gray2rgb::GRAY2RGB_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::image::color::gray2rgb"
 )]
 async fn gray2rgb_builtin(gray: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(gray2rgb_error(&GRAY2RGB_ERROR_TOO_MANY_INPUTS));
     }
-    crate::compatibility::ensure_builtin_extension_enabled(&GRAY2RGB_CALL_EXTENSION, NAME)?;
-    let gathered = common::gather_value(NAME, &gray)
-        .await
-        .map_err(|err| gray2rgb_map_error(err, &GRAY2RGB_ERROR_INVALID_INPUT))?;
+    crate::output_count::validate_fixed_outputs(
+        &GRAY2RGB_DESCRIPTOR,
+        &GRAY2RGB_ERROR_TOO_MANY_OUTPUTS,
+        NAME,
+    )?;
+    crate::compatibility::ensure_builtin_extension_enabled(&GRAY2RGB_EXTENSIONS[0], NAME)?;
+    let prepare = admit_gray(&gray)?;
+    if !prepare {
+        return gray2rgb_execute(gray).await;
+    }
+    execute_current_invocation(
+        BuiltinPreparationAdmission {
+            binding: BuiltinBindingIdentity {
+                builtin: BuiltinCatalogIdentity { name: NAME },
+                variant: "default",
+            },
+            form: BuiltinPreparationFormId(0),
+            signature: 0,
+            input_count: 1,
+            requested_outputs: crate::output_count::current_output_count(),
+        },
+        vec![gray],
+        |mut operands| async move {
+            gray2rgb_execute(operands.pop().expect("one admitted grayscale operand")).await
+        },
+    )
+    .await
+}
+
+fn admit_gray(value: &Value) -> BuiltinResult<bool> {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(true),
+        Value::Tensor(tensor) if tensor.shape.len() == 2 => Ok(true),
+        Value::LogicalArray(array) if array.shape.len() == 2 => Ok(true),
+        Value::GpuTensor(handle) if handle.shape().len() == 2 => {
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                // Logical resident images keep their existing owner-aware gather path.
+                return Ok(false);
+            }
+            common::resident_numeric_dtype(handle, NAME)
+                .map_err(|err| gray2rgb_map_error(err, &GRAY2RGB_ERROR_INVALID_INPUT))?;
+            Ok(true)
+        }
+        Value::Tensor(_) | Value::LogicalArray(_) | Value::GpuTensor(_) => {
+            Err(gray2rgb_error_with_message(
+                "gray2rgb: expected an MxN grayscale image",
+                &GRAY2RGB_ERROR_INVALID_INPUT,
+            ))
+        }
+        _ => Ok(false),
+    }
+}
+
+async fn gray2rgb_execute(gray: Value) -> BuiltinResult<Value> {
+    let gathered = if matches!(gray, Value::GpuTensor(_)) {
+        common::gather_value(NAME, &gray)
+            .await
+            .map_err(|err| gray2rgb_map_error(err, &GRAY2RGB_ERROR_INVALID_INPUT))?
+    } else {
+        gray
+    };
     match gathered {
         Value::LogicalArray(logical) => replicate_logical(logical),
         Value::Bool(value) => replicate_logical(
@@ -243,7 +204,7 @@ mod tests {
         let input = Tensor::new(vec![0.5], vec![1, 1]).expect("input");
         let error = block_on(gray2rgb_builtin(Value::Tensor(input), Vec::new()))
             .expect_err("whole callable is an extension");
-        assert_eq!(error.identifier(), GRAY2RGB_CALL_EXTENSION.error_identifier);
+        assert_eq!(error.identifier(), GRAY2RGB_EXTENSIONS[0].error_identifier);
         assert_eq!(GRAY2RGB_EXTENSIONS.len(), 1);
         assert_eq!(GRAY2RGB_INTEGER_CAPABILITIES.len(), 1);
     }
