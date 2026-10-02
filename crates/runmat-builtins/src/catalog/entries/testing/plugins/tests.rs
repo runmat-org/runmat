@@ -1,7 +1,9 @@
 use super::*;
+use crate::*;
 use runmat_types::{
-    DynamicReason, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
-    OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, DynamicReason, LiteralContext, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 fn call(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>, outputs: usize) -> CallRequest {
@@ -33,6 +35,18 @@ fn assert_plugin_class(result: CallInference, class: runmat_types::StaticClassId
 
 #[test]
 fn base_plugin_is_a_scalar_host_object_without_arguments() {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.identity.name)
+            .collect::<Vec<_>>(),
+        [
+            "matlab.unittest.plugins.TestRunnerPlugin",
+            "matlab.unittest.plugins.CodeCoveragePlugin.forFolder"
+        ]
+    );
     assert_plugin_class(
         inference::test_runner_plugin(&call(vec![], vec![], 1), &TEST_RUNNER_PLUGIN_CATALOG_ENTRY),
         runmat_types::standard::UNIT_TEST_RUNNER_PLUGIN,

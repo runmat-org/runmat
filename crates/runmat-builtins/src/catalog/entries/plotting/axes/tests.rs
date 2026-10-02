@@ -1,7 +1,12 @@
 use super::*;
+use crate::*;
 use runmat_types::*;
 #[test]
 fn axes_inference_returns_host_handle_without_inventing_graphics_identity() {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].identity.name, "axes");
     for count in [0, 1, 2] {
         let request = CallRequest {
             arguments: vec![],

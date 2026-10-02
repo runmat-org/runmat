@@ -1,4 +1,5 @@
 use super::*;
+use crate::*;
 use runmat_types::*;
 
 fn call(arguments: Vec<ValueFact>, outputs: usize) -> CallRequest {
@@ -15,6 +16,21 @@ fn unknown() -> ValueFact {
 
 #[test]
 fn all_five_bindings_infer_the_correct_host_object_class() {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.identity.name)
+            .collect::<Vec<_>>(),
+        [
+            "timetable",
+            "array2timetable",
+            "table2timetable",
+            "timetable2table",
+            "readtimetable"
+        ]
+    );
     for (entry, arguments, class) in [
         (
             &constructor::ENTRY,
