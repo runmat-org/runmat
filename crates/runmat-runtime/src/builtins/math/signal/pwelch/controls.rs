@@ -19,6 +19,28 @@ enum ControlRole {
     Option,
 }
 
+impl ControlRole {
+    fn at_positional_index(index: usize) -> Self {
+        match index {
+            0 => Self::Window,
+            1 => Self::Overlap,
+            2 => Self::Grid,
+            3 => Self::SampleRate,
+            _ => Self::Option,
+        }
+    }
+
+    fn integer_boundary(self) -> Option<(&'static str, &'static BuiltinErrorDescriptor)> {
+        match self {
+            Self::Window => Some(("window", &PWELCH_ERROR_INVALID_WINDOW)),
+            Self::Overlap => Some(("overlap", &PWELCH_ERROR_INVALID_OVERLAP)),
+            Self::Grid => Some(("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT)),
+            Self::SampleRate => Some(("sample-rate", &PWELCH_ERROR_INVALID_FS)),
+            Self::Option => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct PreparedHostControls {
     window: Option<Vec<f64>>,
@@ -67,13 +89,7 @@ pub(super) async fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<Pre
         if matches!(value, Value::GpuTensor(_)) || is_empty(value) {
             continue;
         }
-        let (name, error) = match role {
-            ControlRole::Window => ("window", &PWELCH_ERROR_INVALID_WINDOW),
-            ControlRole::Overlap => ("overlap", &PWELCH_ERROR_INVALID_OVERLAP),
-            ControlRole::Grid => ("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT),
-            ControlRole::SampleRate => ("sample-rate", &PWELCH_ERROR_INVALID_FS),
-            ControlRole::Option => unreachable!("handled above"),
-        };
+        let (name, error) = role.integer_boundary().expect("option handled above");
         ensure_pwelch_integer_boundary(value, name, error).await?;
         match role {
             ControlRole::Window => {
@@ -120,7 +136,7 @@ pub(super) async fn materialize_resident_controls(
     rest: &[Value],
 ) -> BuiltinResult<Vec<Option<Value>>> {
     let mut materialized = Vec::with_capacity(rest.len());
-    for value in rest {
+    for (index, value) in rest.iter().enumerate() {
         if let Value::GpuTensor(handle) = value {
             let provider = super::super::resident_output::owner(handle, || {
                 pwelch_error(&PWELCH_ERROR_INTERNAL)
@@ -130,6 +146,10 @@ pub(super) async fn materialize_resident_controls(
                     provider, handle,
                 )
                 .await?;
+            if let Some((role, error)) = ControlRole::at_positional_index(index).integer_boundary()
+            {
+                ensure_pwelch_integer_boundary(&host, role, error).await?;
+            }
             materialized.push(Some(host));
         } else {
             materialized.push(None);
