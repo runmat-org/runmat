@@ -12,10 +12,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, NumericScalar, NumericStorage, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::rgb_input;
 use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
@@ -52,33 +48,6 @@ fn rgb2gray_map_error(
             .build()
     }
 }
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::color::rgb2gray")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: NAME,
-    op_kind: GpuOpKind::Custom("rgb2gray"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Owner-aware host fallback preserves image dtype semantics and restores documented GPU results to the source provider.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::color::rgb2gray")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: NAME,
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not fused yet; channel-aware image shape handling is custom.",
-};
 
 #[runtime_builtin(
     name = "rgb2gray",

@@ -42,8 +42,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Logical, exact integer and shape replication", location: "crates/runmat-runtime/src/builtins/image/color/gray2rgb.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled color binding and fusion boundary", location: "crates/runmat-runtime/tests/image_color_catalog_binding.rs" },
         ],
-        notes: &[],
+        notes: &["Native/JIT/AOT, browser, real-provider and whole-work placement qualification remain integration requirements."],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

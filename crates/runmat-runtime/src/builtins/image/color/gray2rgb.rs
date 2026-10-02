@@ -11,10 +11,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::image::color::common;
 use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -54,33 +50,6 @@ fn gray2rgb_map_error(
             .build()
     }
 }
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::color::gray2rgb")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: NAME,
-    op_kind: GpuOpKind::Custom("gray2rgb"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host implementation replicates grayscale planes while preserving logical image dtype metadata.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::color::gray2rgb")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: NAME,
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not fused yet; output rank changes from MxN to MxNx3.",
-};
 
 #[runtime_builtin(
     name = "gray2rgb",

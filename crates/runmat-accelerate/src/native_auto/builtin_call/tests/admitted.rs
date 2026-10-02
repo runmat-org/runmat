@@ -329,6 +329,38 @@ fn filter_and_filtfilt_canonical_calls_preserve_resident_signal_without_legacy_s
 }
 
 #[test]
+fn canonical_color_sinks_retain_resident_operands_for_domain_admission() {
+    let probe = Rc::new(Probe::default());
+    let context = runtime(&probe);
+    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(
+            vec![1, 1, 3],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let args = [Value::GpuTensor(allocation.handle)];
+    for name in ["gray2rgb", "rgb2gray", "rgb2hsv"] {
+        let prepared =
+            futures::executor::block_on(prepare_builtin_call(name, &args, &context)).unwrap();
+        assert_eq!(
+            prepared.args(),
+            &args,
+            "{name} must retain resident admission input"
+        );
+        assert!(
+            probe.requests.borrow().is_empty(),
+            "{name} must not run legacy auto planning"
+        );
+        assert!(
+            probe.feedback.borrow().is_empty(),
+            "{name} must not report legacy feedback"
+        );
+    }
+}
+
+#[test]
 fn nansum_waits_for_its_typed_admission_instead_of_legacy_prepromotion() {
     let probe = Rc::new(Probe::default());
     let context = runtime(&probe);
