@@ -11,7 +11,7 @@ use runmat_accelerate_api::{
     same_provider_instance, GpuTensorHandle, GpuTensorStorage, ProviderElementType, ProviderLayout,
     ProviderPrecision, ProviderRepresentation, ProviderResidency, ProviderStorage,
 };
-use runmat_execution::{Digest, ResourceByteBound};
+use runmat_execution::{Digest, ResourceBoundUnavailable, ResourceByteBound};
 
 pub(super) struct SelectedImhist {
     owner: GpuTensorHandle,
@@ -92,9 +92,13 @@ pub(super) fn select(
         ))
         .expect("typed imhist facts serialize"),
     );
-    let Some(host_compute_scratch) = host_scratch_bound(owner, bins, outputs) else {
-        return Ok(None);
-    };
+    // Unrepresentable arithmetic is unknown resource evidence, not an
+    // unselected route that could execute without a finite-quota check.
+    let host_compute_scratch = host_scratch_bound(owner, bins, outputs)
+        .map(ResourceByteBound::Known)
+        .unwrap_or(ResourceByteBound::Unavailable(
+            ResourceBoundUnavailable::NoScratchBound,
+        ));
     let receipt = select_exact_host_upload(
         runtime,
         ExactHostUpload {
@@ -103,7 +107,7 @@ pub(super) fn select(
             owner,
             domain_facts: facts,
             outputs: vec![output; outputs],
-            host_compute_scratch: ResourceByteBound::Known(host_compute_scratch),
+            host_compute_scratch,
         },
     )?;
     Ok(receipt.map(|receipt| SelectedImhist {

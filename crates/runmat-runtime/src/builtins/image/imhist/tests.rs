@@ -412,6 +412,49 @@ fn selected_histogram_unpolled_and_statement_forms_do_not_probe() {
 }
 
 #[test]
+fn readback_workspace_overflow_fails_admission_before_provider_effects() {
+    test_support::with_test_provider(|provider| {
+        let input = tensor(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2], NumericDType::F64);
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+        let request = || crate::context::host_presentation::ExactHostUpload {
+            operation: NAME,
+            variant: "overflow.admission.test",
+            owner: &source,
+            domain_facts: runmat_execution::Digest::sha256(b"overflow-admission"),
+            outputs: vec![runmat_accelerate_api::ProviderRepresentation {
+                element_type: runmat_accelerate_api::ProviderElementType::F64,
+                storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+                layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+                shape: vec![3, 1],
+                residency: runmat_accelerate_api::ProviderResidency::Device,
+            }],
+            host_compute_scratch: runmat_execution::ResourceByteBound::Known(u64::MAX),
+        };
+        provider.reset_telemetry();
+        assert!(
+            crate::context::host_presentation::select_exact_host_upload(None, request())
+                .unwrap()
+                .is_none()
+        );
+        let witness = Rc::new(PresentationWitness::default());
+        let runtime = witness.context();
+        let error =
+            crate::context::host_presentation::select_exact_host_upload(Some(&runtime), request())
+                .err()
+                .expect("overflow must fail before policy selection");
+        assert_eq!(witness.selections(), 0);
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:ResourceOverflow")
+        );
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.download_bytes, 0);
+        assert_eq!(telemetry.upload_bytes, 0);
+        assert!(source.allocation_lease().validate_live().is_ok());
+    });
+}
+
+#[test]
 fn resident_statement_form_returns_host_counts_without_plotting_or_publication() {
     test_support::with_test_provider(|provider| {
         let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F64);

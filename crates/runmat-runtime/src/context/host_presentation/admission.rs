@@ -90,11 +90,8 @@ pub(crate) fn select_exact_host_upload(
         return Ok(None);
     }
     let readback_host_workspace = provider.download_numeric_host_workspace_bound(request.owner);
-    let Some(total_host_scratch) =
-        combine_host_scratch(request.host_compute_scratch, readback_host_workspace)
-    else {
-        return Ok(None);
-    };
+    let total_host_scratch =
+        combine_host_scratch(request.host_compute_scratch, readback_host_workspace)?;
     let device_id = provider.device_id();
     let provider_digest = Digest::sha256(
         serde_json::to_vec(&provider.capability_snapshot())
@@ -179,18 +176,23 @@ pub(crate) fn select_exact_host_upload(
 /// The caller's scratch excludes the provider's native readback payload and
 /// its internal host temporaries. Unknown on either side remains unknown;
 /// only a checked sum of proven bounds can pass a finite host-memory quota.
+/// Overflow is a placement error, never an unselected route that could run
+/// without admission.
 fn combine_host_scratch(
     operation_owned: ResourceByteBound,
     readback_host_workspace: ResourceByteBound,
-) -> Option<ResourceByteBound> {
+) -> BuiltinResult<ResourceByteBound> {
     match (operation_owned, readback_host_workspace) {
-        (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => {
-            left.checked_add(right).map(ResourceByteBound::Known)
-        }
+        (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => left
+            .checked_add(right)
+            .map(ResourceByteBound::Known)
+            .ok_or_else(|| {
+                build_runtime_error("host readback workspace byte bound overflows")
+                    .with_identifier("RunMat:Placement:ResourceOverflow")
+                    .build()
+            }),
         (ResourceByteBound::Unavailable(reason), _)
-        | (_, ResourceByteBound::Unavailable(reason)) => {
-            Some(ResourceByteBound::Unavailable(reason))
-        }
+        | (_, ResourceByteBound::Unavailable(reason)) => Ok(ResourceByteBound::Unavailable(reason)),
     }
 }
 
@@ -330,24 +332,26 @@ mod tests {
     #[test]
     fn readback_workspace_combination_preserves_unknown_and_checks_sum() {
         assert_eq!(
-            combine_host_scratch(ResourceByteBound::Known(56), ResourceByteBound::Known(16)),
-            Some(ResourceByteBound::Known(72))
+            combine_host_scratch(ResourceByteBound::Known(56), ResourceByteBound::Known(16))
+                .unwrap(),
+            ResourceByteBound::Known(72)
         );
         assert_eq!(
             combine_host_scratch(
                 ResourceByteBound::Known(56),
                 ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-            ),
-            Some(ResourceByteBound::Unavailable(
-                ResourceBoundUnavailable::NoScratchBound
-            ))
+            )
+            .unwrap(),
+            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound)
         );
         assert_eq!(
             combine_host_scratch(
                 ResourceByteBound::Known(u64::MAX),
                 ResourceByteBound::Known(1)
-            ),
-            None
+            )
+            .unwrap_err()
+            .identifier(),
+            Some("RunMat:Placement:ResourceOverflow")
         );
     }
 
