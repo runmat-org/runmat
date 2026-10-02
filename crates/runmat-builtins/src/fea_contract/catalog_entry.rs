@@ -12,6 +12,8 @@ pub struct ConstructorEntryDefinition {
     pub integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
     pub integer_audit: Option<&'static BuiltinIntegerAuditDescriptor>,
     pub filesystem_read: bool,
+    /// Identity-specific distributed admission; never infer from FEA category.
+    pub distributed: BuiltinDistributedPolicy,
 }
 
 /// Only layout shared by the family; prose and example values are supplied by
@@ -70,7 +72,7 @@ pub const fn entry(definition: ConstructorEntryDefinition) -> BuiltinCatalogEntr
             inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
                 definition.inference,
             )),
-            compatibility: BuiltinCompatibility::Matlab,
+            compatibility: BuiltinCompatibility::RunMat,
             async_behavior: if definition.filesystem_read {
                 BuiltinAsyncBehavior::MaySuspend
             } else {
@@ -106,7 +108,7 @@ pub const fn entry(definition: ConstructorEntryDefinition) -> BuiltinCatalogEntr
             accelerator: BuiltinAcceleratorPolicy::Forbidden,
             residency: BuiltinResidencyPolicy::Host,
             fusion: BuiltinFusionPolicy::Boundary,
-            distributed: BuiltinDistributedPolicy::Unsupported,
+            distributed: definition.distributed,
         },
         link: BuiltinLinkContract {
             reachability: BuiltinReachability::Always,

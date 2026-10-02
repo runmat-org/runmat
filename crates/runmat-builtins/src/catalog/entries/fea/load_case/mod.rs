@@ -36,7 +36,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "FEA models", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/models") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/load_step.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Load-case constructor", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs::fea_load_case_accepts_moment_and_torque_alias" }],
-    notes: &["The old sidecar's requires_feature field is obsolete; this native FEA identity is available in the runtime without a fea feature gate."],
+    notes: &["Distributed numeric option handles are rejected before any materialization; load kind and vector shape must be validated first."],
 });
 pub const FEA_LOAD_CASE_CATALOG_ENTRY: BuiltinCatalogEntry =
     catalog_entry::entry(ConstructorEntryDefinition {
@@ -48,5 +48,6 @@ pub const FEA_LOAD_CASE_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_capabilities: &FEA_LOAD_CASE_INTEGER_CAPABILITIES,
         integer_audit: None,
         filesystem_read: false,
+        distributed: BuiltinDistributedPolicy::Unsupported,
     });
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_LOAD_CASE_CATALOG_ENTRY];

@@ -29,7 +29,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "FEA models", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/models") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/material.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "FEA material constructors", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs" }],
-    notes: &["The legacy requires_feature value does not describe the current unconditional runtime FEA dependency."],
+    notes: &["Distributed numeric option handles are rejected: whole-value materialization currently precedes material field validation and cannot preserve failure-before-effect ordering."],
 });
 pub const FEA_MATERIAL_CATALOG_ENTRY: BuiltinCatalogEntry =
     catalog_entry::entry(ConstructorEntryDefinition {
@@ -41,5 +41,6 @@ pub const FEA_MATERIAL_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_capabilities: &FEA_MATERIAL_INTEGER_CAPABILITIES,
         integer_audit: None,
         filesystem_read: false,
+        distributed: BuiltinDistributedPolicy::Unsupported,
     });
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_MATERIAL_CATALOG_ENTRY];

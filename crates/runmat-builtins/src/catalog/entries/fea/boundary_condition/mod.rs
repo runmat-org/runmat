@@ -29,7 +29,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "Using FEA", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }, BuiltinDocumentationLink { label: "FEA operation reference", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/operation-reference") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/boundary.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Boundary constructor", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs::fea_boundary_condition" }],
-    notes: &["The API is RunMat-native, not a MATLAB compatibility builtin; obsolete requires_feature metadata is retired."],
+    notes: &["Distributed numeric option handles are rejected before any materialization; the boundary kind and field schema must be validated first."],
 });
 pub const FEA_BOUNDARY_CONDITION_CATALOG_ENTRY: BuiltinCatalogEntry =
     catalog_entry::entry(ConstructorEntryDefinition {
@@ -41,5 +41,6 @@ pub const FEA_BOUNDARY_CONDITION_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_capabilities: &FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES,
         integer_audit: None,
         filesystem_read: false,
+        distributed: BuiltinDistributedPolicy::Unsupported,
     });
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_BOUNDARY_CONDITION_CATALOG_ENTRY];

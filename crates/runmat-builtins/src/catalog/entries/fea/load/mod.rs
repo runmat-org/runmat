@@ -42,7 +42,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "Using FEA", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/document.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Document load and validation", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs::fea_load_validate_and_plan_document_workflow" }],
-    notes: &["No legacy fea.load sidecar existed; the canonical page is source-owned here. The example uses the same real STL and document schema as the runtime test."],
+    notes: &["The path is a local filesystem operand; an execution-owned distributed handle is not a path."],
 });
 pub const FEA_LOAD_CATALOG_ENTRY: BuiltinCatalogEntry =
     catalog_entry::entry(ConstructorEntryDefinition {
@@ -54,5 +54,6 @@ pub const FEA_LOAD_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_capabilities: &[],
         integer_audit: None,
         filesystem_read: true,
+        distributed: BuiltinDistributedPolicy::Unsupported,
     });
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_LOAD_CATALOG_ENTRY];

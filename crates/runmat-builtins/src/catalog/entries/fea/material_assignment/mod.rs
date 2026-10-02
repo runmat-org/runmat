@@ -36,7 +36,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "FEA models", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/models") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/material.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "FEA constructor tests", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs" }],
-    notes: &["Legacy requires_feature is obsolete; this constructor has no numeric boundary."],
+    notes: &["Region and material selectors are local structural text; execution-owned distributed handles are not valid selectors."],
 });
 pub const FEA_MATERIAL_ASSIGNMENT_CATALOG_ENTRY: BuiltinCatalogEntry =
     catalog_entry::entry(ConstructorEntryDefinition {
@@ -48,5 +48,6 @@ pub const FEA_MATERIAL_ASSIGNMENT_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_capabilities: &[],
         integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
         filesystem_read: false,
+        distributed: BuiltinDistributedPolicy::Unsupported,
     });
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_MATERIAL_ASSIGNMENT_CATALOG_ENTRY];

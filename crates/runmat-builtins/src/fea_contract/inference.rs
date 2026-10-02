@@ -54,7 +54,9 @@ fn host_text(fact: &ValueFact) -> bool {
         return false;
     }
     match fact.kind {
-        ValueKindFact::Unknown => !matches!(fact.shape.element_count(), Some(count) if count != 1),
+        // Unknown kind with shape [1, N] may still be a character row. Do not
+        // reject it merely because a string scalar with that shape is invalid.
+        ValueKindFact::Unknown => true,
         ValueKindFact::String => !matches!(fact.shape.element_count(), Some(count) if count != 1),
         ValueKindFact::Character => match &fact.shape {
             ShapeFact::Shaped { dims } => {
@@ -203,11 +205,16 @@ mod tests {
             integer_capabilities: &[],
             integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
             filesystem_read: false,
+            distributed: crate::BuiltinDistributedPolicy::Unsupported,
         })
     }
 
     #[test]
     fn model_requires_literal_profile_and_host_geometry_class() {
+        assert_eq!(
+            entry().contract.compatibility,
+            crate::BuiltinCompatibility::RunMat
+        );
         let text = ValueFact::scalar(ValueKindFact::String);
         let geometry = ValueFact::proven(
             ValueKindFact::Object(ObjectFact {
@@ -269,5 +276,18 @@ mod tests {
             loaded.outputs[0].certainty,
             CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
         ));
+
+        // A partially typed [1, N] value could be a valid character row.
+        let mut possible_char_row = ValueFact::unknown(DynamicReason::RuntimeValue);
+        possible_char_row.shape = ShapeFact::from(vec![Some(1), Some(7)]);
+        let uncertain = infer_constructor(
+            &request(vec![possible_char_row], vec![LiteralValue::Unknown]),
+            &entry(),
+            FeaConstructorKind::LoadDocument,
+        );
+        assert!(!uncertain
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-TEXT"));
     }
 }

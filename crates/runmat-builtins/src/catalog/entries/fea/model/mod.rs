@@ -37,7 +37,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "FEA models", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/models") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/model/constructors.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "FEA model constructor", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs::fea_model_requires_profile" }],
-    notes: &["The former requires_feature field is obsolete: the runtime includes its FEA dependency without a fea feature gate. The sidecar's free `geom` was replaced by an isolated real STL fixture."],
+    notes: &["`geometry.Asset` and typed component identities are local model objects; execution-owned distributed handles are not accepted as model constructor operands."],
 });
 pub const FEA_MODEL_CATALOG_ENTRY: BuiltinCatalogEntry =
     catalog_entry::entry(ConstructorEntryDefinition {
@@ -49,5 +49,6 @@ pub const FEA_MODEL_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_capabilities: &[],
         integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
         filesystem_read: false,
+        distributed: BuiltinDistributedPolicy::Unsupported,
     });
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_MODEL_CATALOG_ENTRY];
