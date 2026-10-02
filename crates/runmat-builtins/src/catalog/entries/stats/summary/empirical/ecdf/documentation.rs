@@ -35,7 +35,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "empirical-cdf", title: "Compute an empirical CDF",
             program: "[f,x] = ecdf([3;1;2;2]); disp(f); disp(x);",
-            display_output: Some("f = [0; 0.25; 0.75; 1], x = [1; 1; 2; 3]"),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -44,11 +44,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "weighted-survivor", title: "Compute a survivor function with frequencies",
             program: "[s,x] = ecdf([1;2;3], \"Frequency\", [2;1;1], \"Function\", \"survivor\"); disp(s);",
-            display_output: Some("Survivor function values for frequency-weighted samples"),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(numel(s)==numel(x)); assert(all(diff(s)<=0));" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(s,[1;0.5;0.25;0])); assert(isequal(x,[1;1;2;3]));" },
         },
         BuiltinExample {
             id: "plot-empirical-cdf", title: "Plot an empirical CDF",
@@ -70,7 +70,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[OWNER, OPTIONS],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Empirical CDF, censoring, integer, plotting, and owner-boundary tests", location: "crates/runmat-runtime/src/builtins/stats/summary/ecdf.rs" }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Empirical CDF, censoring, integer, plotting, and owner-boundary tests", location: "crates/runmat-runtime/src/builtins/stats/summary/ecdf/tests.rs" }],
         notes: &["Host evaluation follows owner-aware gather; plot state is created only for no-output forms."],
     },
     introduced: None,

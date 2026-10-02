@@ -25,7 +25,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample { id: "levels", title: "Include an unobserved positive level",
             program: "tbl = tabulate([1 3 3]); disp(tbl);",
-            display_output: Some("Rows for levels 1, 2, and 3, including zero frequency for level 2."),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None,
@@ -34,7 +34,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample { id: "missing", title: "Omit NaN observations",
             program: "tbl = tabulate([1 NaN 1 2]); disp(tbl);",
-            display_output: Some("Level 1 has count 2 and percentage 66.6667."),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None,

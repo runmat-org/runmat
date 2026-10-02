@@ -37,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             id: "roc-auc",
             title: "Compute a basic ROC curve and AUC",
             program: "labels = [1; 0; 1; 0]; scores = [0.9; 0.8; 0.4; 0.1]; [X,Y,T,AUC] = perfcurve(labels, scores, 1)",
-            display_output: Some("AUC is 0.75 for this ranking."),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None,
@@ -53,7 +53,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(R),[2 1])); assert(isequal(size(P),[2 1])); assert(all(R>=0 & R<=1));" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(R),[2 1])); assert(isequal(size(P),[2 1])); assert(max(abs(R-[0.5;1]))<1e-12); assert(max(abs(P-[0.5;2/3]))<1e-12);" },
         },
         BuiltinExample {
             id: "negative-subclass",
@@ -88,7 +88,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinDocumentationLink { label: "Interpolation and AUC", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve/curve/interpolation.rs") },
         ],
         verification: &[
-            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Performance curve semantics", location: "builtins::stats::ml::perfcurve::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Performance curve semantics", location: "crates/runmat-runtime/src/builtins/stats/ml/perfcurve/tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM statistics/ML forms", location: "crates/runmat-vm/tests/stats_ml.rs" },
         ],
         notes: &[],

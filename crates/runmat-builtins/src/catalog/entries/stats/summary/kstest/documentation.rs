@@ -1,4 +1,4 @@
-//! User-facing kstest contract; the editable JSON shadow remains until export verification.
+//! User-facing kstest contract and independently checkable examples.
 use crate::*;
 
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
@@ -53,24 +53,24 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample { id: "normal", title: "Test a centered sample",
             program: "h = kstest([-1 -0.25 0 0.25 1]); disp(h);",
-            display_output: Some("Logical decision for a centered sample"),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(islogical(h)); assert(isscalar(h));" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(islogical(h)); assert(isequal(h,false));" },
         },
         BuiltinExample { id: "one-sided", title: "Request all outputs with a one-sided alternative",
-            program: "x = [-1 -0.25 0 0.25 1]; [h,p,ksstat,cv] = kstest(x, \"Tail\", \"smaller\"); disp(p); disp(ksstat);",
-            display_output: Some("One-sided p-value and KS statistic"),
+            program: "x = [2 2.5 3 3.5 4]; [h,p,ksstat,cv] = kstest(x, \"Tail\", \"smaller\"); disp(p); disp(ksstat);",
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(islogical(h)); assert(p >= 0 && p <= 1); assert(ksstat >= 0 && ksstat <= 1); assert(isscalar(cv));" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(h,true)); assert(p < 0.05); assert(ksstat >= 0 && ksstat <= 1); assert(isscalar(cv));" },
         },
         BuiltinExample { id: "table", title: "Use a tabulated CDF",
-            program: "x = [0 0.25 0.5 0.75 1]; cdf = [0 0; 0.5 0.5; 1 1]; h = kstest(x, \"CDF\", cdf); disp(h);",
-            display_output: Some("Logical decision against a tabulated CDF"),
+            program: "x = [0.2 0.4 0.6 0.8]; cdf = [0 0; 0.5 0.5; 1 1]; [h,p,ksstat,cv] = kstest(x, \"CDF\", cdf); disp(h);",
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(islogical(h)); assert(isscalar(h));" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(h,false)); assert(abs(ksstat-0.2)<1e-12); assert(p>=0 && p<=1);" },
         },
     ],
     example_exemption: None,
