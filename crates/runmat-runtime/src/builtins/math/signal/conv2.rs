@@ -9,7 +9,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::ConvolutionMode as Conv2Mode;
-use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
+use runmat_value::{
+    ComplexElement, ComplexStorage, ComplexTensor, HostComplexBuffer, NumericDType, Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -706,17 +708,15 @@ async fn matrix_to_value(
         return Ok(Value::Complex(value.re, value.im));
     }
     let storage = if single_output {
-        ComplexStorage::F32(
-            map_matrix_data(matrix.data, cooperation, |c| (c.re as f32, c.im as f32))
-                .await?
-                .into(),
-        )
+        let elements = map_matrix_data(matrix.data, cooperation, |c| {
+            ComplexElement(c.re as f32, c.im as f32)
+        })
+        .await?;
+        ComplexStorage::F32(HostComplexBuffer::from_elements(elements))
     } else {
-        ComplexStorage::F64(
-            map_matrix_data(matrix.data, cooperation, |c| (c.re, c.im))
-                .await?
-                .into(),
-        )
+        let elements =
+            map_matrix_data(matrix.data, cooperation, |c| ComplexElement(c.re, c.im)).await?;
+        ComplexStorage::F64(HostComplexBuffer::from_elements(elements))
     };
     let tensor = ComplexTensor::from_complex_storage(storage, vec![rows, cols])
         .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
