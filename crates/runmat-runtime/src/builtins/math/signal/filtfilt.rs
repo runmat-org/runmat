@@ -1369,14 +1369,19 @@ mod tests {
         ) -> runmat_accelerate_api::ProviderFeasibility {
             self.inner.query_feasibility(query)
         }
-        fn iir_filter<'a>(
+        fn iir_zero_phase<'a>(
             &'a self,
-            _coefficients: runmat_accelerate_api::ProviderIirCoefficientSource<'a>,
-            _x: &'a GpuTensorHandle,
-            _options: ProviderIirFilterOptions,
-        ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
+            _request: &'a runmat_accelerate_api::ProviderIirZeroPhaseRequest<'a>,
+        ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Box::pin(async { Err(anyhow::anyhow!("device failed during filter pass")) })
+            Box::pin(async {
+                Err(
+                    runmat_accelerate_api::ProviderExecutionError::from_source(anyhow::anyhow!(
+                        "device failed during zero-phase pass"
+                    ))
+                    .after_effect(),
+                )
+            })
         }
     }
 
@@ -1443,42 +1448,23 @@ mod tests {
     #[test]
     fn later_stale_resident_signal_precedes_numerator_download() {
         let _lock = test_support::accel_test_lock();
-        let provider: &'static OperationalFailureProvider =
-            Box::leak(Box::new(OperationalFailureProvider {
-                inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
-                calls: std::sync::atomic::AtomicUsize::new(0),
-                downloads: std::sync::atomic::AtomicUsize::new(0),
-            }));
+        let provider = crate::builtins::math::signal::common::convolution::test_support::RejectTransferProvider::new();
         let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let numerator = provider
-            .upload(&HostTensorView {
-                data: &[1.0, 1.0],
-                shape: &[1, 2],
-            })
-            .unwrap();
-        let signal = provider
-            .upload(&HostTensorView {
-                data: &[1.0; 8],
-                shape: &[1, 8],
-            })
-            .unwrap();
-        let stale_signal = signal.clone();
-        signal.release().unwrap();
+        let numerator = provider.input(vec![1.0, 1.0], vec![1, 2]);
+        let signal = provider.input(vec![1.0; 8], vec![1, 8]);
+        signal.probe.mark_unavailable();
         let error = call(
-            Value::GpuTensor(numerator.clone()),
+            Value::GpuTensor(numerator.handle.clone()),
             Value::Num(1.0),
-            Value::GpuTensor(stale_signal),
+            Value::GpuTensor(signal.handle.clone()),
         )
         .expect_err("signal lease must be checked before numerator transfer");
         assert_eq!(error.identifier(), FILTFILT_ERROR_INVALID_SIGNAL.identifier);
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert!(std::error::Error::source(&error).is_some());
-        assert_eq!(
-            provider.downloads.load(std::sync::atomic::Ordering::SeqCst),
-            0
-        );
-        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert!(numerator.allocation_lease().validate_live().is_ok());
+        assert_eq!(provider.downloads(), 0);
+        assert!(numerator.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(numerator.probe.retirements(), 0);
     }
 
     #[test]

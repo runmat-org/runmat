@@ -306,11 +306,9 @@ pub fn provider_iir_zero_phase_query(
             ProviderStorage::DenseReal,
         )
     };
-    let state_shape = if axis == 0 {
-        vec![state_len, 1]
-    } else {
-        vec![1, state_len]
-    };
+    // Match provider_iir_state_shape: the leading dimension is filter order,
+    // irrespective of the signal's filtering axis.
+    let state_shape = vec![state_len, 1];
     let signal = representation(
         signal_shape.clone(),
         ProviderResidency::Device,

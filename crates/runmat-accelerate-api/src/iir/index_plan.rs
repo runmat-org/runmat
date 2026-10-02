@@ -144,11 +144,9 @@ impl ProviderIirZeroPhaseIndexBuilder {
         } else {
             [1, extended_len]
         };
-        let state_shape = if axis == 0 {
-            [state_len, 1]
-        } else {
-            [1, state_len]
-        };
+        // Causal IIR states are order-first even when samples run along the
+        // second axis. A vector has one channel on either axis.
+        let state_shape = [state_len, 1];
         Ok(Self {
             plan: ProviderIirZeroPhaseIndexPlan {
                 signal_shape,
@@ -298,9 +296,19 @@ mod tests {
             assert_eq!(plan.neighbor(), &[3, 2, 1, 0, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4]);
             assert_eq!(plan.trim(), &[3, 4, 5, 6, 7, 8, 9, 10]);
             assert_eq!(charged, 2 * 14 + 2 + 8);
+            assert_eq!(plan.state_shape(), &[1, 1]);
             assert!(plan.matches(&shape, 2, axis, 3));
             assert!(!plan.matches(&shape, 2, 1 - axis, 3));
         }
+    }
+
+    #[test]
+    fn row_vector_multistate_geometry_keeps_order_as_leading_axis() {
+        let source = CancellationSource::new();
+        let plan = ProviderIirZeroPhaseIndexPlan::prepare_direct([1, 12], 3, 1, 6, &source.token())
+            .unwrap();
+        assert_eq!(plan.extended_shape(), &[1, 24]);
+        assert_eq!(plan.state_shape(), &[2, 1]);
     }
 
     #[test]

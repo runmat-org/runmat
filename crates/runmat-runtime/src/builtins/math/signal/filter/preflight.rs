@@ -161,31 +161,15 @@ mod tests {
     #[test]
     fn later_stale_signal_precedes_numerator_download() {
         let _lock = crate::builtins::common::test_support::accel_test_lock();
-        let provider: &'static CountedProvider = Box::leak(Box::new(CountedProvider {
-            delegate: InProcessProvider::new(),
-            uploads: AtomicUsize::new(0),
-            downloads: AtomicUsize::new(0),
-        }));
+        let provider = crate::builtins::math::signal::common::convolution::test_support::RejectTransferProvider::new();
         let _scope = ThreadProviderGuard::set(Some(provider));
-        let numerator = provider
-            .upload(&HostTensorView {
-                data: &[1.0, 1.0],
-                shape: &[1, 2],
-            })
-            .unwrap();
-        let signal = provider
-            .upload(&HostTensorView {
-                data: &[1.0, 2.0],
-                shape: &[1, 2],
-            })
-            .unwrap();
-        let stale_signal = signal.clone();
-        signal.release().unwrap();
-        let uploads_before = provider.uploads.load(Ordering::SeqCst);
+        let numerator = provider.input(vec![1.0, 1.0], vec![1, 2]);
+        let signal = provider.input(vec![1.0, 2.0], vec![1, 2]);
+        signal.probe.mark_unavailable();
         let Err(error) = block_on(super::super::evaluate(
             Value::Num(1.0),
             Value::Num(1.0),
-            Value::GpuTensor(stale_signal),
+            Value::GpuTensor(signal.handle.clone()),
             &[],
         )) else {
             panic!("signal lease must be checked before coefficient uploads");
@@ -193,9 +177,9 @@ mod tests {
         assert_eq!(error.identifier(), FILTER_ERROR_INVALID_SIGNAL.identifier);
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert!(std::error::Error::source(&error).is_some());
-        assert_eq!(provider.uploads.load(Ordering::SeqCst), uploads_before);
-        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-        assert!(numerator.allocation_lease().validate_live().is_ok());
+        assert_eq!(provider.downloads(), 0);
+        assert!(numerator.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(numerator.probe.retirements(), 0);
     }
 
     #[test]

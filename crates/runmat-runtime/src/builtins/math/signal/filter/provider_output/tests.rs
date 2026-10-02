@@ -40,6 +40,12 @@ impl AccelProvider for FailingHookProvider {
     fn device_id(&self) -> u32 {
         self.0.device_id()
     }
+    fn query_feasibility(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        self.0.query_feasibility(query)
+    }
     fn iir_filter<'a>(
         &'a self,
         _coefficients: runmat_accelerate_api::ProviderIirCoefficientSource<'a>,

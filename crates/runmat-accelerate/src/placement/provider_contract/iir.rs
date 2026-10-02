@@ -428,12 +428,7 @@ fn validate_zero_phase(
         || numerator.shape != [coefficient_len, 1]
         || coefficient_len == 0
         || workload.state_len != coefficient_len - 1
-        || state.shape
-            != if workload.dim == 0 {
-                [workload.state_len, 1]
-            } else {
-                [1, workload.state_len]
-            }
+        || state.shape != [workload.state_len, 1]
         || workload.reflection_len != workload.state_len.saturating_mul(3)
         || signal_len <= workload.reflection_len
         || signal.shape.len() != 2
