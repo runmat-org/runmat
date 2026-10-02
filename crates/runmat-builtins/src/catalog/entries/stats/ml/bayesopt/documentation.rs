@@ -20,8 +20,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Options, results and limits",
             paragraphs: &[
-                "Supported controls include MaxObjectiveEvaluations (1 through 2048), NumSeedPoints, AcquisitionFunctionName, ExplorationRatio, IsObjectiveDeterministic, Verbose, UseParallel=false, empty PlotFcn/OutputFcn and XConstraintFcn. Warm starts, conditional variables, nonempty plotting/output callbacks and parallel evaluation return explicit unsupported errors.",
-                "The result exposes XTrace, ObjectiveTrace, ObjectiveMinimumTrace, ObjectiveEvaluationTimeTrace, FeasibilityTrace, OptimizationTrace, XAtMinObjective, MinObjective, BestPoint, BestObjective, VariableDescriptions, Options, Output, ExitFlag and surrogate metadata. Only the single-result form is currently implemented.",
+                "Search controls include MaxObjectiveEvaluations (1 through 2048, default 30), NumSeedPoints (0 through 2048, default 4, limited to MaxObjectiveEvaluations), AcquisitionFunctionName and ExplorationRatio. Acquisition names are expected-improvement, expected-improvement-plus (default) and lower-confidence-bound. The per-second acquisition spellings are accepted aliases of their corresponding expected-improvement variants; the current search does not divide acquisition scores by evaluation time.",
+                "IsObjectiveDeterministic and Verbose are accepted and recorded in Options, but currently do not change the search or emit progress output. UseParallel=false, empty PlotFcn/OutputFcn and XConstraintFcn are supported. Warm starts, conditional variables, nonempty plotting/output callbacks and parallel evaluation return explicit unsupported errors.",
+                "The result exposes XTrace, ObjectiveTrace, ObjectiveMinimumTrace, ObjectiveEvaluationTimeTrace, FeasibilityTrace, OptimizationTrace, XAtMinObjective, MinObjective, BestPoint, BestObjective, VariableDescriptions, Options, Output, ExitFlag and surrogate metadata. A call can return one result or run without retaining a result; requesting more than one output is unsupported.",
                 "This is a host control-flow solver. It validates host-visible controls before downloading resident option values and variable metadata, invokes callbacks on the host, and returns a host result. It does not schedule surrogate updates or objective callbacks on a GPU provider; datastore-backed objective forms are not implemented.",
             ],
         },
@@ -35,7 +36,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(numel(results.ObjectiveTrace) > 0); assert(numel(results.ObjectiveTrace) <= 24);" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(numel(results.ObjectiveTrace) > 0); assert(numel(results.ObjectiveTrace) <= 24); assert(istable(results.XTrace)); assert(abs(results.MinObjective - min(results.ObjectiveTrace)) < 1e-12); assert(abs(results.XAtMinObjective.x^2 + results.XAtMinObjective.y^2 - results.MinObjective) < 1e-12);" },
         },
         BuiltinExample {
             id: "example-2", title: "Filter candidates with XConstraintFcn",
@@ -45,7 +46,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(numel(results.ObjectiveTrace) > 0); assert(numel(results.ObjectiveTrace) <= 8);" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(numel(results.ObjectiveTrace) > 0); assert(numel(results.ObjectiveTrace) <= 8); assert(all(results.XTrace.x >= 0)); assert(abs(results.MinObjective - min(results.ObjectiveTrace)) < 1e-12);" },
         },
     ],
     example_exemption: None,
@@ -63,6 +64,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinDocumentationLink { label: "Variable and option admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt.rs") },
             BuiltinDocumentationLink { label: "Admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/admission.rs") },
             BuiltinDocumentationLink { label: "Options", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/options.rs") },
+            BuiltinDocumentationLink { label: "Variable decoding", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/variables.rs") },
             BuiltinDocumentationLink { label: "Optimization loop", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/optimizer.rs") },
             BuiltinDocumentationLink { label: "Candidate search", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/candidate.rs") },
             BuiltinDocumentationLink { label: "Gaussian-process surrogate", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/bayesopt/surrogate.rs") },

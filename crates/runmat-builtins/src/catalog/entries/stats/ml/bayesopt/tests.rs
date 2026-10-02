@@ -51,6 +51,25 @@ fn variable() -> ValueFact {
 }
 
 #[test]
+fn discarded_result_keeps_search_effects_without_inventing_an_output() {
+    let result = inference::infer(
+        &CallRequest {
+            arguments: vec![objective(), variable()],
+            literals: LiteralContext::new(vec![]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(0)),
+        },
+        &BAYESOPT_CATALOG_ENTRY,
+    );
+    assert!(result.diagnostics.is_empty());
+    assert!(result.outputs.is_empty());
+    assert_eq!(result.effects, BAYESOPT_CATALOG_ENTRY.contract.effect_set());
+    assert!(BAYESOPT_DESCRIPTOR
+        .signatures
+        .iter()
+        .any(|signature| signature.outputs.is_empty()));
+}
+
+#[test]
 fn public_bayesian_option_identity_is_closed() {
     assert_eq!(
         BayesoptOption::from_public_name("MAXOBJECTIVEEVALUATIONS"),

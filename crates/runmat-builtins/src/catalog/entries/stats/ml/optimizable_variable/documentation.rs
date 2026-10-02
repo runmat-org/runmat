@@ -13,14 +13,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Range and type",
             paragraphs: &[
                 "Name must be a nonempty text scalar. Numeric Range contains exactly two finite, increasing bounds and defaults to Type='real'. Type accepts real, integer and categorical; integer bounds must be whole numbers.",
-                "Categorical choices may be a string array, a scalar string with Type='categorical', or a cell array of text scalars. Choices must be nonempty and unique.",
+                "Categorical choices may be a string array, a scalar string or character row with Type='categorical', or a cell array of text scalars. Choices must be nonempty and unique.",
             ],
         },
         BuiltinDocumentationSection {
             heading: "Transform, Optimize and residency",
             paragraphs: &[
-                "Transform is 'none' by default. 'log' requires a positive real lower bound or a nonnegative integer lower bound and is not available for categorical variables. Optimize accepts a scalar logical value and defaults to true.",
-                "The result has Name, Range, Type, Transform and Optimize properties. It is host metadata: host-visible names and effective option values are checked before transfer, then resident Range and option values are materialized by their owning provider for deferred value validation. Typed-integer Range storage is a RunMat-only extension and must convert to double exactly; MATLAB-compatible mode rejects it before provider access. There is no device kernel for metadata construction.",
+                "Transform is 'none' by default. 'log' requires a positive real lower bound or a nonnegative integer lower bound and is not available for categorical variables. Optimize defaults to true and accepts a scalar logical value or numeric 0 or 1.",
+                "The result has Name, Range, Type, Transform and Optimize properties. It is host metadata: host-visible names and effective option values are checked before transfer. Resident numeric Range and Optimize values are materialized by their owning provider for deferred validation; resident numeric Type and Transform values are rejected before download because these options require text. Typed-integer Range storage is a RunMat-only extension and must convert to double exactly; MATLAB-compatible mode rejects it before provider access. There is no device kernel for metadata construction.",
             ],
         },
     ],
@@ -43,7 +43,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(v.Name, 'kernel')); assert(strcmp(v.Type, 'categorical')); assert(numel(v.Range) == 2);" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(v.Name, 'kernel')); assert(strcmp(v.Type, 'categorical')); assert(numel(v.Range) == 2); assert(all(v.Range == [\"linear\" \"rbf\"]));" },
         },
     ],
     example_exemption: None,

@@ -30,7 +30,7 @@ const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 }];
 const BASE: [BuiltinParamDescriptor; 2] = [FUN, VARS];
 const FULL: [BuiltinParamDescriptor; 3] = [FUN, VARS, OPTIONS];
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "results = bayesopt(fun, vars)",
         inputs: &BASE,
@@ -40,6 +40,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         label: "results = bayesopt(fun, vars, Name, Value)",
         inputs: &FULL,
         outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "bayesopt(fun, vars, Name, Value)",
+        inputs: &FULL,
+        outputs: &[],
     },
 ];
 pub const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
