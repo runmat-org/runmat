@@ -32,7 +32,7 @@ pub(super) async fn pairwise_squared_distances_cooperative(
         }
         DistanceMetric::Cosine => PreparedMetric::Cosine,
         DistanceMetric::Correlation => PreparedMetric::Correlation,
-        DistanceMetric::Spearman => PreparedMetric::Spearman(row_ranks(rows)),
+        DistanceMetric::Spearman => PreparedMetric::Spearman(row_ranks(rows, cooperation).await?),
         DistanceMetric::Hamming => PreparedMetric::Hamming,
         DistanceMetric::Jaccard => PreparedMetric::Jaccard,
     };
@@ -350,27 +350,61 @@ async fn mahalanobis_sq(
     Ok(value.max(0.0))
 }
 
-fn row_ranks(rows: &[Vec<f64>]) -> Vec<Vec<f64>> {
-    rows.iter().map(|row| tied_ranks(row)).collect()
+async fn row_ranks(
+    rows: &[Vec<f64>],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<Vec<Vec<f64>>> {
+    let mut ranks = Vec::new();
+    ranks
+        .try_reserve_exact(rows.len())
+        .map_err(|_| invalid("tsne: rank rows exceed available memory"))?;
+    for row in rows {
+        ranks.push(tied_ranks(row, cooperation).await?);
+        cooperation.completed(1).await?;
+    }
+    Ok(ranks)
 }
 
-fn tied_ranks(values: &[f64]) -> Vec<f64> {
-    let mut order = values.iter().copied().enumerate().collect::<Vec<_>>();
-    order.sort_by(|left, right| left.1.partial_cmp(&right.1).unwrap_or(Ordering::Equal));
-    let mut ranks = vec![0.0; values.len()];
+async fn tied_ranks(
+    values: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    let mut order = Vec::new();
+    order
+        .try_reserve_exact(values.len())
+        .map_err(|_| invalid("tsne: rank ordering exceeds available memory"))?;
+    for (index, value) in values.iter().copied().enumerate() {
+        order.push((index, value));
+        cooperation.completed(1).await?;
+    }
+    cooperation
+        .stable_sort_by(&mut order, |left, right| {
+            left.1.partial_cmp(&right.1).unwrap_or(Ordering::Equal)
+        })
+        .await?;
+    let mut ranks = Vec::new();
+    ranks
+        .try_reserve_exact(values.len())
+        .map_err(|_| invalid("tsne: ranks exceed available memory"))?;
+    for _ in values {
+        ranks.push(0.0);
+        cooperation.completed(1).await?;
+    }
     let mut start = 0usize;
     while start < order.len() {
         let mut end = start + 1;
         while end < order.len() && order[end].1 == order[start].1 {
             end += 1;
+            cooperation.completed(1).await?;
         }
         let rank = (start + 1 + end) as f64 / 2.0;
         for idx in start..end {
             ranks[order[idx].0] = rank;
+            cooperation.completed(1).await?;
         }
         start = end;
     }
-    ranks
+    Ok(ranks)
 }
 
 #[cfg(test)]

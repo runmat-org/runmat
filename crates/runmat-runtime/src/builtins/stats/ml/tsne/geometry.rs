@@ -149,7 +149,11 @@ pub(super) async fn apply_pca_if_requested(
         order.push((idx, eig.eigenvalues[idx]));
         cooperation.completed(1).await?;
     }
-    order.sort_by(|left, right| right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal));
+    cooperation
+        .stable_sort_by(&mut order, |left, right| {
+            right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal)
+        })
+        .await?;
     let mut projected = vec![vec![0.0; k]; n];
     for (new_col, (eig_col, _)) in order.into_iter().take(k).enumerate() {
         for row in 0..n {

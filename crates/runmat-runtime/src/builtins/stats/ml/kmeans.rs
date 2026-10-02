@@ -20,7 +20,6 @@ mod compute;
 mod geometry;
 mod options;
 mod output;
-mod sort;
 #[cfg(test)]
 mod admission_tests;
 #[cfg(test)]

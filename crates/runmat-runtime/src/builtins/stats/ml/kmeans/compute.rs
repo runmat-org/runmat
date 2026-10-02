@@ -86,12 +86,11 @@ async fn sample_start(
         scored.push((index, draw));
         cooperation.completed(1).await?;
     }
-    super::sort::stable_sort_by(
-        &mut scored,
-        |a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal),
-        cooperation,
-    )
-    .await?;
+    cooperation
+        .stable_sort_by(&mut scored, |a, b| {
+            a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal)
+        })
+        .await?;
     let mut centers = Vec::new();
     centers
         .try_reserve_exact(k)
@@ -481,12 +480,11 @@ async fn centroid_for(
                     values.push(rows[*row][col]);
                     cooperation.completed(1).await?;
                 }
-                super::sort::stable_sort_by(
-                    &mut values,
-                    |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal),
-                    cooperation,
-                )
-                .await?;
+                cooperation
+                    .stable_sort_by(&mut values, |a, b| {
+                        a.partial_cmp(b).unwrap_or(Ordering::Equal)
+                    })
+                    .await?;
                 let mid = values.len() / 2;
                 center[col] = if values.len() % 2 == 0 {
                     (values[mid - 1] + values[mid]) / 2.0

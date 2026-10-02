@@ -52,7 +52,9 @@ mod ordered;
 use ordered::*;
 
 mod cooperative_sort;
-pub(crate) use cooperative_sort::{stable_sort_non_nan_f64, CooperativeSortError};
+pub(crate) use cooperative_sort::{
+    stable_sort_non_nan_f64, CooperativeSortError, SortProgress, StableSortWork,
+};
 
 mod quantiles;
 use quantiles::{parse_quantile_args, quantile_tensor};

@@ -3,6 +3,7 @@
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::BuiltinResult;
+use std::cmp::Ordering;
 
 use super::{build_runtime_error, with_kmeans_context, NAME};
 
@@ -32,6 +33,39 @@ impl KmeansCooperation {
             .await
             .map_err(with_kmeans_context),
             None => crate::builtins::common::random::generate_uniform(len, NAME),
+        }
+    }
+
+    pub(super) async fn stable_sort_by<T: Copy>(
+        &mut self,
+        values: &mut Vec<T>,
+        compare: impl FnMut(&T, &T) -> Ordering,
+    ) -> BuiltinResult<()> {
+        use crate::builtins::stats::summary::order_stats::{
+            CooperativeSortError, SortProgress, StableSortWork,
+        };
+
+        self.completed(0).await?;
+        let mut work = StableSortWork::new(values, compare);
+        loop {
+            let progress = work.advance().map_err(|error| match error {
+                CooperativeSortError::Resource(source) => crate::build_runtime_error(
+                    "kmeans: sorted observations exceed available memory",
+                )
+                .with_builtin(NAME)
+                .with_source(source)
+                .build(),
+                CooperativeSortError::Service(source) => {
+                    with_kmeans_context(source.into_runtime_error())
+                }
+            })?;
+            let units = match progress {
+                SortProgress::Pending(units) | SortProgress::Complete(units) => units,
+            };
+            self.completed(units).await?;
+            if matches!(progress, SortProgress::Complete(_)) {
+                return Ok(());
+            }
         }
     }
 
