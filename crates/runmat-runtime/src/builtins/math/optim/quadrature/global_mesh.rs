@@ -159,6 +159,12 @@ pub(crate) async fn integrate_mesh<E: QuadratureEvaluator>(
     if required > evaluator.max_evaluations() {
         return Err(evaluator.evaluation_limit_error());
     }
+    if evaluator
+        .max_intervals()
+        .is_some_and(|limit| segments.len() > limit)
+    {
+        return Err(evaluator.interval_limit_error());
+    }
     let mut intervals = Vec::new();
     intervals
         .try_reserve_exact(segments.len())
@@ -213,6 +219,12 @@ pub(crate) async fn integrate_mesh<E: QuadratureEvaluator>(
             .is_none_or(|next| next > evaluator.max_evaluations())
         {
             return Err(evaluator.evaluation_limit_error());
+        }
+        if evaluator
+            .max_intervals()
+            .is_some_and(|limit| intervals.len() >= limit)
+        {
+            return Err(evaluator.interval_limit_error());
         }
         intervals
             .try_reserve(1)

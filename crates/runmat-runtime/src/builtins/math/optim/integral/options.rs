@@ -8,6 +8,7 @@ use crate::BuiltinResult;
 use num_complex::Complex;
 use runmat_builtins::INTEGRAL_ERROR_INVALID_ARGUMENT;
 use runmat_value::{LogicalArray, Value};
+use std::num::NonZeroUsize;
 
 use super::waypoints;
 use crate::builtins::math::optim::quadrature::QuadratureCooperation;
@@ -16,6 +17,7 @@ pub(super) struct IntegralOptions {
     pub(super) abs_tol: f64,
     pub(super) rel_tol: f64,
     pub(super) max_fun_evals: usize,
+    pub(super) max_interval_count: Option<NonZeroUsize>,
     pub(super) callback_mode: IntegralCallbackMode,
     pub(super) array_valued: bool,
     pub(super) waypoints: Vec<Complex<f64>>,
@@ -27,6 +29,7 @@ impl IntegralOptions {
             abs_tol: IntegralOptionName::DEFAULT_ABS_TOL,
             rel_tol: IntegralOptionName::DEFAULT_REL_TOL,
             max_fun_evals: DEFAULT_MAX_FUN_EVALS,
+            max_interval_count: None,
             callback_mode: IntegralCallbackMode::Vectorized,
             array_valued: false,
             waypoints: Vec::new(),
@@ -146,7 +149,7 @@ impl IntegralOptions {
             IntegralOptionName::RelTol => {
                 self.rel_tol = numeric_option(name.display_name(), value)?
             }
-            IntegralOptionName::MaxFunEvals | IntegralOptionName::MaxIntervalCount => {
+            IntegralOptionName::MaxFunEvals => {
                 let parsed = integer_option(name.display_name(), value)?;
                 if parsed < 5 {
                     return Err(integral_error_with_detail(
@@ -155,6 +158,15 @@ impl IntegralOptions {
                     ));
                 }
                 self.max_fun_evals = parsed;
+            }
+            IntegralOptionName::MaxIntervalCount => {
+                let parsed = integer_option(name.display_name(), value)?;
+                self.max_interval_count = Some(NonZeroUsize::new(parsed).ok_or_else(|| {
+                    integral_error_with_detail(
+                        &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                        "MaxIntervalCount must be a positive integer scalar",
+                    )
+                })?);
             }
             IntegralOptionName::ArrayValued => {
                 self.array_valued = bool_option("ArrayValued", value)?;

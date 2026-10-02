@@ -175,6 +175,17 @@ impl QuadratureEvaluator for ArrayEvaluator<'_> {
         self.options.max_fun_evals
     }
 
+    fn max_intervals(&self) -> Option<usize> {
+        self.options.max_interval_count.map(|limit| limit.get())
+    }
+
+    fn interval_limit_error(&self) -> RuntimeError {
+        integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "exceeded MaxIntervalCount adaptive subintervals",
+        )
+    }
+
     fn max_depth(&self) -> usize {
         MAX_DEPTH
     }

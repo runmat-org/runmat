@@ -67,6 +67,43 @@ fn invalid_complex_bound_and_incomplete_option_pairs_do_not_prove_success() {
 }
 
 #[test]
+fn interval_count_is_a_positive_structural_control_not_an_evaluation_alias() {
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    let name = ValueFact::scalar(ValueKindFact::String);
+    let call = |count: i64| {
+        request(
+            vec![
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                real.clone(),
+                real.clone(),
+                name.clone(),
+                real.clone(),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::String("MaxIntervalCount".into()),
+                LiteralValue::Number(count as f64),
+            ],
+            1,
+        )
+    };
+    let invalid = inference::infer(&call(0), &INTEGRAL_CATALOG_ENTRY);
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE"));
+    assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
+    let valid = inference::infer(&call(1), &INTEGRAL_CATALOG_ENTRY);
+    assert!(valid.diagnostics.is_empty());
+    assert_eq!(
+        valid.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+}
+
+#[test]
 fn callback_capability_is_transitive() {
     let mut call = request(
         vec![

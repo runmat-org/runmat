@@ -178,11 +178,20 @@ fn known_option(
             }
             numeric.is_some_and(|number| !number.is_finite()) || known_bad_kind
         }
-        IntegralOptionName::MaxFunEvals | IntegralOptionName::MaxIntervalCount => {
+        IntegralOptionName::MaxFunEvals => {
             numeric.is_some_and(|number| {
                 !number.is_finite()
                     || number.fract() != 0.0
                     || number < 5.0
+                    || number > usize::MAX as f64
+                    || (usize::BITS == 64 && number == usize::MAX as f64)
+            }) || known_bad_kind
+        }
+        IntegralOptionName::MaxIntervalCount => {
+            numeric.is_some_and(|number| {
+                !number.is_finite()
+                    || number.fract() != 0.0
+                    || number < 1.0
                     || number > usize::MAX as f64
                     || (usize::BITS == 64 && number == usize::MAX as f64)
             }) || known_bad_kind

@@ -29,6 +29,12 @@ pub(crate) trait QuadratureEvaluator {
     fn midpoint(&self, a: f64, b: f64) -> f64;
     fn tolerances(&self) -> (f64, f64);
     fn max_evaluations(&self) -> usize;
+    fn max_intervals(&self) -> Option<usize> {
+        None
+    }
+    fn interval_limit_error(&self) -> RuntimeError {
+        self.convergence_error()
+    }
     fn max_depth(&self) -> usize;
     fn evaluation_limit_error(&self) -> RuntimeError;
     fn convergence_error(&self) -> RuntimeError;
@@ -110,6 +116,7 @@ async fn integrate_domain<E: QuadratureEvaluator>(
         .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
     let depth = evaluator.max_depth();
+    let mut intervals = 1usize;
     let q = adapt(
         evaluator,
         Interval {
@@ -123,6 +130,7 @@ async fn integrate_domain<E: QuadratureEvaluator>(
             depth,
         },
         &mut evaluations,
+        &mut intervals,
     )
     .await?;
     Ok((q, evaluations))
@@ -132,6 +140,7 @@ async fn adapt<E: QuadratureEvaluator>(
     evaluator: &mut E,
     state: Interval<E::Sample>,
     evaluations: &mut usize,
+    intervals: &mut usize,
 ) -> BuiltinResult<<E::Sample as QuadratureSample>::Estimate> {
     evaluator.checkpoint().await?;
     if (*evaluations)
@@ -184,6 +193,13 @@ async fn adapt<E: QuadratureEvaluator>(
     if state.depth == 0 {
         return Err(evaluator.convergence_error());
     }
+    if evaluator
+        .max_intervals()
+        .is_some_and(|limit| *intervals >= limit)
+    {
+        return Err(evaluator.interval_limit_error());
+    }
+    *intervals += 1;
 
     let child_tolerance = state
         .tol
@@ -203,6 +219,7 @@ async fn adapt<E: QuadratureEvaluator>(
             depth: state.depth - 1,
         },
         evaluations,
+        intervals,
     ))
     .await?;
     let right_value = Box::pin(adapt(
@@ -218,6 +235,7 @@ async fn adapt<E: QuadratureEvaluator>(
             depth: state.depth - 1,
         },
         evaluations,
+        intervals,
     ))
     .await?;
     left_value

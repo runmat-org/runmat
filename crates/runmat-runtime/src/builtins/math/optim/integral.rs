@@ -191,6 +191,15 @@ async fn integral_with_cooperation(
         Some(segments) => segments,
         None => path::finite_real_segments(a, b, &options.waypoints, cooperation).await?,
     };
+    if options
+        .max_interval_count
+        .is_some_and(|limit| segments.len() > limit.get())
+    {
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "exceeded MaxIntervalCount adaptive subintervals",
+        ));
+    }
     if segments
         .len()
         .checked_mul(5)
@@ -467,6 +476,17 @@ impl QuadratureEvaluator for IntegralEvaluator<'_> {
 
     fn max_evaluations(&self) -> usize {
         self.options.max_fun_evals
+    }
+
+    fn max_intervals(&self) -> Option<usize> {
+        self.options.max_interval_count.map(|limit| limit.get())
+    }
+
+    fn interval_limit_error(&self) -> RuntimeError {
+        integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "exceeded MaxIntervalCount adaptive subintervals",
+        )
     }
 
     fn max_depth(&self) -> usize {
@@ -1247,6 +1267,47 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message().contains("integer scalar"));
+    }
+
+    #[test]
+    fn max_interval_count_is_distinct_from_callback_evaluation_limit() {
+        let zero = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxIntervalCount"), Value::Num(0.0)],
+        ))
+        .expect_err("zero is not a positive interval count");
+        assert!(zero
+            .message()
+            .contains("MaxIntervalCount must be a positive"));
+
+        let split_mesh = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![
+                Value::from("Waypoints"),
+                Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).expect("waypoint")),
+                Value::from("MaxIntervalCount"),
+                Value::Num(1.0),
+                Value::from("MaxFunEvals"),
+                Value::Num(100.0),
+            ],
+        ))
+        .expect_err("two initial intervals exceed a one-interval cap");
+        assert!(split_mesh
+            .message()
+            .contains("MaxIntervalCount adaptive subintervals"));
+
+        let zero_width = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_nan".into()),
+            Value::Num(1.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxIntervalCount"), Value::Num(1.0)],
+        ))
+        .expect("equal bounds do not invoke the scalar callback");
+        assert!(matches!(zero_width, Value::Num(value) if value == 0.0));
     }
 
     #[test]
