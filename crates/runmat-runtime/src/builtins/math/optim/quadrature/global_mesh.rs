@@ -3,8 +3,8 @@
 
 use super::adaptive::QuadratureEvaluator;
 use super::algebra::{AdaptiveEstimate, QuadratureSample};
-use super::ScaledEstimate;
-use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
+use super::{QuadratureArithmeticError, ScaledEstimate};
+use crate::BuiltinResult;
 
 struct Interval<S: QuadratureSample> {
     a: f64,
@@ -20,13 +20,11 @@ struct Interval<S: QuadratureSample> {
     depth: usize,
 }
 
-fn allocation_error(source: std::collections::TryReserveError) -> crate::RuntimeError {
-    build_runtime_error("integral: could not reserve adaptive waypoint intervals")
-        .with_identifier("RunMat:Internal")
-        .with_builtin("integral")
-        .with_source(source)
-        .with_gpu_gather_retry(GpuGatherRetry::Never)
-        .build()
+fn allocation_error<E: QuadratureEvaluator>(
+    evaluator: &E,
+    source: std::collections::TryReserveError,
+) -> crate::RuntimeError {
+    evaluator.arithmetic_error(QuadratureArithmeticError::Resource(source))
 }
 
 async fn build_interval<E: QuadratureEvaluator>(
@@ -95,8 +93,7 @@ async fn totals<E: QuadratureEvaluator>(
     let first = intervals.first().expect("nonempty mesh");
     let mut result = first.corrected.clone();
     let mut error = first.error.clone();
-    for interval in &intervals[1..] {
-        evaluator.checkpoint().await?;
+    for (index, interval) in intervals[1..].iter().enumerate() {
         result = result
             .add(&interval.corrected, evaluator)
             .await
@@ -105,8 +102,49 @@ async fn totals<E: QuadratureEvaluator>(
             .add(&interval.error, evaluator)
             .await
             .map_err(|cause| evaluator.arithmetic_error(cause))?;
+        if (index + 1).is_multiple_of(4096) {
+            evaluator.charge(4096).await?;
+        }
     }
+    evaluator
+        .charge(((intervals.len() - 1) % 4096) as u64)
+        .await?;
     Ok((result, error))
+}
+
+fn refinement_points<E: QuadratureEvaluator>(evaluator: &E, a: f64, b: f64) -> Option<[f64; 4]> {
+    let m = evaluator.midpoint(a, b);
+    let d = evaluator.midpoint(a, m);
+    let e = evaluator.midpoint(m, b);
+    let q1 = evaluator.midpoint(a, d);
+    let q2 = evaluator.midpoint(d, m);
+    let q3 = evaluator.midpoint(m, e);
+    let q4 = evaluator.midpoint(e, b);
+    (q1 > a && q2 < m && q3 > m && q4 < b).then_some([q1, q2, q3, q4])
+}
+
+async fn largest_refinable<E: QuadratureEvaluator>(
+    evaluator: &mut E,
+    intervals: &[Interval<E::Sample>],
+) -> BuiltinResult<Option<(usize, [f64; 4])>> {
+    let mut selected: Option<(usize, [f64; 4])> = None;
+    for (index, interval) in intervals.iter().enumerate() {
+        if interval.depth > 0 {
+            if let Some(points) = refinement_points(evaluator, interval.a, interval.b) {
+                let replace = selected.is_none_or(|(previous, _)| {
+                    intervals[previous].magnitude.abs_le(interval.magnitude)
+                });
+                if replace {
+                    selected = Some((index, points));
+                }
+            }
+        }
+        if (index + 1).is_multiple_of(4096) {
+            evaluator.charge(4096).await?;
+        }
+    }
+    evaluator.charge((intervals.len() % 4096) as u64).await?;
+    Ok(selected)
 }
 
 pub(crate) async fn integrate_mesh<E: QuadratureEvaluator>(
@@ -124,7 +162,7 @@ pub(crate) async fn integrate_mesh<E: QuadratureEvaluator>(
     let mut intervals = Vec::new();
     intervals
         .try_reserve_exact(segments.len())
-        .map_err(allocation_error)?;
+        .map_err(|source| allocation_error(evaluator, source))?;
     let mut evaluations = 0usize;
     for &(a, b) in segments {
         evaluator.checkpoint().await?;
@@ -166,41 +204,21 @@ pub(crate) async fn integrate_mesh<E: QuadratureEvaluator>(
             result = verified_result;
             error = verified_error;
         }
+        let Some((index, [q1, q2, q3, q4])) = largest_refinable(evaluator, &intervals).await?
+        else {
+            return Err(evaluator.convergence_error());
+        };
         if evaluations
             .checked_add(4)
             .is_none_or(|next| next > evaluator.max_evaluations())
         {
             return Err(evaluator.evaluation_limit_error());
         }
-        let index = intervals
-            .iter()
-            .enumerate()
-            .max_by(|(_, left), (_, right)| {
-                if left.magnitude.abs_le(right.magnitude) && right.magnitude.abs_le(left.magnitude)
-                {
-                    std::cmp::Ordering::Equal
-                } else if left.magnitude.abs_le(right.magnitude) {
-                    std::cmp::Ordering::Less
-                } else {
-                    std::cmp::Ordering::Greater
-                }
-            })
-            .map(|(index, _)| index)
-            .expect("nonempty mesh");
-        let selected = &intervals[index];
-        if selected.depth == 0 {
-            return Err(evaluator.convergence_error());
-        }
-        intervals.try_reserve(1).map_err(allocation_error)?;
+        intervals
+            .try_reserve(1)
+            .map_err(|source| allocation_error(evaluator, source))?;
         let selected = intervals.swap_remove(index);
         let m = evaluator.midpoint(selected.a, selected.b);
-        let q1 = evaluator.midpoint(selected.a, evaluator.midpoint(selected.a, m));
-        let q2 = evaluator.midpoint(evaluator.midpoint(selected.a, m), m);
-        let q3 = evaluator.midpoint(m, evaluator.midpoint(m, selected.b));
-        let q4 = evaluator.midpoint(evaluator.midpoint(m, selected.b), selected.b);
-        if q1 <= selected.a || q2 >= m || q3 <= m || q4 >= selected.b {
-            return Err(evaluator.convergence_error());
-        }
         let [f1, f2, f3, f4] = evaluator.evaluate_many([q1, q2, q3, q4]).await?;
         evaluations += 4;
         let left = build_interval(
@@ -247,7 +265,7 @@ pub(crate) async fn integrate_mesh<E: QuadratureEvaluator>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::math::optim::quadrature::QuadratureArithmeticError;
+    use crate::build_runtime_error;
     use crate::RuntimeError;
 
     struct CancellingSine {
@@ -322,5 +340,31 @@ mod tests {
             .expect("finite result");
         assert!(value.abs() < 1.0e-4);
         assert!(enough.calls > 10);
+    }
+
+    #[test]
+    fn exhausted_largest_interval_does_not_hide_another_refinable_interval() {
+        let interval = |a, b, depth, error: f64| Interval {
+            a,
+            b,
+            fa: 0.0,
+            fd: 0.0,
+            fm: 0.0,
+            fe: 0.0,
+            fb: 0.0,
+            corrected: ScaledEstimate::from_f64(0.0),
+            error: ScaledEstimate::from_f64(error),
+            magnitude: ScaledEstimate::from_f64(error),
+            depth,
+        };
+        let intervals = [interval(0.0, 0.5, 0, 10.0), interval(0.5, 1.0, 1, 1.0)];
+        let mut evaluator = CancellingSine {
+            max_evaluations: 100,
+            calls: 0,
+        };
+        let selected = futures::executor::block_on(largest_refinable(&mut evaluator, &intervals))
+            .expect("selection is cooperative")
+            .expect("the second interval can still be refined");
+        assert_eq!(selected.0, 1);
     }
 }

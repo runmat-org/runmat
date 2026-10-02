@@ -75,7 +75,15 @@ pub(super) async fn finite_real_segments(
         });
     }
     if !ascending {
-        segments.reverse();
+        let count = segments.len();
+        let swaps = count / 2;
+        for index in 0..swaps {
+            segments.swap(index, count - 1 - index);
+            if (index + 1).is_multiple_of(4096) {
+                cooperation.completed(4096).await?;
+            }
+        }
+        cooperation.completed((swaps % 4096) as u64).await?;
     }
     Ok(segments)
 }
