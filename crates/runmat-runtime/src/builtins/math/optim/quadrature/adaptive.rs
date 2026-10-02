@@ -68,19 +68,38 @@ pub(crate) async fn integrate<E: QuadratureEvaluator<Sample = f64>>(
     a: f64,
     b: f64,
 ) -> BuiltinResult<AdaptiveSimpsonResult> {
-    let (q, evaluations) = integrate_domain(evaluator, a, b).await?;
+    let (q, evaluations) = integrate_scaled(evaluator, a, b).await?;
     let q = q
         .to_f64()
         .ok_or_else(|| evaluator.nonrepresentable_error())?;
     Ok(AdaptiveSimpsonResult { q, evaluations })
 }
 
+/// Retain the scaled estimate across adjacent path segments. Publishing each
+/// segment as `f64` can overflow even when their combined result is finite.
+pub(crate) async fn integrate_scaled<E: QuadratureEvaluator<Sample = f64>>(
+    evaluator: &mut E,
+    a: f64,
+    b: f64,
+) -> BuiltinResult<(ScaledEstimate, usize)> {
+    integrate_domain(evaluator, a, b).await
+}
+
+#[cfg(test)]
 pub(crate) async fn integrate_array<E: QuadratureEvaluator<Sample = Arc<Vec<f64>>>>(
     evaluator: &mut E,
     a: f64,
     b: f64,
 ) -> BuiltinResult<ArrayEstimate> {
     integrate_domain(evaluator, a, b).await.map(|(q, _)| q)
+}
+
+pub(crate) async fn integrate_array_counted<E: QuadratureEvaluator<Sample = Arc<Vec<f64>>>>(
+    evaluator: &mut E,
+    a: f64,
+    b: f64,
+) -> BuiltinResult<(ArrayEstimate, usize)> {
+    integrate_domain(evaluator, a, b).await
 }
 
 async fn integrate_domain<E: QuadratureEvaluator>(

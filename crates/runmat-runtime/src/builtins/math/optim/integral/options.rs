@@ -5,16 +5,20 @@ use super::{
 };
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
+use num_complex::Complex;
 use runmat_builtins::INTEGRAL_ERROR_INVALID_ARGUMENT;
 use runmat_value::{LogicalArray, Value};
 
-#[derive(Clone, Copy)]
+use super::waypoints;
+
+#[derive(Clone)]
 pub(super) struct IntegralOptions {
     pub(super) abs_tol: f64,
     pub(super) rel_tol: f64,
     pub(super) max_fun_evals: usize,
     pub(super) callback_mode: IntegralCallbackMode,
     pub(super) array_valued: bool,
+    pub(super) waypoints: Vec<Complex<f64>>,
 }
 
 impl IntegralOptions {
@@ -25,14 +29,37 @@ impl IntegralOptions {
             max_fun_evals: DEFAULT_MAX_FUN_EVALS,
             callback_mode: IntegralCallbackMode::Vectorized,
             array_valued: false,
+            waypoints: Vec::new(),
         }
     }
 
-    pub(super) fn preflight_host(rest: &[(IntegralOptionName, &Value)]) -> BuiltinResult<()> {
+    pub(super) fn preflight_host(
+        rest: &[(IntegralOptionName, &Value)],
+    ) -> BuiltinResult<Vec<Option<Vec<Complex<f64>>>>> {
         let mut check = Self::defaults();
         let mut known_abs_tol = Some(check.abs_tol);
         let mut known_rel_tol = Some(check.rel_tol);
+        let mut waypoint_receipts = Vec::new();
+        waypoint_receipts
+            .try_reserve_exact(rest.len())
+            .map_err(|source| {
+                crate::build_runtime_error("integral: could not reserve option admission")
+                    .with_identifier("RunMat:Internal")
+                    .with_builtin("integral")
+                    .with_source(source)
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build()
+            })?;
         for &(name, value) in rest {
+            if name == IntegralOptionName::Waypoints {
+                waypoints::admit_shape(value)?;
+                waypoint_receipts.push(match value {
+                    Value::GpuTensor(_) => None,
+                    host => Some(waypoints::decode(host)?),
+                });
+                continue;
+            }
+            waypoint_receipts.push(None);
             if matches!(value, Value::GpuTensor(_)) {
                 match name {
                     IntegralOptionName::AbsTol => known_abs_tol = None,
@@ -40,7 +67,8 @@ impl IntegralOptions {
                     IntegralOptionName::MaxFunEvals
                     | IntegralOptionName::MaxIntervalCount
                     | IntegralOptionName::ArrayValued
-                    | IntegralOptionName::Vectorized => {}
+                    | IntegralOptionName::Vectorized
+                    | IntegralOptionName::Waypoints => {}
                 }
                 continue;
             }
@@ -51,7 +79,8 @@ impl IntegralOptions {
                 IntegralOptionName::MaxFunEvals
                 | IntegralOptionName::MaxIntervalCount
                 | IntegralOptionName::ArrayValued
-                | IntegralOptionName::Vectorized => {}
+                | IntegralOptionName::Vectorized
+                | IntegralOptionName::Waypoints => {}
             }
         }
         if known_abs_tol == Some(0.0) && known_rel_tol == Some(0.0) {
@@ -72,12 +101,25 @@ impl IntegralOptions {
                 "RelTol must be nonnegative",
             ));
         }
-        Ok(())
+        Ok(waypoint_receipts)
     }
 
-    pub(super) async fn parse(rest: &[(IntegralOptionName, &Value)]) -> BuiltinResult<Self> {
+    pub(super) async fn parse(
+        rest: &[(IntegralOptionName, &Value)],
+        mut waypoint_receipts: Vec<Option<Vec<Complex<f64>>>>,
+    ) -> BuiltinResult<Self> {
         let mut options = Self::defaults();
-        for &(name, value) in rest {
+        for (index, &(name, value)) in rest.iter().enumerate() {
+            if name == IntegralOptionName::Waypoints {
+                options.waypoints = match waypoint_receipts[index].take() {
+                    Some(host) => host,
+                    None => {
+                        let gathered = crate::dispatcher::gather_if_needed_async(value).await?;
+                        waypoints::decode(&gathered)?
+                    }
+                };
+                continue;
+            }
             if matches!(value, Value::GpuTensor(_)) {
                 let gathered = crate::dispatcher::gather_if_needed_async(value).await?;
                 options.apply_option(name, &gathered)?;
@@ -113,6 +155,9 @@ impl IntegralOptions {
             IntegralOptionName::Vectorized => {
                 self.callback_mode =
                     IntegralCallbackMode::from_vectorized(bool_option("Vectorized", value)?);
+            }
+            IntegralOptionName::Waypoints => {
+                self.waypoints = waypoints::decode(value)?;
             }
         }
         Ok(())

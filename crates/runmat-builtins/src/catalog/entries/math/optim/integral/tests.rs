@@ -317,6 +317,7 @@ fn option_identity_is_typed_at_the_public_boundary() {
         ("MaxIntervalCount", IntegralOptionName::MaxIntervalCount),
         ("ArrayValued", IntegralOptionName::ArrayValued),
         ("Vectorized", IntegralOptionName::Vectorized),
+        ("Waypoints", IntegralOptionName::Waypoints),
     ] {
         assert_eq!(IntegralOptionName::parse(spelling), Some(identity));
     }

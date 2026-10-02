@@ -201,6 +201,22 @@ fn known_option(
                 numeric.map(|number| IntegralCallbackMode::from_vectorized(number != 0.0));
             !valid || known_bad_kind
         }
+        IntegralOptionName::Waypoints => value.is_some_and(|fact| {
+            let numeric = matches!(
+                fact.kind,
+                ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
+            );
+            let nonvector = match &fact.shape {
+                ShapeFact::Shaped { dims } => {
+                    let rows = dims.first();
+                    let cols = dims.get(1);
+                    matches!((rows, cols), (Some(runmat_types::DimensionFact::Known(r)), Some(runmat_types::DimensionFact::Known(c))) if *r > 1 && *c > 1)
+                        || dims.iter().skip(2).any(|dim| matches!(dim, runmat_types::DimensionFact::Known(axis) if *axis != 1))
+                }
+                _ => false,
+            };
+            !numeric || fact.storage == StorageFact::Sparse || nonvector
+        }),
     };
     if bad {
         diagnostics.push(argument_error(

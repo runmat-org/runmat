@@ -8,6 +8,7 @@ pub enum IntegralOptionName {
     MaxIntervalCount,
     ArrayValued,
     Vectorized,
+    Waypoints,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,6 +39,7 @@ impl IntegralOptionName {
             "maxintervalcount" => Some(Self::MaxIntervalCount),
             "arrayvalued" => Some(Self::ArrayValued),
             "vectorized" => Some(Self::Vectorized),
+            "waypoints" => Some(Self::Waypoints),
             _ => None,
         }
     }
@@ -45,7 +47,11 @@ impl IntegralOptionName {
     pub const fn is_numeric(self) -> bool {
         matches!(
             self,
-            Self::AbsTol | Self::RelTol | Self::MaxFunEvals | Self::MaxIntervalCount
+            Self::AbsTol
+                | Self::RelTol
+                | Self::MaxFunEvals
+                | Self::MaxIntervalCount
+                | Self::Waypoints
         )
     }
 
@@ -57,6 +63,7 @@ impl IntegralOptionName {
             Self::MaxIntervalCount => "MaxIntervalCount",
             Self::ArrayValued => "ArrayValued",
             Self::Vectorized => "Vectorized",
+            Self::Waypoints => "Waypoints",
         }
     }
 }

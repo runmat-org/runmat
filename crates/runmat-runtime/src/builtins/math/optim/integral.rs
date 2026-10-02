@@ -21,13 +21,14 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
-    integrate, AdaptiveSimpsonResult, QuadratureArithmeticError, QuadratureCooperation,
-    QuadratureEvaluator, QuadratureIdentity,
+    QuadratureArithmeticError, QuadratureCooperation, QuadratureEvaluator, QuadratureIdentity,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod array;
 mod options;
+mod path;
+mod waypoints;
 
 use options::IntegralOptions;
 
@@ -172,9 +173,10 @@ async fn integral_with_cooperation(
     for (label, value) in [("lower bound", &a), ("upper bound", &b)] {
         preflight_integral_bound(label, value)?;
     }
-    IntegralOptions::preflight_host(&admitted_options)?;
+    let waypoint_receipts = IntegralOptions::preflight_host(&admitted_options)?;
+    path::preflight_host_path(&a, &b, &admitted_options, &waypoint_receipts)?;
     authenticate_integral_residents(&a, &b, &admitted_options)?;
-    let options = IntegralOptions::parse(&admitted_options)
+    let options = IntegralOptions::parse(&admitted_options, waypoint_receipts)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_ARGUMENT))?;
     let a = scalar_bound("lower bound", a)
@@ -183,30 +185,39 @@ async fn integral_with_cooperation(
     let b = scalar_bound("upper bound", b)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
+    let segments = path::finite_real_segments(a, b, &options.waypoints)?;
+    if segments
+        .len()
+        .checked_mul(5)
+        .is_none_or(|minimum| minimum > options.max_fun_evals)
+    {
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "exceeded maximum function evaluations",
+        ));
+    }
     let sign = if b < a { -1.0 } else { 1.0 };
     let lo = a.min(b);
     let hi = a.max(b);
     if options.array_valued {
-        let result =
-            array::integrate_array_valued(&function, lo, hi, sign, &options, cooperation).await?;
+        let result = array::integrate_array_valued(
+            &function,
+            lo,
+            hi,
+            sign,
+            &segments,
+            &options,
+            cooperation,
+        )
+        .await?;
         cooperation.completed(0).await?;
         return Ok(result);
     }
-    if a == b {
+    if segments.is_empty() {
         cooperation.completed(0).await?;
         return Ok(Value::Num(0.0));
     }
-    let result = {
-        let mut evaluator = IntegralEvaluator {
-            function: &function,
-            options: &options,
-            cooperation,
-        };
-        let AdaptiveSimpsonResult { q, .. } = integrate(&mut evaluator, lo, hi)
-            .await
-            .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
-        q
-    };
+    let result = path::integrate_real_segments(&function, &options, &segments, cooperation).await?;
     cooperation.completed(0).await?;
     Ok(Value::Num(sign * result))
 }
@@ -1066,6 +1077,42 @@ mod tests {
     }
 
     #[test]
+    fn monotone_real_waypoints_share_one_scalar_and_array_integration_path() {
+        let waypoints = Tensor::new(vec![0.25, 0.75], vec![1, 2]).expect("waypoints");
+        let scalar = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_square".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("Waypoints"), Value::Tensor(waypoints.clone())],
+        ))
+        .expect("scalar waypoint integral");
+        let Value::Num(scalar) = scalar else {
+            panic!("scalar integral must return a number")
+        };
+        assert!((scalar - 1.0 / 3.0).abs() < 1.0e-7);
+
+        let array = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_array_polynomial".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![
+                Value::from("ArrayValued"),
+                Value::Bool(true),
+                Value::from("Waypoints"),
+                Value::Tensor(waypoints),
+            ],
+        ))
+        .expect("array waypoint integral");
+        let Value::Tensor(array) = array else {
+            panic!("array integral must return a tensor")
+        };
+        assert_eq!(array.shape, vec![1, 3]);
+        for (index, expected) in [0.5, 1.0 / 3.0, 1.0].into_iter().enumerate() {
+            assert!((tensor::tensor_value_f64(&array, index) - expected).abs() < 1.0e-7);
+        }
+    }
+
+    #[test]
     fn array_valued_singleton_nd_output_keeps_callback_geometry() {
         for (lo, hi, expected) in [(-2.0, -1.0, -1.5), (-2.0, -2.0, 0.0)] {
             let result = block_on(integral_builtin(
@@ -1371,6 +1418,30 @@ mod tests {
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
         assert_eq!(bound.probe.retirements(), 0);
         assert_eq!(valid_option.probe.retirements(), 0);
+
+        let invalid_host_waypoint = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![
+                Value::from("AbsTol"),
+                Value::GpuTensor(valid_option.handle.clone()),
+                Value::from("Waypoints"),
+                Value::Num(2.0),
+            ],
+        ))
+        .expect_err("known out-of-range waypoint precedes an unrelated resident option");
+        assert_eq!(
+            invalid_host_waypoint.identifier(),
+            INTEGRAL_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(valid_option.probe.retirements(), 0);
+        valid_option
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
     }
 
     #[test]
