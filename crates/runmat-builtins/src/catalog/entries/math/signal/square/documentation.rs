@@ -38,7 +38,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Square-wave boundary, class, and host fallback", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/square.rs") }],
+        implementation: &[BuiltinDocumentationLink { label: "Square-wave boundary, class, and host fallback", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/square.rs") }, BuiltinDocumentationLink { label: "Shared typed waveform scalar controls", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/waveform_control.rs") }, BuiltinDocumentationLink { label: "Typed, cooperative host waveform mapping", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/waveform_map.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Duty boundary, classes, and provider behavior", location: "builtins::math::signal::square::tests" }],
         notes: &[],
     },

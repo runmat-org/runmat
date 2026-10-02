@@ -96,6 +96,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
                 label: "Rectangular pulse admission, boundaries, and restoration",
                 target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/rectpuls.rs"),
             },
+            BuiltinDocumentationLink {
+                label: "Shared typed waveform scalar controls",
+                target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/waveform_control.rs"),
+            },
+            BuiltinDocumentationLink {
+                label: "Typed, cooperative host waveform mapping",
+                target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/waveform_map.rs"),
+            },
         ],
         verification: &[
             BuiltinEvidenceReference {
