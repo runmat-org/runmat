@@ -114,6 +114,26 @@ fn file_import_is_an_effectful_host_boundary() {
     assert!(result.effects.0.contains(&EffectKind::EnvironmentRead));
     assert!(result.effects.0.contains(&EffectKind::MaySuspend));
     assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
+    assert_eq!(
+        readtimetable::ENTRY.contract.capabilities,
+        &[CapabilityRequirement::Filesystem]
+    );
+}
+
+#[test]
+fn in_memory_timetable_construction_does_not_require_a_filesystem() {
+    for entry in [
+        &constructor::ENTRY,
+        &array2timetable::ENTRY,
+        &table2timetable::ENTRY,
+        &timetable2table::ENTRY,
+    ] {
+        assert!(
+            entry.contract.capabilities.is_empty(),
+            "{}",
+            entry.identity.name
+        );
+    }
 }
 
 #[test]

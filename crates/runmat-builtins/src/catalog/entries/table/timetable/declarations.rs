@@ -70,7 +70,11 @@ pub(super) const fn entry(definition: EntryDefinition) -> BuiltinCatalogEntry {
                     runmat_types::EffectKind::MayThrow,
                 ]
             },
-            capabilities: &[],
+            capabilities: if filesystem_read {
+                &[runmat_types::CapabilityRequirement::Filesystem]
+            } else {
+                &[]
+            },
         },
         placement: BuiltinPlacementContract {
             preparation: BuiltinOperandPreparation::RuntimeOwned,
