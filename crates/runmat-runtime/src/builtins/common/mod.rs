@@ -6,6 +6,7 @@ pub(crate) mod binary;
 pub mod broadcast;
 pub mod concatenation;
 pub(crate) mod control_flow_error;
+pub(crate) mod cooperative_sort;
 pub mod deal;
 pub mod elementwise;
 pub mod env;

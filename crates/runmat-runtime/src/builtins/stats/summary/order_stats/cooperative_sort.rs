@@ -6,12 +6,12 @@ use std::cmp::Ordering;
 #[cfg(any(feature = "plot-core", test))]
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 
+#[cfg(test)]
+use crate::builtins::common::cooperative_sort::RUN_LEN;
 #[cfg(any(feature = "plot-core", test))]
 use crate::builtins::common::cooperative_sort::{
     stable_sort_by_sync, SortProgress, SortResourceError, StableSortWork,
 };
-#[cfg(test)]
-use crate::builtins::common::cooperative_sort::RUN_LEN;
 
 #[derive(Debug)]
 pub(crate) enum CooperativeSortError {
