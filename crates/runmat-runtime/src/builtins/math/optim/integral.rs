@@ -145,6 +145,16 @@ async fn integral_in_runtime(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Integral, runtime);
+    integral_with_cooperation(function, a, b, rest, &mut cooperation).await
+}
+
+async fn integral_with_cooperation(
+    function: Value,
+    a: Value,
+    b: Value,
+    rest: Vec<Value>,
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<Value> {
     cooperation.completed(0).await?;
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(integral_error_with_detail(
@@ -175,8 +185,7 @@ async fn integral_in_runtime(
     let hi = a.max(b);
     if options.array_valued {
         let result =
-            array::integrate_array_valued(&function, lo, hi, sign, &options, &mut cooperation)
-                .await?;
+            array::integrate_array_valued(&function, lo, hi, sign, &options, cooperation).await?;
         cooperation.completed(0).await?;
         return Ok(result);
     }
@@ -188,7 +197,7 @@ async fn integral_in_runtime(
         let mut evaluator = IntegralEvaluator {
             function: &function,
             options: &options,
-            cooperation: &mut cooperation,
+            cooperation,
         };
         let AdaptiveSimpsonResult { q, .. } = integrate(&mut evaluator, lo, hi)
             .await
@@ -810,6 +819,25 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::IntegerStorage;
+
+    struct PendingIntegralTurn(std::rc::Rc<std::cell::Cell<bool>>);
+
+    impl std::future::Future for PendingIntegralTurn {
+        type Output = Result<(), crate::execution::ExecutionServiceError>;
+
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            std::task::Poll::Pending
+        }
+    }
+
+    impl Drop for PendingIntegralTurn {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
 
     async fn mapped_helper(x: Value, map: impl Fn(f64) -> f64) -> crate::BuiltinResult<Value> {
         match x {
@@ -1697,5 +1725,64 @@ mod tests {
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
         assert!(error.source.is_some());
+    }
+
+    #[test]
+    fn active_array_integral_turn_cancels_or_drops_without_publication() {
+        use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+        use futures::task::noop_waker;
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::cell::Cell;
+        use std::future::Future;
+        use std::num::NonZeroU64;
+        use std::rc::Rc;
+        use std::task::{Context, Poll};
+
+        for cancel in [false, true] {
+            let source = CancellationSource::new();
+            let dropped = Rc::new(Cell::new(false));
+            let posted = Rc::new(Cell::new(0));
+            let dropped_turn = dropped.clone();
+            let posted_turn = posted.clone();
+            let budget = CpuCooperationBudget::with_test_turn(
+                CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+                source.token(),
+                move || {
+                    posted_turn.set(posted_turn.get() + 1);
+                    Box::pin(PendingIntegralTurn(dropped_turn.clone()))
+                },
+            );
+            let mut cooperation =
+                QuadratureCooperation::with_budget(QuadratureIdentity::Integral, budget);
+            let mut invocation = Box::pin(integral_with_cooperation(
+                Value::FunctionHandle("__integral_array_opposite_constants".into()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                vec![Value::from("ArrayValued"), Value::Bool(true)],
+                &mut cooperation,
+            ));
+            let waker = noop_waker();
+            let mut context = Context::from_waker(&waker);
+            assert!(invocation.as_mut().poll(&mut context).is_pending());
+            assert_eq!(posted.get(), 1, "callback work reached the owning turn");
+            if cancel {
+                source.cancel(CancellationReason::User);
+                let Poll::Ready(Err(error)) = invocation.as_mut().poll(&mut context) else {
+                    panic!("cancelled integral cannot publish an array")
+                };
+                assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+                assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+                assert!(matches!(
+                    error
+                        .source
+                        .as_deref()
+                        .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+                    Some(ExecutionServiceError::Cancelled)
+                ));
+            }
+            drop(invocation);
+            assert!(dropped.get(), "abandoned turn was released");
+        }
     }
 }
