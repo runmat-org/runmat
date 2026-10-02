@@ -24,7 +24,7 @@ mod tests;
 
 use admission::{
     admit_options, ensure_exact_tsne_floating_options, ensure_exact_tsne_integer_value,
-    materialize_options, option_headers, AdmittedOption, AdmittedStatsetField, OptionHeader,
+    materialize_options, option_headers, OptionHeader,
 };
 use optimizer::compute_tsne_cooperative;
 #[cfg(test)]
