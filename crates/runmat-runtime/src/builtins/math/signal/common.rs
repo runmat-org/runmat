@@ -379,6 +379,9 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
         Value::Num(n) => n,
         Value::Int(i) => i.to_f64(),
         Value::Bool(b) => usize::from(b) as f64,
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            usize::from(array.data[0] != 0) as f64
+        }
         Value::Tensor(t) if tensor::is_scalar_tensor(&t) => tensor::tensor_value_f64(&t, 0),
         _ => return Err(WindowArgError::InvalidLength),
     };
@@ -390,6 +393,11 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
         return Err(WindowArgError::InvalidLength);
     }
     Ok(rounded as usize)
+}
+
+pub(crate) fn is_scalar_logical_window_length(value: &Value) -> bool {
+    matches!(value, Value::Bool(_))
+        || matches!(value, Value::LogicalArray(array) if array.data.len() == 1)
 }
 
 pub(crate) fn parse_window_controls(

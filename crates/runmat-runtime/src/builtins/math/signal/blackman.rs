@@ -12,8 +12,8 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
-    parse_window_controls, window_allocation_error, window_options_from_length, window_tensor,
-    WindowArgError, WindowCooperation,
+    is_scalar_logical_window_length, parse_window_controls, window_allocation_error,
+    window_options_from_length, window_tensor, WindowArgError, WindowCooperation,
 };
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
@@ -114,7 +114,7 @@ async fn blackman_in_runtime(
     varargin: Vec<runmat_value::Value>,
 ) -> crate::BuiltinResult<runmat_value::Value> {
     let controls = parse_window_controls(&varargin, true).map_err(blackman_map_window_error)?;
-    if matches!(n, runmat_value::Value::Bool(_)) {
+    if is_scalar_logical_window_length(&n) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &BLACKMAN_LOGICAL_LENGTH_EXTENSION,
             BUILTIN_NAME,
@@ -312,6 +312,31 @@ mod tests {
             assert_eq!(output.shape, vec![1, 1]);
             assert_eq!(output.numeric_dtype(), NumericDType::F64);
         }
+    }
+
+    #[test]
+    fn blackman_scalar_logical_array_uses_the_same_extension_as_bool() {
+        let _guard = test_support::accel_test_lock();
+        let logical = |bit| {
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![bit], vec![1, 1]).unwrap())
+        };
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(blackman_builtin(logical(1), Vec::new())).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                BLACKMAN_LOGICAL_LENGTH_EXTENSION.error_identifier
+            );
+        }
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for (bit, shape) in [(0, vec![0, 1]), (1, vec![1, 1])] {
+            let result = block_on(blackman_builtin(logical(bit), Vec::new())).unwrap();
+            assert_eq!(test_support::gather(result).unwrap().shape, shape);
+        }
+        let nonscalar =
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap());
+        let error = block_on(blackman_builtin(nonscalar, Vec::new())).unwrap_err();
+        assert_eq!(error.identifier(), BLACKMAN_ERROR_INVALID_LENGTH.identifier);
     }
 
     #[test]
