@@ -125,31 +125,19 @@ impl WgpuProvider {
 
     pub(crate) fn fused_indexed_multi_with_telemetry_exec(
         &self,
-        shader: &str,
-        inputs: &[GpuTensorHandle],
-        output_shape: &[usize],
-        len: usize,
-        output_classes: &[runmat_accelerate_api::ProviderElementType],
-        operands: &[super::elementwise::IndexedFusionOperand<'_>],
+        request: super::elementwise::IndexedFusionMultiRequest<'_>,
     ) -> Result<Vec<GpuTensorHandle>> {
         let start = Instant::now();
-        let result = self.fused_indexed_multi_exec(
-            shader,
-            inputs,
-            output_shape,
-            len,
-            output_classes,
-            operands,
-        );
+        let shape = [
+            ("len", request.len as u64),
+            ("inputs", request.inputs.len() as u64),
+            ("rank", request.output_shape.len() as u64),
+            ("num_outputs", request.output_classes.len() as u64),
+        ];
+        let result = self.fused_indexed_multi_exec(request);
         if result.is_ok() {
             self.telemetry
                 .record_fused_elementwise_duration(start.elapsed());
-            let shape = [
-                ("len", len as u64),
-                ("inputs", inputs.len() as u64),
-                ("rank", output_shape.len() as u64),
-                ("num_outputs", output_classes.len() as u64),
-            ];
             let wg = crate::backend::wgpu::config::effective_workgroup_size() as u64;
             self.record_kernel_launch_basic("fused_indexed_multi", &shape, &[("wg", wg)]);
         }

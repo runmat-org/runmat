@@ -1,4 +1,4 @@
-use super::elementwise::IndexedFusionOperand;
+use super::elementwise::{IndexedFusionMultiRequest, IndexedFusionOperand};
 use super::*;
 use crate::backend::wgpu::params::{
     MovingWindowParamsF32, MovingWindowParamsF64, PackedF32, PackedU32,
@@ -679,20 +679,21 @@ impl WgpuProvider {
                 storage: GpuTensorStorage::ComplexInterleaved,
             },
         ];
-        let mut outputs = match self.fused_indexed_multi_with_telemetry_exec(
-            &bounds_shader,
-            &inputs,
-            request.output_shape,
-            real_len,
-            &[self.provider_precision_exec().into(); 2],
-            &operands,
-        ) {
-            Ok(outputs) => outputs,
-            Err(err) => {
-                drop(analytic);
-                return Err(err.into());
-            }
-        };
+        let mut outputs =
+            match self.fused_indexed_multi_with_telemetry_exec(IndexedFusionMultiRequest {
+                shader: &bounds_shader,
+                inputs: &inputs,
+                output_shape: request.output_shape,
+                len: real_len,
+                output_classes: &[self.provider_precision_exec().into(); 2],
+                operands: &operands,
+            }) {
+                Ok(outputs) => outputs,
+                Err(err) => {
+                    drop(analytic);
+                    return Err(err.into());
+                }
+            };
         drop(analytic);
         if outputs.len() != 2 {
             return Err(anyhow!("signal_envelope: missing outputs").into());
@@ -737,20 +738,21 @@ impl WgpuProvider {
                 storage: GpuTensorStorage::Real,
             },
         ];
-        let mut outputs = match self.fused_indexed_multi_with_telemetry_exec(
-            &shader,
-            &inputs,
-            request.output_shape,
-            real_len,
-            &[self.provider_precision_exec().into(); 2],
-            &operands,
-        ) {
-            Ok(outputs) => outputs,
-            Err(err) => {
-                drop(kernel);
-                return Err(err);
-            }
-        };
+        let mut outputs =
+            match self.fused_indexed_multi_with_telemetry_exec(IndexedFusionMultiRequest {
+                shader: &shader,
+                inputs: &inputs,
+                output_shape: request.output_shape,
+                len: real_len,
+                output_classes: &[self.provider_precision_exec().into(); 2],
+                operands: &operands,
+            }) {
+                Ok(outputs) => outputs,
+                Err(err) => {
+                    drop(kernel);
+                    return Err(err);
+                }
+            };
         drop(kernel);
         ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
         let lower = outputs.pop().expect("lower output");
@@ -779,14 +781,15 @@ impl WgpuProvider {
             lanes: real_len,
             storage: GpuTensorStorage::Real,
         }];
-        let mut outputs = self.fused_indexed_multi_with_telemetry_exec(
-            &shader,
-            std::slice::from_ref(request.input),
-            request.output_shape,
-            real_len,
-            &[self.provider_precision_exec().into(); 2],
-            &operands,
-        )?;
+        let mut outputs =
+            self.fused_indexed_multi_with_telemetry_exec(IndexedFusionMultiRequest {
+                shader: &shader,
+                inputs: std::slice::from_ref(request.input),
+                output_shape: request.output_shape,
+                len: real_len,
+                output_classes: &[self.provider_precision_exec().into(); 2],
+                operands: &operands,
+            })?;
         ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
         let lower = outputs.pop().expect("lower output");
         let upper = outputs.pop().expect("upper output");
@@ -3085,28 +3088,35 @@ mod tests {
     }
 
     fn run_envelope(method: ProviderEnvelopeMethod, values: &[f64], shape: &[usize]) -> Vec<f64> {
-        with_wgpu_provider(|provider| {
-            let input = provider
-                .upload(&HostTensorView {
-                    data: values,
-                    shape,
-                })
-                .expect("upload");
-            let result = pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
-                input: &input,
-                channel_len: values.len(),
-                channel_count: 1,
-                output_shape: shape,
-                method,
-            }))
-            .expect("envelope");
-            let upper = pollster::block_on(provider.download(&result.upper)).expect("download");
-            input.release().unwrap();
-            result.upper.release().unwrap();
-            result.lower.release().unwrap();
-            upper.data
-        })
-        .unwrap_or_default()
+        with_wgpu_provider(|provider| run_envelope_on(provider, method, values, shape))
+            .unwrap_or_default()
+    }
+
+    fn run_envelope_on(
+        provider: &'static dyn AccelProvider,
+        method: ProviderEnvelopeMethod,
+        values: &[f64],
+        shape: &[usize],
+    ) -> Vec<f64> {
+        let input = provider
+            .upload(&HostTensorView {
+                data: values,
+                shape,
+            })
+            .expect("upload");
+        let result = pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
+            input: &input,
+            channel_len: values.len(),
+            channel_count: 1,
+            output_shape: shape,
+            method,
+        }))
+        .expect("envelope");
+        let upper = pollster::block_on(provider.download(&result.upper)).expect("download");
+        input.release().unwrap();
+        result.upper.release().unwrap();
+        result.lower.release().unwrap();
+        upper.data
     }
 
     #[test]
@@ -3443,28 +3453,30 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires actual WGPU device; run explicitly for indexed envelope regression"]
     fn signal_envelope_indexed_operands_preserve_row_vector_output_shape() {
         let values = [1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0];
-        for method in [
-            ProviderEnvelopeMethod::Analytic,
-            ProviderEnvelopeMethod::AnalyticFir { filter_len: 5 },
-            ProviderEnvelopeMethod::Rms { window_len: 3 },
-        ] {
-            let column = run_envelope(method, &values, &[8, 1]);
-            let row = run_envelope(method, &values, &[1, 8]);
-            if row.is_empty() || column.is_empty() {
-                continue;
+        with_wgpu_provider(|provider| {
+            for method in [
+                ProviderEnvelopeMethod::Analytic,
+                ProviderEnvelopeMethod::AnalyticFir { filter_len: 5 },
+                ProviderEnvelopeMethod::Rms { window_len: 3 },
+            ] {
+                let column = run_envelope_on(provider, method, &values, &[8, 1]);
+                let row = run_envelope_on(provider, method, &values, &[1, 8]);
+                assert_eq!(row.len(), column.len());
+                for (actual, expected) in row.iter().zip(column.iter()) {
+                    assert!((actual - expected).abs() < 1.0e-5);
+                }
             }
-            assert_eq!(row.len(), column.len());
-            for (actual, expected) in row.iter().zip(column.iter()) {
-                assert!((actual - expected).abs() < 1.0e-5);
-            }
-        }
+        })
+        .expect("actual WGPU device required");
     }
 
     #[test]
+    #[ignore = "requires actual WGPU device; run explicitly for indexed envelope regression"]
     fn signal_envelope_direct_indexing_materializes_lazy_transpose() {
-        let Some(()) = with_wgpu_provider(|provider| {
+        with_wgpu_provider(|provider| {
             let base = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0],
@@ -3517,9 +3529,8 @@ mod tests {
             drop(lazy);
             base.release().unwrap();
             contiguous.release().unwrap();
-        }) else {
-            return;
-        };
+        })
+        .expect("actual WGPU device required");
     }
 
     #[test]
