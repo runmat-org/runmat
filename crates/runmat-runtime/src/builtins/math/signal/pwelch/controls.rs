@@ -79,7 +79,7 @@ pub(super) async fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<Pre
                         ),
                     ));
                 }
-                prepared.window = Some(parse_window(value.clone()).await?);
+                prepared.window = Some(parse_window((*value).clone()).await?);
             }
             ControlRole::Overlap => {
                 prepared.overlap = Some(
@@ -91,7 +91,7 @@ pub(super) async fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<Pre
                 );
             }
             ControlRole::Grid => {
-                prepared.grid = Some(parse_frequency_grid(value.clone(), 0).await?);
+                prepared.grid = Some(parse_frequency_grid((*value).clone(), 0).await?);
             }
             ControlRole::SampleRate => {
                 let rate = parse_scalar_f64(BUILTIN_NAME, "fs", value).map_err(|error| {
@@ -190,7 +190,7 @@ pub(super) async fn parse_options(
             idx += 1;
             match prepared.window.take() {
                 Some(window) => window,
-                None => parse_window((*value).clone()).await?,
+                None => parse_window((**value).clone()).await?,
             }
         }
     } else {
@@ -234,7 +234,7 @@ pub(super) async fn parse_options(
             idx += 1;
             match prepared.grid.take() {
                 Some(grid) => grid,
-                None => parse_frequency_grid((*value).clone(), window_len).await?,
+                None => parse_frequency_grid((**value).clone(), window_len).await?,
             }
         }
     } else {
