@@ -1,5 +1,5 @@
 use super::*;
-use crate::execution::CpuCooperationPolicy;
+use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
 use futures::executor::block_on;
 use futures::task::noop_waker;
 use runmat_execution::cancellation::CancellationSource;
@@ -37,7 +37,7 @@ fn forced_turn_preserves_coefficient_values_and_count() {
     let expected = block_on(window_tensor(
         options(8193),
         |idx, _| idx as f64 / 3.0,
-        &mut WindowCooperation::new(None, "hann"),
+        &mut SignalCooperation::new(None, "hann"),
     ))
     .unwrap();
     let source = CancellationSource::new();
@@ -54,7 +54,7 @@ fn forced_turn_preserves_coefficient_values_and_count() {
     let actual = block_on(window_tensor(
         options(8193),
         |idx, _| idx as f64 / 3.0,
-        &mut WindowCooperation::with_budget(budget, "hann"),
+        &mut SignalCooperation::with_budget(budget, "hann"),
     ))
     .unwrap();
     let (Value::Tensor(expected), Value::Tensor(actual)) = (expected, actual) else {
@@ -83,7 +83,7 @@ fn single_window_uses_the_same_f64_coefficient_formula_before_native_cast() {
     let output = block_on(window_tensor(
         requested,
         |idx, total| idx as f64 / total as f64,
-        &mut WindowCooperation::with_budget(budget, "hann"),
+        &mut SignalCooperation::with_budget(budget, "hann"),
     ))
     .unwrap();
     let Value::Tensor(output) = output else {
@@ -113,7 +113,7 @@ fn pending_turn_cancellation_and_abandonment_do_not_publish_output() {
         );
         let completed = Rc::new(Cell::new(0));
         let count = completed.clone();
-        let mut cooperation = WindowCooperation::with_budget(budget, "blackman");
+        let mut cooperation = SignalCooperation::with_budget(budget, "blackman");
         let mut work = Box::pin(window_tensor(
             options(8193),
             move |_, _| {
@@ -159,7 +159,7 @@ fn service_failure_retains_owning_source() {
     let error = block_on(window_tensor(
         options(4097),
         |_, _| 1.0,
-        &mut WindowCooperation::with_budget(budget, "hamming"),
+        &mut SignalCooperation::with_budget(budget, "hamming"),
     ))
     .unwrap_err();
     let WindowArgError::Execution(error) = error else {
