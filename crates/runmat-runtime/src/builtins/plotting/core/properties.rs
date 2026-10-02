@@ -7,6 +7,12 @@ use std::borrow::Cow;
 #[path = "properties/async_readback.rs"]
 mod async_readback;
 pub use async_readback::{get_properties_async, set_properties_async};
+#[path = "properties/set_preflight.rs"]
+mod set_preflight;
+use set_preflight::{
+    prepare_line3_data_updates, prepare_line_data_updates, prepare_scatter_data_updates,
+    Line3DataUpdates, LineDataUpdates, ScatterDataUpdates,
+};
 
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
 use super::state::{
@@ -3039,6 +3045,11 @@ fn line_property_with_data(
     x_data: NumericPlotData,
     y_data: NumericPlotData,
 ) -> BuiltinResult<Value> {
+    if let SourcePropertyRead::Ready(value) =
+        line_property_without_data(line_handle, property, builtin, &line)?
+    {
+        return Ok(value);
+    }
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
@@ -3065,24 +3076,41 @@ fn line_property_with_data(
             insert_line_marker_struct_props(&mut st, line.marker.as_ref());
             Ok(Value::Struct(st))
         }
-        Some("type") => Ok(Value::String("line".into())),
-        Some("parent") => Ok(child_parent_handle(
-            line_handle.figure,
-            line_handle.axes_index,
-        )),
-        Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
         Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
-        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
-        Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
-        Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-        Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
-        Some("handlevisibility") => Ok(Value::String(line.handle_visibility)),
-        Some("visible") => Ok(Value::String(
-            if line.visible { "on" } else { "off" }.into(),
+        Some(name) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported line property `{name}`"),
         )),
-        Some(name) => line_marker_property_value(&line.marker, name, builtin),
     }
+}
+
+/// Metadata-only queries do not need access to resident source buffers.
+enum SourcePropertyRead {
+    Ready(Value),
+    RequiresCoordinates,
+}
+
+fn line_property_without_data(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    line: &runmat_plot::plots::LinePlot,
+) -> BuiltinResult<SourcePropertyRead> {
+    let value = match property.map(canonical_property_name).as_deref() {
+        None | Some("xdata" | "ydata") => return Ok(SourcePropertyRead::RequiresCoordinates),
+        Some("type") => Value::String("line".into()),
+        Some("parent") => child_parent_handle(line_handle.figure, line_handle.axes_index),
+        Some("children") => handles_value(Vec::new()),
+        Some("color") => Value::String(color_to_short_name(line.color)),
+        Some("linewidth") => Value::Num(line.line_width as f64),
+        Some("linestyle") => Value::String(line_style_name(line.line_style).into()),
+        Some("displayname") => Value::String(line.label.clone().unwrap_or_default()),
+        Some("handlevisibility") => Value::String(line.handle_visibility.clone()),
+        Some("visible") => Value::String(if line.visible { "on" } else { "off" }.into()),
+        Some(name) => line_marker_property_value(&line.marker, name, builtin)?,
+    };
+    Ok(SourcePropertyRead::Ready(value))
 }
 
 fn get_animated_line_property(
@@ -3376,8 +3404,11 @@ fn scatter_property_with_data(
     x_data: NumericPlotData,
     y_data: NumericPlotData,
 ) -> BuiltinResult<Value> {
-    let x_render = x_data.materialize_f64();
-    let y_render = y_data.materialize_f64();
+    if let SourcePropertyRead::Ready(value) =
+        scatter_property_without_data(scatter_handle, property, builtin, &scatter)?
+    {
+        return Ok(value);
+    }
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
@@ -3409,39 +3440,54 @@ fn scatter_property_with_data(
             }
             Ok(Value::Struct(st))
         }
-        Some("type") => Ok(Value::String("scatter".into())),
-        Some("parent") => Ok(child_parent_handle(
-            scatter_handle.figure,
-            scatter_handle.axes_index,
-        )),
-        Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
         Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
-        Some("thetadata") => Ok(tensor_from_vec(
-            scatter
-                .theta_data
-                .clone()
-                .unwrap_or_else(|| cartesian_theta(&x_render, &y_render)),
-        )),
-        Some("rdata") => Ok(tensor_from_vec(
-            scatter
-                .r_data
-                .clone()
-                .unwrap_or_else(|| cartesian_radius(&x_render, &y_render)),
-        )),
-        Some("marker") => Ok(Value::String(
-            marker_style_name(scatter.marker_style).into(),
-        )),
-        Some("sizedata") => Ok(scatter_size_data_value(&scatter)),
-        Some("markerfacecolor") => Ok(Value::String(color_to_short_name(scatter.color))),
-        Some("markeredgecolor") => Ok(Value::String(color_to_short_name(scatter.edge_color))),
-        Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
-        Some("displayname") => Ok(Value::String(scatter.label.unwrap_or_default())),
+        Some("thetadata") => Ok(tensor_from_vec(scatter.theta_data.clone().unwrap_or_else(
+            || cartesian_theta(&x_data.materialize_f64(), &y_data.materialize_f64()),
+        ))),
+        Some("rdata") => Ok(tensor_from_vec(scatter.r_data.clone().unwrap_or_else(
+            || cartesian_radius(&x_data.materialize_f64(), &y_data.materialize_f64()),
+        ))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported scatter property `{other}`"),
         )),
     }
+}
+
+fn scatter_property_without_data(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    scatter: &runmat_plot::plots::ScatterPlot,
+) -> BuiltinResult<SourcePropertyRead> {
+    let value = match property.map(canonical_property_name).as_deref() {
+        None | Some("xdata" | "ydata") => return Ok(SourcePropertyRead::RequiresCoordinates),
+        Some("thetadata") if scatter.theta_data.is_none() => {
+            return Ok(SourcePropertyRead::RequiresCoordinates)
+        }
+        Some("rdata") if scatter.r_data.is_none() => {
+            return Ok(SourcePropertyRead::RequiresCoordinates)
+        }
+        Some("type") => Value::String("scatter".into()),
+        Some("parent") => child_parent_handle(scatter_handle.figure, scatter_handle.axes_index),
+        Some("children") => handles_value(Vec::new()),
+        Some("thetadata") => tensor_from_vec(scatter.theta_data.clone().unwrap_or_default()),
+        Some("rdata") => tensor_from_vec(scatter.r_data.clone().unwrap_or_default()),
+        Some("marker") => Value::String(marker_style_name(scatter.marker_style).into()),
+        Some("sizedata") => scatter_size_data_value(scatter),
+        Some("markerfacecolor") => Value::String(color_to_short_name(scatter.color)),
+        Some("markeredgecolor") => Value::String(color_to_short_name(scatter.edge_color)),
+        Some("linewidth") => Value::Num(scatter.edge_thickness as f64),
+        Some("displayname") => Value::String(scatter.label.clone().unwrap_or_default()),
+        Some(other) => {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: unsupported scatter property `{other}`"),
+            ))
+        }
+    };
+    Ok(SourcePropertyRead::Ready(value))
 }
 
 fn get_bar_property(
@@ -5593,8 +5639,16 @@ fn apply_line_properties(
         ));
     };
 
+    let prepared = prepare_line_data_updates(pairs, builtin)?;
     let (current_x, current_y) = line_xy_data_for_properties(&current_line, builtin)?;
-    apply_line_properties_with_data(line_handle, pairs, builtin, (current_x, current_y), None)
+    apply_line_properties_with_data(
+        line_handle,
+        pairs,
+        builtin,
+        (current_x, current_y),
+        prepared,
+        None,
+    )
 }
 
 fn apply_line_properties_with_data(
@@ -5602,21 +5656,17 @@ fn apply_line_properties_with_data(
     pairs: &[(String, &Value)],
     builtin: &'static str,
     (current_x, current_y): PlotXY,
+    prepared: LineDataUpdates,
     guard: Option<PlotUpdateGuard>,
 ) -> BuiltinResult<()> {
-    let mut x_update = None;
-    let mut y_update = None;
-    let mut style_pairs = Vec::new();
-    for (key, value) in pairs {
-        match key.as_str() {
-            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
-            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
-            _ => style_pairs.push((key.as_str(), *value)),
-        }
-    }
+    let style_pairs: Vec<_> = prepared
+        .style_indices
+        .iter()
+        .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
+        .collect();
 
-    let next_x = x_update.unwrap_or_else(|| current_x.clone());
-    let next_y = y_update.unwrap_or_else(|| current_y.clone());
+    let next_x = prepared.x.unwrap_or_else(|| current_x.clone());
+    let next_y = prepared.y.unwrap_or_else(|| current_y.clone());
     let update_data = next_x != current_x || next_y != current_y;
     if update_data && next_x.len() != next_y.len() {
         return Err(plotting_error(
@@ -5624,12 +5674,6 @@ fn apply_line_properties_with_data(
             format!("{builtin}: XData and YData must contain the same number of elements"),
         ));
     }
-    for (key, value) in &style_pairs {
-        if *key == "handlevisibility" {
-            parse_handle_visibility(&LineStyleParseOptions::generic(builtin), value)?;
-        }
-    }
-
     update_property_plot(
         line_handle.figure,
         line_handle.plot_index,
@@ -5647,6 +5691,27 @@ fn apply_line_properties_with_data(
         },
     )?;
     Ok(())
+}
+
+fn apply_line_style_only(
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    guard: PlotUpdateGuard,
+) -> BuiltinResult<()> {
+    update_property_plot(
+        line_handle.figure,
+        line_handle.plot_index,
+        Some(guard),
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
+                for (key, value) in pairs {
+                    apply_line_plot_properties(line, key, value, builtin);
+                }
+            }
+        },
+    )
 }
 
 fn apply_animated_line_property(
@@ -5875,6 +5940,7 @@ fn apply_scatter_properties(
         ));
     };
 
+    let prepared = prepare_scatter_data_updates(pairs, builtin)?;
     let (current_x, current_y) = scatter_xy_data_for_properties(&current_scatter, builtin)?;
     apply_scatter_properties_with_data(
         scatter_handle,
@@ -5882,6 +5948,7 @@ fn apply_scatter_properties(
         builtin,
         current_scatter,
         (current_x, current_y),
+        prepared,
         None,
     )
 }
@@ -5892,6 +5959,7 @@ fn apply_scatter_properties_with_data(
     builtin: &'static str,
     current_scatter: runmat_plot::plots::ScatterPlot,
     (current_x, current_y): PlotXY,
+    prepared: ScatterDataUpdates,
     guard: Option<PlotUpdateGuard>,
 ) -> BuiltinResult<()> {
     let current_x_render = current_x.materialize_f64();
@@ -5905,35 +5973,21 @@ fn apply_scatter_properties_with_data(
         .r_data
         .clone()
         .unwrap_or_else(|| cartesian_radius(&current_x_render, &current_y_render));
-    let mut x_update = None;
-    let mut y_update = None;
-    let mut theta_update = None;
-    let mut r_update = None;
-    let mut style_pairs = Vec::new();
-    for (key, value) in pairs {
-        match key.as_str() {
-            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
-            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
-            "thetadata" => {
-                theta_update =
-                    Some(line_numeric_data(value, "ThetaData", builtin)?.materialize_f64())
-            }
-            "rdata" => {
-                r_update = Some(line_numeric_data(value, "RData", builtin)?.materialize_f64())
-            }
-            _ => style_pairs.push((key.as_str(), *value)),
-        }
-    }
+    let style_pairs: Vec<_> = prepared
+        .style_indices
+        .iter()
+        .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
+        .collect();
 
-    let next_theta = theta_update.unwrap_or_else(|| current_theta.clone());
-    let next_r = r_update.unwrap_or_else(|| current_r.clone());
+    let next_theta = prepared.theta.unwrap_or_else(|| current_theta.clone());
+    let next_r = prepared.r.unwrap_or_else(|| current_r.clone());
     let polar_update =
         (next_theta != current_theta || next_r != current_r).then_some((next_theta, next_r));
     if let Some((theta, r)) = polar_update.as_ref() {
         validate_polar_scatter_data(theta, r, builtin)?;
     }
-    let next_x = x_update.unwrap_or_else(|| current_x.clone());
-    let next_y = y_update.unwrap_or_else(|| current_y.clone());
+    let next_x = prepared.x.unwrap_or_else(|| current_x.clone());
+    let next_y = prepared.y.unwrap_or_else(|| current_y.clone());
     let cartesian_update = (next_x != current_x || next_y != current_y).then_some((next_x, next_y));
     if let Some((x, y)) = cartesian_update.as_ref() {
         if x.len() != y.len() || x.is_empty() {
@@ -5965,48 +6019,72 @@ fn apply_scatter_properties_with_data(
                 if let Some((theta, r)) = polar_update.as_ref() {
                     replace_polar_scatter_data_unchecked(scatter, theta.clone(), r.clone());
                 }
-                for (key, value) in &style_pairs {
-                    match *key {
-                        "marker" => {
-                            if let Some(s) = value_as_string(value) {
-                                scatter.marker_style =
-                                    scatter_marker_from_name(&s, scatter.marker_style);
-                            }
-                        }
-                        "sizedata" => {
-                            if let Some(v) = value_as_f64(value) {
-                                scatter.marker_size = marker_area_points2_to_diameter_px(v);
-                            }
-                        }
-                        "markerfacecolor" => {
-                            if let Ok(c) =
-                                parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                            {
-                                scatter.set_face_color(c);
-                            }
-                        }
-                        "markeredgecolor" => {
-                            if let Ok(c) =
-                                parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                            {
-                                scatter.set_edge_color(c);
-                            }
-                        }
-                        "linewidth" => {
-                            if let Some(v) = value_as_f64(value) {
-                                scatter.set_edge_thickness(v as f32);
-                            }
-                        }
-                        "displayname" => {
-                            scatter.label = value_as_string(value).map(|s| s.to_string());
-                        }
-                        _ => {}
-                    }
-                }
+                apply_scatter_style_pairs(scatter, &style_pairs, builtin);
             }
         },
     )?;
     Ok(())
+}
+
+fn apply_scatter_style_pairs(
+    scatter: &mut runmat_plot::plots::ScatterPlot,
+    pairs: &[(&str, &Value)],
+    builtin: &'static str,
+) {
+    for (key, value) in pairs {
+        match *key {
+            "marker" => {
+                if let Some(s) = value_as_string(value) {
+                    scatter.marker_style = scatter_marker_from_name(&s, scatter.marker_style);
+                }
+            }
+            "sizedata" => {
+                if let Some(v) = value_as_f64(value) {
+                    scatter.marker_size = marker_area_points2_to_diameter_px(v);
+                }
+            }
+            "markerfacecolor" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    scatter.set_face_color(c);
+                }
+            }
+            "markeredgecolor" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    scatter.set_edge_color(c);
+                }
+            }
+            "linewidth" => {
+                if let Some(v) = value_as_f64(value) {
+                    scatter.set_edge_thickness(v as f32);
+                }
+            }
+            "displayname" => scatter.label = value_as_string(value).map(|s| s.to_string()),
+            _ => {}
+        }
+    }
+}
+
+fn apply_scatter_style_only(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    guard: PlotUpdateGuard,
+) -> BuiltinResult<()> {
+    let style_pairs: Vec<_> = pairs
+        .iter()
+        .map(|(name, value)| (name.as_str(), *value))
+        .collect();
+    update_property_plot(
+        scatter_handle.figure,
+        scatter_handle.plot_index,
+        Some(guard),
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
+                apply_scatter_style_pairs(scatter, &style_pairs, builtin);
+            }
+        },
+    )
 }
 
 fn validate_polar_scatter_data(
@@ -6766,12 +6844,14 @@ fn apply_line3_properties(
         ));
     };
 
+    let prepared = prepare_line3_data_updates(pairs, builtin)?;
     let (current_x, current_y, current_z) = line_xyz_data_for_properties(&current_line, builtin)?;
     apply_line3_properties_with_data(
         line_handle,
         pairs,
         builtin,
         (current_x, current_y, current_z),
+        prepared,
         None,
     )
 }
@@ -6781,24 +6861,18 @@ fn apply_line3_properties_with_data(
     pairs: &[(String, &Value)],
     builtin: &'static str,
     (current_x, current_y, current_z): PlotXYZ,
+    prepared: Line3DataUpdates,
     guard: Option<PlotUpdateGuard>,
 ) -> BuiltinResult<()> {
-    let mut x_update = None;
-    let mut y_update = None;
-    let mut z_update = None;
-    let mut style_pairs = Vec::new();
-    for (key, value) in pairs {
-        match key.as_str() {
-            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
-            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
-            "zdata" => z_update = Some(line_numeric_data(value, "ZData", builtin)?),
-            _ => style_pairs.push((key.as_str(), *value)),
-        }
-    }
+    let style_pairs: Vec<_> = prepared
+        .style_indices
+        .iter()
+        .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
+        .collect();
 
-    let next_x = x_update.unwrap_or_else(|| current_x.clone());
-    let next_y = y_update.unwrap_or_else(|| current_y.clone());
-    let next_z = z_update.unwrap_or_else(|| current_z.clone());
+    let next_x = prepared.x.unwrap_or_else(|| current_x.clone());
+    let next_y = prepared.y.unwrap_or_else(|| current_y.clone());
+    let next_z = prepared.z.unwrap_or_else(|| current_z.clone());
     let update_data = next_x != current_x || next_y != current_y || next_z != current_z;
     if update_data
         && (next_x.is_empty() || next_x.len() != next_y.len() || next_x.len() != next_z.len())
@@ -6820,45 +6894,72 @@ fn apply_line3_properties_with_data(
                     let _ =
                         line.update_numeric_data(next_x.clone(), next_y.clone(), next_z.clone());
                 }
-                for (key, value) in &style_pairs {
-                    match *key {
-                        "color" => {
-                            if let Ok(c) =
-                                parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                            {
-                                line.color = c;
-                            }
-                        }
-                        "linewidth" => {
-                            if let Some(v) = value_as_f64(value) {
-                                line.line_width = v as f32;
-                            }
-                        }
-                        "linestyle" => {
-                            if let Some(s) = value_as_string(value) {
-                                line.line_style = parse_line_style_name_for_props(&s);
-                            }
-                        }
-                        "displayname" => {
-                            line.label = value_as_string(value).map(|s| s.to_string());
-                        }
-                        "visible" => {
-                            if let Some(v) = value_as_bool(value) {
-                                line.set_visible(v);
-                            } else if let Some(s) = value_as_string(value) {
-                                line.set_visible(!matches!(
-                                    s.trim().to_ascii_lowercase().as_str(),
-                                    "off" | "false"
-                                ));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                apply_line3_style_pairs(line, &style_pairs, builtin);
             }
         },
     )?;
     Ok(())
+}
+
+fn apply_line3_style_pairs(
+    line: &mut runmat_plot::plots::Line3Plot,
+    pairs: &[(&str, &Value)],
+    builtin: &'static str,
+) {
+    for (key, value) in pairs {
+        match *key {
+            "color" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    line.color = c;
+                }
+            }
+            "linewidth" => {
+                if let Some(v) = value_as_f64(value) {
+                    line.line_width = v as f32;
+                }
+            }
+            "linestyle" => {
+                if let Some(s) = value_as_string(value) {
+                    line.line_style = parse_line_style_name_for_props(&s);
+                }
+            }
+            "displayname" => line.label = value_as_string(value).map(|s| s.to_string()),
+            "visible" => {
+                if let Some(v) = value_as_bool(value) {
+                    line.set_visible(v);
+                } else if let Some(s) = value_as_string(value) {
+                    line.set_visible(!matches!(
+                        s.trim().to_ascii_lowercase().as_str(),
+                        "off" | "false"
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn apply_line3_style_only(
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    guard: PlotUpdateGuard,
+) -> BuiltinResult<()> {
+    let style_pairs: Vec<_> = pairs
+        .iter()
+        .map(|(name, value)| (name.as_str(), *value))
+        .collect();
+    update_property_plot(
+        line_handle.figure,
+        line_handle.plot_index,
+        Some(guard),
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
+                apply_line3_style_pairs(line, &style_pairs, builtin);
+            }
+        },
+    )
 }
 
 fn apply_scatter3_property(

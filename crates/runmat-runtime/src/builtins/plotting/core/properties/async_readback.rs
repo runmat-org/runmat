@@ -55,10 +55,20 @@ pub async fn get_properties_async(
         plot_child_element_snapshot(*id).map_err(|err| map_figure_error(builtin, err))?;
     match (child, plot) {
         (PlotChildHandleState::Line(state), PlotElement::Line(line)) => {
+            if let SourcePropertyRead::Ready(value) =
+                line_property_without_data(&state, property, builtin, &line)?
+            {
+                return Ok(value);
+            }
             let (x, y) = line_xy(&line, builtin).await?;
             line_property_with_data(&state, property, builtin, line, x, y)
         }
         (PlotChildHandleState::Scatter(state), PlotElement::Scatter(scatter)) => {
+            if let SourcePropertyRead::Ready(value) =
+                scatter_property_without_data(&state, property, builtin, &scatter)?
+            {
+                return Ok(value);
+            }
             let (x, y) = scatter_xy(&scatter, builtin).await?;
             scatter_property_with_data(&state, property, builtin, scatter, x, y)
         }
@@ -118,16 +128,36 @@ pub async fn set_properties_async(
     };
     match (child, plot) {
         (PlotChildHandleState::Line(state), PlotElement::Line(line)) => {
+            let prepared = prepare_line_data_updates(&pairs, builtin)?;
+            if prepared.is_empty() {
+                return apply_line_style_only(&state, &pairs, builtin, guard);
+            }
             let data = line_xy(&line, builtin).await?;
-            apply_line_properties_with_data(&state, &pairs, builtin, data, Some(guard))
+            apply_line_properties_with_data(&state, &pairs, builtin, data, prepared, Some(guard))
         }
         (PlotChildHandleState::Scatter(state), PlotElement::Scatter(scatter)) => {
+            let prepared = prepare_scatter_data_updates(&pairs, builtin)?;
+            if prepared.is_empty() {
+                return apply_scatter_style_only(&state, &pairs, builtin, guard);
+            }
             let data = scatter_xy(&scatter, builtin).await?;
-            apply_scatter_properties_with_data(&state, &pairs, builtin, scatter, data, Some(guard))
+            apply_scatter_properties_with_data(
+                &state,
+                &pairs,
+                builtin,
+                scatter,
+                data,
+                prepared,
+                Some(guard),
+            )
         }
         (PlotChildHandleState::Line3(state), PlotElement::Line3(line)) => {
+            let prepared = prepare_line3_data_updates(&pairs, builtin)?;
+            if prepared.is_empty() {
+                return apply_line3_style_only(&state, &pairs, builtin, guard);
+            }
             let data = line3_xyz(&line, builtin).await?;
-            apply_line3_properties_with_data(&state, &pairs, builtin, data, Some(guard))
+            apply_line3_properties_with_data(&state, &pairs, builtin, data, prepared, Some(guard))
         }
         (
             PlotChildHandleState::Line(_)
@@ -226,5 +256,60 @@ mod tests {
             block_on(set_properties_async(plot, &args, "set")).expect_err("mismatched lengths");
         assert!(error.message.contains("same number of elements"));
         assert_eq!(x_data(handle), before);
+    }
+
+    #[test]
+    fn invalid_coordinate_input_is_rejected_by_host_preflight() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        crate::builtins::plotting::reset_plot_state();
+        let handle = host_line();
+        let before = x_data(handle);
+        let plot = resolve_plot_handle(&Value::Num(handle), "set").expect("handle");
+        let args = [
+            Value::String("XData".into()),
+            Value::String("invalid".into()),
+        ];
+        let error = block_on(set_properties_async(plot, &args, "set"))
+            .expect_err("host-invalid coordinate must fail");
+        assert!(error.message.contains("XData must be numeric"));
+        assert_eq!(x_data(handle), before);
+    }
+
+    #[test]
+    fn metadata_queries_and_style_only_updates_do_not_require_coordinate_materialization() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        crate::builtins::plotting::reset_plot_state();
+        let handle = host_line();
+        let (child, plot, _) = plot_child_element_snapshot(handle).expect("snapshot");
+        let (PlotChildHandleState::Line(state), PlotElement::Line(line)) = (child, plot) else {
+            panic!("expected line");
+        };
+        assert!(matches!(
+            line_property_without_data(&state, Some("Type"), "get", &line).expect("metadata"),
+            SourcePropertyRead::Ready(Value::String(value)) if value == "line"
+        ));
+        assert!(matches!(
+            line_property_without_data(&state, Some("XData"), "get", &line)
+                .expect("known coordinate property"),
+            SourcePropertyRead::RequiresCoordinates
+        ));
+        assert!(line_property_without_data(&state, Some("NotAProperty"), "get", &line).is_err());
+
+        let before = x_data(handle);
+        let target = resolve_plot_handle(&Value::Num(handle), "set").expect("handle");
+        block_on(set_properties_async(
+            target,
+            &[Value::String("LineWidth".into()), Value::Num(3.0)],
+            "set",
+        ))
+        .expect("style update");
+        assert_eq!(x_data(handle), before);
+        let target = resolve_plot_handle(&Value::Num(handle), "get").expect("handle");
+        assert_eq!(
+            block_on(get_properties_async(target, Some("LineWidth"), "get")).expect("style"),
+            Value::Num(3.0)
+        );
     }
 }
