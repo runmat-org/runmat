@@ -1,7 +1,9 @@
 //! Shared FEA constructor catalog fields; identity facts stay in each entry.
 
 use crate::*;
-use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequirement};
+use runmat_types::{
+    CallInference, CallRequest, CapabilityRequirement, EffectKind, ExecutionStackRequirement,
+};
 
 pub struct ConstructorEntryDefinition {
     pub provenance: BuiltinCatalogProvenance,
@@ -100,7 +102,11 @@ pub const fn entry(definition: ConstructorEntryDefinition) -> BuiltinCatalogEntr
             } else {
                 &[EffectKind::MayThrow]
             },
-            capabilities: &[],
+            capabilities: if definition.filesystem_read {
+                &[CapabilityRequirement::Filesystem]
+            } else {
+                &[]
+            },
         },
         placement: BuiltinPlacementContract {
             preparation: BuiltinOperandPreparation::RuntimeOwned,

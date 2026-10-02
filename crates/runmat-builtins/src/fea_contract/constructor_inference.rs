@@ -278,6 +278,29 @@ mod tests {
     }
 
     #[test]
+    fn path_capability_is_declared_without_changing_pure_constructor_admission() {
+        let pure = entry();
+        assert!(pure.contract.capabilities.is_empty());
+        let path = catalog_entry::entry(ConstructorEntryDefinition {
+            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+            name: "fea.load",
+            documentation: BuiltinDocumentation::EMPTY,
+            descriptor: &FEA_MODEL_DESCRIPTOR,
+            inference: |request, entry| {
+                infer_constructor(request, entry, FeaConstructorKind::LoadDocument)
+            },
+            integer_capabilities: &[],
+            integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
+            filesystem_read: true,
+            distributed: crate::BuiltinDistributedPolicy::Unsupported,
+        });
+        assert_eq!(
+            path.contract.capabilities,
+            &[runmat_types::CapabilityRequirement::Filesystem]
+        );
+    }
+
+    #[test]
     fn model_requires_literal_profile_and_host_geometry_class() {
         assert_eq!(
             entry().contract.compatibility,
