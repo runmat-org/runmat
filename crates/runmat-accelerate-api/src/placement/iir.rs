@@ -4,11 +4,14 @@ use serde::{Deserialize, Serialize};
 /// Stable presentation token at the capability-query boundary. Numerical
 /// dispatch uses the closed route enum, never a builtin spelling comparison.
 pub const PROVIDER_IIR_PREPARED_PASS_OPERATION: &str = "signal.iir.prepared_pass";
+pub const PROVIDER_IIR_CAUSAL_PASS_OPERATION: &str = "signal.iir.causal_pass";
 pub const PROVIDER_IIR_ZERO_PHASE_OPERATION: &str = "signal.iir.zero_phase";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderIirRoute {
+    /// One causal pass over the admitted signal axes and order-first state.
+    CausalPass,
     /// One provider pass with one previously prepared resident coefficient set.
     PreparedPass,
     /// Reflected two-pass filtering with state scaling and trim on the device.

@@ -3,7 +3,8 @@ use runmat_accelerate_api::{
     AccelProvider, ProviderElementType, ProviderFeasibility, ProviderFeasibilityQuery,
     ProviderIirRoute, ProviderLayout, ProviderOperationFamily, ProviderRejectionCode,
     ProviderResidency, ProviderResourceEstimate, ProviderStorage,
-    PROVIDER_IIR_PREPARED_PASS_OPERATION, PROVIDER_IIR_ZERO_PHASE_OPERATION,
+    PROVIDER_IIR_CAUSAL_PASS_OPERATION, PROVIDER_IIR_PREPARED_PASS_OPERATION,
+    PROVIDER_IIR_ZERO_PHASE_OPERATION,
 };
 
 pub(super) fn validate(
@@ -11,6 +12,14 @@ pub(super) fn validate(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
+    if query.operation.0 == PROVIDER_IIR_CAUSAL_PASS_OPERATION
+        || query
+            .workload
+            .iir
+            .is_some_and(|workload| workload.route == ProviderIirRoute::CausalPass)
+    {
+        return Some(validate_causal(provider, wgpu, query));
+    }
     if query.operation.0 == PROVIDER_IIR_ZERO_PHASE_OPERATION
         || query
             .workload
@@ -149,6 +158,167 @@ pub(super) fn validate(
         output_bytes: None,
         dispatches: None,
     }))
+}
+
+fn validate_causal(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+) -> ProviderFeasibility {
+    let reject = |code, detail| ProviderFeasibility::rejected(code, detail);
+    let Some(workload) = query.workload.iir else {
+        return reject(
+            ProviderRejectionCode::UnsupportedOperation,
+            "iir.causal.missing_typed_route",
+        );
+    };
+    if workload.route != ProviderIirRoute::CausalPass
+        || query.operation.0 != PROVIDER_IIR_CAUSAL_PASS_OPERATION
+        || query.family != ProviderOperationFamily::Library
+        || query.inputs.len() != 4
+        || query.outputs.len() != 2
+        || workload.reflection_len != 0
+    {
+        return reject(
+            ProviderRejectionCode::UnsupportedOperation,
+            "iir.causal.invalid_query",
+        );
+    }
+    let [numerator, denominator, signal, state] = query.inputs.as_slice() else {
+        unreachable!("input arity checked above")
+    };
+    let [output, final_state] = query.outputs.as_slice() else {
+        unreachable!("output arity checked above")
+    };
+    let expected_class = ProviderElementType::from(provider.precision());
+    let max_allocation = provider.capability_snapshot().max_allocation_bytes;
+    for representation in query.inputs.iter().chain(query.outputs.iter()) {
+        if !matches!(
+            representation.element_type,
+            ProviderElementType::F32 | ProviderElementType::F64
+        ) || (wgpu && representation.element_type != expected_class)
+            || representation.element_type != signal.element_type
+            || representation.storage != ProviderStorage::DenseReal
+        {
+            return reject(
+                ProviderRejectionCode::UnsupportedElementType,
+                "iir.causal.class",
+            );
+        }
+        if representation.layout != ProviderLayout::ColumnMajorContiguous {
+            return reject(
+                ProviderRejectionCode::UnsupportedLayout,
+                "iir.causal.layout",
+            );
+        }
+        if representation.residency != ProviderResidency::Device {
+            return reject(
+                ProviderRejectionCode::UnsupportedOperation,
+                "iir.causal.residency",
+            );
+        }
+        let Some(bytes) = representation.checked_byte_len() else {
+            return reject(
+                ProviderRejectionCode::InvalidShape,
+                "iir.causal.byte_overflow",
+            );
+        };
+        if max_allocation.is_some_and(|limit| bytes > limit) {
+            return reject(
+                ProviderRejectionCode::ResourceLimit,
+                "iir.causal.allocation_limit",
+            );
+        }
+    }
+    let Some(coefficient_len) = numerator.checked_element_count() else {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.causal.coefficient_overflow",
+        );
+    };
+    let Ok(axis) = usize::try_from(workload.dim) else {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.causal.axis_overflow",
+        );
+    };
+    let Ok(state_len) = usize::try_from(workload.state_len) else {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.causal.state_overflow",
+        );
+    };
+    let Some(state_shape) = signal
+        .shape
+        .iter()
+        .copied()
+        .map(usize::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+        .and_then(|shape| {
+            runmat_accelerate_api::provider_iir_state_shape(&shape, axis, state_len).ok()
+        })
+    else {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.causal.axis_geometry",
+        );
+    };
+    let state_shape: Vec<u64> = state_shape
+        .into_iter()
+        .map(|extent| extent as u64)
+        .collect();
+    if coefficient_len == 0
+        || numerator.shape != [coefficient_len, 1]
+        || denominator.shape != numerator.shape
+        || workload.state_len != coefficient_len.saturating_sub(1)
+        || signal.shape.len() < 2
+        || output.shape != signal.shape
+        || state.shape != state_shape
+        || final_state.shape != state_shape
+    {
+        return reject(ProviderRejectionCode::InvalidShape, "iir.causal.geometry");
+    }
+    #[cfg(feature = "wgpu")]
+    if wgpu
+        && (signal.shape.len() > crate::backend::wgpu::params::FILTER_MAX_RANK
+            || coefficient_len > u64::from(u32::MAX)
+            || query
+                .inputs
+                .iter()
+                .chain(query.outputs.iter())
+                .any(|representation| {
+                    representation
+                        .checked_element_count()
+                        .is_none_or(|count| count > u64::from(u32::MAX))
+                        || representation
+                            .shape
+                            .iter()
+                            .any(|&extent| extent > u64::from(u32::MAX))
+                }))
+    {
+        return reject(
+            ProviderRejectionCode::ResourceLimit,
+            "iir.causal.addressable_range",
+        );
+    }
+    #[cfg(not(feature = "wgpu"))]
+    if wgpu {
+        return reject(
+            ProviderRejectionCode::UnsupportedOperation,
+            "iir.causal.no_wgpu",
+        );
+    }
+    let output_bytes = output.checked_byte_len().and_then(|signal_bytes| {
+        final_state
+            .checked_byte_len()
+            .and_then(|state_bytes| signal_bytes.checked_add(state_bytes))
+    });
+    ProviderFeasibility::supported(ProviderResourceEstimate {
+        transient_bytes: None,
+        output_bytes,
+        dispatches: None,
+    })
 }
 
 fn validate_zero_phase(
@@ -334,6 +504,47 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    fn causal_pass() -> ProviderFeasibilityQuery {
+        ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new(PROVIDER_IIR_CAUSAL_PASS_OPERATION),
+            family: ProviderOperationFamily::Library,
+            inputs: vec![
+                representation(&[2, 1]),
+                representation(&[2, 1]),
+                representation(&[3, 4]),
+                representation(&[1, 3]),
+            ],
+            outputs: vec![representation(&[3, 4]), representation(&[1, 3])],
+            workload: ProviderWorkload {
+                iir: Some(ProviderIirWorkload {
+                    route: ProviderIirRoute::CausalPass,
+                    dim: 1,
+                    state_len: 1,
+                    reflection_len: 0,
+                }),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn causal_pass_requires_order_first_state_and_exact_output_geometry() {
+        let provider = crate::simple_provider::InProcessProvider::new();
+        let mut query = causal_pass();
+        assert!(validate(&provider, false, &query).unwrap().is_supported());
+        query.inputs[3].shape = vec![3, 1];
+        assert!(!validate(&provider, false, &query).unwrap().is_supported());
+        query = causal_pass();
+        query.outputs[0].shape = vec![4, 3];
+        assert!(!validate(&provider, false, &query).unwrap().is_supported());
+        query = causal_pass();
+        query.inputs[2].element_type = ProviderElementType::I64;
+        assert!(!validate(&provider, false, &query).unwrap().is_supported());
+        query = causal_pass();
+        query.workload.iir = None;
+        assert!(!validate(&provider, false, &query).unwrap().is_supported());
     }
 
     #[test]

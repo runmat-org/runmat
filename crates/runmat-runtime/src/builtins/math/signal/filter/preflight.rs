@@ -289,6 +289,39 @@ mod tests {
     }
 
     #[test]
+    fn provider_without_causal_hook_rejects_before_coefficient_uploads() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let provider: &'static CountedProvider = Box::leak(Box::new(CountedProvider {
+            delegate: InProcessProvider::new(),
+            uploads: AtomicUsize::new(0),
+            downloads: AtomicUsize::new(0),
+        }));
+        let _scope = ThreadProviderGuard::set(Some(provider));
+        let signal = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0],
+                shape: &[1, 3],
+            })
+            .expect("resident signal");
+        let uploads_before = provider.uploads.load(Ordering::SeqCst);
+        let (output, _) = block_on(super::super::evaluate(
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(1.0),
+            Value::GpuTensor(signal.clone()),
+            &[],
+        ))
+        .expect("unsupported provider uses the host reference route")
+        .into_pair();
+        assert_eq!(provider.uploads.load(Ordering::SeqCst), uploads_before);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+        let Value::Tensor(output) = output else {
+            panic!("unsupported provider must return the host reference result")
+        };
+        assert_eq!(output.materialize_f64(), vec![1.0, 3.0, 5.0]);
+        assert!(signal.allocation_lease().validate_live().is_ok());
+    }
+
+    #[test]
     fn known_nonzero_complex_imaginary_component_never_qualifies_as_real() {
         assert!(super::super::to_real_vec(&[Complex::new(1.0, 1e-300)]).is_none());
     }

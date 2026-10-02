@@ -14,7 +14,8 @@ use crate::{
     NumericUploadCompletionError, NumericUploadError, NumericUploadResult, ProviderElementType,
     ProviderFeasibilityQuery, ProviderIirRoute, ProviderIirWorkload, ProviderLayout,
     ProviderOperationFamily, ProviderOperationIdentity, ProviderPrecision, ProviderRepresentation,
-    ProviderResidency, ProviderStorage, ProviderWorkload, PROVIDER_IIR_ZERO_PHASE_OPERATION,
+    ProviderResidency, ProviderStorage, ProviderWorkload, PROVIDER_IIR_CAUSAL_PASS_OPERATION,
+    PROVIDER_IIR_ZERO_PHASE_OPERATION,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -69,6 +70,87 @@ pub fn provider_iir_state_shape(
         shape.push(1);
     }
     Ok(shape)
+}
+
+/// Describe a causal pass before coefficient/state uploads. The projected
+/// device representations use the signal's actual physical class and view;
+/// the provider must reject unsupported layout or precision before effects.
+pub fn provider_iir_causal_query(
+    input: &GpuTensorHandle,
+    coefficient_len: usize,
+    axis: usize,
+) -> anyhow::Result<ProviderFeasibilityQuery> {
+    let physical = input.physical().element_type();
+    let element_type = if handle_is_logical(input) {
+        ProviderElementType::Logical
+    } else {
+        match physical {
+            NumericElementType::F32 => ProviderElementType::F32,
+            NumericElementType::F64 => ProviderElementType::F64,
+            NumericElementType::I8 => ProviderElementType::I8,
+            NumericElementType::I16 => ProviderElementType::I16,
+            NumericElementType::I32 => ProviderElementType::I32,
+            NumericElementType::I64 => ProviderElementType::I64,
+            NumericElementType::U8 => ProviderElementType::U8,
+            NumericElementType::U16 => ProviderElementType::U16,
+            NumericElementType::U32 => ProviderElementType::U32,
+            NumericElementType::U64 => ProviderElementType::U64,
+        }
+    };
+    let layout = match input.view().layout() {
+        GpuTensorLayout::Contiguous => ProviderLayout::ColumnMajorContiguous,
+        GpuTensorLayout::Transpose(_) => ProviderLayout::Strided,
+    };
+    let storage = match handle_storage(input) {
+        GpuTensorStorage::Real => ProviderStorage::DenseReal,
+        GpuTensorStorage::ComplexInterleaved => ProviderStorage::DenseComplexInterleaved,
+    };
+    let signal_shape: Vec<u64> = input
+        .shape()
+        .iter()
+        .map(|&extent| u64::try_from(extent))
+        .collect::<Result<_, _>>()?;
+    let state_len = coefficient_len.saturating_sub(1);
+    let state_shape: Vec<u64> = provider_iir_state_shape(input.shape(), axis, state_len)?
+        .into_iter()
+        .map(u64::try_from)
+        .collect::<Result<_, _>>()?;
+    let coefficient_len = u64::try_from(coefficient_len)?;
+    let axis = u32::try_from(axis)?;
+    let representation = |shape, residency, layout| ProviderRepresentation {
+        element_type,
+        storage,
+        layout,
+        shape,
+        residency,
+    };
+    let resident = |shape| {
+        representation(
+            shape,
+            ProviderResidency::Device,
+            ProviderLayout::ColumnMajorContiguous,
+        )
+    };
+    Ok(ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new(PROVIDER_IIR_CAUSAL_PASS_OPERATION),
+        family: ProviderOperationFamily::Library,
+        inputs: vec![
+            resident(vec![coefficient_len, 1]),
+            resident(vec![coefficient_len, 1]),
+            representation(signal_shape.clone(), ProviderResidency::Device, layout),
+            resident(state_shape.clone()),
+        ],
+        outputs: vec![resident(signal_shape), resident(state_shape)],
+        workload: ProviderWorkload {
+            iir: Some(ProviderIirWorkload {
+                route: ProviderIirRoute::CausalPass,
+                dim: axis,
+                state_len: coefficient_len.saturating_sub(1),
+                reflection_len: 0,
+            }),
+            ..ProviderWorkload::default()
+        },
+    })
 }
 
 /// One admitted zero-phase operation. The provider owns the reflection,

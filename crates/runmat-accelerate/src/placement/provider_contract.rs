@@ -29,6 +29,10 @@ pub(crate) mod trigonometry;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     (
+        runmat_accelerate_api::PROVIDER_IIR_CAUSAL_PASS_OPERATION,
+        ProviderOperationFamily::Library,
+    ),
+    (
         runmat_accelerate_api::PROVIDER_IIR_ZERO_PHASE_OPERATION,
         ProviderOperationFamily::Library,
     ),
@@ -69,6 +73,10 @@ const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
 
 #[cfg(feature = "wgpu")]
 const WGPU_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
+    (
+        runmat_accelerate_api::PROVIDER_IIR_CAUSAL_PASS_OPERATION,
+        ProviderOperationFamily::Library,
+    ),
     (
         runmat_accelerate_api::PROVIDER_IIR_ZERO_PHASE_OPERATION,
         ProviderOperationFamily::Library,

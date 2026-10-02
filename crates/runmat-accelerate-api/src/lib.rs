@@ -24,10 +24,10 @@ pub use allocation::{
 mod native_device;
 mod iir;
 pub use iir::{
-    provider_iir_state_shape, provider_iir_zero_phase_query, ProviderIirCoefficientSource,
-    ProviderIirFilterOptions, ProviderIirFilterResult, ProviderIirIndexCancelled,
-    ProviderIirZeroPhaseFault, ProviderIirZeroPhaseIndexBuilder, ProviderIirZeroPhaseIndexPlan,
-    ProviderIirZeroPhaseRequest, ProviderPreparedIirCoefficients,
+    provider_iir_causal_query, provider_iir_state_shape, provider_iir_zero_phase_query,
+    ProviderIirCoefficientSource, ProviderIirFilterOptions, ProviderIirFilterResult,
+    ProviderIirIndexCancelled, ProviderIirZeroPhaseFault, ProviderIirZeroPhaseIndexBuilder,
+    ProviderIirZeroPhaseIndexPlan, ProviderIirZeroPhaseRequest, ProviderPreparedIirCoefficients,
 };
 mod logical_upload;
 mod fusion_outputs;

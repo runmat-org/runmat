@@ -900,6 +900,17 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
             }
         }
     }
+    let query =
+        runmat_accelerate_api::provider_iir_causal_query(&signal_handle, args.order, args.dim_idx)
+            .map_err(|source| {
+                crate::runtime_error::with_provider_execution_source(
+                    filter_error(&FILTER_ERROR_INTERNAL),
+                    source.into(),
+                )
+            })?;
+    if !provider.query_feasibility(&query).is_supported() {
+        return Ok(None);
+    }
 
     let b_real = match to_real_vec(&args.coeffs_b.data) {
         Some(vec) => vec,
@@ -967,13 +978,12 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
 
     let result = match result {
         Ok(res) => res,
-        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => return Ok(None),
         Err(err) => {
             let mut error = filter_error(&FILTER_ERROR_PROVIDER_EXECUTION);
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
             return Err(crate::runtime_error::with_provider_execution_source(
                 error,
-                err.into(),
+                runmat_accelerate_api::ProviderExecutionError::after_effect(err.into()),
             ));
         }
     };

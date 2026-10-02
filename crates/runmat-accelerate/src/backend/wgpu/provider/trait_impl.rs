@@ -260,11 +260,12 @@ impl AccelProvider for WgpuProvider {
     ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
         if query.preparation == runmat_execution::CandidatePreparationState::Unknown
             || crate::placement::floating_cast_unresolved_adaptation(&query.operation)
-            || query.operation.workload.iir.is_some_and(|workload| {
-                workload.route == runmat_accelerate_api::ProviderIirRoute::ZeroPhase
-            })
-            || query.operation.operation.0
-                == runmat_accelerate_api::PROVIDER_IIR_ZERO_PHASE_OPERATION
+            || query.operation.workload.iir.is_some()
+            || matches!(
+                query.operation.operation.0,
+                runmat_accelerate_api::PROVIDER_IIR_CAUSAL_PASS_OPERATION
+                    | runmat_accelerate_api::PROVIDER_IIR_ZERO_PHASE_OPERATION
+            )
         {
             return None;
         }
