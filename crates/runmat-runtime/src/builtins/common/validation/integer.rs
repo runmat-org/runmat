@@ -6,6 +6,11 @@ use super::{
 };
 use runmat_builtins::BuiltinExtensionDescriptor;
 
+mod prepared;
+pub use prepared::{
+    prepare_direct_integer_f64_boundary, IntegerBoundaryFailure, PreparedIntegerBoundary,
+};
+
 /// MATLAB stores complex integer arrays, but does not support arithmetic on
 /// them. Arithmetic builtins use this before selecting floating or provider
 /// execution paths so exact integer components are never coerced to `f64`.
@@ -155,85 +160,24 @@ pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {
 /// resident 64-bit value solely because its contents are not visible in handle
 /// metadata. Compatibility admission must run before calling this helper.
 pub async fn native_integer_value_is_exact_f64_async(value: &Value) -> Result<bool, RuntimeError> {
+    if matches!(
+        value,
+        Value::Int(_)
+            | Value::Tensor(_)
+            | Value::SparseTensor(_)
+            | Value::ComplexTensor(_)
+            | Value::GpuTensor(_)
+    ) {
+        return prepare_direct_integer_f64_boundary(value, None)
+            .await
+            .map(|prepared| prepared.is_exact())
+            .map_err(IntegerBoundaryFailure::into_runtime_error);
+    }
+    // Aggregate traversal remains the legacy synchronous contract. The direct
+    // prepared API deliberately does not pretend that nested resident values
+    // or GC-backed payloads can be held safely across an await.
     if native_integer_value_is_exact_f64(value) {
         return Ok(true);
-    }
-    if matches!(value, Value::GpuTensor(handle) if handle_integer_type(handle).is_some()) {
-        let Value::GpuTensor(handle) = value else {
-            unreachable!();
-        };
-        let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-            .ok_or_else(|| {
-                build_runtime_error(
-                    "integer exactness check: no acceleration provider owns the input handle",
-                )
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build()
-            })?;
-        let expected_type = handle_integer_type(handle).expect("integer type checked above");
-        if runmat_accelerate_api::handle_storage(handle)
-            != runmat_accelerate_api::GpuTensorStorage::Real
-            || handle_is_logical(handle)
-            || runmat_accelerate_api::handle_precision(handle).is_some()
-            || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
-                handle,
-                None,
-                Some(expected_type),
-                false,
-            )
-        {
-            return Err(build_runtime_error(
-                "integer exactness check: input handle has contradictory integer metadata",
-            )
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build());
-        }
-        let _residency = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle);
-        let gathered = provider.download_integer(handle).await.map_err(|error| {
-            let mut failure = build_runtime_error(format!(
-                "integer exactness check: owner-preserving download failed: {error}"
-            ))
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build();
-            failure.source = Some(error.into_boxed_dyn_error());
-            failure
-        });
-        let gathered = gathered?;
-        if gathered.shape != handle.shape() || gathered.data.element_type() != expected_type {
-            return Err(build_runtime_error(
-                "integer exactness check: provider returned contradictory integer payload metadata",
-            )
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build());
-        }
-        let exact = integer_is_exact_f64;
-        let values_exact = match &gathered.data {
-            runmat_accelerate_api::HostIntegerDataOwned::I8(values) => values
-                .iter()
-                .all(|value| exact(&IntValue::I64(i64::from(*value)))),
-            runmat_accelerate_api::HostIntegerDataOwned::I16(values) => values
-                .iter()
-                .all(|value| exact(&IntValue::I64(i64::from(*value)))),
-            runmat_accelerate_api::HostIntegerDataOwned::I32(values) => values
-                .iter()
-                .all(|value| exact(&IntValue::I64(i64::from(*value)))),
-            runmat_accelerate_api::HostIntegerDataOwned::I64(values) => {
-                values.iter().all(|value| exact(&IntValue::I64(*value)))
-            }
-            runmat_accelerate_api::HostIntegerDataOwned::U8(values) => values
-                .iter()
-                .all(|value| exact(&IntValue::U64(u64::from(*value)))),
-            runmat_accelerate_api::HostIntegerDataOwned::U16(values) => values
-                .iter()
-                .all(|value| exact(&IntValue::U64(u64::from(*value)))),
-            runmat_accelerate_api::HostIntegerDataOwned::U32(values) => values
-                .iter()
-                .all(|value| exact(&IntValue::U64(u64::from(*value)))),
-            runmat_accelerate_api::HostIntegerDataOwned::U64(values) => {
-                values.iter().all(|value| exact(&IntValue::U64(*value)))
-            }
-        };
-        return Ok(values_exact);
     }
     Ok(false)
 }
