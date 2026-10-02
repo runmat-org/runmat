@@ -4,9 +4,10 @@
 //! adaptive acceptance belong to the same quadrature service, not a builtin.
 
 use super::adaptive::QuadratureEvaluator;
-use super::algebra::{AdaptiveEstimate, EmbeddedRuleInputs, QuadratureSample};
+use super::algebra::AdaptiveEstimate;
 use super::geometry::{midpoint, ScaledEstimate};
 use super::mesh::{integrate_partition, MeshRule};
+use super::open_algebra::{OpenRuleInputs, OpenSample};
 use crate::BuiltinResult;
 
 // Positive half of the Kronrod abscissae on [-1, 1]. Even positions are the
@@ -80,9 +81,9 @@ impl OpenDomain {
     }
 }
 
-pub(crate) struct OpenIntervalEstimate<T> {
-    pub(crate) result: T,
-    pub(crate) error: T,
+pub(crate) struct OpenIntervalEstimate<R, E> {
+    pub(crate) result: R,
+    pub(crate) error: E,
     pub(crate) magnitude: ScaledEstimate,
 }
 
@@ -93,10 +94,10 @@ pub(crate) struct OpenSegment {
     pub(crate) domain: OpenDomain,
 }
 
-struct OpenInterval<S: QuadratureSample> {
+struct OpenInterval<S: OpenSample> {
     segment: OpenSegment,
-    result: S::Estimate,
-    error: S::Estimate,
+    result: S::Result,
+    error: S::Error,
     magnitude: ScaledEstimate,
     depth: usize,
 }
@@ -125,11 +126,11 @@ impl<E: QuadratureEvaluator> MeshRule<E> for KronrodRule {
         })
     }
 
-    fn result(interval: &Self::Interval) -> &<E::Sample as QuadratureSample>::Estimate {
+    fn result(interval: &Self::Interval) -> &<E::Sample as OpenSample>::Result {
         &interval.result
     }
 
-    fn error(interval: &Self::Interval) -> &<E::Sample as QuadratureSample>::Estimate {
+    fn error(interval: &Self::Interval) -> &<E::Sample as OpenSample>::Error {
         &interval.error
     }
 
@@ -176,7 +177,7 @@ impl<E: QuadratureEvaluator> MeshRule<E> for KronrodRule {
 pub(crate) async fn integrate_open<E: QuadratureEvaluator>(
     evaluator: &mut E,
     segments: &[OpenSegment],
-) -> BuiltinResult<<E::Sample as QuadratureSample>::Estimate> {
+) -> BuiltinResult<<E::Sample as OpenSample>::Result> {
     integrate_partition::<E, KronrodRule>(evaluator, segments).await
 }
 
@@ -188,7 +189,9 @@ pub(crate) async fn evaluate_interval<E: QuadratureEvaluator>(
     domain: OpenDomain,
     a: f64,
     b: f64,
-) -> BuiltinResult<OpenIntervalEstimate<<E::Sample as QuadratureSample>::Estimate>> {
+) -> BuiltinResult<
+    OpenIntervalEstimate<<E::Sample as OpenSample>::Result, <E::Sample as OpenSample>::Error>,
+> {
     evaluator.checkpoint().await?;
     let (coordinates, half) = interior_nodes(a, b).ok_or_else(|| evaluator.convergence_error())?;
     let mut points = coordinates;
@@ -217,14 +220,14 @@ pub(crate) async fn evaluate_interval<E: QuadratureEvaluator>(
                 .multiply(jacobians[slot]);
         }
     }
-    let result = E::Sample::weighted_sum(&samples, &kronrod_weights, evaluator)
+    let result = <E::Sample as OpenSample>::weighted_sum(&samples, &kronrod_weights, evaluator)
         .await
         .map_err(|cause| evaluator.arithmetic_error(cause))?;
-    let gauss = E::Sample::weighted_sum(&samples, &gauss_weights, evaluator)
+    let gauss = <E::Sample as OpenSample>::weighted_sum(&samples, &gauss_weights, evaluator)
         .await
         .map_err(|cause| evaluator.arithmetic_error(cause))?;
-    let error = E::Sample::embedded_error(
-        EmbeddedRuleInputs {
+    let error = <E::Sample as OpenSample>::embedded_error(
+        OpenRuleInputs {
             samples: &samples,
             base_weights: &base_weights,
             jacobians: &jacobians,

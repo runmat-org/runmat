@@ -2,8 +2,9 @@
 //! adaptive rules. A numerical rule owns only its interval construction.
 
 use super::adaptive::QuadratureEvaluator;
-use super::algebra::{AdaptiveEstimate, QuadratureSample};
+use super::algebra::AdaptiveEstimate;
 use super::geometry::ScaledEstimate;
+use super::open_algebra::{OpenResult, OpenSample};
 use super::QuadratureArithmeticError;
 use crate::BuiltinResult;
 
@@ -19,8 +20,8 @@ pub(crate) trait MeshRule<E: QuadratureEvaluator> {
         segment: Self::Segment,
         depth: usize,
     ) -> BuiltinResult<Self::Interval>;
-    fn result(interval: &Self::Interval) -> &<E::Sample as QuadratureSample>::Estimate;
-    fn error(interval: &Self::Interval) -> &<E::Sample as QuadratureSample>::Estimate;
+    fn result(interval: &Self::Interval) -> &<E::Sample as OpenSample>::Result;
+    fn error(interval: &Self::Interval) -> &<E::Sample as OpenSample>::Error;
     fn magnitude(interval: &Self::Interval) -> ScaledEstimate;
     fn can_refine(evaluator: &E, interval: &Self::Interval) -> bool;
     async fn refine(
@@ -40,19 +41,17 @@ async fn totals<E: QuadratureEvaluator, R: MeshRule<E>>(
     evaluator: &mut E,
     intervals: &[R::Interval],
 ) -> BuiltinResult<(
-    <E::Sample as QuadratureSample>::Estimate,
-    <E::Sample as QuadratureSample>::Estimate,
+    <E::Sample as OpenSample>::Result,
+    <E::Sample as OpenSample>::Error,
 )> {
     let first = intervals.first().expect("nonempty mesh");
     let mut result = (*R::result(first)).clone();
     let mut error = (*R::error(first)).clone();
     for (index, interval) in intervals[1..].iter().enumerate() {
-        result = result
-            .add(R::result(interval), evaluator)
+        result = OpenResult::add(&result, R::result(interval), evaluator)
             .await
             .map_err(|cause| evaluator.arithmetic_error(cause))?;
-        error = error
-            .add(R::error(interval), evaluator)
+        error = AdaptiveEstimate::add(&error, R::error(interval), evaluator)
             .await
             .map_err(|cause| evaluator.arithmetic_error(cause))?;
         if (index + 1).is_multiple_of(4096) {
@@ -90,7 +89,7 @@ async fn largest_refinable<E: QuadratureEvaluator, R: MeshRule<E>>(
 pub(crate) async fn integrate_partition<E: QuadratureEvaluator, R: MeshRule<E>>(
     evaluator: &mut E,
     segments: &[R::Segment],
-) -> BuiltinResult<<E::Sample as QuadratureSample>::Estimate> {
+) -> BuiltinResult<<E::Sample as OpenSample>::Result> {
     evaluator.checkpoint().await?;
     if segments.is_empty() {
         return Err(evaluator.convergence_error());
@@ -123,7 +122,7 @@ pub(crate) async fn integrate_partition<E: QuadratureEvaluator, R: MeshRule<E>>(
         evaluator.checkpoint().await?;
         let (absolute, relative) = evaluator.tolerances();
         let allowed = result
-            .tolerance(absolute, relative, evaluator)
+            .tolerance_error(absolute, relative, evaluator)
             .await
             .map_err(|cause| evaluator.arithmetic_error(cause))?;
         if error
@@ -135,7 +134,7 @@ pub(crate) async fn integrate_partition<E: QuadratureEvaluator, R: MeshRule<E>>(
             // the actual partition before returning the public result.
             let (verified_result, verified_error) = totals::<E, R>(evaluator, &intervals).await?;
             let verified_allowed = verified_result
-                .tolerance(absolute, relative, evaluator)
+                .tolerance_error(absolute, relative, evaluator)
                 .await
                 .map_err(|cause| evaluator.arithmetic_error(cause))?;
             if verified_error
@@ -171,24 +170,22 @@ pub(crate) async fn integrate_partition<E: QuadratureEvaluator, R: MeshRule<E>>(
         let previous_error = (*R::error(&selected)).clone();
         let [left, right] = R::refine(evaluator, selected).await?;
         evaluations += R::REFINEMENT_EVALUATIONS;
-        result = result
-            .subtract(&previous_result, evaluator)
-            .await
-            .map_err(|cause| evaluator.arithmetic_error(cause))?
-            .add(R::result(&left), evaluator)
-            .await
-            .map_err(|cause| evaluator.arithmetic_error(cause))?
-            .add(R::result(&right), evaluator)
+        let without_previous = OpenResult::subtract(&result, &previous_result, evaluator)
             .await
             .map_err(|cause| evaluator.arithmetic_error(cause))?;
-        error = error
-            .subtract(&previous_error, evaluator)
+        let with_left = OpenResult::add(&without_previous, R::result(&left), evaluator)
             .await
-            .map_err(|cause| evaluator.arithmetic_error(cause))?
-            .add(R::error(&left), evaluator)
+            .map_err(|cause| evaluator.arithmetic_error(cause))?;
+        result = OpenResult::add(&with_left, R::result(&right), evaluator)
             .await
-            .map_err(|cause| evaluator.arithmetic_error(cause))?
-            .add(R::error(&right), evaluator)
+            .map_err(|cause| evaluator.arithmetic_error(cause))?;
+        let without_previous = AdaptiveEstimate::subtract(&error, &previous_error, evaluator)
+            .await
+            .map_err(|cause| evaluator.arithmetic_error(cause))?;
+        let with_left = AdaptiveEstimate::add(&without_previous, R::error(&left), evaluator)
+            .await
+            .map_err(|cause| evaluator.arithmetic_error(cause))?;
+        error = AdaptiveEstimate::add(&with_left, R::error(&right), evaluator)
             .await
             .map_err(|cause| evaluator.arithmetic_error(cause))?;
         intervals.push(left);

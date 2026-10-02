@@ -6,6 +6,7 @@ mod cooperation;
 mod error_estimate;
 mod geometry;
 mod mesh;
+mod open_algebra;
 mod open_rule;
 
 pub(crate) use adaptive::{integrate, AdaptiveSimpsonResult, QuadratureEvaluator};

@@ -8,11 +8,12 @@ use std::sync::Arc;
 #[cfg(test)]
 use super::algebra::ArrayEstimate;
 use super::algebra::{AdaptiveEstimate, QuadratureSample};
+use super::open_algebra::OpenSample;
 use super::QuadratureArithmeticError;
 use super::ScaledEstimate;
 
 pub(crate) trait QuadratureEvaluator {
-    type Sample: QuadratureSample;
+    type Sample: OpenSample;
 
     async fn checkpoint(&mut self) -> BuiltinResult<()>;
     async fn charge(&mut self, _units: u64) -> BuiltinResult<()> {
@@ -48,8 +49,8 @@ pub(crate) trait QuadratureEvaluator {
         _evals: usize,
         _a: f64,
         _b: f64,
-        _estimate: &<Self::Sample as QuadratureSample>::Estimate,
-        _error: &<Self::Sample as QuadratureSample>::Estimate,
+        _estimate: &<Self::Sample as OpenSample>::Result,
+        _error: &<Self::Sample as OpenSample>::Error,
     ) {
     }
 }
@@ -106,7 +107,10 @@ async fn integrate_domain<E: QuadratureEvaluator>(
     evaluator: &mut E,
     a: f64,
     b: f64,
-) -> BuiltinResult<(<E::Sample as QuadratureSample>::Estimate, usize)> {
+) -> BuiltinResult<(<E::Sample as QuadratureSample>::Estimate, usize)>
+where
+    E::Sample: QuadratureSample,
+{
     evaluator.checkpoint().await?;
     let m = evaluator.midpoint(a, b);
     let [fa, fm, fb] = evaluator.evaluate_many([a, m, b]).await?;
@@ -145,7 +149,10 @@ async fn adapt<E: QuadratureEvaluator>(
     state: Interval<E::Sample>,
     evaluations: &mut usize,
     intervals: &mut usize,
-) -> BuiltinResult<<E::Sample as QuadratureSample>::Estimate> {
+) -> BuiltinResult<<E::Sample as QuadratureSample>::Estimate>
+where
+    E::Sample: QuadratureSample,
+{
     evaluator.checkpoint().await?;
     if (*evaluations)
         .checked_add(2)
