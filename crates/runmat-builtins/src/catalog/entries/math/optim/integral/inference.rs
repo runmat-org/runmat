@@ -24,7 +24,7 @@ fn scalar_bound(
         }) | ValueKindFact::Logical
             | ValueKindFact::Unknown
     ) && fact.storage != StorageFact::Sparse
-        && !fact.shape.element_count().is_some_and(|count| count != 1);
+        && fact.shape.element_count().is_none_or(|count| count == 1);
     let finite_literal = request
         .literals
         .literal_args
@@ -40,15 +40,24 @@ fn scalar_bound(
     }
 }
 
+struct ControlFacts {
+    abs_tol: Option<f64>,
+    rel_tol: Option<f64>,
+    callback_mode: Option<IntegralCallbackMode>,
+    array_valued: Option<bool>,
+}
+
 fn controls(
     request: &CallRequest,
     diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
 ) -> (Option<IntegralCallbackMode>, Option<bool>) {
     let rest = request.arguments.len().saturating_sub(3);
-    let mut known_abs_tol = Some(IntegralOptionName::DEFAULT_ABS_TOL);
-    let mut known_rel_tol = Some(IntegralOptionName::DEFAULT_REL_TOL);
-    let mut known_callback_mode = Some(IntegralCallbackMode::Vectorized);
-    let mut known_array_valued = Some(false);
+    let mut facts = ControlFacts {
+        abs_tol: Some(IntegralOptionName::DEFAULT_ABS_TOL),
+        rel_tol: Some(IntegralOptionName::DEFAULT_REL_TOL),
+        callback_mode: Some(IntegralCallbackMode::Vectorized),
+        array_valued: Some(false),
+    };
     if rest == 1 {
         let option = &request.arguments[3];
         if !matches!(
@@ -83,7 +92,7 @@ fn controls(
                 ShapeFact::Shaped { dims }
                     if matches!(dims.first(), Some(runmat_types::DimensionFact::Known(rows)) if *rows != 1)
             ),
-            ValueKindFact::String => !name.shape.element_count().is_some_and(|count| count != 1),
+            ValueKindFact::String => name.shape.element_count().is_none_or(|count| count == 1),
             _ => true,
         };
         if !valid_kind || !valid_shape {
@@ -102,17 +111,7 @@ fn controls(
             if let Some(option) = IntegralOptionName::parse(&text) {
                 let literal = request.literals.literal_args.get(index + 1);
                 let value = request.arguments.get(index + 1);
-                known_option(
-                    option,
-                    literal,
-                    value,
-                    index + 1,
-                    diagnostics,
-                    &mut known_abs_tol,
-                    &mut known_rel_tol,
-                    &mut known_callback_mode,
-                    &mut known_array_valued,
-                );
+                known_option(option, literal, value, index + 1, diagnostics, &mut facts);
             } else {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-INTEGRAL-OPTION-NAME",
@@ -122,21 +121,21 @@ fn controls(
             }
         } else {
             // A runtime option name could overwrite either tolerance.
-            known_abs_tol = None;
-            known_rel_tol = None;
-            known_callback_mode = None;
-            known_array_valued = None;
+            facts.abs_tol = None;
+            facts.rel_tol = None;
+            facts.callback_mode = None;
+            facts.array_valued = None;
         }
     }
-    if known_abs_tol == Some(0.0) && known_rel_tol == Some(0.0) {
+    if facts.abs_tol == Some(0.0) && facts.rel_tol == Some(0.0) {
         diagnostics.push(argument_error(
             "RM-CATALOG-INTEGRAL-TOLERANCES",
             "AbsTol and RelTol cannot both be zero",
             3,
         ));
     }
-    if known_abs_tol.is_some_and(|value| value < 0.0)
-        || known_rel_tol.is_some_and(|value| value < 0.0)
+    if facts.abs_tol.is_some_and(|value| value < 0.0)
+        || facts.rel_tol.is_some_and(|value| value < 0.0)
     {
         diagnostics.push(argument_error(
             "RM-CATALOG-INTEGRAL-TOLERANCES",
@@ -144,7 +143,7 @@ fn controls(
             3,
         ));
     }
-    (known_callback_mode, known_array_valued)
+    (facts.callback_mode, facts.array_valued)
 }
 
 fn known_option(
@@ -153,10 +152,7 @@ fn known_option(
     value: Option<&ValueFact>,
     index: usize,
     diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
-    known_abs_tol: &mut Option<f64>,
-    known_rel_tol: &mut Option<f64>,
-    known_callback_mode: &mut Option<IntegralCallbackMode>,
-    known_array_valued: &mut Option<bool>,
+    facts: &mut ControlFacts,
 ) {
     let numeric = literal.and_then(|literal| match literal {
         LiteralValue::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
@@ -176,9 +172,9 @@ fn known_option(
     let bad = match option {
         IntegralOptionName::AbsTol | IntegralOptionName::RelTol => {
             if option == IntegralOptionName::AbsTol {
-                *known_abs_tol = numeric;
+                facts.abs_tol = numeric;
             } else {
-                *known_rel_tol = numeric;
+                facts.rel_tol = numeric;
             }
             numeric.is_some_and(|number| !number.is_finite()) || known_bad_kind
         }
@@ -196,12 +192,12 @@ fn known_option(
                 Some(LiteralValue::Bool(flag)) => Some(*flag),
                 _ => numeric.map(|number| number != 0.0),
             };
-            *known_array_valued = flag;
+            facts.array_valued = flag;
             numeric.is_some_and(|number| number != 0.0 && number != 1.0) || known_bad_kind
         }
         IntegralOptionName::Vectorized => {
             let valid = numeric.is_none_or(|number| number == 0.0 || number == 1.0);
-            *known_callback_mode =
+            facts.callback_mode =
                 numeric.map(|number| IntegralCallbackMode::from_vectorized(number != 0.0));
             !valid || known_bad_kind
         }

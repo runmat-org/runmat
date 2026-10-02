@@ -23,7 +23,7 @@ fn finite_scalar(
         }) | ValueKindFact::Logical
             | ValueKindFact::Unknown
     );
-    let shape_ok = !fact.shape.element_count().is_some_and(|count| count != 1);
+    let shape_ok = fact.shape.element_count().is_none_or(|count| count == 1);
     let finite = request
         .literals
         .literal_args

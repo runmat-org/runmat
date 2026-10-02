@@ -85,7 +85,7 @@ pub(super) fn real_scalar_callback_result(
         }) | ValueKindFact::Logical
             | ValueKindFact::Unknown
     );
-    let scalar = !result.shape.element_count().is_some_and(|count| count != 1);
+    let scalar = result.shape.element_count().is_none_or(|count| count == 1);
     if !class_ok || !scalar || result.storage == StorageFact::Sparse {
         diagnostics.push(argument_error(
             code,
