@@ -7,8 +7,13 @@ mod hamming;
 mod hann;
 mod periodogram;
 mod pwelch;
+mod rectpuls;
+mod sawtooth;
+mod sinc;
 mod spectral_facts;
 mod spectrogram;
+mod square;
+mod tripuls;
 mod window_facts;
 
 pub use self::blackman::*;
@@ -17,7 +22,12 @@ pub use self::hamming::*;
 pub use self::hann::*;
 pub use self::periodogram::*;
 pub use self::pwelch::*;
+pub use self::rectpuls::*;
+pub use self::sawtooth::*;
+pub use self::sinc::*;
 pub use self::spectrogram::*;
+pub use self::square::*;
+pub use self::tripuls::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(blackman::ENTRIES.iter().copied());
@@ -26,5 +36,10 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(hann::ENTRIES.iter().copied());
     values.extend(periodogram::ENTRIES.iter().copied());
     values.extend(pwelch::ENTRIES.iter().copied());
+    values.extend(rectpuls::ENTRIES.iter().copied());
+    values.extend(sawtooth::ENTRIES.iter().copied());
+    values.extend(sinc::ENTRIES.iter().copied());
     values.extend(spectrogram::ENTRIES.iter().copied());
+    values.extend(square::ENTRIES.iter().copied());
+    values.extend(tripuls::ENTRIES.iter().copied());
 }

@@ -27,7 +27,9 @@ pub use declaration::{
 pub use dimension::{decode_shape_dimension, dimension_fits_platform, DimensionValueError};
 pub use fact::*;
 pub use identity::*;
-pub use integer_literal::{IntegerClass, IntegerLiteral, IntegerLiteralClass};
+pub use integer_literal::{
+    integer_magnitude_is_exact_binary64, IntegerClass, IntegerLiteral, IntegerLiteralClass,
+};
 pub use real_unary::{RealUnaryClassification, RealUnaryPredicate};
 pub use reduction::{
     FusionReductionContract, FusionReductionCount, FusionReductionEmpty, FusionReductionOperation,

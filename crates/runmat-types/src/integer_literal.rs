@@ -64,6 +64,17 @@ impl IntegerClass {
     }
 }
 
+/// Whether the magnitude of a fixed-width integer survives a binary64
+/// conversion exactly. Large aligned integers may still be exact.
+pub fn integer_magnitude_is_exact_binary64(magnitude: u64) -> bool {
+    if magnitude == 0 {
+        return true;
+    }
+    let significant_bits = u64::BITS - magnitude.leading_zeros();
+    significant_bits <= f64::MANTISSA_DIGITS
+        || magnitude.trailing_zeros() >= significant_bits - f64::MANTISSA_DIGITS
+}
+
 /// Backward-compatible source name for the class carried by a typed integer literal.
 ///
 /// Integer class identity is shared beyond parsing; new code should use

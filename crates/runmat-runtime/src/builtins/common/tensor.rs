@@ -307,7 +307,7 @@ pub fn tensor_element_len(tensor: &Tensor) -> usize {
     tensor.len()
 }
 
-fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
+pub(crate) fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),

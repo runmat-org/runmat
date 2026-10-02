@@ -31,6 +31,12 @@ impl ShapeFact {
         }
     }
 
+    /// True only when every completion of the known dimensions has an element
+    /// count other than one. This stays allocation-free for symbolic ranks.
+    pub fn is_definitely_nonscalar(&self) -> bool {
+        matches!(self, Self::Shaped { dims } if dims.iter().any(|dim| matches!(dim, DimensionFact::Known(extent) if *extent != 1)))
+    }
+
     pub fn known_dims(&self) -> Option<Vec<Option<usize>>> {
         match self {
             Self::Unknown => None,
@@ -94,3 +100,32 @@ pub enum DimensionFact {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DimensionSymbol(pub String);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_shapes_can_be_definitely_nonscalar_without_known_element_count() {
+        for extent in [0, 2] {
+            let shape = ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(extent), DimensionFact::Unknown],
+            };
+            assert_eq!(shape.element_count(), None);
+            assert!(shape.is_definitely_nonscalar());
+        }
+        for shape in [
+            ShapeFact::Unknown,
+            ShapeFact::Scalar,
+            ShapeFact::Ranked { rank: usize::MAX },
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Unknown],
+            },
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Known(1)],
+            },
+        ] {
+            assert!(!shape.is_definitely_nonscalar(), "{shape:?}");
+        }
+    }
+}
