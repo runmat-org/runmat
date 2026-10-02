@@ -49,16 +49,16 @@ pub use identity::{
 };
 pub use placement::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
-    CandidateObservationEvidence, CandidateOutputResidency, CandidatePeakLiveDemand,
-    CandidatePreparationState, CandidateResourceDemand, EstimateConfidence, EstimateSource,
-    ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
-    ExecutionCostEstimate, ObservedCandidateDuration, PlacementDecision, PlacementFeedback,
-    PlacementGraph, PlacementGraphCandidate, PlacementGraphEdge, PlacementGraphLimits,
-    PlacementGraphNode, PlacementInvalidation, PlacementPlanRequest, PlacementResourceSnapshot,
-    PlacementRevision, PlacementSignature, ProviderResourceSnapshot, ResourceBoundUnavailable,
-    ResourceByteBound, SelectedExecutionCandidate, WholeWorkCandidate, WholeWorkConstraint,
-    WholeWorkDecision, WholeWorkDecisionKind, WholeWorkObservation, WholeWorkObservationOutcome,
-    WholeWorkPlacementRequest,
+    CandidateObservationEvidence, CandidateOutputPresentation, CandidateOutputResidency,
+    CandidatePeakLiveDemand, CandidatePreparationState, CandidateResourceDemand,
+    EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    ExecutionCostComponents, ExecutionCostEstimate, ObservedCandidateDuration, PlacementDecision,
+    PlacementFeedback, PlacementGraph, PlacementGraphCandidate, PlacementGraphEdge,
+    PlacementGraphLimits, PlacementGraphNode, PlacementInvalidation, PlacementPlanRequest,
+    PlacementResourceSnapshot, PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
+    ResourceBoundUnavailable, ResourceByteBound, SelectedExecutionCandidate, WholeWorkCandidate,
+    WholeWorkConstraint, WholeWorkDecision, WholeWorkDecisionKind, WholeWorkObservation,
+    WholeWorkObservationOutcome, WholeWorkPlacementRequest,
 };
 pub use runmat_types::ProgramFunctionId;
 pub use state::{CancellationReason, PoolState};
