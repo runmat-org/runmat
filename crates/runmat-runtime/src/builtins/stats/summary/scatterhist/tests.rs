@@ -131,6 +131,68 @@ fn scalar_string_array_option_values_decode_once_as_text() {
 }
 
 #[test]
+fn automatic_kde_bandwidth_and_density_retain_large_and_small_finite_scales() {
+    for scale in [1e200, 1e-200] {
+        let samples = [scale, 2.0 * scale];
+        let bandwidth = scott_bandwidth(&samples);
+        assert!(bandwidth.is_finite() && bandwidth > 0.0, "{bandwidth}");
+        let edges = [scale, 1.5 * scale, 2.0 * scale];
+        let (centers, density) = kde_line(&samples, &edges, None).unwrap();
+        assert_eq!(centers.len(), 2);
+        assert!(density
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0));
+    }
+
+    let base = 1e200_f64;
+    let next = f64::from_bits(base.to_bits() + 1);
+    assert!(scott_bandwidth(&[base, next]).is_finite());
+    assert!(scott_bandwidth(&[base, next]) > 0.0);
+    assert!(scott_bandwidth(&[-1e308, 1e308]).is_finite());
+}
+
+#[test]
+fn kde_keeps_count_scaled_density_and_handles_tiny_bandwidth() {
+    let (_, density) = kde_line(&[0.0, 0.0], &[-1.0, 0.0, 1.0], Some(1.0)).unwrap();
+    let expected = 4.0 * (-0.125_f64).exp() / (2.0 * std::f64::consts::PI).sqrt();
+    assert!((density[0] - expected).abs() < 1e-12);
+    assert!((density[1] - expected).abs() < 1e-12);
+
+    let (_, distant) = kde_line(&[0.0, 0.0], &[-1.0, 0.0, 1.0], Some(f64::MIN_POSITIVE)).unwrap();
+    assert_eq!(distant, vec![0.0, 0.0]);
+    assert!(kde_line(
+        &[0.0, 0.0],
+        &[-f64::from_bits(1), f64::from_bits(1)],
+        Some(f64::from_bits(1)),
+    )
+    .is_err());
+    let tiny = f64::from_bits(1);
+    let (_, tail) = kde_line(&[0.0], &[37.0 * tiny, 39.0 * tiny], Some(tiny)).unwrap();
+    assert!(tail[0].is_finite() && tail[0] > 0.0);
+}
+
+#[test]
+fn unrepresentable_kde_geometry_fails_before_figure_mutation() {
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    reset_hold_state_for_run();
+    let figure = current_figure_handle();
+    let before = clone_figure(figure).unwrap().plots().count();
+    let options = ScatterhistOptions {
+        kernel: KernelMode::On,
+        bins: Some([2, 2]),
+        ..Default::default()
+    };
+    let series = grouped_series(&[-f64::MAX, f64::MAX], &[-f64::MAX, f64::MAX], &options).unwrap();
+    let error = render_scatterhist(&series, &options).expect_err("bandwidth exceeds f64 range");
+    assert_eq!(
+        error.identifier(),
+        SCATTERHIST_ERROR_INVALID_ARGUMENT.identifier
+    );
+    assert_eq!(clone_figure(figure).unwrap().plots().count(), before);
+}
+
+#[test]
 fn mixed_cell_groups_keep_typed_identity_until_rendering() {
     let labels = Value::Cell(
         CellArray::new(

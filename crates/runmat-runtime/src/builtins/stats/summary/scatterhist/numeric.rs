@@ -113,12 +113,8 @@ pub(super) fn auto_bin_count(data: &[f64], limits: (f64, f64)) -> usize {
 }
 
 pub(super) fn scott_bin_width(data: &[f64]) -> f64 {
-    let sigma = sample_std(data);
-    if sigma > 0.0 {
-        3.5 * sigma / (data.len() as f64).powf(1.0 / 3.0)
-    } else {
-        0.0
-    }
+    let factor = 3.5 / (data.len() as f64).powf(1.0 / 3.0);
+    super::super::dispersion::finite_sample_std_scaled(data, factor).unwrap_or(0.0)
 }
 
 pub(super) fn histogram_counts(data: &[f64], edges: &[f64]) -> Vec<f64> {
@@ -146,7 +142,7 @@ pub(super) fn kde_line(
     data: &[f64],
     edges: &[f64],
     bandwidth: Option<f64>,
-) -> (Vec<f64>, Vec<f64>) {
+) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
     let centers = edges
         .windows(2)
         .map(|pair| pair[0] * 0.5 + pair[1] * 0.5)
@@ -157,46 +153,47 @@ pub(super) fn kde_line(
         .filter(|value| value.is_finite())
         .collect::<Vec<_>>();
     if finite.is_empty() {
-        return (centers, vec![0.0; edges.len().saturating_sub(1)]);
+        return Ok((centers, vec![0.0; edges.len().saturating_sub(1)]));
     }
-    let bandwidth = bandwidth
-        .unwrap_or_else(|| scott_bandwidth(&finite).max((edges[1] - edges[0]).abs() / 2.0));
-    let norm = 1.0 / ((2.0 * std::f64::consts::PI).sqrt() * bandwidth);
+    let gap = edges[1] - edges[0];
+    let half_gap = if gap.is_finite() {
+        gap.abs() / 2.0
+    } else {
+        ((edges[1] / 2.0) - (edges[0] / 2.0)).abs()
+    };
+    let bandwidth = bandwidth.unwrap_or_else(|| scott_bandwidth(&finite).max(half_gap));
+    if !bandwidth.is_finite() || bandwidth <= 0.0 {
+        return Err(invalid(
+            "scatterhist: automatic KDE bandwidth is not finite and positive",
+        ));
+    }
+    let log_norm = -bandwidth.ln() - 0.5 * (2.0 * std::f64::consts::PI).ln();
     let mut values = Vec::with_capacity(centers.len());
     for center in &centers {
         let density = finite
             .iter()
             .map(|value| {
-                let z = (*center - *value) / bandwidth;
-                (-0.5 * z * z).exp() * norm
+                let difference = *center - *value;
+                let z = if difference.is_finite() {
+                    difference / bandwidth
+                } else {
+                    *center / bandwidth - *value / bandwidth
+                };
+                (-0.5 * z * z + log_norm).exp()
             })
             .sum::<f64>();
-        values.push(density * finite.len() as f64);
+        let count_scaled = density * finite.len() as f64;
+        if !count_scaled.is_finite() {
+            return Err(invalid("scatterhist: marginal density is not finite"));
+        }
+        values.push(count_scaled);
     }
-    (centers, values)
+    Ok((centers, values))
 }
 
 pub(super) fn scott_bandwidth(data: &[f64]) -> f64 {
-    let sigma = sample_std(data);
-    if sigma > 0.0 {
-        1.06 * sigma * (data.len() as f64).powf(-0.2)
-    } else {
-        1.0
-    }
-}
-
-pub(super) fn sample_std(data: &[f64]) -> f64 {
-    if data.len() < 2 {
-        return 1.0;
-    }
-    let mean = data.iter().sum::<f64>() / data.len() as f64;
-    let variance = data
-        .iter()
-        .map(|value| {
-            let diff = *value - mean;
-            diff * diff
-        })
-        .sum::<f64>()
-        / (data.len() as f64 - 1.0);
-    variance.sqrt()
+    let factor = 1.06 * (data.len() as f64).powf(-0.2);
+    super::super::dispersion::finite_sample_std_scaled(data, factor)
+        .filter(|bandwidth| *bandwidth > 0.0)
+        .unwrap_or(1.0)
 }

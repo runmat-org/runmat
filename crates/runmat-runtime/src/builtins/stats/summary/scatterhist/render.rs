@@ -21,12 +21,26 @@ pub(super) fn render_scatterhist(
     ]);
     let x_edges = bin_edges(x_limits, bins[0])?;
     let y_edges = bin_edges(y_limits, bins[1])?;
+    let layout = axes_for_layout(options.location, options.direction);
+    let x_marginals = prepare_marginals(
+        series,
+        options,
+        &x_edges,
+        MarginalAxis::X,
+        layout.x_marginal_scale,
+    )?;
+    let y_marginals = prepare_marginals(
+        series,
+        options,
+        &y_edges,
+        MarginalAxis::Y,
+        layout.y_marginal_scale,
+    )?;
 
     let figure = options
         .parent
         .unwrap_or_else(|| current_axes_state().handle);
     select_axes_for_figure(figure, 0).map_err(|err| internal(format!("scatterhist: {err}")))?;
-    let layout = axes_for_layout(options.location, options.direction);
 
     for axes in [layout.empty, layout.xhist, layout.scatter, layout.yhist] {
         configure_subplot(2, 2, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
@@ -46,7 +60,7 @@ pub(super) fn render_scatterhist(
         series,
         options,
         &x_edges,
-        layout.x_marginal_scale,
+        &x_marginals,
     )?;
     render_y_marginal(
         figure,
@@ -54,7 +68,7 @@ pub(super) fn render_scatterhist(
         series,
         options,
         &y_edges,
-        layout.y_marginal_scale,
+        &y_marginals,
     )?;
 
     if options
@@ -139,7 +153,7 @@ pub(super) fn render_x_marginal(
     series: &[GroupSeries],
     options: &ScatterhistOptions,
     edges: &[f64],
-    marginal_scale: f64,
+    prepared: &[PreparedMarginal],
 ) -> BuiltinResult<()> {
     select_axes_for_figure(figure, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
     let hist_style = resolved_hist_style(options, series);
@@ -153,11 +167,8 @@ pub(super) fn render_x_marginal(
         },
         |figure, axes| {
             for (idx, item) in series.iter().enumerate() {
-                if matches!(options.kernel, KernelMode::On | KernelMode::Overlay) {
-                    let (xs, ys) =
-                        kde_line(&item.marginal_x, edges, item.style.bandwidth.map(|b| b[0]));
-                    let ys = scale_values(ys, marginal_scale);
-                    let line = LinePlot::new(xs, ys)
+                if let Some((xs, ys)) = &prepared[idx].kde {
+                    let line = LinePlot::new(xs.clone(), ys.clone())
                         .map_err(|err| internal(format!("scatterhist: {err}")))?
                         .with_style(
                             item.style.color,
@@ -167,9 +178,8 @@ pub(super) fn render_x_marginal(
                         .with_label(item.label.clone());
                     figure.add_line_plot_on_axes(line, axes);
                 }
-                if matches!(options.kernel, KernelMode::Off | KernelMode::Overlay) {
-                    let counts =
-                        scale_values(histogram_counts(&item.marginal_x, edges), marginal_scale);
+                if let Some(counts) = &prepared[idx].counts {
+                    let counts = counts.clone();
                     match hist_style {
                         HistStyle::Bar => {
                             let mut bar =
@@ -203,7 +213,7 @@ pub(super) fn render_y_marginal(
     series: &[GroupSeries],
     options: &ScatterhistOptions,
     edges: &[f64],
-    marginal_scale: f64,
+    prepared: &[PreparedMarginal],
 ) -> BuiltinResult<()> {
     select_axes_for_figure(figure, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
     let hist_style = resolved_hist_style(options, series);
@@ -217,11 +227,8 @@ pub(super) fn render_y_marginal(
         },
         |figure, axes| {
             for (idx, item) in series.iter().enumerate() {
-                if matches!(options.kernel, KernelMode::On | KernelMode::Overlay) {
-                    let (density, ys) =
-                        kde_line(&item.marginal_y, edges, item.style.bandwidth.map(|b| b[1]));
-                    let density = scale_values(density, marginal_scale);
-                    let line = LinePlot::new(density, ys)
+                if let Some((density, ys)) = &prepared[idx].kde {
+                    let line = LinePlot::new(density.clone(), ys.clone())
                         .map_err(|err| internal(format!("scatterhist: {err}")))?
                         .with_style(
                             item.style.color,
@@ -231,9 +238,8 @@ pub(super) fn render_y_marginal(
                         .with_label(item.label.clone());
                     figure.add_line_plot_on_axes(line, axes);
                 }
-                if matches!(options.kernel, KernelMode::Off | KernelMode::Overlay) {
-                    let counts =
-                        scale_values(histogram_counts(&item.marginal_y, edges), marginal_scale);
+                if let Some(counts) = &prepared[idx].counts {
+                    let counts = counts.clone();
                     match hist_style {
                         HistStyle::Bar => {
                             let mut bar =

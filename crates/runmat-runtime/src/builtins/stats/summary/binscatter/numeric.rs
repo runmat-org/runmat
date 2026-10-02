@@ -285,24 +285,8 @@ fn derive_axis_limits(
 }
 
 fn scott_width(values: &[f64]) -> f64 {
-    if values.len() < 2 {
-        return 0.0;
-    }
-    let mean = values.iter().sum::<f64>() / values.len() as f64;
-    let variance = values
-        .iter()
-        .map(|value| {
-            let diff = *value - mean;
-            diff * diff
-        })
-        .sum::<f64>()
-        / (values.len() as f64 - 1.0);
-    let sigma = variance.sqrt();
-    if sigma <= 0.0 {
-        0.0
-    } else {
-        3.5 * sigma / (values.len() as f64).powf(1.0 / 3.0)
-    }
+    let factor = 3.5 / (values.len() as f64).powf(1.0 / 3.0);
+    super::super::dispersion::finite_sample_std_scaled(values, factor).unwrap_or(0.0)
 }
 
 fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
@@ -363,6 +347,16 @@ fn find_bin_index(value: f64, edges: &[f64]) -> Option<usize> {
 #[cfg(test)]
 mod finite_edge_tests {
     use super::*;
+
+    #[test]
+    fn automatic_width_reuses_scaled_finite_dispersion() {
+        for scale in [1e200, 1e-200] {
+            let width = scott_width(&[scale, 2.0 * scale]);
+            assert!(width.is_finite() && width > 0.0, "{width}");
+        }
+        assert_eq!(scott_width(&[1.0]), 0.0);
+        assert_eq!(scott_width(&[2.0, 2.0]), 0.0);
+    }
 
     #[test]
     fn opposite_finite_extremes_have_finite_monotone_edges() {
