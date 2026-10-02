@@ -1,6 +1,6 @@
 //! Checked, cooperatively filled dense workspaces for t-SNE geometry.
 
-use super::{build_runtime_error, cooperation::TsneCooperation, internal_with_source, NAME};
+use super::{cooperation::TsneCooperation, internal_resource, internal_with_source};
 use crate::BuiltinResult;
 use nalgebra::DMatrix;
 
@@ -9,11 +9,9 @@ pub(super) async fn zero_matrix(
     cols: usize,
     cooperation: &mut TsneCooperation,
 ) -> BuiltinResult<DMatrix<f64>> {
-    let count = rows.checked_mul(cols).ok_or_else(|| {
-        build_runtime_error("tsne: matrix workspace shape overflow")
-            .with_builtin(NAME)
-            .build()
-    })?;
+    let count = rows
+        .checked_mul(cols)
+        .ok_or_else(|| internal_resource("tsne: matrix workspace shape overflow"))?;
     let mut values = Vec::new();
     values.try_reserve_exact(count).map_err(|source| {
         internal_with_source("tsne: matrix workspace exceeds available memory", source)
@@ -30,11 +28,8 @@ pub(super) async fn zero_rows(
     cols: usize,
     cooperation: &mut TsneCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
-    rows.checked_mul(cols).ok_or_else(|| {
-        build_runtime_error("tsne: projection shape overflow")
-            .with_builtin(NAME)
-            .build()
-    })?;
+    rows.checked_mul(cols)
+        .ok_or_else(|| internal_resource("tsne: projection shape overflow"))?;
     let mut output = Vec::new();
     output.try_reserve_exact(rows).map_err(|source| {
         internal_with_source(
@@ -75,5 +70,7 @@ mod tests {
             .err()
             .expect("overflowing workspace must reject before allocation");
         assert!(error.message().contains("shape overflow"));
+        assert_eq!(error.identifier(), Some("RunMat:tsne:Internal"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     }
 }

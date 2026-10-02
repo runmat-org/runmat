@@ -64,7 +64,18 @@ fn internal_with_source(
 ) -> RuntimeError {
     let mut builder = build_runtime_error(message)
         .with_builtin(NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .with_source(source);
+    if let Some(identifier) = ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn internal_resource(message: impl Into<String>) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = ERROR_INTERNAL.identifier {
         builder = builder.with_identifier(identifier);
     }
