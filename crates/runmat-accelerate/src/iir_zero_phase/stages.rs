@@ -6,7 +6,7 @@ use runmat_accelerate_api::{
     allocation::GpuHandleReleaseError, handle_integer_type, handle_is_logical, handle_precision,
     handle_storage, provider_for_handle, same_provider_instance, AccelProvider, GpuTensorHandle,
     GpuTensorLayout, GpuTensorStorage, ProviderExecutionCompletionError, ProviderExecutionError,
-    ProviderExecutionResult,
+    ProviderExecutionResult, ProviderIirFilterResult,
 };
 
 const MAX_STAGES: usize = 24;
@@ -83,57 +83,19 @@ impl<'a> Stages<'a> {
         &self.handles[index]
     }
 
+    pub fn protected(&self) -> &[&GpuTensorHandle] {
+        &self.protected
+    }
+
     pub fn admit(
         &mut self,
         handle: GpuTensorHandle,
         shape: &[usize],
         class: StageClass,
     ) -> ProviderExecutionResult<usize> {
-        let exact_owner = provider_for_handle(&handle)
-            .is_some_and(|owner| same_provider_instance(owner, self.provider));
-        let valid_class = match class {
-            StageClass::Real => {
-                handle_precision(&handle) == Some(self.provider.precision())
-                    && handle_storage(&handle) == GpuTensorStorage::Real
-                    && handle_integer_type(&handle).is_none()
-                    && !handle_is_logical(&handle)
-            }
-            StageClass::Logical => {
-                handle_storage(&handle) == GpuTensorStorage::Real && handle_is_logical(&handle)
-            }
-            StageClass::Predicate => {
-                handle_storage(&handle) == GpuTensorStorage::Real
-                    && (handle_is_logical(&handle)
-                        || (handle_precision(&handle) == Some(self.provider.precision())
-                            && handle_integer_type(&handle).is_none()))
-            }
-        };
-        let distinct = self
-            .protected
-            .iter()
-            .copied()
-            .chain(self.handles.iter())
-            .all(|other| !handle.shares_allocation_with(other));
-        let physical_extent = shape
-            .iter()
-            .try_fold(1u64, |count, &extent| {
-                count.checked_mul(u64::try_from(extent).ok()?)
-            })
-            .is_some_and(|count| {
-                handle.physical().element_capacity() >= count
-                    && count
-                        .checked_mul(handle.physical().element_type().element_size() as u64)
-                        .is_some_and(|bytes| handle.physical().payload_bytes() >= bytes)
-            });
-        let valid = exact_owner
-            && handle.device_id() == self.provider.device_id()
-            && handle.allocation_lease().validate_live().is_ok()
-            && handle.shape() == shape
-            && handle.view().layout() == GpuTensorLayout::Contiguous
-            && valid_class
-            && physical_extent
-            && distinct
-            && self.handles.len() < MAX_STAGES;
+        let distinct = self.is_distinct(&handle, None);
+        let valid =
+            self.valid_stage(&handle, shape, class, None) && self.handles.len() < MAX_STAGES;
         if !valid {
             // A provider may hand back a wrapper for a caller operand or an
             // earlier stage. Retiring that alias would invalidate the owner
@@ -150,6 +112,122 @@ impl<'a> Stages<'a> {
         }
         let index = self.handles.len();
         self.handles.push(handle);
+        Ok(index)
+    }
+
+    fn is_distinct(&self, handle: &GpuTensorHandle, sibling: Option<&GpuTensorHandle>) -> bool {
+        self.protected
+            .iter()
+            .copied()
+            .chain(self.handles.iter())
+            .chain(sibling)
+            .all(|other| !handle.shares_allocation_with(other))
+    }
+
+    fn valid_stage(
+        &self,
+        handle: &GpuTensorHandle,
+        shape: &[usize],
+        class: StageClass,
+        sibling: Option<&GpuTensorHandle>,
+    ) -> bool {
+        let exact_owner = provider_for_handle(handle)
+            .is_some_and(|owner| same_provider_instance(owner, self.provider));
+        let valid_class = match class {
+            StageClass::Real => {
+                handle_precision(handle) == Some(self.provider.precision())
+                    && handle_storage(handle) == GpuTensorStorage::Real
+                    && handle_integer_type(handle).is_none()
+                    && !handle_is_logical(handle)
+            }
+            StageClass::Logical => {
+                handle_storage(handle) == GpuTensorStorage::Real && handle_is_logical(handle)
+            }
+            StageClass::Predicate => {
+                handle_storage(handle) == GpuTensorStorage::Real
+                    && (handle_is_logical(handle)
+                        || (handle_precision(handle) == Some(self.provider.precision())
+                            && handle_integer_type(handle).is_none()))
+            }
+        };
+        let distinct = self.is_distinct(handle, sibling);
+        let physical_extent = shape
+            .iter()
+            .try_fold(1u64, |count, &extent| {
+                count.checked_mul(u64::try_from(extent).ok()?)
+            })
+            .is_some_and(|count| {
+                handle.physical().element_capacity() >= count
+                    && count
+                        .checked_mul(handle.physical().element_type().element_size() as u64)
+                        .is_some_and(|bytes| handle.physical().payload_bytes() >= bytes)
+            });
+        exact_owner
+            && handle.device_id() == self.provider.device_id()
+            && handle.allocation_lease().validate_live().is_ok()
+            && handle.shape() == shape
+            && handle.view().layout() == GpuTensorLayout::Contiguous
+            && valid_class
+            && physical_extent
+            && distinct
+    }
+
+    /// Admit both outputs as one callback result. Validate their ownership and
+    /// mutual distinctness before either handle becomes a stage; on rejection,
+    /// retain every fresh-output cleanup failure alongside the primary fault.
+    pub fn admit_filter_result(
+        &mut self,
+        result: ProviderIirFilterResult,
+        signal_shape: &[usize],
+        state_shape: &[usize],
+        state_required: bool,
+    ) -> ProviderExecutionResult<usize> {
+        let ProviderIirFilterResult {
+            output,
+            final_state,
+        } = result;
+        let capacity = self
+            .handles
+            .len()
+            .checked_add(1 + usize::from(final_state.is_some()));
+        let valid = capacity.is_some_and(|len| len <= MAX_STAGES)
+            && (!state_required || final_state.is_some())
+            && self.valid_stage(
+                &output,
+                signal_shape,
+                StageClass::Real,
+                final_state.as_ref(),
+            )
+            && final_state.as_ref().is_none_or(|state| {
+                self.valid_stage(state, state_shape, StageClass::Real, Some(&output))
+            });
+        if !valid {
+            let output_fresh = self.is_distinct(&output, None);
+            let state_fresh = final_state
+                .as_ref()
+                .is_some_and(|state| self.is_distinct(state, None));
+            if output_fresh {
+                if let Err(error) = output.release() {
+                    self.cleanup.push(error);
+                }
+            }
+            if let Some(state) = final_state {
+                if state_fresh {
+                    if let Err(error) = state.release() {
+                        self.cleanup.push(error);
+                    }
+                }
+            }
+            return Err(ProviderExecutionError::from_source(StageRejected {
+                reason: "iir_zero_phase: malformed provider filter output pair",
+                cleanup: None,
+            }));
+        }
+        let index = self.handles.len();
+        self.handles.push(output);
+        if let Some(state) = final_state {
+            self.handles.push(state);
+        }
         Ok(index)
     }
 

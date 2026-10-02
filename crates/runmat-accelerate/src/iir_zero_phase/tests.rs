@@ -2,8 +2,8 @@ use super::*;
 use crate::simple_provider::InProcessProvider;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
-    provider_iir_zero_phase_query, HostTensorView, ProviderIirZeroPhaseIndexPlan,
-    ProviderPreparedIirCoefficients, ThreadProviderGuard,
+    provider_iir_zero_phase_query, HostTensorView, ProviderIirFilterResult,
+    ProviderIirZeroPhaseIndexPlan, ProviderPreparedIirCoefficients, ThreadProviderGuard,
 };
 use runmat_execution::cancellation::CancellationSource;
 
@@ -136,6 +136,85 @@ fn rejected_borrowed_stage_alias_does_not_retire_the_caller_operand() {
         block_on(provider.download(&caller_coefficient))
             .unwrap()
             .data,
+        vec![1.0, 2.0]
+    );
+}
+
+#[test]
+fn malformed_filter_pair_retires_both_fresh_results_without_publication() {
+    let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let source = |shape: &[usize]| {
+        provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape,
+            })
+            .expect("resident source")
+    };
+    let input = source(&[2, 1]);
+    let numerator = source(&[2, 1]);
+    let denominator = source(&[2, 1]);
+    let output = source(&[2, 1]);
+    let malformed_state = source(&[1, 2]);
+    let output_weak = output.downgrade();
+    let state_weak = malformed_state.downgrade();
+    let mut stages = Stages::new(provider, [&input, &numerator, &denominator], &[]).unwrap();
+    let result = stages.admit_filter_result(
+        ProviderIirFilterResult {
+            output,
+            final_state: Some(malformed_state),
+        },
+        &[2, 1],
+        &[2, 1],
+        true,
+    );
+    let Err(error) = result else {
+        panic!("malformed sibling must reject the whole callback result")
+    };
+    assert!(!stages.finish(Err(error)).unwrap_err().is_unsupported());
+    assert!(output_weak.acquire().is_err());
+    assert!(state_weak.acquire().is_err());
+    assert!(input.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
+fn filter_pair_alias_to_borrowed_control_preserves_caller_and_retires_sibling() {
+    let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let source = || {
+        provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[2, 1],
+            })
+            .expect("resident source")
+    };
+    let input = source();
+    let numerator = source();
+    let denominator = source();
+    let caller_control = source();
+    let final_state = source();
+    let state_weak = final_state.downgrade();
+    let borrowed = [&caller_control];
+    let mut stages = Stages::new(provider, [&input, &numerator, &denominator], &borrowed).unwrap();
+    let result = stages.admit_filter_result(
+        ProviderIirFilterResult {
+            output: caller_control.clone(),
+            final_state: Some(final_state),
+        },
+        &[2, 1],
+        &[2, 1],
+        true,
+    );
+    let Err(error) = result else {
+        panic!("borrowed callback output must not enter intermediate stages")
+    };
+    assert!(!stages.finish(Err(error)).unwrap_err().is_unsupported());
+    assert!(state_weak.acquire().is_err());
+    assert!(caller_control.allocation_lease().validate_live().is_ok());
+    assert_eq!(
+        block_on(provider.download(&caller_control)).unwrap().data,
         vec![1.0, 2.0]
     );
 }

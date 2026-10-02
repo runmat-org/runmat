@@ -236,11 +236,7 @@ async fn execute_staged(
                 shape: indices.state_shape(),
                 storage: GpuTensorStorage::Real,
             },
-            &[
-                request.input,
-                request.coefficients.numerator(),
-                request.coefficients.denominator(),
-            ],
+            stages.protected(),
         )
         .map_err(ProviderExecutionError::from_source)?;
         Some(stages.admit(state, indices.state_shape(), StageClass::Real)?)
@@ -392,18 +388,12 @@ async fn pass(
         )
         .await
         .map_err(ProviderExecutionError::from)?;
-    let output = stages.admit(result.output, signal_shape, StageClass::Real)?;
-    match result.final_state {
-        Some(final_state) => {
-            stages.admit(final_state, state_shape, StageClass::Real)?;
-        }
-        None if request.initial_state.is_empty() => {}
-        None => {
-            return Err(ProviderExecutionError::from(anyhow!(
-                "iir_zero_phase: provider final-state cardinality mismatch"
-            )));
-        }
-    }
+    let output = stages.admit_filter_result(
+        result,
+        signal_shape,
+        state_shape,
+        !request.initial_state.is_empty(),
+    )?;
     check_cancel(request)?;
     Ok(output)
 }
