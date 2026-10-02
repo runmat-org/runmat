@@ -68,6 +68,35 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
     let function = || Value::FunctionHandle("sin".into());
     let resident = || Value::GpuTensor(real.handle.clone());
 
+    let invalid_callback = block_on(super::fminbnd::fminbnd_builtin(
+        Value::Num(3.0),
+        resident(),
+        Value::Num(1.0),
+        Vec::new(),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        invalid_callback.identifier(),
+        Some("RunMat:FevalFunctionValueUnsupported")
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(real.probe.retirements(), 0);
+
+    let invalid_callback_shape = block_on(super::fzero::fzero_builtin(
+        Value::StringArray(
+            runmat_value::StringArray::new_2d(vec!["sin".into(), "cos".into()], 1, 2).unwrap(),
+        ),
+        resident(),
+        Vec::new(),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        invalid_callback_shape.identifier(),
+        Some("RunMat:FevalHandleShapeInvalid")
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(real.probe.retirements(), 0);
+
     let bad_upper = block_on(super::fminbnd::fminbnd_builtin(
         function(),
         resident(),

@@ -1,65 +1,14 @@
 use runmat_builtins::BuiltinExtensionDescriptor;
-use runmat_builtins::{OptimOptionField, OptimSolver};
+use runmat_builtins::OptimSolver;
 use runmat_value::{CharArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::context::RuntimeContext;
-use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
-pub(crate) struct ScalarCooperation {
-    budget: Option<CpuCooperationBudget>,
-    namespace: Option<String>,
-    solver: OptimSolver,
-}
-
-impl ScalarCooperation {
-    pub(crate) fn new(solver: OptimSolver, runtime: Option<&RuntimeContext>) -> Self {
-        Self {
-            budget: runtime.map(RuntimeContext::cpu_cooperation),
-            namespace: runtime.map(RuntimeContext::error_namespace),
-            solver,
-        }
-    }
-
-    pub(crate) async fn completed(&mut self, units: u64) -> BuiltinResult<()> {
-        if let Some(budget) = self.budget.as_mut() {
-            budget
-                .checkpoint(units)
-                .await
-                .map_err(|source| match source {
-                    source @ ExecutionServiceError::Cancelled => {
-                        let namespace = self.namespace.as_deref().unwrap_or("RunMat");
-                        build_runtime_error(format!(
-                            "{}: execution was cancelled",
-                            self.solver.name()
-                        ))
-                        .with_identifier(format!("{namespace}:Cancelled"))
-                        .with_builtin(self.solver.name())
-                        .with_source(source)
-                        .with_gpu_gather_retry(GpuGatherRetry::Never)
-                        .build()
-                    }
-                    other => {
-                        let mut failure = other.into_runtime_error();
-                        failure.context = failure.context.with_builtin(self.solver.name());
-                        failure.gpu_gather_retry = GpuGatherRetry::Never;
-                        failure
-                    }
-                })?;
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_budget(solver: OptimSolver, budget: CpuCooperationBudget) -> Self {
-        Self {
-            budget: Some(budget),
-            namespace: Some("RunMat".into()),
-            solver,
-        }
-    }
-}
+mod scalar_cooperation;
+pub(crate) use scalar_cooperation::ScalarCooperation;
+mod scalar_options;
+pub(crate) use scalar_options::ScalarOptionFields;
 
 pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -321,46 +270,6 @@ pub(crate) fn ensure_option_extensions(
         }
     }
     Ok(())
-}
-
-/// Decodes public struct keys once. The public struct keeps its historical
-/// spellings; scalar solver policy consumes only these semantic fields.
-#[derive(Default)]
-pub(crate) struct ScalarOptionFields<'a> {
-    tol_x: Option<&'a Value>,
-    max_iter: Option<&'a Value>,
-    max_fun_evals: Option<&'a Value>,
-    display: Option<&'a Value>,
-}
-
-impl<'a> ScalarOptionFields<'a> {
-    pub(crate) fn from_struct(options: Option<&'a StructValue>) -> Self {
-        let mut fields = Self::default();
-        if let Some(options) = options {
-            for (name, value) in &options.fields {
-                match OptimOptionField::parse(name) {
-                    Some(OptimOptionField::TolX) => fields.tol_x.get_or_insert(value),
-                    Some(OptimOptionField::MaxIter) => fields.max_iter.get_or_insert(value),
-                    Some(OptimOptionField::MaxFunEvals) => {
-                        fields.max_fun_evals.get_or_insert(value)
-                    }
-                    Some(OptimOptionField::Display) => fields.display.get_or_insert(value),
-                    _ => continue,
-                };
-            }
-        }
-        fields
-    }
-
-    pub(crate) fn get(&self, field: OptimOptionField) -> Option<&'a Value> {
-        match field {
-            OptimOptionField::TolX => self.tol_x,
-            OptimOptionField::MaxIter => self.max_iter,
-            OptimOptionField::MaxFunEvals => self.max_fun_evals,
-            OptimOptionField::Display => self.display,
-            _ => None,
-        }
-    }
 }
 
 fn ensure_exact_binary64_integer(name: &str, value: &Value, role: &str) -> BuiltinResult<()> {

@@ -14,10 +14,9 @@
 use runmat_types::MemberAccess;
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FEVAL_AT_PREFIXED_TEXT_EXTENSION,
-    FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED, FEVAL_ERROR_HANDLE_NAME_INVALID,
-    FEVAL_ERROR_HANDLE_SHAPE_INVALID, FEVAL_ERROR_SEMANTIC_UNAVAILABLE,
-    FEVAL_OBJECT_RECEIVER_EXTENSION,
+    BuiltinErrorDescriptor, FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED,
+    FEVAL_ERROR_HANDLE_NAME_INVALID, FEVAL_ERROR_HANDLE_SHAPE_INVALID,
+    FEVAL_ERROR_SEMANTIC_UNAVAILABLE,
 };
 use runmat_value::Value;
 use std::future::Future;
@@ -1491,40 +1490,7 @@ async fn feval_builtin_in_runtime(
         call_by_identity(runtime, identity, fallback_policy, args, requested_outputs).await
     }
 
-    fn text_target_name(text: &str) -> Option<&str> {
-        let trimmed = text.trim();
-        let name = trimmed.strip_prefix('@').unwrap_or(trimmed).trim();
-        (!name.is_empty()).then_some(name)
-    }
-
-    fn is_at_prefixed_text_target(value: &Value) -> bool {
-        match value {
-            Value::String(text) => text.trim().starts_with('@'),
-            Value::CharArray(chars) if chars.rows == 1 => chars
-                .data
-                .iter()
-                .collect::<String>()
-                .trim()
-                .starts_with('@'),
-            Value::StringArray(strings) if strings.data.len() == 1 => {
-                strings.data[0].trim().starts_with('@')
-            }
-            _ => false,
-        }
-    }
-
-    if is_at_prefixed_text_target(&f) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &FEVAL_AT_PREFIXED_TEXT_EXTENSION,
-            "feval",
-        )?;
-    }
-    if matches!(&f, Value::Object(_) | Value::HandleObject(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &FEVAL_OBJECT_RECEIVER_EXTENSION,
-            "feval",
-        )?;
-    }
+    crate::call::admission::admit_feval_target(&f)?;
 
     let requested_outputs = invocation_outputs
         .or_else(crate::output_count::current_output_count)
@@ -1532,7 +1498,7 @@ async fn feval_builtin_in_runtime(
 
     match f {
         Value::String(s) => {
-            let name = text_target_name(&s).ok_or_else(|| {
+            let name = crate::call::admission::text_target_name(&s).ok_or_else(|| {
                 runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
             })?;
             call_by_name(runtime, name, &rest, requested_outputs).await
@@ -1540,7 +1506,7 @@ async fn feval_builtin_in_runtime(
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 let s: String = ca.data.iter().collect();
-                let name = text_target_name(&s).ok_or_else(|| {
+                let name = crate::call::admission::text_target_name(&s).ok_or_else(|| {
                     runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
                 })?;
                 call_by_name(runtime, name, &rest, requested_outputs).await
@@ -1555,7 +1521,7 @@ async fn feval_builtin_in_runtime(
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 let s = &sa.data[0];
-                let name = text_target_name(s).ok_or_else(|| {
+                let name = crate::call::admission::text_target_name(s).ok_or_else(|| {
                     runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
                 })?;
                 call_by_name(runtime, name, &rest, requested_outputs).await

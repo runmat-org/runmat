@@ -51,7 +51,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Solver behavior", location: "builtins::math::optim::fminbnd::tests" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Function handle execution", location: "runmat-vm/tests/closures.rs::fminbnd_accepts_anonymous_function" },
-    ], notes: &["Contract maturity remains Incomplete until composed native, browser, provider, and standalone example gates run."] },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

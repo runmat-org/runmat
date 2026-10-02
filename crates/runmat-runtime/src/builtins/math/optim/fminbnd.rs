@@ -149,10 +149,11 @@ async fn fminbnd_in_runtime(
             "too many input arguments",
         ));
     }
-    let options_struct = parse_options(rest.first())
+    let options_struct = parse_options(rest.into_iter().next())
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
     let options = FminbndOptions::from_struct(options_struct.as_ref())
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
+    crate::call::admission::admit_feval_target(&function)?;
     for (value, role) in [(&x1, "lower bound"), (&x2, "upper bound")] {
         preflight_scalar_operand(
             OptimSolver::Fminbnd,
@@ -269,10 +270,10 @@ impl FminbndOptions {
     }
 }
 
-fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
+fn parse_options(value: Option<Value>) -> BuiltinResult<Option<StructValue>> {
     match value {
         None => Ok(None),
-        Some(Value::Struct(options)) => Ok(Some(options.clone())),
+        Some(Value::Struct(options)) => Ok(Some(options)),
         Some(other) => Err(fminbnd_error_with_detail(
             &FMINBND_ERROR_INVALID_ARGUMENT,
             format!("options must be a struct, got {other:?}"),

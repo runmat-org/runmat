@@ -152,10 +152,11 @@ async fn fzero_in_runtime(
         ));
     }
     validate_requested_outputs()?;
-    let options = parse_options(rest.first())
+    let options = parse_options(rest.into_iter().next())
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_ARGUMENT))?;
     let mut opts = FzeroOptions::from_struct(options.as_ref())
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_ARGUMENT))?;
+    crate::call::admission::admit_feval_target(&function)?;
     preflight_scalar_operand(
         OptimSolver::Fzero,
         &x,
@@ -222,10 +223,10 @@ fn default_tol_x(single: bool) -> f64 {
     }
 }
 
-fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
+fn parse_options(value: Option<Value>) -> BuiltinResult<Option<StructValue>> {
     match value {
         None => Ok(None),
-        Some(Value::Struct(options)) => Ok(Some(options.clone())),
+        Some(Value::Struct(options)) => Ok(Some(options)),
         Some(other) => Err(fzero_error_with_detail(
             &FZERO_ERROR_INVALID_ARGUMENT,
             format!("options must be a struct, got {other:?}"),
@@ -325,17 +326,32 @@ async fn initial_bracket(
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<Bracket> {
     match x {
-        Value::Tensor(tensor) => {
-            let values = tensor::tensor_values_f64(&tensor);
-            match values.as_slice() {
-                [a, b] => bracket_from_endpoints(function, *a, *b, single, cooperation).await,
-                [guess] => expand_bracket(function, *guess, options, single, cooperation).await,
-                _ => Err(fzero_error_with_detail(
-                    &FZERO_ERROR_INVALID_INPUT,
-                    "initial point must be a scalar or two-element bracket",
-                )),
+        Value::Tensor(tensor) => match tensor.len() {
+            2 => {
+                bracket_from_endpoints(
+                    function,
+                    tensor::tensor_value_f64(&tensor, 0),
+                    tensor::tensor_value_f64(&tensor, 1),
+                    single,
+                    cooperation,
+                )
+                .await
             }
-        }
+            1 => {
+                expand_bracket(
+                    function,
+                    tensor::tensor_value_f64(&tensor, 0),
+                    options,
+                    single,
+                    cooperation,
+                )
+                .await
+            }
+            _ => Err(fzero_error_with_detail(
+                &FZERO_ERROR_INVALID_INPUT,
+                "initial point must be a scalar or two-element bracket",
+            )),
+        },
         Value::Num(n) => expand_bracket(function, n, options, single, cooperation).await,
         Value::Int(i) => expand_bracket(function, i.to_f64(), options, single, cooperation).await,
         Value::Bool(b) => {

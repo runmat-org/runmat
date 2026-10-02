@@ -1,6 +1,7 @@
 //! Executor-neutral callable resolution, argument, output, and invocation semantics.
 
 pub mod arguments;
+pub(crate) mod admission;
 pub(crate) mod catalog;
 pub mod closures;
 pub mod descriptor;
