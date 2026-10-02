@@ -86,6 +86,7 @@ pub(super) fn select(
             handle_precision(owner),
             handle_integer_type(owner),
             handle_is_logical(owner),
+            owner.view().layout(),
             bins,
             outputs,
         ))
@@ -114,7 +115,8 @@ pub(super) fn select(
 }
 
 /// Bound only the operation-owned host temporaries outside the published
-/// result. The source download is one native-class vector; logical decoding
+/// result. The source download is one native-class vector, plus a second
+/// vector when a lazy transpose is materialized; logical decoding
 /// may form a bit vector and then an f64 vector, and f32 binning forms an f64
 /// vector. `linspace` always constructs locations, even for a one-output call.
 /// Both published tensors move their vectors and clones are COW handles.
@@ -124,6 +126,11 @@ fn host_scratch_bound(owner: &GpuTensorHandle, bins: usize, outputs: usize) -> O
     })?;
     let native_bytes = elements
         .checked_mul(u64::try_from(owner.physical().element_type().element_size()).ok()?)?;
+    let transpose_bytes = if runmat_accelerate_api::handle_is_transposed(owner) {
+        native_bytes
+    } else {
+        0
+    };
     let logical_bits = if handle_is_logical(owner) {
         elements
     } else {
@@ -141,33 +148,15 @@ fn host_scratch_bound(owner: &GpuTensorHandle, bins: usize, outputs: usize) -> O
         0
     };
     native_bytes
+        .checked_add(transpose_bytes)?
         .checked_add(logical_bits)?
         .checked_add(f64_conversion)?
         .checked_add(unused_locations)
 }
 
 #[cfg(test)]
-mod resource_tests {
-    use super::*;
-    use crate::builtins::common::{gpu_helpers, test_support};
-    use runmat_value::{NumericDType, Tensor};
-
-    #[test]
-    fn finite_host_scratch_tracks_real_buffers_and_one_output_location() {
-        test_support::with_test_provider(|provider| {
-            let source = gpu_helpers::upload_tensor(
-                provider,
-                &Tensor::new_with_dtype(vec![0.0; 4], vec![2, 2], NumericDType::F32).unwrap(),
-            )
-            .unwrap();
-            // One native f32 download (16), one f64 binning vector (32),
-            // and the unreturned locations vector (24). Counts are charged
-            // separately as host_result_bytes by shared admission.
-            assert_eq!(host_scratch_bound(&source, 3, 1), Some(72));
-            assert_eq!(host_scratch_bound(&source, 3, 2), Some(48));
-        });
-    }
-}
+#[path = "placement/tests.rs"]
+mod resource_tests;
 
 pub(super) fn publish(
     selected: &mut Option<SelectedImhist>,
