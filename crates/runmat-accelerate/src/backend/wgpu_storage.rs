@@ -1,5 +1,8 @@
 //! Physical integer buffer geometry shared by WGPU allocation and admission.
-use runmat_accelerate_api::{IntegerElementType, ProviderElementType, ProviderRepresentation};
+use runmat_accelerate_api::{
+    IntegerElementType, ProviderElementType, ProviderPrecision, ProviderRepresentation,
+    ProviderStorage,
+};
 
 /// Requested raw-word storage, including WGPU's nonzero empty binding buffer.
 /// Payload length remains separate; this is not driver allocation granularity.
@@ -42,4 +45,42 @@ pub(crate) fn checked_allocation_bytes(value: &ProviderRepresentation) -> Option
         |ty| integer_words_per_element(ty) as u64 * std::mem::size_of::<u32>() as u64,
     );
     value.checked_element_count()?.checked_mul(width)
+}
+
+/// Storage reserved by the WGPU numeric upload path. Empty uploads use the
+/// provider's floating-element buffer even for integer and complex payloads.
+pub(crate) fn checked_upload_allocation_bytes(
+    value: &ProviderRepresentation,
+    precision: ProviderPrecision,
+) -> Option<u64> {
+    let expected_storage = match value.element_type {
+        ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => {
+            ProviderStorage::DenseComplexInterleaved
+        }
+        _ => ProviderStorage::DenseReal,
+    };
+    if value.storage != expected_storage {
+        return None;
+    }
+    let count = value.checked_element_count()?;
+    if count == 0 {
+        return Some(ProviderElementType::from(precision).byte_width());
+    }
+    match value.element_type {
+        ProviderElementType::Logical => {
+            count.checked_mul(ProviderElementType::from(precision).byte_width())
+        }
+        ProviderElementType::I8
+        | ProviderElementType::I16
+        | ProviderElementType::I32
+        | ProviderElementType::I64
+        | ProviderElementType::U8
+        | ProviderElementType::U16
+        | ProviderElementType::U32
+        | ProviderElementType::U64 => checked_allocation_bytes(value),
+        ProviderElementType::F32
+        | ProviderElementType::F64
+        | ProviderElementType::ComplexF32
+        | ProviderElementType::ComplexF64 => value.checked_byte_len(),
+    }
 }

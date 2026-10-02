@@ -18,15 +18,12 @@ pub(super) fn wgpu_dense_feasibility(
 ) -> ProviderFeasibility {
     // An empty WGPU numeric upload still owns one storage element. This is a
     // physical estimate; logical transfer volume remains zero.
-    let empty_floor = ProviderElementType::from(precision).byte_width();
     super::dense_feasibility_with_bytes(snapshot, query, |representation| {
-        representation.checked_byte_len().map(|bytes| {
-            if bytes == 0 && query.operation.0 == "transfer.upload" {
-                empty_floor
-            } else {
-                bytes
-            }
-        })
+        if query.operation.0 == "transfer.upload" {
+            crate::backend::wgpu_storage::checked_upload_allocation_bytes(representation, precision)
+        } else {
+            representation.checked_byte_len()
+        }
     })
 }
 
