@@ -438,6 +438,21 @@ fn known_invalid_host_control_precedes_resident_control_access() {
 }
 
 #[test]
+fn inexact_wide_host_window_rejects_before_length_allocation() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let signal = Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap();
+    let window =
+        Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap();
+    let error = call(Value::Tensor(signal), &[Value::Tensor(window)], Some(1))
+        .expect_err("inexact integer length");
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:pwelch:InvalidWindow")
+    );
+    assert!(error.message().contains("exactly representable"));
+}
+
+#[test]
 fn pwelch_accepts_explicit_frequency_vector() {
     let x = Tensor::new(vec![1.0; 4], vec![1, 4]).unwrap();
     let window = Tensor::new(vec![1.0; 4], vec![1, 4]).unwrap();

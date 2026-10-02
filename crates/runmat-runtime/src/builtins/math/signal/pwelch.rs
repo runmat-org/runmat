@@ -185,6 +185,9 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         .map(|(original, materialized)| materialized.as_ref().unwrap_or(original))
         .collect::<Vec<_>>();
     for (index, value) in controls.iter().take(4).enumerate() {
+        if materialized_controls[index].is_none() {
+            continue;
+        }
         let (role, error) = match index {
             0 => ("window", &PWELCH_ERROR_INVALID_WINDOW),
             1 => ("overlap", &PWELCH_ERROR_INVALID_OVERLAP),

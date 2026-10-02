@@ -67,6 +67,14 @@ pub(super) async fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<Pre
         if matches!(value, Value::GpuTensor(_)) || is_empty(value) {
             continue;
         }
+        let (name, error) = match role {
+            ControlRole::Window => ("window", &PWELCH_ERROR_INVALID_WINDOW),
+            ControlRole::Overlap => ("overlap", &PWELCH_ERROR_INVALID_OVERLAP),
+            ControlRole::Grid => ("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT),
+            ControlRole::SampleRate => ("sample-rate", &PWELCH_ERROR_INVALID_FS),
+            ControlRole::Option => unreachable!("handled above"),
+        };
+        ensure_pwelch_integer_boundary(value, name, error).await?;
         match role {
             ControlRole::Window => {
                 // A text value in the first position has its owning window error.
@@ -314,6 +322,15 @@ pub(super) async fn parse_frequency_grid(
     value: Value,
     window_len: usize,
 ) -> BuiltinResult<FrequencyGrid> {
+    let over_limit = match &value {
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) > MAX_NFFT,
+        Value::ComplexTensor(tensor) => tensor_utils::complex_tensor_element_len(tensor) > MAX_NFFT,
+        Value::LogicalArray(array) => array.data.len() > MAX_NFFT,
+        _ => false,
+    };
+    if over_limit {
+        return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
+    }
     if is_scalar_numeric(&value) {
         let parsed = parse_nonnegative_integer(BUILTIN_NAME, "nfft", &value)
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_NFFT, err.message()))?;
@@ -350,12 +367,24 @@ pub(super) fn is_scalar_numeric(value: &Value) -> bool {
 }
 
 pub(super) async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
+    let over_limit = match &value {
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) > MAX_NFFT,
+        Value::ComplexTensor(tensor) => tensor_utils::complex_tensor_element_len(tensor) > MAX_NFFT,
+        Value::LogicalArray(array) => array.data.len() > MAX_NFFT,
+        _ => false,
+    };
+    if over_limit {
+        return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+    }
     match &value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let len = parse_nonnegative_integer(BUILTIN_NAME, "window", &value).map_err(|err| {
                 pwelch_error_with_detail(&PWELCH_ERROR_INVALID_WINDOW, err.message())
             })?;
             if len == 0 {
+                return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+            }
+            if len > MAX_NFFT {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
             }
             return Ok(hamming_window(len));
@@ -367,6 +396,9 @@ pub(super) async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
             if len == 0 {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
             }
+            if len > MAX_NFFT {
+                return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+            }
             return Ok(hamming_window(len));
         }
         _ => {}
@@ -374,7 +406,7 @@ pub(super) async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
     let vector = value_to_complex_vector(BUILTIN_NAME, "window", value)
         .await
         .map_err(|source| pwelch_control_error(&PWELCH_ERROR_INVALID_WINDOW, source))?;
-    if vector.data.is_empty() {
+    if vector.data.is_empty() || vector.data.len() > MAX_NFFT {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }
     let mut out = Vec::with_capacity(vector.data.len());
