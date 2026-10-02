@@ -386,7 +386,7 @@ async fn ensure_pwelch_integer_boundary(
 }
 
 fn output_eval(eval: PwelchEvaluation, precision: SignalPrecision) -> BuiltinResult<Value> {
-    if crate::output_count::current_output_count() == Some(0) {
+    if statement_form_call() {
         return Ok(Value::OutputList(Vec::new()));
     }
     let freq_len = eval.f.len();

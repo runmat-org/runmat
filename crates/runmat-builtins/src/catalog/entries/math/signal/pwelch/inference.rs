@@ -107,6 +107,41 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
+    let mut positional_count = 0usize;
+    let mut unknown_parent_name = false;
+    let mut index = 1usize;
+    while index < request.arguments.len() {
+        let literal = request
+            .literals
+            .literal_args
+            .get(index)
+            .and_then(literal_text);
+        if literal.is_some_and(|text| text.eq_ignore_ascii_case("parent")) {
+            index += if index + 1 < request.arguments.len() {
+                2
+            } else {
+                1
+            };
+            continue;
+        }
+        if literal.is_none()
+            && matches!(
+                request.arguments[index].kind,
+                ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+            )
+        {
+            unknown_parent_name = true;
+        }
+        positional_count += 1;
+        index += 1;
+    }
+    if positional_count > 7 && !unknown_parent_name {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-PWELCH-ARITY",
+            "pwelch accepts no more than seven positional controls",
+            8,
+        ));
+    }
     for (index, control) in request.arguments.iter().enumerate().skip(1) {
         let invalid_kind = matches!(
             control.kind,

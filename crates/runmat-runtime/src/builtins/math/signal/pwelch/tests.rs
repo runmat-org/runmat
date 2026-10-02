@@ -131,6 +131,78 @@ fn no_output_welch_publishes_a_line_in_the_current_axes() {
 
 #[test]
 #[cfg(feature = "plot-core")]
+fn presentation_context_alone_publishes_and_discards_numeric_outputs() {
+    let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+    let _ = crate::builtins::plotting::clear_figure(None);
+    let axes = crate::builtins::plotting::state::current_axes_state();
+    let before = crate::builtins::plotting::state::plot_child_handles_for_axes(
+        axes.handle,
+        axes.active_index,
+    )
+    .len();
+    let _presentation = crate::output_context::push_output_count(0);
+    assert_eq!(crate::output_count::current_output_count(), None);
+    let signal = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    let output = call(
+        signal,
+        &[Value::Num(4.0), Value::Num(0.0), Value::Num(4.0)],
+        None,
+    )
+    .unwrap();
+    assert!(matches!(output, Value::OutputList(values) if values.is_empty()));
+    let after = crate::builtins::plotting::state::plot_child_handles_for_axes(
+        axes.handle,
+        axes.active_index,
+    )
+    .len();
+    assert_eq!(after, before + 1);
+}
+
+#[test]
+#[cfg(not(feature = "plot-core"))]
+fn no_plot_core_rejects_invalid_parent_before_missing_presentation() {
+    let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    for target in [Value::Num(0.0), Value::String("axes".into())] {
+        let error = call(
+            x.clone(),
+            &[Value::String("Parent".into()), target],
+            Some(1),
+        )
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidParent"));
+    }
+    let error = call(
+        x,
+        &[Value::String("Parent".into()), Value::Num(1.0)],
+        Some(1),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        crate::plotting_hooks::unavailable_presentation().identifier()
+    );
+}
+
+#[test]
+#[cfg(not(feature = "plot-core"))]
+fn presentation_context_alone_requires_plotting_capability() {
+    let _presentation = crate::output_context::push_output_count(0);
+    assert_eq!(crate::output_count::current_output_count(), None);
+    let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    let error = call(
+        x,
+        &[Value::Num(4.0), Value::Num(0.0), Value::Num(4.0)],
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        crate::plotting_hooks::unavailable_presentation().identifier()
+    );
+}
+
+#[test]
+#[cfg(feature = "plot-core")]
 fn parent_name_value_uses_existing_axes_identity_only() {
     let _guard = crate::builtins::plotting::tests::lock_plot_registry();
     let axes = crate::builtins::plotting::state::current_axes_state();

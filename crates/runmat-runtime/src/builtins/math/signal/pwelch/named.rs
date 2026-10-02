@@ -17,8 +17,14 @@ pub(super) struct NamedControls<'a> {
 
 impl NamedControls<'_> {
     pub fn wants_plot(&self) -> bool {
-        self.parent.is_some() || crate::output_count::current_output_count() == Some(0)
+        self.parent.is_some() || statement_form_call()
     }
+}
+
+pub(super) fn statement_form_call() -> bool {
+    matches!(crate::output_count::current_output_count(), Some(0))
+        || (crate::output_context::requested_output_count() == Some(0)
+            && crate::output_count::current_output_count().is_none())
 }
 
 pub(super) fn split_named_controls(rest: &[Value]) -> BuiltinResult<NamedControls<'_>> {
@@ -74,9 +80,20 @@ fn resolve_parent(value: &Value) -> BuiltinResult<AxesTarget> {
 }
 
 #[cfg(not(feature = "plot-core"))]
-fn resolve_parent(_value: &Value) -> BuiltinResult<AxesTarget> {
+fn resolve_parent(value: &Value) -> BuiltinResult<AxesTarget> {
+    let scalar = match value {
+        Value::Num(value) => *value,
+        Value::Int(value) => value.to_f64(),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            tensor_utils::tensor_values_f64(tensor)[0]
+        }
+        _ => return Err(pwelch_error(&PWELCH_ERROR_INVALID_PARENT)),
+    };
+    if !scalar.is_finite() || scalar <= 0.0 {
+        return Err(pwelch_error(&PWELCH_ERROR_INVALID_PARENT));
+    }
     // Preserve the Parent form through host-visible admission. The caller
     // reports the missing presentation capability before any resident input
-    // is downloaded, without masking a malformed signal or numeric control.
+    // is downloaded. Existence and axes identity need the plotting registry.
     Ok(())
 }

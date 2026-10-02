@@ -95,6 +95,74 @@ fn plotting_effect_is_conditional_on_requested_outputs_and_parent() {
 }
 
 #[test]
+fn positional_limit_counts_controls_after_a_known_parent_pair() {
+    let x = signal(
+        NumericClass::Double,
+        NumericDomain::Real,
+        ResidencyFact::Host,
+    );
+    let numeric = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let controls = [
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::String("onesided".into()),
+        LiteralValue::String("psd".into()),
+        LiteralValue::String("mean".into()),
+        LiteralValue::String("maxhold".into()),
+    ];
+    let mut arguments = vec![x.clone()];
+    arguments.extend((0..4).map(|_| numeric.clone()));
+    arguments.extend((0..4).map(|_| ValueFact::scalar(ValueKindFact::String)));
+    let mut literals = vec![LiteralValue::Unknown];
+    literals.extend(controls);
+    let invalid = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments,
+            literals: LiteralContext::new(literals),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-ARITY"));
+    assert_eq!(invalid.outputs[0].kind, ValueKindFact::Unknown);
+
+    let mut arguments = vec![x, ValueFact::scalar(ValueKindFact::String), numeric.clone()];
+    arguments.extend((0..4).map(|_| numeric.clone()));
+    arguments.extend((0..3).map(|_| ValueFact::scalar(ValueKindFact::String)));
+    let valid = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments,
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Parent".into()),
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::String("onesided".into()),
+                LiteralValue::String("psd".into()),
+                LiteralValue::String("mean".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(!valid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-ARITY"));
+}
+
+#[test]
 fn output_class_is_signal_derived_and_residency_is_not_proven() {
     for class in [
         NumericClass::Single,

@@ -29,6 +29,7 @@ enum SuspendAfter {
 
 struct StageProvider {
     owner: TestAllocationOwner,
+    unsupported_extrema: bool,
     spectral_calls: AtomicUsize,
     mean_calls: AtomicUsize,
     extrema_calls: AtomicUsize,
@@ -38,8 +39,13 @@ struct StageProvider {
 
 impl StageProvider {
     fn new() -> Self {
+        Self::with_unsupported_extrema(false)
+    }
+
+    fn with_unsupported_extrema(unsupported_extrema: bool) -> Self {
         Self {
             owner: TestAllocationOwner::new(),
+            unsupported_extrema,
             spectral_calls: AtomicUsize::new(0),
             mean_calls: AtomicUsize::new(0),
             extrema_calls: AtomicUsize::new(0),
@@ -107,6 +113,11 @@ impl AccelProvider for StageProvider {
     ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
         Box::pin(async move {
             self.extrema_calls.fetch_add(1, Ordering::SeqCst);
+            if self.unsupported_extrema {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "extrema intentionally unsupported",
+                ));
+            }
             let mut shape = input.shape().to_vec();
             shape[1] = 1;
             Ok(ReduceDimResult {
@@ -122,6 +133,50 @@ impl AccelProvider for StageProvider {
     ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
         self.reduce_max_dim(input, axis)
     }
+}
+
+#[test]
+fn unsupported_extrema_download_failure_keeps_owned_welch_cause() {
+    let provider = Box::leak(Box::new(StageProvider::with_unsupported_extrema(true)));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let source = provider
+        .owner
+        .allocate_zeroed(vec![8, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let cancellation = CancellationSource::new();
+    let mut cooperation = SignalCooperation::with_budget(
+        CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::NeverYield,
+            cancellation.token(),
+            || Box::pin(async { Ok(()) }),
+        ),
+        BUILTIN_NAME,
+    );
+    let options = PwelchOptions {
+        window: vec![1.0; 4],
+        noverlap: 0,
+        grid: FrequencyGrid::Uniform { nfft: 8 },
+        fs: Some(8.0),
+        range: FrequencyRange::Onesided,
+        scale: SpectrumScale::Psd,
+        trace: WelchTrace::MaxHold,
+    };
+    let error = futures::executor::block_on(output_gpu(
+        &source.handle,
+        8,
+        1,
+        &options,
+        &[],
+        &mut cooperation,
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:Internal"));
+    assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    assert!(error.source.is_some());
+    assert_eq!(provider.spectral_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.extrema_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.download_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(source.probe.retirements(), 0);
 }
 
 #[test]

@@ -272,9 +272,22 @@ async fn output_host_hold_from_frames(
             provider, frames,
         )
         .await
-        .map_err(|mut error| {
-            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            error
+        .map_err(|source| {
+            let span = source.span;
+            let mut error = crate::build_runtime_error(format!(
+                "pwelch: provider spectral-frame download failed: {}",
+                source.message()
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .with_source(source);
+            if let Some(identifier) = PWELCH_ERROR_INTERNAL.identifier {
+                error = error.with_identifier(identifier);
+            }
+            if let Some(span) = span {
+                error = error.with_span(span);
+            }
+            error.build()
         })?;
     cooperation.completed(0).await?;
     let Value::Tensor(tensor) = downloaded else {
