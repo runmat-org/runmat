@@ -480,6 +480,7 @@ fn rendered_tick_coordinates_follow_gap_and_full_factor_slot_positions() {
 
 #[test]
 fn factor_controls_decode_once_and_validate_against_factor_count() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let options = BoxplotOptions::parse(vec![
         Value::from("FactorDirection"),
         Value::from("auto"),
@@ -785,6 +786,7 @@ fn all_integer_sample_classes_cross_the_explicit_statistics_boundary() {
 
 #[test]
 fn all_integer_group_and_numeric_option_classes_are_covered() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let cases = [
         (IntegerStorage::I8(vec![2, 1]), IntValue::I8(1)),
         (IntegerStorage::I16(vec![2, 1]), IntValue::I16(1)),
@@ -1004,6 +1006,7 @@ fn matrix_grouping_accepts_row_group_vector() {
 
 #[test]
 fn reads_typed_integer_data_groups_and_options_exactly() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let options = BoxplotOptions::parse(vec![
         Value::CharArray(CharArray::new_row("Colors")),
         int_tensor(IntegerStorage::U8(vec![0, 1, 0]), vec![1, 3]),
@@ -1207,6 +1210,7 @@ fn label_orientation_changes_axes_rotation_without_changing_horizontal_labels() 
 fn unrepresentable_filled_vertices_reject_before_plot_state_changes() {
     let _guard = crate::builtins::plotting::lock_plot_test_context();
     crate::builtins::plotting::reset_plot_state();
+    crate::builtins::plotting::figure::figure_builtin(Vec::new()).expect("create baseline figure");
     let options =
         BoxplotOptions::parse(vec![Value::from("BoxStyle"), Value::from("filled")]).unwrap();
     let boxes = build_box_stats(

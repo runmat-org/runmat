@@ -67,6 +67,7 @@ fn categorical_group(codes: Vec<f64>, with_categories: bool) -> Value {
 
 #[test]
 fn host_invalid_controls_and_geometry_reject_before_download() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(RejectDownloads::default()));
     unsafe { runmat_accelerate_api::register_provider(provider) };
@@ -326,6 +327,7 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
 
 #[test]
 fn malformed_host_categorical_keeps_table_domain_cause_without_download() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(RejectDownloads::default()));
     unsafe { runmat_accelerate_api::register_provider(provider) };
@@ -381,6 +383,7 @@ fn nested_resident_group_is_compatibility_gated_before_download() {
 
 #[test]
 fn gather_failure_retains_cause_and_caller_lease() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(RejectDownloads::default()));
     unsafe { runmat_accelerate_api::register_provider(provider) };
@@ -414,6 +417,7 @@ fn gather_failure_retains_cause_and_caller_lease() {
 
 #[test]
 fn unpolled_and_abandoned_pending_future_keep_borrowed_input_live() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(RejectDownloads::default()));
     provider.pending.store(true, Ordering::SeqCst);
