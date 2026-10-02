@@ -175,7 +175,7 @@ fn could_be_colormap_shape(value: &ValueFact) -> bool {
         dims.len() == 2
             && dims
                 .get(1)
-                .is_some_and(|cols| cols.is_none_or(|count| *count == 3))
+                .is_some_and(|cols| cols.is_none_or(|count| count == 3))
     })
 }
 
