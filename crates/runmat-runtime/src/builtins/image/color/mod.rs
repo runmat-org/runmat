@@ -15,7 +15,6 @@ pub mod rgb2lab;
 pub(crate) mod rgb_input;
 pub(crate) mod rgb_presentation;
 pub(crate) mod resident_owner;
-pub(crate) mod type_resolvers;
 
 #[cfg(test)]
 mod preparation_tests;

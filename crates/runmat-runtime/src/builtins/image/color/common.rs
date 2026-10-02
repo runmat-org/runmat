@@ -4,7 +4,6 @@ use runmat_accelerate_api::{
 use runmat_builtins::BuiltinIntegerClass;
 use std::borrow::Cow;
 
-use runmat_builtins::Type;
 use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
@@ -426,16 +425,6 @@ pub(crate) fn image_output_dtype(input: NumericDType) -> NumericDType {
         | NumericDType::U16
         | NumericDType::U32
         | NumericDType::U64 => NumericDType::F64,
-    }
-}
-
-pub(crate) fn same_shape_type(args: &[Type]) -> Type {
-    match args.first() {
-        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Some(Type::Num) | Some(Type::Int) | Some(Type::Bool) => Type::Num,
-        _ => Type::tensor(),
     }
 }
 

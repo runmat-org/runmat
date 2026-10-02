@@ -18,7 +18,9 @@ use std::{
     task::{Context, Poll},
 };
 
-const NAMES: [&str; 5] = ["gray2rgb", "hsv2rgb", "lab2rgb", "rgb2gray", "rgb2hsv"];
+const NAMES: [&str; 6] = [
+    "gray2rgb", "hsv2rgb", "lab2rgb", "rgb2gray", "rgb2hsv", "rgb2lab",
+];
 type Events = Rc<RefCell<Vec<&'static str>>>;
 
 struct Observer(Events);
@@ -347,7 +349,7 @@ fn extension_gate_and_empty_rgb_inputs_precede_service() {
         );
         assert!(events.borrow().is_empty());
     }
-    for name in ["hsv2rgb", "rgb2gray", "rgb2hsv"] {
+    for name in ["hsv2rgb", "rgb2gray", "rgb2hsv", "rgb2lab"] {
         let empty = Value::Tensor(Tensor::new(vec![], vec![0, 1, 3]).unwrap());
         let error = block_on(dispatcher::call_builtin_async(name, &[empty])).unwrap_err();
         let expected = format!("RunMat:{name}:InvalidInput");
@@ -408,9 +410,13 @@ fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
         } else {
             Value::Tensor(Tensor::new(vec![1.0; 3], vec![1, 3]).unwrap())
         };
-        // Nx3 numeric colormaps reject uint8 for these conversion forms.
+        // Nx3 numeric colormaps reject uint8 except RGB-to-Lab, which accepts it.
         let invalid = if name == "gray2rgb" {
             invalid
+        } else if name == "rgb2lab" {
+            Value::Tensor(
+                Tensor::new_with_dtype(vec![1.0; 3], vec![1, 3], NumericDType::I16).unwrap(),
+            )
         } else {
             Value::Tensor(
                 Tensor::new_with_dtype(vec![1.0; 3], vec![1, 3], NumericDType::U8).unwrap(),
@@ -419,6 +425,20 @@ fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
         assert!(block_on(dispatcher::call_builtin_async(name, &[invalid])).is_err());
         assert!(events.borrow().is_empty());
     }
+    let invalid_option = block_on(dispatcher::call_builtin_async(
+        "rgb2lab",
+        &[
+            valid("rgb2lab"),
+            Value::from("ColorSpace"),
+            Value::from("unsupported"),
+        ],
+    ))
+    .unwrap_err();
+    assert_eq!(
+        invalid_option.identifier(),
+        Some("RunMat:rgb2lab:InvalidOption")
+    );
+    assert!(events.borrow().is_empty());
 }
 
 #[test]
