@@ -150,10 +150,17 @@ pub const POLYFIT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescripto
     when: "Runtime fails while constructing fit outputs or provider payloads.",
     message: "polyfit: internal runtime failure",
 };
-const ERRORS: [BuiltinErrorDescriptor; 3] = [
+pub const POLYFIT_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYFIT.PROVIDER_FAILED",
+    identifier: Some("RunMat:polyfit:ProviderFailed"),
+    when: "An owning acceleration provider returns malformed or nonfinite fit outputs.",
+    message: "polyfit: invalid provider result",
+};
+const ERRORS: [BuiltinErrorDescriptor; 4] = [
     POLYFIT_ERROR_INVALID_ARGUMENT,
     POLYFIT_ERROR_INVALID_INPUT,
     POLYFIT_ERROR_INTERNAL,
+    POLYFIT_ERROR_PROVIDER_FAILED,
 ];
 pub const POLYFIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,

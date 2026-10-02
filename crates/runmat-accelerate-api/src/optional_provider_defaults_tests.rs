@@ -85,8 +85,14 @@ fn polynomial_defaults_are_typed_unsupported() {
         &Defaults.polyval(&input, &input, &options).unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
-        &ready_default(Defaults.polyfit(&input, &input, 1, None, ProviderPolyfitBasis::Original))
-            .unwrap_err()
+        &ready_default(Defaults.polyfit(
+            &input,
+            &input,
+            1,
+            None,
+            ProviderPolyfitOutputs::Statistics
+        ))
+        .unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
         &ready_default(Defaults.polyder_single(&input)).unwrap_err()

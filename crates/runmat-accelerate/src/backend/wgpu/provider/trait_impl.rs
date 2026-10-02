@@ -500,9 +500,9 @@ impl AccelProvider for WgpuProvider {
         y: &'a GpuTensorHandle,
         degree: usize,
         weights: Option<&'a GpuTensorHandle>,
-        basis: runmat_accelerate_api::ProviderPolyfitBasis,
+        outputs: runmat_accelerate_api::ProviderPolyfitOutputs,
     ) -> AccelProviderFuture<'a, ProviderPolyfitResult> {
-        Box::pin(async move { self.polyfit_exec(x, y, degree, weights, basis).await })
+        Box::pin(async move { self.polyfit_exec(x, y, degree, weights, outputs).await })
     }
 
     fn polyder_single<'a>(

@@ -1,3 +1,4 @@
+mod normalization;
 pub mod polyder;
 pub mod polyfit;
 pub mod polyint;

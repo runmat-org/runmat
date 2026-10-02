@@ -5,18 +5,18 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("roots"),
     slug: Some("roots"),
     summary: "Find polynomial zeros from descending-power coefficients.",
-    description: "`roots(c)` builds a companion-matrix problem for the polynomial represented by `c` and returns its finite zeros as a column vector.",
+    description: "`roots(c)` finds zeros of the polynomial represented by descending-power coefficients `c` and returns them as a column vector.",
     keywords: &["roots", "polynomial", "eigenvalues", "companion"],
     related: &["polyval", "polyfit", "polyder", "polyint"],
     sections: &[
         BuiltinDocumentationSection { heading: "Coefficients and output", paragraphs: &[
-            "Leading zero coefficients are discarded. A zero or constant polynomial returns an empty double column. Linear polynomials use `-b/a`; higher degrees use companion-matrix eigenvalues. Root order is not specified.",
+            "Exactly zero leading coefficients are discarded; small nonzero coefficients retain their degree. A zero or constant polynomial returns an empty double column. Linear polynomials use `-b/a`, cubics use the current closed-form solver, and other higher degrees use companion-matrix eigenvalues. Root order is not specified.",
             "The current runtime accepts coefficient arrays with at most one nonsingleton dimension, including singleton-extended N-D vector shapes, and returns a column vector. A shape with two nonsingleton dimensions is rejected.",
-            "Real coefficients can yield complex roots. Tiny imaginary components from numerical round-off may be suppressed in an otherwise real result. The output uses double or complex-double storage even when the input is single.",
+            "Real coefficients can yield complex roots. The runtime retains nonzero computed real and imaginary components; it does not use a magnitude threshold to turn a small root into zero or change a complex result into a real one. The output uses double or complex-double storage even when the input is single.",
             "Single and double coefficients are accepted. RunMat mode also accepts exact-binary64 fixed-width integer coefficients; values that cannot cross that boundary exactly are rejected. The runtime additionally accepts logical coefficient arrays and converts them for the host solve.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "The companion-matrix solve runs on the CPU. Resident coefficient values are gathered through their owning provider; `roots` returns a host-resident column. This operation ends fusion.",
+            "The polynomial solve runs on the CPU. Resident coefficient values are gathered through their owning provider; `roots` returns a host-resident column. This operation ends fusion.",
         ] },
     ],
     examples: &[
@@ -33,7 +33,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Does roots preserve input precision?", answer: "No. This companion-matrix implementation returns double or complex-double values." },
         BuiltinDocumentationFaq { question: "Are results sorted?", answer: "No. The eigenvalue solver determines their order; sort them explicitly when order matters." },
         BuiltinDocumentationFaq { question: "Does roots solve on a GPU?", answer: "No. Resident coefficients are gathered and the CPU solves the companion-matrix problem." },
-        BuiltinDocumentationFaq { question: "What happens to tiny imaginary parts?", answer: "The implementation treats components within a scale-relative numerical tolerance as real in an all-real result." },
+        BuiltinDocumentationFaq { question: "What happens to tiny imaginary parts?", answer: "Nonzero computed imaginary parts remain present, including small components; numerical eigensolvers can also produce small roundoff components." },
     ],
     links: &[
         BuiltinDocumentationLink { label: "polyval", target: BuiltinDocumentationLinkTarget::Builtin("polyval") },

@@ -23,8 +23,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const LEADING_ZERO_TOL: f64 = 1.0e-12;
-const RESULT_ZERO_TOL: f64 = 1.0e-10;
 const BUILTIN_NAME: &str = "roots";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::roots")]
@@ -166,15 +164,9 @@ fn trim_leading_zeros(mut coeffs: Vec<Complex64>) -> Vec<Complex64> {
     if coeffs.is_empty() {
         return coeffs;
     }
-    let scale = coeffs.iter().map(|c| c.norm()).fold(0.0_f64, f64::max);
-    let tol = if scale == 0.0 {
-        LEADING_ZERO_TOL
-    } else {
-        LEADING_ZERO_TOL * scale
-    };
     let first_nonzero = coeffs
         .iter()
-        .position(|c| c.norm() > tol)
+        .position(|c| c.re != 0.0 || c.im != 0.0)
         .unwrap_or(coeffs.len());
     coeffs.split_off(first_nonzero)
 }
@@ -186,7 +178,7 @@ fn solve_roots(coeffs: &[Complex64]) -> BuiltinResult<Vec<Complex64>> {
     if coeffs.len() == 2 {
         let a = coeffs[0];
         let b = coeffs[1];
-        if a.norm() <= LEADING_ZERO_TOL {
+        if a.re == 0.0 && a.im == 0.0 {
             return Err(roots_error(
                 "roots: leading coefficient must be non-zero after trimming",
             ));
@@ -199,7 +191,7 @@ fn solve_roots(coeffs: &[Complex64]) -> BuiltinResult<Vec<Complex64>> {
         return Ok(cubic_roots(coeffs[0], coeffs[1], coeffs[2], coeffs[3]));
     }
     let leading = coeffs[0];
-    if leading.norm() <= LEADING_ZERO_TOL {
+    if leading.re == 0.0 && leading.im == 0.0 {
         return Err(roots_error(
             "roots: leading coefficient must be non-zero after trimming",
         ));
@@ -224,7 +216,7 @@ fn solve_roots(coeffs: &[Complex64]) -> BuiltinResult<Vec<Complex64>> {
             &ROOTS_ERROR_INTERNAL,
         )
     })?;
-    Ok(eigenvalues.iter().map(|&z| canonicalize_root(z)).collect())
+    Ok(eigenvalues.iter().copied().collect())
 }
 
 fn cubic_roots(a: Complex64, b: Complex64, c: Complex64, d: Complex64) -> Vec<Complex64> {
@@ -251,29 +243,11 @@ fn cubic_roots(a: Complex64, b: Complex64, c: Complex64, d: Complex64) -> Vec<Co
     vec![y0 - shift, y1 - shift, y2 - shift]
 }
 
-fn canonicalize_root(z: Complex64) -> Complex64 {
-    if !z.re.is_finite() || !z.im.is_finite() {
-        return z;
-    }
-    let mut real = z.re;
-    let mut imag = z.im;
-    let scale = 1.0 + real.abs();
-    if imag.abs() <= RESULT_ZERO_TOL * scale {
-        imag = 0.0;
-    }
-    if real.abs() <= RESULT_ZERO_TOL {
-        real = 0.0;
-    }
-    Complex64::new(real, imag)
-}
-
 fn roots_to_value(roots: &[Complex64]) -> BuiltinResult<Value> {
     if roots.is_empty() {
         return empty_column();
     }
-    let all_real = roots
-        .iter()
-        .all(|z| z.im.abs() <= RESULT_ZERO_TOL * (1.0 + z.re.abs()));
+    let all_real = roots.iter().all(|z| z.im == 0.0);
     if all_real {
         let mut data: Vec<f64> = Vec::with_capacity(roots.len());
         for &root in roots {
@@ -526,6 +500,41 @@ pub(crate) mod tests {
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tiny_nonzero_coefficients_and_roots_are_not_trimmed() {
+        for (coefficients, expected) in [([1.0e-13, 1.0], -1.0e13), ([1.0, 1.0e-12], -1.0e-12)] {
+            let value = Value::Tensor(Tensor::new(coefficients.to_vec(), vec![1, 2]).unwrap());
+            let root = roots_builtin(value).expect("linear root");
+            let Value::Tensor(root) = root else {
+                panic!("real linear root expected");
+            };
+            assert_eq!(root.shape, vec![1, 1]);
+            assert!((root.materialize_f64()[0] / expected - 1.0).abs() < 1.0e-14);
+        }
+        let complex = roots_builtin(Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 0.0), (0.0, 1.0e-13)], vec![1, 2]).unwrap(),
+        ))
+        .expect("complex linear root");
+        let Value::ComplexTensor(complex) = complex else {
+            panic!("nonzero imaginary root must remain complex");
+        };
+        assert_eq!(complex.materialize_f64(), vec![(0.0, -1.0e-13)]);
+
+        let quadratic = roots_builtin(Value::Tensor(
+            Tensor::new(vec![1.0, 0.0, 1.0e-26], vec![1, 3]).unwrap(),
+        ))
+        .expect("small complex quadratic roots");
+        let Value::ComplexTensor(quadratic) = quadratic else {
+            panic!("quadratic with negative discriminant must remain complex");
+        };
+        let roots = quadratic.materialize_f64();
+        assert_eq!(roots.len(), 2);
+        assert!(roots
+            .iter()
+            .all(|(re, im)| re.abs() < 1.0e-25 && im.abs() > 0.0));
+        assert!((roots[0].1 + roots[1].1).abs() < 1.0e-24);
     }
 
     fn roots_builtin(coefficients: Value) -> BuiltinResult<Value> {

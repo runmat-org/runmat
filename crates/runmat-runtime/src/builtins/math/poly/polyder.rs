@@ -19,7 +19,6 @@ use crate::builtins::common::{tensor, tensor::tensor_into_value};
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyder";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyder")]
@@ -267,7 +266,7 @@ fn poly_sub(a: &[Complex64], b: &[Complex64]) -> Vec<Complex64> {
 fn trim_leading_zeros(coeffs: &[Complex64]) -> Vec<Complex64> {
     let mut first = None;
     for (idx, coeff) in coeffs.iter().enumerate() {
-        if coeff.norm() > EPS {
+        if coeff.re != 0.0 || coeff.im != 0.0 {
             first = Some(idx);
             break;
         }
@@ -279,7 +278,7 @@ fn trim_leading_zeros(coeffs: &[Complex64]) -> Vec<Complex64> {
 }
 
 fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinResult<Value> {
-    if coeffs.iter().all(|c| c.im.abs() <= EPS) {
+    if coeffs.iter().all(|c| c.im == 0.0) {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
         let shape = orientation.shape_for_len(data.len());
         let tensor =
@@ -671,6 +670,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tiny_nonzero_derivative_and_imaginary_component_survive() {
+        let real = derivative_single(Value::Tensor(
+            Tensor::new(vec![1.0e-13, 0.0], vec![1, 2]).unwrap(),
+        ))
+        .expect("tiny derivative");
+        assert_eq!(real, Value::Num(1.0e-13));
+        let complex = derivative_single(Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 1.0e-13), (0.0, 0.0)], vec![1, 2]).unwrap(),
+        ))
+        .expect("tiny complex derivative");
+        assert_eq!(complex, Value::Complex(1.0, 1.0e-13));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
