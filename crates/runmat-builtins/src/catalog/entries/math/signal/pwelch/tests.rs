@@ -23,6 +23,146 @@ fn infer(input: ValueFact, outputs: RequestedOutputCount) -> CallInference {
 }
 
 #[test]
+fn parent_literal_requires_a_scalar_axes_candidate() {
+    let signal = signal(
+        NumericClass::Double,
+        NumericDomain::Real,
+        ResidencyFact::Host,
+    );
+    let name = ValueFact::scalar(ValueKindFact::String);
+    let invalid_target = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Dense,
+    );
+    let result = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![signal, name, invalid_target],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Parent".into()),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-PARENT"));
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn plotting_effect_is_conditional_on_requested_outputs_and_parent() {
+    let x = signal(
+        NumericClass::Double,
+        NumericDomain::Real,
+        ResidencyFact::Host,
+    );
+    let numeric = infer(x.clone(), RequestedOutputCount::Exactly(2));
+    assert!(!numeric.effects.0.contains(&EffectKind::UserInterface));
+    assert!(!numeric
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::UserInterface));
+    let plotted = infer(x.clone(), RequestedOutputCount::Exactly(0));
+    assert!(plotted.effects.0.contains(&EffectKind::UserInterface));
+    let parent = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![
+                x,
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Parent".into()),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+        },
+    );
+    assert!(parent.effects.0.contains(&EffectKind::UserInterface));
+}
+
+#[test]
+fn positional_limit_counts_controls_after_a_known_parent_pair() {
+    let x = signal(
+        NumericClass::Double,
+        NumericDomain::Real,
+        ResidencyFact::Host,
+    );
+    let numeric = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let controls = [
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::String("onesided".into()),
+        LiteralValue::String("psd".into()),
+        LiteralValue::String("mean".into()),
+        LiteralValue::String("maxhold".into()),
+    ];
+    let mut arguments = vec![x.clone()];
+    arguments.extend((0..4).map(|_| numeric.clone()));
+    arguments.extend((0..4).map(|_| ValueFact::scalar(ValueKindFact::String)));
+    let mut literals = vec![LiteralValue::Unknown];
+    literals.extend(controls);
+    let invalid = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments,
+            literals: LiteralContext::new(literals),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-ARITY"));
+    assert_eq!(invalid.outputs[0].kind, ValueKindFact::Unknown);
+
+    let mut arguments = vec![x, ValueFact::scalar(ValueKindFact::String), numeric.clone()];
+    arguments.extend((0..4).map(|_| numeric.clone()));
+    arguments.extend((0..3).map(|_| ValueFact::scalar(ValueKindFact::String)));
+    let valid = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments,
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Parent".into()),
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::String("onesided".into()),
+                LiteralValue::String("psd".into()),
+                LiteralValue::String("mean".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(!valid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-ARITY"));
+}
+
+#[test]
 fn output_class_is_signal_derived_and_residency_is_not_proven() {
     for class in [
         NumericClass::Single,
@@ -107,10 +247,44 @@ fn known_invalid_control_does_not_prove_result() {
 }
 
 #[test]
+fn complex_onesided_selector_has_no_success_fact() {
+    let input = signal(
+        NumericClass::Double,
+        NumericDomain::Complex,
+        ResidencyFact::Host,
+    );
+    let result = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![
+                input,
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(8.0),
+                LiteralValue::Number(0.0),
+                LiteralValue::Number(8.0),
+                LiteralValue::String("onesided".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-RANGE"));
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
 fn descriptor_and_docs_are_canonical() {
     assert!(crate::validate_builtin_catalog(&[&PWELCH_CATALOG_ENTRY]).is_empty());
     assert_eq!(PWELCH_CATALOG_ENTRY.identity.name, "pwelch");
-    assert_eq!(PWELCH_CATALOG_ENTRY.documentation.examples.len(), 6);
+    assert_eq!(PWELCH_CATALOG_ENTRY.documentation.examples.len(), 8);
     assert_eq!(
         PWELCH_CATALOG_ENTRY.descriptor.signatures[1].outputs.len(),
         2

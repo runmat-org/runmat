@@ -1,6 +1,6 @@
 use super::*;
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 pub const PWELCH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -15,12 +15,19 @@ pub const PWELCH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
-        purity: BuiltinPurity::Pure,
+        // Numerical calls remain side-effect free; zero-output and Parent forms
+        // mutate a figure, so the identity-wide declaration is conservative.
+        purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &[EffectKind::MaySuspend, EffectKind::MayThrow],
-        capabilities: &[],
+        effects: &[
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+            EffectKind::UserInterface,
+            EffectKind::HostCallback,
+        ],
+        capabilities: &[CapabilityRequirement::UserInterface],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,

@@ -7,9 +7,9 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinErrorDescriptor, BuiltinExtensionDescriptor, PWELCH_ERROR_ARG_COUNT,
     PWELCH_ERROR_INTERNAL, PWELCH_ERROR_INVALID_FS, PWELCH_ERROR_INVALID_NFFT,
-    PWELCH_ERROR_INVALID_OVERLAP, PWELCH_ERROR_INVALID_RANGE, PWELCH_ERROR_INVALID_SIGNAL,
-    PWELCH_ERROR_INVALID_WINDOW, PWELCH_INTEGER_CONTROL_EXTENSION, PWELCH_INTEGER_SIGNAL_EXTENSION,
-    PWELCH_LOGICAL_INPUT_EXTENSION,
+    PWELCH_ERROR_INVALID_OVERLAP, PWELCH_ERROR_INVALID_PARENT, PWELCH_ERROR_INVALID_RANGE,
+    PWELCH_ERROR_INVALID_SIGNAL, PWELCH_ERROR_INVALID_WINDOW, PWELCH_INTEGER_CONTROL_EXTENSION,
+    PWELCH_INTEGER_SIGNAL_EXTENSION, PWELCH_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -22,7 +22,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::signal::common::output_precision::SignalPrecision;
 use crate::builtins::math::signal::common::{
-    gpu_matrix_shape, parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector,
+    centered_frequency_offset, centered_shift, gpu_matrix_shape, hamming_coefficient,
+    parse_nonnegative_integer, parse_scalar_f64, symmetric_window_values, value_to_complex_vector,
+    window_allocation_error, SignalCooperation, WindowArgError, SIGNAL_WORK_CHUNK,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -30,6 +32,27 @@ const BUILTIN_NAME: &str = "pwelch";
 const DEFAULT_NFFT_MIN: usize = 256;
 const MAX_NFFT: usize = 1 << 22;
 const EPS: f64 = 1.0e-12;
+#[derive(Default)]
+struct CompletedWork {
+    pending: u64,
+}
+
+impl CompletedWork {
+    fn record(&mut self, units: u64) -> Option<u64> {
+        self.pending = self.pending.saturating_add(units);
+        if self.pending >= SIGNAL_WORK_CHUNK {
+            Some(std::mem::take(&mut self.pending))
+        } else {
+            None
+        }
+    }
+
+    async fn finish(&mut self, cooperation: &mut SignalCooperation) -> BuiltinResult<()> {
+        cooperation
+            .completed(std::mem::take(&mut self.pending))
+            .await
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::pwelch")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -71,6 +94,13 @@ enum SpectrumScale {
     Power,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WelchTrace {
+    Mean,
+    MaxHold,
+    MinHold,
+}
+
 #[derive(Clone, Debug)]
 struct SignalColumns {
     columns: Vec<Vec<Complex<f64>>>,
@@ -88,6 +118,7 @@ struct PwelchOptions {
     fs: Option<f64>,
     range: FrequencyRange,
     scale: SpectrumScale,
+    trace: WelchTrace,
 }
 
 #[derive(Clone, Debug)]
@@ -124,6 +155,22 @@ fn pwelch_control_error(
     error
 }
 
+fn pwelch_window_generation_error(error: WindowArgError) -> RuntimeError {
+    match error {
+        WindowArgError::Allocation(cause) => {
+            window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause)
+        }
+        WindowArgError::Execution(error) => error,
+        WindowArgError::InvalidLength => pwelch_error(&PWELCH_ERROR_INVALID_WINDOW),
+        WindowArgError::TensorBuild(detail) => {
+            pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, detail)
+        }
+        WindowArgError::TooManyOptions
+        | WindowArgError::InvalidOptionType
+        | WindowArgError::UnknownOption(_) => pwelch_error(&PWELCH_ERROR_INTERNAL),
+    }
+}
+
 fn pwelch_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -138,29 +185,59 @@ fn pwelch_error_with_message(
 #[runtime_builtin(
     name = "pwelch",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::pwelch"
 )]
-async fn pwelch_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(x, &rest).await
+async fn pwelch_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    evaluate_in_runtime(runtime.as_ref(), x, &rest).await
 }
 
 pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
+    evaluate_in_runtime(None, x, rest).await
+}
+
+async fn evaluate_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    x: Value,
+    rest: &[Value],
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    evaluate_with_cooperation(x, rest, &mut cooperation).await
+}
+
+async fn evaluate_with_cooperation(
+    x: Value,
+    rest: &[Value],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    cooperation.completed(0).await?;
+    let named = split_named_controls(rest)?;
+    let rest = named.positional.as_slice();
     if rest.len() > 7 {
         return Err(pwelch_error(&PWELCH_ERROR_ARG_COUNT));
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
-    for value in rest {
+    for value in rest.iter().copied() {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
     ensure_pwelch_class_boundary(&x, &PWELCH_INTEGER_SIGNAL_EXTENSION)?;
-    for value in rest.iter().take(4) {
+    for value in rest.iter().take(4).copied() {
         ensure_pwelch_class_boundary(value, &PWELCH_INTEGER_CONTROL_EXTENSION)?;
     }
-    let mut prepared_controls = preflight_host_controls(rest).await?;
+    let complex_input = preflight_signal_carrier(&x)?;
+    let mut prepared_controls = preflight_host_controls(rest, complex_input, cooperation).await?;
+    #[cfg(not(feature = "plot-core"))]
+    if named.wants_plot() {
+        return Err(crate::plotting_hooks::unavailable_presentation());
+    }
     // All borrowed operands must be admitted before exactness checks or parsers
     // can download any one of them.
     let resident_inputs = std::iter::once(&x)
-        .chain(rest.iter())
+        .chain(rest.iter().copied())
         .filter_map(|value| {
             if let Value::GpuTensor(handle) = value {
                 Some(handle)
@@ -176,12 +253,15 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         .iter()
         .map(|handle| runmat_accelerate_api::ResidencyRestoreGuard::new(handle))
         .collect::<Vec<_>>();
+    cooperation.completed(0).await?;
     ensure_pwelch_integer_boundary(&x, "signal", &PWELCH_ERROR_INVALID_SIGNAL).await?;
-    let materialized_controls = materialize_resident_controls(rest).await?;
+    cooperation.completed(0).await?;
+    let materialized_controls =
+        materialize_resident_controls(rest, &mut prepared_controls, cooperation).await?;
     let controls = rest
         .iter()
         .zip(&materialized_controls)
-        .map(|(original, materialized)| materialized.as_ref().unwrap_or(original))
+        .map(|(original, materialized)| materialized.as_ref().unwrap_or(*original))
         .collect::<Vec<_>>();
     let source_handle = match &x {
         Value::GpuTensor(handle) => Some(handle.clone()),
@@ -189,6 +269,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     };
     let protected = rest
         .iter()
+        .copied()
         .filter_map(|value| {
             if let Value::GpuTensor(handle) = value {
                 Some(handle)
@@ -208,9 +289,20 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err.message()))?;
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-        let options = parse_options(&controls, rows, complex_input, &mut prepared_controls).await?;
-        if let Some(value) = output_gpu(handle, rows, cols, &options, &protected).await? {
-            return Ok(value);
+        let options = parse_options(
+            &controls,
+            rows,
+            complex_input,
+            &mut prepared_controls,
+            cooperation,
+        )
+        .await?;
+        if !named.wants_plot() {
+            if let Some(value) =
+                output_gpu(handle, rows, cols, &options, &protected, cooperation).await?
+            {
+                return Ok(value);
+            }
         }
         Some(options)
     } else {
@@ -218,7 +310,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     };
     drop(_preflight_guards);
     drop(resident_inputs);
-    let input = value_to_signal_columns(x).await?;
+    let input = value_to_signal_columns(x, cooperation).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
     }
@@ -230,16 +322,28 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
                 input.rows,
                 input.is_complex,
                 &mut prepared_controls,
+                cooperation,
             )
             .await?
         }
     };
-    let eval = compute_pwelch(&input.columns, &options)?;
+    let eval = compute_pwelch(&input.columns, &options, cooperation).await?;
+    #[cfg(feature = "plot-core")]
+    let prepared_plot = if named.wants_plot() {
+        Some(prepare_pwelch_plot(&eval, &options, named.parent, cooperation).await?)
+    } else {
+        None
+    };
     let output = output_eval(eval, input.output_precision)?;
-    match source_handle.as_ref() {
+    let output = match source_handle.as_ref() {
         Some(source) => super::resident_output::restore(source, output, BUILTIN_NAME, &protected),
         None => Ok(output),
+    }?;
+    #[cfg(feature = "plot-core")]
+    if let Some(plot) = prepared_plot {
+        publish_pwelch_plot(plot)?;
     }
+    Ok(output)
 }
 
 fn ensure_pwelch_class_boundary(
@@ -281,6 +385,9 @@ async fn ensure_pwelch_integer_boundary(
 }
 
 fn output_eval(eval: PwelchEvaluation, precision: SignalPrecision) -> BuiltinResult<Value> {
+    if statement_form_call() {
+        return Ok(Value::OutputList(Vec::new()));
+    }
     let freq_len = eval.f.len();
     let pxx = precision
         .real(eval.pxx, vec![freq_len, eval.columns])
@@ -291,9 +398,6 @@ fn output_eval(eval: PwelchEvaluation, precision: SignalPrecision) -> BuiltinRes
         .map(Value::Tensor)
         .map_err(|e| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, e))?;
     if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
         if out_count == 1 {
             return Ok(Value::OutputList(vec![pxx]));
         }
@@ -314,8 +418,19 @@ use signal::value_to_signal_columns;
 mod controls;
 use controls::*;
 
+mod named;
+use named::*;
+
+#[cfg(feature = "plot-core")]
+mod presentation;
+#[cfg(feature = "plot-core")]
+use presentation::{prepare_pwelch_plot, publish_pwelch_plot};
+
 mod numerical;
 use numerical::*;
+
+mod scaling;
+use scaling::normalized_window;
 
 fn is_empty(value: &Value) -> bool {
     match value {

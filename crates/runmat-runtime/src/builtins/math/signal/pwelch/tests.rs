@@ -4,7 +4,8 @@ use futures::executor::block_on;
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::builtin_function_by_name;
-use runmat_value::{IntegerStorage, NumericDType};
+use runmat_value::IntegerStorage;
+use runmat_value::NumericDType;
 
 fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
     let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
@@ -46,9 +47,204 @@ fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
 }
 
 #[test]
+fn trace_modes_select_segment_powers_without_changing_the_frequency_grid() {
+    let x = Value::Tensor(Tensor::new(vec![1.0, 1.0, 3.0, 3.0], vec![4, 1]).unwrap());
+    let controls = [
+        Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+        Value::Num(0.0),
+        Value::Num(2.0),
+        Value::Num(1.0),
+    ];
+    for (name, expected) in [("mean", 10.0), ("maxhold", 18.0), ("minhold", 2.0)] {
+        let mut args = controls.to_vec();
+        args.push(Value::String(name.into()));
+        let (pxx, frequency) = output_pair(call(x.clone(), &args, Some(2)).unwrap());
+        assert_eq!(frequency, vec![0.0, 0.5]);
+        assert!((pxx[0] - expected).abs() < 1e-12, "{name}: {pxx:?}");
+        assert!(pxx[1].abs() < 1e-12);
+    }
+}
+
+#[test]
+fn trace_mean_does_not_overflow_a_representable_average() {
+    let first = f64::MAX.sqrt() * 0.5;
+    let x = Value::Tensor(Tensor::new(vec![first, first], vec![2, 1]).unwrap());
+    let args = [
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Num(0.0),
+        Value::Num(1.0),
+        Value::Num(1.0),
+        Value::String("mean".into()),
+    ];
+    let (pxx, _) = output_pair(call(x, &args, Some(2)).unwrap());
+    assert!(pxx[0].is_finite() && pxx[0] > f64::MAX * 0.2);
+}
+
+#[test]
+fn trace_holds_include_nan_instead_of_hiding_a_missing_segment() {
+    for trace in [WelchTrace::MaxHold, WelchTrace::MinHold] {
+        assert!(combine_trace(2.0, f64::NAN, 1, trace).is_nan());
+        assert!(combine_trace(f64::NAN, 2.0, 1, trace).is_nan());
+    }
+}
+
+#[test]
+fn shorter_dft_folds_the_segment_modulo_its_length() {
+    let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
+    let args = [
+        Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
+        Value::Num(0.0),
+        Value::Num(2.0),
+        Value::Num(1.0),
+    ];
+    let (pxx, f) = output_pair(call(x, &args, Some(2)).unwrap());
+    assert_eq!(f, vec![0.0, 0.5]);
+    assert!((pxx[0] - 25.0).abs() < 1e-12);
+    assert!((pxx[1] - 1.0).abs() < 1e-12);
+}
+
+#[test]
+#[cfg(feature = "plot-core")]
+fn no_output_welch_publishes_a_line_in_the_current_axes() {
+    let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+    let _ = crate::builtins::plotting::clear_figure(None);
+    let axes = crate::builtins::plotting::state::current_axes_state();
+    let before = crate::builtins::plotting::state::plot_child_handles_for_axes(
+        axes.handle,
+        axes.active_index,
+    )
+    .len();
+    let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    let output = call(
+        x,
+        &[Value::Num(4.0), Value::Num(0.0), Value::Num(4.0)],
+        Some(0),
+    )
+    .unwrap();
+    assert!(matches!(output, Value::OutputList(values) if values.is_empty()));
+    let after = crate::builtins::plotting::state::plot_child_handles_for_axes(
+        axes.handle,
+        axes.active_index,
+    )
+    .len();
+    assert_eq!(after, before + 1);
+}
+
+#[test]
+#[cfg(feature = "plot-core")]
+fn presentation_context_alone_publishes_and_discards_numeric_outputs() {
+    let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+    let _ = crate::builtins::plotting::clear_figure(None);
+    let axes = crate::builtins::plotting::state::current_axes_state();
+    let before = crate::builtins::plotting::state::plot_child_handles_for_axes(
+        axes.handle,
+        axes.active_index,
+    )
+    .len();
+    let _presentation = crate::output_context::push_output_count(0);
+    assert_eq!(crate::output_count::current_output_count(), None);
+    let signal = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    let output = call(
+        signal,
+        &[Value::Num(4.0), Value::Num(0.0), Value::Num(4.0)],
+        None,
+    )
+    .unwrap();
+    assert!(matches!(output, Value::OutputList(values) if values.is_empty()));
+    let after = crate::builtins::plotting::state::plot_child_handles_for_axes(
+        axes.handle,
+        axes.active_index,
+    )
+    .len();
+    assert_eq!(after, before + 1);
+}
+
+#[test]
+#[cfg(not(feature = "plot-core"))]
+fn no_plot_core_rejects_invalid_parent_before_missing_presentation() {
+    let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    for target in [Value::Num(0.0), Value::String("axes".into())] {
+        let error = call(
+            x.clone(),
+            &[Value::String("Parent".into()), target],
+            Some(1),
+        )
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidParent"));
+    }
+    let error = call(
+        x,
+        &[Value::String("Parent".into()), Value::Num(1.0)],
+        Some(1),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        crate::plotting_hooks::unavailable_presentation().identifier()
+    );
+}
+
+#[test]
+#[cfg(not(feature = "plot-core"))]
+fn presentation_context_alone_requires_plotting_capability() {
+    let _presentation = crate::output_context::push_output_count(0);
+    assert_eq!(crate::output_count::current_output_count(), None);
+    let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    let error = call(
+        x,
+        &[Value::Num(4.0), Value::Num(0.0), Value::Num(4.0)],
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        crate::plotting_hooks::unavailable_presentation().identifier()
+    );
+}
+
+#[test]
+#[cfg(feature = "plot-core")]
+fn parent_name_value_uses_existing_axes_identity_only() {
+    let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+    let axes = crate::builtins::plotting::state::current_axes_state();
+    let target =
+        crate::builtins::plotting::state::encode_axes_handle(axes.handle, axes.active_index);
+    let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    let output = call(
+        x.clone(),
+        &[
+            Value::Num(4.0),
+            Value::Num(0.0),
+            Value::Num(4.0),
+            Value::String("Parent".into()),
+            Value::Num(target),
+        ],
+        Some(2),
+    )
+    .unwrap();
+    assert!(matches!(output, Value::OutputList(values) if values.len() == 2));
+    let error = call(
+        x,
+        &[Value::String("Parent".into()), Value::Num(0.0)],
+        Some(1),
+    )
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidParent"));
+}
+
+#[test]
 fn descriptor_is_registered() {
-    let builtin = builtin_function_by_name(BUILTIN_NAME).expect("pwelch builtin");
-    let descriptor = builtin.descriptor.expect("descriptor");
+    let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+        .expect("canonical pwelch identity");
+    assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+    assert_eq!(builtin.bindings.len(), 1);
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(
+        bindings[0].identity,
+        builtin.binding_identity(&builtin.bindings[0])
+    );
+    let descriptor = builtin.descriptor;
     assert!(descriptor
         .signatures
         .iter()
@@ -199,8 +395,9 @@ fn pwelch_twosided_and_centered_ranges() {
     )
     .unwrap();
     let (_, f) = output_pair(centered);
-    assert_eq!(f[0], -std::f64::consts::PI);
-    assert_eq!(f[4], 0.0);
+    assert!((f[0] + 3.0 * std::f64::consts::PI / 4.0).abs() < 1e-12);
+    assert_eq!(f[3], 0.0);
+    assert_eq!(f[7], std::f64::consts::PI);
 }
 
 #[test]
@@ -420,6 +617,7 @@ fn resident_scalar_controls_are_decoded_as_structural_values_once() {
 
 #[test]
 fn known_invalid_host_control_precedes_resident_control_access() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     test_support::with_test_provider(|provider| {
         let window = Tensor::new_integer(IntegerStorage::U16(vec![8]), vec![1, 1]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &window).expect("upload control");
@@ -487,7 +685,7 @@ fn pwelch_rejects_nfft_shorter_than_window() {
 }
 
 #[test]
-fn pwelch_power_scale_omits_density_bandwidth() {
+fn pwelch_power_uses_window_equivalent_noise_bandwidth() {
     let x = Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap();
     let window = Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap();
     let psd = call(
@@ -516,7 +714,123 @@ fn pwelch_power_scale_omits_density_bandwidth() {
     .unwrap();
     let (psd, _) = output_pair(psd);
     let (power, _) = output_pair(power);
-    assert!((power[0] / psd[0] - 8.0).abs() < 1e-12);
+    // For a rectangular eight-sample window at Fs=8, ENBW is 1 Hz.
+    assert!((power[0] / psd[0] - 1.0).abs() < 1e-12);
+
+    let signal = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
+    let weighted = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let base = [
+        weighted.clone(),
+        Value::Num(0.0),
+        Value::Num(2.0),
+        Value::Num(1.0),
+    ];
+    let (density, _) = output_pair(call(signal.clone(), &base, Some(2)).unwrap());
+    let (power, _) = output_pair(
+        call(
+            signal,
+            &[
+                weighted,
+                Value::Num(0.0),
+                Value::Num(2.0),
+                Value::Num(1.0),
+                Value::from("power"),
+            ],
+            Some(2),
+        )
+        .unwrap(),
+    );
+    assert!((density[0] - 9.0 / 5.0).abs() < 1e-12);
+    assert!((power[0] - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn explicit_empty_sample_rate_is_one_hertz_but_omitted_is_angular() {
+    let signal = Value::Tensor(Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap());
+    let window = Value::Tensor(Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap());
+    let common = [window.clone(), Value::Num(0.0), Value::Num(8.0)];
+    let (_, angular) = output_pair(call(signal.clone(), &common, Some(2)).unwrap());
+    let (_, hertz) = output_pair(
+        call(
+            signal,
+            &[
+                window,
+                Value::Num(0.0),
+                Value::Num(8.0),
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            ],
+            Some(2),
+        )
+        .unwrap(),
+    );
+    assert!((angular[1] - std::f64::consts::PI / 4.0).abs() < 1e-12);
+    assert!((hertz[1] - 0.125).abs() < 1e-12);
+}
+
+#[test]
+fn finite_tiny_and_huge_windows_preserve_normalized_psd() {
+    for amplitude in [1e-200, 1e200] {
+        let result = call(
+            Value::Num(1.0),
+            &[
+                Value::Tensor(Tensor::new(vec![amplitude], vec![1, 1]).unwrap()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, frequency) = output_pair(result);
+        assert_eq!(frequency, vec![0.0]);
+        assert!((pxx[0] - 1.0).abs() < 1e-12);
+    }
+    let scaled = call(
+        Value::Num(1e200),
+        &[
+            Value::Num(1.0),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Value::Num(1e200),
+        ],
+        Some(2),
+    )
+    .unwrap();
+    let (scaled_psd, _) = output_pair(scaled);
+    assert!((scaled_psd[0] / 1e200 - 1.0).abs() < 1e-12);
+
+    let extreme_fs = call(
+        Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+        &[
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(0.0),
+            Value::Num(2.0),
+            Value::Num(f64::MAX),
+            Value::from("twosided"),
+        ],
+        Some(2),
+    )
+    .unwrap();
+    let (extreme_psd, _) = output_pair(extreme_fs);
+    let expected = 2.0 / f64::MAX;
+    assert!(extreme_psd[0] > 0.0);
+    assert!((extreme_psd[0] / expected - 1.0).abs() < 1e-12);
+    let extreme_frequency = futures::executor::block_on(frequency_vector(
+        4,
+        Some(f64::MAX),
+        FrequencyRange::Twosided,
+        &mut SignalCooperation::new(None, BUILTIN_NAME),
+    ))
+    .unwrap();
+    assert!(extreme_frequency.iter().all(|value| value.is_finite()));
+    assert_eq!(extreme_frequency[2], f64::MAX / 2.0);
+}
+
+#[test]
+fn spectral_output_geometry_rejects_product_overflow() {
+    let error = checked_output_elements(usize::MAX, 2).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:Internal"));
+    assert!(error.message().contains("dimensions overflow"));
 }
 
 #[cfg(feature = "wgpu")]
@@ -585,13 +899,88 @@ fn pwelch_wgpu_keeps_uniform_outputs_resident_and_matches_cpu() {
             "actual={actual} expected={expected}"
         );
     }
+    let tone = runmat_value::ComplexTensor::new(
+        (0..8)
+            .map(|index| {
+                let angle = 2.0 * std::f64::consts::PI * index as f64 / 8.0;
+                (angle.cos(), angle.sin())
+            })
+            .collect(),
+        vec![8, 1],
+    )
+    .unwrap();
+    let controls = [
+        Value::Num(8.0),
+        Value::Num(0.0),
+        Value::Num(8.0),
+        Value::Num(8.0),
+        Value::from("centered"),
+    ];
+    let (host_centered, host_f) =
+        output_pair(call(Value::ComplexTensor(tone.clone()), &controls, Some(2)).unwrap());
+    let resident_tone = gpu_helpers::upload_complex_tensor(provider, &tone).unwrap();
+    let Value::OutputList(resident_centered) =
+        call(Value::GpuTensor(resident_tone), &controls, Some(2)).unwrap()
+    else {
+        panic!("centered Welch must return two outputs");
+    };
+    let resident_power =
+        crate::builtins::common::test_support::gather(resident_centered[0].clone()).unwrap();
+    let resident_f =
+        crate::builtins::common::test_support::gather(resident_centered[1].clone()).unwrap();
+    assert_eq!(resident_f.materialize_f64(), host_f);
+    assert_eq!(host_f[0], -3.0);
+    assert_eq!(host_f[7], 4.0);
+    for (actual, expected) in resident_power
+        .materialize_f64()
+        .iter()
+        .zip(host_centered.iter())
+    {
+        assert!((actual - expected).abs() < 1e-5);
+    }
+    assert!(host_centered[4] > host_centered[3]);
+    let extreme_input = Tensor::new(vec![1e200], vec![1, 1]).unwrap();
+    let extreme_handle = gpu_helpers::upload_tensor(provider, &extreme_input).unwrap();
+    let extreme = call(
+        Value::GpuTensor(extreme_handle),
+        &[
+            Value::Num(1.0),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Value::Num(1e200),
+        ],
+        Some(1),
+    )
+    .unwrap();
+    let Value::OutputList(extreme) = extreme else {
+        panic!("one requested output must retain its output list");
+    };
+    let extreme = crate::builtins::common::test_support::gather(extreme[0].clone()).unwrap();
+    assert!((extreme.materialize_f64()[0] / 1e200 - 1.0).abs() < 1e-5);
     handle.release().ok();
 }
 
 #[test]
 fn default_window_uses_eight_overlapped_sections() {
-    assert_eq!(default_window(900).len(), 200);
-    assert_eq!(default_window(1).len(), 1);
+    let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+    assert_eq!(
+        block_on(default_window(900, &mut cooperation))
+            .unwrap()
+            .len(),
+        200
+    );
+    assert_eq!(
+        block_on(default_window(1, &mut cooperation)).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn default_fft_grid_rounds_window_length_to_next_power_of_two() {
+    let signal = Value::Tensor(Tensor::new(vec![1.0; 300], vec![1, 300]).unwrap());
+    let (_, frequencies) = output_pair(call(signal, &[Value::Num(300.0)], Some(2)).unwrap());
+    assert_eq!(frequencies.len(), 257);
+    assert!((frequencies[1] - 2.0 * std::f64::consts::PI / 512.0).abs() < 1e-12);
 }
 
 #[test]
@@ -605,3 +994,119 @@ fn pwelch_rejects_invalid_overlap() {
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:pwelch:InvalidOverlap"));
 }
+
+mod cooperation_tests {
+    use super::*;
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use futures::task::noop_waker;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::cell::Cell;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
+
+    struct PendingTurn(Rc<Cell<usize>>);
+    impl Future for PendingTurn {
+        type Output = Result<(), ExecutionServiceError>;
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+    impl Drop for PendingTurn {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    #[test]
+    fn pending_window_generation_drop_and_cancel_never_publish() {
+        for cancel in [false, true] {
+            let source = CancellationSource::new();
+            let dropped = Rc::new(Cell::new(0));
+            let count = dropped.clone();
+            let budget = CpuCooperationBudget::with_test_turn(
+                CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(4).unwrap()),
+                source.token(),
+                move || Box::pin(PendingTurn(count.clone())),
+            );
+            let mut cooperation = SignalCooperation::with_budget(budget, BUILTIN_NAME);
+            let mut future = Box::pin(symmetric_window_values(
+                8193,
+                hamming_coefficient,
+                &mut cooperation,
+            ));
+            let waker = noop_waker();
+            let mut context = Context::from_waker(&waker);
+            assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+            if cancel {
+                source.cancel(CancellationReason::User);
+                let Poll::Ready(Err(WindowArgError::Execution(error))) =
+                    future.as_mut().poll(&mut context)
+                else {
+                    panic!("cancelled window generation must not publish a window");
+                };
+                assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+                assert!(matches!(
+                    error
+                        .source
+                        .as_deref()
+                        .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+                    Some(ExecutionServiceError::Cancelled)
+                ));
+            }
+            drop(future);
+            assert_eq!(dropped.get(), 1);
+        }
+    }
+
+    #[test]
+    fn invocation_service_failure_keeps_cause_and_ready_value_matches_direct_call() {
+        let signal = Value::Tensor(Tensor::new(vec![1.0; 16], vec![1, 16]).unwrap());
+        let args = [Value::Num(8.0), Value::Num(4.0), Value::Num(8.0)];
+        let expected = call(signal.clone(), &args, None).unwrap();
+        let source = CancellationSource::new();
+        let ready_budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            || Box::pin(async { Ok(()) }),
+        );
+        let actual = block_on(evaluate_with_cooperation(
+            signal.clone(),
+            &args,
+            &mut SignalCooperation::with_budget(ready_budget, BUILTIN_NAME),
+        ))
+        .unwrap();
+        let (Value::Tensor(expected), Value::Tensor(actual)) = (expected, actual) else {
+            panic!("expected real PSD tensors");
+        };
+        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.materialize_f64(), expected.materialize_f64());
+
+        let failure_budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            || Box::pin(async { Err(ExecutionServiceError::Infrastructure("turn failed".into())) }),
+        );
+        let error = block_on(evaluate_with_cooperation(
+            signal,
+            &args,
+            &mut SignalCooperation::with_budget(failure_budget, BUILTIN_NAME),
+        ))
+        .unwrap_err();
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(matches!(
+            error
+                .source
+                .as_deref()
+                .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+            Some(ExecutionServiceError::Infrastructure(_))
+        ));
+    }
+}
+
+#[path = "tests/cooperation_resident.rs"]
+mod cooperation_resident;

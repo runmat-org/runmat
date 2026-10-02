@@ -7,6 +7,10 @@ use crate::{build_runtime_error, GpuGatherRetry, RuntimeError};
 use runmat_builtins::{BuiltinErrorDescriptor, BuiltinExtensionDescriptor};
 use runmat_value::Value;
 
+/// Maximum uninterrupted scalar work between checks. The execution service,
+/// not this bound, determines when a task turn is yielded.
+pub(crate) const SIGNAL_WORK_CHUNK: u64 = 4096;
+
 pub(crate) struct SignalCooperation {
     budget: Option<CpuCooperationBudget>,
     namespace: Option<String>,

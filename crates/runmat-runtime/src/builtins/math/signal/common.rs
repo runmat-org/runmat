@@ -17,14 +17,16 @@ mod waveform_sample;
 #[cfg(test)]
 pub(crate) mod waveform_restore_fixture;
 pub(crate) mod window_provider;
-pub(crate) use cooperation::SignalCooperation;
+pub(crate) use cooperation::{SignalCooperation, SIGNAL_WORK_CHUNK};
 pub(crate) use waveform_boundary::{
     admit_resident_waveform_operand, prepared_real_integer_tensor, waveform_input_tensor,
 };
 pub(crate) use waveform_control::{PreparedWaveformControl, WaveformControlError};
 pub(crate) use waveform_map::{map_real_waveform, WaveformMapError, WaveformOutputMode};
 pub(crate) use waveform_sample::{admit_real_waveform_sample, WaveformSampleError};
-pub(crate) use window_generation::{window_allocation_error, window_tensor};
+pub(crate) use window_generation::{
+    hamming_coefficient, symmetric_window_values, window_allocation_error, window_tensor,
+};
 
 const EPS: f64 = 1.0e-12;
 
