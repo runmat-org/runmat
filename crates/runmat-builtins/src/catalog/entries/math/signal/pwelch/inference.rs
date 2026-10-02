@@ -171,15 +171,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    let count = request.outputs.requested.known_count().unwrap_or(1);
-    let outputs = (0..count)
+    let outputs = (0..2)
         .map(|slot| {
-            if slot >= 2 {
-                return ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                    class: NumericClass::Double,
-                    domain: NumericDomain::Real,
-                }));
-            }
             let Some(class) = class.filter(|_| diagnostics.is_empty()) else {
                 return ValueFact::unknown(DynamicReason::RuntimeValue);
             };
@@ -211,6 +204,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         })
         .collect();
     let mut contract = CallContract::fixed(outputs);
+    // Surplus runtime padding is not a computed spectral result or a
+    // confidence interval. Do not assign it numerical result facts.
+    contract.maximum_outputs = None;
+    contract.variadic_output = Some(Box::new(ValueFact::unknown(
+        DynamicReason::UnsupportedRepresentation,
+    )));
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
     let parent_possible = request

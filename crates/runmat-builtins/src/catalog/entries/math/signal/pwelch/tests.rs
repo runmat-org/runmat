@@ -186,11 +186,8 @@ fn output_class_is_signal_derived_and_residency_is_not_proven() {
             facts.outputs[1].shape.known_dims(),
             Some(vec![None, Some(1)])
         );
-        assert_eq!(
-            facts.outputs[2].numeric().unwrap().class,
-            NumericClass::Double
-        );
-        assert!(facts.outputs[2].is_scalar());
+        assert_eq!(facts.outputs[2].kind, ValueKindFact::Unknown);
+        assert!(!facts.outputs[2].is_scalar());
     }
     let input = signal(
         NumericClass::Single,
@@ -284,7 +281,27 @@ fn complex_onesided_selector_has_no_success_fact() {
 fn descriptor_and_docs_are_canonical() {
     assert!(crate::validate_builtin_catalog(&[&PWELCH_CATALOG_ENTRY]).is_empty());
     assert_eq!(PWELCH_CATALOG_ENTRY.identity.name, "pwelch");
-    assert_eq!(PWELCH_CATALOG_ENTRY.documentation.examples.len(), 8);
+    assert_eq!(
+        PWELCH_CATALOG_ENTRY
+            .documentation
+            .examples
+            .iter()
+            .map(|example| example.id)
+            .collect::<Vec<_>>(),
+        vec![
+            "example-1",
+            "example-2",
+            "example-3",
+            "example-4",
+            "example-5",
+            "example-6",
+            "example-7",
+            "example-8",
+            "example-9",
+            "example-10",
+            "example-11"
+        ]
+    );
     assert_eq!(
         PWELCH_CATALOG_ENTRY.descriptor.signatures[1].outputs.len(),
         2
