@@ -29,9 +29,10 @@ pub(crate) use support::materialization::gathered_value_fact;
 pub(crate) use support::text::known_invalid_text_scalar;
 pub(crate) use support::text::possible_character_row;
 pub(crate) use support::text::{invalid_text_comparison_container, text_comparison_result};
+pub(crate) use support::{argument_error, finish_fixed};
 pub(super) use support::{
-    argument_error, default_double_scalar, finish_fixed, finish_fixed_outputs, literal_text,
-    numeric_kind, preserved_binary_residency,
+    default_double_scalar, finish_fixed_outputs, literal_text, numeric_kind,
+    preserved_binary_residency,
 };
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {

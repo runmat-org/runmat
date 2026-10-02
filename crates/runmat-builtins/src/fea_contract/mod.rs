@@ -3,5 +3,7 @@
 //! bounded slices; no constructor or solver semantics live here.
 
 pub mod descriptors;
+pub mod catalog_entry;
+pub mod inference;
 pub mod integer;
 pub mod parameters;

@@ -43,10 +43,7 @@ use std::path::PathBuf;
 
 #[runtime_builtin(
     name = "fea.load",
-    category = "fea",
-    summary = "Load a .fea study or sweep document.",
-    keywords = "fea,study,sweep,load,yaml",
-    descriptor(crate::builtins::fea::FEA_LOAD_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_load_builtin(path: String) -> BuiltinResult<Value> {
@@ -97,11 +94,7 @@ pub async fn fea_sweep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.model",
-    category = "fea",
-    summary = "Create a typed FEA model object from geometry and model components.",
-    keywords = "fea,model,materials,boundary,loads,domains",
-    descriptor(crate::builtins::fea::FEA_MODEL_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -110,11 +103,7 @@ pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.material",
-    category = "fea",
-    summary = "Create a typed FEA material object.",
-    keywords = "fea,material,mechanical,thermal,electrical,plastic",
-    descriptor(crate::builtins::fea::FEA_MATERIAL_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_MATERIAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -123,11 +112,7 @@ pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.materialAssignment",
-    category = "fea",
-    summary = "Create a typed FEA material assignment.",
-    keywords = "fea,material,assignment,region",
-    descriptor(crate::builtins::fea::FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -136,11 +121,7 @@ pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<
 
 #[runtime_builtin(
     name = "fea.boundaryCondition",
-    category = "fea",
-    summary = "Create a typed FEA boundary condition.",
-    keywords = "fea,boundary,condition,region,prescribed,rotation",
-    descriptor(crate::builtins::fea::FEA_BOUNDARY_CONDITION_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_boundary_condition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -149,11 +130,7 @@ pub async fn fea_boundary_condition_builtin(args: Vec<Value>) -> BuiltinResult<V
 
 #[runtime_builtin(
     name = "fea.loadCase",
-    category = "fea",
-    summary = "Create a typed FEA load case.",
-    keywords = "fea,load,force,moment,torque,pressure,current",
-    descriptor(crate::builtins::fea::FEA_LOAD_CASE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_LOAD_CASE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_load_case_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -175,11 +152,7 @@ pub async fn fea_step_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.domain",
-    category = "fea",
-    summary = "Create a typed FEA physics domain object.",
-    keywords = "fea,domain,thermal,electromagnetic,cfd",
-    descriptor(crate::builtins::fea::FEA_DOMAIN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_DOMAIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_domain_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -188,11 +161,7 @@ pub async fn fea_domain_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.interface",
-    category = "fea",
-    summary = "Create a typed FEA interface object.",
-    keywords = "fea,interface,contact,region",
-    descriptor(crate::builtins::fea::FEA_INTERFACE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_INTERFACE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_interface_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

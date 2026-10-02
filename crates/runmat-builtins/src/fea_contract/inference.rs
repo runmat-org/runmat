@@ -1,0 +1,273 @@
+//! Shared, typed static facts for the FEA object-constructor family.
+
+use crate::{
+    catalog::inference::{argument_error, finish_fixed},
+    BuiltinCatalogEntry,
+};
+use runmat_types::{
+    CallInference, CallRequest, CertaintyFact, DimensionFact, DynamicReason, ObjectFact,
+    ResidencyFact, ShapeFact, StaticClassIdentity, StorageFact, ValueFact, ValueKindFact,
+};
+use std::collections::BTreeMap;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FeaConstructorKind {
+    Model,
+    Material,
+    MaterialAssignment,
+    BoundaryCondition,
+    LoadCase,
+    Domain,
+    Interface,
+    LoadDocument,
+}
+
+impl FeaConstructorKind {
+    const fn positional(self) -> usize {
+        match self {
+            Self::Model | Self::MaterialAssignment => 2,
+            Self::BoundaryCondition | Self::LoadCase | Self::Interface => 3,
+            Self::Material | Self::Domain | Self::LoadDocument => 1,
+        }
+    }
+
+    const fn class(self) -> Option<StaticClassIdentity> {
+        Some(StaticClassIdentity::new(match self {
+            Self::Model => "fea.Model",
+            Self::Material => "fea.Material",
+            Self::MaterialAssignment => "fea.MaterialAssignment",
+            Self::BoundaryCondition => "fea.BoundaryCondition",
+            Self::LoadCase => "fea.LoadCase",
+            Self::Domain => "fea.Domain",
+            Self::Interface => "fea.Interface",
+            Self::LoadDocument => return None,
+        }))
+    }
+
+    const fn is_document_load(self) -> bool {
+        matches!(self, Self::LoadDocument)
+    }
+}
+
+fn host_text(fact: &ValueFact) -> bool {
+    if matches!(fact.residency, ResidencyFact::Device { .. }) {
+        return false;
+    }
+    match fact.kind {
+        ValueKindFact::Unknown => !matches!(fact.shape.element_count(), Some(count) if count != 1),
+        ValueKindFact::String => !matches!(fact.shape.element_count(), Some(count) if count != 1),
+        ValueKindFact::Character => match &fact.shape {
+            ShapeFact::Shaped { dims } => {
+                !matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1)
+            }
+            ShapeFact::Scalar | ShapeFact::Ranked { rank: 2 } | ShapeFact::Unknown => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn object_result(kind: FeaConstructorKind) -> ValueFact {
+    let mut fact = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: kind.class().map(StaticClassIdentity::owned),
+            properties: BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: Some(false),
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    if kind.is_document_load() {
+        // The document may contain a Study or Sweep; path shape cannot tell.
+        fact.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
+    }
+    fact
+}
+
+pub fn infer_constructor(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    kind: FeaConstructorKind,
+) -> CallInference {
+    let mut diagnostics = Vec::new();
+    let positional = kind.positional();
+    let arity_valid = if kind.is_document_load() {
+        request.arguments.len() == 1
+    } else {
+        request.arguments.len() >= positional && (request.arguments.len() - positional) % 2 == 0
+    };
+    if !arity_valid {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-FEA-ARITY",
+            "FEA constructor requires its positional values and complete name/value pairs",
+            request.arguments.len(),
+        ));
+    }
+    for index in 0..request.arguments.len().min(positional) {
+        if kind == FeaConstructorKind::Model && index == 1 {
+            let input = &request.arguments[index];
+            let valid = match &input.kind {
+                ValueKindFact::Unknown => true,
+                ValueKindFact::Object(object) => object
+                    .runtime_class
+                    .as_ref()
+                    .is_none_or(|class| class.is(StaticClassIdentity::new("geometry.Asset"))),
+                _ => false,
+            } && !matches!(input.residency, ResidencyFact::Device { .. });
+            if !valid {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FEA-GEOMETRY",
+                    "fea.model geometry must be a host geometry.Asset",
+                    index,
+                ));
+            }
+        } else if !host_text(&request.arguments[index]) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-FEA-TEXT",
+                "FEA structural identifiers, kinds, and paths must be host text scalars",
+                index,
+            ));
+        }
+    }
+    if !kind.is_document_load() {
+        let mut all_option_names_known = true;
+        let mut has_profile = false;
+        for index in (positional..request.arguments.len()).step_by(2) {
+            match request.literals.literal_string_at(index) {
+                Some(name) => {
+                    if name.eq_ignore_ascii_case("profile") {
+                        has_profile = true;
+                    }
+                }
+                None => all_option_names_known = false,
+            }
+            if !host_text(&request.arguments[index]) {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FEA-OPTION",
+                    "FEA option names must be host text scalars",
+                    index,
+                ));
+            }
+            if let Some(value) = request.arguments.get(index + 1) {
+                if matches!(value.residency, ResidencyFact::Device { .. }) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FEA-RESIDENT",
+                        "FEA constructor option values do not implicitly gather resident data",
+                        index + 1,
+                    ));
+                }
+            }
+        }
+        if kind == FeaConstructorKind::Model && all_option_names_known && !has_profile {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-FEA-PROFILE",
+                "fea.model requires a Profile option",
+                positional,
+            ));
+        }
+    }
+    // Literal facts here do not certify nested typed component payloads or geometry.
+    finish_fixed(entry, request, object_result(kind), diagnostics)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fea_contract::{
+        catalog_entry::{self, ConstructorEntryDefinition},
+        descriptors::FEA_MODEL_DESCRIPTOR,
+        integer::FEA_STRUCTURAL_INTEGER_AUDIT,
+    };
+    use crate::{BuiltinCatalogProvenance, BuiltinDocumentation};
+    use runmat_types::{LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount};
+
+    fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
+        CallRequest {
+            arguments,
+            literals: LiteralContext::new(literals),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        }
+    }
+
+    fn entry() -> BuiltinCatalogEntry {
+        catalog_entry::entry(ConstructorEntryDefinition {
+            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+            name: "fea.model",
+            documentation: BuiltinDocumentation::EMPTY,
+            descriptor: &FEA_MODEL_DESCRIPTOR,
+            inference: |request, entry| {
+                infer_constructor(request, entry, FeaConstructorKind::Model)
+            },
+            integer_capabilities: &[],
+            integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
+            filesystem_read: false,
+        })
+    }
+
+    #[test]
+    fn model_requires_literal_profile_and_host_geometry_class() {
+        let text = ValueFact::scalar(ValueKindFact::String);
+        let geometry = ValueFact::proven(
+            ValueKindFact::Object(ObjectFact {
+                class: None,
+                runtime_class: Some(StaticClassIdentity::new("geometry.Asset").owned()),
+                properties: BTreeMap::new(),
+                properties_complete: false,
+                handle_semantics: Some(false),
+            }),
+            ShapeFact::Scalar,
+            StorageFact::Opaque,
+        );
+        let missing = infer_constructor(
+            &request(
+                vec![text.clone(), geometry.clone()],
+                vec![LiteralValue::Unknown; 2],
+            ),
+            &entry(),
+            FeaConstructorKind::Model,
+        );
+        assert!(missing
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-PROFILE"));
+        let valid = infer_constructor(
+            &request(
+                vec![text.clone(), geometry, text.clone(), text],
+                vec![
+                    LiteralValue::Unknown,
+                    LiteralValue::Unknown,
+                    LiteralValue::String("Profile".into()),
+                    LiteralValue::String("linear_static_structural".into()),
+                ],
+            ),
+            &entry(),
+            FeaConstructorKind::Model,
+        );
+        assert!(valid.diagnostics.is_empty());
+        assert_eq!(valid.outputs[0].residency, ResidencyFact::Host);
+        assert!(
+            matches!(&valid.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(StaticClassIdentity::new("fea.Model"))))
+        );
+    }
+
+    #[test]
+    fn document_class_is_dynamic_and_text_arrays_are_rejected() {
+        let mut text_array = ValueFact::scalar(ValueKindFact::String);
+        text_array.shape = ShapeFact::from(vec![Some(2), Some(1)]);
+        let loaded = infer_constructor(
+            &request(vec![text_array], vec![LiteralValue::Unknown]),
+            &entry(),
+            FeaConstructorKind::LoadDocument,
+        );
+        assert!(loaded
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-TEXT"));
+        assert!(matches!(
+            loaded.outputs[0].certainty,
+            CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+        ));
+    }
+}
