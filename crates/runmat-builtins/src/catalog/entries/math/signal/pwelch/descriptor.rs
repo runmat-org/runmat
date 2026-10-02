@@ -74,7 +74,7 @@ pub const PWELCH_ERROR_INVALID_NFFT: BuiltinErrorDescriptor = BuiltinErrorDescri
     code: "RM.PWELCH.INVALID_NFFT",
     identifier: Some("RunMat:pwelch:InvalidNfft"),
     when: "FFT length is invalid.",
-    message: "pwelch: nfft must be a positive integer at least as large as the window length",
+    message: "pwelch: nfft must be a positive integer",
 };
 pub const PWELCH_ERROR_INVALID_FS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.PWELCH.INVALID_FS",

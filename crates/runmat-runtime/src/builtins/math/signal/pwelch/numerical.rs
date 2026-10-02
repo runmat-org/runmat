@@ -121,7 +121,10 @@ pub(super) async fn column_uniform_periodogram(
                 .get(start + idx)
                 .copied()
                 .unwrap_or_else(|| Complex::new(0.0, 0.0));
-            buffer[idx] = sample * window[idx];
+            // When the DFT is shorter than the segment, fold windowed samples
+            // modulo nfft before transforming. For nfft >= window length each
+            // destination is visited once, preserving the zero-padding path.
+            buffer[idx % nfft] += sample * window[idx];
             if let Some(units) = work.record(1) {
                 cooperation.completed(units).await?;
             }

@@ -132,7 +132,7 @@ pub(super) async fn preflight_host_controls(
                 );
             }
             ControlRole::Grid => {
-                prepared.grid = Some(parse_frequency_grid(value, 0, cooperation).await?);
+                prepared.grid = Some(parse_frequency_grid(value, cooperation).await?);
             }
             ControlRole::SampleRate => {
                 let rate = parse_scalar_f64(BUILTIN_NAME, "fs", value).map_err(|error| {
@@ -189,7 +189,7 @@ pub(super) async fn materialize_resident_controls(
                         );
                     }
                     ControlRole::Grid => {
-                        prepared.grid = Some(parse_frequency_grid(&host, 0, cooperation).await?);
+                        prepared.grid = Some(parse_frequency_grid(&host, cooperation).await?);
                     }
                     ControlRole::SampleRate => {
                         let rate =
@@ -323,7 +323,7 @@ pub(super) async fn parse_options(
             idx += 1;
             match prepared.grid.take() {
                 Some(grid) => grid,
-                None => parse_frequency_grid(value, window_len, cooperation).await?,
+                None => parse_frequency_grid(value, cooperation).await?,
             }
         }
     } else {
@@ -332,7 +332,7 @@ pub(super) async fn parse_options(
         }
     };
     if let FrequencyGrid::Uniform { nfft } = &grid {
-        if *nfft < window_len || *nfft > MAX_NFFT {
+        if *nfft == 0 || *nfft > MAX_NFFT {
             return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
         }
     }
@@ -421,7 +421,6 @@ fn default_nfft(window_len: usize) -> BuiltinResult<usize> {
 
 pub(super) async fn parse_frequency_grid(
     value: &Value,
-    window_len: usize,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<FrequencyGrid> {
     cooperation.completed(0).await?;
@@ -437,7 +436,7 @@ pub(super) async fn parse_frequency_grid(
     if is_scalar_numeric(value) {
         let parsed = parse_nonnegative_integer(BUILTIN_NAME, "nfft", value)
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_NFFT, err.message()))?;
-        if parsed == 0 || parsed < window_len || parsed > MAX_NFFT {
+        if parsed == 0 || parsed > MAX_NFFT {
             return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
         }
         return Ok(FrequencyGrid::Uniform { nfft: parsed });

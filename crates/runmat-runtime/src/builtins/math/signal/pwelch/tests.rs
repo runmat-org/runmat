@@ -88,6 +88,21 @@ fn trace_holds_include_nan_instead_of_hiding_a_missing_segment() {
 }
 
 #[test]
+fn shorter_dft_folds_the_segment_modulo_its_length() {
+    let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
+    let args = [
+        Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
+        Value::Num(0.0),
+        Value::Num(2.0),
+        Value::Num(1.0),
+    ];
+    let (pxx, f) = output_pair(call(x, &args, Some(2)).unwrap());
+    assert_eq!(f, vec![0.0, 0.5]);
+    assert!((pxx[0] - 25.0).abs() < 1e-12);
+    assert!((pxx[1] - 1.0).abs() < 1e-12);
+}
+
+#[test]
 fn descriptor_is_registered() {
     let builtin = builtin_function_by_name(BUILTIN_NAME).expect("pwelch builtin");
     let descriptor = builtin.descriptor.expect("descriptor");

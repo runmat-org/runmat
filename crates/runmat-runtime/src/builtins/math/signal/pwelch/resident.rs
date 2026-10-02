@@ -28,7 +28,7 @@ pub(super) async fn output_gpu(
     let window_len = scaling.values.len();
     // ColumnSliding requires an in-bounds frame. The host reference route
     // retains the admitted zero-padded short-signal behavior.
-    if rows < window_len {
+    if rows < window_len || nfft < window_len {
         return Ok(None);
     }
     let step = window_len - options.noverlap;
