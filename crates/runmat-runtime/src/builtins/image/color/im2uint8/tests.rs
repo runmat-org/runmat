@@ -259,7 +259,8 @@ fn nd_image_preserves_geometry_and_exact_uint8_storage() {
     assert_eq!(output.shape, vec![1, 1, 2, 2]);
     assert_eq!(
         output.integer_storage(),
-        Some(&IntegerStorage::U8(vec![0, 255, 128, 1]))
+        // 32896 is the exact half-byte boundary above 128 and rounds upward.
+        Some(&IntegerStorage::U8(vec![0, 255, 129, 1]))
     );
 }
 
