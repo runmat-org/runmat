@@ -24,6 +24,7 @@ use crate::builtins::math::fft::common::ensure_wide_integer_data_exact;
 use crate::builtins::math::signal::common::{
     complex_vector_to_value_with_dtype, preflight_iir_operands, value_to_complex_vector,
     vector_is_row, ComplexVectorInput, IirAdmissionFault, IirFaultKind, IirForm, IirOperand,
+    SignalCooperation,
 };
 use crate::builtins::math::signal::resident_output::{self, OutputContext};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -148,16 +149,33 @@ fn filtfilt_error_with_message(
     keywords = "filtfilt,zero phase,filter,IIR,FIR,signal processing,gpu",
     accel = "custom",
     binding_variant = "default",
+    context = true,
     descriptor(runmat_builtins::FILTFILT_DESCRIPTOR),
     extensions(runmat_builtins::FILTFILT_EXTENSIONS),
     integer_capabilities(runmat_builtins::FILTFILT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::filtfilt"
 )]
-async fn filtfilt_builtin(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
-    evaluate(b, a, x).await
+async fn filtfilt_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    b: Value,
+    a: Value,
+    x: Value,
+) -> BuiltinResult<Value> {
+    evaluate_with_runtime(runtime.as_ref(), b, a, x).await
 }
 
 pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
+    evaluate_with_runtime(None, b, a, x).await
+}
+
+async fn evaluate_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    b: Value,
+    a: Value,
+    x: Value,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     ensure_filtfilt_extensions([&b, &a, &x])?;
     preflight_iir_operands(IirForm::ZeroPhase, &b, &a, &x, None)
         .map_err(filtfilt_preflight_error)?;
@@ -238,11 +256,13 @@ pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
-    if let Some(value) = try_filtfilt_gpu(&coeffs, &x_input, output_dtype, &borrowed).await? {
+    if let Some(value) =
+        try_filtfilt_gpu(&coeffs, &x_input, output_dtype, &borrowed, &mut cooperation).await?
+    {
         return Ok(value);
     }
 
-    let filtered = filtfilt_host(&coeffs, &x_input.data)?;
+    let filtered = filtfilt_host(&coeffs, &x_input.data, &mut cooperation).await?;
     complex_vector_to_value_with_dtype(
         filtered,
         x_input.shape,
@@ -402,9 +422,10 @@ fn divide_by_leading_coefficient(value: Complex<f64>, leading: Complex<f64>) -> 
     }
 }
 
-fn filtfilt_host(
+async fn filtfilt_host(
     coeffs: &NormalizedCoefficients,
     signal: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Vec<Complex<f64>>> {
     if coeffs.state_len == 0 {
         let gain = coeffs.b[0];
@@ -425,7 +446,7 @@ fn filtfilt_host(
         ));
     }
 
-    let zi = lfilter_zi(coeffs)?;
+    let zi = lfilter_zi(coeffs, cooperation).await?;
     let extended = odd_reflect(signal, nfact)?;
     let first = extended[0];
     let y = direct_form_filter(coeffs, &extended, &scale_state(&zi, first));
@@ -525,6 +546,7 @@ async fn try_filtfilt_gpu(
     input: &ComplexVectorInput,
     output_dtype: NumericDType,
     borrowed: &[&GpuTensorHandle],
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Option<Value>> {
     let Some(input_handle) = input.gpu_handle.as_ref() else {
         return Ok(None);
@@ -554,7 +576,7 @@ async fn try_filtfilt_gpu(
         return Ok(None);
     }
 
-    let zi = lfilter_zi(coeffs)?;
+    let zi = lfilter_zi(coeffs, cooperation).await?;
     if zi.iter().any(|z| z.im != 0.0) {
         return Ok(None);
     }
@@ -912,6 +934,25 @@ mod tests {
             .any(|err| err.code == "RM.FILTFILT.INVALID_SIGNAL"));
         assert_eq!(builtin.integer_capabilities.len(), 1);
         assert_eq!(builtin.extensions.len(), 2);
+    }
+
+    #[test]
+    fn registered_filtfilt_binding_uses_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(filtfilt_builtin_registered(
+            Some(runtime),
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(1.0),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     }
 
     #[test]

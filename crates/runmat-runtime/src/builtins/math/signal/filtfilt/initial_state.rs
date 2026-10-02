@@ -5,6 +5,7 @@ use super::{
     filtfilt_error_with_detail, NormalizedCoefficients, BUILTIN_NAME, FILTFILT_ERROR_INTERNAL,
     FILTFILT_ERROR_INVALID_COEFFICIENTS,
 };
+use crate::builtins::math::signal::common::SignalCooperation;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
 use std::collections::TryReserveError;
 
@@ -39,7 +40,13 @@ fn singular_error() -> crate::RuntimeError {
     )
 }
 
-pub(super) fn lfilter_zi(coeffs: &NormalizedCoefficients) -> BuiltinResult<Vec<Complex<f64>>> {
+const SOLVE_CHUNK: u64 = 4096;
+
+pub(super) async fn lfilter_zi(
+    coeffs: &NormalizedCoefficients,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<Complex<f64>>> {
+    cooperation.completed(0).await?;
     let n = coeffs.state_len;
     if n == 0 {
         return Ok(Vec::new());
@@ -59,6 +66,9 @@ pub(super) fn lfilter_zi(coeffs: &NormalizedCoefficients) -> BuiltinResult<Vec<C
         row.try_reserve_exact(n).map_err(allocation_error)?;
         row.resize(n, Complex::new(0.0, 0.0));
         matrix.push(row);
+        cooperation
+            .completed(u64::try_from(n).unwrap_or(u64::MAX))
+            .await?;
     }
     for (row, row_values) in matrix.iter_mut().enumerate() {
         for (col, value) in row_values.iter_mut().enumerate() {
@@ -74,19 +84,27 @@ pub(super) fn lfilter_zi(coeffs: &NormalizedCoefficients) -> BuiltinResult<Vec<C
             };
             *value -= a_t;
         }
+        cooperation
+            .completed(u64::try_from(n).unwrap_or(u64::MAX))
+            .await?;
     }
     let mut rhs = Vec::new();
     rhs.try_reserve_exact(n).map_err(allocation_error)?;
     for idx in 0..n {
         rhs.push(coeffs.b[idx + 1] - coeffs.a[idx + 1] * coeffs.b[0]);
     }
-    solve_linear(matrix, rhs)
+    cooperation
+        .completed(u64::try_from(n).unwrap_or(u64::MAX))
+        .await?;
+    solve_linear(matrix, rhs, cooperation).await
 }
 
-fn solve_linear(
+async fn solve_linear(
     mut matrix: Vec<Vec<Complex<f64>>>,
     mut rhs: Vec<Complex<f64>>,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Vec<Complex<f64>>> {
+    cooperation.completed(0).await?;
     let n = rhs.len();
     for (row, values) in matrix.iter_mut().enumerate() {
         let scale = values.iter().fold(0.0_f64, |largest, value| {
@@ -101,12 +119,16 @@ fn solve_linear(
         for value in values {
             *value = Complex::new(value.re / scale, value.im / scale);
         }
+        cooperation
+            .completed(u64::try_from(n).unwrap_or(u64::MAX))
+            .await?;
         rhs[row] = Complex::new(rhs[row].re / scale, rhs[row].im / scale);
         if !finite(rhs[row]) {
             return Err(range_error());
         }
     }
 
+    let mut work = 0_u64;
     for pivot_idx in 0..n {
         let Some(pivot_row) = (pivot_idx..n).max_by(|&left, &right| {
             matrix[left][pivot_idx]
@@ -134,6 +156,11 @@ fn solve_linear(
                 if !finite(values[col]) {
                     return Err(range_error());
                 }
+                work += 1;
+                if work == SOLVE_CHUNK {
+                    cooperation.completed(work).await?;
+                    work = 0;
+                }
             }
             rhs[row] -= factor * pivot_rhs;
             if !finite(rhs[row]) {
@@ -142,6 +169,8 @@ fn solve_linear(
         }
     }
 
+    cooperation.completed(work).await?;
+
     let mut out = Vec::new();
     out.try_reserve_exact(n).map_err(allocation_error)?;
     out.resize(n, Complex::new(0.0, 0.0));
@@ -149,6 +178,11 @@ fn solve_linear(
         let mut acc = rhs[row];
         for (col, value) in matrix[row].iter().enumerate().skip(row + 1) {
             acc -= *value * out[col];
+            work += 1;
+            if work == SOLVE_CHUNK {
+                cooperation.completed(work).await?;
+                work = 0;
+            }
         }
         let pivot = matrix[row][row];
         if pivot == Complex::new(0.0, 0.0) {
@@ -159,16 +193,38 @@ fn solve_linear(
             return Err(range_error());
         }
     }
+    cooperation.completed(work).await?;
     Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::{cancellation::CancellationSource, CancellationReason};
+    use std::{cell::Cell, num::NonZeroU64, rc::Rc};
+
+    fn solve(
+        matrix: Vec<Vec<Complex<f64>>>,
+        rhs: Vec<Complex<f64>>,
+    ) -> BuiltinResult<Vec<Complex<f64>>> {
+        futures::executor::block_on(solve_linear(
+            matrix,
+            rhs,
+            &mut SignalCooperation::new(None, BUILTIN_NAME),
+        ))
+    }
+
+    fn state(coeffs: &NormalizedCoefficients) -> BuiltinResult<Vec<Complex<f64>>> {
+        futures::executor::block_on(lfilter_zi(
+            coeffs,
+            &mut SignalCooperation::new(None, BUILTIN_NAME),
+        ))
+    }
 
     #[test]
     fn small_nonzero_pivot_remains_admissible_without_fixed_epsilon() {
-        let solution = solve_linear(
+        let solution = solve(
             vec![vec![Complex::new(1.0e-14, 0.0)]],
             vec![Complex::new(1.0, 0.0)],
         )
@@ -180,10 +236,10 @@ mod tests {
             &[Complex::new(1.0, 0.0), Complex::new(-(1.0 - 1.0e-14), 0.0)],
         )
         .expect("near-unit-root coefficients");
-        let state = lfilter_zi(&coeffs).expect("finite near-unit-root initial state");
+        let state = state(&coeffs).expect("finite near-unit-root initial state");
         assert!(state[0].re.is_finite());
         assert!(state[0].re > 1.0e13);
-        let complex = solve_linear(
+        let complex = solve(
             vec![vec![Complex::new(1.0e-14, 1.0e-14)]],
             vec![Complex::new(1.0, 1.0)],
         )
@@ -194,12 +250,12 @@ mod tests {
 
     #[test]
     fn zero_and_nonrepresentable_systems_reject_without_publishing_nan() {
-        assert!(solve_linear(
+        assert!(solve(
             vec![vec![Complex::new(0.0, 0.0)]],
             vec![Complex::new(1.0, 0.0)],
         )
         .is_err());
-        assert!(solve_linear(
+        assert!(solve(
             vec![vec![Complex::new(f64::MIN_POSITIVE, 0.0)]],
             vec![Complex::new(f64::MAX, 0.0)],
         )
@@ -208,7 +264,7 @@ mod tests {
 
     #[test]
     fn multistate_scaled_pivoting_reconstructs_independent_real_and_complex_solutions() {
-        let real = solve_linear(
+        let real = solve(
             vec![
                 vec![Complex::new(1.0e-14, 0.0), Complex::new(1.0, 0.0)],
                 vec![Complex::new(1.0, 0.0), Complex::new(1.0, 0.0)],
@@ -219,7 +275,7 @@ mod tests {
         assert!((real[0].re - 2.0).abs() < 1.0e-10);
         assert!((real[1].re - 3.0).abs() < 1.0e-10);
 
-        let complex = solve_linear(
+        let complex = solve(
             vec![
                 vec![Complex::new(1.0e-14, 1.0e-14), Complex::new(0.0, 0.0)],
                 vec![Complex::new(0.0, 0.0), Complex::new(2.0, -1.0)],
@@ -241,8 +297,46 @@ mod tests {
             order: usize::MAX,
             state_len: usize::MAX,
         };
-        let error = lfilter_zi(&impossible).expect_err("checked square size before indexing");
+        let error = state(&impossible).expect_err("checked square size before indexing");
         assert_eq!(error.identifier(), FILTFILT_ERROR_INTERNAL.identifier);
+        assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+    }
+
+    #[test]
+    fn initial_state_solver_observes_invocation_cancellation_after_work() {
+        let coeffs = NormalizedCoefficients::new(
+            &[
+                Complex::new(0.0, 0.0),
+                Complex::new(1.0, 0.0),
+                Complex::new(0.0, 0.0),
+            ],
+            &[
+                Complex::new(1.0, 0.0),
+                Complex::new(-0.5, 0.0),
+                Complex::new(0.2, 0.0),
+            ],
+        )
+        .unwrap();
+        let source = Rc::new(CancellationSource::new());
+        let turns = Rc::new(Cell::new(0));
+        let cancelled = source.clone();
+        let observed = turns.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(9).unwrap()),
+            source.token(),
+            move || {
+                observed.set(observed.get() + 1);
+                cancelled.cancel(CancellationReason::User);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let error = futures::executor::block_on(lfilter_zi(
+            &coeffs,
+            &mut SignalCooperation::with_budget(budget, BUILTIN_NAME),
+        ))
+        .expect_err("cancelled invocation must not publish initial state");
+        assert_eq!(turns.get(), 1);
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
     }
 }
