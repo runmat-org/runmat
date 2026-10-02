@@ -68,7 +68,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "How do I see available properties?", answer: "Call `get(h)` without a property name. The resulting struct lists the known properties for that handle type." },
-        BuiltinDocumentationFaq { question: "Can I query axes handles?", answer: "Yes. Axes, legends, text objects, and plot-child handles use the same interface; for example, `get(gca,'XScale')` reads the current x-axis scale mode." },
+        BuiltinDocumentationFaq { question: "Can I query axes handles?", answer: "Yes. Axes, legends, text objects, and plot-child handles use the same interface. For axes, `get(gca,'XScale')` reads the x-axis scale mode, `get(gca,'View')` reads the camera angle, and `get(gca,'FontSize')` reads the tick-label font size." },
         BuiltinDocumentationFaq { question: "What if a property does not exist?", answer: "RunMat raises a plotting error. Call `get(h)` to inspect the fields exposed by that handle family." },
     ],
     links: &[

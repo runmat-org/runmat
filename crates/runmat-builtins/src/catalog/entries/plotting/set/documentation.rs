@@ -48,7 +48,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Can I set multiple properties in one call?", answer: "Yes. Pass alternating property/value pairs, such as `set(h,'Color','r','LineWidth',2)`. The line, scatter, and 3-D line owner validates coordinates and selected controls before one guarded plot update; style validation and other handle families are not uniformly transactional." },
-        BuiltinDocumentationFaq { question: "Which line properties are common?", answer: "`Color`, `LineWidth`, `LineStyle`, `Marker`, and `DisplayName` cover typical styling. `DisplayName` feeds the legend when it is created without explicit labels. For example, `set(h,'Color',[0.2 0.6 0.8],'LineWidth',1.5,'DisplayName','measured')`." },
+        BuiltinDocumentationFaq { question: "Which line properties are common?", answer: "`Color`, `LineWidth`, `LineStyle`, `Marker`, and `DisplayName` cover typical styling. `DisplayName` feeds the legend when it is created without explicit labels. For example, create the line with `h = plot(x,y);`, then use `set(h,'Color',[0.2 0.6 0.8],'LineWidth',1.5,'DisplayName','measured')`." },
         BuiltinDocumentationFaq { question: "What if a property is unsupported?", answer: "Property availability depends on the handle family; inspect `get(h)` first. Many owners report an error, but some legacy plot-child setters currently ignore unknown names, so do not rely on a uniform rejection guarantee." },
     ],
     links: &[
