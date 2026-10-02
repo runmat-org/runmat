@@ -57,7 +57,7 @@ pub(super) fn source(
         );
         return None;
     }
-    if !facts.effects.0.is_empty() {
+    if !facts.effects.is_side_effect_free() {
         error(
             declaration,
             declaration.span,

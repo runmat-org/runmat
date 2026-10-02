@@ -12,6 +12,12 @@ mod fixture;
 #[path = "duct/reference.rs"]
 mod reference;
 
+#[derive(Clone, Copy, Debug)]
+enum Drive {
+    NormalVelocity,
+    IncidentPressure,
+}
+
 struct Evidence {
     project: Option<TempDir>,
     pressure: Vec<f64>,
@@ -37,6 +43,15 @@ impl Drop for Evidence {
 
 #[test]
 fn authored_matched_duct_refines_and_reopens_full_partial_complex_components() {
+    qualify(Drive::NormalVelocity);
+}
+
+#[test]
+fn authored_incident_duct_refines_and_reopens_full_partial_complex_components() {
+    qualify(Drive::IncidentPressure);
+}
+
+fn qualify(drive: Drive) {
     // Eight actual processes: two orders, two independently remeshed target sizes,
     // generated/explicit complex normal-velocity sources. Not a nested mesh rate claim.
     // Exercise the previously rejecting order first; do not spend four producer runs
@@ -44,8 +59,8 @@ fn authored_matched_duct_refines_and_reopens_full_partial_complex_components() {
     for quadratic in [true, false] {
         let mut refinement = Vec::new();
         for size in [0.5, 0.25] {
-            let generated = execute(quadratic, size, true);
-            let explicit = execute(quadratic, size, false);
+            let generated = execute(drive, quadratic, size, true);
+            let explicit = execute(drive, quadratic, size, false);
             assert_eq!(generated.mesh_digest, explicit.mesh_digest);
             for (left, right) in [
                 (&generated.pressure, &explicit.pressure),
@@ -68,10 +83,10 @@ fn authored_matched_duct_refines_and_reopens_full_partial_complex_components() {
     }
 }
 
-fn execute(quadratic: bool, size: f64, generated: bool) -> Evidence {
+fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidence {
     let project = TempDir::new().unwrap();
     let evidence = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let imported = fixture::prepare(&project, quadratic, size, generated);
+        let imported = fixture::prepare(&project, drive, quadratic, size, generated);
         let output = runmat(
             &project,
             &[
@@ -170,6 +185,7 @@ fn execute(quadratic: bool, size: f64, generated: bool) -> Evidence {
         );
         assert_eq!(completed.workload.solver.maximum_iterations, 4096);
         fixture::verify_medium(&completed.workload.model, &mesh);
+        fixture::verify_drive(&completed.workload.model, drive, generated);
         let result = &completed.result.result;
         let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
         assert!(result
@@ -208,7 +224,7 @@ fn execute(quadratic: bool, size: f64, generated: bool) -> Evidence {
         if size == 0.25 {
             assert!(intensity_error < 0.005);
         }
-        eprintln!("authored matched duct quadratic={quadratic} size={size} generated={generated} nodes={} elements={} pressure={pressure_error} velocity={velocity_error} intensity={intensity_error}", projection.nodes.len(), projection.elements.len());
+        eprintln!("authored matched duct drive={drive:?} quadratic={quadratic} size={size} generated={generated} nodes={} elements={} pressure={pressure_error} velocity={velocity_error} intensity={intensity_error}", projection.nodes.len(), projection.elements.len());
         Evidence {
             project: None,
             pressure,

@@ -9,8 +9,7 @@ use runmat_geometry_core::{GeometryAuthoringValue, GeometryScalarExpression};
 use runmat_geometry_ops::ResolvedGeneratedGeometryRequest;
 use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
 use runmat_types::{
-    CapabilityRequirement, EffectKind, NumericClass, NumericDomain, ShapeFact, ValueFact,
-    ValueKindFact,
+    CapabilityRequirement, NumericClass, NumericDomain, ShapeFact, ValueFact, ValueKindFact,
 };
 
 use crate::{
@@ -150,8 +149,7 @@ pub fn admit_named_geometry_generator(
         .zip(&function.callable.parameters)
         .map(|(argument, parameter)| encode_argument(&argument.value, parameter))
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
-    let permitted_effects = BTreeSet::from([EffectKind::MayThrow]);
-    if !function.effects.0.is_subset(&permitted_effects)
+    if !function.effects.is_side_effect_free()
         || !function.capabilities.0.is_subset(available_capabilities)
     {
         return Err(AnalysisBridgeError::Invalid(

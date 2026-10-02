@@ -18,8 +18,8 @@ use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::BundleCallable;
 use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
 use runmat_types::{
-    CapabilityRequirement, DimensionFact, EffectKind, NumericClass, NumericDomain, ShapeFact,
-    ValueFact, ValueKindFact,
+    CapabilityRequirement, DimensionFact, NumericClass, NumericDomain, ShapeFact, ValueFact,
+    ValueKindFact,
 };
 
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
@@ -539,12 +539,12 @@ fn validate_static_contract(
             "seeded-random generators require a task-scoped deterministic RNG context".into(),
         ));
     }
-    let permitted_effects = BTreeSet::from([EffectKind::MayThrow]);
-    if !function.effects.0.is_subset(&permitted_effects) {
+    if !function.effects.is_side_effect_free() {
         let forbidden = function
             .effects
             .0
-            .difference(&permitted_effects)
+            .iter()
+            .filter(|effect| !effect.is_side_effect_free())
             .copied()
             .collect::<Vec<_>>();
         return Err(AnalysisBridgeError::Invalid(format!(
@@ -718,8 +718,8 @@ mod tests {
     use runmat_execution::value::InlineValue;
     use runmat_execution::ProgramEnvironment;
     use runmat_types::{
-        CallableFact, CapabilitySet, EffectSet, NumericClass, NumericDomain, NumericFact,
-        ProgramFunctionId, ValueFact,
+        CallableFact, CapabilitySet, EffectKind, EffectSet, NumericClass, NumericDomain,
+        NumericFact, ProgramFunctionId, ValueFact,
     };
 
     use super::*;

@@ -39,11 +39,22 @@ impl TestHost {
     }
 
     pub fn with_function(
+        self,
+        path: &str,
+        symbol: &str,
+        inputs: Vec<runmat_types::OperationParameter>,
+        outputs: Vec<runmat_types::OperationTypePattern>,
+    ) -> Self {
+        self.with_effectful_function(path, symbol, inputs, outputs, EffectSet::default())
+    }
+
+    pub fn with_effectful_function(
         mut self,
         path: &str,
         symbol: &str,
         inputs: Vec<runmat_types::OperationParameter>,
         outputs: Vec<runmat_types::OperationTypePattern>,
+        effects: EffectSet,
     ) -> Self {
         self.functions.insert(
             (path.to_string(), symbol.to_string()),
@@ -54,7 +65,7 @@ impl TestHost {
                 declaration_span: runmat_types::Span::default(),
                 inputs,
                 outputs,
-                effects: EffectSet::default(),
+                effects,
                 capabilities: CapabilitySet::default(),
             },
         );

@@ -5,7 +5,15 @@ use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
 fn check(domain: &str, members: &str) -> CheckedFeaProgram {
-    let host = TestHost::default().with_function(
+    check_effects(domain, members, runmat_types::EffectSet::default())
+}
+
+fn check_effects(
+    domain: &str,
+    members: &str,
+    effects: runmat_types::EffectSet,
+) -> CheckedFeaProgram {
+    let host = TestHost::default().with_effectful_function(
         "project/response.m",
         "response",
         vec![runmat_types::OperationParameter {
@@ -15,6 +23,7 @@ fn check(domain: &str, members: &str) -> CheckedFeaProgram {
             default: None,
         }],
         vec![runmat_types::OperationTypePattern::NumericArray],
+        effects,
     );
     let source = format!(
         r#"
@@ -83,6 +92,39 @@ fn generated_physical_axes_and_complex_precision_survive_lowering() {
             panic!("force signal expected")
         };
         assert_eq!(signal.precision, precision);
+    }
+}
+
+#[test]
+fn generated_signal_purity_agrees_with_callable_admission() {
+    use runmat_types::{EffectKind, EffectSet};
+    use std::collections::BTreeSet;
+    let members = "sample_points = [0.2 Hz, 0.4 Hz]\nprecision = complex128";
+    assert!(check_effects(
+        "frequency",
+        members,
+        EffectSet(BTreeSet::from([EffectKind::MayThrow]))
+    )
+    .is_valid());
+    for forbidden in [
+        EffectKind::Unknown,
+        EffectKind::Network,
+        EffectKind::Randomness,
+        EffectKind::WorkspaceRead,
+        EffectKind::FilesystemRead,
+        EffectKind::HostCallback,
+        EffectKind::MaySuspend,
+    ] {
+        let program = check_effects(
+            "frequency",
+            members,
+            EffectSet(BTreeSet::from([EffectKind::MayThrow, forbidden])),
+        );
+        assert!(!program.is_valid(), "{forbidden:?}");
+        assert!(program
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("generator must be pure")));
     }
 }
 
