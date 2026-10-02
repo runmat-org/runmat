@@ -262,9 +262,10 @@ impl AccelProvider for WgpuProvider {
             || crate::placement::floating_cast_unresolved_adaptation(&query.operation)
             || query.operation.workload.iir.is_some()
             || matches!(
-                query.operation.operation.0,
+                query.operation.operation.0.as_str(),
                 runmat_accelerate_api::PROVIDER_IIR_CAUSAL_PASS_OPERATION
                     | runmat_accelerate_api::PROVIDER_IIR_ZERO_PHASE_OPERATION
+                    | runmat_accelerate_api::PROVIDER_IIR_PREPARED_PASS_OPERATION
             )
         {
             return None;
