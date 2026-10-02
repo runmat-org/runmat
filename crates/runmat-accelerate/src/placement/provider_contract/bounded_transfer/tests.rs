@@ -45,12 +45,18 @@ fn empty_wgpu_upload_admission_counts_physical_storage_without_copy_volume() {
         let exact = ProviderFeasibilityQuery {
             operation: ProviderOperationIdentity::new("transfer.upload"),
             family: ProviderOperationFamily::Upload,
-            inputs: vec![ProviderRepresentation {
-                residency: ProviderResidency::Host,
-                ..output.clone()
-            }],
+            inputs: vec![
+                ProviderRepresentation {
+                    residency: ProviderResidency::Host,
+                    ..output.clone()
+                };
+                2
+            ],
             outputs: vec![output.clone(), output.clone()],
-            workload: ProviderWorkload::default(),
+            workload: ProviderWorkload {
+                requested_outputs: Some(2),
+                ..ProviderWorkload::default()
+            },
         };
         let ProviderFeasibility::Supported { estimate } =
             wgpu_dense_feasibility(&snapshot(class, width), &exact, precision)
@@ -59,7 +65,7 @@ fn empty_wgpu_upload_admission_counts_physical_storage_without_copy_volume() {
         };
         assert_eq!(output.checked_byte_len(), Some(0));
         assert_eq!(estimate.output_bytes, Some(2 * width));
-        assert_eq!(estimate.transient_bytes, Some(3 * width));
+        assert_eq!(estimate.transient_bytes, Some(4 * width));
         assert!(matches!(
             wgpu_dense_feasibility(&snapshot(class, width - 1), &exact, precision),
             ProviderFeasibility::Rejected { .. }
@@ -130,12 +136,18 @@ fn exact_wgpu_upload_uses_physical_width_for_every_numeric_class() {
             let query = ProviderFeasibilityQuery {
                 operation: ProviderOperationIdentity::new("transfer.upload"),
                 family: ProviderOperationFamily::Upload,
-                inputs: vec![ProviderRepresentation {
-                    residency: ProviderResidency::Host,
-                    ..output.clone()
-                }],
+                inputs: vec![
+                    ProviderRepresentation {
+                        residency: ProviderResidency::Host,
+                        ..output.clone()
+                    };
+                    2
+                ],
                 outputs: vec![output.clone(), output],
-                workload: ProviderWorkload::default(),
+                workload: ProviderWorkload {
+                    requested_outputs: Some(2),
+                    ..ProviderWorkload::default()
+                },
             };
             let snapshot = |limit| ProviderCapabilitySnapshot {
                 schema_version: PROVIDER_CAPABILITY_SCHEMA_VERSION,
@@ -167,7 +179,7 @@ fn exact_wgpu_upload_uses_physical_width_for_every_numeric_class() {
                 panic!("{class:?} with {elements} elements fits each buffer");
             };
             assert_eq!(estimate.output_bytes, Some(2 * bytes_per_output));
-            assert_eq!(estimate.transient_bytes, Some(3 * bytes_per_output));
+            assert_eq!(estimate.transient_bytes, Some(4 * bytes_per_output));
             assert!(matches!(
                 wgpu_dense_feasibility(
                     &snapshot(bytes_per_output - 1),
@@ -200,6 +212,38 @@ fn exact_wgpu_upload_uses_physical_width_for_every_numeric_class() {
                 ),
                 ProviderFeasibility::Rejected { .. }
             ));
+            let mut wrong_shape = query.clone();
+            wrong_shape.outputs[0].shape = vec![elements, 1];
+            assert!(!wgpu_dense_feasibility(
+                &snapshot(bytes_per_output),
+                &wrong_shape,
+                ProviderPrecision::F64
+            )
+            .is_supported());
+            let mut missing_input = query.clone();
+            missing_input.inputs.pop();
+            assert!(!wgpu_dense_feasibility(
+                &snapshot(bytes_per_output),
+                &missing_input,
+                ProviderPrecision::F64
+            )
+            .is_supported());
+            let mut wrong_residency = query.clone();
+            wrong_residency.inputs[0].residency = ProviderResidency::Device;
+            assert!(!wgpu_dense_feasibility(
+                &snapshot(bytes_per_output),
+                &wrong_residency,
+                ProviderPrecision::F64
+            )
+            .is_supported());
+            let mut wrong_output_count = query.clone();
+            wrong_output_count.workload.requested_outputs = Some(1);
+            assert!(!wgpu_dense_feasibility(
+                &snapshot(bytes_per_output),
+                &wrong_output_count,
+                ProviderPrecision::F64
+            )
+            .is_supported());
         }
     }
 }

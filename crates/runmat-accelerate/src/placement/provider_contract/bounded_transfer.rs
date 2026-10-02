@@ -90,3 +90,48 @@ pub(super) fn feasibility(
         dispatches: Some(0),
     }))
 }
+
+/// An exact upload query represents one host payload per device result. A
+/// multi-result query is a sequence of those exact uploads, never one input
+/// that magically produces additional outputs. This runs before generic dense
+/// byte estimation for both native and non-native classes.
+pub(super) fn exact_contract(query: &ProviderFeasibilityQuery) -> Option<ProviderFeasibility> {
+    if query.operation.0 != "transfer.upload" || query.family != ProviderOperationFamily::Upload {
+        return None;
+    }
+    let count = u32::try_from(query.outputs.len()).ok();
+    let valid_count = !query.inputs.is_empty()
+        && query.inputs.len() == query.outputs.len()
+        && count.is_some_and(|count| {
+            query.workload.requested_outputs == Some(count)
+                || (count == 1 && query.workload.requested_outputs.is_none())
+        });
+    let valid_pairs = query
+        .inputs
+        .iter()
+        .zip(&query.outputs)
+        .all(|(input, output)| {
+            let expected_storage = match input.element_type {
+                ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => {
+                    ProviderStorage::DenseComplexInterleaved
+                }
+                _ => ProviderStorage::DenseReal,
+            };
+            input.element_type == output.element_type
+                && input.storage == expected_storage
+                && output.storage == expected_storage
+                && input.layout == ProviderLayout::ColumnMajorContiguous
+                && output.layout == ProviderLayout::ColumnMajorContiguous
+                && input.shape == output.shape
+                && input.residency == ProviderResidency::Host
+                && output.residency == ProviderResidency::Device
+        });
+    if valid_count && valid_pairs {
+        None
+    } else {
+        Some(ProviderFeasibility::rejected(
+            ProviderRejectionCode::InvalidShape,
+            "provider.transfer.exact_contract",
+        ))
+    }
+}

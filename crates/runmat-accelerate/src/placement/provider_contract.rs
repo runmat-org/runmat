@@ -565,6 +565,9 @@ fn dense_feasibility_with_bytes(
     if let Some(feasibility) = bounded_transfer::feasibility(snapshot, query) {
         return feasibility;
     }
+    if let Some(feasibility) = bounded_transfer::exact_contract(query) {
+        return feasibility;
+    }
 
     let mut total_bytes = 0_u64;
     let mut largest_allocation = 0_u64;
@@ -824,5 +827,39 @@ mod tests {
             },
         };
         assert!(provider.query_feasibility(&bounded).is_supported());
+
+        let mut native = upload.clone();
+        native.inputs[0].element_type = ProviderElementType::F64;
+        native.outputs[0].element_type = ProviderElementType::F64;
+        assert!(provider.query_feasibility(&native).is_supported());
+        let mut malformed = Vec::new();
+        let mut shape = native.clone();
+        shape.outputs[0].shape = vec![2, 8];
+        malformed.push(shape);
+        let mut count = native.clone();
+        count.outputs.push(count.outputs[0].clone());
+        malformed.push(count);
+        let mut requested = native.clone();
+        requested.workload.requested_outputs = Some(2);
+        malformed.push(requested);
+        let mut source_residency = native.clone();
+        source_residency.inputs[0].residency = ProviderResidency::Device;
+        malformed.push(source_residency);
+        let mut result_residency = native.clone();
+        result_residency.outputs[0].residency = ProviderResidency::Host;
+        malformed.push(result_residency);
+        let mut class = native.clone();
+        class.outputs[0].element_type = ProviderElementType::F32;
+        malformed.push(class);
+        for query in malformed {
+            assert!(
+                !provider.query_feasibility(&query).is_supported(),
+                "malformed native-F64 upload was admitted: {query:?}"
+            );
+            assert!(matches!(
+                provider.operation_observation_capability(&query),
+                ProviderObservationCapability::Unsupported
+            ));
+        }
     }
 }
