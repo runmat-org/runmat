@@ -63,13 +63,13 @@ fn empty_shapes_have_zero_registered_allocation_and_overflow_is_rejected() {
 }
 
 #[test]
-fn physical_memory_limit_and_total_overflow_use_packed_allocations() {
+fn physical_allocation_limit_and_total_overflow_use_packed_allocations() {
     let provider = InProcessProvider::new();
     let mut snapshot = dense_capability_snapshot(&provider, 4, &[]);
     append(&mut snapshot);
     let mut request = query(&UINT8_CATALOG_ENTRY, ProviderElementType::U8, &[4]);
     request.outputs = request.inputs.clone();
-    snapshot.max_allocation_bytes = Some(16);
+    snapshot.max_allocation_bytes = Some(8);
     assert!(matches!(
         dense_feasibility(&snapshot, &request),
         ProviderFeasibility::Supported { .. }
@@ -78,6 +78,17 @@ fn physical_memory_limit_and_total_overflow_use_packed_allocations() {
         dense_feasibility_with_bytes(&snapshot, &request, checked_allocation_bytes),
         ProviderFeasibility::Rejected { .. }
     ));
+
+    // Each packed allocation is 16 bytes. The per-allocation limit does not
+    // constrain their combined 32-byte demand; placement owns total capacity.
+    snapshot.max_allocation_bytes = Some(16);
+    let packed = estimate(dense_feasibility_with_bytes(
+        &snapshot,
+        &request,
+        checked_allocation_bytes,
+    ));
+    assert_eq!(packed.output_bytes, Some(16));
+    assert_eq!(packed.transient_bytes, Some(32));
 
     snapshot.max_allocation_bytes = None;
     request.inputs[0].shape = vec![u64::MAX / 4];
