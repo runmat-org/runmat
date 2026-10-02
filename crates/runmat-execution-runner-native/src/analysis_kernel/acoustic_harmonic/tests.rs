@@ -18,6 +18,7 @@ use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 mod accuracy;
+mod incident;
 mod publication;
 mod sweep;
 

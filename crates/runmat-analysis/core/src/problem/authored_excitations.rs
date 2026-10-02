@@ -53,6 +53,8 @@ pub enum AuthoredExcitationKind {
     MagneticVolumeCurrentDensity,
     MagneticVectorPotential,
     AcousticPressure,
+    /// Uniform incoming pressure on a planar exterior acoustic boundary.
+    AcousticIncidentPressure,
     NormalVelocity,
     InletVelocity,
     MassFlow,
@@ -64,6 +66,9 @@ mod charge_density_tests;
 
 #[cfg(test)]
 mod magnetic_volume_current_tests;
+
+#[cfg(test)]
+mod incident_pressure_tests;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -86,7 +91,9 @@ impl AuthoredExcitationKind {
             Self::Force => PhysicalQuantityKind::Force,
             Self::Moment => PhysicalQuantityKind::Moment,
             Self::Traction => PhysicalQuantityKind::Traction,
-            Self::Pressure | Self::AcousticPressure => PhysicalQuantityKind::Pressure,
+            Self::Pressure | Self::AcousticPressure | Self::AcousticIncidentPressure => {
+                PhysicalQuantityKind::Pressure
+            }
             Self::BodyForce => PhysicalQuantityKind::BodyForceDensity,
             Self::HeatGeneration => PhysicalQuantityKind::HeatGenerationDensity,
             Self::HeatFlux => PhysicalQuantityKind::HeatFlux,
@@ -124,6 +131,7 @@ impl AuthoredExcitationKind {
             | Self::TerminalVoltage
             | Self::MagneticVectorPotential
             | Self::AcousticPressure
+            | Self::AcousticIncidentPressure
             | Self::NormalVelocity
             | Self::InletVelocity
             | Self::WallMotion => ExcitationDistribution::UniformKinematic,
@@ -344,6 +352,7 @@ fn valid_shape_and_direction(
         | AuthoredExcitationKind::ElectricCharge
         | AuthoredExcitationKind::ElectricChargeDensity
         | AuthoredExcitationKind::AcousticPressure
+        | AuthoredExcitationKind::AcousticIncidentPressure
         | AuthoredExcitationKind::NormalVelocity
         | AuthoredExcitationKind::MassFlow => scalar && !has_direction,
     }

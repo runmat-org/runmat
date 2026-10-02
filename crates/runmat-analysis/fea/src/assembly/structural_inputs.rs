@@ -285,9 +285,11 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::MagneticVectorPotential(_), _) => {
                 (StructuralLoadKind::MagneticVectorPotential, false)
             }
-            (RealizedExcitationKind::AcousticPressure(_), _) => {
-                (StructuralLoadKind::AcousticPressure, false)
-            }
+            (
+                RealizedExcitationKind::AcousticPressure(_)
+                | RealizedExcitationKind::AcousticIncidentPressure(_),
+                _,
+            ) => (StructuralLoadKind::AcousticPressure, false),
             (RealizedExcitationKind::NormalVelocity(_), _) => {
                 (StructuralLoadKind::NormalVelocity, false)
             }
@@ -419,7 +421,10 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
         RealizedExcitationKind::MagneticVectorPotential(_) => {
             StructuralLoadKind::MagneticVectorPotential
         }
-        RealizedExcitationKind::AcousticPressure(_) => StructuralLoadKind::AcousticPressure,
+        RealizedExcitationKind::AcousticPressure(_)
+        | RealizedExcitationKind::AcousticIncidentPressure(_) => {
+            StructuralLoadKind::AcousticPressure
+        }
         RealizedExcitationKind::NormalVelocity(_) => StructuralLoadKind::NormalVelocity,
         RealizedExcitationKind::InletVelocity(_) => StructuralLoadKind::InletVelocity,
         RealizedExcitationKind::MassFlow(_) => StructuralLoadKind::MassFlow,

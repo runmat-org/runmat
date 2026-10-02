@@ -4,6 +4,8 @@
 //! K_ij = integral grad(N_i).grad(N_j)/rho; M_ij = integral N_i N_j/(rho c²).
 //! A = K - omega² M + i omega B, B_ij = integral N_i N_j/Z.
 //! An outward normal velocity supplies b = -i omega integral N_i v_n.
+//! Uniform normally incoming pressure supplies b=2 i omega integral N_i Y p_inc,
+//! with its own matching outgoing operator. Reported input is net incoming power.
 
 mod assembly;
 mod boundary;
@@ -108,7 +110,9 @@ pub enum AcousticHarmonicError {
 /// Supports lossless isotropic fluids, prescribed complex pressure, outward normal velocity,
 /// rigid walls and positive real specific impedance. Unspecified exterior faces are rigid.
 /// Matching translated exterior-face periodic/Bloch constraints use unit-phase pressure
-/// relations. Rotated/nonmatching pairing, incident fields, material damping and radiation
+/// relations. Uniform normally incoming incident pressure requires a planar face in one
+/// homogeneous medium. Rotated/nonmatching pairing, oblique/spatial incident fields,
+/// material damping and radiation
 /// fail closed.
 /// This entry does not advertise workload admission, bounded-resource or release qualification.
 pub fn solve_canonical_harmonic(

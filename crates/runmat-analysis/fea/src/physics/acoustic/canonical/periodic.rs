@@ -142,11 +142,15 @@ impl AcousticAssembly {
             ));
         }
         for load in excitations.iter() {
-            if matches!(load.kind, RealizedExcitationKind::NormalVelocity(_)) {
+            if matches!(
+                load.kind,
+                RealizedExcitationKind::NormalVelocity(_)
+                    | RealizedExcitationKind::AcousticIncidentPressure(_)
+            ) {
                 if let RealizedExcitationTarget::Region(target) = &load.target {
                     if overlaps(target) {
                         return Err(AcousticHarmonicError::Boundary(
-                            "periodic pressure overlaps normal velocity".into(),
+                            "periodic pressure overlaps natural acoustic source".into(),
                         ));
                     }
                 }

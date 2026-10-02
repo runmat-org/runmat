@@ -747,9 +747,9 @@ fn action_class(action: &ExcitationAction) -> &'static str {
         | ExcitationAction::CurrentDensity(_)
         | ExcitationAction::MagneticVolumeCurrentDensity(_) => ELECTRICAL_EXCITATION_CLASS,
         ExcitationAction::MagneticVectorPotential(_) => MAGNETIC_EXCITATION_CLASS,
-        ExcitationAction::AcousticPressure(_) | ExcitationAction::NormalVelocity(_) => {
-            ACOUSTIC_EXCITATION_CLASS
-        }
+        ExcitationAction::AcousticPressure(_)
+        | ExcitationAction::AcousticIncidentPressure(_)
+        | ExcitationAction::NormalVelocity(_) => ACOUSTIC_EXCITATION_CLASS,
         ExcitationAction::InletVelocity(_)
         | ExcitationAction::MassFlow(_)
         | ExcitationAction::WallMotion(_) => FLUID_EXCITATION_CLASS,

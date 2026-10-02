@@ -314,7 +314,9 @@ fn sample_prescribed_scalar<'a, Q>(
     component: impl Fn(&Q) -> f64,
 ) -> Result<ComplexScalar, RealizationError> {
     match value {
-        PrescribedValue::Constant(value) => Ok(ComplexScalar::real(component(value))),
+        PrescribedValue::Constant(value) => {
+            expect_scalar(SampledValue::Scalar(ComplexScalar::real(component(value))))
+        }
         PrescribedValue::Signal(signal_id) => {
             let signal = signals
                 .iter()
@@ -333,7 +335,12 @@ fn sample_prescribed_scalar<'a, Q>(
 
 pub(crate) fn expect_scalar(value: SampledValue) -> Result<ComplexScalar, RealizationError> {
     match value {
-        SampledValue::Scalar(value) => Ok(value),
+        SampledValue::Scalar(value) if value.real.is_finite() && value.imaginary.is_finite() => {
+            Ok(value)
+        }
+        SampledValue::Scalar(_) => Err(RealizationError::new(
+            "scalar excitation requires finite real and imaginary components",
+        )),
         SampledValue::Vector3(_) | SampledValue::Tensor(_) => {
             Err(RealizationError::new("excitation requires scalar signal"))
         }

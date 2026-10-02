@@ -4,14 +4,14 @@ Acoustic pressure and normal velocity are conjugate boundary variables. A rigid 
 $v_n=0$; an impedance boundary imposes $p=Zv_n$; a radiation boundary approximates an outgoing-wave
 relation. They change the Helmholtz boundary operator in different ways.
 
-The typed language currently defines acoustic harmonic procedures. It can check the declarations
-below, but the native typed whole-study executor currently admits structural procedure graphs only;
-an acoustic `.fea` run fails closed at that boundary. The page therefore documents authoring and
-physics semantics, not a claim that `runmat fea run` executes acoustic studies today.
+The experimental native typed executor supports standalone canonical acoustic harmonic studies;
+see the retained [authored duct evidence](../qualification/acoustic-right-lu.md). This is not
+production qualification of all acoustic declarations or a general exterior-wave solver.
 
 | Kind | Quantity/fields | Use |
 | --- | --- | --- |
 | `acoustic_pressure` | Pa | Pressure signal on an acoustic boundary |
+| `incident_pressure` | Pa | Uniform normally incoming plane-wave pressure, not total pressure |
 | `normal_velocity` | m/s | Drive a boundary through normal velocity |
 | `acoustic.rigid_wall` | `target` | Zero normal velocity |
 | `acoustic.radiation` | `target` | Outgoing-wave truncation |
@@ -19,6 +19,30 @@ physics semantics, not a claim that `runmat fea run` executes acoustic studies t
 
 Every implemented acoustic action and boundary on this page targets a face region. Pressure and
 normal velocity are scalar normal quantities; they do not accept a separate global direction.
+
+## How do I inject incoming pressure without fixing the reflected pressure?
+
+```fea
+excitation incoming_wave {
+    incident_pressure {
+        target = geometry.duct.region.inlet
+        signal = signal.phased_pressure
+    }
+}
+```
+
+The signal supplies **incoming** pressure. Total pressure remains an unknown, allowing a reflected
+wave to leave through the same face. For peak phasors with `exp(+i omega t)`, the operator uses
+`v_n = Y (p - 2 p_inc)`, where `Y = 1/(rho*c)` comes from the unique exterior owning fluid.
+Reported input power is net incoming power (incoming minus reflected); it is not twice incident
+power from Robin source-work bookkeeping. The source has the same shared scalar pressure-signal
+and projection-provenance contract as other excitations, without private amplitude/phase arrays.
+
+This bounded implementation requires coplanar equally oriented exterior faces in one homogeneous
+medium, uniform distribution, fixed frame and no separate direction. Conflicting sources,
+natural boundaries, pressure prescriptions and periodic pairing reject. Curved, oblique and
+spatially varying incidence are not supported by this action. Do not add a separate impedance
+boundary on its target: the incoming action already includes the matching outgoing operator.
 
 ```fea
 load driver_velocity {

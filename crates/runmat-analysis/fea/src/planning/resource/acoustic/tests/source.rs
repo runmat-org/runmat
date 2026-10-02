@@ -1,6 +1,93 @@
 use super::*;
 
 #[test]
+fn incident_projection_metadata_and_cold_result_fit_admitted_payload() {
+    for mesh in [slab_mesh(2), quadratic_slab_mesh(2)] {
+        let mut workload = workload();
+        workload.model.constraints.clear();
+        let signal_id = SignalId("incident_drive_".repeat(1000));
+        let action_id = ExcitationId("incident_source_".repeat(1000));
+        workload
+            .model
+            .signals
+            .push(PhysicalSignal::Pressure(Signal {
+                signal_id: signal_id.clone(),
+                shape: SignalShape::Scalar,
+                frame: None,
+                representation: SignalRepresentation::Tabulated(TabulatedSignal {
+                    domain: TabulatedSignalDomain::FrequencyHertz,
+                    knots: [0.01, 1.0]
+                        .into_iter()
+                        .map(|f| {
+                            SignalKnot::continuous(
+                                f,
+                                SignalOrdinate::Complex {
+                                    real: SignalValue::Scalar(Pressure::new(1.0)),
+                                    imaginary: SignalValue::Scalar(Pressure::new(0.4)),
+                                },
+                            )
+                        })
+                        .collect(),
+                    interpolation: SignalInterpolation::Linear,
+                    extrapolation: SignalExtrapolation::Reject,
+                }),
+                precision: SignalPrecision::Complex64,
+                evidence: SignalApproximationEvidence {
+                    max_absolute_error: Some(0.0),
+                    max_relative_error: Some(0.0),
+                    derivative_max_absolute_error: None,
+                    sample_count: 2,
+                },
+                provenance: SignalProvenance::Authored,
+            }));
+        workload
+            .model
+            .excitations
+            .push(ExcitationAction::AcousticIncidentPressure(
+                AnalysisExcitation {
+                    excitation_id: action_id.clone(),
+                    target: ExcitationTarget::Region(RegionTarget::boundary("slab_left")),
+                    frame: CoordinateFrame::BoundaryNormalTangent,
+                    direction: None,
+                    distribution: ExcitationDistribution::UniformKinematic,
+                    kinematics: ExcitationKinematics::FixedFrame,
+                    signal_id,
+                    active_step_ids: vec![],
+                    combination_group: None,
+                    projection: ProjectionRequirement {
+                        preserve_resultant: true,
+                        preserve_moment: false,
+                        relative_tolerance: 1e-10,
+                    },
+                },
+            ));
+        workload.model.excitation_cases.push(ExcitationCase {
+            case_id: ExcitationCaseId("incident".into()),
+            action_ids: vec![action_id],
+            activation: ExcitationCaseActivation::Always,
+        });
+        let cold =
+            AcousticHarmonicWorkload::from_canonical_bytes(&workload.canonical_bytes().unwrap())
+                .unwrap();
+        assert_eq!(cold, workload);
+        let prepared = facts(&cold, &mesh);
+        build_acoustic_resource_plan(&cold, &mesh, prepared.clone()).unwrap();
+        let result = cold.execute(&mesh).unwrap();
+        assert_eq!(result.source_evidence().len(), 1);
+        let bytes = result.canonical_bytes().unwrap();
+        assert!(bytes.len() as u64 <= prepared.result_output.encoded_payload_bytes_upper_bound.0);
+        let imported =
+            crate::execution::AcousticHarmonicSolverResult::from_canonical_bytes(&bytes).unwrap();
+        imported.validate_for(&workload, &mesh).unwrap();
+        assert_eq!(imported, result);
+        assert_eq!(
+            imported.source_result_identity().unwrap(),
+            result.source_result_identity().unwrap()
+        );
+    }
+}
+
+#[test]
 fn long_named_complex_normal_velocity_evidence_fits_actual_payload() {
     for mesh in [slab_mesh(2), quadratic_slab_mesh(2)] {
         let mut workload = workload();

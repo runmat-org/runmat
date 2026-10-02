@@ -192,6 +192,23 @@ pub(super) fn realize_kind(
         ExcitationAction::AcousticPressure(_) => RealizedExcitationKind::AcousticPressure(
             scalar_action!(signal, PhysicalSignal::Pressure, pascals, sample)?,
         ),
+        ExcitationAction::AcousticIncidentPressure(excitation) => {
+            if signal.shape() != &SignalShape::Scalar
+                || excitation.direction.is_some()
+                || excitation.distribution
+                    != runmat_analysis_core::ExcitationDistribution::UniformKinematic
+                || excitation.kinematics != runmat_analysis_core::ExcitationKinematics::FixedFrame
+                || excitation.projection.preserve_moment
+            {
+                return Err(RealizationError::new("incident pressure requires a fixed-frame uniform scalar pressure without direction or moment projection"));
+            }
+            RealizedExcitationKind::AcousticIncidentPressure(scalar_action!(
+                signal,
+                PhysicalSignal::Pressure,
+                pascals,
+                sample
+            )?)
+        }
         ExcitationAction::NormalVelocity(_) => RealizedExcitationKind::NormalVelocity(
             scalar_action!(signal, PhysicalSignal::Velocity, meters_per_second, sample)?,
         ),

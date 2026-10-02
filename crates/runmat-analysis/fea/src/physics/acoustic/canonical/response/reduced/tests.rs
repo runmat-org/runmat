@@ -270,6 +270,7 @@ fn assembly(phase: f64, amplitude: f64) -> AcousticAssembly {
             .collect(),
         prescribed,
         source_evidence: Vec::new(),
+        incident_faces: Vec::new(),
         reduction: Some(reduction),
     }
 }

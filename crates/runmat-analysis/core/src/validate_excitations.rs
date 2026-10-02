@@ -218,6 +218,12 @@ fn validate_action_policy(
         ExcitationAction::WallMotion(_) => {
             excitation.distribution == ExcitationDistribution::UniformKinematic
         }
+        ExcitationAction::AcousticIncidentPressure(_) => {
+            excitation.distribution == ExcitationDistribution::UniformKinematic
+                && signal.shape() == &SignalShape::Scalar
+                && excitation.direction.is_none()
+                && excitation.kinematics == crate::ExcitationKinematics::FixedFrame
+        }
         _ => true,
     };
     if !distribution_valid {
@@ -255,6 +261,7 @@ fn validate_action_policy(
             | ExcitationAction::ElectricCurrent(_)
             | ExcitationAction::ElectricCharge(_)
             | ExcitationAction::ElectricChargeDensity(_)
+            | ExcitationAction::AcousticIncidentPressure(_)
             | ExcitationAction::MassFlow(_)
     ) && excitation.projection.preserve_moment
     {
@@ -298,7 +305,8 @@ fn validate_action_target(
         | ExcitationAction::InletVelocity(_)
         | ExcitationAction::MassFlow(_)
         | ExcitationAction::TerminalVoltage(_)
-        | ExcitationAction::AcousticPressure(_) => surface_target,
+        | ExcitationAction::AcousticPressure(_)
+        | ExcitationAction::AcousticIncidentPressure(_) => surface_target,
         ExcitationAction::BodyForce(_)
         | ExcitationAction::HeatGeneration(_)
         | ExcitationAction::ElectricChargeDensity(_)

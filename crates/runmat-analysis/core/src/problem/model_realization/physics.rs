@@ -251,6 +251,7 @@ fn realize_excitation(
         }
         AuthoredExcitationKind::MagneticVectorPotential => action!(MagneticVectorPotential),
         AuthoredExcitationKind::AcousticPressure => action!(AcousticPressure),
+        AuthoredExcitationKind::AcousticIncidentPressure => action!(AcousticIncidentPressure),
         AuthoredExcitationKind::NormalVelocity => action!(NormalVelocity),
         AuthoredExcitationKind::InletVelocity => action!(InletVelocity),
         AuthoredExcitationKind::MassFlow => action!(MassFlow),

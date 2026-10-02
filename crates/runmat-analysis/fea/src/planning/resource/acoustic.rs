@@ -90,10 +90,13 @@ fn evidence_profile(
         encoded_bytes_upper_bound: 9,
         materialization_resident_bytes_estimate: 24,
     };
-    for load in loads
-        .iter()
-        .filter(|load| matches!(load.kind, RealizedExcitationKind::NormalVelocity(_)))
-    {
+    for load in loads.iter().filter(|load| {
+        matches!(
+            load.kind,
+            RealizedExcitationKind::NormalVelocity(_)
+                | RealizedExcitationKind::AcousticIncidentPressure(_)
+        )
+    }) {
         let profile = profile_serialized(
             &SpatialProjectionEvidence::scalar_projection_serialization(
                 &load.excitation_id.0,
@@ -271,7 +274,9 @@ pub fn build_acoustic_resource_plan(
     let reservation = [
         // Boundary selectors clone face records and provenance; reserve another complete
         // projection metadata envelope while the authoritative projection remains retained.
-        mul(projection, 2)?,
+        // A disjoint incident-face set can retain at most one complete projection's
+        // face metadata for physical net-input power, in addition to selector clones.
+        mul(projection, 3)?,
         properties,
         operators,
         sparse_solve,

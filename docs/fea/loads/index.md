@@ -55,6 +55,7 @@ even when both happen to be represented by one number.
 | `current_density` | electric-current density | face | intensity per area or topology field | Distributed current injection |
 | `magnetic_vector_potential` | magnetic vector potential | face | uniform kinematic or topology field | Magnetic boundary drive |
 | `acoustic_pressure` | pressure | face | uniform kinematic or topology field | Acoustic pressure source |
+| `incident_pressure` | pressure | planar exterior face | uniform kinematic | Normally incoming pressure; matching outgoing operator included |
 | `normal_velocity` | velocity | face | uniform kinematic or topology field | Acoustic piston or normal wall velocity |
 | `inlet_velocity` | velocity | face | uniform kinematic or topology field | Fluid inlet profile |
 | `mass_flow` | mass-flow rate | face | preserve resultant | Total inlet or outlet mass flow |

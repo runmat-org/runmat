@@ -2,6 +2,7 @@ use crate::fixtures::{
     fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind, FixtureId,
 };
 
+mod acoustic_incident_pressure;
 mod charge_density;
 mod magnetic_volume_current;
 

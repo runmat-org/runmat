@@ -1,5 +1,6 @@
 use super::*;
 mod continuum;
+mod incident;
 mod interface;
 use crate::fixtures::{fixture_model, replace_fixture_excitations, FixtureId};
 use crate::topology::test_meshes::slab_mesh;
@@ -178,7 +179,7 @@ fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_
     }
 }
 
-fn model() -> AnalysisModel {
+pub(super) fn model() -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     replace_fixture_excitations(&mut model, Vec::new());
     model.constraints.clear();

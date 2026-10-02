@@ -18,6 +18,8 @@ use runmat_analysis_core::{
 use runmat_meshing_core::BoundaryFaceRole;
 use std::collections::BTreeSet;
 
+mod incident;
+
 impl AcousticAssembly {
     pub(super) fn with_boundaries(
         mut self,
@@ -52,8 +54,8 @@ impl AcousticAssembly {
                 }
                 BoundaryOperator::AcousticRadiation => {
                     return Err(AcousticHarmonicError::Unsupported(
-                        "radiation boundary".into(),
-                    ))
+                        "local radiation qualification is pending".into(),
+                    ));
                 }
                 _ => {
                     return Err(AcousticHarmonicError::Unsupported(
@@ -86,7 +88,6 @@ impl AcousticAssembly {
                     .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
             }
         }
-        self.impedance = finish(impedance)?;
         for constraint in &model.constraints {
             if !step.object_is_active(&StepObjectRef::Constraint(
                 constraint.constraint_id().to_string(),
@@ -134,6 +135,19 @@ impl AcousticAssembly {
                 ));
             };
             match load.kind {
+                RealizedExcitationKind::AcousticIncidentPressure(value) => {
+                    let faces = self.faces(target)?;
+                    if faces.iter().any(|face| {
+                        owned.contains(&face.face_id)
+                            || pressure_faces.contains(&face.face_id)
+                            || velocity_faces.contains(&face.face_id)
+                    }) {
+                        return Err(AcousticHarmonicError::Boundary(
+                            "incident pressure overlaps another acoustic source or boundary".into(),
+                        ));
+                    }
+                    self.add_incident_pressure(load, value, faces, &mut impedance, &mut owned)?;
+                }
                 RealizedExcitationKind::AcousticPressure(value) => {
                     if load.policy.distribution != ExcitationDistribution::UniformKinematic {
                         return Err(AcousticHarmonicError::Unsupported(
@@ -211,6 +225,7 @@ impl AcousticAssembly {
                 }
             }
         }
+        self.impedance = finish(impedance)?;
         if self
             .source
             .iter()
@@ -221,6 +236,45 @@ impl AcousticAssembly {
             ));
         }
         Ok(self)
+    }
+
+    /// First-order local outgoing condition for exp(+i omega t): v_n=p/(rho*c).
+    /// beta=1/(rho*c*c) is already authenticated from the owning compiled medium.
+    fn radiation_admittance(
+        &self,
+        face: &ProjectedBoundaryFace,
+    ) -> Result<f64, AcousticHarmonicError> {
+        if face.role != BoundaryFaceRole::Exterior {
+            return Err(AcousticHarmonicError::Boundary(
+                "radiation requires an exterior face".into(),
+            ));
+        }
+        let [owner] = face.adjacent_element_indices.as_slice() else {
+            return Err(AcousticHarmonicError::Boundary(
+                "radiation requires exactly one exterior owning element".into(),
+            ));
+        };
+        let (Some(&rho), Some(&beta)) =
+            (self.density.get(*owner), self.compressibility.get(*owner))
+        else {
+            return Err(AcousticHarmonicError::Boundary(
+                "radiation owning medium is missing".into(),
+            ));
+        };
+        // Separate square roots avoid overflowing rho*c or underflowing beta/rho.
+        let admittance = beta.sqrt() / rho.sqrt();
+        if !rho.is_finite()
+            || rho <= 0.0
+            || !beta.is_finite()
+            || beta <= 0.0
+            || !admittance.is_finite()
+            || admittance <= 0.0
+        {
+            return Err(AcousticHarmonicError::Boundary(
+                "radiation owning medium admittance must be positive finite".into(),
+            ));
+        }
+        Ok(admittance)
     }
 
     fn prescribe(

@@ -112,7 +112,7 @@ fn transmitted(amplitude: [f64; 2]) -> [f64; 2] {
     )
 }
 
-fn exact_pressure(x: f64, amplitude: [f64; 2]) -> [f64; 2] {
+pub(super) fn exact_pressure(x: f64, amplitude: [f64; 2]) -> [f64; 2] {
     let (k1, k2) = wave_numbers();
     if x <= 0.5 {
         let incident = multiply(amplitude, phase(-k1 * x));
@@ -123,7 +123,7 @@ fn exact_pressure(x: f64, amplitude: [f64; 2]) -> [f64; 2] {
     }
 }
 
-fn exact_mean_velocity(xs: [f64; 4], left: bool, amplitude: [f64; 2]) -> [f64; 2] {
+pub(super) fn exact_mean_velocity(xs: [f64; 4], left: bool, amplitude: [f64; 2]) -> [f64; 2] {
     let (k1, k2) = wave_numbers();
     if left {
         let incident = multiply(amplitude, mean_wave(xs, k1));
@@ -165,7 +165,7 @@ fn analytic_interface_obeys_pressure_velocity_and_power_continuity() {
     }
 }
 
-fn two_medium(
+pub(super) fn two_medium(
     cells: usize,
     quadratic: bool,
     amplitude: [f64; 2],

@@ -34,8 +34,30 @@ fn assembly(amplitude: f64) -> AcousticAssembly {
             .collect(),
         prescribed: vec![None; 4],
         source_evidence: vec![],
+        incident_faces: Vec::new(),
         reduction: None,
     }
+}
+
+#[test]
+fn nonfinite_apparent_power_cannot_certify_zero_relative_error() {
+    let mut a = assembly(1.0);
+    a.impedance = RealSparseAssembler::square(
+        4,
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .finish()
+    .unwrap();
+    a.source.fill(ProjectionScalar {
+        real: 1e200,
+        imaginary: 0.0,
+    });
+    // Exact signed real source-work is zero but apparent-power multiplication overflows.
+    assert!(matches!(
+        power::evaluate(&a, &[1e200; 4], &[0.0; 4]),
+        Err(AcousticHarmonicError::Operator(_))
+    ));
 }
 
 #[test]

@@ -278,6 +278,16 @@ pub(super) fn pressure_sources(
         crate::excitation::ExcitationSamplePoint::frequency(frequency_hz),
     )
     .map_err(|error| format!("acoustic pressure excitation realization failed: {error}"))?;
+    if realized.iter().any(|load| {
+        matches!(
+            load.kind,
+            crate::excitation::RealizedExcitationKind::AcousticIncidentPressure(_)
+        )
+    }) {
+        return Err(
+            "incident pressure requires canonical exterior-face Helmholtz execution".into(),
+        );
+    }
     Ok(realized
         .iter()
         .filter_map(|excitation| {

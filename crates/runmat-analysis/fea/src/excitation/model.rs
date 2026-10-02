@@ -103,6 +103,7 @@ pub(crate) enum RealizedExcitationKind {
     MagneticVolumeCurrentDensity(ComplexVector3),
     MagneticVectorPotential(ComplexVector3),
     AcousticPressure(ComplexScalar),
+    AcousticIncidentPressure(ComplexScalar),
     NormalVelocity(ComplexScalar),
     InletVelocity(ComplexVector3),
     MassFlow(ComplexScalar),
@@ -218,6 +219,9 @@ impl RealizedExcitationKind {
                 Self::MagneticVectorPotential(value.component(component))
             }
             Self::AcousticPressure(value) => Self::AcousticPressure(value.component(component)),
+            Self::AcousticIncidentPressure(value) => {
+                Self::AcousticIncidentPressure(value.component(component))
+            }
             Self::NormalVelocity(value) => Self::NormalVelocity(value.component(component)),
             Self::InletVelocity(value) => Self::InletVelocity(value.component(component)),
             Self::MassFlow(value) => Self::MassFlow(value.component(component)),

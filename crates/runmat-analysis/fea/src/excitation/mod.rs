@@ -23,12 +23,12 @@ pub use evidence::{
     SpatialProjectionBalance, SpatialProjectionEvidence, SpatialProjectionEvidenceError,
 };
 pub(crate) use kinematics::{StructuralMotionError, StructuralMotionSet};
+#[cfg(test)]
+pub(crate) use model::RealizedExcitationPolicy;
 pub(crate) use model::{
-    ComplexComponent, ComplexVector3, RealizedExcitation, RealizedExcitationKind,
+    ComplexComponent, ComplexScalar, ComplexVector3, RealizedExcitation, RealizedExcitationKind,
     RealizedExcitationTarget, RealizedExcitations,
 };
-#[cfg(test)]
-pub(crate) use model::{ComplexScalar, RealizedExcitationPolicy};
 pub(crate) use projection::{ScalarProjectionAccumulator, SpatialProjectionAccumulator};
 pub(crate) use realize::realize_step_excitations;
 pub(crate) use realize::RealizationError;

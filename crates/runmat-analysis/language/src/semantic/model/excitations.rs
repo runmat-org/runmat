@@ -478,6 +478,7 @@ fn kind_policy(
             "magnetic_vector_potential",
         ),
         "acoustic_pressure" => (AuthoredExcitationKind::AcousticPressure, "pressure"),
+        "incident_pressure" => (AuthoredExcitationKind::AcousticIncidentPressure, "pressure"),
         "normal_velocity" => (AuthoredExcitationKind::NormalVelocity, "velocity"),
         "inlet_velocity" => (AuthoredExcitationKind::InletVelocity, "velocity"),
         "mass_flow" => (AuthoredExcitationKind::MassFlow, "mass_flow_rate"),
