@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::validation::PreparedIntegerPayload;
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::signal::common::SignalCooperation;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
@@ -156,18 +157,16 @@ async fn evaluate_requested(
     ensure_extensions(&denominator)?;
     admit_deconv_operand(&numerator)?;
     admit_deconv_operand(&denominator)?;
-    crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
-        &numerator,
-        BUILTIN_NAME,
-    )?;
-    crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
-        &denominator,
-        BUILTIN_NAME,
-    )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&numerator, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&denominator, BUILTIN_NAME)?;
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
+    // Complete host-visible exactness admission before either resident readback.
+    for value in [&numerator, &denominator] {
+        if !matches!(value, Value::GpuTensor(_)) {
+            prepare_deconv_integer(value, &mut cooperation).await?;
+        }
+    }
     preflight_denominator(&denominator, &mut cooperation).await?;
     let integer_or_logical = [&numerator, &denominator]
         .iter()
@@ -213,8 +212,18 @@ async fn evaluate_requested(
             }
         }
     }
-    let num_input = convert_value(numerator, &mut cooperation).await?;
-    let den_input = convert_value(denominator, &mut cooperation).await?;
+    let numerator_payload = if matches!(&numerator, Value::GpuTensor(_)) {
+        prepare_deconv_integer(&numerator, &mut cooperation).await?
+    } else {
+        None
+    };
+    let num_input = convert_value(numerator, numerator_payload, &mut cooperation).await?;
+    let denominator_payload = if matches!(&denominator, Value::GpuTensor(_)) {
+        prepare_deconv_integer(&denominator, &mut cooperation).await?
+    } else {
+        None
+    };
+    let den_input = convert_value(denominator, denominator_payload, &mut cooperation).await?;
 
     let (quotient_raw, remainder_raw) =
         polynomial_division(&num_input.data, &den_input.data, &mut cooperation).await?;
@@ -383,26 +392,60 @@ enum Orientation {
     Column,
 }
 
+async fn prepare_deconv_integer(
+    value: &Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Option<PreparedIntegerPayload>> {
+    let prepared = cooperation
+        .prepare_integer_receipt(value, &DECONV_INTEGER_INPUT_EXTENSION)
+        .await?;
+    if !prepared.is_exact() {
+        return Err(build_runtime_error(
+            "deconv: integer input must be exactly representable as double",
+        )
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier("RunMat:deconv:InvalidInput")
+        .with_gpu_gather_retry(GpuGatherRetry::Never)
+        .build());
+    }
+    Ok(prepared.into_resident_payload())
+}
+
 async fn convert_value(
     value: Value,
+    integer_payload: Option<PreparedIntegerPayload>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PolyInput> {
     match value {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-                .await
-                .map_err(|flow| {
-                    let message = flow.message().to_owned();
-                    deconv_error_with_source(
-                        &DECONV_ERROR_GATHER_FAILED,
-                        message,
-                        map_control_flow_with_builtin(flow, BUILTIN_NAME),
-                    )
-                })?;
-            crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
-                &gathered,
-                BUILTIN_NAME,
-            )?;
+            let gathered = if let Some(payload) = integer_payload {
+                match payload {
+                    PreparedIntegerPayload::Real(gathered) => {
+                        let tensor = Tensor::new_integer(
+                            gpu_helpers::integer_storage_from_owned(gathered.data),
+                            gathered.shape,
+                        )
+                        .map_err(|detail| {
+                            deconv_error_with_detail(&DECONV_ERROR_GATHER_FAILED, detail)
+                        })?;
+                        Value::Tensor(tensor)
+                    }
+                    PreparedIntegerPayload::Complex(_) => {
+                        return Err(deconv_error(&DECONV_ERROR_INVALID_INPUT));
+                    }
+                }
+            } else {
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                    .await
+                    .map_err(|flow| {
+                        let message = flow.message().to_owned();
+                        deconv_error_with_source(
+                            &DECONV_ERROR_GATHER_FAILED,
+                            message,
+                            map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                        )
+                    })?
+            };
             convert_host_value(gathered, cooperation).await
         }
         host => convert_host_value(host, cooperation).await,
@@ -1106,6 +1149,36 @@ pub(crate) mod tests {
                 assert!(runmat_accelerate_api::handle_integer_type(&handle).is_none());
                 assert!(!runmat_accelerate_api::handle_is_logical(&handle));
             }
+        });
+    }
+
+    #[test]
+    fn deconv_resident_wide_integer_exactness_uses_native_payload() {
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let numerator = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[1u64 << 54, 0]),
+                    shape: &[1, 2],
+                })
+                .expect("upload exact wide numerator");
+            let quotient = evaluate(Value::GpuTensor(numerator), Value::Num(1.0))
+                .expect("exact wide coefficients")
+                .quotient();
+            let gathered = test_support::gather(quotient).expect("gather quotient");
+            assert_eq!(gathered.materialize_f64(), vec![(1u64 << 54) as f64, 0.0]);
+
+            let inexact = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[(1u64 << 53) + 1]),
+                    shape: &[1, 1],
+                })
+                .expect("upload inexact wide numerator");
+            let failure = evaluate(Value::GpuTensor(inexact), Value::Num(1.0))
+                .expect_err("inexact wide coefficients");
+            assert_eq!(failure.identifier(), Some("RunMat:deconv:InvalidInput"));
         });
     }
 
