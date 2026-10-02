@@ -57,7 +57,7 @@ impl FeaConstructorKind {
     }
 }
 
-fn host_text(fact: &ValueFact) -> bool {
+pub(crate) fn host_text(fact: &ValueFact) -> bool {
     if matches!(fact.residency, ResidencyFact::Device { .. }) {
         return false;
     }

@@ -167,11 +167,7 @@ pub async fn fea_run_options_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.validate",
-    category = "fea",
-    summary = "Validate a FEA study or sweep without planning or solving.",
-    keywords = "fea,validate,study,sweep",
-    descriptor(crate::builtins::fea::FEA_VALIDATE_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
@@ -197,11 +193,7 @@ pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.plan",
-    category = "fea",
-    summary = "Plan a FEA study or sweep without solving it.",
-    keywords = "fea,plan,study,sweep",
-    descriptor(crate::builtins::fea::FEA_PLAN_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
@@ -292,11 +284,7 @@ pub async fn fea_compare_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.trends",
-    category = "fea",
-    summary = "Summarize recent persisted FEA run trends.",
-    keywords = "fea,trends,history,quality",
-    descriptor(crate::builtins::fea::FEA_TRENDS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_TRENDS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_trends_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
