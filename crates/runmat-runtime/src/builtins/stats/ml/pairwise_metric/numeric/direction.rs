@@ -227,13 +227,13 @@ impl<'a> DirectionWork<'a> {
 pub(in crate::builtins::stats::ml) fn unit_direction(
     row: &[f64],
     center: bool,
-) -> Option<Vec<f64>> {
+) -> Result<Option<Vec<f64>>, DirectionError> {
     let mut work = DirectionWork::new(row, center);
     loop {
         match work.advance() {
             Ok(DirectionProgress::Pending(_)) => {}
-            Ok(DirectionProgress::Complete(direction, _)) => return direction,
-            Err(DirectionError::Resource) => return None,
+            Ok(DirectionProgress::Complete(direction, _)) => return Ok(direction),
+            Err(error) => return Err(error),
         }
     }
 }

@@ -35,10 +35,10 @@ pub(super) fn pairwise_squared_distances(
                 PreparedMetric::Cityblock => cityblock(&rows[i], &rows[j]).powi(2),
                 PreparedMetric::Chebychev => chebychev(&rows[i], &rows[j]).powi(2),
                 PreparedMetric::Mahalanobis(inverse) => mahalanobis_sq(&rows[i], &rows[j], inverse),
-                PreparedMetric::Cosine => cosine_distance(&rows[i], &rows[j]).powi(2),
-                PreparedMetric::Correlation => correlation_distance(&rows[i], &rows[j]).powi(2),
+                PreparedMetric::Cosine => cosine_distance(&rows[i], &rows[j])?.powi(2),
+                PreparedMetric::Correlation => correlation_distance(&rows[i], &rows[j])?.powi(2),
                 PreparedMetric::Spearman(ranks) => {
-                    correlation_distance(&ranks[i], &ranks[j]).powi(2)
+                    correlation_distance(&ranks[i], &ranks[j])?.powi(2)
                 }
                 PreparedMetric::Hamming => hamming_distance(&rows[i], &rows[j]).powi(2),
                 PreparedMetric::Jaccard => jaccard_distance(&rows[i], &rows[j]).powi(2),
@@ -99,27 +99,38 @@ fn chebychev(left: &[f64], right: &[f64]) -> f64 {
         .fold(0.0, f64::max)
 }
 
-fn cosine_distance(left: &[f64], right: &[f64]) -> f64 {
+fn cosine_distance(left: &[f64], right: &[f64]) -> BuiltinResult<f64> {
     directional_distance(left, right, false)
 }
 
-fn correlation_distance(left: &[f64], right: &[f64]) -> f64 {
+fn correlation_distance(left: &[f64], right: &[f64]) -> BuiltinResult<f64> {
     directional_distance(left, right, true)
 }
 
-fn directional_distance(left: &[f64], right: &[f64], center: bool) -> f64 {
-    let Some(left) = super::super::pairwise_metric::unit_direction(left, center) else {
-        return 1.0;
+fn directional_distance(left: &[f64], right: &[f64], center: bool) -> BuiltinResult<f64> {
+    use super::super::pairwise_metric::DirectionError;
+    let Some(left) = super::super::pairwise_metric::unit_direction(left, center).map_err(
+        |error| match error {
+            DirectionError::Resource => invalid("tsne: direction exceeds available memory"),
+        },
+    )?
+    else {
+        return Ok(1.0);
     };
-    let Some(right) = super::super::pairwise_metric::unit_direction(right, center) else {
-        return 1.0;
+    let Some(right) = super::super::pairwise_metric::unit_direction(right, center).map_err(
+        |error| match error {
+            DirectionError::Resource => invalid("tsne: direction exceeds available memory"),
+        },
+    )?
+    else {
+        return Ok(1.0);
     };
     let dot = left
         .iter()
         .zip(right.iter())
         .map(|(a, b)| a * b)
         .sum::<f64>();
-    (1.0 - dot).max(0.0)
+    Ok((1.0 - dot).max(0.0))
 }
 
 fn hamming_distance(left: &[f64], right: &[f64]) -> f64 {
