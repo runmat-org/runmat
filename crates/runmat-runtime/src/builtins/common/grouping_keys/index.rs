@@ -1,3 +1,4 @@
+#[cfg(any(feature = "plot-core", test))]
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 
 use super::KeyAtom;
@@ -7,6 +8,7 @@ use builder::{BuildProgress, GroupIndexBuilder};
 
 /// The semantic group grammar and execution service remain separate failure
 /// domains. Callers adapt each at their public builtin boundary.
+#[cfg(any(feature = "plot-core", test))]
 #[derive(Debug)]
 pub(crate) enum GroupIndexBuildError {
     Invalid(String),
@@ -40,6 +42,7 @@ impl GroupIndex {
 
     /// The synchronous and cooperative drivers run the same bounded exact-key
     /// state machine; neither driver enters a nested executor.
+    #[cfg(any(feature = "plot-core", test))]
     pub(crate) async fn build_cooperative(
         rows: Vec<Option<GroupKey>>,
         order: KeyOrder,
@@ -67,7 +70,10 @@ impl GroupIndex {
     fn build_from_builder(mut builder: GroupIndexBuilder) -> Result<Self, String> {
         loop {
             match builder.step()? {
+                #[cfg(any(feature = "plot-core", test))]
                 BuildProgress::Work(_) => {}
+                #[cfg(not(any(feature = "plot-core", test)))]
+                BuildProgress::Work => {}
                 BuildProgress::Complete(index) => return Ok(index),
             }
         }

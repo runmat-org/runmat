@@ -1,22 +1,28 @@
 //! Stable numeric and associated-value ordering with bounded work.
 
+#[cfg(any(feature = "plot-core", test))]
 use std::cmp::Ordering;
 
+#[cfg(any(feature = "plot-core", test))]
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 
 mod generic;
+#[cfg(any(feature = "plot-core", test))]
+pub(crate) use generic::stable_sort_by_sync;
 #[cfg(test)]
 use generic::RUN_LEN;
-pub(crate) use generic::{stable_sort_by_sync, SortProgress, StableSortWork};
+pub(crate) use generic::{SortProgress, StableSortWork};
 
 #[derive(Debug)]
 pub(crate) enum CooperativeSortError {
     Resource(std::collections::TryReserveError),
+    #[cfg(any(feature = "plot-core", test))]
     Service(ExecutionServiceError),
 }
 
 /// Sort non-NaN values using the same stable partial order as before. NaN
 /// admission and signed-zero policy remain with the caller.
+#[cfg(any(feature = "plot-core", test))]
 pub(crate) async fn stable_sort_non_nan_f64(
     values: &mut Vec<f64>,
     mut budget: Option<&mut CpuCooperationBudget>,

@@ -1,10 +1,27 @@
 use std::collections::{btree_map::IntoKeys, BTreeMap};
 
 use super::{GroupIndex, GroupKey, KeyOrder};
+#[cfg(any(feature = "plot-core", test))]
 use crate::builtins::common::grouping_keys::group_key_work_units;
 
+macro_rules! work_progress {
+    ($units:expr) => {{
+        #[cfg(any(feature = "plot-core", test))]
+        {
+            BuildProgress::Work($units)
+        }
+        #[cfg(not(any(feature = "plot-core", test)))]
+        {
+            BuildProgress::Work
+        }
+    }};
+}
+
 pub(super) enum BuildProgress {
+    #[cfg(any(feature = "plot-core", test))]
     Work(u64),
+    #[cfg(not(any(feature = "plot-core", test)))]
+    Work,
     Complete(GroupIndex),
 }
 
@@ -60,24 +77,24 @@ impl GroupIndexBuilder {
             match self.phase {
                 Phase::CollectSorted => {
                     if let Some(row) = self.rows.get(self.cursor) {
-                        let work = row.as_ref().map_or(1, |key| {
-                            let work = group_key_work_units(key);
+                        if let Some(key) = row {
                             if !self.sorted.contains_key(key) {
                                 self.sorted.insert(key.clone(), ());
                             }
-                            work
-                        });
+                        }
+                        let progress =
+                            work_progress!(row.as_ref().map_or(1, |key| group_key_work_units(key)));
                         self.cursor += 1;
-                        return Ok(BuildProgress::Work(work));
+                        return Ok(progress);
                     }
                     self.sorted_keys = Some(std::mem::take(&mut self.sorted).into_keys());
                     self.phase = Phase::DrainSorted;
                 }
                 Phase::DrainSorted => {
                     if let Some(key) = self.sorted_keys.as_mut().and_then(Iterator::next) {
-                        let work = group_key_work_units(&key);
+                        let progress = work_progress!(group_key_work_units(&key));
                         self.keys.push(key);
-                        return Ok(BuildProgress::Work(work));
+                        return Ok(progress);
                     }
                     self.sorted_keys = None;
                     self.cursor = 0;
@@ -85,42 +102,42 @@ impl GroupIndexBuilder {
                 }
                 Phase::CollectFirstAppearance => {
                     if let Some(row) = self.rows.get(self.cursor) {
-                        let work = row.as_ref().map_or(1, |key| {
-                            let work = group_key_work_units(key);
+                        if let Some(key) = row {
                             if !self.key_indices.contains_key(key) {
                                 self.key_indices.insert(key.clone(), self.keys.len());
                                 self.keys.push(key.clone());
                             }
-                            work
-                        });
+                        }
+                        let progress =
+                            work_progress!(row.as_ref().map_or(1, |key| group_key_work_units(key)));
                         self.cursor += 1;
-                        return Ok(BuildProgress::Work(work));
+                        return Ok(progress);
                     }
                     self.cursor = 0;
                     self.phase = Phase::IndexKeys;
                 }
                 Phase::ValidateExplicit => {
                     if let Some(key) = self.keys.get(self.cursor) {
-                        let work = group_key_work_units(key);
+                        let progress = work_progress!(group_key_work_units(key));
                         if self.key_indices.insert(key.clone(), self.cursor).is_some() {
                             return Err("explicit group order contains a duplicate key".into());
                         }
                         self.cursor += 1;
-                        return Ok(BuildProgress::Work(work));
+                        return Ok(progress);
                     }
                     self.cursor = 0;
                     self.phase = Phase::IndexKeys;
                 }
                 Phase::IndexKeys => {
                     if let Some(key) = self.keys.get(self.cursor) {
-                        let work = group_key_work_units(key);
+                        let progress = work_progress!(group_key_work_units(key));
                         if !self.key_indices.contains_key(key) {
                             self.key_indices.insert(key.clone(), self.cursor);
                         }
                         self.first_rows.push(None);
                         self.row_groups.push(Vec::new());
                         self.cursor += 1;
-                        return Ok(BuildProgress::Work(work));
+                        return Ok(progress);
                     }
                     self.cursor = 0;
                     self.phase = Phase::AssignRows;
@@ -128,21 +145,21 @@ impl GroupIndexBuilder {
                 Phase::AssignRows => {
                     if let Some(row) = self.rows.get_mut(self.cursor) {
                         let current = self.cursor;
-                        let work = if let Some(key) = row.take() {
-                            let work = group_key_work_units(&key);
+                        let progress = if let Some(key) = row.take() {
+                            let progress = work_progress!(group_key_work_units(&key));
                             let index = self.key_indices.get(&key).copied().ok_or_else(|| {
                                 "group observation is absent from the explicit order".to_string()
                             })?;
                             self.ids.push(index as f64 + 1.0);
                             self.first_rows[index].get_or_insert(current);
                             self.row_groups[index].push(current);
-                            work
+                            progress
                         } else {
                             self.ids.push(f64::NAN);
-                            1
+                            work_progress!(1)
                         };
                         self.cursor += 1;
-                        return Ok(BuildProgress::Work(work));
+                        return Ok(progress);
                     }
                     self.phase = Phase::Complete;
                 }
