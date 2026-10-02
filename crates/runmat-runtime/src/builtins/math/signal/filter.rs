@@ -1401,20 +1401,16 @@ pub(crate) mod tests {
         assert!(signal.allocation_lease().validate_live().is_ok());
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     #[test]
-    #[cfg(feature = "wgpu")]
+    #[ignore = "requires a live WGPU adapter; run explicitly for hardware qualification"]
     fn filter_wgpu_matches_cpu() {
-        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _serial = test_support::accel_test_lock();
+        let _restore = runmat_accelerate_api::ThreadProviderGuard::set(None);
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
-        .is_err()
-        {
-            return;
-        }
-        let Some(provider) = runmat_accelerate_api::provider() else {
-            return;
-        };
+        .expect("live WGPU adapter required");
 
         let b = Tensor::new(vec![1.0 / 3.0; 3], vec![1, 3]).unwrap();
         let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
@@ -1438,6 +1434,7 @@ pub(crate) mod tests {
             shape: &x.shape,
         };
         let x_gpu = provider.upload(&view).expect("upload signal");
+        let borrowed_signal = x_gpu.clone();
         provider.reset_telemetry();
 
         let gpu_eval = evaluate(
@@ -1448,10 +1445,11 @@ pub(crate) mod tests {
         )
         .expect("wgpu filter");
         let (gpu_value, _) = gpu_eval.into_pair();
-        assert!(matches!(gpu_value, Value::GpuTensor(_)));
+        assert!(matches!(&gpu_value, Value::GpuTensor(_)));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         approx_eq_slice(&gathered.materialize_f64(), &cpu_tensor.materialize_f64());
+        assert!(borrowed_signal.allocation_lease().validate_live().is_ok());
     }
 }

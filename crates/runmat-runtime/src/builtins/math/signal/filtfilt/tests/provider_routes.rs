@@ -298,19 +298,16 @@ fn gpu_matches_cpu() {
     });
 }
 
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 #[test]
-#[cfg(feature = "wgpu")]
+#[ignore = "requires a live WGPU adapter; run explicitly for hardware qualification"]
 fn wgpu_matches_cpu() {
-    if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+    let _serial = test_support::accel_test_lock();
+    let _restore = runmat_accelerate_api::ThreadProviderGuard::set(None);
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
     )
-    .is_err()
-    {
-        return;
-    }
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return;
-    };
+    .expect("live WGPU adapter required");
     let b = Tensor::new(vec![1.0 / 3.0; 3], vec![1, 3]).unwrap();
     let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
     let x = Tensor::new((1..=20).map(|v| v as f64).collect(), vec![1, 20]).unwrap();
@@ -327,7 +324,11 @@ fn wgpu_matches_cpu() {
             shape: &x.shape,
         })
         .expect("upload");
+    let borrowed_signal = handle.clone();
     let gpu = call(Value::Tensor(b), Value::Tensor(a), Value::GpuTensor(handle)).unwrap();
+    assert!(matches!(&gpu, Value::GpuTensor(_)));
+    let tolerance = value_tolerance(&gpu);
     let (gpu_data, _) = tensor_data(gpu);
-    approx(&gpu_data, &cpu_data, 1e-6);
+    approx(&gpu_data, &cpu_data, tolerance);
+    assert!(borrowed_signal.allocation_lease().validate_live().is_ok());
 }
