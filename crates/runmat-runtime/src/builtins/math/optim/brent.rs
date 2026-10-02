@@ -159,7 +159,7 @@ pub(crate) async fn brent_zero(
         }
 
         let tol = 2.0 * f64::EPSILON * b.abs() + 0.5 * params.tol_x;
-        let midpoint = 0.5 * (c - b);
+        let midpoint = half_difference(c, b);
         if midpoint.abs() <= tol || fb == 0.0 {
             return Ok(BrentZeroResult {
                 x: b,
@@ -265,6 +265,24 @@ pub(crate) fn interpolation_step_accepted(p: f64, q: f64, midpoint: f64, tol: f6
 /// Inverse golden ratio used by Brent minimization: `(3 - sqrt(5)) / 2`.
 const CGOLD: f64 = 0.381_966_011_250_105_15;
 
+fn half_difference(a: f64, b: f64) -> f64 {
+    let difference = a - b;
+    if difference.is_finite() {
+        0.5 * difference
+    } else {
+        0.5 * a - 0.5 * b
+    }
+}
+
+fn interval_point(a: f64, b: f64, fraction: f64) -> f64 {
+    let difference = b - a;
+    if difference.is_finite() {
+        a + fraction * difference
+    } else {
+        (1.0 - fraction).mul_add(a, fraction * b)
+    }
+}
+
 /// Bounded scalar minimization following Brent's method (Numerical Recipes §10.2).
 ///
 /// The function `function` is evaluated through the standard scalar dispatcher.
@@ -306,7 +324,7 @@ pub(crate) async fn brent_min(
         });
     }
 
-    let mut x = a + CGOLD * (b - a);
+    let mut x = interval_point(a, b, CGOLD);
     let mut w = x;
     let mut v = x;
     let mut fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x).await?;
@@ -323,7 +341,7 @@ pub(crate) async fn brent_min(
 
     for iter in 1..=params.max_iter {
         cooperation.completed(1).await?;
-        let xm = 0.5 * (a + b);
+        let xm = interval_point(a, b, 0.5);
         let tol1 = brent_min_tolerance(x, params);
         let tol2 = 2.0 * tol1;
         if (x - xm).abs() <= tol2 - 0.5 * (b - a) {
@@ -349,7 +367,13 @@ pub(crate) async fn brent_min(
             q = q.abs();
             let etemp = e;
             e = d;
-            if p.abs() < (0.5 * q * etemp).abs() && p > q * (a - x) && p < q * (b - x) {
+            if p.is_finite()
+                && q.is_finite()
+                && etemp.is_finite()
+                && p.abs() < (0.5 * q * etemp).abs()
+                && p > q * (a - x)
+                && p < q * (b - x)
+            {
                 d = p / q;
                 let u = x + d;
                 if (u - a) < tol2 || (b - u) < tol2 {
@@ -360,8 +384,9 @@ pub(crate) async fn brent_min(
             }
         }
         if !use_parabolic {
-            e = if x >= xm { a - x } else { b - x };
-            d = CGOLD * e;
+            let edge = if x >= xm { a } else { b };
+            e = edge - x;
+            d = interval_point(x, edge, CGOLD) - x;
         }
 
         let u = if d.abs() >= tol1 {
@@ -517,6 +542,57 @@ mod tests {
             None,
         ));
         assert!(result.is_ok(), "tiny signed values form a valid bracket");
+    }
+
+    #[test]
+    fn opposite_extreme_finite_root_bracket_keeps_midpoint_finite() {
+        let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
+        let result = futures::executor::block_on(brent_zero(
+            "fzero",
+            &mut cooperation,
+            &Value::FunctionHandle("sign".into()),
+            BrentZeroBracket {
+                a: -f64::MAX,
+                b: f64::MAX,
+                fa: -1.0,
+                fb: 1.0,
+                evals: 2,
+            },
+            BrentParams {
+                tol_x: 1.0e-8,
+                max_iter: 16,
+                max_fun_evals: 16,
+            },
+            false,
+            None,
+        ))
+        .unwrap();
+        assert!(result.converged);
+        assert_eq!(result.x, 0.0);
+        assert_eq!(result.fval, 0.0);
+    }
+
+    #[test]
+    fn bounded_minimum_on_opposite_extreme_finite_bounds_stays_finite() {
+        let mut cooperation = ScalarCooperation::new(OptimSolver::Fminbnd, None);
+        let result = futures::executor::block_on(brent_min(
+            "fminbnd",
+            &mut cooperation,
+            &Value::FunctionHandle("abs".into()),
+            -f64::MAX,
+            f64::MAX,
+            BrentParams {
+                tol_x: 1.0e-4,
+                max_iter: 2000,
+                max_fun_evals: 2000,
+            },
+            None,
+        ))
+        .unwrap();
+        assert!(result.converged);
+        assert!(result.x.is_finite());
+        assert!(result.fval.is_finite());
+        assert!(result.fval <= 1.0e-4, "{}", result.fval);
     }
 
     #[test]
