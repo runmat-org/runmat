@@ -4,200 +4,18 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, HANN_ERROR_ARG_COUNT, HANN_ERROR_INTERNAL, HANN_ERROR_INVALID_LENGTH,
+    HANN_ERROR_INVALID_OPTION, HANN_ERROR_UNKNOWN_OPTION, HANN_LOGICAL_LENGTH_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::math::signal::common::{
-    keyword, parse_window_options, provider_precision_matches, window_tensor, WindowArgError,
-    WindowOutputType, WindowSampling,
+    parse_window_controls, provider_precision_matches, window_options_from_length, window_tensor,
+    WindowArgError, WindowOutputType, WindowSampling,
 };
-use crate::builtins::math::signal::type_resolvers::window_vector_type;
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
 const BUILTIN_NAME: &str = "hann";
-
-const HANN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "w",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Hann window column vector.",
-}];
-
-const HANN_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Window length.",
-}];
-
-const HANN_SIG_SAMPLING_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Window length.",
-    },
-    BuiltinParamDescriptor {
-        name: "sampling",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"symmetric\""),
-        description: "Sampling mode: \"symmetric\" or \"periodic\".",
-    },
-];
-
-const HANN_SIG_TYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Window length.",
-    },
-    BuiltinParamDescriptor {
-        name: "precision",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
-        description: "Output precision: \"double\" or \"single\".",
-    },
-];
-
-const HANN_SIG_FULL_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Window length.",
-    },
-    BuiltinParamDescriptor {
-        name: "sampling",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"symmetric\""),
-        description: "Sampling mode: \"symmetric\" or \"periodic\".",
-    },
-    BuiltinParamDescriptor {
-        name: "precision",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
-        description: "Output precision: \"double\" or \"single\".",
-    },
-];
-
-const HANN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "w = hann(n)",
-        inputs: &HANN_SIG_N_INPUTS,
-        outputs: &HANN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "w = hann(n, sampling)",
-        inputs: &HANN_SIG_SAMPLING_INPUTS,
-        outputs: &HANN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "w = hann(n, precision)",
-        inputs: &HANN_SIG_TYPE_INPUTS,
-        outputs: &HANN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "w = hann(n, sampling, precision)",
-        inputs: &HANN_SIG_FULL_INPUTS,
-        outputs: &HANN_OUTPUT,
-    },
-];
-
-const HANN_ERROR_INVALID_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.INVALID_LENGTH",
-    identifier: Some("RunMat:hann:InvalidLength"),
-    when: "Length input is not a finite nonnegative scalar value.",
-    message: "hann: expected a nonnegative scalar integer length",
-};
-
-const HANN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.INVALID_OPTION",
-    identifier: Some("RunMat:hann:InvalidOption"),
-    when: "An option argument is not a string-like sampling/precision token.",
-    message: "hann: unrecognized option",
-};
-
-const HANN_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.UNKNOWN_OPTION",
-    identifier: Some("RunMat:hann:UnknownOption"),
-    when: "An option string is not recognized by hann.",
-    message: "hann: unrecognized option",
-};
-
-const HANN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.INTERNAL",
-    identifier: Some("RunMat:hann:InternalError"),
-    when: "Window materialization fails internally.",
-    message: "hann: internal error",
-};
-
-const HANN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.ARG_COUNT",
-    identifier: Some("RunMat:hann:ArgumentCount"),
-    when: "More than a sampling option and an output-type option are supplied.",
-    message: "hann: too many input arguments",
-};
-
-const HANN_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    HANN_ERROR_INVALID_LENGTH,
-    HANN_ERROR_INVALID_OPTION,
-    HANN_ERROR_UNKNOWN_OPTION,
-    HANN_ERROR_INTERNAL,
-    HANN_ERROR_ARG_COUNT,
-];
-
-const HANN_LOGICAL_LENGTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "hann-logical-length",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "hann with a logical scalar length is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:HannLogicalLengthExtension"),
-};
-
-const HANN_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [HANN_LOGICAL_LENGTH_EXTENSION];
-
-const HANN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "L",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "L accepts every built-in integer class as a nonnegative scalar length; floating L is rounded to the nearest integer.",
-    }];
-
-pub const HANN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "w = hann(L[, sflag][, typeName])",
-        inputs: &HANN_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::FunctionSpecific,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The default and sampling-only forms return a double column vector; typeName selects double or single. L is a host structural scalar with no interactive gpuArray overload; RunMat may materialize the new floating output on its active provider as an internal acceleration choice.",
-    }];
-
-pub const HANN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HANN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HANN_ERRORS,
-};
 
 fn hann_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     hann_error_with_message(error.message, error)
@@ -223,6 +41,7 @@ fn hann_error_with_message(
 
 fn hann_map_window_error(error: WindowArgError) -> RuntimeError {
     match error {
+        WindowArgError::TooManyOptions => hann_error(&HANN_ERROR_ARG_COUNT),
         WindowArgError::InvalidLength => hann_error(&HANN_ERROR_INVALID_LENGTH),
         WindowArgError::InvalidOptionType => hann_error(&HANN_ERROR_INVALID_OPTION),
         WindowArgError::UnknownOption(option) => {
@@ -261,27 +80,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "hann",
-    category = "math/signal",
-    summary = "Generate Hann windows.",
-    keywords = "hann,window,signal processing,dsp,fft",
-    type_resolver(window_vector_type),
-    descriptor(crate::builtins::math::signal::hann::HANN_DESCRIPTOR),
-    extensions(HANN_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::hann::HANN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::hann"
 )]
 async fn hann_builtin(
     n: runmat_value::Value,
     varargin: Vec<runmat_value::Value>,
 ) -> crate::BuiltinResult<runmat_value::Value> {
-    validate_hann_options(&varargin)?;
+    let controls = parse_window_controls(&varargin, true).map_err(hann_map_window_error)?;
     if matches!(n, runmat_value::Value::Bool(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &HANN_LOGICAL_LENGTH_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    let options = parse_window_options(n, &varargin, true).map_err(hann_map_window_error)?;
+    let options = window_options_from_length(n, controls).map_err(hann_map_window_error)?;
     if options.len > 1 && provider_precision_matches(options.output_type) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.hann_window(
@@ -306,47 +119,6 @@ async fn hann_builtin(
     .map_err(hann_map_window_error)
 }
 
-fn validate_hann_options(args: &[runmat_value::Value]) -> crate::BuiltinResult<()> {
-    if args.len() > 2 {
-        return Err(hann_error(&HANN_ERROR_ARG_COUNT));
-    }
-    let keywords = args
-        .iter()
-        .map(|arg| keyword(arg).ok_or_else(|| hann_error(&HANN_ERROR_INVALID_OPTION)))
-        .collect::<Result<Vec<_>, _>>()?;
-    let valid = match keywords.as_slice() {
-        [] => true,
-        [option] => matches!(
-            option.as_str(),
-            "symmetric" | "periodic" | "double" | "single"
-        ),
-        [sampling, output_type] => {
-            matches!(sampling.as_str(), "symmetric" | "periodic")
-                && matches!(output_type.as_str(), "double" | "single")
-        }
-        _ => false,
-    };
-    if valid {
-        Ok(())
-    } else {
-        let option = keywords
-            .iter()
-            .find(|option| {
-                !matches!(
-                    option.as_str(),
-                    "symmetric" | "periodic" | "double" | "single"
-                )
-            })
-            .or_else(|| keywords.first())
-            .map(String::as_str)
-            .unwrap_or_default();
-        Err(hann_error_with_detail(
-            &HANN_ERROR_UNKNOWN_OPTION,
-            format!("'{option}'"),
-        ))
-    }
-}
-
 fn valid_provider_window(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
@@ -354,6 +126,7 @@ fn valid_provider_window(
     precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
     handle.shape() == [len, 1]
+        && handle.allocation_lease().validate_live().is_ok()
         && handle.device_id() == provider.device_id()
         && runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::Real
@@ -369,27 +142,12 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::HANN_CATALOG_ENTRY;
     use runmat_value::{IntValue, Value};
 
     #[test]
-    fn hann_type_uses_literal_length() {
-        let out = window_vector_type(
-            &[Type::Num],
-            &ResolveContext::new(vec![runmat_builtins::LiteralValue::Number(8.0)]),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(8), Some(1)])
-            }
-        );
-    }
-
-    #[test]
     fn hann_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("hann builtin");
-        let descriptor = builtin.descriptor.expect("hann descriptor");
+        let descriptor = HANN_CATALOG_ENTRY.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"w = hann(n)"));
         assert!(labels.contains(&"w = hann(n, sampling)"));
@@ -403,9 +161,8 @@ mod tests {
 
     #[test]
     fn hann_integer_metadata_and_logical_extension_are_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("hann builtin");
-        assert_eq!(builtin.integer_capabilities.len(), 1);
-        assert_eq!(builtin.extensions.len(), 1);
+        assert_eq!(HANN_CATALOG_ENTRY.integer_capabilities.len(), 1);
+        assert_eq!(HANN_CATALOG_ENTRY.extensions.len(), 1);
 
         let integer = block_on(super::hann_builtin(
             Value::Int(IntValue::U64(4)),

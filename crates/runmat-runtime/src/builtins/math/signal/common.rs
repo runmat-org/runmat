@@ -1,5 +1,7 @@
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
+use runmat_types::WindowOption;
+pub(crate) use runmat_types::{WindowOutputType, WindowSampling};
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -10,26 +12,21 @@ pub(super) mod output_precision;
 const EPS: f64 = 1.0e-12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WindowSampling {
-    Symmetric,
-    Periodic,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WindowOutputType {
-    Double,
-    Single,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WindowOptions {
     pub len: usize,
     pub sampling: WindowSampling,
     pub output_type: WindowOutputType,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WindowControls {
+    pub sampling: WindowSampling,
+    pub output_type: WindowOutputType,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WindowArgError {
+    TooManyOptions,
     InvalidLength,
     InvalidOptionType,
     UnknownOption(String),
@@ -409,9 +406,12 @@ pub(crate) fn window_tensor(
         WindowSampling::Symmetric => len,
         WindowSampling::Periodic => len.checked_add(1).ok_or(WindowArgError::InvalidLength)?,
     };
-    let mut data = (0..effective_len)
-        .map(|idx| coeff(idx, effective_len))
-        .collect::<Vec<_>>();
+    let mut data = Vec::new();
+    data.try_reserve_exact(effective_len)
+        .map_err(|error| WindowArgError::TensorBuild(error.to_string()))?;
+    for idx in 0..effective_len {
+        data.push(coeff(idx, effective_len));
+    }
     if matches!(options.sampling, WindowSampling::Periodic) {
         data.pop();
     }
@@ -420,26 +420,44 @@ pub(crate) fn window_tensor(
         .map_err(|e| WindowArgError::TensorBuild(e.to_string()))
 }
 
-pub(crate) fn parse_window_options(
-    len_value: Value,
+pub(crate) fn parse_window_controls(
     rest: &[Value],
     allow_type_name: bool,
-) -> Result<WindowOptions, WindowArgError> {
-    let len = scalar_length_arg(len_value)?;
+) -> Result<WindowControls, WindowArgError> {
+    if rest.len() > 2 {
+        return Err(WindowArgError::TooManyOptions);
+    }
+    let keywords = rest
+        .iter()
+        .map(|arg| window_keyword(arg).ok_or(WindowArgError::InvalidOptionType))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut sampling = WindowSampling::Symmetric;
     let mut output_type = WindowOutputType::Double;
-    for arg in rest {
-        let Some(keyword) = string_keyword(arg) else {
-            return Err(WindowArgError::InvalidOptionType);
-        };
-        match keyword.as_str() {
-            "symmetric" => sampling = WindowSampling::Symmetric,
-            "periodic" => sampling = WindowSampling::Periodic,
-            "double" if allow_type_name => output_type = WindowOutputType::Double,
-            "single" if allow_type_name => output_type = WindowOutputType::Single,
+    for (index, keyword) in keywords.into_iter().enumerate() {
+        match (index, WindowOption::parse(&keyword)) {
+            (0, Some(WindowOption::Sampling(value))) => sampling = value,
+            (0, Some(WindowOption::OutputType(value))) if allow_type_name && rest.len() == 1 => {
+                output_type = value
+            }
+            (1, Some(WindowOption::OutputType(value))) if allow_type_name => output_type = value,
             _ => return Err(WindowArgError::UnknownOption(keyword)),
         }
     }
+    Ok(WindowControls {
+        sampling,
+        output_type,
+    })
+}
+
+pub(crate) fn window_options_from_length(
+    len_value: Value,
+    controls: WindowControls,
+) -> Result<WindowOptions, WindowArgError> {
+    let len = scalar_length_arg(len_value)?;
+    let WindowControls {
+        sampling,
+        output_type,
+    } = controls;
     if matches!(sampling, WindowSampling::Periodic) && len.checked_add(1).is_none() {
         return Err(WindowArgError::InvalidLength);
     }
@@ -448,6 +466,15 @@ pub(crate) fn parse_window_options(
         sampling,
         output_type,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn parse_window_options(
+    len_value: Value,
+    rest: &[Value],
+    allow_type_name: bool,
+) -> Result<WindowOptions, WindowArgError> {
+    window_options_from_length(len_value, parse_window_controls(rest, allow_type_name)?)
 }
 
 pub(crate) fn dtype_for(output_type: WindowOutputType) -> NumericDType {
@@ -477,6 +504,19 @@ fn string_keyword(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
         Value::CharArray(chars) => Some(chars.data.iter().collect::<String>().to_ascii_lowercase()),
+        _ => None,
+    }
+}
+
+fn window_keyword(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.to_ascii_lowercase()),
+        Value::StringArray(values) if values.data.len() == 1 => {
+            Some(values.data[0].to_ascii_lowercase())
+        }
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Some(chars.data.iter().collect::<String>().to_ascii_lowercase())
+        }
         _ => None,
     }
 }
@@ -617,6 +657,26 @@ mod tests {
         .expect_err("periodic effective length must not overflow");
 
         assert_eq!(error, WindowArgError::InvalidLength);
+    }
+
+    #[test]
+    fn window_controls_decode_scalar_text_once_and_reject_invalid_roles() {
+        use runmat_value::{CharArray, StringArray};
+        let single =
+            Value::StringArray(StringArray::new(vec!["single".into()], vec![1, 1]).unwrap());
+        let periodic = Value::CharArray(CharArray::new_row("periodic"));
+        let controls = parse_window_controls(&[periodic, single], true).unwrap();
+        assert_eq!(controls.sampling, WindowSampling::Periodic);
+        assert_eq!(controls.output_type, WindowOutputType::Single);
+        let misplaced =
+            parse_window_controls(&[Value::from("single"), Value::from("periodic")], true);
+        assert!(matches!(misplaced, Err(WindowArgError::UnknownOption(_))));
+        let multirow =
+            Value::CharArray(CharArray::new("periodic".chars().collect(), 2, 4).unwrap());
+        assert_eq!(
+            parse_window_controls(&[multirow], true),
+            Err(WindowArgError::InvalidOptionType)
+        );
     }
 
     #[test]

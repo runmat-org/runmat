@@ -185,52 +185,6 @@ pub fn numeric_unary_shape_type(args: &[Type], _context: &ResolveContext) -> Typ
     }
 }
 
-pub fn window_vector_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    let Some(arg) = args.first() else {
-        return Type::Unknown;
-    };
-    if let Some(n) = literal_nonnegative_scalar(ctx) {
-        return Type::Tensor {
-            shape: Some(vec![Some(n), Some(1)]),
-        };
-    }
-    match arg {
-        Type::Num | Type::Int | Type::Bool => Type::Tensor {
-            shape: Some(vec![None, Some(1)]),
-        },
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            if element_count_if_known(shape).unwrap_or(1) == 1 {
-                Type::Tensor {
-                    shape: Some(vec![None, Some(1)]),
-                }
-            } else {
-                Type::Unknown
-            }
-        }
-        Type::Tensor { shape: None } | Type::Logical { shape: None } | Type::Unknown => {
-            Type::Tensor {
-                shape: Some(vec![None, Some(1)]),
-            }
-        }
-        _ => Type::Unknown,
-    }
-}
-
-fn literal_nonnegative_scalar(ctx: &ResolveContext) -> Option<usize> {
-    match ctx.literal_args.first() {
-        Some(LiteralValue::Number(value)) if value.is_finite() => {
-            let rounded = value.round();
-            if rounded < 0.0 || (rounded - value).abs() > 1e-9 {
-                None
-            } else {
-                Some(rounded as usize)
-            }
-        }
-        Some(LiteralValue::Bool(value)) => Some(usize::from(*value)),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SampleRateOp {
     Up,
