@@ -297,6 +297,38 @@ fn canonical_calls_are_not_speculatively_prepared_by_legacy_route() {
 }
 
 #[test]
+fn filter_and_filtfilt_canonical_calls_preserve_resident_signal_without_legacy_specs() {
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, HostNumericDataOwned,
+        HostNumericTensorOwned,
+    };
+
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![1.0; 40]),
+            shape: vec![1, 40],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    for name in ["filter", "filtfilt"] {
+        let probe = Rc::new(Probe::default());
+        let context = runtime(&probe);
+        let args = [Value::GpuTensor(allocation.handle.clone())];
+        let prepared = futures::executor::block_on(prepare_builtin_call(name, &args, &context))
+            .expect("canonical runtime owns IIR operand preparation");
+        let [Value::GpuTensor(retained)] = prepared.args() else {
+            panic!("canonical call must preserve resident signal")
+        };
+        assert_eq!(retained.buffer_id(), allocation.handle.buffer_id());
+        assert!(retained.allocation_lease().validate_live().is_ok());
+        assert!(probe.requests.borrow().is_empty());
+        assert!(probe.feedback.borrow().is_empty());
+    }
+    assert!(allocation.handle.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
 fn nansum_waits_for_its_typed_admission_instead_of_legacy_prepromotion() {
     let probe = Rc::new(Probe::default());
     let context = runtime(&probe);

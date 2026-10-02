@@ -15,6 +15,22 @@ fn compiled_inventory_is_deterministic_and_self_digesting() {
 }
 
 #[test]
+fn canonical_iir_bindings_have_no_legacy_gpu_or_fusion_spec_rows() {
+    let observed = &migration_inventory().snapshot.observed;
+    for name in ["filter", "filtfilt"] {
+        assert!(observed.gpu_specs.iter().all(|spec| spec.key != name));
+        assert!(observed.fusion_specs.iter().all(|spec| spec.key != name));
+        let bindings = observed
+            .runtime_bindings
+            .iter()
+            .filter(|binding| binding.name == name)
+            .collect::<Vec<_>>();
+        assert_eq!(bindings.len(), 1, "{name} needs one runtime binding");
+        assert_eq!(bindings[0].variant, "default");
+    }
+}
+
+#[test]
 fn compiled_inventory_preserves_runtime_registration_provenance() {
     let inventory = migration_inventory();
 

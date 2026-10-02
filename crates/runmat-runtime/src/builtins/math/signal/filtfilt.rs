@@ -14,10 +14,6 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::builtins::math::fft::common::ensure_wide_integer_data_exact;
 use crate::builtins::math::signal::common::{
@@ -38,33 +34,6 @@ use provider_pass::gpu_filter_pass;
 use provider_pass::try_filtfilt_gpu;
 
 const BUILTIN_NAME: &str = "filtfilt";
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filtfilt")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "filtfilt",
-    op_kind: GpuOpKind::Custom("zero-phase-iir-filter"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("iir_filter")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Uses the provider `iir_filter` hook for the forward and reverse passes on real gpuArray inputs when available; complex inputs use the host reference path.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::filtfilt")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "filtfilt",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Zero-phase filtering is a two-pass stateful operation and is not fused.",
-};
 
 fn filtfilt_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     filtfilt_error_with_message(error.message, error)

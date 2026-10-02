@@ -31,6 +31,19 @@ fn selected_binding_cannot_borrow_another_variants_expression() {
 }
 
 #[test]
+fn iir_fusion_boundaries_have_no_legacy_declaration() {
+    for name in ["filter", "filtfilt"] {
+        let entry = builtin_catalog_entry_by_name(name).expect("canonical IIR entry");
+        assert_eq!(
+            entry.placement.fusion,
+            runmat_builtins::BuiltinFusionPolicy::Boundary
+        );
+        let identity = entry.binding_identity(&entry.bindings[0]);
+        assert!(canonical_fusion_declaration(identity).is_none());
+    }
+}
+
+#[test]
 fn admission_work_identity_distinguishes_operand_and_provider_precision() {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_runtime::builtins::common::spec::FusionAdmissionWork;

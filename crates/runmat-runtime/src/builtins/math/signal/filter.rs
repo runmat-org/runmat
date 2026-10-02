@@ -19,40 +19,9 @@ use runmat_macros::runtime_builtin;
 use runmat_value::ComplexTensor;
 use runmat_value::{NumericDType, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::signal::common::SignalCooperation;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filter")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "filter",
-    op_kind: GpuOpKind::Custom("iir-filter"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("iir_filter")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Uses the provider hook `iir_filter` when available. Complex filters or missing hooks fall back to the host implementation.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::filter")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "filter",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Filtering is handled via dedicated runtime logic; fusion does not currently optimise IIR/FIR chains.",
-};
 
 const BUILTIN_NAME: &str = "filter";
 
