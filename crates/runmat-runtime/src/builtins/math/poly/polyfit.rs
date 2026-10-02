@@ -2,7 +2,7 @@
 
 use log::warn;
 use num_complex::Complex64;
-use runmat_accelerate_api::{ProviderPolyfitBasis, ProviderPolyfitResult};
+use runmat_accelerate_api::{ProviderPolyfitBasis, ProviderPolyfitOutputs, ProviderPolyfitResult};
 #[cfg(test)]
 use runmat_builtins::POLYFIT_DESCRIPTOR;
 use runmat_builtins::{
@@ -49,6 +49,8 @@ use kernel_error::{PolyfitKernelError, PolyfitKernelResult};
 #[path = "polyfit/geometry.rs"]
 mod geometry;
 use geometry::SolverGeometry;
+#[path = "polyfit/column_scale.rs"]
+mod column_scale;
 
 fn polyfit_error_with(
     message: impl Into<String>,
@@ -95,8 +97,14 @@ async fn polyfit_builtin(
     degree: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(x, y, degree, &rest).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
+    let requested_count = crate::output_count::current_output_count();
+    let outputs = match requested_count {
+        Some(count) if count >= 3 => ProviderPolyfitOutputs::StatisticsAndNormalization,
+        Some(count) if count >= 2 => ProviderPolyfitOutputs::Statistics,
+        _ => ProviderPolyfitOutputs::Coefficients,
+    };
+    let eval = evaluate_requested(x, y, degree, &rest, outputs).await?;
+    if let Some(out_count) = requested_count {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
@@ -121,12 +129,20 @@ pub async fn evaluate(
     degree: Value,
     rest: &[Value],
 ) -> BuiltinResult<PolyfitEval> {
-    // The third output requests coefficients and QR statistics in centered,
-    // scaled coordinates. Without it, both are in the original X basis.
-    let basis = match crate::output_count::current_output_count() {
-        Some(count) if count >= 3 => ProviderPolyfitBasis::CenteredScaled,
-        _ => ProviderPolyfitBasis::Original,
+    let outputs = match crate::output_count::current_output_count() {
+        Some(count) if count >= 3 => ProviderPolyfitOutputs::StatisticsAndNormalization,
+        _ => ProviderPolyfitOutputs::Statistics,
     };
+    evaluate_requested(x, y, degree, rest, outputs).await
+}
+
+async fn evaluate_requested(
+    x: Value,
+    y: Value,
+    degree: Value,
+    rest: &[Value],
+    outputs: ProviderPolyfitOutputs,
+) -> BuiltinResult<PolyfitEval> {
     if rest.len() > 1 {
         return Err(polyfit_argument_error("polyfit: too many input arguments"));
     }
@@ -160,7 +176,7 @@ pub async fn evaluate(
         )
         .await?;
     }
-    if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest, basis).await? {
+    if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest, outputs).await? {
         return Ok(eval);
     }
 
@@ -189,7 +205,7 @@ pub async fn evaluate(
     }
 
     let weights = parse_weights(rest, x_data.len(), deg).await?;
-    let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref(), basis)?;
+    let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref(), outputs)?;
     if is_complex_input {
         solution.is_complex = true;
     }
@@ -202,7 +218,7 @@ async fn try_gpu_polyfit(
     y: &Value,
     degree: usize,
     rest: &[Value],
-    basis: ProviderPolyfitBasis,
+    outputs: ProviderPolyfitOutputs,
 ) -> BuiltinResult<Option<PolyfitEval>> {
     let x_handle = match x {
         Value::GpuTensor(handle) => handle,
@@ -265,7 +281,7 @@ async fn try_gpu_polyfit(
         .collect::<Vec<_>>();
 
     let result = match provider
-        .polyfit(x_handle, y_handle, degree, weight_handle, basis)
+        .polyfit(x_handle, y_handle, degree, weight_handle, outputs)
         .await
     {
         Ok(res) => res,
@@ -284,14 +300,14 @@ async fn try_gpu_polyfit(
             "polyfit: provider returned incorrect coefficient count",
         ));
     }
-    let solution = PolyfitSolution::from_provider(result)?;
+    let solution = PolyfitSolution::from_provider(result, outputs)?;
     PolyfitEval::from_solution(solution).map(Some)
 }
 
 #[derive(Clone, Debug)]
 struct PolyfitSolution {
     coeffs: Vec<Complex64>,
-    r_matrix: Vec<f64>,
+    r_matrix: Option<Vec<f64>>,
     mu_mean: f64,
     mu_scale: f64,
     normr: f64,
@@ -301,17 +317,27 @@ struct PolyfitSolution {
 }
 
 impl PolyfitSolution {
-    fn from_provider(result: ProviderPolyfitResult) -> BuiltinResult<Self> {
+    fn from_provider(
+        result: ProviderPolyfitResult,
+        outputs: ProviderPolyfitOutputs,
+    ) -> BuiltinResult<Self> {
         let cols = result.coefficients.len();
         if cols == 0 {
             return Err(polyfit_internal_error(
                 "polyfit: provider returned empty coefficient vector",
             ));
         }
-        if cols.checked_mul(cols) != Some(result.r_matrix.len()) {
+        if result.r_matrix.is_some() != outputs.wants_statistics() {
             return Err(polyfit_internal_error(
-                "polyfit: provider returned malformed R matrix",
+                "polyfit: provider returned statistics inconsistent with requested outputs",
             ));
+        }
+        if let Some(r) = &result.r_matrix {
+            if cols.checked_mul(cols) != Some(r.len()) {
+                return Err(polyfit_internal_error(
+                    "polyfit: provider returned malformed R matrix",
+                ));
+            }
         }
         let [mu_mean, mu_scale] = result.mu;
         Ok(Self {
@@ -335,7 +361,7 @@ impl PolyfitSolution {
 #[derive(Debug)]
 pub struct PolyfitEval {
     coefficients: Value,
-    stats: Value,
+    stats: Option<Value>,
     mu: Value,
     is_complex: bool,
 }
@@ -343,12 +369,11 @@ pub struct PolyfitEval {
 impl PolyfitEval {
     fn from_solution(solution: PolyfitSolution) -> BuiltinResult<Self> {
         let coefficients = coefficients_to_value(&solution.coeffs)?;
-        let stats = build_stats(
-            &solution.r_matrix,
-            solution.cols,
-            solution.normr,
-            solution.df,
-        )?;
+        let stats = solution
+            .r_matrix
+            .as_ref()
+            .map(|r| build_stats(r, solution.cols, solution.normr, solution.df))
+            .transpose()?;
         let mu = build_mu(solution.mu_mean, solution.mu_scale)?;
         Ok(Self {
             coefficients,
@@ -365,7 +390,9 @@ impl PolyfitEval {
 
     /// Structure `S` containing fields `R`, `df`, and `normr`.
     pub fn stats(&self) -> Value {
-        self.stats.clone()
+        self.stats
+            .clone()
+            .expect("polyfit statistics were requested")
     }
 
     /// Centering and scaling vector `[mean(x), std(x)]`.
@@ -548,7 +575,7 @@ fn solve_polyfit(
     y_data: &[Complex64],
     degree: usize,
     weights: Option<&[f64]>,
-    basis: ProviderPolyfitBasis,
+    outputs: ProviderPolyfitOutputs,
 ) -> PolyfitKernelResult<PolyfitSolution> {
     if x_data.len() != y_data.len() {
         return Err(PolyfitKernelError::input(
@@ -574,7 +601,7 @@ fn solve_polyfit(
     if let Some(w) = weights {
         validate_weights(w)?;
     }
-    let (mean, scale) = match basis {
+    let (mean, scale) = match outputs.basis() {
         ProviderPolyfitBasis::Original => (0.0, 1.0),
         ProviderPolyfitBasis::CenteredScaled => {
             let mean = normalization::sample_mean(x_data)
@@ -603,12 +630,15 @@ fn solve_polyfit(
         apply_weights_matrix(&mut vandermonde, rows, cols, w)?;
     }
 
+    let column_scales = column_scale::equilibrate(&mut vandermonde, rows, cols)?;
+
     let mut transformed_rhs = rhs.clone();
     let column_norms: Vec<f64> = (0..cols)
         .map(|col| stable_l2((0..rows).map(|row| vandermonde[row + col * rows])))
         .collect();
     householder_qr(&mut vandermonde, rows, cols, &mut transformed_rhs)?;
-    let coeffs = solve_upper(&vandermonde, rows, cols, &transformed_rhs, &column_norms)?;
+    let scaled_coeffs = solve_upper(&vandermonde, rows, cols, &transformed_rhs, &column_norms)?;
+    let coeffs = column_scale::restore_coefficients(scaled_coeffs, &column_scales)?;
 
     let normr = residual_norm(&transformed_rhs, rows, cols)?;
     let df = if rows > cols {
@@ -616,7 +646,13 @@ fn solve_polyfit(
     } else {
         0.0
     };
-    let r_matrix = extract_upper(&vandermonde, &geometry);
+    let r_matrix = if outputs.wants_statistics() {
+        let mut r = extract_upper(&vandermonde, &geometry);
+        column_scale::restore_upper(&mut r, cols, &column_scales)?;
+        Some(r)
+    } else {
+        None
+    };
     let is_complex = coeffs.iter().any(|c| c.im != 0.0);
 
     Ok(PolyfitSolution {
@@ -916,7 +952,7 @@ fn build_mu(mean: f64, scale: f64) -> BuiltinResult<Value> {
 #[derive(Debug, Clone)]
 pub struct PolyfitHostRealResult {
     pub coefficients: Vec<f64>,
-    pub r_matrix: Vec<f64>,
+    pub r_matrix: Option<Vec<f64>>,
     pub mu: [f64; 2],
     pub normr: f64,
     pub df: f64,
@@ -928,6 +964,20 @@ pub fn polyfit_host_real_for_provider(
     degree: usize,
     weights: Option<&[f64]>,
     basis: ProviderPolyfitBasis,
+) -> PolyfitKernelResult<PolyfitHostRealResult> {
+    let outputs = match basis {
+        ProviderPolyfitBasis::Original => ProviderPolyfitOutputs::Statistics,
+        ProviderPolyfitBasis::CenteredScaled => ProviderPolyfitOutputs::StatisticsAndNormalization,
+    };
+    polyfit_host_real_for_provider_requested(x, y, degree, weights, outputs)
+}
+
+pub fn polyfit_host_real_for_provider_requested(
+    x: &[f64],
+    y: &[f64],
+    degree: usize,
+    weights: Option<&[f64]>,
+    outputs: ProviderPolyfitOutputs,
 ) -> PolyfitKernelResult<PolyfitHostRealResult> {
     if x.len() != y.len() {
         return Err(PolyfitKernelError::input(
@@ -950,7 +1000,7 @@ pub fn polyfit_host_real_for_provider(
         validate_weights(w)?;
     }
     let complex_y: Vec<Complex64> = y.iter().copied().map(|v| Complex64::new(v, 0.0)).collect();
-    let solution = solve_polyfit(x, &complex_y, degree, weights, basis)?;
+    let solution = solve_polyfit(x, &complex_y, degree, weights, outputs)?;
     let PolyfitSolution {
         coeffs,
         r_matrix,

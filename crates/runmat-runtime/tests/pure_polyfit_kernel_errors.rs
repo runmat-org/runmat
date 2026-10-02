@@ -1,10 +1,11 @@
 //! Pure solver diagnostics survive a real owning provider round trip.
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
-    ProviderPolyfitBasis,
+    ProviderPolyfitBasis, ProviderPolyfitOutputs,
 };
 use runmat_runtime::builtins::math::poly::polyfit::{
     kernel_error::PolyfitKernelError, polyfit_host_real_for_provider,
+    polyfit_host_real_for_provider_requested,
 };
 use runmat_value::{Tensor, Value};
 use std::error::Error;
@@ -47,7 +48,7 @@ impl AccelProvider for SolverProvider {
         y: &'a runmat_accelerate_api::GpuTensorHandle,
         degree: usize,
         weights: Option<&'a runmat_accelerate_api::GpuTensorHandle>,
-        basis: ProviderPolyfitBasis,
+        outputs: ProviderPolyfitOutputs,
     ) -> runmat_accelerate_api::AccelProviderFuture<'a, runmat_accelerate_api::ProviderPolyfitResult>
     {
         Box::pin(async move {
@@ -58,12 +59,12 @@ impl AccelProvider for SolverProvider {
                 Some(handle) => Some(self.inner.download(handle).await?),
                 None => None,
             };
-            let solved = polyfit_host_real_for_provider(
+            let solved = polyfit_host_real_for_provider_requested(
                 &x.data,
                 &y.data,
                 degree,
                 weights.as_ref().map(|w| w.data.as_slice()),
-                basis,
+                outputs,
             )?;
             Ok(runmat_accelerate_api::ProviderPolyfitResult {
                 coefficients: solved.coefficients,
@@ -94,7 +95,7 @@ fn pure_solver_preserves_coefficients_and_typed_validation() {
     .unwrap();
     assert!((result.coefficients[0] - 2.).abs() < 1e-12);
     assert!((result.coefficients[1] - 1.).abs() < 1e-12);
-    assert_eq!(result.r_matrix.len(), 4);
+    assert_eq!(result.r_matrix.as_ref().unwrap().len(), 4);
     assert_eq!(result.df, 1.);
     assert!(result.normr < 1e-12);
     let error =
@@ -167,7 +168,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
     )
     .unwrap();
     assert_eq!(fit.coefficients.len(), 4);
-    assert_eq!(fit.r_matrix.len(), 16);
+    assert_eq!(fit.r_matrix.as_ref().unwrap().len(), 16);
     assert_eq!(fit.df, 0.);
     for (x, y) in [(-1., 2.), (1., 4.)] {
         let evaluated = fit
@@ -359,6 +360,68 @@ fn invalid_host_degree_precedes_resident_integer_download() {
         assert_eq!(error.identifier(), Some("RunMat:polyfit:InvalidArgument"));
         assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     }
+    x.allocation_lease().validate_live().unwrap();
+    y.allocation_lease().validate_live().unwrap();
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn extreme_original_basis_fits_coefficients_without_unrequested_overflowing_r() {
+    let x_data = [f64::MAX, -f64::MAX];
+    let y_data = [1.0, -1.0];
+    let coefficient_only = polyfit_host_real_for_provider_requested(
+        &x_data,
+        &y_data,
+        1,
+        None,
+        ProviderPolyfitOutputs::Coefficients,
+    )
+    .expect("finite coefficients do not require an unrepresentable R matrix");
+    assert!(coefficient_only.r_matrix.is_none());
+    assert!(coefficient_only.coefficients[0] > 0.0);
+    assert!((coefficient_only.coefficients[0] * f64::MAX - 1.0).abs() < 1e-14);
+    assert!(coefficient_only.coefficients[1].abs() < 1e-14);
+    let error = polyfit_host_real_for_provider_requested(
+        &x_data,
+        &y_data,
+        1,
+        None,
+        ProviderPolyfitOutputs::Statistics,
+    )
+    .expect_err("requested original-basis R cannot be represented");
+    assert!(matches!(error, PolyfitKernelError::InvalidInput(_)));
+
+    let provider = Box::leak(Box::new(SolverProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        calls: AtomicUsize::new(0),
+    }));
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let x = provider
+        .inner
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &x_data,
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let y = provider
+        .inner
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &y_data,
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let args = [
+        Value::GpuTensor(x.clone()),
+        Value::GpuTensor(y.clone()),
+        Value::Num(1.0),
+    ];
+    let result = futures::executor::block_on(runmat_runtime::call_builtin_async("polyfit", &args))
+        .expect("one-output provider fit");
+    let Value::Tensor(coefficients) = result else {
+        panic!("expected real coefficient tensor");
+    };
+    assert!((coefficients.materialize_f64()[0] * f64::MAX - 1.0).abs() < 1e-14);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
     x.allocation_lease().validate_live().unwrap();
     y.allocation_lease().validate_live().unwrap();
 }

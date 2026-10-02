@@ -6,9 +6,9 @@ mod admission_tests;
 use bytemuck::cast_slice;
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, ProviderConv1dOptions, ProviderConvMode,
-    ProviderPolyderQuotient, ProviderPolyfitBasis, ProviderPolyfitResult, ProviderPolyvalOptions,
+    ProviderPolyderQuotient, ProviderPolyfitOutputs, ProviderPolyfitResult, ProviderPolyvalOptions,
 };
-use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
+use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider_requested;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
@@ -25,7 +25,7 @@ impl WgpuProvider {
         y: &GpuTensorHandle,
         degree: usize,
         weights: Option<&GpuTensorHandle>,
-        basis: ProviderPolyfitBasis,
+        outputs: ProviderPolyfitOutputs,
     ) -> Result<ProviderPolyfitResult> {
         // Authenticate every borrowed operand before storage eligibility or work.
         let entries = [Some(x), Some(y), weights]
@@ -55,12 +55,12 @@ impl WgpuProvider {
             None => None,
         };
         let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
-        let host_result = polyfit_host_real_for_provider(
+        let host_result = polyfit_host_real_for_provider_requested(
             &x_host.data,
             &y_host.data,
             degree,
             weights_slice,
-            basis,
+            outputs,
         )
         .map_err(|err| anyhow!(err))?;
         Ok(ProviderPolyfitResult {

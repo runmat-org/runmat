@@ -821,7 +821,8 @@ pub struct ProviderInvOptions {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderPolyfitResult {
     pub coefficients: Vec<f64>,
-    pub r_matrix: Vec<f64>,
+    /// Present only when the caller requested the QR statistics output.
+    pub r_matrix: Option<Vec<f64>>,
     pub normr: f64,
     pub df: f64,
     pub mu: [f64; 2],
@@ -832,6 +833,28 @@ pub struct ProviderPolyfitResult {
 pub enum ProviderPolyfitBasis {
     Original,
     CenteredScaled,
+}
+
+/// Requested polynomial outputs. The third output selects the centered basis;
+/// the second requires representable QR statistics in that basis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderPolyfitOutputs {
+    Coefficients,
+    Statistics,
+    StatisticsAndNormalization,
+}
+
+impl ProviderPolyfitOutputs {
+    pub fn wants_statistics(self) -> bool {
+        !matches!(self, Self::Coefficients)
+    }
+
+    pub fn basis(self) -> ProviderPolyfitBasis {
+        match self {
+            Self::StatisticsAndNormalization => ProviderPolyfitBasis::CenteredScaled,
+            Self::Coefficients | Self::Statistics => ProviderPolyfitBasis::Original,
+        }
+    }
 }
 
 /// Numerator/denominator payload returned by provider-backed `polyder` quotient rule.
@@ -2209,7 +2232,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _y: &'a GpuTensorHandle,
         _degree: usize,
         _weights: Option<&'a GpuTensorHandle>,
-        _basis: ProviderPolyfitBasis,
+        _outputs: ProviderPolyfitOutputs,
     ) -> AccelProviderFuture<'a, ProviderPolyfitResult> {
         Box::pin(async move {
             Err(unsupported_provider_operation(
