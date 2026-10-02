@@ -152,8 +152,8 @@ impl Drop for PendingTurn {
 
 #[test]
 fn pending_drop_and_post_reservation_failures_consume_exact_reserved_range() {
-    let context = context();
-    let start = state(&context);
+    let pending_context = context();
+    let start = state(&pending_context);
     let dropped = Rc::new(Cell::new(false));
     let dropped_in_turn = dropped.clone();
     let cancellation = CancellationSource::new();
@@ -165,13 +165,13 @@ fn pending_drop_and_post_reservation_failures_consume_exact_reserved_range() {
     let mut future = Box::pin(generate_normal_cooperative(
         5,
         "rng test",
-        Some(&context),
+        Some(&pending_context),
         &mut pending_budget,
     ));
     let waker = futures::task::noop_waker();
     let mut task = Context::from_waker(&waker);
     assert!(matches!(future.as_mut().poll(&mut task), Poll::Pending));
-    assert_eq!(state(&context), advance_state(start, 6));
+    assert_eq!(state(&pending_context), advance_state(start, 6));
     drop(future);
     assert!(dropped.get());
 

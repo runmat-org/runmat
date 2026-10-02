@@ -1,9 +1,9 @@
 use super::*;
 use crate::builtins::common::random::{
     advance_state, enter_parallel_random_stream, reserve_parallel_random_streams, set_seed,
-    snapshot, test_guard, DEFAULT_RNG_SEED,
+    snapshot, test_guard, with_rng_state_in, DEFAULT_RNG_SEED,
 };
-use crate::execution::{CpuCooperationPolicy, RuntimeExecutionService};
+use crate::execution::{CpuCooperationPolicy, ExecutionServiceError, RuntimeExecutionService};
 use futures::executor::block_on;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;

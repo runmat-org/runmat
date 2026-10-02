@@ -46,6 +46,7 @@ impl TsneCooperation {
                             .with_identifier(format!("{namespace}:Cancelled"))
                             .with_builtin(NAME)
                             .with_source(source)
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     }
                     other => with_tsne_context(other.into_runtime_error()),
