@@ -176,3 +176,46 @@ fn known_bad_bin_count_and_host_option_values_do_not_prove_a_handle() {
     assert!(!bad_alpha.diagnostics.is_empty());
     assert!(matches!(bad_alpha.outputs[0].kind, ValueKindFact::Unknown));
 }
+
+#[test]
+fn table_selectors_and_option_forms_have_truthful_structured_signatures() {
+    let signatures = BINSCATTER_CATALOG_ENTRY.descriptor.signatures;
+    let table = signatures
+        .iter()
+        .find(|signature| signature.label == "binscatter(tbl, xvar, yvar)")
+        .expect("table signature");
+    assert_eq!(table.inputs[1].ty, BuiltinParamType::Any);
+    assert_eq!(table.inputs[2].ty, BuiltinParamType::Any);
+    for label in [
+        "binscatter(tbl, xvar, yvar, Name, Value)",
+        "h = binscatter(x, y, Name, Value)",
+        "h = binscatter(tbl, xvar, yvar, nbins)",
+        "h = binscatter(ax, x, y, Name, Value)",
+    ] {
+        assert!(signatures.iter().any(|signature| signature.label == label));
+    }
+}
+
+#[test]
+fn retained_legacy_examples_exercise_distinct_bin_and_table_forms() {
+    let examples = BINSCATTER_CATALOG_ENTRY.documentation.examples;
+    let limits = examples
+        .iter()
+        .find(|example| example.id == "binscatter-limits")
+        .expect("limits example");
+    assert!(limits.program.contains("'NumBins',[20 10]"));
+    assert!(limits.program.contains("'YLimits',[-1 1]"));
+    let table = examples
+        .iter()
+        .find(|example| example.id == "binscatter-table")
+        .expect("table example");
+    assert!(table.program.contains("binscatter(T,'x','y',25)"));
+    assert!(matches!(
+        limits.verification,
+        BuiltinExampleVerification::Figure { .. }
+    ));
+    assert!(matches!(
+        table.verification,
+        BuiltinExampleVerification::Figure { .. }
+    ));
+}

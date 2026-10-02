@@ -25,6 +25,22 @@ const PARAM_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Y coordinates or table variable selector.",
 };
 
+const PARAM_XVAR: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "xvar",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Table variable name or positive one-based variable index for X.",
+};
+
+const PARAM_YVAR: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "yvar",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Table variable name or positive one-based variable index for Y.",
+};
+
 const PARAM_TABLE: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "tbl",
     ty: BuiltinParamType::Any,
@@ -60,14 +76,19 @@ const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
 const INPUT_XY: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_Y];
 const INPUT_XY_N: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_Y, PARAM_NBINS];
 const INPUT_XY_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_Y, PARAM_OPTIONS];
-const INPUT_TBL_XY: [BuiltinParamDescriptor; 3] = [PARAM_TABLE, PARAM_X, PARAM_Y];
-const INPUT_TBL_XY_N: [BuiltinParamDescriptor; 4] = [PARAM_TABLE, PARAM_X, PARAM_Y, PARAM_NBINS];
+const INPUT_TBL_XY: [BuiltinParamDescriptor; 3] = [PARAM_TABLE, PARAM_XVAR, PARAM_YVAR];
+const INPUT_TBL_XY_N: [BuiltinParamDescriptor; 4] =
+    [PARAM_TABLE, PARAM_XVAR, PARAM_YVAR, PARAM_NBINS];
+const INPUT_TBL_XY_OPTIONS: [BuiltinParamDescriptor; 4] =
+    [PARAM_TABLE, PARAM_XVAR, PARAM_YVAR, PARAM_OPTIONS];
 const INPUT_AX_XY: [BuiltinParamDescriptor; 3] = [PARAM_AX, PARAM_X, PARAM_Y];
 const INPUT_AX_XY_OPTIONS: [BuiltinParamDescriptor; 4] =
     [PARAM_AX, PARAM_X, PARAM_Y, PARAM_OPTIONS];
+const INPUT_AX_TBL_XY: [BuiltinParamDescriptor; 4] =
+    [PARAM_AX, PARAM_TABLE, PARAM_XVAR, PARAM_YVAR];
 const OUTPUT_H: [BuiltinParamDescriptor; 1] = [OUTPUT_HANDLE];
 
-const SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 14] = [
     BuiltinSignatureDescriptor {
         label: "binscatter(x, y)",
         inputs: &INPUT_XY,
@@ -94,6 +115,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
         outputs: &[],
     },
     BuiltinSignatureDescriptor {
+        label: "binscatter(tbl, xvar, yvar, Name, Value)",
+        inputs: &INPUT_TBL_XY_OPTIONS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
         label: "binscatter(ax, ___)",
         inputs: &INPUT_AX_XY,
         outputs: &[],
@@ -104,6 +130,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
         outputs: &[],
     },
     BuiltinSignatureDescriptor {
+        label: "binscatter(ax, tbl, xvar, yvar)",
+        inputs: &INPUT_AX_TBL_XY,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
         label: "h = binscatter(___)",
         inputs: &INPUT_XY,
         outputs: &OUTPUT_H,
@@ -111,6 +142,21 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
     BuiltinSignatureDescriptor {
         label: "h = binscatter(x, y, nbins)",
         inputs: &INPUT_XY_N,
+        outputs: &OUTPUT_H,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = binscatter(x, y, Name, Value)",
+        inputs: &INPUT_XY_OPTIONS,
+        outputs: &OUTPUT_H,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = binscatter(tbl, xvar, yvar, nbins)",
+        inputs: &INPUT_TBL_XY_N,
+        outputs: &OUTPUT_H,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = binscatter(ax, x, y, Name, Value)",
+        inputs: &INPUT_AX_XY_OPTIONS,
         outputs: &OUTPUT_H,
     },
 ];
