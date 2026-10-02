@@ -1,6 +1,6 @@
 use super::geometry::{
-    apply_pca_if_requested, guard_dense_feature_work, matrix_value, needs_pca,
-    prepare_data_cooperative, standardize_rows,
+    apply_pca_if_requested, guard_dense_feature_work, needs_pca, prepare_data_cooperative,
+    standardize_rows,
 };
 use super::metric::pairwise_squared_distances;
 use super::{
@@ -19,26 +19,30 @@ pub(super) async fn compute_tsne_cooperative(
     if x.shape.len() > 2 {
         return Err(invalid("tsne: X must be a 2-D numeric matrix"));
     }
-    let prepared = prepare_data_cooperative(&x, cooperation).await?;
-    if prepared.rows.is_empty() {
+    let PreparedData {
+        mut rows,
+        good_rows,
+        original_rows,
+    } = prepare_data_cooperative(&x, cooperation).await?;
+    if rows.is_empty() {
         return Err(invalid(
             "tsne: at least one complete observation is required",
         ));
     }
-    if prepared.rows.len() < 2 {
-        return single_row_embedding(prepared.rows.len(), options.num_dimensions);
+    if rows.len() < 2 {
+        return single_row_embedding(rows.len(), options.num_dimensions);
     }
-    if prepared.rows.len().saturating_mul(prepared.rows.len()) > MAX_WORK_CELLS {
+    if rows.len().saturating_mul(rows.len()) > MAX_WORK_CELLS {
         return Err(invalid(format!(
             "tsne: exact CPU implementation supports at most {MAX_WORK_CELLS} pairwise cells"
         )));
     }
-    let feature_count = prepared.rows[0].len();
+    let complete_rows = rows.len();
+    let feature_count = rows[0].len();
     if matches!(options.distance, DistanceMetric::Mahalanobis) || needs_pca(&options, feature_count)
     {
         guard_dense_feature_work(feature_count)?;
     }
-    let mut rows = prepared.rows.clone();
     let _reporting_options = (options.num_print, options.verbose);
     let _barnes_hut_theta = options.theta;
     match options.algorithm {
@@ -56,10 +60,17 @@ pub(super) async fn compute_tsne_cooperative(
     rows = apply_pca_if_requested(rows, options.num_pca_components)?;
     let distances = pairwise_squared_distances(&rows, options.distance)?;
     let probabilities = joint_probabilities(&distances, options.perplexity, cooperation).await?;
-    let mut embedding = initial_embedding(&options, &prepared, cooperation).await?;
+    let mut embedding = initial_embedding(
+        &options,
+        complete_rows,
+        original_rows,
+        &good_rows,
+        cooperation,
+    )
+    .await?;
     center_embedding(&mut embedding, options.num_dimensions, cooperation).await?;
-    let mut velocity = vec![0.0; embedding.len()];
-    let mut gains = vec![1.0_f64; embedding.len()];
+    let mut velocity = filled_f64(embedding.len(), 0.0, cooperation).await?;
+    let mut gains = filled_f64(embedding.len(), 1.0, cooperation).await?;
     let iterations = options.max_iter.max(1);
     for iter in 0..iterations {
         let exaggeration = if iter < 99 { options.exaggeration } else { 1.0 };
@@ -96,7 +107,7 @@ pub(super) async fn compute_tsne_cooperative(
         cooperation,
     )
     .await?;
-    let output = Tensor::new(embedding, vec![prepared.rows.len(), options.num_dimensions])
+    let output = Tensor::new(embedding, vec![complete_rows, options.num_dimensions])
         .map_err(|err| internal(format!("tsne: {err}")))?;
     Ok(EmbeddingResult {
         embedding: output,
@@ -122,12 +133,12 @@ async fn joint_probabilities(
         .ok_or_else(|| internal("tsne: distance matrix has invalid shape"))?;
     let effective_perplexity = perplexity.min((n - 1) as f64).max(1.0);
     let target_entropy = effective_perplexity.ln();
-    let mut conditional = vec![0.0; n * n];
+    let mut conditional = filled_f64(distances.len(), 0.0, cooperation).await?;
     for i in 0..n {
         let mut beta = 1.0;
         let mut beta_min = f64::NEG_INFINITY;
         let mut beta_max = f64::INFINITY;
-        let mut row_prob = vec![0.0; n];
+        let mut row_prob = filled_f64(n, 0.0, cooperation).await?;
         for _ in 0..80 {
             let mut sum = 0.0;
             for j in 0..n {
@@ -180,7 +191,7 @@ async fn joint_probabilities(
             cooperation.completed(1).await?;
         }
     }
-    let mut joint = vec![0.0; n * n];
+    let mut joint = filled_f64(distances.len(), 0.0, cooperation).await?;
     for i in 0..n {
         for j in 0..n {
             if i != j {
@@ -207,24 +218,29 @@ async fn joint_probabilities(
 
 async fn initial_embedding(
     options: &Options,
-    prepared: &PreparedData,
+    rows: usize,
+    original_rows: usize,
+    good_rows: &[usize],
     cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<Vec<f64>> {
-    let rows = prepared.rows.len();
     let dims = options.num_dimensions;
     if let Some(initial) = &options.initial_y {
-        let values = tensor::tensor_values_f64_cow(initial);
         if initial.shape.len() > 2 || initial.cols != dims {
             return Err(invalid(format!(
                 "tsne: InitialY must have {} columns",
                 dims
             )));
         }
-        let mut data = Vec::with_capacity(rows * dims);
-        if initial.rows == prepared.original_rows {
+        let count = rows
+            .checked_mul(dims)
+            .ok_or_else(|| invalid("tsne: embedding shape overflow"))?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(count)
+            .map_err(|_| invalid("tsne: embedding exceeds available memory"))?;
+        if initial.rows == original_rows {
             for col in 0..dims {
-                for &row in &prepared.good_rows {
-                    let value = matrix_value(values.as_ref(), initial.rows, row, col);
+                for &row in good_rows {
+                    let value = tensor::tensor_value_f64(initial, row + col * initial.rows);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -235,7 +251,7 @@ async fn initial_embedding(
         } else if initial.rows == rows {
             for col in 0..dims {
                 for row in 0..rows {
-                    let value = matrix_value(values.as_ref(), initial.rows, row, col);
+                    let value = tensor::tensor_value_f64(initial, row + col * initial.rows);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -270,7 +286,7 @@ async fn gradient_and_loss(
     cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<(Vec<f64>, f64, f64)> {
     let n = integer_sqrt(probabilities.len()).unwrap_or(0);
-    let mut q_num = vec![0.0; n * n];
+    let mut q_num = filled_f64(probabilities.len(), 0.0, cooperation).await?;
     let mut sum_q = 0.0;
     for i in 0..n {
         for j in (i + 1)..n {
@@ -288,7 +304,7 @@ async fn gradient_and_loss(
         }
     }
     let sum_q = sum_q.max(MIN_PROB);
-    let mut gradient = vec![0.0; embedding.len()];
+    let mut gradient = filled_f64(embedding.len(), 0.0, cooperation).await?;
     let mut loss = 0.0;
     for i in 0..n {
         for j in 0..n {
@@ -343,4 +359,20 @@ fn integer_sqrt(value: usize) -> Option<usize> {
     } else {
         None
     }
+}
+
+async fn filled_f64(
+    len: usize,
+    value: f64,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|_| invalid("tsne: numerical workspace exceeds available memory"))?;
+    for _ in 0..len {
+        values.push(value);
+        cooperation.completed(1).await?;
+    }
+    Ok(values)
 }
