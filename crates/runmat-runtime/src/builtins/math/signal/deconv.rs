@@ -400,13 +400,12 @@ async fn prepare_deconv_integer(
         .prepare_integer_receipt(value, &DECONV_INTEGER_INPUT_EXTENSION)
         .await?;
     if !prepared.is_exact() {
-        return Err(build_runtime_error(
-            "deconv: integer input must be exactly representable as double",
-        )
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier("RunMat:deconv:InvalidInput")
-        .with_gpu_gather_retry(GpuGatherRetry::Never)
-        .build());
+        let mut error = deconv_error_with_detail(
+            &DECONV_ERROR_INVALID_INPUT,
+            "integer input must be exactly representable as double",
+        );
+        error.gpu_gather_retry = GpuGatherRetry::Never;
+        return Err(error);
     }
     Ok(prepared.into_resident_payload())
 }
@@ -776,6 +775,10 @@ fn finalize_real(data: Vec<f64>, shape: Vec<usize>, single_output: bool) -> Buil
     .map_err(|e| deconv_error_with_detail(&DECONV_ERROR_BUILD_OUTPUT, &e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
+
+#[cfg(test)]
+#[path = "deconv/provider_tests.rs"]
+mod provider_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
