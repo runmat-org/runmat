@@ -2,172 +2,18 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, RECTPULS_ERROR_ARG_COUNT, RECTPULS_ERROR_INTERNAL,
+    RECTPULS_ERROR_INVALID_INPUT, RECTPULS_ERROR_WIDTH_INVALID, RECTPULS_EXPLICIT_GPU_EXTENSION,
+    RECTPULS_INTEGER_T_EXTENSION, RECTPULS_INTEGER_W_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::signal::type_resolvers::numeric_unary_shape_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "rectpuls";
-
-const RECTPULS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Rectangular pulse samples.",
-}];
-
-const RECTPULS_INPUTS_T: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "T",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sample times relative to the pulse center.",
-}];
-
-const RECTPULS_INPUTS_T_W: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "T",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times relative to the pulse center.",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Pulse width.",
-    },
-];
-
-const RECTPULS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = rectpuls(T)",
-        inputs: &RECTPULS_INPUTS_T,
-        outputs: &RECTPULS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = rectpuls(T, W)",
-        inputs: &RECTPULS_INPUTS_T_W,
-        outputs: &RECTPULS_OUTPUT,
-    },
-];
-
-const RECTPULS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RECTPULS.INVALID_INPUT",
-    identifier: Some("RunMat:rectpuls:InvalidInput"),
-    when: "Input times cannot be interpreted as real numeric samples.",
-    message: "rectpuls: expected real numeric input",
-};
-
-const RECTPULS_ERROR_WIDTH_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RECTPULS.WIDTH_INVALID",
-    identifier: Some("RunMat:rectpuls:WidthInvalid"),
-    when: "Width is not a positive finite scalar.",
-    message: "rectpuls: width must be a positive finite scalar",
-};
-
-const RECTPULS_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RECTPULS.ARG_COUNT",
-    identifier: Some("RunMat:rectpuls:ArgCount"),
-    when: "Too many input arguments are provided.",
-    message: "rectpuls: expected 1 or 2 arguments",
-};
-
-const RECTPULS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RECTPULS.INTERNAL",
-    identifier: Some("RunMat:rectpuls:InternalError"),
-    when: "Internal tensor construction or GPU gather fails.",
-    message: "rectpuls: internal error",
-};
-
-const RECTPULS_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    RECTPULS_ERROR_INVALID_INPUT,
-    RECTPULS_ERROR_WIDTH_INVALID,
-    RECTPULS_ERROR_ARG_COUNT,
-    RECTPULS_ERROR_INTERNAL,
-];
-
-pub const RECTPULS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RECTPULS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RECTPULS_ERRORS,
-};
-
-const RECTPULS_INTEGER_T_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rectpuls-integer-time",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rectpuls with typed-integer sample times is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RectpulsIntegerTimeExtension"),
-};
-const RECTPULS_INTEGER_W_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rectpuls-integer-width",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rectpuls with a typed-integer width is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RectpulsIntegerWidthExtension"),
-};
-const RECTPULS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rectpuls-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rectpuls with an explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RectpulsExplicitGpuInputExtension"),
-};
-pub const RECTPULS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    RECTPULS_INTEGER_T_EXTENSION,
-    RECTPULS_INTEGER_W_EXTENSION,
-    RECTPULS_EXPLICIT_GPU_EXTENSION,
-];
-const RECTPULS_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "T",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double sample times; typed integers are an independently gated RunMat extension.",
-    }];
-const RECTPULS_INTEGER_W_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "W",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public width is a positive floating scalar; typed width storage is admitted only at a checked binary64 boundary.",
-    }];
-pub const RECTPULS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = rectpuls(integer_T,W)",
-        inputs: &RECTPULS_INTEGER_T_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Typed times reject before provider access unless RunMat extensions are enabled and exact conversion is possible.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = rectpuls(T,integer_W)",
-        inputs: &RECTPULS_INTEGER_W_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Width is gated and checked separately from sample-time class.",
-    },
-];
 
 fn rectpuls_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rectpuls_error_with_message(error.message, error)
@@ -236,13 +82,7 @@ pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
 
 #[runtime_builtin(
     name = "rectpuls",
-    category = "math/signal",
-    summary = "Generate sampled rectangular pulses.",
-    keywords = "rectpuls,rectangular pulse,pulse train,signal processing",
-    type_resolver(numeric_unary_shape_type),
-    descriptor(crate::builtins::math::signal::rectpuls::RECTPULS_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::rectpuls::RECTPULS_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::rectpuls::RECTPULS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::rectpuls"
 )]
 async fn rectpuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -358,7 +198,7 @@ async fn rectpuls_input_tensor(value: Value) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::builtin_function_by_name;
     use runmat_value::{CharArray, IntegerStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -388,22 +228,6 @@ mod tests {
             IntegerStorage::U32(vec![0, 1]),
             IntegerStorage::U64(vec![0, 1]),
         ]
-    }
-
-    #[test]
-    fn rectpuls_type_preserves_input_shape() {
-        let out = numeric_unary_shape_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)])
-            }
-        );
     }
 
     #[test]
@@ -514,6 +338,14 @@ mod tests {
 
     #[test]
     fn rectpuls_is_registered() {
-        assert!(builtin_function_by_name("rectpuls").is_some());
+        let entry = runmat_builtins::builtin_catalog_entry_by_name("rectpuls").unwrap();
+        assert!(builtin_function_by_name("rectpuls").is_none());
+        assert_eq!(entry.bindings.len(), 1);
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name("rectpuls");
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
     }
 }

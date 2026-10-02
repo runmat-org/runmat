@@ -1,0 +1,95 @@
+use crate::catalog::inference::argument_error;
+use crate::BuiltinCatalogEntry;
+use runmat_types::*;
+
+pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    if !(1..=2).contains(&request.arguments.len()) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-RECTPULS-ARITY",
+            "rectpuls expects sample times and an optional width",
+            request.arguments.len().saturating_sub(1),
+        ));
+    }
+    let output = match request.arguments.first() {
+        Some(times) => sample_output(times, &mut diagnostics),
+        None => ValueFact::unknown(DynamicReason::RuntimeValue),
+    };
+    if let Some(width) = request.arguments.get(1) {
+        let scalar = width.shape.element_count().is_none_or(|count| count == 1);
+        let real = matches!(
+            width.kind,
+            ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Real,
+                ..
+            }) | ValueKindFact::Logical
+                | ValueKindFact::Unknown
+        );
+        if !scalar || !real {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-RECTPULS-WIDTH",
+                "rectpuls width must be a positive real scalar",
+                1,
+            ));
+        }
+        if request
+            .literals
+            .numeric_at(1)
+            .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-RECTPULS-WIDTH",
+                "rectpuls width must be positive and finite",
+                1,
+            ));
+        }
+    }
+    let output = if diagnostics.is_empty() {
+        output
+    } else {
+        ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
+    };
+    let mut contract = CallContract::fixed(vec![output]);
+    contract.effects = entry.contract.effect_set();
+    contract.capabilities = entry.contract.capability_set();
+    let mut result = infer_call(&contract, request);
+    result.dynamic_outputs = request.outputs.requested.known_count().is_none();
+    result.diagnostics.extend(diagnostics);
+    result
+}
+
+fn sample_output(times: &ValueFact, diagnostics: &mut Vec<InferenceDiagnostic>) -> ValueFact {
+    match times.kind {
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        })
+        | ValueKindFact::Logical => {}
+        ValueKindFact::Unknown => return ValueFact::unknown(DynamicReason::RuntimeValue),
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-RECTPULS-INPUT",
+                "rectpuls expects real numeric sample times",
+                0,
+            ));
+            return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+    }
+    let storage = if times.shape.element_count() == Some(1) {
+        StorageFact::Scalar
+    } else if times.shape.element_count().is_some() {
+        StorageFact::Dense
+    } else {
+        StorageFact::Unknown
+    };
+    let mut output = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        times.shape.clone(),
+        storage,
+    );
+    output.residency = ResidencyFact::Unknown;
+    output
+}
