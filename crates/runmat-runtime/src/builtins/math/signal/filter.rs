@@ -423,6 +423,32 @@ fn filter_error_with_message(
     builder.build()
 }
 
+#[derive(Clone, Copy)]
+enum ProviderUploadRole {
+    Numerator,
+    Denominator,
+    InitialState,
+}
+
+impl ProviderUploadRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Numerator => "numerator",
+            Self::Denominator => "denominator",
+            Self::InitialState => "initial state",
+        }
+    }
+}
+
+fn provider_upload_error(role: ProviderUploadRole, cause: anyhow::Error) -> RuntimeError {
+    let mut error = filter_error_with_detail(
+        &FILTER_ERROR_PROVIDER_UPLOAD,
+        format!("{} upload failed", role.label()),
+    );
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    crate::runtime_error::with_provider_execution_source(error, cause.into())
+}
+
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
         .await
@@ -537,8 +563,8 @@ impl FilterArgs {
             other => other,
         };
 
-        let coeffs_b = CoeffInput::from_value("filter", "numerator", b).await?;
-        let coeffs_a = CoeffInput::from_value("filter", "denominator", a).await?;
+        let coeffs_b = CoeffInput::from_value(CoefficientRole::Numerator, b).await?;
+        let coeffs_a = CoeffInput::from_value(CoefficientRole::Denominator, a).await?;
 
         if coeffs_a.len == 0 {
             return Err(filter_error(&FILTER_ERROR_EMPTY_DENOMINATOR));
@@ -614,16 +640,30 @@ struct CoeffInput {
     is_complex: bool,
 }
 
-impl CoeffInput {
-    fn empty_error(label: &str) -> &'static BuiltinErrorDescriptor {
-        if label == "denominator" {
-            &FILTER_ERROR_EMPTY_DENOMINATOR
-        } else {
-            &FILTER_ERROR_EMPTY_NUMERATOR
+#[derive(Clone, Copy)]
+enum CoefficientRole {
+    Numerator,
+    Denominator,
+}
+
+impl CoefficientRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Numerator => "numerator",
+            Self::Denominator => "denominator",
         }
     }
 
-    async fn from_value(name: &str, label: &str, value: Value) -> BuiltinResult<Self> {
+    fn empty_error(self) -> &'static BuiltinErrorDescriptor {
+        match self {
+            Self::Numerator => &FILTER_ERROR_EMPTY_NUMERATOR,
+            Self::Denominator => &FILTER_ERROR_EMPTY_DENOMINATOR,
+        }
+    }
+}
+
+impl CoeffInput {
+    async fn from_value(role: CoefficientRole, value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -635,18 +675,21 @@ impl CoeffInput {
                             map_control_flow_with_builtin(flow, BUILTIN_NAME),
                         )
                     })?;
-                Self::from_tensor(name, label, tensor)
+                Self::from_tensor(role, tensor)
             }
-            Value::Tensor(tensor) => Self::from_tensor(name, label, tensor),
+            Value::Tensor(tensor) => Self::from_tensor(role, tensor),
             Value::ComplexTensor(tensor) => {
                 let len = tensor.materialize_f64().len();
                 if len == 0 {
                     return Err(filter_error_with_detail(
-                        Self::empty_error(label),
-                        format!("{name}: {label} coefficients cannot be empty"),
+                        role.empty_error(),
+                        format!(
+                            "{BUILTIN_NAME}: {} coefficients cannot be empty",
+                            role.label()
+                        ),
                     ));
                 }
-                ensure_vector_shape(name, label, &tensor.shape)?;
+                ensure_vector_shape(role, &tensor.shape)?;
                 let data = tensor
                     .materialize_f64()
                     .into_iter()
@@ -662,10 +705,10 @@ impl CoeffInput {
                 let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
                     filter_error_with_detail(
                         &FILTER_ERROR_INVALID_COEFFICIENTS,
-                        format!("{name}: {label} coefficients: {e}"),
+                        format!("{BUILTIN_NAME}: {} coefficients: {e}", role.label()),
                     )
                 })?;
-                Self::from_tensor(name, label, tensor)
+                Self::from_tensor(role, tensor)
             }
             Value::Num(n) => Ok(Self {
                 data: vec![Complex::new(n, 0.0)],
@@ -689,19 +732,22 @@ impl CoeffInput {
             }),
             other => Err(filter_error_with_detail(
                 &FILTER_ERROR_INVALID_COEFFICIENTS,
-                format!("{name}: received {other:?}"),
+                format!("{BUILTIN_NAME}: received {other:?}"),
             )),
         }
     }
 
-    fn from_tensor(name: &str, label: &str, tensor: Tensor) -> BuiltinResult<Self> {
-        ensure_vector_shape(name, label, &tensor.shape)?;
+    fn from_tensor(role: CoefficientRole, tensor: Tensor) -> BuiltinResult<Self> {
+        ensure_vector_shape(role, &tensor.shape)?;
         let values = tensor::tensor_into_values_f64(tensor);
         let len = values.len();
         if len == 0 {
             return Err(filter_error_with_detail(
-                Self::empty_error(label),
-                format!("{name}: {label} coefficients cannot be empty"),
+                role.empty_error(),
+                format!(
+                    "{BUILTIN_NAME}: {} coefficients cannot be empty",
+                    role.label()
+                ),
             ));
         }
         let data = values.into_iter().map(|re| Complex::new(re, 0.0)).collect();
@@ -1118,24 +1164,18 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         data: &b_real,
         shape: &b_shape,
     };
-    let b_handle = provider.upload(&view_b).map_err(|e| {
-        filter_error_with_detail(
-            &FILTER_ERROR_PROVIDER_UPLOAD,
-            format!("numerator upload failed: {e}"),
-        )
-    })?;
+    let b_handle = provider
+        .upload(&view_b)
+        .map_err(|cause| provider_upload_error(ProviderUploadRole::Numerator, cause))?;
 
     let a_shape = vec![args.coeffs_a.len, 1];
     let view_a = runmat_accelerate_api::HostTensorView {
         data: &a_real,
         shape: &a_shape,
     };
-    let a_handle = provider.upload(&view_a).map_err(|e| {
-        filter_error_with_detail(
-            &FILTER_ERROR_PROVIDER_UPLOAD,
-            format!("denominator upload failed: {e}"),
-        )
-    })?;
+    let a_handle = provider
+        .upload(&view_a)
+        .map_err(|cause| provider_upload_error(ProviderUploadRole::Denominator, cause))?;
 
     let (zi_handle_opt, _zi_temp) = if args.state_len == 0 || !args.initial.provided {
         (None, None)
@@ -1157,12 +1197,9 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
             data: &zi_real,
             shape: &args.initial.shape,
         };
-        let handle = provider.upload(&view).map_err(|e| {
-            filter_error_with_detail(
-                &FILTER_ERROR_PROVIDER_UPLOAD,
-                format!("initial-state upload failed: {e}"),
-            )
-        })?;
+        let handle = provider
+            .upload(&view)
+            .map_err(|cause| provider_upload_error(ProviderUploadRole::InitialState, cause))?;
         (Some(handle.clone()), Some(handle))
     };
 
@@ -1423,12 +1460,15 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
     })
 }
 
-fn ensure_vector_shape(name: &str, label: &str, shape: &[usize]) -> BuiltinResult<()> {
+fn ensure_vector_shape(role: CoefficientRole, shape: &[usize]) -> BuiltinResult<()> {
     let non_singleton = shape.iter().copied().filter(|&d| d > 1).count();
     if non_singleton > 1 {
         Err(filter_error_with_detail(
             &FILTER_ERROR_INVALID_COEFFICIENTS,
-            format!("{name}: {label} coefficients must be a row or column vector"),
+            format!(
+                "{BUILTIN_NAME}: {} coefficients must be a row or column vector",
+                role.label()
+            ),
         ))
     } else {
         Ok(())
