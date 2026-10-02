@@ -78,6 +78,21 @@ pub(super) async fn stats_for_values_cooperative(
     })
 }
 
+fn percentile_sorted(values: &[f64], p: f64) -> f64 {
+    if values.len() == 1 {
+        return values[0];
+    }
+    let pos = p * (values.len() - 1) as f64;
+    let lo = pos.floor() as usize;
+    let hi = pos.ceil() as usize;
+    if lo == hi {
+        values[lo]
+    } else {
+        let frac = pos - lo as f64;
+        values[lo] * (1.0 - frac) + values[hi] * frac
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,20 +146,5 @@ mod tests {
         .expect_err("cancellation in the sort must not yield a partial box");
         assert_eq!(turns.get(), 602);
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
-    }
-}
-
-fn percentile_sorted(values: &[f64], p: f64) -> f64 {
-    if values.len() == 1 {
-        return values[0];
-    }
-    let pos = p * (values.len() - 1) as f64;
-    let lo = pos.floor() as usize;
-    let hi = pos.ceil() as usize;
-    if lo == hi {
-        values[lo]
-    } else {
-        let frac = pos - lo as f64;
-        values[lo] * (1.0 - frac) + values[hi] * frac
     }
 }
