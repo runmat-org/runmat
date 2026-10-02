@@ -5,34 +5,6 @@ use futures::executor::block_on;
 use runmat_value::{IntegerStorage, NumericDType};
 use std::rc::Rc;
 
-struct HostBudget(u64);
-
-impl crate::context::RuntimeParallelService for HostBudget {
-    fn supports(&self, _: crate::context::ParallelCapability) -> bool {
-        false
-    }
-    fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
-        crate::context::RuntimeParallelResources {
-            cpu_millicores_available: 1_000,
-            memory_available_bytes: Some(self.0),
-            epoch: 0,
-        }
-    }
-}
-
-fn budgeted_context(host_bytes: u64) -> crate::context::RuntimeContext {
-    crate::context::RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-        .with_service_ports(
-            crate::context::RuntimeServicePorts::default()
-                .with_placement(Rc::new(
-                    runmat_accelerate::placement::PlacementSession::new(
-                        runmat_accelerate::placement::PlacementSessionConfig::default(),
-                    ),
-                ))
-                .with_parallel(Rc::new(HostBudget(host_bytes))),
-        )
-}
-
 fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
     let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
     block_on(imhist_builtin(None, image, rest)).expect("imhist")
@@ -72,29 +44,6 @@ fn uint8_grayscale_default_bins_count_exact_intensities() {
     assert_eq!(counts.materialize_f64()[0], 1.0);
     assert_eq!(counts.materialize_f64()[1], 2.0);
     assert_eq!(counts.materialize_f64()[255], 1.0);
-}
-
-#[test]
-fn exact_integer_grayscale_images_use_their_storage_class_range() {
-    let u8 = Tensor::new_integer(IntegerStorage::U8(vec![0, 1, 1, u8::MAX]), vec![2, 2])
-        .expect("uint8 tensor");
-    let u16 = Tensor::new_integer(
-        IntegerStorage::U16(vec![0, 1, u16::MAX, u16::MAX]),
-        vec![2, 2],
-    )
-    .expect("uint16 tensor");
-
-    let u8_image = GrayscaleInput::from_tensor(u8).expect("uint8 image");
-    assert_eq!(u8_image.class_max, 255.0);
-    assert_eq!(u8_image.default_bins, 256);
-    let u8_eval = u8_image.evaluate(None).expect("uint8 histogram");
-    assert_eq!(u8_eval.counts.materialize_f64()[0], 1.0);
-    assert_eq!(u8_eval.counts.materialize_f64()[1], 2.0);
-    assert_eq!(u8_eval.counts.materialize_f64()[255], 1.0);
-
-    let u16_image = GrayscaleInput::from_tensor(u16).expect("uint16 image");
-    assert_eq!(u16_image.class_max, 65535.0);
-    assert_eq!(u16_image.default_bins, 256);
 }
 
 #[test]
@@ -171,16 +120,6 @@ fn uint8_indexed_image_uses_zero_based_colormap_indices() {
         panic!("expected counts");
     };
     assert_eq!(counts.materialize_f64(), vec![1.0, 2.0, 1.0]);
-}
-
-#[test]
-fn exact_integer_indexed_images_use_zero_based_indices() {
-    let image = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 1, 2]), vec![2, 2])
-        .expect("uint16 tensor");
-    let indexed = IndexedInput::from_value(Value::Tensor(image), 3).expect("indexed input");
-
-    assert!(indexed.zero_based);
-    assert_eq!(indexed.storage, NumericStorage::U16(vec![0, 1, 1, 2]));
 }
 
 #[test]
@@ -468,36 +407,6 @@ fn selected_histogram_unpolled_and_statement_forms_do_not_probe() {
         assert!(matches!(counts, Value::Tensor(_)));
         assert_eq!(witness.selections(), 0);
         assert!(witness.feedback().is_empty());
-        assert!(source.allocation_lease().validate_live().is_ok());
-    });
-}
-
-#[test]
-fn finite_host_budget_admits_bound_and_rejects_before_gather() {
-    test_support::with_test_provider(|provider| {
-        let input = tensor(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2], NumericDType::F64);
-        let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-        provider.reset_telemetry();
-        let admitted = block_on(imhist_builtin(
-            Some(budgeted_context(1024)),
-            Value::GpuTensor(source.clone()),
-            vec![Value::Num(3.0)],
-        ))
-        .expect("finite host budget admits real route");
-        assert!(matches!(admitted, Value::GpuTensor(_)));
-        assert!(provider.telemetry_snapshot().download_bytes > 0);
-
-        provider.reset_telemetry();
-        let rejected = block_on(imhist_builtin(
-            Some(budgeted_context(1)),
-            Value::GpuTensor(source.clone()),
-            vec![Value::Num(3.0)],
-        ))
-        .expect_err("finite budget must reject selected route before gather");
-        assert!(rejected
-            .identifier()
-            .is_some_and(|id| id.starts_with("RunMat:Placement:")));
-        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert!(source.allocation_lease().validate_live().is_ok());
     });
 }

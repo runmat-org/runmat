@@ -239,3 +239,42 @@ fn numeric_storage_from_int(value: IntValue) -> NumericStorage {
         IntValue::U64(value) => NumericStorage::U64(vec![value]),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::IntegerStorage;
+
+    #[test]
+    fn exact_integer_grayscale_images_use_their_storage_class_range() {
+        let u8 = Tensor::new_integer(IntegerStorage::U8(vec![0, 1, 1, u8::MAX]), vec![2, 2])
+            .expect("uint8 tensor");
+        let u16 = Tensor::new_integer(
+            IntegerStorage::U16(vec![0, 1, u16::MAX, u16::MAX]),
+            vec![2, 2],
+        )
+        .expect("uint16 tensor");
+
+        let u8_image = GrayscaleInput::from_tensor(u8).expect("uint8 image");
+        assert_eq!(u8_image.class_max, 255.0);
+        assert_eq!(u8_image.default_bins, 256);
+        let u8_eval = u8_image.evaluate(None).expect("uint8 histogram");
+        assert_eq!(u8_eval.counts.materialize_f64()[0], 1.0);
+        assert_eq!(u8_eval.counts.materialize_f64()[1], 2.0);
+        assert_eq!(u8_eval.counts.materialize_f64()[255], 1.0);
+
+        let u16_image = GrayscaleInput::from_tensor(u16).expect("uint16 image");
+        assert_eq!(u16_image.class_max, 65535.0);
+        assert_eq!(u16_image.default_bins, 256);
+    }
+
+    #[test]
+    fn exact_integer_indexed_images_use_zero_based_indices() {
+        let image = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 1, 2]), vec![2, 2])
+            .expect("uint16 tensor");
+        let indexed = IndexedInput::from_value(Value::Tensor(image), 3).expect("indexed input");
+
+        assert!(indexed.zero_based);
+        assert_eq!(indexed.storage, NumericStorage::U16(vec![0, 1, 1, 2]));
+    }
+}
