@@ -1011,7 +1011,7 @@ mod tests {
             ))
         };
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let strict_result = scalar_form().expect("R2026a scalar-callback selector is compatible");
+        let strict_result = scalar_form().expect("pinned scalar-callback selector is compatible");
         assert!(matches!(strict_result, Value::Num(value) if (value - 1.0/3.0).abs() < 1.0e-8));
         drop(_strict);
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
