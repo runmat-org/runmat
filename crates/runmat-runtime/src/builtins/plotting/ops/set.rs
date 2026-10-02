@@ -133,6 +133,31 @@ mod tests {
     }
 
     #[test]
+    fn set_property_name_admits_scalar_string_array_and_rejects_multirow_characters() {
+        let _guard = setup();
+        let root = Value::Num(0.0);
+        set_builtin(vec![
+            root.clone(),
+            Value::StringArray(
+                runmat_value::StringArray::new_2d(vec!["ShowHiddenHandles".into()], 1, 1)
+                    .expect("scalar text"),
+            ),
+            Value::String("off".into()),
+        ])
+        .expect("scalar string property name");
+        let error = set_builtin(vec![
+            root,
+            Value::CharArray(
+                runmat_value::CharArray::new(vec!['G', 'r', 'i', 'd'], 2, 2)
+                    .expect("two character rows"),
+            ),
+            Value::Bool(true),
+        ])
+        .expect_err("multirow property name");
+        assert_eq!(error.identifier(), SET_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
     fn set_updates_text_handle_properties() {
         let _guard = setup();
         let h = title_builtin(vec![Value::String("Signal".into())]).unwrap();

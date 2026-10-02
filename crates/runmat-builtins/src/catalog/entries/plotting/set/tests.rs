@@ -69,3 +69,26 @@ fn set_accepts_known_pan_control_object_and_rejects_unrelated_class() {
         .diagnostics
         .is_empty());
 }
+
+#[test]
+fn set_rejects_known_multirow_property_name_without_proven_status() {
+    let handle = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let mut property = ValueFact::scalar(ValueKindFact::Character);
+    property.shape = ShapeFact::from(vec![Some(2), Some(4)]);
+    let result = inference::infer(
+        &CallRequest {
+            arguments: vec![handle, property, ValueFact::scalar(ValueKindFact::Logical)],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::default(),
+        },
+        &SET_CATALOG_ENTRY,
+    );
+    assert!(!result.diagnostics.is_empty());
+    assert!(matches!(
+        result.outputs[0].certainty,
+        CertaintyFact::Dynamic(_)
+    ));
+}

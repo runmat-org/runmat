@@ -2,6 +2,25 @@ use runmat_types::{
     broadcast_shape, DynamicReason, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
+/// A scalar string or one character row is required at name-value boundaries.
+/// Unknown geometry stays conservative rather than inventing a scalar proof.
+pub(crate) fn known_invalid_text_scalar(value: &ValueFact) -> bool {
+    match value.kind {
+        ValueKindFact::String => value.shape.element_count().is_some_and(|count| count != 1),
+        ValueKindFact::Character => value.shape.known_dims().is_some_and(|dims| {
+            dims.first()
+                .copied()
+                .flatten()
+                .is_some_and(|rows| rows != 1)
+                || dims
+                    .iter()
+                    .skip(2)
+                    .any(|extent| extent.is_some_and(|extent| extent != 1))
+        }),
+        _ => false,
+    }
+}
+
 /// A row of characters, allowing trailing singleton dimensions. Unknown
 /// dimensions cannot prove rejection; zero-row empty text retains its policy.
 pub(crate) fn possible_character_row(shape: &ShapeFact) -> bool {

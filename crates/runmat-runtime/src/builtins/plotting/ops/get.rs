@@ -2,7 +2,7 @@ use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::properties::{get_properties_async, resolve_plot_handle};
+use super::properties::{get_properties_async, property_name_text, resolve_plot_handle};
 use crate::{build_runtime_error, RuntimeError};
 #[cfg(test)]
 use runmat_builtins::{GET_DESCRIPTOR, GET_INTEGER_CAPABILITIES};
@@ -81,11 +81,7 @@ pub async fn get_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> 
     };
     let property = args
         .get(1)
-        .map(|value| {
-            crate::builtins::plotting::style::value_as_string(value).ok_or_else(|| {
-                get_error_with_detail(&GET_ERROR_INVALID_ARGUMENT, "property name must be text")
-            })
-        })
+        .map(|value| property_name_text(value, BUILTIN_NAME).map_err(map_get_error))
         .transpose()?;
     if let Some(value) =
         super::zoom::get_zoom_object_property(&handle_arg, property.as_deref(), BUILTIN_NAME)?
@@ -170,6 +166,33 @@ mod tests {
             ],
         ] {
             let error = get_builtin(args).expect_err("invalid property invocation");
+            assert_eq!(error.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
+        }
+    }
+
+    #[test]
+    fn get_property_name_accepts_scalar_string_array_but_not_multirow_text() {
+        let _guard = setup();
+        let scalar = Value::StringArray(
+            runmat_value::StringArray::new_2d(vec!["Type".into()], 1, 1).expect("scalar text"),
+        );
+        assert_eq!(
+            get_builtin(vec![Value::Num(0.0), scalar]).expect("scalar string property"),
+            Value::String("root".into())
+        );
+        let invalid = [
+            Value::StringArray(
+                runmat_value::StringArray::new_2d(vec!["Type".into(), "Parent".into()], 1, 2)
+                    .expect("two strings"),
+            ),
+            Value::CharArray(
+                runmat_value::CharArray::new(vec!['T', 'y', 'p', 'e'], 2, 2)
+                    .expect("two character rows"),
+            ),
+        ];
+        for property in invalid {
+            let error =
+                get_builtin(vec![Value::Num(0.0), property]).expect_err("non-scalar property name");
             assert_eq!(error.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
         }
     }

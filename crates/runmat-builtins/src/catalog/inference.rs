@@ -26,6 +26,7 @@ mod unary_logical_scalar;
 pub use distributed::infer_partition_local_call;
 pub(crate) use support::facts::materialize;
 pub(crate) use support::materialization::gathered_value_fact;
+pub(crate) use support::text::known_invalid_text_scalar;
 pub(crate) use support::text::possible_character_row;
 pub(crate) use support::text::{invalid_text_comparison_container, text_comparison_result};
 pub(super) use support::{

@@ -82,3 +82,28 @@ fn get_accepts_known_graphics_control_object_and_keeps_unknown_object_conservati
     let unrelated = infer(vec![object(Some(standard::TABLE.owned()))], vec![]);
     assert!(!unrelated.diagnostics.is_empty());
 }
+
+#[test]
+fn get_property_text_geometry_rejects_known_arrays_but_keeps_unknown_shapes() {
+    let handle = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let mut scalar_string = ValueFact::scalar(ValueKindFact::String);
+    assert!(infer(vec![handle.clone(), scalar_string.clone()], vec![])
+        .diagnostics
+        .is_empty());
+    scalar_string.shape = ShapeFact::from(vec![Some(1), Some(2)]);
+    assert!(!infer(vec![handle.clone(), scalar_string], vec![])
+        .diagnostics
+        .is_empty());
+    let mut characters = ValueFact::scalar(ValueKindFact::Character);
+    characters.shape = ShapeFact::from(vec![Some(2), Some(2)]);
+    assert!(!infer(vec![handle.clone(), characters.clone()], vec![])
+        .diagnostics
+        .is_empty());
+    characters.shape = ShapeFact::Unknown;
+    assert!(infer(vec![handle, characters], vec![])
+        .diagnostics
+        .is_empty());
+}

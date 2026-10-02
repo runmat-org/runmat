@@ -1,5 +1,5 @@
 use crate::{
-    catalog::inference::{argument_error, finish_fixed_outputs},
+    catalog::inference::{argument_error, finish_fixed_outputs, known_invalid_text_scalar},
     BuiltinCatalogEntry,
 };
 use runmat_types::*;
@@ -51,7 +51,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ) || matches!(
             name.residency,
             ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
-        ) {
+        ) || known_invalid_text_scalar(name)
+        {
             diagnostics.push(argument_error(
                 "RM-CATALOG-SET-PROPERTY",
                 "property names must be host text",

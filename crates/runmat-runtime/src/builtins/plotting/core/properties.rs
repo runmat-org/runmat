@@ -1334,15 +1334,25 @@ pub(crate) fn is_heatmap_property_name(value: &Value) -> bool {
     )
 }
 
-fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
-    value_as_string(value)
-        .map(|s| s.trim().to_string())
-        .ok_or_else(|| {
-            plotting_error(
+pub(crate) fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
+    if !crate::builtins::common::validation::value_is_text_scalar(value) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: property names must be scalar strings or character rows"),
+        ));
+    }
+    let text = match value {
+        Value::String(text) => text.clone(),
+        Value::StringArray(strings) => strings.data[0].clone(),
+        Value::CharArray(chars) => chars.data.iter().collect(),
+        _ => {
+            return Err(plotting_error(
                 builtin,
-                format!("{builtin}: property names must be strings"),
-            )
-        })
+                format!("{builtin}: property names must be scalar strings or character rows"),
+            ))
+        }
+    };
+    Ok(text.trim().to_string())
 }
 
 pub(crate) fn data_aspect_ratio_from_value(
@@ -5665,9 +5675,10 @@ fn apply_line_properties_with_data(
         .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
         .collect();
 
-    let next_x = prepared.x.unwrap_or_else(|| current_x.clone());
-    let next_y = prepared.y.unwrap_or_else(|| current_y.clone());
-    let update_data = next_x != current_x || next_y != current_y;
+    let update_data = prepared.x.as_ref().is_some_and(|x| *x != current_x)
+        || prepared.y.as_ref().is_some_and(|y| *y != current_y);
+    let next_x = prepared.x.unwrap_or(current_x);
+    let next_y = prepared.y.unwrap_or(current_y);
     if update_data && next_x.len() != next_y.len() {
         return Err(plotting_error(
             builtin,
@@ -5682,7 +5693,7 @@ fn apply_line_properties_with_data(
         |plot| {
             if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
                 if update_data {
-                    let _ = line.update_numeric_data(next_x.clone(), next_y.clone());
+                    let _ = line.update_numeric_data(next_x, next_y);
                 }
                 for (key, value) in &style_pairs {
                     apply_line_plot_properties(line, key, value, builtin);
@@ -5962,33 +5973,40 @@ fn apply_scatter_properties_with_data(
     prepared: ScatterDataUpdates,
     guard: Option<PlotUpdateGuard>,
 ) -> BuiltinResult<()> {
-    let current_x_render = current_x.materialize_f64();
-    let current_y_render = current_y.materialize_f64();
-
-    let current_theta = current_scatter
-        .theta_data
-        .clone()
-        .unwrap_or_else(|| cartesian_theta(&current_x_render, &current_y_render));
-    let current_r = current_scatter
-        .r_data
-        .clone()
-        .unwrap_or_else(|| cartesian_radius(&current_x_render, &current_y_render));
     let style_pairs: Vec<_> = prepared
         .style_indices
         .iter()
         .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
         .collect();
 
-    let next_theta = prepared.theta.unwrap_or_else(|| current_theta.clone());
-    let next_r = prepared.r.unwrap_or_else(|| current_r.clone());
-    let polar_update =
-        (next_theta != current_theta || next_r != current_r).then_some((next_theta, next_r));
+    let polar_update = if prepared.theta.is_some() || prepared.r.is_some() {
+        let current_x_render = current_x.materialize_f64();
+        let current_y_render = current_y.materialize_f64();
+        let current_theta = current_scatter
+            .theta_data
+            .clone()
+            .unwrap_or_else(|| cartesian_theta(&current_x_render, &current_y_render));
+        let current_r = current_scatter
+            .r_data
+            .clone()
+            .unwrap_or_else(|| cartesian_radius(&current_x_render, &current_y_render));
+        let next_theta = prepared.theta.unwrap_or_else(|| current_theta.clone());
+        let next_r = prepared.r.unwrap_or_else(|| current_r.clone());
+        (next_theta != current_theta || next_r != current_r).then_some((next_theta, next_r))
+    } else {
+        None
+    };
     if let Some((theta, r)) = polar_update.as_ref() {
         validate_polar_scatter_data(theta, r, builtin)?;
     }
-    let next_x = prepared.x.unwrap_or_else(|| current_x.clone());
-    let next_y = prepared.y.unwrap_or_else(|| current_y.clone());
-    let cartesian_update = (next_x != current_x || next_y != current_y).then_some((next_x, next_y));
+    let cartesian_changed = prepared.x.as_ref().is_some_and(|x| *x != current_x)
+        || prepared.y.as_ref().is_some_and(|y| *y != current_y);
+    let cartesian_update = cartesian_changed.then(|| {
+        (
+            prepared.x.unwrap_or(current_x),
+            prepared.y.unwrap_or(current_y),
+        )
+    });
     if let Some((x, y)) = cartesian_update.as_ref() {
         if x.len() != y.len() || x.is_empty() {
             return Err(plotting_error(
@@ -6013,11 +6031,11 @@ fn apply_scatter_properties_with_data(
         builtin,
         |plot| {
             if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
-                if let Some((x, y)) = cartesian_update.as_ref() {
-                    let _ = scatter.update_numeric_data(x.clone(), y.clone());
+                if let Some((x, y)) = cartesian_update {
+                    let _ = scatter.update_numeric_data(x, y);
                 }
-                if let Some((theta, r)) = polar_update.as_ref() {
-                    replace_polar_scatter_data_unchecked(scatter, theta.clone(), r.clone());
+                if let Some((theta, r)) = polar_update {
+                    replace_polar_scatter_data_unchecked(scatter, theta, r);
                 }
                 apply_scatter_style_pairs(scatter, &style_pairs, builtin);
             }
@@ -6870,10 +6888,12 @@ fn apply_line3_properties_with_data(
         .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
         .collect();
 
-    let next_x = prepared.x.unwrap_or_else(|| current_x.clone());
-    let next_y = prepared.y.unwrap_or_else(|| current_y.clone());
-    let next_z = prepared.z.unwrap_or_else(|| current_z.clone());
-    let update_data = next_x != current_x || next_y != current_y || next_z != current_z;
+    let update_data = prepared.x.as_ref().is_some_and(|x| *x != current_x)
+        || prepared.y.as_ref().is_some_and(|y| *y != current_y)
+        || prepared.z.as_ref().is_some_and(|z| *z != current_z);
+    let next_x = prepared.x.unwrap_or(current_x);
+    let next_y = prepared.y.unwrap_or(current_y);
+    let next_z = prepared.z.unwrap_or(current_z);
     if update_data
         && (next_x.is_empty() || next_x.len() != next_y.len() || next_x.len() != next_z.len())
     {
@@ -6891,8 +6911,7 @@ fn apply_line3_properties_with_data(
         |plot| {
             if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
                 if update_data {
-                    let _ =
-                        line.update_numeric_data(next_x.clone(), next_y.clone(), next_z.clone());
+                    let _ = line.update_numeric_data(next_x, next_y, next_z);
                 }
                 apply_line3_style_pairs(line, &style_pairs, builtin);
             }
