@@ -104,7 +104,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "fminbnd",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
     builtin_path = "crate::builtins::math::optim::fminbnd"
 )]
 pub(super) async fn fminbnd_builtin_registered(

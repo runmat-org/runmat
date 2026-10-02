@@ -115,7 +115,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "fzero",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
     builtin_path = "crate::builtins::math::optim::fzero"
 )]
 async fn fzero_builtin_registered(
