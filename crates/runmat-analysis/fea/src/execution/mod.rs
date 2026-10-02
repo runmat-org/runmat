@@ -53,6 +53,12 @@ mod frequency_assembly;
 mod frequency_balance;
 mod frequency_entry;
 mod frequency_publication;
+mod frequency_sample_publication;
+pub use frequency_sample_publication::{
+    FrequencySampleNumericalEntry, FrequencySamplePublicationAuthority,
+    FrequencySamplePublicationIdentity, FrequencySamplePublicationManifest,
+    FrequencySamplePublicationSample,
+};
 mod frequency_receipt;
 mod frequency_result;
 mod frequency_sample;

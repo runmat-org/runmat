@@ -28,7 +28,7 @@ impl AnalysisKernel for AcceptedOutputs {
     }
 }
 
-fn workload() -> AcousticHarmonicWorkload {
+pub(super) fn workload() -> AcousticHarmonicWorkload {
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
     );

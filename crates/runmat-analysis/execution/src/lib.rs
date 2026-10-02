@@ -21,6 +21,10 @@ mod fluid_steady_result;
 mod fluid_steady_task;
 mod frequency_field_recovery;
 mod frequency_object_access;
+mod frequency_sample_publication;
+pub use frequency_sample_publication::{
+    decode_prepared_frequency_sample_publication, prepare_frequency_sample_publication_objects,
+};
 mod frequency_task;
 mod geometry_materialization;
 mod graph;

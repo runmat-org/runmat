@@ -40,6 +40,7 @@ pub enum AnalysisNumericalObjectKind {
     ThermalStudyCompletion,
     ThermalWorkload,
     FieldSourceBinding,
+    FrequencySamplePublication,
     AcousticHarmonicWorkload,
     ElectricalStaticWorkload,
     MagnetostaticWorkload,

@@ -12,6 +12,8 @@ const RESULT_PREFIX: &[u8] = b"runmat-acoustic-frequency-result/v1\0";
 const RESULT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
+mod publication;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "AcousticFrequencyWorkloadWire")]
 pub struct AcousticFrequencyWorkload {
