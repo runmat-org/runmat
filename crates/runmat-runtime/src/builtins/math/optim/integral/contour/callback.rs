@@ -6,18 +6,18 @@ use std::borrow::Cow;
 use runmat_builtins::INTEGRAL_ERROR_INVALID_INPUT;
 use runmat_value::Value;
 
-use super::{COMPONENT_CHUNK, invalid, resource_error};
+use super::{invalid, resource_error, COMPONENT_CHUNK};
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::math::optim::integral::{NAME, integral_map_error, waypoints};
+use crate::builtins::math::optim::integral::{integral_map_error, waypoints, NAME};
 use crate::builtins::math::optim::quadrature::{QuadratureCooperation, ScaledComplex};
-use crate::{BuiltinResult, GpuGatherRetry, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
 
-pub(super) fn has_complex_class(value: &Value) -> bool {
+pub(in super::super) fn has_complex_class(value: &Value) -> bool {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => true,
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_storage(handle)
-                == runmat_accelerate_api::GpuTensorStorage::Complex
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         }
         _ => false,
     }
@@ -41,7 +41,7 @@ pub(super) async fn materialize(value: &Value) -> BuiltinResult<Cow<'_, Value>> 
 }
 
 pub(super) fn shape(value: &Value) -> BuiltinResult<&[usize]> {
-    use runmat_accelerate_api::{GpuTensorStorage, handle_storage};
+    use runmat_accelerate_api::{handle_storage, GpuTensorStorage};
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(&[1, 1]),
         Value::Tensor(array) => Ok(&array.shape),
@@ -60,7 +60,7 @@ pub(super) fn shape(value: &Value) -> BuiltinResult<&[usize]> {
                 })?;
             if !matches!(
                 handle_storage(handle),
-                GpuTensorStorage::Real | GpuTensorStorage::Complex
+                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
             ) {
                 return Err(invalid(
                     "callback must return real or complex numeric values",

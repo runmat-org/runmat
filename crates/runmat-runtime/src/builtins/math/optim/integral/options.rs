@@ -1,12 +1,10 @@
 //! Typed option values and one ordered admission authority for `integral`.
 
-use super::{
-    integral_error_with_detail, IntegralCallbackMode, IntegralOptionName, DEFAULT_MAX_FUN_EVALS,
-};
+use super::{integral_error_with_detail, IntegralOptionName, DEFAULT_MAX_FUN_EVALS};
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 use num_complex::Complex;
-use runmat_builtins::INTEGRAL_ERROR_INVALID_ARGUMENT;
+use runmat_builtins::{IntegralCallbackMode, INTEGRAL_ERROR_INVALID_ARGUMENT};
 use runmat_value::{LogicalArray, Value};
 use std::num::NonZeroUsize;
 

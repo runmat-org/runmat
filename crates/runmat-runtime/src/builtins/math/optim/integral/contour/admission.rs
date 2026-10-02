@@ -16,12 +16,18 @@ fn checked_complex(real: f64, imaginary: f64) -> BuiltinResult<Complex<f64>> {
     }
 }
 
-pub(super) async fn scalar_bound(label: &str, value: &Value) -> BuiltinResult<Complex<f64>> {
+pub(in super::super) async fn scalar_bound(
+    label: &str,
+    value: &Value,
+) -> BuiltinResult<Complex<f64>> {
     let host = materialize(value).await?;
     scalar_bound_host(label, host.as_ref())
 }
 
-pub(super) fn scalar_bound_host(label: &str, value: &Value) -> BuiltinResult<Complex<f64>> {
+pub(in super::super) fn scalar_bound_host(
+    label: &str,
+    value: &Value,
+) -> BuiltinResult<Complex<f64>> {
     if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
         return Err(invalid(format!(
             "{label} must be exactly representable as double"
@@ -40,7 +46,7 @@ pub(super) fn scalar_bound_host(label: &str, value: &Value) -> BuiltinResult<Com
     }
 }
 
-pub(super) async fn ordered_segments(
+pub(in super::super) async fn ordered_segments(
     lower: Complex<f64>,
     upper: Complex<f64>,
     waypoints: &[Complex<f64>],

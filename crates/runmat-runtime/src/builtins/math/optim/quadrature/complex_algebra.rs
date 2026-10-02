@@ -149,7 +149,7 @@ impl OpenSample for ScaledComplex {
             .await
             .map_err(QuadratureArithmeticError::execution)?;
         Ok(super::error_estimate::adjusted_error(
-            inputs.kronrod.subtract(*inputs.gauss).magnitude(),
+            ScaledComplex::subtract(*inputs.kronrod, *inputs.gauss).magnitude(),
             resabs,
             resasc,
         ))

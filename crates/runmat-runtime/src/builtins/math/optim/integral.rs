@@ -303,7 +303,7 @@ fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
         if !scalar
             || !matches!(
                 handle_storage(handle),
-                GpuTensorStorage::Real | GpuTensorStorage::Complex
+                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
             )
         {
             return Err(integral_error_with_detail(
