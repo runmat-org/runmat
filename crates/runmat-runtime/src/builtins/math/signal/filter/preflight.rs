@@ -8,7 +8,6 @@ pub(super) fn operands(
     denominator: &Value,
     signal: &Value,
     initial: Option<&Value>,
-    _dimension: Option<&Value>,
 ) -> BuiltinResult<()> {
     preflight_iir_operands(IirForm::Causal, numerator, denominator, signal, initial)
         .map(|_| ())
