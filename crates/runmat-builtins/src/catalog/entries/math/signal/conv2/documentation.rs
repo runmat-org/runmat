@@ -19,7 +19,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Logical inputs promote to double. Explicitly complex inputs remain complex even if all computed imaginary components are zero. Integer operands, including mixed classes and host complex integer storage, convert independently to the selected floating result class before arithmetic.",
             "Same-owner, same-device real floating operands may use a native provider `conv2d` hook. Its output is admitted only with the required class, shape, owner, device, and distinct live allocation. Other supported resident values gather through their owners and eligible floating results return to the first owner. Typed complex integer host data works; the current provider ABI cannot encode typed complex-integer resident buffers.",
             "Convolution terminates fusion plans. The direct host form uses nested-loop convolution. The separable host form uses two one-dimensional passes when numerically admitted, with the general kernel as its fallback.",
-            "Numerical comparisons should account for accumulation order and precision. Representative host/provider parity tests use tolerances of `1e-9` for double and `1e-3` for single; these are test tolerances, not universal error bounds for arbitrary inputs.",
+            "Numerical comparisons should account for accumulation order, scale, and precision. Example comparison tolerances of `1e-9` for double and `1e-3` for single are illustrative guidance, not universal error bounds for arbitrary inputs.",
         ] },
     ],
     examples: &[
