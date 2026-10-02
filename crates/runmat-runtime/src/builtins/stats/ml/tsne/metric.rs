@@ -111,7 +111,12 @@ fn directional_distance(left: &[f64], right: &[f64], center: bool) -> BuiltinRes
     use super::super::pairwise_metric::DirectionError;
     let Some(left) = super::super::pairwise_metric::unit_direction(left, center).map_err(
         |error| match error {
-            DirectionError::Resource => invalid("tsne: direction exceeds available memory"),
+            DirectionError::Resource(source) => {
+                crate::build_runtime_error("tsne: direction exceeds available memory")
+                    .with_builtin(super::NAME)
+                    .with_source(source)
+                    .build()
+            }
         },
     )?
     else {
@@ -119,7 +124,12 @@ fn directional_distance(left: &[f64], right: &[f64], center: bool) -> BuiltinRes
     };
     let Some(right) = super::super::pairwise_metric::unit_direction(right, center).map_err(
         |error| match error {
-            DirectionError::Resource => invalid("tsne: direction exceeds available memory"),
+            DirectionError::Resource(source) => {
+                crate::build_runtime_error("tsne: direction exceeds available memory")
+                    .with_builtin(super::NAME)
+                    .with_source(source)
+                    .build()
+            }
         },
     )?
     else {

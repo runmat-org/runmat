@@ -90,9 +90,17 @@ pub(super) async fn prepare_data_cooperative(
     };
     let cols = if vector_as_column { 1 } else { raw_cols };
     let mut rows = Vec::new();
-    let mut original_to_valid = Vec::with_capacity(original_row_count);
+    rows.try_reserve_exact(original_row_count)
+        .map_err(|_| invalid("kmeans: observations exceed available memory"))?;
+    let mut original_to_valid = Vec::new();
+    original_to_valid
+        .try_reserve_exact(original_row_count)
+        .map_err(|_| invalid("kmeans: row indices exceed available memory"))?;
     for row in 0..original_row_count {
-        let mut row_values = Vec::with_capacity(cols);
+        let mut row_values = Vec::new();
+        row_values
+            .try_reserve_exact(cols)
+            .map_err(|_| invalid("kmeans: observations exceed available memory"))?;
         let mut has_nan = false;
         for col in 0..cols {
             let value: f64 = if vector_as_column {
@@ -180,7 +188,12 @@ pub(super) async fn direction_or_nan(
     let mut work = DirectionWork::new(row, center);
     loop {
         match work.advance().map_err(|error| match error {
-            DirectionError::Resource => invalid("kmeans: direction exceeds available memory"),
+            DirectionError::Resource(source) => {
+                crate::build_runtime_error("kmeans: direction exceeds available memory")
+                    .with_builtin(super::NAME)
+                    .with_source(source)
+                    .build()
+            }
         })? {
             DirectionProgress::Pending(units) => cooperation.completed(units).await?,
             DirectionProgress::Complete(direction, units) => {

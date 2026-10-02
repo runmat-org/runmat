@@ -4,7 +4,7 @@ const MAX_UNINTERRUPTED_ELEMENTS: u64 = 4096;
 
 #[derive(Debug)]
 pub(in crate::builtins::stats::ml) enum DirectionError {
-    Resource,
+    Resource(std::collections::TryReserveError),
 }
 
 pub(in crate::builtins::stats::ml) enum DirectionProgress {
@@ -73,7 +73,7 @@ impl<'a> DirectionWork<'a> {
                     if self.index == self.row.len() {
                         self.values
                             .try_reserve_exact(self.row.len())
-                            .map_err(|_| DirectionError::Resource)?;
+                            .map_err(DirectionError::Resource)?;
                         self.begin(if self.center {
                             Phase::Differences
                         } else {
