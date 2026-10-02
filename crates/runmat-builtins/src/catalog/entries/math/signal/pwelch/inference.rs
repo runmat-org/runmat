@@ -36,7 +36,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     };
     if let Some(fact) = signal {
         if let Some(dims) = fact.shape.known_dims() {
-            if dims.len() > 2 || dims.iter().any(|dim| *dim == Some(0)) {
+            if dims.len() > 2 || dims.contains(&Some(0)) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-PWELCH-SHAPE",
                     "pwelch expects a nonempty vector or 2-D matrix",

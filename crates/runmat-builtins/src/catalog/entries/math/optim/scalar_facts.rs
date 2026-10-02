@@ -27,7 +27,7 @@ pub(super) fn callback(request: &CallRequest, diagnostics: &mut Vec<InferenceDia
                 if matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1)
         ),
         ValueKindFact::String => {
-            !value.shape.element_count().is_some_and(|count| count != 1)
+            value.shape.element_count().is_none_or(|count| count == 1)
                 && !matches!(
                     &value.shape,
                     ShapeFact::Shaped { dims }
