@@ -168,6 +168,7 @@ async fn evaluate_requested(
     crate::builtins::common::validation::reject_typed_complex_integer(&denominator, BUILTIN_NAME)?;
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
+    preflight_denominator(&denominator, &mut cooperation).await?;
     let integer_or_logical = [&numerator, &denominator]
         .iter()
         .any(|value| value_is_integer_or_logical(value));
@@ -254,6 +255,72 @@ async fn evaluate_requested(
     })
 }
 
+async fn preflight_denominator(
+    denominator: &Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<()> {
+    let invalid = match denominator {
+        Value::Num(number) => *number == 0.0,
+        Value::Int(integer) => integer.is_zero(),
+        Value::Bool(flag) => !flag,
+        Value::Complex(real, imaginary) => *real == 0.0 && *imaginary == 0.0,
+        Value::Tensor(tensor) => {
+            let mut nonzero = false;
+            for index in 0..tensor.len() {
+                nonzero |= tensor
+                    .numeric_value_at(index)
+                    .is_some_and(|value| !value.is_zero());
+                if (index + 1).is_multiple_of(super::common::SIGNAL_WORK_CHUNK as usize) {
+                    cooperation
+                        .completed(super::common::SIGNAL_WORK_CHUNK)
+                        .await?;
+                }
+                if nonzero {
+                    break;
+                }
+            }
+            !nonzero
+        }
+        Value::ComplexTensor(tensor) => {
+            let mut nonzero = false;
+            for index in 0..tensor.len() {
+                nonzero |= tensor
+                    .numeric_value_at(index)
+                    .is_some_and(|(real, imaginary)| !real.is_zero() || !imaginary.is_zero());
+                if (index + 1).is_multiple_of(super::common::SIGNAL_WORK_CHUNK as usize) {
+                    cooperation
+                        .completed(super::common::SIGNAL_WORK_CHUNK)
+                        .await?;
+                }
+                if nonzero {
+                    break;
+                }
+            }
+            !nonzero
+        }
+        Value::LogicalArray(array) => {
+            let mut nonzero = false;
+            for chunk in array.data.chunks(super::common::SIGNAL_WORK_CHUNK as usize) {
+                nonzero |= chunk.iter().any(|value| *value != 0);
+                cooperation.completed(chunk.len() as u64).await?;
+                if nonzero {
+                    break;
+                }
+            }
+            !nonzero
+        }
+        Value::GpuTensor(handle) => handle.shape().contains(&0),
+        _ => false,
+    };
+    if invalid {
+        return Err(deconv_error_with_detail(
+            &DECONV_ERROR_DENOMINATOR_INVALID,
+            "must contain at least one non-zero coefficient",
+        ));
+    }
+    Ok(())
+}
+
 fn admit_deconv_operand(value: &Value) -> BuiltinResult<()> {
     if matches!(value, Value::GpuTensor(_)) {
         super::common::convolution::admit_resident_operand(value, || {
@@ -316,7 +383,6 @@ enum Orientation {
     Column,
 }
 
-#[async_recursion::async_recursion(?Send)]
 async fn convert_value(value: Value) -> BuiltinResult<PolyInput> {
     match value {
         Value::GpuTensor(handle) => {
@@ -334,8 +400,14 @@ async fn convert_value(value: Value) -> BuiltinResult<PolyInput> {
                 &gathered,
                 BUILTIN_NAME,
             )?;
-            convert_value(gathered).await
+            convert_host_value(gathered)
         }
+        host => convert_host_value(host),
+    }
+}
+
+fn convert_host_value(value: Value) -> BuiltinResult<PolyInput> {
+    match value {
         Value::Tensor(tensor) => convert_tensor(tensor),
         Value::ComplexTensor(tensor) => convert_complex_tensor(tensor),
         Value::LogicalArray(logical) => convert_logical_array(logical),
@@ -358,6 +430,10 @@ async fn convert_value(value: Value) -> BuiltinResult<PolyInput> {
             data: vec![Complex::new(re, im)],
             hint: OrientationHint::Scalar,
         }),
+        Value::GpuTensor(_) => Err(deconv_error_with_detail(
+            &DECONV_ERROR_GATHER_FAILED,
+            "provider returned a resident handle instead of host coefficients",
+        )),
         other => Err(deconv_error_with_detail(
             &DECONV_ERROR_INVALID_INPUT,
             format!("{other:?}"),
@@ -729,6 +805,31 @@ pub(crate) mod tests {
         numerator.handle.allocation_lease().validate_live().unwrap();
     }
 
+    #[test]
+    fn known_empty_or_zero_denominator_rejects_before_resident_numerator_download() {
+        let _serial = test_support::accel_test_lock();
+        let provider =
+            super::super::common::convolution::test_support::RejectTransferProvider::new();
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let numerator = provider.input(vec![1.0, 2.0], vec![1, 2]);
+        for denominator in [
+            Tensor::new(Vec::new(), vec![1, 0]).expect("empty denominator"),
+            Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("zero denominator"),
+        ] {
+            let error = deconv_builtin(
+                Value::GpuTensor(numerator.handle.clone()),
+                Value::Tensor(denominator),
+            )
+            .expect_err("known invalid denominator");
+            assert_eq!(
+                error.identifier(),
+                DECONV_ERROR_DENOMINATOR_INVALID.identifier
+            );
+            assert_eq!(provider.downloads(), 0);
+            numerator.handle.allocation_lease().validate_live().unwrap();
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_exact_division() {
@@ -757,6 +858,24 @@ pub(crate) mod tests {
 
         assert_eq!(real_vector(eval.quotient()), vec![1.0, 2.0, 1.0]);
         assert_eq!(real_vector(eval.remainder()), vec![0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn deconv_rejects_typed_complex_integer_coefficients() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storage = runmat_value::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I16(vec![0, 1]),
+        )
+        .expect("integer components");
+        let coefficients =
+            ComplexTensor::from_complex_storage(ComplexStorage::Integer(storage), vec![1, 2])
+                .expect("complex integer coefficients");
+        let error = evaluate(Value::ComplexTensor(coefficients), Value::Num(1.0))
+            .expect_err("complex integer arithmetic is unsupported");
+        assert!(error
+            .message()
+            .contains("complex numbers with integer types"));
     }
 
     #[test]

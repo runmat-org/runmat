@@ -149,6 +149,16 @@ fn vector(
             return None;
         }
     };
+    if class.is_some_and(|class| class.integer_class().is_some())
+        && domain == Some(NumericDomain::Complex)
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-DECONV-COMPLEX-INTEGER",
+            "deconv does not admit typed complex-integer coefficients",
+            index,
+        ));
+        return None;
+    }
     let (len, orientation) = match &value.shape {
         ShapeFact::Scalar => (Some(1), Some(Orientation::Row)),
         ShapeFact::Shaped { dims } => {

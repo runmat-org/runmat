@@ -94,6 +94,23 @@ fn known_zero_denominator_and_excess_outputs_are_diagnosed() {
 }
 
 #[test]
+fn known_typed_complex_integer_coefficients_are_not_proven() {
+    let real = numeric(NumericClass::Double, NumericDomain::Real, &[1, 2]);
+    let complex_integer = numeric(NumericClass::Int32, NumericDomain::Complex, &[1, 2]);
+    for (numerator, denominator) in [
+        (complex_integer.clone(), real.clone()),
+        (real.clone(), complex_integer.clone()),
+    ] {
+        let facts = inference::infer(&request(numerator, denominator, 2), &DECONV_CATALOG_ENTRY);
+        assert!(!facts.diagnostics.is_empty());
+        assert!(facts
+            .outputs
+            .iter()
+            .all(|fact| fact.kind == ValueKindFact::Unknown));
+    }
+}
+
+#[test]
 fn canonical_metadata_retains_requested_output_and_error_contract() {
     let labels = DECONV_DESCRIPTOR
         .signatures
