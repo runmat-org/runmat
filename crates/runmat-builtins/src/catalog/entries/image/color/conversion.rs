@@ -145,7 +145,11 @@ pub(super) fn infer(
                         .literal_args
                         .first()
                         .and_then(LiteralContext::numeric_from_literal)
-                        .is_some_and(|value| !(value <= maximum))
+                        .is_some_and(|value| {
+                            value
+                                .partial_cmp(&maximum)
+                                .is_none_or(|ordering| ordering.is_gt())
+                        })
                 }) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-IMAGE-CONVERSION-INDEX-BOUND",
