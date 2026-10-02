@@ -8,6 +8,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(super) mod output_precision;
+pub(crate) mod convolution;
 mod cooperation;
 mod window_generation;
 mod waveform_map;

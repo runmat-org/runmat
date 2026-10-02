@@ -262,7 +262,8 @@ fn deconv_error_with_source(
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
 async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
-    if matches!(crate::output_count::current_output_count(), Some(count) if count > 2) {
+    let requested = crate::output_count::current_output_count();
+    if matches!(requested, Some(count) if count > 2) {
         return Err(build_runtime_error(DECONV_ERROR_TOO_MANY_OUTPUTS.message)
             .with_builtin(BUILTIN_NAME)
             .with_identifier(
@@ -272,25 +273,50 @@ async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinR
             )
             .build());
     }
-    let eval = evaluate(numerator, denominator).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+    let mut outputs = evaluate_requested(numerator, denominator, requested.unwrap_or(1)).await?;
+    match requested {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(count) => {
+            let mut published = vec![outputs.quotient.take().ok_or_else(deconv_missing_output)?];
+            if count == 2 {
+                published.push(outputs.remainder.take().ok_or_else(deconv_missing_output)?);
+            }
+            Ok(Value::OutputList(published))
         }
-        let mut outputs = vec![eval.quotient()];
-        if out_count >= 2 {
-            outputs.push(eval.remainder());
-        }
-        return Ok(Value::OutputList(outputs));
+        None => outputs.quotient.take().ok_or_else(deconv_missing_output),
     }
-    let quotient = eval.quotient();
-    Ok(quotient)
 }
 
 /// Evaluate `deconv` and retain both outputs for multi-value contexts.
 pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
+    let mut outputs = evaluate_requested(numerator, denominator, 2).await?;
+    Ok(DeconvEval {
+        quotient: outputs.quotient.take().ok_or_else(deconv_missing_output)?,
+        remainder: outputs.remainder.take().ok_or_else(deconv_missing_output)?,
+    })
+}
+
+fn deconv_missing_output() -> RuntimeError {
+    deconv_error_with_detail(
+        &DECONV_ERROR_BUILD_OUTPUT,
+        "requested result was not constructed",
+    )
+}
+
+struct RequestedDeconvOutputs {
+    quotient: Option<Value>,
+    remainder: Option<Value>,
+}
+
+async fn evaluate_requested(
+    numerator: Value,
+    denominator: Value,
+    requested: usize,
+) -> BuiltinResult<RequestedDeconvOutputs> {
     ensure_extensions(&numerator)?;
     ensure_extensions(&denominator)?;
+    admit_deconv_operand(&numerator)?;
+    admit_deconv_operand(&denominator)?;
     crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
         &numerator,
         BUILTIN_NAME,
@@ -307,20 +333,18 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
     let single_output =
         !integer_or_logical && (value_is_single(&numerator) || value_is_single(&denominator));
     let complex_output = value_is_complex(&numerator) || value_is_complex(&denominator);
-    let resident_prototype = [&numerator, &denominator]
+    let resident_inputs = [&numerator, &denominator]
         .iter()
-        .find_map(|value| match value {
+        .filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
             _ => None,
-        });
+        })
+        .collect::<Vec<_>>();
+    let resident_prototype = resident_inputs.first();
     let provider = resident_prototype
         .as_ref()
         .and_then(runmat_accelerate_api::provider_for_handle);
-    if [&numerator, &denominator]
-        .iter()
-        .any(|value| matches!(value, Value::GpuTensor(_)))
-        && provider.is_none()
-    {
+    if !resident_inputs.is_empty() && provider.is_none() {
         return Err(deconv_error_with_detail(
             &DECONV_ERROR_GATHER_FAILED,
             "resident input has no owning provider",
@@ -353,54 +377,61 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
     let (quotient_raw, remainder_raw) = polynomial_division(&num_input.data, &den_input.data)?;
 
     let orientation = orientation_from_hint(num_input.hint);
-    let quotient = convert_output(quotient_raw, orientation, single_output, complex_output)?;
-    let remainder = convert_output(remainder_raw, orientation, single_output, complex_output)?;
-    let (quotient, remainder) =
-        if let (Some(provider), Some(prototype)) = (provider, resident_prototype.as_ref()) {
-            let quotient = if integer_or_logical {
-                quotient
-            } else {
-                crate::builtins::common::provider_restore::align_floating_value_precision(
-                    quotient,
-                    prototype,
-                    BUILTIN_NAME,
-                )?
-            };
-            let remainder = if integer_or_logical {
-                remainder
-            } else {
-                crate::builtins::common::provider_restore::align_floating_value_precision(
-                    remainder,
-                    prototype,
-                    BUILTIN_NAME,
-                )?
-            };
-            let quotient = crate::builtins::common::provider_restore::upload_value_like(
-                provider,
-                quotient,
-                BUILTIN_NAME,
+    let mut quotient = (requested >= 1)
+        .then(|| convert_output(quotient_raw, orientation, single_output, complex_output))
+        .transpose()?;
+    let mut remainder = (requested >= 2)
+        .then(|| convert_output(remainder_raw, orientation, single_output, complex_output))
+        .transpose()?;
+    if let Some(prototype) = resident_prototype {
+        let caller_inputs = resident_inputs.iter().collect::<Vec<_>>();
+        if let Some(value) = quotient.take() {
+            quotient = Some(gpu_helpers::restore_class_preserving_value_with_operands(
                 prototype,
-            )?;
-            let remainder = match crate::builtins::common::provider_restore::upload_value_like(
-                provider,
-                remainder,
+                value,
                 BUILTIN_NAME,
+                gpu_helpers::RestoreOperandContext::new(&caller_inputs, &caller_inputs),
+            )?);
+        }
+        if let Some(value) = remainder.take() {
+            let mut protected = caller_inputs.clone();
+            if let Some(Value::GpuTensor(handle)) = quotient.as_ref() {
+                protected.push(handle);
+            }
+            remainder = Some(gpu_helpers::restore_class_preserving_value_with_operands(
                 prototype,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    return Err(error);
-                }
-            };
-            (quotient, remainder)
-        } else {
-            (quotient, remainder)
-        };
-
-    Ok(DeconvEval {
+                value,
+                BUILTIN_NAME,
+                gpu_helpers::RestoreOperandContext::new(&protected, &caller_inputs),
+            )?);
+        }
+    }
+    Ok(RequestedDeconvOutputs {
         quotient,
         remainder,
     })
+}
+
+fn admit_deconv_operand(value: &Value) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) {
+        super::common::convolution::admit_resident_operand(value, || {
+            deconv_error(&DECONV_ERROR_INVALID_INPUT)
+        })?;
+    }
+    let shape = match value {
+        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,
+        _ => return Err(deconv_error(&DECONV_ERROR_INVALID_INPUT)),
+    };
+    if shape
+        .is_some_and(|shape| super::common::convolution::checked_vector_elements(shape).is_none())
+    {
+        return Err(deconv_error(&DECONV_ERROR_VECTOR_REQUIRED));
+    }
+    Ok(())
 }
 
 /// Evaluation envelope used by both builtin and bytecode multi-output paths.
@@ -759,6 +790,24 @@ pub(crate) mod tests {
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
         Tensor::new_integer(storage, shape).expect("typed integer tensor")
+    }
+
+    #[test]
+    fn later_invalid_denominator_shape_rejects_before_resident_download() {
+        let _serial = test_support::accel_test_lock();
+        let provider =
+            super::super::common::convolution::test_support::RejectTransferProvider::new();
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let numerator = provider.input(vec![1.0, 2.0], vec![1, 2]);
+        let denominator = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let error = deconv_builtin(
+            Value::GpuTensor(numerator.handle.clone()),
+            Value::Tensor(denominator),
+        )
+        .expect_err("denominator matrix is invalid");
+        assert_eq!(error.identifier(), DECONV_ERROR_VECTOR_REQUIRED.identifier);
+        assert_eq!(provider.downloads(), 0);
+        numerator.handle.allocation_lease().validate_live().unwrap();
     }
 
     #[test]
