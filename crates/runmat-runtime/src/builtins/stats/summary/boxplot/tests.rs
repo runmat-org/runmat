@@ -448,6 +448,62 @@ fn scalar_text_options_reject_containers_but_factor_direction_accepts_text_vecto
 }
 
 #[test]
+fn factor_gap_and_separator_use_the_scalar_text_boundary() {
+    for name in ["FactorGap", "FactorSeparator"] {
+        assert!(BoxplotOptions::parse(vec![
+            Value::from(name),
+            Value::StringArray(
+                StringArray::new(vec!["auto".into(), "auto".into()], vec![1, 2]).unwrap(),
+            ),
+        ])
+        .is_err());
+        assert!(BoxplotOptions::parse(vec![
+            Value::from(name),
+            Value::CharArray(CharArray::new(vec!['a', 'u', 't', 'o'], 2, 2).unwrap()),
+        ])
+        .is_err());
+        assert!(BoxplotOptions::parse(vec![Value::from(name), Value::from("auto")]).is_ok());
+    }
+}
+
+#[test]
+fn logical_grouping_keeps_logical_identity_in_vectors_and_scalar_cells() {
+    let logical = Value::LogicalArray(LogicalArray::new(vec![0, 1, 0, 1], vec![4, 1]).unwrap());
+    let boxes = build_box_stats(
+        tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]),
+        Some(logical),
+        &BoxplotOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(boxes.len(), 2);
+    assert_eq!(boxes[0].group_key, vec![KeyAtom::Logical(false)]);
+    assert_eq!(boxes[1].group_key, vec![KeyAtom::Logical(true)]);
+
+    let cell = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+                Value::String("b".into()),
+                Value::String("c".into()),
+                Value::String("d".into()),
+            ],
+            4,
+            1,
+        )
+        .unwrap(),
+    );
+    let boxes = build_box_stats(
+        tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]),
+        Some(cell),
+        &BoxplotOptions::default(),
+    )
+    .unwrap();
+    assert!(boxes
+        .iter()
+        .any(|stats| stats.group_key == vec![KeyAtom::Logical(true)]));
+}
+
+#[test]
 fn extensions_are_independently_mode_gated() {
     let data = || tensor(vec![1.0, 2.0], vec![2, 1]);
     let integer_data = || int_tensor(IntegerStorage::I16(vec![1, 2]), vec![2, 1]);

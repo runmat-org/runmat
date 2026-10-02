@@ -51,6 +51,11 @@ pub(super) fn group_labels(
             .iter()
             .map(|text| missing_text_label(text).then(|| vec![KeyAtom::Text(text.clone())]))
             .collect()),
+        Value::LogicalArray(array) if array.len() == expected_len => Ok(array
+            .data
+            .iter()
+            .map(|value| Some(vec![KeyAtom::Logical(*value != 0)]))
+            .collect()),
         Value::CharArray(array) if array.rows == expected_len => Ok(char_rows(array)
             .into_iter()
             .map(|text| missing_text_label(&text).then_some(vec![KeyAtom::Text(text)]))
@@ -147,6 +152,9 @@ fn scalar_group_label(value: &Value) -> BuiltinResult<Option<GroupLabel>> {
         Value::Num(value) => Ok(value.is_finite().then_some(vec![KeyAtom::Number(*value)])),
         Value::Int(value) => Ok(Some(vec![KeyAtom::Integer(value.clone())])),
         Value::Bool(value) => Ok(Some(vec![KeyAtom::Logical(*value)])),
+        Value::LogicalArray(array) if array.len() == 1 => {
+            Ok(Some(vec![KeyAtom::Logical(array.data[0] != 0)]))
+        }
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(tensor.numeric_value_at(0).and_then(numeric_group_label))
         }

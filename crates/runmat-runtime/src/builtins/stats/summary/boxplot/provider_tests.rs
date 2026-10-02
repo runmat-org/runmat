@@ -83,6 +83,14 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
         .owner
         .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
+    let logical_scalar = provider
+        .owner
+        .allocate_logical(vec![1], vec![1, 1])
+        .unwrap();
+    let logical_short = provider
+        .owner
+        .allocate_logical(vec![0, 1], vec![2, 1])
+        .unwrap();
     let calls = [
         vec![
             Value::GpuTensor(resident.handle.clone()),
@@ -172,6 +180,26 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
             ),
         ],
         vec![
+            Value::GpuTensor(resident.handle.clone()),
+            Value::Cell(
+                CellArray::new(vec![Value::GpuTensor(logical_short.handle.clone())], 1, 1).unwrap(),
+            ),
+        ],
+        vec![
+            Value::GpuTensor(resident.handle.clone()),
+            Value::Cell(
+                CellArray::new(
+                    vec![
+                        categorical_group(vec![1.0, 2.0, 1.0], true),
+                        Value::GpuTensor(resident.handle.clone()),
+                    ],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ),
+        ],
+        vec![
             sample(),
             Value::String("ColorGroup".into()),
             Value::Cell(
@@ -198,16 +226,28 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
             .allocation_lease()
             .validate_live()
             .unwrap();
+        logical_scalar
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        logical_short
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
         assert_eq!(resident.probe.retirements(), 0);
         assert_eq!(option.probe.retirements(), 0);
         assert_eq!(short_group.probe.retirements(), 0);
+        assert_eq!(logical_scalar.probe.retirements(), 0);
+        assert_eq!(logical_short.probe.retirements(), 0);
     }
 
     let scalar_labels = Value::Cell(
         CellArray::new(
             vec![
                 Value::GpuTensor(option.handle.clone()),
-                Value::String("b".into()),
+                Value::GpuTensor(logical_scalar.handle.clone()),
                 Value::String("c".into()),
                 Value::String("d".into()),
             ],
@@ -225,6 +265,19 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
         Some(&row_factor),
     )
     .expect("a four-row factor can group a four-by-two matrix");
+    let categorical_factor = Value::Cell(
+        CellArray::new(
+            vec![
+                categorical_group(vec![1.0, 2.0, 1.0, 2.0], true),
+                Value::GpuTensor(resident.handle.clone()),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    admission::admit_host_visible(&sample(), Some(&categorical_factor))
+        .expect("valid host categorical factors remain admissible beside resident factors");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }
 

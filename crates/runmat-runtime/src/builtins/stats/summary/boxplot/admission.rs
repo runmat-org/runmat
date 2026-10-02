@@ -41,13 +41,16 @@ fn validate_known_group(
         return super::groups::validate_known_host_group(group, x_shape, x_count);
     }
     if matches!(group, Value::Cell(_)) {
-        let matches_elements = could_match_group_length(group, x_count);
-        let matches_rows = x_shape.is_some_and(|shape| {
-            shape.len() == 2
-                && shape[0] > 1
-                && shape[1] > 1
-                && could_match_group_length(group, shape[0])
-        });
+        let matches_elements = could_match_group_length(group, x_count)?;
+        let matches_rows = if matches_elements {
+            false
+        } else if let Some(shape) =
+            x_shape.filter(|shape| shape.len() == 2 && shape[0] > 1 && shape[1] > 1)
+        {
+            could_match_group_length(group, shape[0])?
+        } else {
+            false
+        };
         if !matches_elements && !matches_rows {
             return Err(invalid("boxplot: grouping variable length must match X"));
         }
@@ -94,29 +97,43 @@ fn validate_known_group(
 /// A resident leaf keeps its known class and shape through materialization.
 /// A cell is either one scalar label per row or a list of grouping vectors;
 /// reject only when neither role can match the sample geometry.
-fn could_match_group_length(value: &Value, expected: usize) -> bool {
+fn could_match_group_length(value: &Value, expected: usize) -> BuiltinResult<bool> {
     match value {
         Value::Cell(cell) => {
-            (cell.data.len() == expected && cell.data.iter().all(could_be_scalar_label))
-                || cell
-                    .data
-                    .iter()
-                    .all(|element| could_match_group_length(element, expected))
+            if cell.data.len() == expected && cell.data.iter().all(could_be_scalar_label) {
+                return Ok(true);
+            }
+            for element in &cell.data {
+                if !could_match_group_length(element, expected)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
         }
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => expected == 1,
-        Value::Tensor(tensor) => tensor.len() == expected,
-        Value::LogicalArray(array) => array.len() == expected,
-        Value::StringArray(array) => array.data.len() == expected,
-        Value::CharArray(array) => array.rows == expected,
-        Value::GpuTensor(handle) => {
-            handle
-                .shape()
-                .iter()
-                .try_fold(1usize, |count, extent| count.checked_mul(*extent))
-                == Some(expected)
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(expected == 1),
+        Value::Tensor(tensor) => Ok(tensor.len() == expected),
+        Value::LogicalArray(array) => Ok(array.len() == expected),
+        Value::StringArray(array) => Ok(array.data.len() == expected),
+        Value::CharArray(array) => Ok(array.rows == expected),
+        Value::GpuTensor(handle) => Ok(handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            == Some(expected)),
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
+            // Host categorical row count belongs to the table domain. A
+            // resident property may become valid after gather, so keep that
+            // case dynamic rather than interpreting object field strings here.
+            if value_contains_gpu(value)? {
+                return Ok(true);
+            }
+            let labels =
+                crate::builtins::table::categorical_observation_labels(object).map_err(|err| {
+                    invalid_with_source("boxplot: invalid categorical grouping variable", err)
+                })?;
+            Ok(labels.len() == expected)
         }
-        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => true,
-        _ => false,
+        _ => Ok(false),
     }
 }
 
@@ -124,6 +141,7 @@ fn could_be_scalar_label(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
         Value::Tensor(tensor) => tensor.len() == 1,
+        Value::LogicalArray(array) => array.len() == 1,
         Value::StringArray(array) => array.data.len() == 1,
         Value::CharArray(array) => array.rows == 1,
         Value::GpuTensor(handle) => {

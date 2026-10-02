@@ -78,7 +78,11 @@ pub(in crate::builtins::stats::summary::boxplot) fn parse_full_factors(
 pub(in crate::builtins::stats::summary::boxplot) fn parse_gap(
     value: &Value,
 ) -> BuiltinResult<FactorGap> {
-    if let Some(text) = crate::builtins::common::random_args::keyword_of(value) {
+    if matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    ) {
+        let text = super::super::options::text_scalar(value, "FactorGap")?;
         return if text == "auto" {
             Ok(FactorGap::Auto)
         } else {
@@ -106,7 +110,11 @@ pub(in crate::builtins::stats::summary::boxplot) fn parse_gap(
 pub(in crate::builtins::stats::summary::boxplot) fn parse_separator(
     value: &Value,
 ) -> BuiltinResult<FactorSeparator> {
-    if let Some(text) = crate::builtins::common::random_args::keyword_of(value) {
+    if matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    ) {
+        let text = super::super::options::text_scalar(value, "FactorSeparator")?;
         return if text == "auto" {
             Ok(FactorSeparator::Auto)
         } else {
