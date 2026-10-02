@@ -9,10 +9,11 @@ use std::sync::{Mutex, MutexGuard};
 
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 use chrono::Utc;
+#[cfg(feature = "plot-core")]
+use runmat_geometry_core::{AssemblyNode, DiagnosticSeverity};
 use runmat_geometry_core::{
-    AssemblyNode, DiagnosticSeverity, EntityIdRange, EntityKind, EntityRef, GeometryAsset,
-    GeometrySource, MeshKind, Region, SourceGeometry, SourceGeometryKind, TessellationProfile,
-    UnitSystem,
+    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind, Region,
+    SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
 };
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry_with_context, GeometryFormat,

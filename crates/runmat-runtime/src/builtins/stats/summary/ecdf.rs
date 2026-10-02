@@ -13,9 +13,9 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 #[cfg(feature = "plot-core")]
 use runmat_plot::plots::{LinePlot, LineStyle};
+use runmat_value::{IntValue, Tensor, Value};
 #[cfg(feature = "plot-core")]
-use runmat_value::StructValue;
-use runmat_value::{IntValue, NumericScalar, Tensor, Value};
+use runmat_value::{NumericScalar, StructValue};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
