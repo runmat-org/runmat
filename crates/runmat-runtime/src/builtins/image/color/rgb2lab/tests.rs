@@ -1,6 +1,7 @@
 use super::*;
 use crate::builtins::common::{gpu_helpers, test_support};
 use futures::executor::block_on;
+use runmat_builtins::BuiltinIntegerOutputClassRule;
 use runmat_value::{IntegerStorage, Tensor};
 
 fn call(tensor: Tensor) -> BuiltinResult<Tensor> {

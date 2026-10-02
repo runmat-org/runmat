@@ -6,8 +6,6 @@ use runmat_builtins::{
     LAB2RGB_ERROR_INVALID_INPUT, LAB2RGB_ERROR_INVALID_OPTION, LAB2RGB_ERROR_TOO_MANY_INPUTS,
     LAB2RGB_ERROR_TOO_MANY_OUTPUTS, LAB2RGB_EXTENSIONS,
 };
-#[cfg(test)]
-use runmat_builtins::{BuiltinIntegerInputAvailability, LAB2RGB_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericStorage;
 use runmat_value::{NumericDType, Tensor, Value};
