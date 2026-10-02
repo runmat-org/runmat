@@ -2355,15 +2355,21 @@ pub trait AccelProvider: AcceleratorThreadBound {
     }
 
     fn hann_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("hann_window not supported by provider"))
+        Err(unsupported_provider_operation(
+            "hann_window not supported by provider",
+        ))
     }
 
     fn hamming_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("hamming_window not supported by provider"))
+        Err(unsupported_provider_operation(
+            "hamming_window not supported by provider",
+        ))
     }
 
     fn blackman_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("blackman_window not supported by provider"))
+        Err(unsupported_provider_operation(
+            "blackman_window not supported by provider",
+        ))
     }
 
     /// Apply an N-D correlation/convolution with padding semantics matching MATLAB's `imfilter`.

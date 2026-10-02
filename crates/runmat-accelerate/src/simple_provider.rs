@@ -1238,16 +1238,13 @@ fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Result<
             };
             let denom = (effective_len - 1) as f64;
             let mut data = (0..effective_len)
-                .map(|idx| {
-                    let phase = 2.0 * std::f64::consts::PI * idx as f64 / denom;
-                    match kind {
-                        WindowKind::Hann => 0.5 - 0.5 * phase.cos(),
-                        WindowKind::Hamming => 0.54 - 0.46 * window_cospi(2.0 * idx as f64 / denom),
-                        WindowKind::Blackman => {
-                            let first = 2.0 * idx as f64 / denom;
-                            let second = 4.0 * idx as f64 / denom;
-                            0.42 - 0.5 * window_cospi(first) + 0.08 * window_cospi(second)
-                        }
+                .map(|idx| match kind {
+                    WindowKind::Hann => 0.5 - 0.5 * window_cospi(2.0 * idx as f64 / denom),
+                    WindowKind::Hamming => 0.54 - 0.46 * window_cospi(2.0 * idx as f64 / denom),
+                    WindowKind::Blackman => {
+                        let first = 2.0 * idx as f64 / denom;
+                        let second = 4.0 * idx as f64 / denom;
+                        0.42 - 0.5 * window_cospi(first) + 0.08 * window_cospi(second)
                     }
                 })
                 .collect::<Vec<_>>();
@@ -9484,6 +9481,20 @@ mod tests {
         HostIntegerDataView, IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
     };
     use runmat_value::{IntValue, IntegerStorage};
+
+    #[test]
+    fn hann_provider_has_exact_cospi_cardinal_coefficients() {
+        let provider = InProcessProvider::new();
+        for (length, periodic, expected) in [
+            (5, false, vec![0.0, 0.5, 1.0, 0.5, 0.0]),
+            (4, true, vec![0.0, 0.5, 1.0, 0.5]),
+        ] {
+            let handle = provider.hann_window(length, periodic).unwrap();
+            let output = block_on(provider.download(&handle)).unwrap();
+            assert_eq!(output.shape, vec![length, 1]);
+            assert_eq!(output.data, expected);
+        }
+    }
 
     #[test]
     fn modulation_rejects_near_integer_symbols_and_bits() {
