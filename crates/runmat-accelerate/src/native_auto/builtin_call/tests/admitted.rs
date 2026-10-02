@@ -341,7 +341,7 @@ fn canonical_color_sinks_retain_resident_operands_for_domain_admission() {
         )
         .unwrap();
     let args = [Value::GpuTensor(allocation.handle)];
-    for name in ["gray2rgb", "hsv2rgb", "rgb2gray", "rgb2hsv"] {
+    for name in ["gray2rgb", "hsv2rgb", "lab2rgb", "rgb2gray", "rgb2hsv"] {
         let prepared =
             futures::executor::block_on(prepare_builtin_call(name, &args, &context)).unwrap();
         assert_eq!(

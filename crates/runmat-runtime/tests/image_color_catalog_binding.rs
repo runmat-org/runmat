@@ -1,7 +1,7 @@
 //! Compiled runtime evidence for the L15 color bindings, in one library.
 use runmat_builtins::{
     builtin_function_by_name, BuiltinFusionPolicy, GRAY2RGB_CATALOG_ENTRY, HSV2RGB_CATALOG_ENTRY,
-    IND2RGB_CATALOG_ENTRY, RGB2GRAY_CATALOG_ENTRY, RGB2HSV_CATALOG_ENTRY,
+    IND2RGB_CATALOG_ENTRY, LAB2RGB_CATALOG_ENTRY, RGB2GRAY_CATALOG_ENTRY, RGB2HSV_CATALOG_ENTRY,
 };
 use runmat_runtime::builtin::migration_inventory::migration_inventory;
 use runmat_runtime::builtins::common::spec::canonical_fusion_declaration;
@@ -13,6 +13,7 @@ fn color_calls_have_one_exact_canonical_binding_and_no_legacy_registration() {
         &GRAY2RGB_CATALOG_ENTRY,
         &HSV2RGB_CATALOG_ENTRY,
         &IND2RGB_CATALOG_ENTRY,
+        &LAB2RGB_CATALOG_ENTRY,
         &RGB2GRAY_CATALOG_ENTRY,
         &RGB2HSV_CATALOG_ENTRY,
     ] {

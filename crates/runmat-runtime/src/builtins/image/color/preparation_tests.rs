@@ -18,7 +18,7 @@ use std::{
     task::{Context, Poll},
 };
 
-const NAMES: [&str; 4] = ["gray2rgb", "hsv2rgb", "rgb2gray", "rgb2hsv"];
+const NAMES: [&str; 5] = ["gray2rgb", "hsv2rgb", "lab2rgb", "rgb2gray", "rgb2hsv"];
 type Events = Rc<RefCell<Vec<&'static str>>>;
 
 struct Observer(Events);
@@ -255,6 +255,39 @@ fn indexed_color_unpolled_and_pending_calls_do_not_publish_preparation() {
     assert_eq!(&*events.borrow(), &["prepare"]);
     drop(call);
     assert_eq!(&*events.borrow(), &["prepare", "abort"]);
+}
+
+#[test]
+fn lab_output_type_is_parsed_before_preparation_and_controls_native_class() {
+    let events = Events::default();
+    let _context = enter(&events, false);
+    let lab = Value::Tensor(Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 1, 3]).unwrap());
+    let invalid = block_on(dispatcher::call_builtin_async(
+        "lab2rgb",
+        &[
+            lab.clone(),
+            Value::String("OutputType".into()),
+            Value::String("int32".into()),
+        ],
+    ))
+    .unwrap_err();
+    assert_eq!(invalid.identifier(), Some("RunMat:lab2rgb:InvalidOption"));
+    assert!(events.borrow().is_empty());
+    let result = block_on(dispatcher::call_builtin_async(
+        "lab2rgb",
+        &[
+            lab,
+            Value::String("OutputType".into()),
+            Value::String("uint8".into()),
+        ],
+    ))
+    .unwrap();
+    let Value::Tensor(result) = result else {
+        panic!("uint8 RGB tensor");
+    };
+    assert_eq!(result.numeric_dtype(), NumericDType::U8);
+    assert_eq!(result.shape, vec![1, 1, 3]);
+    assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
 }
 
 fn valid(name: &str) -> Value {

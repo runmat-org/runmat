@@ -5,7 +5,3 @@ use super::common;
 pub fn same_shape_type(args: &[Type], _context: &ResolveContext) -> Type {
     common::same_shape_type(args)
 }
-
-pub fn lab2rgb_type(args: &[Type], _context: &ResolveContext) -> Type {
-    common::same_shape_type(args)
-}
