@@ -10,8 +10,9 @@ use crate::{
     BuiltinCatalogEntry,
 };
 use runmat_types::{
-    CallInference, CallRequest, NumericClass, NumericDomain, NumericFact, ObjectFact,
-    ResidencyFact, ShapeFact, StaticClassIdentity, StorageFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, DimensionFact, NumericClass, NumericDomain, NumericFact,
+    ObjectFact, ResidencyFact, ShapeFact, StaticClassIdentity, StorageFact, ValueFact,
+    ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -25,6 +26,7 @@ pub enum FeaResultKind {
 
 fn possible_object(value: &ValueFact, classes: &[StaticClassIdentity]) -> bool {
     !matches!(value.residency, ResidencyFact::Device { .. })
+        && !matches!(value.shape.element_count(), Some(count) if count != 1)
         && match &value.kind {
             ValueKindFact::Unknown => true,
             ValueKindFact::Object(object) => object
@@ -61,6 +63,55 @@ fn object_result(class: StaticClassIdentity) -> ValueFact {
     )
 }
 
+fn exact_numeric_class(value: &ValueFact) -> bool {
+    matches!(&value.kind, ValueKindFact::Numeric(number) if number.domain == NumericDomain::Real && number.class != NumericClass::Single)
+}
+
+fn possible_flag(value: &ValueFact) -> bool {
+    !matches!(value.residency, ResidencyFact::Device { .. })
+        && !matches!(value.shape.element_count(), Some(count) if count != 1)
+        && (matches!(&value.kind, ValueKindFact::Unknown | ValueKindFact::Logical)
+            || exact_numeric_class(value))
+}
+
+fn possible_index_vector(value: &ValueFact) -> bool {
+    if matches!(value.residency, ResidencyFact::Device { .. }) {
+        return false;
+    }
+    if let ShapeFact::Shaped { dims } = &value.shape {
+        if dims
+            .iter()
+            .filter(|dim| matches!(dim, DimensionFact::Known(size) if *size > 1))
+            .count()
+            > 1
+        {
+            return false;
+        }
+    }
+    matches!(&value.kind, ValueKindFact::Unknown) || exact_numeric_class(value)
+}
+
+fn possible_text_list(value: &ValueFact) -> bool {
+    if matches!(value.residency, ResidencyFact::Device { .. }) {
+        return false;
+    }
+    match &value.kind {
+        ValueKindFact::Unknown | ValueKindFact::String => true,
+        ValueKindFact::Character => host_text(value),
+        ValueKindFact::Cell(cell) => {
+            host_text(&cell.element) && cell.elements.iter().all(host_text)
+        }
+        _ => false,
+    }
+}
+
+fn normalized_option(name: &str) -> String {
+    name.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 pub fn infer_result(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
@@ -84,6 +135,15 @@ pub fn infer_result(
                         0,
                     ));
                 }
+                if request.arguments.len() > 1
+                    && matches!(&input.kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_RESULTS_CLASS)))
+                {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FEA-RESULTS-OPTIONS",
+                        "an existing fea.Results object is accepted only without options",
+                        0,
+                    ));
+                }
             }
             for index in (1..request.arguments.len()).step_by(2) {
                 if !host_text(&request.arguments[index]) {
@@ -93,16 +153,42 @@ pub fn infer_result(
                         index,
                     ));
                 }
-                if request
-                    .arguments
-                    .get(index + 1)
-                    .is_some_and(|value| matches!(value.residency, ResidencyFact::Device { .. }))
-                {
-                    diagnostics.push(argument_error(
-                        "RM-CATALOG-FEA-RESIDENT",
-                        "fea.results selectors are not implicitly gathered",
-                        index + 1,
-                    ));
+                if let Some(value) = request.arguments.get(index + 1) {
+                    if let Some(name) = request.literals.literal_string_at(index) {
+                        let key = normalized_option(&name);
+                        let (valid, detail) = match key.as_str() {
+                            "fields" | "includefields" | "diagnosticcodes" => {
+                                (possible_text_list(value), "text selector list")
+                            }
+                            "modeindices" | "transientsnapshotindices" => (
+                                possible_index_vector(value),
+                                "exact one-based numeric vector",
+                            ),
+                            "includefieldvalues"
+                            | "fieldvalues"
+                            | "includediagnostics"
+                            | "includemodalresults"
+                            | "includetransientresults"
+                            | "includenonlinearresults"
+                            | "includeelectromagneticresults" => {
+                                (possible_flag(value), "logical or exact zero/one scalar")
+                            }
+                            _ => (false, "supported option name"),
+                        };
+                        if !valid {
+                            diagnostics.push(argument_error(
+                                "RM-CATALOG-FEA-SELECTOR",
+                                detail,
+                                index + 1,
+                            ));
+                        }
+                    } else if matches!(value.residency, ResidencyFact::Device { .. }) {
+                        diagnostics.push(argument_error(
+                            "RM-CATALOG-FEA-RESIDENT",
+                            "fea.results selectors are not implicitly gathered",
+                            index + 1,
+                        ));
+                    }
                 }
             }
             object_result(FEA_RESULTS_CLASS)
@@ -250,5 +336,22 @@ mod tests {
         assert!(
             matches!(&inferred.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_FIELD_CLASS)))
         );
+    }
+
+    #[test]
+    fn result_index_selector_requires_exact_class_and_vector_geometry() {
+        let mut selector = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }));
+        assert!(!possible_index_vector(&selector));
+        selector.kind = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        });
+        selector.shape = ShapeFact::from(vec![Some(2), Some(2)]);
+        assert!(!possible_index_vector(&selector));
+        selector.shape = ShapeFact::from(vec![Some(1), Some(4)]);
+        assert!(possible_index_vector(&selector));
     }
 }

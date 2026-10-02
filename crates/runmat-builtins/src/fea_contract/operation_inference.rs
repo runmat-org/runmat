@@ -11,7 +11,7 @@ use crate::{
     BuiltinCatalogEntry,
 };
 use runmat_types::{
-    CallInference, CallRequest, NumericDomain, ObjectFact, ResidencyFact, ShapeFact,
+    CallInference, CallRequest, NumericClass, NumericDomain, ObjectFact, ResidencyFact, ShapeFact,
     StaticClassIdentity, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
@@ -55,10 +55,13 @@ fn possible_document(value: &ValueFact) -> bool {
     }
     match &value.kind {
         ValueKindFact::Unknown => true,
-        ValueKindFact::Object(object) => object
-            .runtime_class
-            .as_ref()
-            .is_none_or(|class| class.is(FEA_STUDY_CLASS) || class.is(FEA_SWEEP_CLASS)),
+        ValueKindFact::Object(object) => {
+            !matches!(value.shape.element_count(), Some(count) if count != 1)
+                && object
+                    .runtime_class
+                    .as_ref()
+                    .is_none_or(|class| class.is(FEA_STUDY_CLASS) || class.is(FEA_SWEEP_CLASS))
+        }
         _ => host_text(value),
     }
 }
@@ -68,7 +71,9 @@ fn possible_positive_window(value: &ValueFact) -> bool {
         && !matches!(value.shape.element_count(), Some(count) if count != 1)
         && match &value.kind {
             ValueKindFact::Unknown => true,
-            ValueKindFact::Numeric(number) => number.domain == NumericDomain::Real,
+            ValueKindFact::Numeric(number) => {
+                number.domain == NumericDomain::Real && number.class != NumericClass::Single
+            }
             _ => false,
         }
 }
@@ -109,6 +114,17 @@ pub fn infer_evidence(
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-WINDOW",
                         "WindowSize must be a host real numeric scalar",
+                        index + 1,
+                    ));
+                }
+                if request
+                    .literals
+                    .numeric_at(index + 1)
+                    .is_some_and(|value| !value.is_finite() || value <= 0.0 || value.fract() != 0.0)
+                {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FEA-WINDOW",
+                        "WindowSize must be a positive exact integer",
                         index + 1,
                     ));
                 }

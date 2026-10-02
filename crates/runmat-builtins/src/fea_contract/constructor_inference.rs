@@ -89,10 +89,13 @@ fn possible_host_study(fact: &ValueFact) -> bool {
     !matches!(fact.residency, ResidencyFact::Device { .. })
         && match &fact.kind {
             ValueKindFact::Unknown => true,
-            ValueKindFact::Object(object) => object
-                .runtime_class
-                .as_ref()
-                .is_none_or(|class| class.is(FEA_STUDY_CLASS)),
+            ValueKindFact::Object(object) => {
+                !matches!(fact.shape.element_count(), Some(count) if count != 1)
+                    && object
+                        .runtime_class
+                        .as_ref()
+                        .is_none_or(|class| class.is(FEA_STUDY_CLASS))
+            }
             _ => false,
         }
 }
@@ -158,7 +161,8 @@ pub fn infer_constructor(
                     .as_ref()
                     .is_none_or(|class| class.is(StaticClassIdentity::new("geometry.Asset"))),
                 _ => false,
-            } && !matches!(input.residency, ResidencyFact::Device { .. });
+            } && !matches!(input.residency, ResidencyFact::Device { .. })
+                && !matches!(input.shape.element_count(), Some(count) if count != 1);
             if !valid {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-GEOMETRY",

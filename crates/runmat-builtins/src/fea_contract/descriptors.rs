@@ -41,7 +41,7 @@ pub const VALIDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatu
     outputs: &OUT_ANY,
 }];
 pub const PLAN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "plan = fea.plan(study)",
+    label: "plan = fea.plan(studyOrSweepOrPath)",
     inputs: &IN_INPUT,
     outputs: &OUT_ANY,
 }];
@@ -143,18 +143,18 @@ pub const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatur
     outputs: &OUT_ANY,
 }];
 pub const FIELD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.field(resultsOrRun, fieldId)",
+    label: "field = fea.field(resultsOrRunOrRunId, fieldId)",
     inputs: &FIELD_INPUTS,
     outputs: &OUT_ANY,
 }];
 pub const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "figure = fea.plot(runOrResultsOrField, fieldId)",
+        label: "figure = fea.plot(runOrResultsOrField, [fieldId], Name, Value, ...)",
         inputs: &PLOT_CONTEXT_INPUTS,
         outputs: &OUT_ANY,
     },
     BuiltinSignatureDescriptor {
-        label: "figure = fea.plot(study, runId, fieldId)",
+        label: "figure = fea.plot(study, runId, [fieldId], Name, Value, ...)",
         inputs: &PLOT_STUDY_INPUTS,
         outputs: &OUT_ANY,
     },
