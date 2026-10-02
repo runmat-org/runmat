@@ -749,6 +749,42 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires a live WGPU adapter; run explicitly for physical empty-upload qualification"]
+    fn actual_empty_numeric_upload_retains_physical_buffer_but_transfers_no_payload() {
+        let provider =
+            WgpuProvider::new(WgpuProviderOptions::default()).expect("live WGPU adapter required");
+        let before = provider.placement_resources().live_bytes;
+        let f32_values: [f32; 0] = [];
+        let f64_values: [f64; 0] = [];
+        let data = match provider.precision() {
+            ProviderPrecision::F32 => HostNumericDataView::F32(&f32_values),
+            ProviderPrecision::F64 => HostNumericDataView::F64(&f64_values),
+        };
+        let handle = provider
+            .upload_numeric_produced(
+                &HostNumericTensorView {
+                    data,
+                    shape: &[1, 0],
+                    storage: GpuTensorStorage::Real,
+                },
+                false,
+            )
+            .expect("empty numeric upload");
+        let entry = provider.get_entry_raw(&handle).unwrap();
+        let floor = provider.element_size as u64;
+        assert_eq!(entry.buffer.size(), floor);
+        assert_eq!(entry.allocated_bytes, floor);
+        assert_eq!(provider.placement_resources().live_bytes - before, floor);
+        let downloaded = futures::executor::block_on(provider.download_numeric_exec(&handle))
+            .expect("empty numeric readback");
+        assert_eq!(downloaded.data.len(), 0);
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        handle.release().unwrap();
+        assert_eq!(provider.placement_resources().live_bytes, before);
+    }
+
+    #[test]
     #[ignore = "requires provisioned WGPU adapter; run with --ignored"]
     fn readback_decode_error_and_unpolled_drop_preserve_source() {
         let provider =

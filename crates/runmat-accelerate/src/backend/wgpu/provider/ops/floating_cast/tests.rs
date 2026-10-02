@@ -32,7 +32,11 @@ fn actual_wgpu_single_buffers_preserve_f32_empty_nd_and_independent_handle_lifet
         );
         assert_eq!(
             provider.get_entry_raw(&output).unwrap().allocated_bytes,
-            values.len() as u64 * 4
+            if values.is_empty() {
+                provider.element_size as u64
+            } else {
+                values.len() as u64 * 4
+            }
         );
         input.release().unwrap();
         assert_eq!(
