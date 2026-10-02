@@ -407,13 +407,10 @@ pub(crate) fn window_tensor(
         WindowSampling::Periodic => len.checked_add(1).ok_or(WindowArgError::InvalidLength)?,
     };
     let mut data = Vec::new();
-    data.try_reserve_exact(effective_len)
+    data.try_reserve_exact(len)
         .map_err(|error| WindowArgError::TensorBuild(error.to_string()))?;
-    for idx in 0..effective_len {
+    for idx in 0..len {
         data.push(coeff(idx, effective_len));
-    }
-    if matches!(options.sampling, WindowSampling::Periodic) {
-        data.pop();
     }
     Tensor::new_with_dtype(data, vec![len, 1], dtype_for(options.output_type))
         .map(Value::Tensor)
