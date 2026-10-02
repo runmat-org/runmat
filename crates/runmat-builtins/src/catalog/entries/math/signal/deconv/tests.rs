@@ -1,4 +1,5 @@
 use super::*;
+use crate::BuiltinOutputMode;
 use runmat_types::*;
 
 fn numeric(class: NumericClass, domain: NumericDomain, dims: &[usize]) -> ValueFact {
