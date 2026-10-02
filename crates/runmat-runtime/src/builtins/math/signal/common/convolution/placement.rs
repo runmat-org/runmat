@@ -1,6 +1,10 @@
 //! Whole-call placement for the two live-handle convolution hooks. Public
 //! parsing and semantic admission remain with the identity owners.
 
+use runmat_accelerate_api::observation::{
+    ProviderObservationFailure, ProviderObservationStatus, ProviderObservationSupport,
+    ProviderOperationReceipt, ProviderOperationRecorder,
+};
 use runmat_accelerate_api::{
     same_provider_instance, GpuTensorHandle, ProviderConvolutionForm,
     ProviderConvolutionInputBackings, ProviderConvolutionWorkload, ProviderElementType,
@@ -11,15 +15,14 @@ use runmat_accelerate_api::{
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
     CandidateOutputPresentation, CandidateOutputResidency, CandidatePreparationState,
-    CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementResourceSnapshot,
-    PlacementSignature, ResourceBoundUnavailable, ResourceByteBound, WholeWorkCandidate,
-    WholeWorkConstraint, WholeWorkObservation, WholeWorkObservationOutcome,
-    WholeWorkPlacementRequest,
+    CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementFeedback,
+    PlacementResourceSnapshot, PlacementSignature, ResourceBoundUnavailable, ResourceByteBound,
+    WholeWorkCandidate, WholeWorkConstraint, WholeWorkPlacementRequest,
 };
-use runmat_time::{duration_ns_saturating, Instant};
+use runmat_time::duration_ns_saturating;
 use runmat_types::ConvolutionMode;
 
-use crate::context::{RuntimeContext, RuntimeWholeWorkSelection};
+use crate::context::{RuntimeContext, RuntimePlacementFeedbackSource, RuntimeWholeWorkSelection};
 use crate::BuiltinResult;
 
 /// The receipt is tied to the actual borrowed pair, not a serialized shape.
@@ -27,14 +30,19 @@ use crate::BuiltinResult;
 pub(crate) struct SelectedConvolution {
     runtime: RuntimeContext,
     selected: RuntimeWholeWorkSelection,
-    started: Instant,
     provider_route: bool,
     backing: ProviderConvolutionInputBackings,
+    receipt: Option<ProviderOperationReceipt>,
 }
 
 impl SelectedConvolution {
     pub(crate) fn provider_route(&self) -> bool {
         self.provider_route
+    }
+    pub(crate) fn recorder(&self) -> Option<ProviderOperationRecorder> {
+        self.receipt
+            .as_ref()
+            .map(ProviderOperationReceipt::recorder)
     }
 
     pub(crate) fn revalidate(&self, handles: [&GpuTensorHandle; 2]) -> BuiltinResult<bool> {
@@ -46,41 +54,106 @@ impl SelectedConvolution {
         })
     }
 
-    pub(crate) fn finish_hook(self, outcome: &BuiltinResult<Option<runmat_value::Value>>) {
-        self.finish(outcome.is_ok(), outcome.as_ref().err());
-    }
-
-    pub(crate) fn finish_value(self, outcome: &BuiltinResult<runmat_value::Value>) {
-        let published_on_provider = matches!(outcome, Ok(runmat_value::Value::GpuTensor(_)));
-        self.finish(published_on_provider, outcome.as_ref().err());
-    }
-
-    fn finish(self, published: bool, error: Option<&crate::RuntimeError>) {
-        let status = match error {
-            // Hook return and output adoption do not prove asynchronous
-            // provider completion. Until the convolution receipt is wired
-            // end-to-end, a successful call cannot train a duration profile.
-            None if published => WholeWorkObservationOutcome::Abandoned,
-            None => WholeWorkObservationOutcome::Abandoned,
-            Some(error)
-                if self.runtime.is_cancelled()
-                    || error.identifier() == Some("RunMat:Cancelled") =>
+    pub(crate) fn finish_hook(mut self, outcome: &BuiltinResult<Option<runmat_value::Value>>) {
+        if let Some(mut receipt) = self.receipt.take() {
+            if self.runtime.is_cancelled()
+                || outcome
+                    .as_ref()
+                    .err()
+                    .is_some_and(|error| error.identifier() == Some("RunMat:Cancelled"))
             {
-                WholeWorkObservationOutcome::Cancelled
+                receipt.fail(ProviderObservationFailure::Cancelled);
+            } else if outcome.is_err() {
+                receipt.fail(ProviderObservationFailure::ProviderFailed);
+            } else if receipt.publish().is_err() {
+                receipt.fail(ProviderObservationFailure::PublicationFailed);
             }
-            Some(_) => WholeWorkObservationOutcome::OperationalFailure,
-        };
-        let observation = WholeWorkObservation {
+            self.deliver(receipt);
+        }
+    }
+
+    pub(crate) fn finish_value(mut self, outcome: &BuiltinResult<runmat_value::Value>) {
+        if let Some(mut receipt) = self.receipt.take() {
+            if self.runtime.is_cancelled()
+                || outcome
+                    .as_ref()
+                    .err()
+                    .is_some_and(|error| error.identifier() == Some("RunMat:Cancelled"))
+            {
+                receipt.fail(ProviderObservationFailure::Cancelled);
+            } else if outcome.is_err() {
+                receipt.fail(ProviderObservationFailure::ProviderFailed);
+            } else if !matches!(outcome, Ok(runmat_value::Value::GpuTensor(_))) {
+                receipt.fail(ProviderObservationFailure::SharedRuntimeFallback);
+            } else if receipt.publish().is_err() {
+                receipt.fail(ProviderObservationFailure::PublicationFailed);
+            }
+            self.deliver(receipt);
+        }
+    }
+
+    fn deliver(&self, receipt: ProviderOperationReceipt) {
+        let mut deferred = DeferredConvolutionFeedback {
+            receipt,
             signature: self.selected.decision.signature.clone(),
             selected: self.selected.decision.selected.clone(),
-            elapsed_ns: duration_ns_saturating(self.started.elapsed()),
-            outcome: status,
+            cancellation: self.runtime.cancellation(),
+            terminal_without_feedback: false,
         };
         if let Some(service) = self.runtime.service_ports().placement() {
-            if let Err(error) = service.observe_whole_work(observation) {
-                tracing::warn!(target: "runmat_placement", "convolution observation rejected: {error}");
+            if let Some(ready) = deferred.take_ready() {
+                let _ = service.observe(ready);
+            } else if !deferred.terminal_without_feedback()
+                && service.defer_feedback(Box::new(deferred)).is_err()
+            {
+                tracing::debug!(target: "runmat_placement", "convolution completion receipt could not be retained");
             }
         }
+    }
+}
+
+struct DeferredConvolutionFeedback {
+    receipt: ProviderOperationReceipt,
+    signature: PlacementSignature,
+    selected: runmat_execution::SelectedExecutionCandidate,
+    cancellation: runmat_execution::cancellation::CancellationToken,
+    terminal_without_feedback: bool,
+}
+
+impl RuntimePlacementFeedbackSource for DeferredConvolutionFeedback {
+    fn signature(&self) -> &PlacementSignature {
+        &self.signature
+    }
+
+    fn take_ready(&mut self) -> Option<PlacementFeedback> {
+        if self.cancellation.is_cancelled() {
+            self.receipt.fail(ProviderObservationFailure::Cancelled);
+        }
+        let observation = self.receipt.take_completed()?;
+        let (elapsed, succeeded) = match observation.status {
+            ProviderObservationStatus::Completed { total_elapsed, .. } => {
+                (duration_ns_saturating(total_elapsed), true)
+            }
+            ProviderObservationStatus::Failed(ProviderObservationFailure::ProviderFailed) => {
+                (0, false)
+            }
+            ProviderObservationStatus::Failed(_) => {
+                self.terminal_without_feedback = true;
+                return None;
+            }
+            ProviderObservationStatus::Pending => return None,
+        };
+        Some(PlacementFeedback {
+            signature: self.signature.clone(),
+            candidate: self.selected.candidate.clone(),
+            kind: self.selected.kind,
+            total_elapsed_ns: elapsed,
+            succeeded,
+        })
+    }
+
+    fn terminal_without_feedback(&self) -> bool {
+        self.terminal_without_feedback
     }
 }
 
@@ -198,10 +271,8 @@ pub(crate) fn select_pair(
             ..ProviderWorkload::default()
         },
     };
-    // Current WGPU convolution only proves enqueue, and the in-process
-    // implementation has no complete-call observation declaration. Preserve
-    // their existing execution path until a provider-owned receipt tracks
-    // this exact convolution route through completion and publication.
+    // A provider without complete-call evidence keeps the existing direct
+    // execution route; enqueue alone cannot train a placement profile.
     if !matches!(
         provider.operation_observation_capability(&query),
         runmat_accelerate_api::observation::ProviderObservationCapability::Supported(_)
@@ -231,31 +302,6 @@ pub(crate) fn select_pair(
         revision,
     };
     let device_id = provider.device_id();
-    let host = WholeWorkCandidate {
-        kind: ExecutionCandidateKind::SharedRuntime,
-        execution_location: CandidateExecutionLocation::Host,
-        preparation: CandidatePreparationState::Ready,
-        output_residency: CandidateOutputResidency::Provider { device_id },
-        presentation: CandidateOutputPresentation::ProviderUpload {
-            device_id,
-            transfer_bytes: host_result_bytes,
-            host_scratch_bytes: unknown_scratch(),
-            provider_scratch_bytes: unknown_scratch(),
-            queue_slots: 1,
-            preparation: CandidatePreparationState::Ready,
-        },
-        route_facts: Digest::sha256(b"runmat.signal.convolution.host_gather_compute_restore.v1"),
-        cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
-        resources: CandidateResourceDemand {
-            cpu_millicores: 1_000,
-            retained_bytes: host_result_bytes.map(ResourceByteBound::Known).unwrap_or(
-                ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
-            ),
-            scratch_bytes: unknown_scratch(),
-            queue_slots: 0,
-        },
-        transactional_results: true,
-    };
     let mut candidates = Vec::new();
     let host_upload = ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new("transfer.upload"),
@@ -267,10 +313,58 @@ pub(crate) fn select_pair(
         outputs: vec![output],
         workload: ProviderWorkload::default(),
     };
-    if provider.query_feasibility(&host_upload).is_supported() {
-        candidates.push(host);
+    if provider.query_feasibility(&host_upload).is_supported()
+        && matches!(
+            provider.operation_observation_capability(&host_upload),
+            runmat_accelerate_api::observation::ProviderObservationCapability::Supported(_)
+        )
+    {
+        candidates.push(WholeWorkCandidate {
+            kind: ExecutionCandidateKind::SharedRuntime,
+            execution_location: CandidateExecutionLocation::Host,
+            preparation: CandidatePreparationState::Ready,
+            output_residency: CandidateOutputResidency::Provider { device_id },
+            presentation: CandidateOutputPresentation::ProviderUpload {
+                device_id,
+                transfer_bytes: host_result_bytes,
+                host_scratch_bytes: unknown_scratch(),
+                provider_scratch_bytes: unknown_scratch(),
+                queue_slots: 1,
+                preparation: CandidatePreparationState::Ready,
+            },
+            route_facts: Digest::sha256(
+                b"runmat.signal.convolution.host_gather_compute_restore.v2",
+            ),
+            cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
+            resources: CandidateResourceDemand {
+                cpu_millicores: 1_000,
+                retained_bytes: host_result_bytes.map(ResourceByteBound::Known).unwrap_or(
+                    ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
+                ),
+                scratch_bytes: unknown_scratch(),
+                queue_slots: 0,
+                peak_live: None,
+            },
+            transactional_results: true,
+        });
     }
     if let ProviderFeasibility::Supported { estimate } = feasibility {
+        let unique_live = backing.unique_live_bytes(handles).map_err(|cause| {
+            crate::build_runtime_error("convolution input lease changed during placement")
+                .with_identifier("RunMat:Placement:ExpiredConvolutionInput")
+                .with_source(cause)
+                .build()
+        })?;
+        let peak_live =
+            estimate
+                .transient_bytes
+                .zip(unique_live)
+                .map(|(peak_bytes, already_live_bytes)| {
+                    runmat_execution::CandidatePeakLiveDemand {
+                        peak_bytes,
+                        already_live_bytes,
+                    }
+                });
         candidates.push(WholeWorkCandidate {
             kind: ExecutionCandidateKind::ProviderOperation,
             execution_location: CandidateExecutionLocation::Provider { device_id },
@@ -293,6 +387,7 @@ pub(crate) fn select_pair(
                 // A peak-live bound is not a transient-scratch bound.
                 scratch_bytes: unknown_scratch(),
                 queue_slots: estimate.dispatches.unwrap_or(1),
+                peak_live,
             },
             transactional_results: capability.concurrency.transactional_results,
         });
@@ -341,11 +436,24 @@ pub(crate) fn select_pair(
         .with_identifier("RunMat:Placement:InvalidDecision")
         .build());
     };
+    let provider_route = candidates[index].kind.is_provider();
+    let observed_query = if provider_route { &query } else { &host_upload };
+    let receipt = {
+        match provider.begin_operation_observation(observed_query) {
+            ProviderObservationSupport::Observed(mut receipt) => {
+                if provider_route {
+                    receipt.require_provider_execution(device_id, query.operation.clone());
+                }
+                Some(receipt)
+            }
+            ProviderObservationSupport::Unsupported => return Ok(None),
+        }
+    };
     Ok(Some(SelectedConvolution {
         runtime: runtime.clone(),
         selected: chosen,
-        started: Instant::now(),
-        provider_route: candidates[index].kind.is_provider(),
+        provider_route,
         backing,
+        receipt,
     }))
 }

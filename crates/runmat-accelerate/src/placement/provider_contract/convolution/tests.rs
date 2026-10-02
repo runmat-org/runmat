@@ -247,8 +247,20 @@ fn checked_peak_obeys_a_known_provider_memory_limit() {
         .unwrap()
         .expect("full registered input views");
     assert_eq!(backing.live_requested_bytes(), Some([40, 24]));
+    assert_eq!(
+        backing.unique_live_bytes([&signal, &kernel]).unwrap(),
+        Some(64)
+    );
     assert!(backing.matches_live_handles([&signal, &kernel]).unwrap());
     assert!(!backing.matches_live_handles([&kernel, &signal]).unwrap());
+    assert_eq!(backing.unique_live_bytes([&kernel, &signal]).unwrap(), None);
+    let alias = ProviderConvolutionInputBackings::from_full_live_handles([&signal, &signal])
+        .unwrap()
+        .expect("same allocation is an admissible ordered pair");
+    assert_eq!(
+        alias.unique_live_bytes([&signal, &signal]).unwrap(),
+        Some(40)
+    );
     let mut request = query(vector(), ConvolutionMode::Full, &[1, 5], &[1, 3]);
     request
         .workload
@@ -302,6 +314,91 @@ fn checked_peak_obeys_a_known_provider_memory_limit() {
     assert_eq!(
         code(validate(&output_too_large, true, &decoded).unwrap()),
         ProviderRejectionCode::ResourceLimit
+    );
+}
+
+#[test]
+fn in_process_convolution_receipt_completes_only_after_hook_publication() {
+    use runmat_accelerate_api::observation::{
+        with_provider_observation, ProviderObservationStatus, ProviderObservationSupport,
+    };
+    let provider = crate::simple_provider::InProcessProvider::new();
+    let signal = provider
+        .upload(&HostTensorView {
+            data: &[1.0; 5],
+            shape: &[1, 5],
+        })
+        .unwrap();
+    let kernel = provider
+        .upload(&HostTensorView {
+            data: &[1.0; 3],
+            shape: &[1, 3],
+        })
+        .unwrap();
+    let backing = ProviderConvolutionInputBackings::from_full_live_handles([&signal, &kernel])
+        .unwrap()
+        .expect("full handles");
+    let mut request = query(vector(), ConvolutionMode::Full, &[1, 5], &[1, 3]);
+    request
+        .workload
+        .convolution
+        .as_mut()
+        .unwrap()
+        .input_backings = Some(backing);
+    let ProviderObservationSupport::Observed(mut receipt) =
+        provider.begin_operation_observation(&request)
+    else {
+        panic!("in-process convolution is synchronous");
+    };
+    receipt.require_provider_execution(provider.device_id(), request.operation.clone());
+    let result = with_provider_observation(Some(receipt.recorder()), || {
+        provider.conv1d(
+            &signal,
+            &kernel,
+            runmat_accelerate_api::ProviderConv1dOptions {
+                mode: runmat_accelerate_api::ProviderConvMode::Full,
+                orientation: ProviderConvOrientation::Row,
+            },
+        )
+    });
+    assert!(result.is_ok());
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    receipt.publish().unwrap();
+    assert!(matches!(
+        receipt.status(),
+        ProviderObservationStatus::Completed { .. }
+    ));
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn only_the_admitted_wgpu_vector_route_claims_completion_fences() {
+    use runmat_accelerate_api::observation::{
+        ProviderObservationCapability, ProviderObservationOverhead,
+    };
+    let provider = GeometryProvider {
+        memory_limit: None,
+        precision: ProviderPrecision::F64,
+    };
+    let vector = query(vector(), ConvolutionMode::Same, &[1, 5], &[1, 3]);
+    assert_eq!(
+        observation_capability(&provider, &vector),
+        ProviderObservationCapability::Supported(ProviderObservationOverhead {
+            submissions: 1,
+            requested_peak_buffer_bytes: 8,
+            clear_commands: 1,
+            map_callbacks: 1,
+        })
+    );
+    let matrix = query(
+        ProviderConvolutionForm::Matrix,
+        ConvolutionMode::Full,
+        &[3, 4],
+        &[2, 2],
+    );
+    assert_eq!(
+        observation_capability(&provider, &matrix),
+        ProviderObservationCapability::Unsupported
     );
 }
 

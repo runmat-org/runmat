@@ -363,7 +363,11 @@ fn try_conv2_gpu(
             return Err(conv2_error(&CONV2_ERROR_INVALID_INPUT));
         }
     }
-    let result = match provider.conv2d(lhs, rhs, provider_mode) {
+    let recorder = placement.as_ref().and_then(|selected| selected.recorder());
+    let hook = runmat_accelerate_api::observation::with_provider_observation(recorder, || {
+        provider.conv2d(lhs, rhs, provider_mode)
+    });
+    let result = match hook {
         Ok(handle) => super::common::convolution::admit_binary_output(
             handle,
             lhs,

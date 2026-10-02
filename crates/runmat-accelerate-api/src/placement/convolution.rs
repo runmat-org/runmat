@@ -72,6 +72,28 @@ impl ProviderConvolutionInputBackings {
         self.live_views.map(|_| self.requested_bytes)
     }
 
+    /// Requested bytes already counted in the provider's live allocation
+    /// snapshot. Two full views of one allocation contribute that allocation
+    /// only once, even though the physical route's conservative peak may
+    /// count both hook arguments.
+    pub fn unique_live_bytes(
+        self,
+        handles: [&GpuTensorHandle; 2],
+    ) -> Result<Option<u64>, AllocationAcquisitionError> {
+        if !self.matches_live_handles(handles)? {
+            return Ok(None);
+        }
+        let bytes = if handles[0].allocation_identity() == handles[1].allocation_identity() {
+            self.requested_bytes[0].max(self.requested_bytes[1])
+        } else {
+            match self.requested_bytes[0].checked_add(self.requested_bytes[1]) {
+                Some(bytes) => bytes,
+                None => return Ok(None),
+            }
+        };
+        Ok(Some(bytes))
+    }
+
     /// The caller must recheck the exact borrowed pair immediately before the
     /// selected hook, after any suspension or preparation.
     pub fn matches_live_handles(

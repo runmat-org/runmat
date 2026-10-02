@@ -11,7 +11,7 @@ use runmat_value::{NumericDType, Value};
 
 mod arithmetic;
 mod complex_components;
-mod convolution;
+pub(crate) mod convolution;
 mod iir;
 pub(crate) mod floating_conversion;
 pub(crate) mod fusion_elementwise;

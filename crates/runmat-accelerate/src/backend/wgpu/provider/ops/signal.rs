@@ -775,6 +775,12 @@ impl WgpuProvider {
         kernel: &GpuTensorHandle,
         options: ProviderConv1dOptions,
     ) -> Result<GpuTensorHandle> {
+        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("conv");
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        let checkpoint = observed.as_ref().map(
+            runmat_accelerate_api::observation::ProviderOperationRecorder::submission_checkpoint,
+        );
         let entry_signal = self.get_entry(signal)?;
         let entry_kernel = self.get_entry(kernel)?;
 
@@ -858,7 +864,13 @@ impl WgpuProvider {
         })??;
 
         let handle = self.register_existing_buffer(out_buffer, out_shape, output_len)?;
-
+        if let (Some(recorder), Some(checkpoint)) = (observed, checkpoint) {
+            recorder.confirm_submitted_provider_execution_after(
+                self.device_id(),
+                &operation,
+                checkpoint,
+            );
+        }
         Ok(handle)
     }
     pub(crate) async fn iir_filter_exec<'a>(

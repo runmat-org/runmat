@@ -3818,6 +3818,45 @@ impl AccelProvider for InProcessProvider {
         crate::placement::in_process_feasibility(self, query)
     }
 
+    fn operation_observation_capability(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        use runmat_accelerate_api::observation::{
+            ProviderObservationCapability, ProviderObservationOverhead,
+        };
+        if !matches!(
+            query.operation.0.as_str(),
+            "conv" | "conv2" | "transfer.upload"
+        ) || !self.query_feasibility(query).is_supported()
+        {
+            return ProviderObservationCapability::Unsupported;
+        }
+        // These in-process hooks finish all computation and publication before
+        // returning. No asynchronous submission or callback is outstanding.
+        ProviderObservationCapability::Supported(ProviderObservationOverhead {
+            submissions: 0,
+            requested_peak_buffer_bytes: 0,
+            clear_commands: 0,
+            map_callbacks: 0,
+        })
+    }
+
+    fn begin_operation_observation(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::observation::ProviderObservationSupport {
+        use runmat_accelerate_api::observation::{
+            ProviderObservationCapability, ProviderObservationSupport, ProviderOperationReceipt,
+        };
+        match self.operation_observation_capability(query) {
+            ProviderObservationCapability::Supported(_) => {
+                ProviderObservationSupport::Observed(ProviderOperationReceipt::new())
+            }
+            ProviderObservationCapability::Unsupported => ProviderObservationSupport::Unsupported,
+        }
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,
@@ -6901,30 +6940,33 @@ impl AccelProvider for InProcessProvider {
         kernel: &GpuTensorHandle,
         options: ProviderConv1dOptions,
     ) -> Result<GpuTensorHandle> {
-        let signal_len: usize = signal.shape().iter().copied().product();
-        let kernel_len: usize = kernel.shape().iter().copied().product();
+        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("conv");
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        let result = (|| -> Result<GpuTensorHandle> {
+            let signal_len: usize = signal.shape().iter().copied().product();
+            let kernel_len: usize = kernel.shape().iter().copied().product();
 
-        if signal_len == 0 {
-            let shape = conv1d_output_shape(0, options.orientation);
-            return self.allocate_tensor(Vec::new(), shape);
-        }
-        if kernel_len == 0 {
-            let data = if matches!(options.mode, ProviderConvMode::Valid) {
-                vec![0.0; signal_len]
-            } else {
-                Vec::new()
-            };
-            let shape = conv1d_output_shape(data.len(), options.orientation);
-            return self.allocate_tensor(data, shape);
-        }
+            if signal_len == 0 {
+                let shape = conv1d_output_shape(0, options.orientation);
+                return self.allocate_tensor(Vec::new(), shape);
+            }
+            if kernel_len == 0 {
+                let data = if matches!(options.mode, ProviderConvMode::Valid) {
+                    vec![0.0; signal_len]
+                } else {
+                    Vec::new()
+                };
+                let shape = conv1d_output_shape(data.len(), options.orientation);
+                return self.allocate_tensor(data, shape);
+            }
 
-        if matches!(options.mode, ProviderConvMode::Valid) && signal_len < kernel_len {
-            let shape = conv1d_output_shape(0, options.orientation);
-            return self.allocate_tensor(Vec::new(), shape);
-        }
+            if matches!(options.mode, ProviderConvMode::Valid) && signal_len < kernel_len {
+                let shape = conv1d_output_shape(0, options.orientation);
+                return self.allocate_tensor(Vec::new(), shape);
+            }
 
-        let (signal_data, kernel_data) =
-            {
+            let (signal_data, kernel_data) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let signal_buf = guard.get(signal).cloned().ok_or_else(|| {
                     anyhow!("conv1d: unknown signal buffer {}", signal.buffer_id())
@@ -6935,23 +6977,30 @@ impl AccelProvider for InProcessProvider {
                 (signal_buf, kernel_buf)
             };
 
-        ensure!(
-            signal_data.len() == signal_len,
-            "conv1d: signal length mismatch (shape implies {}, buffer has {})",
-            signal_len,
-            signal_data.len()
-        );
-        ensure!(
-            kernel_data.len() == kernel_len,
-            "conv1d: kernel length mismatch (shape implies {}, buffer has {})",
-            kernel_len,
-            kernel_data.len()
-        );
+            ensure!(
+                signal_data.len() == signal_len,
+                "conv1d: signal length mismatch (shape implies {}, buffer has {})",
+                signal_len,
+                signal_data.len()
+            );
+            ensure!(
+                kernel_data.len() == kernel_len,
+                "conv1d: kernel length mismatch (shape implies {}, buffer has {})",
+                kernel_len,
+                kernel_data.len()
+            );
 
-        let full = convolve_real(&signal_data, &kernel_data)?;
-        let shaped = apply_conv_mode_real(&full, options.mode, signal_len, kernel_len);
-        let shape = conv1d_output_shape(shaped.len(), options.orientation);
-        self.allocate_tensor(shaped, shape)
+            let full = convolve_real(&signal_data, &kernel_data)?;
+            let shaped = apply_conv_mode_real(&full, options.mode, signal_len, kernel_len);
+            let shape = conv1d_output_shape(shaped.len(), options.orientation);
+            self.allocate_tensor(shaped, shape)
+        })();
+        if result.is_ok() {
+            if let Some(recorder) = observed {
+                recorder.confirm_provider_execution(self.device_id, &operation);
+            }
+        }
+        result
     }
     fn conv2d(
         &self,
@@ -6959,32 +7008,35 @@ impl AccelProvider for InProcessProvider {
         kernel: &GpuTensorHandle,
         mode: ProviderConvMode,
     ) -> Result<GpuTensorHandle> {
-        ensure_diag_shape("conv2d", signal.shape())?;
-        ensure_diag_shape("conv2d", kernel.shape())?;
-        let (signal_rows, signal_cols) = rows_cols(signal.shape());
-        let (kernel_rows, kernel_cols) = rows_cols(kernel.shape());
+        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("conv2");
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        let result = (|| -> Result<GpuTensorHandle> {
+            ensure_diag_shape("conv2d", signal.shape())?;
+            ensure_diag_shape("conv2d", kernel.shape())?;
+            let (signal_rows, signal_cols) = rows_cols(signal.shape());
+            let (kernel_rows, kernel_cols) = rows_cols(kernel.shape());
 
-        let signal_len: usize = signal.shape().iter().copied().product();
-        let kernel_len: usize = kernel.shape().iter().copied().product();
+            let signal_len: usize = signal.shape().iter().copied().product();
+            let kernel_len: usize = kernel.shape().iter().copied().product();
 
-        let empty_shape = match mode {
-            ProviderConvMode::Full | ProviderConvMode::Valid => vec![0, 0],
-            ProviderConvMode::Same => vec![signal_rows, signal_cols],
-        };
+            let empty_shape = match mode {
+                ProviderConvMode::Full | ProviderConvMode::Valid => vec![0, 0],
+                ProviderConvMode::Same => vec![signal_rows, signal_cols],
+            };
 
-        if signal_len == 0
-            || kernel_len == 0
-            || signal_rows == 0
-            || signal_cols == 0
-            || kernel_rows == 0
-            || kernel_cols == 0
-        {
-            let len = empty_shape.iter().copied().product::<usize>();
-            return self.allocate_tensor(vec![0.0; len], empty_shape);
-        }
-
-        let (signal_data, kernel_data) =
+            if signal_len == 0
+                || kernel_len == 0
+                || signal_rows == 0
+                || signal_cols == 0
+                || kernel_rows == 0
+                || kernel_cols == 0
             {
+                let len = empty_shape.iter().copied().product::<usize>();
+                return self.allocate_tensor(vec![0.0; len], empty_shape);
+            }
+
+            let (signal_data, kernel_data) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let signal_buf = guard.get(signal).cloned().ok_or_else(|| {
                     anyhow!("conv2d: unknown signal buffer {}", signal.buffer_id())
@@ -6995,52 +7047,59 @@ impl AccelProvider for InProcessProvider {
                 (signal_buf, kernel_buf)
             };
 
-        ensure!(
-            signal_data.len() == signal_len,
-            "conv2d: signal length mismatch (shape implies {}, buffer has {})",
-            signal_len,
-            signal_data.len()
-        );
-        ensure!(
-            kernel_data.len() == kernel_len,
-            "conv2d: kernel length mismatch (shape implies {}, buffer has {})",
-            kernel_len,
-            kernel_data.len()
-        );
+            ensure!(
+                signal_data.len() == signal_len,
+                "conv2d: signal length mismatch (shape implies {}, buffer has {})",
+                signal_len,
+                signal_data.len()
+            );
+            ensure!(
+                kernel_data.len() == kernel_len,
+                "conv2d: kernel length mismatch (shape implies {}, buffer has {})",
+                kernel_len,
+                kernel_data.len()
+            );
 
-        let full_rows = signal_rows
-            .checked_add(kernel_rows)
-            .and_then(|v| v.checked_sub(1))
-            .ok_or_else(|| anyhow!("conv2d: row size overflow"))?;
-        let full_cols = signal_cols
-            .checked_add(kernel_cols)
-            .and_then(|v| v.checked_sub(1))
-            .ok_or_else(|| anyhow!("conv2d: column size overflow"))?;
-        full_rows
-            .checked_mul(full_cols)
-            .ok_or_else(|| anyhow!("conv2d: output size overflow"))?;
-        let full = conv2d_full_real(
-            &signal_data,
-            signal_rows,
-            signal_cols,
-            &kernel_data,
-            kernel_rows,
-            kernel_cols,
-            full_rows,
-            full_cols,
-        );
+            let full_rows = signal_rows
+                .checked_add(kernel_rows)
+                .and_then(|v| v.checked_sub(1))
+                .ok_or_else(|| anyhow!("conv2d: row size overflow"))?;
+            let full_cols = signal_cols
+                .checked_add(kernel_cols)
+                .and_then(|v| v.checked_sub(1))
+                .ok_or_else(|| anyhow!("conv2d: column size overflow"))?;
+            full_rows
+                .checked_mul(full_cols)
+                .ok_or_else(|| anyhow!("conv2d: output size overflow"))?;
+            let full = conv2d_full_real(
+                &signal_data,
+                signal_rows,
+                signal_cols,
+                &kernel_data,
+                kernel_rows,
+                kernel_cols,
+                full_rows,
+                full_cols,
+            );
 
-        let (shaped, out_rows, out_cols) = apply_conv2_mode_real_2d(
-            &full,
-            full_rows,
-            full_cols,
-            mode,
-            signal_rows,
-            signal_cols,
-            kernel_rows,
-            kernel_cols,
-        );
-        self.allocate_tensor(shaped, vec![out_rows, out_cols])
+            let (shaped, out_rows, out_cols) = apply_conv2_mode_real_2d(
+                &full,
+                full_rows,
+                full_cols,
+                mode,
+                signal_rows,
+                signal_cols,
+                kernel_rows,
+                kernel_cols,
+            );
+            self.allocate_tensor(shaped, vec![out_rows, out_cols])
+        })();
+        if result.is_ok() {
+            if let Some(recorder) = observed {
+                recorder.confirm_provider_execution(self.device_id, &operation);
+            }
+        }
+        result
     }
     fn iir_filter<'a>(
         &'a self,

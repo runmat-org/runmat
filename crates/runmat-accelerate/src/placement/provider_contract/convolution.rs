@@ -54,6 +54,36 @@ pub(super) fn validate(
     Some(work(provider, wgpu, identity, query))
 }
 
+#[cfg(feature = "wgpu")]
+pub(crate) fn observation_capability(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+    use runmat_accelerate_api::observation::{
+        ProviderObservationCapability, ProviderObservationOverhead,
+    };
+    if query.operation.0 != "conv" {
+        return ProviderObservationCapability::Unsupported;
+    }
+    let Some(ProviderFeasibility::Supported { estimate }) = validate(provider, true, query) else {
+        return ProviderObservationCapability::Unsupported;
+    };
+    let Some(submissions) = estimate.dispatches else {
+        return ProviderObservationCapability::Unsupported;
+    };
+    let Some(requested_peak_buffer_bytes) = u64::from(submissions)
+        .checked_mul(crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES)
+    else {
+        return ProviderObservationCapability::Unsupported;
+    };
+    ProviderObservationCapability::Supported(ProviderObservationOverhead {
+        submissions,
+        requested_peak_buffer_bytes,
+        clear_commands: submissions,
+        map_callbacks: submissions,
+    })
+}
+
 fn reject(code: ProviderRejectionCode, detail: &'static str) -> ProviderFeasibility {
     ProviderFeasibility::rejected(code, detail)
 }

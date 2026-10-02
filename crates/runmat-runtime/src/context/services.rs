@@ -198,6 +198,11 @@ pub trait RuntimeAccelerationService {
 pub trait RuntimePlacementFeedbackSource: Send {
     fn signature(&self) -> &runmat_execution::PlacementSignature;
     fn take_ready(&mut self) -> Option<runmat_execution::PlacementFeedback>;
+    /// A completed cancellation or abandonment has no feedback sample. The
+    /// owner may retire its source without manufacturing a failed observation.
+    fn terminal_without_feedback(&self) -> bool {
+        false
+    }
 }
 
 /// A process-local reservation for one exploratory whole-work invocation.

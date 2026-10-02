@@ -51,6 +51,30 @@ fn source(ready: Arc<AtomicBool>, dropped: Arc<AtomicUsize>) -> Box<Source> {
     })
 }
 
+struct TerminalSource(Source);
+impl RuntimePlacementFeedbackSource for TerminalSource {
+    fn signature(&self) -> &PlacementSignature {
+        &self.0.signature
+    }
+    fn take_ready(&mut self) -> Option<PlacementFeedback> {
+        None
+    }
+    fn terminal_without_feedback(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn cancelled_or_abandoned_completion_retires_without_a_failure_sample() {
+    let queue = PendingFeedback::default();
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let pending = source(Arc::new(AtomicBool::new(false)), dropped.clone());
+    assert!(queue.push(Box::new(TerminalSource(*pending))).is_ok());
+    assert!(queue.take_ready().is_empty());
+    assert!(queue.sources.borrow().is_empty());
+    assert_eq!(dropped.load(Ordering::Acquire), 1);
+}
+
 #[test]
 fn queue_is_bounded_and_ready_sources_deliver_once() {
     let queue = PendingFeedback::default();

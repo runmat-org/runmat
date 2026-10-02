@@ -116,7 +116,15 @@ impl AccelProvider for WgpuProvider {
                 cast,
                 runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
             ) {
-                crate::placement::sum_observation_capability(self, query)
+                let sum = crate::placement::sum_observation_capability(self, query);
+                if matches!(
+                    sum,
+                    runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
+                ) {
+                    crate::placement::convolution_observation_capability(self, query)
+                } else {
+                    sum
+                }
             } else {
                 cast
             }

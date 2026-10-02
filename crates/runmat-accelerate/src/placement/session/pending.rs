@@ -46,6 +46,7 @@ impl PendingFeedback {
         for mut source in sources {
             match source.take_ready() {
                 Some(feedback) => ready.push(feedback),
+                None if source.terminal_without_feedback() => {}
                 None => pending.push(source),
             }
         }
