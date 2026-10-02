@@ -251,6 +251,24 @@ mod tests {
 
     fn budget_request(logical: u64, physical: u64, capacity: u64) -> WholeWorkPlacementRequest {
         let digest = Digest::sha256(b"physical-host-upload-budget");
+        let mut candidate = upload_candidate(
+            17,
+            logical,
+            Some(physical),
+            ResourceByteBound::Known(0),
+            1,
+            digest,
+        );
+        // This synthetic route isolates retained-provider and host-workspace
+        // budgets. Unknown provider scratch would independently prevent its
+        // acceptance under the finite provider capacity in this fixture.
+        if let CandidateOutputPresentation::ProviderUpload {
+            provider_scratch_bytes,
+            ..
+        } = &mut candidate.presentation
+        {
+            *provider_scratch_bytes = ResourceByteBound::Known(0);
+        }
         WholeWorkPlacementRequest {
             signature: PlacementSignature {
                 region: None,
@@ -265,14 +283,7 @@ mod tests {
                 },
             },
             constraint: WholeWorkConstraint::AnyLegal,
-            candidates: vec![upload_candidate(
-                17,
-                logical,
-                Some(physical),
-                ResourceByteBound::Known(0),
-                1,
-                digest,
-            )],
+            candidates: vec![candidate],
             resources: PlacementResourceSnapshot {
                 cpu_millicores_available: 1_000,
                 memory_available_bytes: Some(1_024),
