@@ -109,7 +109,11 @@ async fn integrate_domain<E: QuadratureEvaluator>(
     b: f64,
 ) -> BuiltinResult<(<E::Sample as QuadratureSample>::Estimate, usize)>
 where
-    E::Sample: QuadratureSample,
+    E::Sample: QuadratureSample
+        + OpenSample<
+            Result = <E::Sample as QuadratureSample>::Estimate,
+            Error = <E::Sample as QuadratureSample>::Estimate,
+        >,
 {
     evaluator.checkpoint().await?;
     let m = evaluator.midpoint(a, b);
@@ -151,7 +155,11 @@ async fn adapt<E: QuadratureEvaluator>(
     intervals: &mut usize,
 ) -> BuiltinResult<<E::Sample as QuadratureSample>::Estimate>
 where
-    E::Sample: QuadratureSample,
+    E::Sample: QuadratureSample
+        + OpenSample<
+            Result = <E::Sample as QuadratureSample>::Estimate,
+            Error = <E::Sample as QuadratureSample>::Estimate,
+        >,
 {
     evaluator.checkpoint().await?;
     if (*evaluations)
