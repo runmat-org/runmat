@@ -409,8 +409,7 @@ fn nested_integer_boundary_checks_large_aggregates_incrementally() {
         "InitialY",
         &mut cooperation::TsneCooperation::with_budget(budget),
     ))
-    .err()
-    .expect("the first cooperative turn must cancel aggregate inspection");
+    .expect_err("the first cooperative turn must cancel aggregate inspection");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
 }
 

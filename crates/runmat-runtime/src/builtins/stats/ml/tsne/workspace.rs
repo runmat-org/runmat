@@ -67,8 +67,7 @@ mod tests {
         assert_eq!(rows, vec![vec![0.0; 2]; 3]);
 
         let error = futures::executor::block_on(zero_matrix(usize::MAX, 2, &mut cooperation))
-            .err()
-            .expect("overflowing workspace must reject before allocation");
+            .expect_err("overflowing workspace must reject before allocation");
         assert!(error.message().contains("shape overflow"));
         assert_eq!(error.identifier(), Some("RunMat:tsne:Internal"));
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);

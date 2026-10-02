@@ -208,8 +208,7 @@ fn registered_known_start_shape_rejects_before_resident_x_download_and_keeps_lea
             k,
             vec![Value::from("Start"), Value::Tensor(start)],
         ))
-        .err()
-        .expect("known k-by-p mismatch must reject before download");
+        .expect_err("known k-by-p mismatch must reject before download");
         assert!(error.message().contains("numeric Start must be k-by-p"));
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
         assert!(x.allocation_lease().validate_live().is_ok());
