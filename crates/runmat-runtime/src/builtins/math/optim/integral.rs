@@ -759,6 +759,21 @@ mod tests {
     }
 
     #[runtime_builtin(
+        name = "__integral_array_sine",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn array_sine_helper(x: Value) -> crate::BuiltinResult<Value> {
+        let Value::Num(x) = x else {
+            unreachable!("array callback receives scalar")
+        };
+        Ok(Value::Tensor(
+            Tensor::new(vec![x.sin(), x.cos()], vec![1, 2]).expect("fixed shape"),
+        ))
+    }
+
+    #[runtime_builtin(
         name = "__integral_array_changing_shape",
         type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
         descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
@@ -1308,6 +1323,85 @@ mod tests {
         ))
         .expect("equal bounds do not invoke the scalar callback");
         assert!(matches!(zero_width, Value::Num(value) if value == 0.0));
+    }
+
+    #[test]
+    fn scalar_and_array_refinement_obey_interval_cap_independently_of_evaluation_cap() {
+        let scalar_polynomial = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_scalar_only".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![
+                Value::from("Vectorized"),
+                Value::Bool(false),
+                Value::from("MaxFunEvals"),
+                Value::Num(5.0),
+                Value::from("MaxIntervalCount"),
+                Value::Num(1.0),
+            ],
+        ))
+        .expect("a polynomial accepts within one subinterval and five evaluations");
+        assert!(
+            matches!(scalar_polynomial, Value::Num(value) if (value - 1.0 / 3.0).abs() < 1.0e-12)
+        );
+
+        let scalar_sine = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(std::f64::consts::PI),
+            vec![
+                Value::from("AbsTol"),
+                Value::Num(1.0e-12),
+                Value::from("RelTol"),
+                Value::Num(0.0),
+                Value::from("MaxFunEvals"),
+                Value::Num(1000.0),
+                Value::from("MaxIntervalCount"),
+                Value::Num(1.0),
+            ],
+        ))
+        .expect_err("the interval cap, not the evaluation cap, stops refinement");
+        assert!(scalar_sine
+            .message()
+            .contains("MaxIntervalCount adaptive subintervals"));
+
+        let array_polynomial = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_array_polynomial".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![
+                Value::from("ArrayValued"),
+                Value::Bool(true),
+                Value::from("MaxFunEvals"),
+                Value::Num(5.0),
+                Value::from("MaxIntervalCount"),
+                Value::Num(1.0),
+            ],
+        ))
+        .expect("array polynomial accepts within one interval");
+        assert!(matches!(array_polynomial, Value::Tensor(value) if value.shape == [1, 3]));
+
+        let array_sine = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_array_sine".into()),
+            Value::Num(0.0),
+            Value::Num(std::f64::consts::PI),
+            vec![
+                Value::from("ArrayValued"),
+                Value::Bool(true),
+                Value::from("AbsTol"),
+                Value::Num(1.0e-12),
+                Value::from("RelTol"),
+                Value::Num(0.0),
+                Value::from("MaxFunEvals"),
+                Value::Num(1000.0),
+                Value::from("MaxIntervalCount"),
+                Value::Num(1.0),
+            ],
+        ))
+        .expect_err("array components require further refinement");
+        assert!(array_sine
+            .message()
+            .contains("MaxIntervalCount adaptive subintervals"));
     }
 
     #[test]
