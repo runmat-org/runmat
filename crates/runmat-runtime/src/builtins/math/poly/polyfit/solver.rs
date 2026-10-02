@@ -4,8 +4,8 @@ use num_complex::Complex64;
 use runmat_accelerate_api::{ProviderPolyfitBasis, ProviderPolyfitOutputs};
 
 use super::{
-    column_scale, normalization, PolyfitKernelError, PolyfitKernelResult, PolyfitSolution,
-    SolverGeometry,
+    column_scale, normalization, response_scale::ResponseScale, PolyfitKernelError,
+    PolyfitKernelResult, PolyfitSolution, SolverGeometry,
 };
 
 pub(super) fn validate_weights(weights: &[f64]) -> PolyfitKernelResult<()> {
@@ -76,18 +76,13 @@ pub(super) fn solve_polyfit(
     // QR works in a dimensionless RHS basis too. A residual may exceed f64
     // even when the requested coefficients are finite (for example opposite
     // MAX-valued observations fitted by a constant).
-    let rhs_magnitude = y_data
-        .iter()
-        .flat_map(|value| [value.re.abs(), value.im.abs()])
-        .fold(0.0, f64::max);
-    let rhs_scale = if rhs_magnitude == 0.0 {
-        1.0
-    } else {
-        rhs_magnitude
-    };
+    // The real Vandermonde basis acts independently on both components. A
+    // shared response scale would erase a tiny representable component next
+    // to a large component, even in an exact one-sample constant fit.
+    let rhs_scale = ResponseScale::from_values(y_data);
     let mut rhs = y_data
         .iter()
-        .map(|value| Complex64::new(value.re / rhs_scale, value.im / rhs_scale))
+        .map(|value| rhs_scale.normalize(value))
         .collect::<Vec<_>>();
     if let Some(w) = weights {
         apply_weights_rhs(&mut rhs, w)?;
@@ -113,15 +108,8 @@ pub(super) fn solve_polyfit(
     let normr = outputs
         .wants_statistics()
         .then(|| {
-            let scaled = residual_norm(&transformed_rhs, rows, cols)?;
-            let restored = scaled * rhs_scale;
-            if restored.is_finite() {
-                Ok(restored)
-            } else {
-                Err(PolyfitKernelError::input(
-                    "polyfit: requested residual norm exceeds finite output range",
-                ))
-            }
+            let residual_start = cols.min(rows);
+            rhs_scale.residual_norm(&transformed_rhs[residual_start..rows])
         })
         .transpose()?;
     let df = if rows > cols {
@@ -355,15 +343,6 @@ pub(super) fn solve_upper(
         coeffs[col] = coefficient;
     }
     Ok(coeffs)
-}
-
-fn residual_norm(rhs: &[Complex64], rows: usize, cols: usize) -> PolyfitKernelResult<f64> {
-    let tail_start = rows.min(cols);
-    let norm = stable_l2(rhs.iter().skip(tail_start).map(|value| value.norm()));
-    if !norm.is_finite() {
-        return Err(finite_solver_range_error());
-    }
-    Ok(norm)
 }
 
 fn extract_upper(matrix: &[f64], geometry: &SolverGeometry) -> Vec<f64> {

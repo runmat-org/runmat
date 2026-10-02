@@ -1,7 +1,8 @@
 //! Column equilibration for the polynomial least-squares QR basis.
 
 use super::{
-    solver::finite_solver_range_error, Complex64, PolyfitKernelError, PolyfitKernelResult,
+    response_scale::ResponseScale, solver::finite_solver_range_error, Complex64,
+    PolyfitKernelError, PolyfitKernelResult,
 };
 
 /// Factor each original weighted Vandermonde column into a finite scale and
@@ -31,15 +32,15 @@ pub(super) fn equilibrate(
 pub(super) fn restore_coefficients(
     scaled: Vec<Complex64>,
     scales: &[f64],
-    rhs_scale: f64,
+    rhs_scale: ResponseScale,
 ) -> PolyfitKernelResult<Vec<Complex64>> {
     scaled
         .into_iter()
         .zip(scales)
         .map(|(value, &scale)| {
             let restored = Complex64::new(
-                restore_component(value.re, scale, rhs_scale),
-                restore_component(value.im, scale, rhs_scale),
+                restore_component(value.re, scale, rhs_scale.real),
+                restore_component(value.im, scale, rhs_scale.imaginary),
             );
             if restored.re.is_finite() && restored.im.is_finite() {
                 Ok(restored)

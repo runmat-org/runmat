@@ -52,6 +52,8 @@ mod geometry;
 use geometry::SolverGeometry;
 #[path = "polyfit/column_scale.rs"]
 mod column_scale;
+#[path = "polyfit/response_scale.rs"]
+mod response_scale;
 #[path = "polyfit/solver.rs"]
 mod solver;
 #[path = "polyfit/provider_output.rs"]
