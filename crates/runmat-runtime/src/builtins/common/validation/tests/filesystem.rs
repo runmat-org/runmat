@@ -2,16 +2,29 @@ use super::*;
 use futures::executor::block_on;
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn path_guards_use_configured_vfs_and_preserve_false_on_metadata_error() {
+    let root = tempfile::tempdir().unwrap();
+    let provider = runmat_filesystem::SandboxFsProvider::new(root.path().to_owned()).unwrap();
+    assert_configured_path_guards(std::sync::Arc::new(provider));
+}
+
+#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn path_guards_use_portable_memory_vfs_and_preserve_false_on_metadata_error() {
+    assert_configured_path_guards(std::sync::Arc::new(
+        runmat_filesystem::MemoryFsProvider::new(),
+    ));
+}
+
+fn assert_configured_path_guards(provider: std::sync::Arc<dyn runmat_filesystem::FsProvider>) {
     let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
         .lock()
         .unwrap();
-    let root = tempfile::tempdir().unwrap();
-    let provider = runmat_filesystem::SandboxFsProvider::new(root.path().to_owned()).unwrap();
-    let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(provider));
-    block_on(runmat_filesystem::create_dir_all_async("validator-domain")).unwrap();
+    let _provider = runmat_filesystem::replace_provider(provider);
+    block_on(runmat_filesystem::create_dir_all_async("/validator-domain")).unwrap();
     block_on(runmat_filesystem::write_async(
-        "validator-domain/data.txt",
+        "/validator-domain/data.txt",
         b"test",
     ))
     .unwrap();
