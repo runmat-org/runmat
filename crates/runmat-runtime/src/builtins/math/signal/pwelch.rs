@@ -197,7 +197,8 @@ async fn pwelch_builtin(
     evaluate_in_runtime(runtime.as_ref(), x, &rest).await
 }
 
-pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
+#[cfg(test)]
+async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     evaluate_in_runtime(None, x, rest).await
 }
 
