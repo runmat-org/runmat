@@ -595,7 +595,7 @@ async fn conv2_matrices(
     }
     cooperation.completed(work).await?;
 
-    let result = match mode {
+    match mode {
         Conv2Mode::Full => Ok(full),
         Conv2Mode::Same => {
             if a.is_empty() {
@@ -612,8 +612,7 @@ async fn conv2_matrices(
             let col_start = b.cols - 1;
             full.slice(row_start, row_start + rows, col_start, col_start + cols)
         }
-    };
-    result
+    }
 }
 
 fn empty_result(a: &Matrix, _b: &Matrix, mode: Conv2Mode) -> BuiltinResult<Matrix> {
