@@ -11,12 +11,14 @@ use super::contracts::identities::{
     PLAN_NAME, RESULTS_NAME, RUN_NAME, RUN_OPTIONS_NAME, STUDY_NAME,
 };
 use super::contracts::integer::FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES;
+#[cfg(feature = "plot-core")]
+use super::entrypoints::fea_plot_builtin;
 use super::entrypoints::{
     fea_boundary_condition_builtin, fea_domain_builtin, fea_field_builtin, fea_interface_builtin,
     fea_load_builtin, fea_load_case_builtin, fea_material_assignment_builtin, fea_material_builtin,
-    fea_model_builtin, fea_plan_builtin, fea_plot_builtin, fea_results_builtin,
-    fea_run_options_builtin, fea_step_builtin, fea_study_builtin, fea_sweep_builtin,
-    fea_trends_builtin, fea_validate_builtin,
+    fea_model_builtin, fea_plan_builtin, fea_results_builtin, fea_run_options_builtin,
+    fea_step_builtin, fea_study_builtin, fea_sweep_builtin, fea_trends_builtin,
+    fea_validate_builtin,
 };
 use super::geometry::geometry_asset_from_value;
 use super::integer_serialization::{
