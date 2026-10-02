@@ -40,6 +40,7 @@ impl BuiltinPreparationObservation for Observer {
 struct Service {
     events: Events,
     pause: bool,
+    replacement: Option<Value>,
 }
 impl RuntimeAccelerationService for Service {
     fn supports_operation(&self, operation: &str) -> bool {
@@ -57,10 +58,12 @@ impl RuntimeAccelerationService for Service {
         );
         assert_eq!(request.form().data_arguments, &[0]);
         self.events.borrow_mut().push("prepare");
-        let prepared = PreparedBuiltinOperands::new(
-            request.into_operands(),
-            Some(Box::new(Observer(self.events.clone()))),
-        );
+        let mut operands = request.into_operands();
+        if let Some(replacement) = &self.replacement {
+            operands[0] = replacement.clone();
+        }
+        let prepared =
+            PreparedBuiltinOperands::new(operands, Some(Box::new(Observer(self.events.clone()))));
         let pause = self.pause;
         Box::pin(async move {
             if pause {
@@ -72,15 +75,75 @@ impl RuntimeAccelerationService for Service {
 }
 
 fn enter(events: &Events, pause: bool) -> RuntimeContextGuard {
+    enter_with_replacement(events, pause, None)
+}
+
+fn enter_with_replacement(
+    events: &Events,
+    pause: bool,
+    replacement: Option<Value>,
+) -> RuntimeContextGuard {
     RuntimeContextGuard::enter(
         RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
             .with_service_ports(RuntimeServicePorts::default().with_acceleration(Rc::new(
                 Service {
                     events: events.clone(),
                     pause,
+                    replacement,
                 },
             ))),
     )
+}
+
+#[test]
+fn prepared_host_operand_is_consumed_once_but_result_restores_to_original_resident_owner() {
+    use crate::builtins::common::{gpu_helpers, test_support};
+    use runmat_value::IntegerStorage;
+    test_support::with_test_provider(|provider| {
+        let source_rgb =
+            Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]).unwrap();
+        let source = gpu_helpers::upload_tensor(provider, &source_rgb)
+            .unwrap()
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        // The fixture substitutes a different already-materialized host operand;
+        // the output witnesses that the body does not gather the original again.
+        let prepared_green = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U8(vec![0, 255, 0]), vec![1, 1, 3]).unwrap(),
+        );
+        for name in ["rgb2gray", "rgb2hsv"] {
+            let events = Events::default();
+            let _context = enter_with_replacement(&events, false, Some(prepared_green.clone()));
+            let result = block_on(dispatcher::call_builtin_async(
+                name,
+                &[Value::GpuTensor(source.clone())],
+            ))
+            .unwrap();
+            let Value::GpuTensor(output) = result else {
+                panic!("explicit result must be resident");
+            };
+            let owner = runmat_accelerate_api::provider_for_handle(&output).unwrap();
+            assert!(runmat_accelerate_api::same_provider_instance(
+                owner, provider
+            ));
+            let observed = test_support::gather(Value::GpuTensor(output))
+                .unwrap()
+                .materialize_f64();
+            if name == "rgb2gray" {
+                assert_eq!(observed, vec![150.0]);
+            } else {
+                assert!((observed[0] - 1.0 / 3.0).abs() < 1e-12);
+                assert_eq!(&observed[1..], &[1.0, 1.0]);
+            }
+            assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+        }
+        assert_eq!(
+            test_support::gather(Value::GpuTensor(source))
+                .unwrap()
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![255, 0, 0]))
+        );
+    });
 }
 
 fn valid(name: &str) -> Value {
