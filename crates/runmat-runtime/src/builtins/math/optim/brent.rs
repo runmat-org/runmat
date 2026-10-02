@@ -86,8 +86,8 @@ pub(crate) enum BrentZeroStepKind {
 
 /// Find a zero of a scalar function on a sign-changing bracket using Brent's method.
 ///
-/// `bracket` must satisfy `fa * fb < 0` unless either endpoint is already zero
-/// the function returns an error).  The function evaluation counter
+/// `bracket` must have opposite-sign endpoint values unless an endpoint is
+/// already zero (in which case that endpoint is returned). The evaluation counter
 /// tracks calls performed by the caller while constructing the bracket.
 pub(crate) async fn brent_zero(
     name: &str,
@@ -115,7 +115,7 @@ pub(crate) async fn brent_zero(
             converged: true,
         });
     }
-    if bracket.fa * bracket.fb >= 0.0 {
+    if bracket.fa.signum() == bracket.fb.signum() {
         return Err(optim_error(
             name,
             format!("{name}: invalid bracket; endpoint function values must have opposite signs"),
@@ -428,6 +428,33 @@ pub(crate) fn brent_min_tolerance(x: f64, params: BrentParams) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiny_opposite_sign_values_remain_a_valid_bracket() {
+        let positive = f64::MIN_POSITIVE;
+        let negative = -positive;
+        assert_eq!(positive * negative, -0.0);
+        assert_ne!(positive.signum(), negative.signum());
+        let result = futures::executor::block_on(brent_zero(
+            "fzero",
+            &Value::FunctionHandle("sin".into()),
+            BrentZeroBracket {
+                a: -1.0,
+                b: 1.0,
+                fa: negative,
+                fb: positive,
+                evals: 2,
+            },
+            BrentParams {
+                tol_x: 1.0e-6,
+                max_iter: 8,
+                max_fun_evals: 8,
+            },
+            false,
+            None,
+        ));
+        assert!(result.is_ok(), "tiny signed values form a valid bracket");
+    }
 
     #[test]
     fn interpolation_acceptance_uses_signed_q() {
