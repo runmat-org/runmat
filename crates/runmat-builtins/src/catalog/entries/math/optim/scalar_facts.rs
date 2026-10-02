@@ -1,4 +1,4 @@
-//! Static facts shared by the two callback-driven scalar Brent solvers.
+//! Static callback and scalar facts shared by optimization and quadrature.
 
 use crate::catalog::inference::argument_error;
 use runmat_types::{
@@ -49,17 +49,87 @@ pub(super) fn callback_invocation(
     request: &CallRequest,
     argument: ValueFact,
 ) -> Option<CallInference> {
+    callback_invocation_with_arguments(request, vec![argument])
+}
+
+pub(super) fn callback_invocation_with_arguments(
+    request: &CallRequest,
+    arguments: Vec<ValueFact>,
+) -> Option<CallInference> {
     let ValueKindFact::Callable(callable) = &request.arguments.first()?.kind else {
         return None;
     };
     Some(crate::infer_callable_call(
         callable,
         &CallRequest {
-            arguments: vec![argument],
+            arguments,
             literals: LiteralContext::default(),
             outputs: OutputSelection::new(RequestedOutputCount::One),
         },
     ))
+}
+
+pub(super) fn real_scalar_callback_result(
+    callback: &CallInference,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+    code: &'static str,
+) {
+    let Some(result) = callback.outputs.first() else {
+        return;
+    };
+    let class_ok = matches!(
+        result.kind,
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        }) | ValueKindFact::Logical
+            | ValueKindFact::Unknown
+    );
+    let scalar = !result.shape.element_count().is_some_and(|count| count != 1);
+    if !class_ok || !scalar || result.storage == StorageFact::Sparse {
+        diagnostics.push(argument_error(
+            code,
+            "quadrature callback must return a real numeric scalar",
+            0,
+        ));
+    }
+}
+
+pub(super) fn real_row_batch_callback_result(
+    callback: &CallInference,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+    code: &'static str,
+) {
+    let Some(result) = callback.outputs.first() else {
+        return;
+    };
+    let class_ok = matches!(
+        result.kind,
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        }) | ValueKindFact::Logical
+            | ValueKindFact::Unknown
+    );
+    // The same callback is invoked with batches of three and two points.
+    // A fixed result length cannot satisfy both calls.
+    let geometry_ok = match &result.shape {
+        ShapeFact::Scalar => false,
+        ShapeFact::Shaped { dims } => {
+            dims.len() == 2
+                && !matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1)
+                && !matches!(dims.get(1), Some(DimensionFact::Known(_)))
+        }
+        ShapeFact::Ranked { rank } => *rank == 2,
+        ShapeFact::Unknown => true,
+    };
+    if !class_ok || !geometry_ok || result.storage == StorageFact::Sparse {
+        diagnostics.push(argument_error(
+            code,
+            "vectorized quadrature callback must return one real value per row-vector sample",
+            0,
+        ));
+    }
 }
 
 pub(super) fn real_numeric(

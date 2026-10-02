@@ -1,0 +1,279 @@
+//! Componentwise estimate algebra for one adaptive quadrature traversal.
+
+use std::collections::TryReserveError;
+use std::sync::Arc;
+
+use super::adaptive::QuadratureEvaluator;
+use super::geometry::{simpson, ScaledEstimate};
+use crate::RuntimeError;
+
+const COMPONENT_CHUNK: usize = 4096;
+
+#[derive(Debug)]
+pub(crate) enum QuadratureArithmeticError {
+    Resource(TryReserveError),
+    InconsistentComponents,
+    Execution(RuntimeError),
+}
+
+pub(crate) trait AdaptiveEstimate: Clone {
+    async fn add<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError>;
+    async fn subtract<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError>;
+    async fn multiply_f64<E: QuadratureEvaluator>(
+        &self,
+        factor: f64,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError>;
+    async fn tolerance<E: QuadratureEvaluator>(
+        &self,
+        absolute: f64,
+        relative: f64,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError>;
+    async fn abs_le<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        evaluator: &mut E,
+    ) -> Result<bool, QuadratureArithmeticError>;
+}
+
+pub(crate) trait QuadratureSample: Clone {
+    type Estimate: AdaptiveEstimate;
+
+    async fn simpson<E: QuadratureEvaluator<Sample = Self>>(
+        a: f64,
+        b: f64,
+        fa: &Self,
+        fm: &Self,
+        fb: &Self,
+        evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError>;
+}
+
+impl AdaptiveEstimate for ScaledEstimate {
+    async fn add<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        _evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        Ok((*self).add(*other))
+    }
+
+    async fn subtract<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        _evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        Ok((*self).subtract(*other))
+    }
+
+    async fn multiply_f64<E: QuadratureEvaluator>(
+        &self,
+        factor: f64,
+        _evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        Ok((*self).multiply_f64(factor))
+    }
+
+    async fn tolerance<E: QuadratureEvaluator>(
+        &self,
+        absolute: f64,
+        relative: f64,
+        _evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        Ok(ScaledEstimate::from_f64(absolute).max(self.abs().multiply_f64(relative)))
+    }
+
+    async fn abs_le<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        _evaluator: &mut E,
+    ) -> Result<bool, QuadratureArithmeticError> {
+        Ok((*self).abs_le(*other))
+    }
+}
+
+impl QuadratureSample for f64 {
+    type Estimate = ScaledEstimate;
+
+    async fn simpson<E: QuadratureEvaluator<Sample = Self>>(
+        a: f64,
+        b: f64,
+        fa: &Self,
+        fm: &Self,
+        fb: &Self,
+        _evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError> {
+        Ok(simpson(a, b, *fa, *fm, *fb))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ArrayEstimate(pub(crate) Arc<Vec<ScaledEstimate>>);
+
+impl ArrayEstimate {
+    async fn zip_map<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        evaluator: &mut E,
+        map: impl Fn(ScaledEstimate, ScaledEstimate) -> ScaledEstimate,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        if self.0.len() != other.0.len() {
+            return Err(QuadratureArithmeticError::InconsistentComponents);
+        }
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(self.0.len())
+            .map_err(QuadratureArithmeticError::Resource)?;
+        for (index, (&left, &right)) in self.0.iter().zip(other.0.iter()).enumerate() {
+            values.push(map(left, right));
+            if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
+                evaluator
+                    .charge(COMPONENT_CHUNK as u64)
+                    .await
+                    .map_err(QuadratureArithmeticError::Execution)?;
+            }
+        }
+        evaluator
+            .charge((self.0.len() % COMPONENT_CHUNK) as u64)
+            .await
+            .map_err(QuadratureArithmeticError::Execution)?;
+        Ok(Self(Arc::new(values)))
+    }
+
+    async fn map<E: QuadratureEvaluator>(
+        &self,
+        evaluator: &mut E,
+        map: impl Fn(ScaledEstimate) -> ScaledEstimate,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(self.0.len())
+            .map_err(QuadratureArithmeticError::Resource)?;
+        for (index, &value) in self.0.iter().enumerate() {
+            values.push(map(value));
+            if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
+                evaluator
+                    .charge(COMPONENT_CHUNK as u64)
+                    .await
+                    .map_err(QuadratureArithmeticError::Execution)?;
+            }
+        }
+        evaluator
+            .charge((self.0.len() % COMPONENT_CHUNK) as u64)
+            .await
+            .map_err(QuadratureArithmeticError::Execution)?;
+        Ok(Self(Arc::new(values)))
+    }
+}
+
+impl AdaptiveEstimate for ArrayEstimate {
+    async fn add<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        self.zip_map(other, evaluator, ScaledEstimate::add).await
+    }
+
+    async fn subtract<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        self.zip_map(other, evaluator, ScaledEstimate::subtract)
+            .await
+    }
+
+    async fn multiply_f64<E: QuadratureEvaluator>(
+        &self,
+        factor: f64,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        self.map(evaluator, |value| value.multiply_f64(factor))
+            .await
+    }
+
+    async fn tolerance<E: QuadratureEvaluator>(
+        &self,
+        absolute: f64,
+        relative: f64,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        self.map(evaluator, |value| {
+            ScaledEstimate::from_f64(absolute).max(value.abs().multiply_f64(relative))
+        })
+        .await
+    }
+
+    async fn abs_le<E: QuadratureEvaluator>(
+        &self,
+        other: &Self,
+        evaluator: &mut E,
+    ) -> Result<bool, QuadratureArithmeticError> {
+        if self.0.len() != other.0.len() {
+            return Err(QuadratureArithmeticError::InconsistentComponents);
+        }
+        for (index, (left, right)) in self.0.iter().zip(other.0.iter()).enumerate() {
+            if !(*left).abs_le(*right) {
+                return Ok(false);
+            }
+            if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
+                evaluator
+                    .charge(COMPONENT_CHUNK as u64)
+                    .await
+                    .map_err(QuadratureArithmeticError::Execution)?;
+            }
+        }
+        evaluator
+            .charge((self.0.len() % COMPONENT_CHUNK) as u64)
+            .await
+            .map_err(QuadratureArithmeticError::Execution)?;
+        Ok(true)
+    }
+}
+
+impl QuadratureSample for Arc<Vec<f64>> {
+    type Estimate = ArrayEstimate;
+
+    async fn simpson<E: QuadratureEvaluator<Sample = Self>>(
+        a: f64,
+        b: f64,
+        fa: &Self,
+        fm: &Self,
+        fb: &Self,
+        evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError> {
+        if fa.len() != fm.len() || fa.len() != fb.len() {
+            return Err(QuadratureArithmeticError::InconsistentComponents);
+        }
+        let mut components = Vec::new();
+        components
+            .try_reserve_exact(fa.len())
+            .map_err(QuadratureArithmeticError::Resource)?;
+        for (index, ((&left, &middle), &right)) in
+            fa.iter().zip(fm.iter()).zip(fb.iter()).enumerate()
+        {
+            components.push(simpson(a, b, left, middle, right));
+            if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
+                evaluator
+                    .charge(COMPONENT_CHUNK as u64)
+                    .await
+                    .map_err(QuadratureArithmeticError::Execution)?;
+            }
+        }
+        evaluator
+            .charge((fa.len() % COMPONENT_CHUNK) as u64)
+            .await
+            .map_err(QuadratureArithmeticError::Execution)?;
+        Ok(ArrayEstimate(Arc::new(components)))
+    }
+}

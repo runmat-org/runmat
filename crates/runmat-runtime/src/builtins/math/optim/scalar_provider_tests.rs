@@ -228,6 +228,34 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
     assert_eq!(wide_upper.identifier(), Some("RunMat:fminbnd:InvalidInput"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
+    let quad_bad_tolerance = block_on(super::quad::quad_builtin(
+        function(),
+        resident(),
+        Value::Num(1.0),
+        vec![Value::Num(-1.0)],
+    ))
+    .unwrap_err();
+    assert_eq!(
+        quad_bad_tolerance.identifier(),
+        Some("RunMat:quad:InvalidArgument")
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(real.probe.retirements(), 0);
+
+    let quad_bad_later_bound = block_on(super::quad::quad_builtin(
+        function(),
+        Value::GpuTensor(unavailable_upper.handle.clone()),
+        Value::Complex(1.0, 1.0),
+        Vec::new(),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        quad_bad_later_bound.identifier(),
+        Some("RunMat:quad:InvalidInput")
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(unavailable_upper.probe.retirements(), 0);
+
     let bad_initial = block_on(super::fzero::fzero_builtin(
         function(),
         Value::GpuTensor(complex.handle.clone()),

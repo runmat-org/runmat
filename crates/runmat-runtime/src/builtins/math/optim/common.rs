@@ -18,9 +18,12 @@ fn canonicalize_callback_handle(handle: &Value) -> Value {
     crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone())
 }
 
-pub(crate) async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn call_function(
+    handle: &Value,
+    args: impl AsRef<[Value]>,
+) -> BuiltinResult<Value> {
     let callback = canonicalize_callback_handle(handle);
-    crate::call_feval_async_with_outputs(callback, &args, 1).await
+    crate::call_feval_async_with_outputs(callback, args.as_ref(), 1).await
 }
 
 pub(crate) async fn call_scalar_function(
