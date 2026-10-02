@@ -1,10 +1,10 @@
 //! One numerical coefficient source for each provider IIR invocation.
-use anyhow::{ensure, Result};
 use serde::Serialize;
 
 use crate::{
-    handle_integer_type, handle_is_logical, handle_precision, handle_storage, provider_for_handle,
-    same_provider_instance, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
+    provider_for_handle, same_provider_instance, upload_numeric_protecting, AccelProvider,
+    GpuTensorHandle, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
+    InvalidNumericUploadResult, NumericUploadError, NumericUploadResult, ProviderPrecision,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -50,30 +50,96 @@ impl ProviderPreparedIirCoefficients {
         provider: &'static dyn AccelProvider,
         numerator: &[f64],
         denominator: &[f64],
-    ) -> Result<Self> {
-        ensure!(
-            !numerator.is_empty() && numerator.len() == denominator.len(),
-            "iir_filter: prepared coefficient lengths are incompatible"
-        );
-        ensure!(
-            denominator.first() == Some(&1.0),
-            "iir_filter: prepared leading denominator must equal one"
-        );
+        precision: ProviderPrecision,
+        protected: &[&GpuTensorHandle],
+    ) -> NumericUploadResult<Self> {
+        if numerator.is_empty() || numerator.len() != denominator.len() {
+            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+                "iir_filter: prepared coefficient lengths are incompatible"
+            )));
+        }
+        if denominator.first() != Some(&1.0) {
+            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+                "iir_filter: prepared leading denominator must equal one"
+            )));
+        }
+        if numerator
+            .iter()
+            .chain(denominator)
+            .any(|value| !value.is_finite())
+        {
+            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+                "iir_filter: prepared coefficients must be finite"
+            )));
+        }
+        if provider.precision() != precision {
+            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+                "iir_filter: admitted precision is unavailable on provider"
+            )));
+        }
+        for handle in protected {
+            handle
+                .allocation_lease()
+                .validate_live()
+                .map_err(|source| NumericUploadError::Provider(anyhow::Error::new(source)))?;
+        }
         let shape = [numerator.len(), 1];
-        let numerator_handle = provider.upload(&HostTensorView {
-            data: numerator,
-            shape: &shape,
-        })?;
-        validate_prepared_handle(provider, &numerator_handle, &shape)?;
-        let denominator_handle = provider.upload(&HostTensorView {
-            data: denominator,
-            shape: &shape,
-        })?;
-        validate_prepared_handle(provider, &denominator_handle, &shape)?;
-        ensure!(
-            !numerator_handle.shares_allocation_with(&denominator_handle),
-            "iir_filter: prepared coefficient allocations must be distinct"
-        );
+        let (numerator_single, denominator_single) = match precision {
+            ProviderPrecision::F32 => {
+                let narrow = |values: &[f64]| -> NumericUploadResult<Vec<f32>> {
+                    let mut result = Vec::new();
+                    result.try_reserve_exact(values.len()).map_err(|source| {
+                        NumericUploadError::Provider(anyhow::Error::new(source))
+                    })?;
+                    for &value in values {
+                        let converted = value as f32;
+                        if !converted.is_finite() {
+                            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+                                "iir_filter: prepared coefficient exceeds single precision range"
+                            )));
+                        }
+                        result.push(converted);
+                    }
+                    Ok(result)
+                };
+                (Some(narrow(numerator)?), Some(narrow(denominator)?))
+            }
+            ProviderPrecision::F64 => (None, None),
+        };
+        let numerator_data = match &numerator_single {
+            Some(values) => HostNumericDataView::F32(values),
+            None => HostNumericDataView::F64(numerator),
+        };
+        let denominator_data = match &denominator_single {
+            Some(values) => HostNumericDataView::F32(values),
+            None => HostNumericDataView::F64(denominator),
+        };
+        let mut denominator_protected = Vec::new();
+        denominator_protected
+            .try_reserve_exact(protected.len().saturating_add(1))
+            .map_err(|source| NumericUploadError::Provider(anyhow::Error::new(source)))?;
+        denominator_protected.extend_from_slice(protected);
+        let numerator_handle = upload_numeric_protecting(
+            provider,
+            &HostNumericTensorView {
+                data: numerator_data,
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            },
+            protected,
+        )?;
+        let numerator_handle = require_exact_owner(provider, numerator_handle)?;
+        denominator_protected.push(&numerator_handle);
+        let denominator_handle = upload_numeric_protecting(
+            provider,
+            &HostNumericTensorView {
+                data: denominator_data,
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            },
+            &denominator_protected,
+        )?;
+        let denominator_handle = require_exact_owner(provider, denominator_handle)?;
         Ok(Self {
             numerator: numerator_handle,
             denominator: denominator_handle,
@@ -89,28 +155,117 @@ impl ProviderPreparedIirCoefficients {
     }
 }
 
-fn validate_prepared_handle(
+fn require_exact_owner(
     provider: &'static dyn AccelProvider,
-    handle: &GpuTensorHandle,
-    shape: &[usize],
-) -> Result<()> {
-    handle.allocation_lease().validate_live()?;
-    ensure!(
-        handle.shape() == shape,
-        "iir_filter: invalid prepared coefficient shape"
-    );
-    ensure!(
-        handle.device_id() == provider.device_id()
-            && provider_for_handle(handle)
-                .is_some_and(|owner| same_provider_instance(owner, provider)),
-        "iir_filter: prepared coefficient owner mismatch"
-    );
-    ensure!(
-        handle_storage(handle) == GpuTensorStorage::Real
-            && !handle_is_logical(handle)
-            && handle_integer_type(handle).is_none()
-            && handle_precision(handle) == Some(provider.precision()),
-        "iir_filter: prepared coefficient class mismatch"
-    );
-    Ok(())
+    handle: GpuTensorHandle,
+) -> NumericUploadResult<GpuTensorHandle> {
+    if provider_for_handle(&handle).is_some_and(|owner| same_provider_instance(owner, provider)) {
+        Ok(handle)
+    } else {
+        Err(InvalidNumericUploadResult::reject(
+            handle,
+            "iir_filter: prepared coefficient allocation owner mismatch".into(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AccelDownloadFuture, HostTensorView, NumericElementType};
+    use std::sync::{atomic::Ordering, Mutex};
+
+    struct UploadProvider {
+        queued: Mutex<Vec<GpuTensorHandle>>,
+        observed_single: Mutex<Vec<Vec<f32>>>,
+        precision: ProviderPrecision,
+    }
+
+    impl AccelProvider for UploadProvider {
+        fn device_id(&self) -> u32 {
+            17
+        }
+        fn device_info(&self) -> String {
+            "prepared-iir-upload-test".into()
+        }
+        fn precision(&self) -> ProviderPrecision {
+            self.precision
+        }
+        fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("legacy upload must not run")
+        }
+        fn upload_numeric_raw(
+            &self,
+            host: &HostNumericTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            if let HostNumericDataView::F32(data) = host.data {
+                self.observed_single.lock().unwrap().push(data.to_vec());
+            }
+            self.queued
+                .lock()
+                .unwrap()
+                .pop()
+                .ok_or_else(|| anyhow::anyhow!("missing queued handle"))
+        }
+        fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { anyhow::bail!("unused download") })
+        }
+    }
+
+    #[test]
+    fn prepared_upload_rejects_borrowed_coefficient_alias_without_retiring_caller() {
+        let (borrowed, owner) = crate::test_support::owned(
+            17,
+            vec![2, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+            false,
+        );
+        let provider: &'static UploadProvider = Box::leak(Box::new(UploadProvider {
+            queued: Mutex::new(vec![borrowed.clone()]),
+            observed_single: Mutex::new(Vec::new()),
+            precision: ProviderPrecision::F64,
+        }));
+        let error = ProviderPreparedIirCoefficients::upload(
+            provider,
+            &[0.5, 0.5],
+            &[1.0, 0.0],
+            ProviderPrecision::F64,
+            &[&borrowed],
+        )
+        .expect_err("borrowed coefficient may not be reused for prepared upload");
+        assert!(crate::is_invalid_numeric_upload_result(&error));
+        assert_eq!(owner.retired.load(Ordering::SeqCst), 0);
+        drop(borrowed);
+        assert_eq!(owner.retired.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn prepared_single_upload_requests_native_single_payload() {
+        let (numerator, _) = crate::test_support::owned(
+            17,
+            vec![2, 1],
+            NumericElementType::F32,
+            GpuTensorStorage::Real,
+            false,
+        );
+        let provider: &'static UploadProvider = Box::leak(Box::new(UploadProvider {
+            queued: Mutex::new(vec![numerator]),
+            observed_single: Mutex::new(Vec::new()),
+            precision: ProviderPrecision::F32,
+        }));
+        let error = ProviderPreparedIirCoefficients::upload(
+            provider,
+            &[0.5, 0.5],
+            &[1.0, 0.0],
+            ProviderPrecision::F32,
+            &[],
+        )
+        .expect_err("the synthetic owner is not the invoking provider");
+        assert!(crate::is_invalid_numeric_upload_result(&error));
+        assert_eq!(
+            *provider.observed_single.lock().unwrap(),
+            vec![vec![0.5, 0.5]]
+        );
+    }
 }

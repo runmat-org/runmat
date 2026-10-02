@@ -585,11 +585,15 @@ async fn try_filtfilt_gpu(
     let provider = resident_output::owner(input_handle, || {
         filtfilt_error_with_detail(&FILTFILT_ERROR_INVALID_SIGNAL, "invalid resident signal")
     })?;
+    let Some(input_precision) = runmat_accelerate_api::handle_precision(input_handle) else {
+        return Ok(None);
+    };
     if matches!(output_dtype, NumericDType::F32)
         != matches!(
             provider.precision(),
             runmat_accelerate_api::ProviderPrecision::F32
         )
+        || input_precision != provider.precision()
     {
         return Ok(None);
     }
@@ -610,18 +614,74 @@ async fn try_filtfilt_gpu(
     let extended = odd_reflect(&input.data, nfact)?;
     let b_real = coeffs.b.iter().map(|z| z.re).collect::<Vec<_>>();
     let a_real = coeffs.a.iter().map(|z| z.re).collect::<Vec<_>>();
-    let prepared =
-        ProviderPreparedIirCoefficients::upload(provider, &b_real, &a_real).map_err(|source| {
-            let mut error = filtfilt_error_with_detail(
-                &FILTFILT_ERROR_PASS_FAILED,
-                "coefficient preparation failed",
-            );
-            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            crate::runtime_error::with_provider_execution_source(error, source.into())
-        })?;
+    let coefficient_len =
+        u64::try_from(b_real.len()).map_err(|_| filtfilt_error(&FILTFILT_ERROR_INTERNAL))?;
+    let extended_len =
+        u64::try_from(extended.len()).map_err(|_| filtfilt_error(&FILTFILT_ERROR_INTERNAL))?;
+    let extended_shape = if vector_is_row(&input.shape) {
+        vec![1, extended_len]
+    } else {
+        vec![extended_len, 1]
+    };
+    let state_len =
+        u64::try_from(coeffs.state_len).map_err(|_| filtfilt_error(&FILTFILT_ERROR_INTERNAL))?;
+    let state_shape = if vector_is_row(&input.shape) {
+        vec![1, state_len]
+    } else {
+        vec![state_len, 1]
+    };
+    let element_type = runmat_accelerate_api::ProviderElementType::from(provider.precision());
+    let representation = |shape| runmat_accelerate_api::ProviderRepresentation {
+        element_type,
+        storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+        layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+        shape,
+        residency: runmat_accelerate_api::ProviderResidency::Device,
+    };
+    let coefficients_shape = vec![coefficient_len, 1];
+    let query = runmat_accelerate_api::ProviderFeasibilityQuery {
+        operation: runmat_accelerate_api::ProviderOperationIdentity::new(
+            runmat_accelerate_api::PROVIDER_IIR_PREPARED_PASS_OPERATION,
+        ),
+        family: runmat_accelerate_api::ProviderOperationFamily::Library,
+        inputs: vec![
+            representation(coefficients_shape.clone()),
+            representation(coefficients_shape),
+            representation(extended_shape.clone()),
+            representation(state_shape.clone()),
+        ],
+        outputs: vec![representation(extended_shape), representation(state_shape)],
+        workload: runmat_accelerate_api::ProviderWorkload {
+            iir: Some(runmat_accelerate_api::ProviderIirWorkload {
+                route: runmat_accelerate_api::ProviderIirRoute::PreparedPass,
+                dim: u32::from(vector_is_row(&input.shape)),
+                state_len,
+            }),
+            ..Default::default()
+        },
+    };
+    if !provider.query_feasibility(&query).is_supported() {
+        return Ok(None);
+    }
     let pass_borrowed = std::iter::once(input_handle)
         .chain(borrowed.iter().copied())
         .collect::<Vec<_>>();
+    let prepared = ProviderPreparedIirCoefficients::upload(
+        provider,
+        &b_real,
+        &a_real,
+        input_precision,
+        &pass_borrowed,
+    )
+    .map_err(|source| {
+        let mut error = filtfilt_error_with_detail(
+            &FILTFILT_ERROR_PASS_FAILED,
+            "coefficient preparation failed",
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error.source = Some(Box::new(source));
+        error
+    })?;
     let first_pass = gpu_filter_pass(
         provider,
         &prepared,
@@ -710,7 +770,11 @@ async fn gpu_filter_pass(
         .into_iter()
         .map(|z| z.re)
         .collect::<Vec<_>>();
-    let zi_shape = vec![coeffs.state_len, 1];
+    let zi_shape = if is_row {
+        vec![1, coeffs.state_len]
+    } else {
+        vec![coeffs.state_len, 1]
+    };
     let zi_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &scaled_zi,
@@ -1162,8 +1226,14 @@ mod tests {
             .map(|value| Complex::new(value as f64, 0.0))
             .collect::<Vec<_>>();
         let zi = vec![Complex::new(0.0, 0.0)];
-        let prepared = ProviderPreparedIirCoefficients::upload(provider, &[0.5, 0.5], &[1.0, 0.0])
-            .expect("prepared coefficients");
+        let prepared = ProviderPreparedIirCoefficients::upload(
+            provider,
+            &[0.5, 0.5],
+            &[1.0, 0.0],
+            provider.precision(),
+            &[],
+        )
+        .expect("prepared coefficients");
         let result = block_on(gpu_filter_pass(
             provider,
             &prepared,
@@ -1183,6 +1253,87 @@ mod tests {
         inner: runmat_accelerate::simple_provider::InProcessProvider,
         calls: std::sync::atomic::AtomicUsize,
         downloads: std::sync::atomic::AtomicUsize,
+    }
+
+    struct NoIirProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        uploads: std::sync::atomic::AtomicUsize,
+    }
+
+    impl AccelProvider for NoIirProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            self.uploads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.upload(host)
+        }
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+            self.inner.download_numeric(handle)
+        }
+        fn device_info(&self) -> String {
+            "filtfilt-no-iir".into()
+        }
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+    }
+
+    #[test]
+    fn absent_iir_hook_falls_back_before_coefficient_uploads() {
+        let _lock = test_support::accel_test_lock();
+        let provider: &'static NoIirProvider = Box::leak(Box::new(NoIirProvider {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            uploads: std::sync::atomic::AtomicUsize::new(0),
+        }));
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let x = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                shape: &[1, 8],
+            })
+            .expect("resident signal");
+        let b = Tensor::new(vec![0.5, 0.5], vec![1, 2]).unwrap();
+        let result = call(Value::Tensor(b), Value::Num(1.0), Value::GpuTensor(x))
+            .expect("host fallback before unsupported provider effects");
+        assert_eq!(
+            provider.uploads.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        let (values, shape) = tensor_data(result);
+        assert_eq!(shape, vec![1, 8]);
+        approx(&values[3..7], &[4.0, 5.0, 6.0, 7.0], 1e-9);
+    }
+
+    #[test]
+    fn resident_row_filter_uses_axis_aligned_multistate_geometry() {
+        let b = Tensor::new(vec![0.25, 0.5, 0.25], vec![1, 3]).unwrap();
+        let values = (1..=12).map(f64::from).collect::<Vec<_>>();
+        let host = call(
+            Value::Tensor(b.clone()),
+            Value::Num(1.0),
+            Value::Tensor(Tensor::new(values.clone(), vec![1, 12]).unwrap()),
+        )
+        .expect("host reference");
+        let (expected, expected_shape) = tensor_data(host);
+        test_support::with_test_provider(|provider| {
+            let signal = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &[1, 12],
+                })
+                .expect("resident signal");
+            let result = call(Value::Tensor(b), Value::Num(1.0), Value::GpuTensor(signal))
+                .expect("resident row signal with two filter states");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("resident result");
+            assert_eq!(gathered.shape, expected_shape);
+            approx(&gathered.materialize_f64(), &expected, 1e-9);
+        });
     }
 
     impl AccelProvider for OperationalFailureProvider {
@@ -1207,6 +1358,12 @@ mod tests {
         }
         fn device_id(&self) -> u32 {
             self.inner.device_id()
+        }
+        fn query_feasibility(
+            &self,
+            query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        ) -> runmat_accelerate_api::ProviderFeasibility {
+            self.inner.query_feasibility(query)
         }
         fn iir_filter<'a>(
             &'a self,

@@ -356,6 +356,7 @@ fn select_fusion_provider_with_contract(
                 matmul: matmul.as_ref().map(|contract| contract.workload.clone()),
                 sum: None,
                 convolution: None,
+                iir: None,
                 elements: Some(element_count),
                 flops: None,
                 scalar_work_units,

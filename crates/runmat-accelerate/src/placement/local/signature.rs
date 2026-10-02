@@ -153,6 +153,7 @@ mod tests {
                     matmul: None,
                     sum: None,
                     convolution: None,
+                    iir: None,
                     elements: Some(4),
                     flops: Some(8),
                     scalar_work_units: None,

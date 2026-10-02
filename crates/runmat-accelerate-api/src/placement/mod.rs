@@ -14,6 +14,8 @@ pub use convolution::{
 mod cost;
 mod execution_inventory;
 mod feasibility;
+mod iir;
+pub use iir::{ProviderIirRoute, ProviderIirWorkload, PROVIDER_IIR_PREPARED_PASS_OPERATION};
 mod matmul;
 pub use matmul::{MatmulScaleWork, MatmulWorkload, ProviderMatmulGeometry};
 mod representation;

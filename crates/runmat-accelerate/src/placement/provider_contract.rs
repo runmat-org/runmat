@@ -12,6 +12,7 @@ use runmat_value::{NumericDType, Value};
 mod arithmetic;
 mod complex_components;
 mod convolution;
+mod iir;
 pub(crate) mod floating_conversion;
 pub(crate) mod fusion_elementwise;
 mod integer_conversion;
@@ -27,6 +28,10 @@ pub(crate) mod remainder;
 pub(crate) mod trigonometry;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
+    (
+        runmat_accelerate_api::PROVIDER_IIR_PREPARED_PASS_OPERATION,
+        ProviderOperationFamily::Library,
+    ),
     ("transfer.upload", ProviderOperationFamily::Upload),
     ("transfer.download", ProviderOperationFamily::Download),
     ("legacy.elementwise", ProviderOperationFamily::Elementwise),
@@ -60,6 +65,10 @@ const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
 
 #[cfg(feature = "wgpu")]
 const WGPU_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
+    (
+        runmat_accelerate_api::PROVIDER_IIR_PREPARED_PASS_OPERATION,
+        ProviderOperationFamily::Library,
+    ),
     ("transfer.upload", ProviderOperationFamily::Upload),
     ("transfer.download", ProviderOperationFamily::Download),
     ("legacy.elementwise", ProviderOperationFamily::Elementwise),
@@ -258,6 +267,9 @@ pub(crate) fn in_process_feasibility(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
+    if let Some(result) = iir::validate(provider, false, query) {
+        return result;
+    }
     if let Some(result) = sum::validate(provider, false, query) {
         return result;
     }
@@ -332,6 +344,9 @@ pub(crate) fn wgpu_feasibility(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
+    if let Some(result) = iir::validate(provider, true, query) {
+        return result;
+    }
     if let Some(result) = sum::validate(provider, true, query) {
         return result;
     }

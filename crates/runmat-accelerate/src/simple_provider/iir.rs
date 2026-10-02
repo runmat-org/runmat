@@ -77,8 +77,14 @@ mod tests {
     fn one_prepared_coefficient_owner_is_reused_for_two_filter_passes() {
         let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
         let _scope = ThreadProviderGuard::set(Some(provider));
-        let prepared = ProviderPreparedIirCoefficients::upload(provider, &[0.5, 0.5], &[1.0, 0.0])
-            .expect("prepare normalized FIR coefficients");
+        let prepared = ProviderPreparedIirCoefficients::upload(
+            provider,
+            &[0.5, 0.5],
+            &[1.0, 0.0],
+            provider.precision(),
+            &[],
+        )
+        .expect("prepare normalized FIR coefficients");
         let input = provider
             .upload(&HostTensorView {
                 data: &[1.0, 3.0, 5.0],

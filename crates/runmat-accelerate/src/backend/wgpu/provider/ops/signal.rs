@@ -3650,8 +3650,14 @@ mod tests {
     fn prepared_iir_coefficients_are_uploaded_once_and_reused_without_download() {
         let provider = register_wgpu_provider(WgpuProviderOptions::default())
             .expect("actual WGPU provider required");
-        let prepared = ProviderPreparedIirCoefficients::upload(provider, &[0.5, 0.5], &[1.0, 0.0])
-            .expect("prepare coefficients once");
+        let prepared = ProviderPreparedIirCoefficients::upload(
+            provider,
+            &[0.5, 0.5],
+            &[1.0, 0.0],
+            provider.precision(),
+            &[],
+        )
+        .expect("prepare coefficients once");
         let input = provider
             .upload(&HostTensorView {
                 data: &[1.0, 3.0, 5.0],
