@@ -44,6 +44,7 @@ pub(super) async fn compute_pwelch(
                     &scaling.values,
                     step,
                     density_scale,
+                    options.trace,
                     *nfft,
                     fft,
                     buffer,
@@ -58,6 +59,7 @@ pub(super) async fn compute_pwelch(
                     &scaling.values,
                     step,
                     density_scale,
+                    options.trace,
                     frequencies,
                     options.fs,
                     cooperation,
@@ -95,6 +97,7 @@ pub(super) async fn column_uniform_periodogram(
     window: &[f64],
     step: usize,
     density_scale: f64,
+    trace: WelchTrace,
     nfft: usize,
     fft: &std::sync::Arc<dyn rustfft::Fft<f64>>,
     buffer: &mut [Complex<f64>],
@@ -107,7 +110,7 @@ pub(super) async fn column_uniform_periodogram(
         .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
     accum.resize(nfft, 0.0);
     let mut work = CompletedWork::default();
-    for &start in &starts {
+    for (segment, &start) in starts.iter().enumerate() {
         cooperation.completed(0).await?;
         for chunk in buffer.chunks_mut(SIGNAL_WORK_CHUNK as usize) {
             chunk.fill(Complex::new(0.0, 0.0));
@@ -128,19 +131,13 @@ pub(super) async fn column_uniform_periodogram(
         fft.process(buffer);
         cooperation.completed(buffer.len() as u64).await?;
         for (dst, value) in accum.iter_mut().zip(buffer.iter()) {
-            *dst += value.norm_sqr() / density_scale;
+            let observed = value.norm_sqr() / density_scale;
+            *dst = combine_trace(*dst, observed, segment, trace);
             if let Some(units) = work.record(1) {
                 cooperation.completed(units).await?;
             }
         }
         work.finish(cooperation).await?;
-    }
-    let segment_count = starts.len() as f64;
-    for value in &mut accum {
-        *value /= segment_count;
-        if let Some(units) = work.record(1) {
-            cooperation.completed(units).await?;
-        }
     }
     work.finish(cooperation).await?;
     Ok(accum)
@@ -151,6 +148,7 @@ pub(super) async fn column_explicit_frequency_periodogram(
     window: &[f64],
     step: usize,
     density_scale: f64,
+    trace: WelchTrace,
     frequencies: &[f64],
     fs: Option<f64>,
     cooperation: &mut SignalCooperation,
@@ -162,7 +160,7 @@ pub(super) async fn column_explicit_frequency_periodogram(
     pxx.resize(frequencies.len(), 0.0);
     let fs_scale = fs.map(|fs| 2.0 * std::f64::consts::PI / fs);
     let mut work = CompletedWork::default();
-    for &start in &starts {
+    for (segment, &start) in starts.iter().enumerate() {
         cooperation.completed(0).await?;
         for (freq_idx, &frequency) in frequencies.iter().enumerate() {
             let omega = fs_scale.map_or(frequency, |scale| frequency * scale);
@@ -179,23 +177,36 @@ pub(super) async fn column_explicit_frequency_periodogram(
                     cooperation.completed(units).await?;
                 }
             }
-            pxx[freq_idx] += sum.norm_sqr() / density_scale;
+            pxx[freq_idx] = combine_trace(
+                pxx[freq_idx],
+                sum.norm_sqr() / density_scale,
+                segment,
+                trace,
+            );
             if let Some(units) = work.record(1) {
                 cooperation.completed(units).await?;
             }
-        }
-    }
-    let segment_count = starts.len() as f64;
-    for value in &mut pxx {
-        *value /= segment_count;
-        if let Some(units) = work.record(1) {
-            cooperation.completed(units).await?;
         }
     }
     work.finish(cooperation).await?;
     let mut f = reserved_f64(frequencies.len())?;
     f.extend_from_slice(frequencies);
     Ok(PwelchEvaluation { pxx, f, columns: 1 })
+}
+
+/// Segment powers are nonnegative. An online mean avoids overflow in the sum
+/// when the final mean remains representable.
+fn combine_trace(current: f64, observed: f64, completed: usize, trace: WelchTrace) -> f64 {
+    if completed == 0 {
+        return observed;
+    }
+    match trace {
+        WelchTrace::Mean => current + (observed - current) / (completed as f64 + 1.0),
+        WelchTrace::MaxHold if current.is_nan() || observed.is_nan() => f64::NAN,
+        WelchTrace::MaxHold => current.max(observed),
+        WelchTrace::MinHold if current.is_nan() || observed.is_nan() => f64::NAN,
+        WelchTrace::MinHold => current.min(observed),
+    }
 }
 
 fn reserved_f64(len: usize) -> BuiltinResult<Vec<f64>> {

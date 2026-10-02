@@ -46,6 +46,48 @@ fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
 }
 
 #[test]
+fn trace_modes_select_segment_powers_without_changing_the_frequency_grid() {
+    let x = Value::Tensor(Tensor::new(vec![1.0, 1.0, 3.0, 3.0], vec![4, 1]).unwrap());
+    let controls = [
+        Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+        Value::Num(0.0),
+        Value::Num(2.0),
+        Value::Num(1.0),
+    ];
+    for (name, expected) in [("mean", 10.0), ("maxhold", 18.0), ("minhold", 2.0)] {
+        let mut args = controls.to_vec();
+        args.push(Value::String(name.into()));
+        let (pxx, frequency) = output_pair(call(x.clone(), &args, Some(2)).unwrap());
+        assert_eq!(frequency, vec![0.0, 0.5]);
+        assert!((pxx[0] - expected).abs() < 1e-12, "{name}: {pxx:?}");
+        assert!(pxx[1].abs() < 1e-12);
+    }
+}
+
+#[test]
+fn trace_mean_does_not_overflow_a_representable_average() {
+    let first = f64::MAX.sqrt() * 0.5;
+    let x = Value::Tensor(Tensor::new(vec![first, first], vec![2, 1]).unwrap());
+    let args = [
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Num(0.0),
+        Value::Num(1.0),
+        Value::Num(1.0),
+        Value::String("mean".into()),
+    ];
+    let (pxx, _) = output_pair(call(x, &args, Some(2)).unwrap());
+    assert!(pxx[0].is_finite() && pxx[0] > f64::MAX * 0.2);
+}
+
+#[test]
+fn trace_holds_include_nan_instead_of_hiding_a_missing_segment() {
+    for trace in [WelchTrace::MaxHold, WelchTrace::MinHold] {
+        assert!(combine_trace(2.0, f64::NAN, 1, trace).is_nan());
+        assert!(combine_trace(f64::NAN, 2.0, 1, trace).is_nan());
+    }
+}
+
+#[test]
 fn descriptor_is_registered() {
     let builtin = builtin_function_by_name(BUILTIN_NAME).expect("pwelch builtin");
     let descriptor = builtin.descriptor.expect("descriptor");

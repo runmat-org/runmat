@@ -7,7 +7,8 @@ use futures::task::noop_waker;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
     AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
-    NumericElementType, ProviderExecutionFuture, ProviderSpectralResult, ThreadProviderGuard,
+    NumericElementType, ProviderExecutionFuture, ProviderSpectralResult, ReduceDimResult,
+    ThreadProviderGuard,
 };
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
@@ -30,6 +31,7 @@ struct StageProvider {
     owner: TestAllocationOwner,
     spectral_calls: AtomicUsize,
     mean_calls: AtomicUsize,
+    extrema_calls: AtomicUsize,
     download_calls: AtomicUsize,
     outputs: Mutex<Vec<RetirementProbe>>,
 }
@@ -40,6 +42,7 @@ impl StageProvider {
             owner: TestAllocationOwner::new(),
             spectral_calls: AtomicUsize::new(0),
             mean_calls: AtomicUsize::new(0),
+            extrema_calls: AtomicUsize::new(0),
             download_calls: AtomicUsize::new(0),
             outputs: Mutex::new(Vec::new()),
         }
@@ -96,6 +99,28 @@ impl AccelProvider for StageProvider {
             shape[1] = 1;
             Ok(self.output(shape, GpuTensorStorage::Real))
         })
+    }
+    fn reduce_max_dim<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        _: usize,
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move {
+            self.extrema_calls.fetch_add(1, Ordering::SeqCst);
+            let mut shape = input.shape().to_vec();
+            shape[1] = 1;
+            Ok(ReduceDimResult {
+                values: self.output(shape.clone(), GpuTensorStorage::Real),
+                indices: self.output(shape, GpuTensorStorage::Real),
+            })
+        })
+    }
+    fn reduce_min_dim<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        axis: usize,
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
+        self.reduce_max_dim(input, axis)
     }
 }
 
@@ -161,6 +186,55 @@ fn invalid_signal_carrier_precedes_resident_control_download() {
     assert_eq!(resident_window.probe.retirements(), 0);
 }
 
+#[test]
+fn resident_hold_trace_uses_typed_extrema_and_keeps_borrowed_source_live() {
+    for trace in [WelchTrace::MaxHold, WelchTrace::MinHold] {
+        let provider = Box::leak(Box::new(StageProvider::new()));
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let source_input = provider
+            .owner
+            .allocate_zeroed(vec![8, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let cancel_source = CancellationSource::new();
+        let mut cooperation = SignalCooperation::with_budget(
+            CpuCooperationBudget::with_test_turn(
+                CpuCooperationPolicy::NeverYield,
+                cancel_source.token(),
+                || Box::pin(async { Ok(()) }),
+            ),
+            BUILTIN_NAME,
+        );
+        let options = PwelchOptions {
+            window: vec![1.0; 4],
+            noverlap: 0,
+            grid: FrequencyGrid::Uniform { nfft: 8 },
+            fs: Some(8.0),
+            range: FrequencyRange::Onesided,
+            scale: SpectrumScale::Psd,
+            trace,
+        };
+        let _count = crate::output_count::push_output_count(Some(1));
+        let value = futures::executor::block_on(output_gpu(
+            &source_input.handle,
+            8,
+            1,
+            &options,
+            &[],
+            &mut cooperation,
+        ))
+        .unwrap()
+        .unwrap();
+        let Value::OutputList(outputs) = value else {
+            panic!("expected one requested output");
+        };
+        assert!(matches!(outputs.as_slice(), [Value::GpuTensor(_)]));
+        assert_eq!(provider.extrema_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.mean_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.download_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(source_input.probe.retirements(), 0);
+    }
+}
+
 fn pending_budget(
     provider: &'static StageProvider,
     source: &CancellationSource,
@@ -205,6 +279,7 @@ fn admitted_provider_outputs_retire_after_pending_cancel_or_drop() {
                 fs: Some(8.0),
                 range: FrequencyRange::Onesided,
                 scale: SpectrumScale::Psd,
+                trace: WelchTrace::Mean,
             };
             let mut future = Box::pin(output_gpu(
                 &source_input.handle,

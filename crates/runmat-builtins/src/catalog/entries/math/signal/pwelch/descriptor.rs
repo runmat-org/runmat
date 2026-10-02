@@ -6,7 +6,7 @@ const INPUTS: [BuiltinParamDescriptor; 6] = [
     BuiltinParamDescriptor { name: "noverlap", ty: BuiltinParamType::NumericScalar, arity: BuiltinParamArity::Optional, default: Some("[]"), description: "Nonnegative overlap count smaller than the window length." },
     BuiltinParamDescriptor { name: "nfft", ty: BuiltinParamType::NumericArray, arity: BuiltinParamArity::Optional, default: Some("[]"), description: "DFT length or explicit real frequency vector." },
     BuiltinParamDescriptor { name: "fs", ty: BuiltinParamType::NumericScalar, arity: BuiltinParamArity::Optional, default: None, description: "Positive sample frequency in Hz." },
-    BuiltinParamDescriptor { name: "options", ty: BuiltinParamType::StringScalar, arity: BuiltinParamArity::Variadic, default: None, description: "Up to three range (onesided, twosided, centered) or scale (psd, power) selectors in source order." },
+    BuiltinParamDescriptor { name: "options", ty: BuiltinParamType::StringScalar, arity: BuiltinParamArity::Variadic, default: None, description: "Up to three range (onesided, twosided, centered), scale (psd, power), or trace (mean, maxhold, minhold) selectors in source order." },
 ];
 const PSD: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "pxx",
@@ -82,7 +82,12 @@ pub const PWELCH_ERROR_INVALID_FS: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "Sampling frequency is invalid.",
     message: "pwelch: fs must be a positive finite scalar",
 };
-pub const PWELCH_ERROR_INVALID_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor { code: "RM.PWELCH.INVALID_RANGE", identifier: Some("RunMat:pwelch:InvalidRange"), when: "Frequency range selector is invalid.", message: "pwelch: freqrange must be 'onesided', 'twosided', or 'centered'; spectrum type must be 'psd' or 'power'" };
+pub const PWELCH_ERROR_INVALID_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PWELCH.INVALID_RANGE",
+    identifier: Some("RunMat:pwelch:InvalidRange"),
+    when: "Frequency range, spectrum, or trace selector is invalid.",
+    message: "pwelch: options must select a frequency range, spectrum type, or trace mode",
+};
 pub const PWELCH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.PWELCH.INTERNAL",
     identifier: Some("RunMat:pwelch:Internal"),

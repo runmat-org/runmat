@@ -7,6 +7,9 @@ enum WelchKeyword {
     Centered,
     Psd,
     Power,
+    Mean,
+    MaxHold,
+    MinHold,
     Unknown(String),
 }
 
@@ -63,7 +66,10 @@ pub(super) async fn preflight_host_controls(
     for (index, value) in rest.iter().enumerate() {
         cooperation.completed(1).await?;
         let decoded = keyword(value);
-        let role = if options_started || (decoded.is_some() && index > 0) {
+        let begins_options = decoded
+            .as_ref()
+            .is_some_and(|keyword| !matches!(keyword, WelchKeyword::Unknown(_)));
+        let role = if options_started || begins_options {
             options_started = true;
             ControlRole::Option
         } else {
@@ -88,6 +94,9 @@ pub(super) async fn preflight_host_controls(
                         | WelchKeyword::Centered
                         | WelchKeyword::Psd
                         | WelchKeyword::Power
+                        | WelchKeyword::Mean
+                        | WelchKeyword::MaxHold
+                        | WelchKeyword::MinHold
                 )
             ) {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE));
@@ -224,6 +233,9 @@ fn decode_keyword(text: &str) -> WelchKeyword {
         "centered" => WelchKeyword::Centered,
         "psd" => WelchKeyword::Psd,
         "power" => WelchKeyword::Power,
+        "mean" => WelchKeyword::Mean,
+        "maxhold" => WelchKeyword::MaxHold,
+        "minhold" => WelchKeyword::MinHold,
         _ => WelchKeyword::Unknown(normalized),
     }
 }
@@ -235,6 +247,9 @@ fn keyword_label(keyword: &WelchKeyword) -> &str {
         WelchKeyword::Centered => "centered",
         WelchKeyword::Psd => "psd",
         WelchKeyword::Power => "power",
+        WelchKeyword::Mean => "mean",
+        WelchKeyword::MaxHold => "maxhold",
+        WelchKeyword::MinHold => "minhold",
         WelchKeyword::Unknown(value) => value,
     }
 }
@@ -253,13 +268,13 @@ pub(super) async fn parse_options(
             idx += 1;
             default_window(input_len, cooperation).await?
         } else if let Some(keyword) = keywords.get(idx).and_then(Option::as_ref) {
-            return Err(pwelch_error_with_detail(
-                &PWELCH_ERROR_INVALID_WINDOW,
-                format!(
-                    "unexpected option '{}' before window arguments",
-                    keyword_label(&keyword)
-                ),
-            ));
+            if matches!(keyword, WelchKeyword::Unknown(_)) {
+                return Err(pwelch_error_with_detail(
+                    &PWELCH_ERROR_INVALID_WINDOW,
+                    format!("unknown window option '{}'", keyword_label(keyword)),
+                ));
+            }
+            default_window(input_len, cooperation).await?
         } else {
             idx += 1;
             match prepared.window.take() {
@@ -353,6 +368,7 @@ pub(super) async fn parse_options(
     };
     let mut range = default_range;
     let mut scale = SpectrumScale::Psd;
+    let mut trace = WelchTrace::Mean;
     while rest.get(idx).is_some() {
         cooperation.completed(1).await?;
         let Some(keyword) = keywords.get(idx).and_then(Option::as_ref) else {
@@ -373,6 +389,9 @@ pub(super) async fn parse_options(
             WelchKeyword::Centered => range = FrequencyRange::Centered,
             WelchKeyword::Psd => scale = SpectrumScale::Psd,
             WelchKeyword::Power => scale = SpectrumScale::Power,
+            WelchKeyword::Mean => trace = WelchTrace::Mean,
+            WelchKeyword::MaxHold => trace = WelchTrace::MaxHold,
+            WelchKeyword::MinHold => trace = WelchTrace::MinHold,
             WelchKeyword::Unknown(_) => return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE)),
         }
     }
@@ -388,6 +407,7 @@ pub(super) async fn parse_options(
         fs,
         range,
         scale,
+        trace,
     })
 }
 

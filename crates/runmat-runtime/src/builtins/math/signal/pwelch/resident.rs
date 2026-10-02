@@ -109,9 +109,94 @@ pub(super) async fn output_gpu(
         runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let ps_frames = context.admit(ps_frames, &contract, &[], output_error)?;
-    let ps_mean = match provider.reduce_mean_nd(&ps_frames, &[1]).await {
-        Ok(ps_mean) => ps_mean,
-        Err(err) => return Err(preparation_failure(err)),
+    let ps_mean = match options.trace {
+        WelchTrace::Mean => provider
+            .reduce_mean_nd(&ps_frames, &[1])
+            .await
+            .map_err(preparation_failure)?,
+        WelchTrace::MaxHold | WelchTrace::MinHold => {
+            let result = match options.trace {
+                WelchTrace::MaxHold => provider.reduce_max_dim(&ps_frames, 1).await,
+                WelchTrace::MinHold => provider.reduce_min_dim(&ps_frames, 1).await,
+                WelchTrace::Mean => unreachable!("mean handled above"),
+            };
+            let result = match result {
+                Ok(result) => result,
+                Err(error)
+                    if crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(
+                        &error,
+                    ) =>
+                {
+                    return output_host_hold_from_frames(
+                        provider,
+                        handle,
+                        &ps_frames,
+                        estimate.rows,
+                        segment_count,
+                        cols,
+                        options,
+                        protected,
+                        cooperation,
+                    )
+                    .await
+                    .map(Some);
+                }
+                Err(error) => return Err(preparation_failure(error)),
+            };
+            // An extrema provider produces both values and indices. Validate the
+            // unused index before discarding it, so malformed or borrowed output
+            // never escapes as a successful spectral result.
+            let expected = [estimate.rows, 1, cols];
+            let index_precision = runmat_accelerate_api::handle_precision(&result.indices);
+            let index_contract = crate::builtins::common::gpu_helpers::BinaryGpuOutputContract {
+                shape: expected.to_vec(),
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                precision: index_precision,
+                integer: None,
+                logical: false,
+                alias: crate::builtins::common::gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+            };
+            if !matches!(
+                index_precision,
+                Some(
+                    runmat_accelerate_api::ProviderPrecision::F32
+                        | runmat_accelerate_api::ProviderPrecision::F64
+                )
+            ) || (index_precision == Some(runmat_accelerate_api::ProviderPrecision::F32)
+                && segment_count > (1 << 24))
+                || result.indices.shares_allocation_with(&result.values)
+            {
+                let error = output_error();
+                return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                    result.indices,
+                    crate::builtins::common::gpu_helpers::reject_gpu_output(result.values, error),
+                ));
+            }
+            let index = match context.admit(
+                result.indices,
+                &index_contract,
+                &[&ps_frames, &estimate.s, &estimate.ps, &result.values],
+                output_error,
+            ) {
+                Ok(index) => index,
+                Err(error) => {
+                    return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                        result.values,
+                        error,
+                    ));
+                }
+            };
+            let mut value_contract = contract.clone();
+            value_contract.shape = expected.to_vec();
+            let values = context.admit(
+                result.values,
+                &value_contract,
+                &[&ps_frames, &estimate.s, &estimate.ps, &index],
+                output_error,
+            )?;
+            drop(index);
+            values
+        }
     };
     contract.shape = vec![estimate.rows, 1, cols];
     let mut protected_mean = vec![&estimate.s];
@@ -167,4 +252,67 @@ pub(super) async fn output_gpu(
         )));
     }
     Ok(Some(pxx))
+}
+
+/// A provider may implement the FFT/framing hook but not dimensional extrema.
+/// Download its already-computed frames once; do not replay the spectral work.
+async fn output_host_hold_from_frames(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &runmat_accelerate_api::GpuTensorHandle,
+    frames: &runmat_accelerate_api::GpuTensorHandle,
+    rows: usize,
+    segments: usize,
+    columns: usize,
+    options: &PwelchOptions,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    let downloaded =
+        crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+            provider, frames,
+        )
+        .await
+        .map_err(|mut error| {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })?;
+    cooperation.completed(0).await?;
+    let Value::Tensor(tensor) = downloaded else {
+        return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
+    };
+    if tensor.shape != [rows, segments, columns] {
+        return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
+    }
+    let values = tensor.materialize_f64();
+    let mut pxx = Vec::new();
+    pxx.try_reserve_exact(checked_output_elements(rows, columns)?)
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
+    let mut work = CompletedWork::default();
+    for column in 0..columns {
+        for frequency in 0..rows {
+            let mut selected = values[frequency + column * rows * segments];
+            for segment in 1..segments {
+                selected = combine_trace(
+                    selected,
+                    values[frequency + segment * rows + column * rows * segments],
+                    segment,
+                    options.trace,
+                );
+                if let Some(units) = work.record(1) {
+                    cooperation.completed(units).await?;
+                }
+            }
+            pxx.push(selected);
+        }
+    }
+    work.finish(cooperation).await?;
+    let FrequencyGrid::Uniform { nfft } = options.grid else {
+        unreachable!("resident spectral frames require a uniform grid")
+    };
+    let f = frequency_vector(nfft, options.fs, options.range, cooperation).await?;
+    let output = output_eval(
+        PwelchEvaluation { pxx, f, columns },
+        SignalPrecision::of_handle(input),
+    )?;
+    super::super::resident_output::restore(input, output, BUILTIN_NAME, protected)
 }

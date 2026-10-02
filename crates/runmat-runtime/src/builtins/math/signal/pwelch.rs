@@ -95,6 +95,13 @@ enum SpectrumScale {
     Power,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WelchTrace {
+    Mean,
+    MaxHold,
+    MinHold,
+}
+
 #[derive(Clone, Debug)]
 struct SignalColumns {
     columns: Vec<Vec<Complex<f64>>>,
@@ -112,6 +119,7 @@ struct PwelchOptions {
     fs: Option<f64>,
     range: FrequencyRange,
     scale: SpectrumScale,
+    trace: WelchTrace,
 }
 
 #[derive(Clone, Debug)]
