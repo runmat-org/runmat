@@ -72,12 +72,20 @@ pub const FILTFILT_ERROR_PASS_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescr
     message: "filtfilt: filtering pass failed",
 };
 
-const FILTFILT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const FILTFILT_ERROR_PROVIDER_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTFILT.PROVIDER_OUTPUT",
+    identifier: Some("RunMat:filtfilt:InvalidProviderOutput"),
+    when: "The provider returns a stale, foreign, wrong-class, wrong-shape, or borrowed output allocation.",
+    message: "filtfilt: invalid provider result",
+};
+
+const FILTFILT_ERRORS: [BuiltinErrorDescriptor; 6] = [
     FILTFILT_ERROR_ARG_COUNT,
     FILTFILT_ERROR_INVALID_COEFFICIENTS,
     FILTFILT_ERROR_INVALID_SIGNAL,
     FILTFILT_ERROR_INTERNAL,
     FILTFILT_ERROR_PASS_FAILED,
+    FILTFILT_ERROR_PROVIDER_OUTPUT,
 ];
 
 pub const FILTFILT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {

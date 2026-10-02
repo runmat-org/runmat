@@ -1,10 +1,12 @@
 //! MATLAB-compatible zero-phase digital filtering.
 
 use num_complex::Complex;
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinErrorDescriptor, FILTFILT_ERROR_ARG_COUNT, FILTFILT_ERROR_INTERNAL,
     FILTFILT_ERROR_INVALID_COEFFICIENTS, FILTFILT_ERROR_INVALID_SIGNAL, FILTFILT_ERROR_PASS_FAILED,
-    FILTFILT_INTEGER_INPUT_EXTENSION, FILTFILT_LOGICAL_INPUT_EXTENSION,
+    FILTFILT_ERROR_PROVIDER_OUTPUT, FILTFILT_INTEGER_INPUT_EXTENSION,
+    FILTFILT_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
@@ -21,6 +23,7 @@ use crate::builtins::math::signal::common::{
     vector_is_row, ComplexVectorInput, IirAdmissionFault, IirFaultKind, IirForm, IirOperand,
 };
 use crate::builtins::math::signal::filter;
+use crate::builtins::math::signal::resident_output::{self, OutputContext};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "filtfilt";
@@ -71,7 +74,8 @@ fn filtfilt_error_with_source(
     after_provider_effect: bool,
 ) -> RuntimeError {
     let span = source.span;
-    let context = source.context.clone();
+    let mut context = source.context.clone();
+    context.builtin = Some(BUILTIN_NAME.to_owned());
     let retry = source.gpu_gather_retry;
     let mut builder = build_runtime_error(format!("{}: {detail}", descriptor.message))
         .with_builtin(BUILTIN_NAME)
@@ -216,7 +220,11 @@ pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
     } else {
         NumericDType::F64
     };
-    if let Some(value) = try_filtfilt_gpu(&coeffs, &x_input, output_dtype).await? {
+    let borrowed = [b_input.gpu_handle.as_ref(), a_input.gpu_handle.as_ref()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    if let Some(value) = try_filtfilt_gpu(&coeffs, &x_input, output_dtype, &borrowed).await? {
         return Ok(value);
     }
 
@@ -558,13 +566,14 @@ async fn try_filtfilt_gpu(
     coeffs: &NormalizedCoefficients,
     input: &ComplexVectorInput,
     output_dtype: NumericDType,
+    borrowed: &[&GpuTensorHandle],
 ) -> BuiltinResult<Option<Value>> {
     let Some(input_handle) = input.gpu_handle.as_ref() else {
         return Ok(None);
     };
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(input_handle) else {
-        return Ok(None);
-    };
+    let provider = resident_output::owner(input_handle, || {
+        filtfilt_error_with_detail(&FILTFILT_ERROR_INVALID_SIGNAL, "invalid resident signal")
+    })?;
     if matches!(output_dtype, NumericDType::F32)
         != matches!(
             provider.precision(),
@@ -612,7 +621,20 @@ async fn try_filtfilt_gpu(
             source.into(),
         )
     })?;
-    Ok(Some(Value::GpuTensor(handle)))
+    let context = OutputContext {
+        input: input_handle,
+        provider,
+        caller_inputs: borrowed,
+    };
+    let contract = resident_output::floating_contract(
+        input_handle,
+        input.shape.clone(),
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
+    let output = context.admit(handle, &contract, &[], || {
+        filtfilt_error(&FILTFILT_ERROR_PROVIDER_OUTPUT)
+    })?;
+    Ok(Some(Value::GpuTensor(output)))
 }
 
 async fn gpu_filter_pass(
@@ -785,6 +807,83 @@ mod tests {
             .any(|err| err.code == "RM.FILTFILT.INVALID_SIGNAL"));
         assert_eq!(builtin.integer_capabilities.len(), 1);
         assert_eq!(builtin.extensions.len(), 2);
+    }
+
+    #[test]
+    fn operational_source_keeps_filtfilt_as_the_owning_builtin() {
+        let mut source = build_runtime_error("readback failed")
+            .with_builtin("gather")
+            .with_identifier("RunMat:gather:ProviderFailed")
+            .build();
+        source.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        let error = filtfilt_error_with_source(
+            &FILTFILT_ERROR_PASS_FAILED,
+            "provider result gather failed",
+            source,
+            true,
+        );
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let nested = std::error::Error::source(&error).expect("original gather cause");
+        assert!(nested.to_string().contains("readback failed"));
+    }
+
+    #[test]
+    fn final_provider_output_rejects_borrowed_alias_and_wrong_shape() {
+        let _lock = test_support::accel_test_lock();
+        let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let signal = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let borrowed = provider
+            .upload(&HostTensorView {
+                data: &[3.0, 4.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let protected = [&borrowed];
+        let context = OutputContext {
+            input: &signal,
+            provider,
+            caller_inputs: &protected,
+        };
+        let contract = resident_output::floating_contract(
+            &signal,
+            vec![1, 2],
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+        let alias_error = context
+            .admit(borrowed.clone(), &contract, &[], || {
+                filtfilt_error(&FILTFILT_ERROR_PROVIDER_OUTPUT)
+            })
+            .expect_err("a borrowed coefficient may not be published as the result");
+        assert_eq!(
+            alias_error.identifier(),
+            FILTFILT_ERROR_PROVIDER_OUTPUT.identifier
+        );
+        assert!(borrowed.allocation_lease().validate_live().is_ok());
+        let wrong_shape = provider
+            .upload(&HostTensorView {
+                data: &[5.0, 6.0],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        let shape_error = context
+            .admit(wrong_shape, &contract, &[], || {
+                filtfilt_error(&FILTFILT_ERROR_PROVIDER_OUTPUT)
+            })
+            .expect_err("same-count transposed result must be rejected");
+        assert_eq!(
+            shape_error.identifier(),
+            FILTFILT_ERROR_PROVIDER_OUTPUT.identifier
+        );
+        assert!(signal.allocation_lease().validate_live().is_ok());
     }
 
     #[test]

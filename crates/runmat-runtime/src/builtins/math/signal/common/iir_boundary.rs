@@ -120,7 +120,7 @@ fn leading_denominator_is_zero(value: &Value) -> bool {
         Value::ComplexTensor(tensor) => tensor
             .numeric_value_at(0)
             .is_some_and(|(re, im)| re.is_zero() && im.is_zero()),
-        Value::LogicalArray(logical) => logical.data.first() == Some(&false),
+        Value::LogicalArray(logical) => logical.data.first() == Some(&0),
         Value::GpuTensor(_) => false,
         _ => false,
     }
@@ -129,7 +129,7 @@ fn leading_denominator_is_zero(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::Tensor;
+    use runmat_value::{LogicalArray, Tensor};
 
     #[test]
     fn form_specific_signal_geometry_does_not_constrain_causal_arrays() {
@@ -156,6 +156,20 @@ mod tests {
 
     #[test]
     fn denominator_zero_and_short_reflection_are_known_without_payload_download() {
+        let logical_zero = Value::LogicalArray(LogicalArray::new(vec![0], vec![1, 1]).unwrap());
+        assert_eq!(
+            preflight(
+                IirForm::Causal,
+                &Value::Num(1.0),
+                &logical_zero,
+                &Value::Num(1.0),
+                None
+            ),
+            Err(fault(
+                IirOperand::Denominator,
+                IirFaultKind::LeadingDenominatorZero
+            ))
+        );
         assert_eq!(
             preflight(
                 IirForm::Causal,
