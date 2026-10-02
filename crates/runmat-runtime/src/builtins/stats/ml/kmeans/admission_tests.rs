@@ -186,6 +186,54 @@ fn invalid_host_numeric_start_rejects_before_resident_x_download() {
 }
 
 #[test]
+fn registered_known_start_shape_rejects_before_resident_x_download_and_keeps_lease() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let x = Tensor::new(vec![0.0, 1.0, 9.0, 10.0, 0.0, 1.0, 9.0, 10.0], vec![4, 2]).unwrap();
+    let x = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x).unwrap();
+    for (k, start) in [
+        (
+            Value::Num(2.0),
+            Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap(),
+        ),
+        (
+            Value::Num(3.0),
+            Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap(),
+        ),
+    ] {
+        let error = block_on(kmeans_builtin_registered(
+            None,
+            Value::GpuTensor(x.clone()),
+            k,
+            vec![Value::from("Start"), Value::Tensor(start)],
+        ))
+        .err()
+        .expect("known k-by-p mismatch must reject before download");
+        assert!(error.message().contains("numeric Start must be k-by-p"));
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert!(x.allocation_lease().validate_live().is_ok());
+    }
+}
+
+#[test]
+fn effective_start_shape_uses_last_override_and_vector_feature_geometry() {
+    let x = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![1, 4]).unwrap();
+    let options = admission::admit_option_values(
+        admission::parse_option_headers(vec![
+            Value::from("Start"),
+            Value::Tensor(Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap()),
+            Value::from("Start"),
+            Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
+        ])
+        .unwrap(),
+    )
+    .unwrap();
+    geometry::preflight_effective_start(&Value::Tensor(x), &Value::Num(2.0), &options)
+        .expect("the last vector-shaped Start overrides the earlier matrix");
+}
+
+#[test]
 fn ignored_resident_statset_field_does_not_download() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = CountingProvider::new();

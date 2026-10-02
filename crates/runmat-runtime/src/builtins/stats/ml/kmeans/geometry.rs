@@ -1,4 +1,5 @@
 use super::{
+    admission::{OptionInput, StartInput},
     internal, invalid, Distance, KmeansStart, Options, PreparedData, StartSpec, MAX_WORK_CELLS,
     NAME,
 };
@@ -60,6 +61,74 @@ pub(super) fn preflight_cluster_count(value: &Value) -> BuiltinResult<()> {
         return Err(invalid("kmeans: k must be a positive integer scalar or []"));
     }
     Ok(())
+}
+
+/// Check the effective host Start against dimensions already carried by X
+/// and k. No provider payload is needed for these structural facts. Earlier
+/// Start entries may be overwritten by a later one, as in parse_options.
+pub(super) fn preflight_effective_start(
+    x: &Value,
+    k: &Value,
+    options: &[OptionInput],
+) -> BuiltinResult<()> {
+    let Some(start) = options.iter().rev().find_map(|option| match option {
+        OptionInput::Start(start) => Some(start),
+        _ => None,
+    }) else {
+        return Ok(());
+    };
+    let StartInput::Prepared(start) = start else {
+        return Ok(());
+    };
+    let expected_cols = match x {
+        Value::Tensor(tensor) => observation_feature_count(&tensor.shape),
+        Value::LogicalArray(array) => observation_feature_count(&array.shape),
+        Value::GpuTensor(handle) => observation_feature_count(handle.shape()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => 1,
+        _ => return Ok(()), // preflight_observations owns this diagnostic.
+    };
+    let expected_rows = if matches!(k, Value::GpuTensor(_)) || super::admission::is_empty_numeric(k)
+    {
+        None
+    } else {
+        Some(super::options::parse_positive_usize(k, "k")?)
+    };
+    let (rows, cols) = match start {
+        StartSpec::Numeric(centers) => (centers.len(), centers.first().map(Vec::len)),
+        StartSpec::NumericPages(pages) => {
+            let Some(first) = pages.first() else {
+                return Err(invalid(
+                    "kmeans: numeric Start array must have at least one page",
+                ));
+            };
+            (first.len(), first.first().map(Vec::len))
+        }
+        StartSpec::Named(_) => return Ok(()),
+    };
+    if !start_matches(rows, cols, expected_rows, expected_cols) {
+        return Err(invalid(
+            "kmeans: numeric Start must be k-by-p or k-by-p-by-r",
+        ));
+    }
+    Ok(())
+}
+
+fn observation_feature_count(shape: &[usize]) -> usize {
+    match shape {
+        [] | [_] => 1,
+        [rows, cols] if *rows == 1 || *cols == 1 => 1,
+        [_, cols] => *cols,
+        _ => 1, // preflight_observations owns invalid-rank diagnostics.
+    }
+}
+
+fn start_matches(
+    rows: usize,
+    cols: Option<usize>,
+    expected_rows: Option<usize>,
+    expected_cols: usize,
+) -> bool {
+    expected_rows.is_none_or(|expected| rows == expected) && cols == Some(expected_cols)
 }
 
 #[cfg(test)]
@@ -307,7 +376,7 @@ async fn validate_centers(
     cols: usize,
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<()> {
-    if centers.len() != k {
+    if !start_matches(centers.len(), centers.first().map(Vec::len), Some(k), cols) {
         return Err(invalid(
             "kmeans: numeric Start must be k-by-p or k-by-p-by-r",
         ));

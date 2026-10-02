@@ -162,6 +162,7 @@ async fn kmeans_in_runtime(
     if !matches!(&k, Value::GpuTensor(_)) && !admission::is_empty_numeric(&k) {
         options::parse_positive_usize(&k, "k")?;
     }
+    geometry::preflight_effective_start(&x, &k, &options)?;
     let output_source = value_gpu_source(&x);
     borrowed.record_consumed(&x);
     let x_was_integer = typed_integer(&x);
