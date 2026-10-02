@@ -91,7 +91,17 @@ fn known_zero_denominator_and_excess_outputs_are_diagnosed() {
         &DECONV_CATALOG_ENTRY,
     );
     assert!(!excess.diagnostics.is_empty());
-    assert!(excess.outputs.len() <= 2);
+    // The shared call contract retains a fact for each requested slot even
+    // when the output count is invalid; no slot may claim a produced value.
+    assert_eq!(excess.outputs.len(), 3);
+    assert!(excess
+        .outputs
+        .iter()
+        .all(|fact| fact.kind == ValueKindFact::Unknown));
+    assert!(excess
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-DECONV-OUTPUTS"));
 }
 
 #[test]
