@@ -109,11 +109,12 @@ fn option_materialization_cancellation_does_not_publish_partial_controls() {
         admission::AdmittedOption::Perplexity(Value::Num(2.0)),
         admission::AdmittedOption::LearnRate(Value::Num(100.0)),
     ];
-    let error = futures::executor::block_on(materialize_options(
+    let Err(error) = futures::executor::block_on(materialize_options(
         options,
         &mut cooperation::TsneCooperation::with_budget(budget),
-    ))
-    .expect_err("a cancelled materialization must not publish a partial option list");
+    )) else {
+        panic!("a cancelled materialization must not publish a partial option list");
+    };
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
 }
