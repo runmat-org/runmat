@@ -3,13 +3,13 @@
 
 use crate::{BuiltinResult, RuntimeError};
 
-use super::simpson;
+use super::{simpson, ScaledEstimate};
 
 pub(crate) trait QuadratureEvaluator {
     async fn checkpoint(&mut self) -> BuiltinResult<()>;
     async fn evaluate(&mut self, x: f64) -> BuiltinResult<f64>;
     fn midpoint(&self, a: f64, b: f64) -> f64;
-    fn initial_tolerance(&self, whole: f64) -> f64;
+    fn tolerances(&self) -> (f64, f64);
     fn max_evaluations(&self) -> usize;
     fn max_depth(&self) -> usize;
     fn evaluation_limit_error(&self) -> RuntimeError;
@@ -31,8 +31,8 @@ struct Interval {
     fa: f64,
     fm: f64,
     fb: f64,
-    whole: f64,
-    tol: f64,
+    whole: ScaledEstimate,
+    tol: ScaledEstimate,
     depth: usize,
 }
 
@@ -46,9 +46,11 @@ pub(crate) async fn integrate<E: QuadratureEvaluator>(
     let m = evaluator.midpoint(a, b);
     let fm = evaluator.evaluate(m).await?;
     let fb = evaluator.evaluate(b).await?;
-    let whole = simpson(a, b, fa, fm, fb).map_err(|_| evaluator.nonrepresentable_error())?;
+    let whole = simpson(a, b, fa, fm, fb);
     let mut evaluations = 3_usize;
-    let tol = evaluator.initial_tolerance(whole);
+    let (absolute_tolerance, relative_tolerance) = evaluator.tolerances();
+    let tol = ScaledEstimate::from_f64(absolute_tolerance)
+        .max(whole.abs().multiply_f64(relative_tolerance));
     let depth = evaluator.max_depth();
     let q = adapt(
         evaluator,
@@ -65,6 +67,9 @@ pub(crate) async fn integrate<E: QuadratureEvaluator>(
         &mut evaluations,
     )
     .await?;
+    let q = q
+        .to_f64()
+        .ok_or_else(|| evaluator.nonrepresentable_error())?;
     Ok(AdaptiveSimpsonResult { q, evaluations })
 }
 
@@ -72,7 +77,7 @@ async fn adapt<E: QuadratureEvaluator>(
     evaluator: &mut E,
     state: Interval,
     evaluations: &mut usize,
-) -> BuiltinResult<f64> {
+) -> BuiltinResult<ScaledEstimate> {
     evaluator.checkpoint().await?;
     if (*evaluations)
         .checked_add(2)
@@ -88,23 +93,19 @@ async fn adapt<E: QuadratureEvaluator>(
     let fe = evaluator.evaluate(e).await?;
     *evaluations += 2;
 
-    let left = simpson(state.a, c, state.fa, fd, state.fm)
-        .map_err(|_| evaluator.nonrepresentable_error())?;
-    let right = simpson(c, state.b, state.fm, fe, state.fb)
-        .map_err(|_| evaluator.nonrepresentable_error())?;
-    let refined = left + right;
-    if !refined.is_finite() {
-        return Err(evaluator.nonrepresentable_error());
-    }
-    let error = refined - state.whole;
-    evaluator.refined(*evaluations, state.a, state.b, refined, error);
-    if error.abs() <= 15.0 * state.tol {
-        let corrected = refined + error / 15.0;
-        return if corrected.is_finite() {
-            Ok(corrected)
-        } else {
-            Err(evaluator.nonrepresentable_error())
-        };
+    let left = simpson(state.a, c, state.fa, fd, state.fm);
+    let right = simpson(c, state.b, state.fm, fe, state.fb);
+    let refined = left.add(right);
+    let error = refined.subtract(state.whole);
+    evaluator.refined(
+        *evaluations,
+        state.a,
+        state.b,
+        refined.trace_f64(),
+        error.trace_f64(),
+    );
+    if error.abs_le(state.tol.multiply_f64(15.0)) {
+        return Ok(refined.add(error.multiply_f64(1.0 / 15.0)));
     }
     if state.depth == 0 {
         return Err(evaluator.convergence_error());
@@ -119,7 +120,7 @@ async fn adapt<E: QuadratureEvaluator>(
             fm: fd,
             fb: state.fm,
             whole: left,
-            tol: state.tol * 0.5,
+            tol: state.tol.multiply_f64(0.5),
             depth: state.depth - 1,
         },
         evaluations,
@@ -134,18 +135,13 @@ async fn adapt<E: QuadratureEvaluator>(
             fm: fe,
             fb: state.fb,
             whole: right,
-            tol: state.tol * 0.5,
+            tol: state.tol.multiply_f64(0.5),
             depth: state.depth - 1,
         },
         evaluations,
     ))
     .await?;
-    let result = left_value + right_value;
-    if result.is_finite() {
-        Ok(result)
-    } else {
-        Err(evaluator.nonrepresentable_error())
-    }
+    Ok(left_value.add(right_value))
 }
 
 #[cfg(test)]
@@ -172,8 +168,8 @@ mod tests {
             super::super::midpoint(a, b)
         }
 
-        fn initial_tolerance(&self, _whole: f64) -> f64 {
-            1.0e-6
+        fn tolerances(&self) -> (f64, f64) {
+            (1.0e-6, 0.0)
         }
 
         fn max_evaluations(&self) -> usize {

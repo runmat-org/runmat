@@ -574,8 +574,8 @@ impl QuadratureEvaluator for QuadEvaluator<'_> {
         midpoint(a, b)
     }
 
-    fn initial_tolerance(&self, _whole: f64) -> f64 {
-        self.tolerance
+    fn tolerances(&self) -> (f64, f64) {
+        (self.tolerance, 0.0)
     }
 
     fn max_evaluations(&self) -> usize {

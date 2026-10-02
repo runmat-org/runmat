@@ -615,8 +615,8 @@ impl QuadratureEvaluator for IntegralEvaluator<'_> {
         crate::builtins::math::optim::quadrature::midpoint(a, b)
     }
 
-    fn initial_tolerance(&self, whole: f64) -> f64 {
-        self.options.abs_tol.max(self.options.rel_tol * whole.abs())
+    fn tolerances(&self) -> (f64, f64) {
+        (self.options.abs_tol, self.options.rel_tol)
     }
 
     fn max_evaluations(&self) -> usize {
@@ -756,6 +756,16 @@ mod tests {
     async fn scaled_identity_helper(x: Value) -> crate::BuiltinResult<Value> {
         let x = scalar_bound("x", x).await?;
         Ok(Value::Num(x / 1.0e308))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_identity",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn identity_helper(x: Value) -> crate::BuiltinResult<Value> {
+        Ok(x)
     }
 
     #[runtime_builtin(
@@ -899,6 +909,14 @@ mod tests {
         )
         .expect("opposite-sign interval with cancelling integrand");
         assert!(matches!(symmetric_linear, Value::Num(value) if value == 0.0));
+
+        let cancelling_large_subintervals = run(
+            Value::FunctionHandle("__integral_identity".into()),
+            -1.0e308,
+            1.0e308,
+        )
+        .expect("nonrepresentable half-integrals cancel to zero");
+        assert!(matches!(cancelling_large_subintervals, Value::Num(value) if value == 0.0));
 
         let nonrepresentable = run(
             Value::FunctionHandle("__integral_one".into()),
