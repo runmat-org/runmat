@@ -987,6 +987,18 @@ mod tests {
     }
 
     #[runtime_builtin(
+        name = "__integral_array_opposite_constants",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn array_opposite_constants_helper(_x: Value) -> crate::BuiltinResult<Value> {
+        Ok(Value::Tensor(
+            Tensor::new(vec![1.0, -1.0], vec![1, 2]).expect("fixed shape"),
+        ))
+    }
+
+    #[runtime_builtin(
         name = "__integral_nan",
         type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
         descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
@@ -1267,6 +1279,23 @@ mod tests {
                 assert!((tensor::tensor_value_f64(&result, index) - expected).abs() < 1.0e-7);
             }
         }
+    }
+
+    #[test]
+    fn array_valued_scaled_estimates_preserve_large_finite_components() {
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_array_opposite_constants".into()),
+            Value::Num(0.0),
+            Value::Num(1.0e308),
+            vec![Value::from("ArrayValued"), Value::Bool(true)],
+        ))
+        .expect("large finite componentwise integral");
+        let Value::Tensor(result) = result else {
+            panic!("expected array output")
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert!((tensor::tensor_value_f64(&result, 0) / 1.0e308 - 1.0).abs() < 1.0e-12);
+        assert!((tensor::tensor_value_f64(&result, 1) / 1.0e308 + 1.0).abs() < 1.0e-12);
     }
 
     #[test]
