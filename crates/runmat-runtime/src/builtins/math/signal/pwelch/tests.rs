@@ -47,6 +47,148 @@ fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
 }
 
 #[test]
+fn complex_controls_with_tiny_nonzero_imaginary_parts_are_not_real() {
+    let x = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap());
+    let window = Value::ComplexTensor(
+        runmat_value::ComplexTensor::new(vec![(1.0, 1e-13), (1.0, 0.0)], vec![2, 1]).unwrap(),
+    );
+    let error = call(
+        x.clone(),
+        &[window, Value::Num(0.0), Value::Num(2.0)],
+        Some(1),
+    )
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidWindow"));
+
+    let frequencies = Value::ComplexTensor(
+        runmat_value::ComplexTensor::new(vec![(0.0, 0.0), (0.5, 1e-13)], vec![2, 1]).unwrap(),
+    );
+    let error = call(
+        x,
+        &[
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap()),
+            Value::Num(0.0),
+            frequencies,
+        ],
+        Some(1),
+    )
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidNfft"));
+}
+
+#[test]
+fn wide_host_integer_exactness_uses_the_invocation_budget() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::num::NonZeroU64;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let source = CancellationSource::new();
+    let turns = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&turns);
+    let mut cooperation = SignalCooperation::with_budget(
+        CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            },
+        ),
+        BUILTIN_NAME,
+    );
+    let input = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 54; 4097]), vec![4097, 1]).unwrap(),
+    );
+    let receipt = block_on(ensure_pwelch_integer_boundary(
+        &input,
+        "signal",
+        &PWELCH_ERROR_INVALID_SIGNAL,
+        &PWELCH_INTEGER_SIGNAL_EXTENSION,
+        &mut cooperation,
+    ))
+    .unwrap();
+    assert!(receipt.is_none());
+    assert!(turns.load(Ordering::SeqCst) >= 2);
+}
+
+#[test]
+fn wide_resident_integer_signal_is_read_back_once_and_input_remains_borrowed() {
+    use runmat_accelerate_api::{AccelIntegerDownloadFuture, AccelProvider, ThreadProviderGuard};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountedOwner {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        integer_downloads: AtomicUsize,
+        other_downloads: AtomicUsize,
+    }
+    impl AccelProvider for CountedOwner {
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+        fn device_info(&self) -> String {
+            self.inner.device_info()
+        }
+        fn upload(
+            &self,
+            host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+        fn upload_numeric_raw(
+            &self,
+            host: &runmat_accelerate_api::HostNumericTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.inner.upload_numeric_raw(host)
+        }
+        fn download<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.other_downloads.fetch_add(1, Ordering::SeqCst);
+            self.inner.download(handle)
+        }
+        fn download_integer<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> AccelIntegerDownloadFuture<'a> {
+            self.integer_downloads.fetch_add(1, Ordering::SeqCst);
+            self.inner.download_integer(handle)
+        }
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+            self.other_downloads.fetch_add(1, Ordering::SeqCst);
+            self.inner.download_numeric(handle)
+        }
+    }
+
+    let provider = Box::leak(Box::new(CountedOwner {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        integer_downloads: AtomicUsize::new(0),
+        other_downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let signal =
+        Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 54; 8]), vec![8, 1]).unwrap();
+    let input = gpu_helpers::upload_tensor(provider, &signal).unwrap();
+    let output = call(
+        Value::GpuTensor(input.clone()),
+        &[Value::Num(8.0), Value::Num(0.0), Value::Num(8.0)],
+        Some(1),
+    )
+    .unwrap();
+    assert!(matches!(output, Value::OutputList(values) if values.len() == 1));
+    assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.other_downloads.load(Ordering::SeqCst), 0);
+    assert!(input.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
 fn trace_modes_select_segment_powers_without_changing_the_frequency_grid() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 1.0, 3.0, 3.0], vec![4, 1]).unwrap());
     let controls = [

@@ -6,11 +6,12 @@ use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
 };
 use runmat_builtins::{
-    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, PWELCH_ERROR_ARG_COUNT,
-    PWELCH_ERROR_INTERNAL, PWELCH_ERROR_INVALID_FS, PWELCH_ERROR_INVALID_NFFT,
-    PWELCH_ERROR_INVALID_OVERLAP, PWELCH_ERROR_INVALID_PARENT, PWELCH_ERROR_INVALID_RANGE,
-    PWELCH_ERROR_INVALID_SIGNAL, PWELCH_ERROR_INVALID_WINDOW, PWELCH_INTEGER_CONTROL_EXTENSION,
-    PWELCH_INTEGER_SIGNAL_EXTENSION, PWELCH_LOGICAL_INPUT_EXTENSION,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, PwelchControlCursor, PwelchControlRole,
+    PwelchKeyword, PWELCH_ERROR_ARG_COUNT, PWELCH_ERROR_INTERNAL, PWELCH_ERROR_INVALID_FS,
+    PWELCH_ERROR_INVALID_NFFT, PWELCH_ERROR_INVALID_OVERLAP, PWELCH_ERROR_INVALID_PARENT,
+    PWELCH_ERROR_INVALID_RANGE, PWELCH_ERROR_INVALID_SIGNAL, PWELCH_ERROR_INVALID_WINDOW,
+    PWELCH_INTEGER_CONTROL_EXTENSION, PWELCH_INTEGER_SIGNAL_EXTENSION,
+    PWELCH_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -32,7 +33,6 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "pwelch";
 const DEFAULT_NFFT_MIN: usize = 256;
 const MAX_NFFT: usize = 1 << 22;
-const EPS: f64 = 1.0e-12;
 #[derive(Default)]
 struct CompletedWork {
     pending: u64,
@@ -219,6 +219,7 @@ async fn evaluate_with_cooperation(
     cooperation.completed(0).await?;
     let named = split_named_controls(rest)?;
     let rest = named.positional.as_slice();
+    let tokens = named.tokens.as_slice();
     if rest.len() > 7 {
         return Err(pwelch_error(&PWELCH_ERROR_ARG_COUNT));
     }
@@ -231,7 +232,8 @@ async fn evaluate_with_cooperation(
         ensure_pwelch_class_boundary(value, &PWELCH_INTEGER_CONTROL_EXTENSION)?;
     }
     let complex_input = preflight_signal_carrier(&x)?;
-    let mut prepared_controls = preflight_host_controls(rest, complex_input, cooperation).await?;
+    let mut prepared_controls =
+        preflight_host_controls(rest, tokens, complex_input, cooperation).await?;
     #[cfg(not(feature = "plot-core"))]
     if named.wants_plot() {
         return Err(crate::plotting_hooks::unavailable_presentation());
@@ -256,7 +258,14 @@ async fn evaluate_with_cooperation(
         .map(|handle| runmat_accelerate_api::ResidencyRestoreGuard::new(handle))
         .collect::<Vec<_>>();
     cooperation.completed(0).await?;
-    ensure_pwelch_integer_boundary(&x, "signal", &PWELCH_ERROR_INVALID_SIGNAL).await?;
+    let prepared_signal_payload = ensure_pwelch_integer_boundary(
+        &x,
+        "signal",
+        &PWELCH_ERROR_INVALID_SIGNAL,
+        &PWELCH_INTEGER_SIGNAL_EXTENSION,
+        cooperation,
+    )
+    .await?;
     cooperation.completed(0).await?;
     let materialized_controls =
         materialize_resident_controls(rest, &mut prepared_controls, cooperation).await?;
@@ -293,6 +302,7 @@ async fn evaluate_with_cooperation(
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(
             &controls,
+            tokens,
             rows,
             complex_input,
             &mut prepared_controls,
@@ -312,7 +322,7 @@ async fn evaluate_with_cooperation(
     };
     drop(_preflight_guards);
     drop(resident_inputs);
-    let input = value_to_signal_columns(x, cooperation).await?;
+    let input = value_to_signal_columns(x, prepared_signal_payload, cooperation).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
     }
@@ -321,6 +331,7 @@ async fn evaluate_with_cooperation(
         None => {
             parse_options(
                 &controls,
+                tokens,
                 input.rows,
                 input.is_complex,
                 &mut prepared_controls,
@@ -371,19 +382,19 @@ async fn ensure_pwelch_integer_boundary(
     value: &Value,
     role: &str,
     error: &'static BuiltinErrorDescriptor,
-) -> BuiltinResult<()> {
-    use crate::builtins::common::validation::{
-        native_integer_value_is_exact_f64_async, value_has_native_integer_class,
-    };
-    if value_has_native_integer_class(value)
-        && !native_integer_value_is_exact_f64_async(value).await?
-    {
+    extension: &'static BuiltinExtensionDescriptor,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Option<crate::builtins::common::validation::PreparedIntegerPayload>> {
+    let prepared = cooperation
+        .prepare_integer_receipt(value, extension)
+        .await?;
+    if !prepared.is_exact() {
         return Err(pwelch_error_with_detail(
             error,
             format!("integer {role} values must be exactly representable as double"),
         ));
     }
-    Ok(())
+    Ok(prepared.into_resident_payload())
 }
 
 fn output_eval(eval: PwelchEvaluation, precision: SignalPrecision) -> BuiltinResult<Value> {

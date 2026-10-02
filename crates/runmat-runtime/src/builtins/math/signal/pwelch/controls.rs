@@ -1,46 +1,25 @@
 use super::*;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum WelchKeyword {
-    Onesided,
-    Twosided,
-    Centered,
-    Psd,
-    Power,
-    Mean,
-    MaxHold,
-    MinHold,
-    Unknown(String),
-}
+use PwelchControlRole as ControlRole;
+use PwelchKeyword as WelchKeyword;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ControlRole {
-    Window,
-    Overlap,
-    Grid,
-    SampleRate,
-    Option,
-}
-
-impl ControlRole {
-    fn at_positional_index(index: usize) -> Self {
-        match index {
-            0 => Self::Window,
-            1 => Self::Overlap,
-            2 => Self::Grid,
-            3 => Self::SampleRate,
-            _ => Self::Option,
-        }
+fn role_at_positional_index(index: usize) -> ControlRole {
+    match index {
+        0 => ControlRole::Window,
+        1 => ControlRole::Overlap,
+        2 => ControlRole::Grid,
+        3 => ControlRole::SampleRate,
+        _ => ControlRole::Option,
     }
+}
 
-    fn integer_boundary(self) -> Option<(&'static str, &'static BuiltinErrorDescriptor)> {
-        match self {
-            Self::Window => Some(("window", &PWELCH_ERROR_INVALID_WINDOW)),
-            Self::Overlap => Some(("overlap", &PWELCH_ERROR_INVALID_OVERLAP)),
-            Self::Grid => Some(("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT)),
-            Self::SampleRate => Some(("sample-rate", &PWELCH_ERROR_INVALID_FS)),
-            Self::Option => None,
-        }
+fn integer_boundary(role: ControlRole) -> Option<(&'static str, &'static BuiltinErrorDescriptor)> {
+    match role {
+        ControlRole::Window => Some(("window", &PWELCH_ERROR_INVALID_WINDOW)),
+        ControlRole::Overlap => Some(("overlap", &PWELCH_ERROR_INVALID_OVERLAP)),
+        ControlRole::Grid => Some(("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT)),
+        ControlRole::SampleRate => Some(("sample-rate", &PWELCH_ERROR_INVALID_FS)),
+        ControlRole::Option => None,
     }
 }
 
@@ -57,48 +36,20 @@ pub(super) struct PreparedHostControls {
 /// large window or frequency-vector work.
 pub(super) async fn preflight_host_controls(
     rest: &[&Value],
+    tokens: &[Option<PwelchKeyword>],
     complex_input: bool,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PreparedHostControls> {
     let mut prepared = PreparedHostControls::default();
-    let mut next_positional = ControlRole::Window;
-    let mut options_started = false;
-    for value in rest {
+    let mut cursor = PwelchControlCursor::default();
+    for (value, decoded) in rest.iter().zip(tokens) {
         cooperation.completed(1).await?;
-        let decoded = keyword(value);
-        let begins_options = decoded
-            .as_ref()
-            .is_some_and(|keyword| !matches!(keyword, WelchKeyword::Unknown(_)));
-        let role = if options_started || begins_options {
-            options_started = true;
-            ControlRole::Option
-        } else {
-            let role = next_positional;
-            next_positional = match role {
-                ControlRole::Window => ControlRole::Overlap,
-                ControlRole::Overlap => ControlRole::Grid,
-                ControlRole::Grid => ControlRole::SampleRate,
-                ControlRole::SampleRate | ControlRole::Option => ControlRole::Option,
-            };
-            role
-        };
+        let role = cursor.next(decoded.as_ref());
         if role == ControlRole::Option {
-            if complex_input && matches!(decoded.as_ref(), Some(WelchKeyword::Onesided)) {
+            if complex_input && matches!(decoded, Some(WelchKeyword::Onesided)) {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE));
             }
-            if !matches!(
-                decoded,
-                Some(
-                    WelchKeyword::Onesided
-                        | WelchKeyword::Twosided
-                        | WelchKeyword::Centered
-                        | WelchKeyword::Psd
-                        | WelchKeyword::Power
-                        | WelchKeyword::Mean
-                        | WelchKeyword::MaxHold
-                        | WelchKeyword::MinHold
-                )
-            ) {
+            if !decoded.as_ref().is_some_and(PwelchKeyword::is_selector) {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE));
             }
             continue;
@@ -106,8 +57,15 @@ pub(super) async fn preflight_host_controls(
         if matches!(value, Value::GpuTensor(_)) || is_empty(value) {
             continue;
         }
-        let (name, error) = role.integer_boundary().expect("option handled above");
-        ensure_pwelch_integer_boundary(value, name, error).await?;
+        let (name, error) = integer_boundary(role).expect("option handled above");
+        ensure_pwelch_integer_boundary(
+            value,
+            name,
+            error,
+            &PWELCH_INTEGER_CONTROL_EXTENSION,
+            cooperation,
+        )
+        .await?;
         match role {
             ControlRole::Window => {
                 // A text value in the first position has its owning window error.
@@ -116,7 +74,7 @@ pub(super) async fn preflight_host_controls(
                         &PWELCH_ERROR_INVALID_WINDOW,
                         format!(
                             "unexpected option '{}' before window arguments",
-                            keyword_label(&option)
+                            option.label()
                         ),
                     ));
                 }
@@ -167,12 +125,18 @@ pub(super) async fn materialize_resident_controls(
                 )
                 .await?;
             cooperation.completed(0).await?;
-            if let Some((role, error)) = ControlRole::at_positional_index(index).integer_boundary()
-            {
-                ensure_pwelch_integer_boundary(&host, role, error).await?;
+            if let Some((role, error)) = integer_boundary(role_at_positional_index(index)) {
+                ensure_pwelch_integer_boundary(
+                    &host,
+                    role,
+                    error,
+                    &PWELCH_INTEGER_CONTROL_EXTENSION,
+                    cooperation,
+                )
+                .await?;
             }
             if !is_empty(&host) {
-                match ControlRole::at_positional_index(index) {
+                match role_at_positional_index(index) {
                     ControlRole::Window => {
                         prepared.window = Some(parse_window(&host, cooperation).await?);
                     }
@@ -212,56 +176,14 @@ pub(super) async fn materialize_resident_controls(
     Ok(materialized)
 }
 
-fn keyword(value: &Value) -> Option<WelchKeyword> {
-    let text = match value {
-        Value::String(text) => text,
-        Value::StringArray(array) if array.data.len() == 1 => &array.data[0],
-        Value::CharArray(chars) if chars.rows <= 1 => {
-            let text = chars.data.iter().collect::<String>();
-            return Some(decode_keyword(&text));
-        }
-        _ => return None,
-    };
-    Some(decode_keyword(text))
-}
-
-fn decode_keyword(text: &str) -> WelchKeyword {
-    let normalized = text.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "onesided" => WelchKeyword::Onesided,
-        "twosided" => WelchKeyword::Twosided,
-        "centered" => WelchKeyword::Centered,
-        "psd" => WelchKeyword::Psd,
-        "power" => WelchKeyword::Power,
-        "mean" => WelchKeyword::Mean,
-        "maxhold" => WelchKeyword::MaxHold,
-        "minhold" => WelchKeyword::MinHold,
-        _ => WelchKeyword::Unknown(normalized),
-    }
-}
-
-fn keyword_label(keyword: &WelchKeyword) -> &str {
-    match keyword {
-        WelchKeyword::Onesided => "onesided",
-        WelchKeyword::Twosided => "twosided",
-        WelchKeyword::Centered => "centered",
-        WelchKeyword::Psd => "psd",
-        WelchKeyword::Power => "power",
-        WelchKeyword::Mean => "mean",
-        WelchKeyword::MaxHold => "maxhold",
-        WelchKeyword::MinHold => "minhold",
-        WelchKeyword::Unknown(value) => value,
-    }
-}
-
 pub(super) async fn parse_options(
     rest: &[&Value],
+    keywords: &[Option<PwelchKeyword>],
     input_len: usize,
     complex_input: bool,
     prepared: &mut PreparedHostControls,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PwelchOptions> {
-    let keywords = rest.iter().map(|value| keyword(value)).collect::<Vec<_>>();
     let mut idx = 0usize;
     let window = if let Some(value) = rest.get(idx) {
         if is_empty(value) {
@@ -271,7 +193,7 @@ pub(super) async fn parse_options(
             if matches!(keyword, WelchKeyword::Unknown(_)) {
                 return Err(pwelch_error_with_detail(
                     &PWELCH_ERROR_INVALID_WINDOW,
-                    format!("unknown window option '{}'", keyword_label(keyword)),
+                    format!("unknown window option '{}'", keyword.label()),
                 ));
             }
             default_window(input_len, cooperation).await?
@@ -392,6 +314,7 @@ pub(super) async fn parse_options(
             WelchKeyword::Mean => trace = WelchTrace::Mean,
             WelchKeyword::MaxHold => trace = WelchTrace::MaxHold,
             WelchKeyword::MinHold => trace = WelchTrace::MinHold,
+            WelchKeyword::Parent => return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE)),
             WelchKeyword::Unknown(_) => return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE)),
         }
     }
@@ -457,7 +380,7 @@ pub(super) async fn parse_frequency_grid(
         if let Some(units) = work.record(1) {
             cooperation.completed(units).await?;
         }
-        if value.im.abs() > EPS || !value.re.is_finite() {
+        if value.im != 0.0 || !value.re.is_finite() {
             return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
         }
         frequencies.push(value.re);
@@ -535,7 +458,7 @@ pub(super) async fn parse_window(
         if let Some(units) = work.record(1) {
             cooperation.completed(units).await?;
         }
-        if value.im.abs() > EPS || !value.re.is_finite() {
+        if value.im != 0.0 || !value.re.is_finite() {
             return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
         }
         out.push(value.re);

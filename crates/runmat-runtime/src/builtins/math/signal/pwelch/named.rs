@@ -12,6 +12,7 @@ type AxesTarget = ();
 
 pub(super) struct NamedControls<'a> {
     pub positional: Vec<&'a Value>,
+    pub tokens: Vec<Option<PwelchKeyword>>,
     pub parent: Option<AxesTarget>,
 }
 
@@ -32,10 +33,15 @@ pub(super) fn split_named_controls(rest: &[Value]) -> BuiltinResult<NamedControl
     positional
         .try_reserve_exact(rest.len())
         .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
+    let mut tokens = Vec::new();
+    tokens
+        .try_reserve_exact(rest.len())
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
     let mut parent = None;
     let mut index = 0;
     while index < rest.len() {
-        if is_parent_name(&rest[index]) {
+        let token = keyword(&rest[index]);
+        if token == Some(PwelchKeyword::Parent) {
             if parent.is_some() {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_PARENT));
             }
@@ -46,24 +52,28 @@ pub(super) fn split_named_controls(rest: &[Value]) -> BuiltinResult<NamedControl
             index += 2;
         } else {
             positional.push(&rest[index]);
+            tokens.push(token);
             index += 1;
         }
     }
-    Ok(NamedControls { positional, parent })
+    Ok(NamedControls {
+        positional,
+        tokens,
+        parent,
+    })
 }
 
-fn is_parent_name(value: &Value) -> bool {
+pub(super) fn keyword(value: &Value) -> Option<PwelchKeyword> {
     match value {
-        Value::String(text) => text.eq_ignore_ascii_case("parent"),
+        Value::String(text) => Some(PwelchKeyword::decode(text)),
         Value::StringArray(array) if array.data.len() == 1 => {
-            array.data[0].eq_ignore_ascii_case("parent")
+            Some(PwelchKeyword::decode(&array.data[0]))
         }
-        Value::CharArray(chars) if chars.rows <= 1 => chars
-            .data
-            .iter()
-            .collect::<String>()
-            .eq_ignore_ascii_case("parent"),
-        _ => false,
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            let text = chars.data.iter().collect::<String>();
+            Some(PwelchKeyword::decode(&text))
+        }
+        _ => None,
     }
 }
 
