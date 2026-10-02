@@ -10,7 +10,6 @@ use runmat_builtins::{
     INTEGRAL_ERROR_INVALID_ARGUMENT, INTEGRAL_ERROR_INVALID_INPUT, INTEGRAL_ERROR_TOO_MANY_OUTPUTS,
     INTEGRAL_INTEGER_BOUND_EXTENSION, INTEGRAL_INTEGER_OPTION_EXTENSION,
     INTEGRAL_LOGICAL_BOUND_EXTENSION, INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
-    INTEGRAL_VECTORIZED_OPTION_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Tensor, Value};
@@ -202,12 +201,6 @@ fn preflight_integral_option_extensions(
         value_has_logical_class, value_has_native_integer_class,
     };
     for &(name, value) in options {
-        if name == IntegralOptionName::Vectorized {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &INTEGRAL_VECTORIZED_OPTION_EXTENSION,
-                NAME,
-            )?;
-        }
         if value_has_native_integer_class(value) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &INTEGRAL_INTEGER_OPTION_EXTENSION,
@@ -1000,7 +993,7 @@ mod tests {
     }
 
     #[test]
-    fn vectorized_default_batches_samples_and_scalar_extension_is_gated() {
+    fn vectorized_default_batches_samples_and_scalar_option_honors_current_pin() {
         let default_error = run(
             Value::FunctionHandle("__integral_scalar_only".into()),
             0.0,
@@ -1018,11 +1011,8 @@ mod tests {
             ))
         };
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let gated = scalar_form().expect_err("newer scalar-callback selector is gated");
-        assert_eq!(
-            gated.identifier(),
-            INTEGRAL_VECTORIZED_OPTION_EXTENSION.error_identifier
-        );
+        let strict_result = scalar_form().expect("R2026a scalar-callback selector is compatible");
+        assert!(matches!(strict_result, Value::Num(value) if (value - 1.0/3.0).abs() < 1.0e-8));
         drop(_strict);
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = scalar_form().expect("RunMat scalar callback form");

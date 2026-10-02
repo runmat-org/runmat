@@ -11,7 +11,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "The callback can be a named function handle, anonymous function, or function-handle string. By default it receives row-vector batches of sample locations and must return a real row vector of the same shape. The adaptive solver batches its initial three samples and each subsequent pair.",
-            "`Vectorized=false` selects scalar callback calls as a RunMat extension beyond the pinned MATLAB compatibility release. Array-valued and complex-valued callbacks, complex contours, waypoints, and infinite bounds are not yet implemented. `ArrayValued=true` is rejected rather than misinterpreted as a scalar call.",
+            "`Vectorized=false` selects scalar callback calls, a form introduced in MATLAB R2026a and included in RunMat's current compatibility pin. Array-valued and complex-valued callbacks, complex contours, waypoints, and infinite bounds are not yet implemented. `ArrayValued=true` is rejected rather than misinterpreted as a scalar call.",
             "Finite reversed bounds negate the result; equal bounds return zero without invoking the callback.",
             "`AbsTol`, `RelTol`, and exact structural `MaxFunEvals`/`MaxIntervalCount` controls are accepted as name/value pairs or scalar options-struct fields. `ArrayValued=false` is admitted. The newer `AbsoluteTolerance` and `RelativeTolerance` spellings still need separate compatibility-pinned implementation.",
             "Typed-integer bounds and numeric options are separately gated RunMat extensions; floating conversions require exact binary64 representation. Counts remain structural integers.",
