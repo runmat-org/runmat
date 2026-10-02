@@ -46,7 +46,8 @@ pub use deep_learning::{
     DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
 pub use provider_execution::{
-    ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,
+    is_unsupported_provider_error, ProviderExecutionError, ProviderExecutionFuture,
+    ProviderExecutionResult,
 };
 mod placement;
 mod power;
@@ -1553,9 +1554,7 @@ pub fn unsupported_provider_operation(detail: impl Into<String>) -> anyhow::Erro
 }
 
 pub fn is_unsupported_provider_operation(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<UnsupportedProviderOperation>()
-        .is_some()
+    is_unsupported_provider_error(error.as_ref())
 }
 
 fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, T> {

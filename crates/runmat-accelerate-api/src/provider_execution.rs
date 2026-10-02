@@ -71,25 +71,28 @@ impl ProviderExecutionError {
 
     /// Only an explicit provider unsupported marker permits numerical fallback.
     pub fn is_unsupported(&self) -> bool {
-        if self.disposition == FallbackDisposition::AfterEffect {
+        is_unsupported_provider_error(self)
+    }
+}
+
+/// Shared fallback classification for platform-local, anyhow-wrapped, and
+/// RuntimeError-wrapped provider causes. An outer post-effect disposition
+/// dominates a retained nested Unsupported cause.
+pub fn is_unsupported_provider_error(mut error: &(dyn Error + 'static)) -> bool {
+    loop {
+        if error
+            .downcast_ref::<ProviderExecutionError>()
+            .is_some_and(|nested| nested.disposition == FallbackDisposition::AfterEffect)
+        {
             return false;
         }
-        let mut error: &(dyn Error + 'static) = self.source.as_error();
-        loop {
-            if error
-                .downcast_ref::<Self>()
-                .is_some_and(|nested| nested.disposition == FallbackDisposition::AfterEffect)
-            {
-                return false;
-            }
-            if error.is::<crate::UnsupportedProviderOperation>() {
-                return true;
-            }
-            let Some(source) = error.source() else {
-                return false;
-            };
-            error = source;
+        if error.is::<crate::UnsupportedProviderOperation>() {
+            return true;
         }
+        let Some(source) = error.source() else {
+            return false;
+        };
+        error = source;
     }
 }
 

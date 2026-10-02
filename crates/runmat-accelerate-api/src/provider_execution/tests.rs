@@ -55,6 +55,18 @@ fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
     assert!(!staged.is_unsupported());
     assert!(staged.source().unwrap().source().is_some());
     assert!(!ProviderExecutionError::from_source(staged).is_unsupported());
+
+    let wrapped = anyhow::Error::new(
+        ProviderExecutionError::from(crate::unsupported_provider_operation(
+            "post-effect source retained through anyhow",
+        ))
+        .after_effect(),
+    )
+    .context("outer operation failed");
+    assert!(!crate::is_unsupported_provider_operation(&wrapped));
+    assert!(wrapped
+        .chain()
+        .any(|source| source.is::<crate::UnsupportedProviderOperation>()));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

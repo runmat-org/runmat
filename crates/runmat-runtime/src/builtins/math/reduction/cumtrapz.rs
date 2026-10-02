@@ -527,14 +527,7 @@ fn restore_to_owner(
 }
 
 fn unsupported_spacing_failure(error: &RuntimeError) -> bool {
-    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    while let Some(error) = source {
-        if error.is::<runmat_accelerate_api::UnsupportedProviderOperation>() {
-            return true;
-        }
-        source = error.source();
-    }
-    false
+    runmat_accelerate_api::is_unsupported_provider_error(error)
 }
 
 #[cfg(test)]
@@ -553,6 +546,16 @@ fn spacing_fallback_recognizes_only_retained_typed_capability_rejection() {
         assert_eq!(unsupported_spacing_failure(&error), unsupported);
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     }
+    let staged = crate::runtime_error::with_provider_execution_source(
+        cumtrapz_internal_error("spacing provider stage failed"),
+        runmat_accelerate_api::ProviderExecutionError::from(
+            runmat_accelerate_api::unsupported_provider_operation(
+                "spacing primitive rejected after staging",
+            ),
+        )
+        .after_effect(),
+    );
+    assert!(!unsupported_spacing_failure(&staged));
 }
 
 #[cfg(test)]
