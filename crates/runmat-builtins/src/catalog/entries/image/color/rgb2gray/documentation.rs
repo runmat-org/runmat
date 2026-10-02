@@ -14,7 +14,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Multi-pixel single/double truecolor output retains its input class; the one-pixel single result is published as a double scalar. uint8/uint16 output retains its integer class using nearest rounding with ties away from zero and saturation.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "Supported resident input is checked by owner, class, and shape before download. The host conversion is a fusion boundary and restores a numeric result through the original provider when possible; explicit device intent is preserved or fails. The call can suspend and throw.",
+            "Supported resident input is checked by owner, class, and shape before download. The typed gather, host conversion, and exact-owner restoration are one admitted whole-work route when its provider upload is supported; shared placement accounts for readback host workspace, physical retention, and completion-qualified feedback. Without that route, the existing host conversion and restoration behavior remains. The conversion is a fusion boundary; explicit device intent is preserved or fails. The call can suspend and throw.",
         ]},
     ],
     examples: &[
@@ -48,10 +48,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[
             BuiltinDocumentationLink { label: "Luminance conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/rgb2gray.rs") },
             BuiltinDocumentationLink { label: "RGB admission and residency", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/rgb_input.rs") },
+            BuiltinDocumentationLink { label: "Resident whole-work presentation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/rgb_presentation.rs") },
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Truecolor/colormap and resident class tests", location: "crates/runmat-runtime/src/builtins/image/color/rgb2gray.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled color binding and fusion boundary", location: "crates/runmat-runtime/tests/image_color_catalog_binding.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident owner-upload admission and feedback", location: "crates/runmat-runtime/src/builtins/image/color/rgb_presentation/tests.rs" },
         ],
         notes: &["Native/JIT/AOT, browser, real-provider and whole-work placement qualification remain integration requirements."],
     },

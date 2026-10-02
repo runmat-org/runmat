@@ -16,6 +16,24 @@ fn supported(layout: ColorLayout, dtype: NumericDType) -> bool {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct ResidentRgbInput {
+    pub(crate) layout: ColorLayout,
+    pub(crate) dtype: NumericDType,
+}
+
+pub(crate) enum RgbAdmission {
+    PreparedHost,
+    PreparedResident(ResidentRgbInput),
+    Unprepared,
+}
+
+impl RgbAdmission {
+    pub(crate) fn prepares(&self) -> bool {
+        !matches!(self, Self::Unprepared)
+    }
+}
+
 pub(crate) fn host_layout(
     tensor: &Tensor,
     name: &'static str,
@@ -47,7 +65,7 @@ pub(crate) fn host_layout(
 pub(crate) fn resident_layout(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     name: &'static str,
-) -> BuiltinResult<ColorLayout> {
+) -> BuiltinResult<ResidentRgbInput> {
     let dtype = common::resident_numeric_dtype(handle, name)?;
     let shape = handle.shape();
     let layout = if shape.len() == 3 && shape[2] == 3 && shape[0] > 0 && shape[1] > 0 {
@@ -61,7 +79,7 @@ pub(crate) fn resident_layout(
         None
     };
     match layout {
-        Some(layout) if supported(layout, dtype) => Ok(layout),
+        Some(layout) if supported(layout, dtype) => Ok(ResidentRgbInput { layout, dtype }),
         _ => Err(common::builtin_error(
             name,
             format!(
@@ -80,12 +98,14 @@ pub(crate) fn admitted(
     name: &'static str,
     conversion: RgbConversion,
     map: impl FnOnce(RuntimeError) -> RuntimeError,
-) -> BuiltinResult<bool> {
+) -> BuiltinResult<RgbAdmission> {
     match value {
         Value::Tensor(tensor) => host_layout(tensor, name, conversion)
-            .map(|_| true)
+            .map(|_| RgbAdmission::PreparedHost)
             .map_err(map),
-        Value::GpuTensor(handle) => resident_layout(handle, name).map(|_| true).map_err(map),
-        _ => Ok(false),
+        Value::GpuTensor(handle) => resident_layout(handle, name)
+            .map(RgbAdmission::PreparedResident)
+            .map_err(map),
+        _ => Ok(RgbAdmission::Unprepared),
     }
 }

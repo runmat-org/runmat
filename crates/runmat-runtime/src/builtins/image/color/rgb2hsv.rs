@@ -12,7 +12,11 @@ use runmat_value::{NumericDType, Value};
 
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::rgb_input;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::builtins::image::color::rgb_presentation::{self, SelectedRgbPresentation};
+use crate::context::preparation::{
+    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
+    BuiltinPreparationAdmission,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rgb2hsv";
@@ -47,9 +51,14 @@ fn rgb2hsv_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 #[runtime_builtin(
     name = "rgb2hsv",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::color::rgb2hsv"
 )]
-async fn rgb2hsv_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rgb2hsv_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    rgb: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(rgb2hsv_error(&RGB2HSV_ERROR_TOO_MANY_INPUTS));
     }
@@ -65,10 +74,16 @@ async fn rgb2hsv_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => vec![handle.clone()],
         _ => Vec::new(),
     };
-    if !admitted {
-        return rgb2hsv_execute(rgb, resident_sources).await;
+    let selected = match (&rgb, &admitted) {
+        (Value::GpuTensor(owner), rgb_input::RgbAdmission::PreparedResident(input)) => {
+            rgb_presentation::select(runtime.as_ref(), NAME, owner, *input, RgbConversion::Hsv)?
+        }
+        _ => None,
+    };
+    if !admitted.prepares() {
+        return rgb2hsv_execute(rgb, resident_sources, selected).await;
     }
-    execute_current_invocation(
+    let request = AdmittedBuiltinPreparation::new(
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: BuiltinCatalogIdentity { name: NAME },
@@ -80,20 +95,25 @@ async fn rgb2hsv_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             requested_outputs: crate::output_count::current_output_count(),
         },
         vec![rgb],
-        |mut operands| async move {
-            rgb2hsv_execute(
-                operands.pop().expect("one admitted RGB operand"),
-                resident_sources,
-            )
-            .await
-        },
-    )
-    .await
+    )?;
+    let execute = |mut operands: Vec<Value>| async move {
+        rgb2hsv_execute(
+            operands.pop().expect("one admitted RGB operand"),
+            resident_sources,
+            selected,
+        )
+        .await
+    };
+    match runtime.as_ref() {
+        Some(runtime) => execute_admitted(runtime, request, execute).await,
+        None => execute_current_request(request, execute).await,
+    }
 }
 
 async fn rgb2hsv_execute(
     rgb: Value,
     resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
+    mut selected: Option<SelectedRgbPresentation>,
 ) -> BuiltinResult<Value> {
     let resident_guard = common::protect_resident_inputs(&resident_sources);
     let tensor = match rgb {
@@ -129,11 +149,13 @@ async fn rgb2hsv_execute(
     }
     let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INTERNAL))?;
-    common::restore_resident_numeric_result_for_sources(
-        &resident_sources,
-        common::image_value_from_tensor(out),
-        NAME,
-    )
+    rgb_presentation::publish(&mut selected, || {
+        common::restore_resident_numeric_result_for_sources(
+            &resident_sources,
+            common::image_value_from_tensor(out),
+            NAME,
+        )
+    })
 }
 
 pub(crate) fn rgb_to_hsv_unit(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
@@ -170,7 +192,7 @@ mod tests {
 
     fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) =
-            block_on(rgb2hsv_builtin(Value::Tensor(tensor), Vec::new())).expect("rgb2hsv")
+            block_on(rgb2hsv_builtin(None, Value::Tensor(tensor), Vec::new())).expect("rgb2hsv")
         else {
             panic!("expected tensor");
         };
@@ -277,7 +299,7 @@ mod tests {
             IntegerStorage::U64(vec![0; 3]),
         ] {
             let input = Tensor::new_integer(storage, vec![1, 1, 3]).unwrap();
-            let err = block_on(rgb2hsv_builtin(Value::Tensor(input), Vec::new()))
+            let err = block_on(rgb2hsv_builtin(None, Value::Tensor(input), Vec::new()))
                 .expect_err("unsupported integer class");
             assert_eq!(err.identifier(), RGB2HSV_ERROR_INVALID_INPUT.identifier);
         }
@@ -286,7 +308,7 @@ mod tests {
     #[test]
     fn rejects_grayscale_shape() {
         let gray = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = block_on(rgb2hsv_builtin(Value::Tensor(gray), Vec::new())).unwrap_err();
+        let err = block_on(rgb2hsv_builtin(None, Value::Tensor(gray), Vec::new())).unwrap_err();
         assert!(err
             .message()
             .contains("expected an MxNx3 RGB image or an Nx3 colormap"));
@@ -325,6 +347,7 @@ mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .expect("publish provenance view");
             let result = block_on(rgb2hsv_builtin(
+                None,
                 Value::GpuTensor(source.clone()),
                 Vec::new(),
             ))
@@ -363,6 +386,7 @@ mod tests {
             .expect("admit owned fixture")
             .handle;
         let err = block_on(rgb2hsv_builtin(
+            None,
             Value::GpuTensor(handle.clone()),
             Vec::new(),
         ))
@@ -384,8 +408,12 @@ mod tests {
 
     #[test]
     fn rgb2hsv_too_many_args_uses_stable_identifier() {
-        let err = block_on(rgb2hsv_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
-            .expect_err("expected argument error");
+        let err = block_on(rgb2hsv_builtin(
+            None,
+            Value::Num(1.0),
+            vec![Value::Num(2.0)],
+        ))
+        .expect_err("expected argument error");
         assert_eq!(err.identifier(), RGB2HSV_ERROR_TOO_MANY_INPUTS.identifier);
     }
 }

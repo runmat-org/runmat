@@ -13,6 +13,7 @@ pub mod rgb2gray;
 pub mod rgb2hsv;
 pub mod rgb2lab;
 pub(crate) mod rgb_input;
+pub(crate) mod rgb_presentation;
 pub(crate) mod type_resolvers;
 
 #[cfg(test)]

@@ -14,7 +14,11 @@ use runmat_value::{NumericDType, NumericScalar, NumericStorage, Tensor, Value};
 
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::rgb_input;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::builtins::image::color::rgb_presentation::{self, SelectedRgbPresentation};
+use crate::context::preparation::{
+    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
+    BuiltinPreparationAdmission,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rgb2gray";
@@ -52,9 +56,14 @@ fn rgb2gray_map_error(
 #[runtime_builtin(
     name = "rgb2gray",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::color::rgb2gray"
 )]
-async fn rgb2gray_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rgb2gray_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    rgb: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(rgb2gray_error(&RGB2GRAY_ERROR_TOO_MANY_INPUTS));
     }
@@ -70,10 +79,16 @@ async fn rgb2gray_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::GpuTensor(handle) => vec![handle.clone()],
         _ => Vec::new(),
     };
-    if !admitted {
-        return rgb2gray_execute(rgb, resident_sources).await;
+    let selected = match (&rgb, &admitted) {
+        (Value::GpuTensor(owner), rgb_input::RgbAdmission::PreparedResident(input)) => {
+            rgb_presentation::select(runtime.as_ref(), NAME, owner, *input, RgbConversion::Gray)?
+        }
+        _ => None,
+    };
+    if !admitted.prepares() {
+        return rgb2gray_execute(rgb, resident_sources, selected).await;
     }
-    execute_current_invocation(
+    let request = AdmittedBuiltinPreparation::new(
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: BuiltinCatalogIdentity { name: NAME },
@@ -85,20 +100,25 @@ async fn rgb2gray_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             requested_outputs: crate::output_count::current_output_count(),
         },
         vec![rgb],
-        |mut operands| async move {
-            rgb2gray_execute(
-                operands.pop().expect("one admitted RGB operand"),
-                resident_sources,
-            )
-            .await
-        },
-    )
-    .await
+    )?;
+    let execute = |mut operands: Vec<Value>| async move {
+        rgb2gray_execute(
+            operands.pop().expect("one admitted RGB operand"),
+            resident_sources,
+            selected,
+        )
+        .await
+    };
+    match runtime.as_ref() {
+        Some(runtime) => execute_admitted(runtime, request, execute).await,
+        None => execute_current_request(request, execute).await,
+    }
 }
 
 async fn rgb2gray_execute(
     rgb: Value,
     resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
+    mut selected: Option<SelectedRgbPresentation>,
 ) -> BuiltinResult<Value> {
     let resident_guard = common::protect_resident_inputs(&resident_sources);
     let tensor = match rgb {
@@ -110,11 +130,13 @@ async fn rgb2gray_execute(
     resident_guard.restore();
     let out = rgb2gray_tensor(&tensor)
         .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INTERNAL))?;
-    common::restore_resident_numeric_result_for_sources(
-        &resident_sources,
-        common::image_value_from_tensor(out),
-        NAME,
-    )
+    rgb_presentation::publish(&mut selected, || {
+        common::restore_resident_numeric_result_for_sources(
+            &resident_sources,
+            common::image_value_from_tensor(out),
+            NAME,
+        )
+    })
 }
 
 fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
@@ -214,7 +236,7 @@ mod tests {
     use runmat_value::IntegerStorage;
 
     fn call(value: Value) -> Value {
-        block_on(rgb2gray_builtin(value, Vec::new())).expect("rgb2gray")
+        block_on(rgb2gray_builtin(None, value, Vec::new())).expect("rgb2gray")
     }
 
     fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
@@ -317,7 +339,7 @@ mod tests {
     fn rejects_int16_truecolor_images() {
         let rgb =
             Tensor::new_with_dtype(vec![0.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::I16).unwrap();
-        let err = block_on(rgb2gray_builtin(Value::Tensor(rgb), Vec::new()))
+        let err = block_on(rgb2gray_builtin(None, Value::Tensor(rgb), Vec::new()))
             .expect_err("int16 truecolor is not a supported MATLAB rgb2gray input class");
         assert_eq!(err.identifier(), RGB2GRAY_ERROR_INVALID_INPUT.identifier);
         assert!(err.message().contains("int16"));
@@ -326,7 +348,7 @@ mod tests {
     #[test]
     fn rejects_non_rgb_matrix_shape() {
         let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let err = block_on(rgb2gray_builtin(Value::Tensor(map), Vec::new())).unwrap_err();
+        let err = block_on(rgb2gray_builtin(None, Value::Tensor(map), Vec::new())).unwrap_err();
         assert!(err
             .message()
             .contains("expected an MxNx3 RGB image or an Nx3 colormap"));
@@ -369,6 +391,7 @@ mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .expect("publish provenance view");
             let result = block_on(rgb2gray_builtin(
+                None,
                 Value::GpuTensor(source.clone()),
                 Vec::new(),
             ))
@@ -406,6 +429,7 @@ mod tests {
             .expect("admit owned fixture")
             .handle;
         let err = block_on(rgb2gray_builtin(
+            None,
             Value::GpuTensor(handle.clone()),
             Vec::new(),
         ))
@@ -427,8 +451,12 @@ mod tests {
 
     #[test]
     fn rgb2gray_too_many_args_uses_stable_identifier() {
-        let err = block_on(rgb2gray_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
-            .expect_err("expected argument error");
+        let err = block_on(rgb2gray_builtin(
+            None,
+            Value::Num(1.0),
+            vec![Value::Num(2.0)],
+        ))
+        .expect_err("expected argument error");
         assert_eq!(err.identifier(), RGB2GRAY_ERROR_TOO_MANY_INPUTS.identifier);
     }
 
