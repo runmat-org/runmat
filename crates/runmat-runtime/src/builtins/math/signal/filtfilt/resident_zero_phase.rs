@@ -72,7 +72,7 @@ async fn prepare_indices(
 pub(super) fn preflight_route(
     input: &GpuTensorHandle,
     coefficient_len: usize,
-    output_single: bool,
+    output_dtype: NumericDType,
 ) -> BuiltinResult<bool> {
     if handle_integer_type(input).is_some()
         || handle_is_logical(input)
@@ -85,7 +85,9 @@ pub(super) fn preflight_route(
     let Some(precision) = handle_precision(input) else {
         return Ok(false);
     };
-    if (precision == ProviderPrecision::F32) != output_single || precision != provider.precision() {
+    if (precision == ProviderPrecision::F32) != (output_dtype == NumericDType::F32)
+        || precision != provider.precision()
+    {
         return Ok(false);
     }
     let reflection_len = coefficient_len

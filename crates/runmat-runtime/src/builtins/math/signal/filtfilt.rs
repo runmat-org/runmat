@@ -189,11 +189,16 @@ async fn evaluate_with_runtime(
             resident_output::owner(handle, || filtfilt_error(descriptor))?;
         }
     }
+    let output_dtype = if [&b, &a, &x].into_iter().any(value_is_single) {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     let resident_preflight = if let Value::GpuTensor(handle) = &x {
         resident_zero_phase::preflight_route(
             handle,
             admitted_geometry.coefficient_len,
-            [&b, &a, &x].into_iter().any(value_is_single),
+            output_dtype,
         )?
     } else {
         false
@@ -204,7 +209,6 @@ async fn evaluate_with_runtime(
     for value in [&b, &a, &x] {
         ensure_wide_integer_data_exact(value, BUILTIN_NAME)?;
     }
-    let output_single = [&b, &a, &x].into_iter().any(value_is_single);
     crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
@@ -229,11 +233,6 @@ async fn evaluate_with_runtime(
             )
         })?;
     let coeffs = NormalizedCoefficients::new(&b_input.data, &a_input.data)?;
-    let output_dtype = if output_single {
-        NumericDType::F32
-    } else {
-        NumericDType::F64
-    };
     let borrowed = [b_input.gpu_handle.as_ref(), a_input.gpu_handle.as_ref()]
         .into_iter()
         .flatten()
