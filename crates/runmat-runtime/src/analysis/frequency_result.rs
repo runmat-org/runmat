@@ -6,7 +6,7 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralFrequencyPublicationManifest,
     StructuralFrequencySolverResult, StructuralFrequencyWorkload,
 };
-use runmat_execution::value::{PublishedObjectCatalog, PublishedObjectSource, ValueRef};
+use runmat_execution::value::{PublishedObjectCatalog, PublishedObjectSource};
 use runmat_execution::Digest;
 
 mod admission;
@@ -17,121 +17,34 @@ pub(in crate::analysis) use admission::{
     CompletedStructuralFrequencyStep, StructuralFrequencyPersistence,
 };
 
-/// One explicitly assigned semantic root in a structural-frequency object closure.
-///
-/// This is a process-local handoff contract. The reference locates the immutable analysis-object
-/// manifest, while the remaining fields state exactly what that manifest must describe when the
-/// runtime admits it. Root roles are assigned by [`StructuralFrequencyArtifactRootIndex`]; callers
-/// must not infer them from media types, schemas, or catalog position.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralFrequencyArtifactRoot {
-    reference: ValueRef,
-    expected_kind: AnalysisNumericalObjectKind,
-    expected_logical_identity: Digest,
-    expected_payload_digest: Digest,
+use super::{AnalysisArtifactRoot, FrequencySampleArtifactRoots, ObservationHistoryArtifactRoot};
+
+#[derive(Debug, Clone)]
+pub enum StructuralStudyPrestressedFrequencyReductionResult {
+    Direct,
+    ModalReduced(Box<StructuralStudyPrestressedModalFrequencyReductionResult>),
 }
 
-impl StructuralFrequencyArtifactRoot {
-    pub fn new(
-        reference: ValueRef,
-        expected_kind: AnalysisNumericalObjectKind,
-        expected_logical_identity: Digest,
-        expected_payload_digest: Digest,
-    ) -> Result<Self, String> {
-        if expected_logical_identity == Digest::sha256([])
-            || expected_payload_digest == Digest::sha256([])
-        {
-            return Err(
-                "structural frequency artifact root requires nonempty logical and payload identities"
-                    .into(),
-            );
-        }
-        Ok(Self {
-            reference,
-            expected_kind,
-            expected_logical_identity,
-            expected_payload_digest,
-        })
-    }
-
-    pub fn reference(&self) -> &ValueRef {
-        &self.reference
-    }
-
-    pub const fn expected_kind(&self) -> AnalysisNumericalObjectKind {
-        self.expected_kind
-    }
-
-    pub const fn expected_logical_identity(&self) -> Digest {
-        self.expected_logical_identity
-    }
-
-    pub const fn expected_payload_digest(&self) -> Digest {
-        self.expected_payload_digest
-    }
-
-    fn validate_role(
-        &self,
-        expected_kind: AnalysisNumericalObjectKind,
-        expected_logical_identity: Digest,
-        role: &str,
-    ) -> Result<(), String> {
-        if self.expected_kind != expected_kind
-            || self.expected_logical_identity != expected_logical_identity
-            || self.expected_payload_digest == Digest::sha256([])
-        {
-            return Err(format!(
-                "structural frequency {role} root differs from its semantic publication"
-            ));
-        }
-        Ok(())
-    }
+#[derive(Debug, Clone)]
+pub struct StructuralStudyPrestressedModalFrequencyReductionResult {
+    pub modal_step_id: ProcedureStepId,
+    pub modal_result: runmat_analysis_fea::execution::StructuralModalSolverResult,
+    pub modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
+    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
 
-/// Ordered artifact roots for one published structural-frequency sample.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralFrequencySampleArtifactRoots {
-    fields: StructuralFrequencyArtifactRoot,
-    observations: Option<StructuralFrequencyArtifactRoot>,
-}
-
-impl StructuralFrequencySampleArtifactRoots {
-    pub fn new(
-        fields: StructuralFrequencyArtifactRoot,
-        observations: Option<StructuralFrequencyArtifactRoot>,
-    ) -> Self {
-        Self {
-            fields,
-            observations,
-        }
-    }
-
-    pub const fn fields(&self) -> &StructuralFrequencyArtifactRoot {
-        &self.fields
-    }
-
-    pub const fn observations(&self) -> Option<&StructuralFrequencyArtifactRoot> {
-        self.observations.as_ref()
-    }
-}
-
-/// Ordered artifact root for one published structural-frequency history.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralFrequencyHistoryArtifactRoot {
-    checkpoint: StructuralFrequencyArtifactRoot,
-}
-
-impl StructuralFrequencyHistoryArtifactRoot {
-    pub const fn new(checkpoint: StructuralFrequencyArtifactRoot) -> Self {
-        Self { checkpoint }
-    }
-
-    pub const fn checkpoint(&self) -> &StructuralFrequencyArtifactRoot {
-        &self.checkpoint
-    }
+#[derive(Debug, Clone)]
+pub struct StructuralStudyPrestressedFrequencyNumericalResult {
+    pub frozen_project_digest: Option<runmat_execution::Digest>,
+    pub preload_step_id: ProcedureStepId,
+    pub frequency_step_id: ProcedureStepId,
+    pub preload_result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
+    pub preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub preload_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
+    pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub reduction: StructuralStudyPrestressedFrequencyReductionResult,
+    pub frequency: StructuralStudyFrequencyNumericalResult,
 }
 
 /// Typed storage index over every semantic root in a structural-frequency closure.
@@ -144,20 +57,20 @@ impl StructuralFrequencyHistoryArtifactRoot {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralFrequencyArtifactRootIndex {
-    result: StructuralFrequencyArtifactRoot,
-    receipt: StructuralFrequencyArtifactRoot,
-    resource_usage: StructuralFrequencyArtifactRoot,
-    samples: Vec<StructuralFrequencySampleArtifactRoots>,
-    histories: Vec<StructuralFrequencyHistoryArtifactRoot>,
+    result: AnalysisArtifactRoot,
+    receipt: AnalysisArtifactRoot,
+    resource_usage: AnalysisArtifactRoot,
+    samples: Vec<FrequencySampleArtifactRoots>,
+    histories: Vec<ObservationHistoryArtifactRoot>,
 }
 
 impl StructuralFrequencyArtifactRootIndex {
     pub fn new(
-        result: StructuralFrequencyArtifactRoot,
-        receipt: StructuralFrequencyArtifactRoot,
-        resource_usage: StructuralFrequencyArtifactRoot,
-        samples: Vec<StructuralFrequencySampleArtifactRoots>,
-        histories: Vec<StructuralFrequencyHistoryArtifactRoot>,
+        result: AnalysisArtifactRoot,
+        receipt: AnalysisArtifactRoot,
+        resource_usage: AnalysisArtifactRoot,
+        samples: Vec<FrequencySampleArtifactRoots>,
+        histories: Vec<ObservationHistoryArtifactRoot>,
         publication: &StructuralFrequencyPublicationManifest,
         object_catalog: &PublishedObjectCatalog,
     ) -> Result<Self, String> {
@@ -172,23 +85,23 @@ impl StructuralFrequencyArtifactRootIndex {
         Ok(index)
     }
 
-    pub const fn result(&self) -> &StructuralFrequencyArtifactRoot {
+    pub const fn result(&self) -> &AnalysisArtifactRoot {
         &self.result
     }
 
-    pub const fn receipt(&self) -> &StructuralFrequencyArtifactRoot {
+    pub const fn receipt(&self) -> &AnalysisArtifactRoot {
         &self.receipt
     }
 
-    pub const fn resource_usage(&self) -> &StructuralFrequencyArtifactRoot {
+    pub const fn resource_usage(&self) -> &AnalysisArtifactRoot {
         &self.resource_usage
     }
 
-    pub fn samples(&self) -> &[StructuralFrequencySampleArtifactRoots] {
+    pub fn samples(&self) -> &[FrequencySampleArtifactRoots] {
         &self.samples
     }
 
-    pub fn histories(&self) -> &[StructuralFrequencyHistoryArtifactRoot] {
+    pub fn histories(&self) -> &[ObservationHistoryArtifactRoot] {
         &self.histories
     }
 
@@ -223,23 +136,7 @@ impl StructuralFrequencyArtifactRootIndex {
             );
         }
         for (roots, sample) in self.samples.iter().zip(publication.samples()) {
-            roots.fields.validate_role(
-                AnalysisNumericalObjectKind::Field,
-                sample.fields.identity.digest(),
-                "field",
-            )?;
-            match (&roots.observations, &sample.observations) {
-                (Some(root), Some(observations)) => root.validate_role(
-                    AnalysisNumericalObjectKind::Observation,
-                    observations.identity.digest(),
-                    "observation",
-                )?,
-                (None, None) => {}
-                _ => return Err(
-                    "structural frequency observation roots differ from the published sample order"
-                        .into(),
-                ),
-            }
+            roots.validate_catalogs(&sample.fields, sample.observations.as_ref())?;
         }
 
         if self.histories.len() != publication.histories().len() {
@@ -272,14 +169,7 @@ impl StructuralFrequencyArtifactRootIndex {
                 .iter()
                 .map(|history| history.checkpoint.reference.clone()),
         );
-        declared_roots.sort_by_key(|reference| reference.id);
-        if declared_roots != object_catalog.roots {
-            return Err(
-                "structural frequency artifact-root index differs from the published root inventory"
-                    .into(),
-            );
-        }
-        Ok(())
+        super::artifact_root::validate_complete_root_inventory(declared_roots, object_catalog)
     }
 }
 

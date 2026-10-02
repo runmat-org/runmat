@@ -24,8 +24,8 @@ use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
     run_modal_with_options, run_nonlinear_with_options, run_thermal_with_options,
     run_transient_with_options, AnalysisRunIdentity, ComputeBackend, ExecutionBackend,
-    FeaBucklingRunResult, FeaProgressHandler, FeaRunResult, ModalSolveOptions,
-    SolverMethod, SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
+    FeaBucklingRunResult, FeaProgressHandler, FeaRunResult, ModalSolveOptions, SolverMethod,
+    SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
 };
 use runmat_geometry_core::UnitSystem;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -52,6 +52,11 @@ use policy::{
     THERMO_SPREAD_THRESHOLD_BALANCED,
 };
 
+mod artifact_root;
+pub use artifact_root::{
+    AdmittedFrequencySamplePublication, AnalysisArtifactRoot, FrequencySampleArtifactRootInventory,
+    FrequencySampleArtifactRoots, FrequencySamplePublicationAccess, ObservationHistoryArtifactRoot,
+};
 mod contracts;
 #[cfg(test)]
 mod excitation_authoring;
@@ -237,41 +242,14 @@ pub struct StructuralStudyPrestressedModalNumericalResult {
     pub modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
 }
 
-#[derive(Debug, Clone)]
-pub enum StructuralStudyPrestressedFrequencyReductionResult {
-    Direct,
-    ModalReduced(Box<StructuralStudyPrestressedModalFrequencyReductionResult>),
-}
-
-#[derive(Debug, Clone)]
-pub struct StructuralStudyPrestressedModalFrequencyReductionResult {
-    pub modal_step_id: ProcedureStepId,
-    pub modal_result: runmat_analysis_fea::execution::StructuralModalSolverResult,
-    pub modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
-    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
-}
-
-#[derive(Debug, Clone)]
-pub struct StructuralStudyPrestressedFrequencyNumericalResult {
-    pub frozen_project_digest: Option<runmat_execution::Digest>,
-    pub preload_step_id: ProcedureStepId,
-    pub frequency_step_id: ProcedureStepId,
-    pub preload_result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
-    pub preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
-    pub preload_numerical_receipt:
-        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
-    pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
-    pub reduction: StructuralStudyPrestressedFrequencyReductionResult,
-    pub frequency: StructuralStudyFrequencyNumericalResult,
-}
-
 mod study_numerical_result;
 pub use study_numerical_result::StructuralStudyNumericalResult;
 
 pub use frequency_result::{
-    StructuralFrequencyArtifactRoot, StructuralFrequencyArtifactRootIndex,
-    StructuralFrequencyHistoryArtifactRoot, StructuralFrequencySampleArtifactRoots,
-    StructuralStudyFrequencyNumericalResult,
+    StructuralFrequencyArtifactRootIndex, StructuralStudyFrequencyNumericalResult,
+    StructuralStudyPrestressedFrequencyNumericalResult,
+    StructuralStudyPrestressedFrequencyReductionResult,
+    StructuralStudyPrestressedModalFrequencyReductionResult,
 };
 
 impl PreparedStructuralLinearRun {

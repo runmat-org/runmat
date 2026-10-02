@@ -136,7 +136,7 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
     let sample_roots = entries
         .iter()
         .map(|entry| {
-            let fields = runmat_runtime::analysis::StructuralFrequencyArtifactRoot::new(
+            let fields = runmat_runtime::analysis::AnalysisArtifactRoot::new(
                 entry.recovered_fields.output.root.clone(),
                 entry.recovered_fields.output.kind,
                 entry.recovered_fields.output.logical_identity,
@@ -147,7 +147,7 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
                 .observations
                 .as_ref()
                 .map(|observations| {
-                    runmat_runtime::analysis::StructuralFrequencyArtifactRoot::new(
+                    runmat_runtime::analysis::AnalysisArtifactRoot::new(
                         observations.output.root.clone(),
                         observations.output.kind,
                         observations.output.logical_identity,
@@ -156,12 +156,10 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
                     .map_err(protocol)
                 })
                 .transpose()?;
-            Ok(
-                runmat_runtime::analysis::StructuralFrequencySampleArtifactRoots::new(
-                    fields,
-                    observations,
-                ),
-            )
+            Ok(runmat_runtime::analysis::FrequencySampleArtifactRoots::new(
+                fields,
+                observations,
+            ))
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let history_roots = histories
@@ -173,7 +171,7 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
                 .root_reference(access, ValueRefKind::ResultObject)
                 .map_err(protocol)?;
             Ok(
-                runmat_runtime::analysis::StructuralFrequencyHistoryArtifactRoot::new(
+                runmat_runtime::analysis::ObservationHistoryArtifactRoot::new(
                     super::result_import::runtime_artifact_root(
                         &history.checkpoint.objects,
                         reference,

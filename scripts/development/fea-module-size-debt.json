@@ -1,5 +1,5 @@
 {
-  "crates/runmat-runtime/src/analysis/mod.rs": 6395,
+  "crates/runmat-runtime/src/analysis/mod.rs": 6373,
   "crates/runmat-analysis/fea/src/assembly/mod.rs": 4396,
   "crates/runmat-runtime/src/analysis/figures.rs": 3808,
   "crates/runmat-runtime/src/analysis/contracts.rs": 3060,

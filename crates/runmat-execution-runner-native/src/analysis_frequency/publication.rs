@@ -3,8 +3,8 @@ use runmat_analysis_fea::execution::AnalysisNumericalObjectKind;
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution_artifact::{ArtifactAccess, PublishedObjectCatalog};
 use runmat_runtime::analysis::{
-    StructuralFrequencyArtifactRoot, StructuralFrequencyArtifactRootIndex,
-    StructuralFrequencyHistoryArtifactRoot, StructuralFrequencySampleArtifactRoots,
+    AnalysisArtifactRoot, FrequencySampleArtifactRoots, ObservationHistoryArtifactRoot,
+    StructuralFrequencyArtifactRootIndex,
 };
 
 use super::CompletedStructuralFrequencyStudy;
@@ -83,7 +83,7 @@ impl CompletedStructuralFrequencyStudy {
             .iter()
             .zip(&self.observation_samples)
             .map(|(entry, observations)| {
-                let fields = StructuralFrequencyArtifactRoot::new(
+                let fields = AnalysisArtifactRoot::new(
                     entry.recovered_fields.output.root.clone(),
                     AnalysisNumericalObjectKind::Field,
                     entry.recovered_fields.output.logical_identity,
@@ -94,7 +94,7 @@ impl CompletedStructuralFrequencyStudy {
                     .observations
                     .as_ref()
                     .map(|observations| {
-                        StructuralFrequencyArtifactRoot::new(
+                        AnalysisArtifactRoot::new(
                             observations.output.root.clone(),
                             AnalysisNumericalObjectKind::Observation,
                             observations.output.logical_identity,
@@ -103,10 +103,7 @@ impl CompletedStructuralFrequencyStudy {
                         .map_err(protocol)
                     })
                     .transpose()?;
-                Ok(StructuralFrequencySampleArtifactRoots::new(
-                    fields,
-                    observations,
-                ))
+                Ok(FrequencySampleArtifactRoots::new(fields, observations))
             })
             .collect::<NativeExecutionResult<Vec<_>>>()?;
         for history in &self.histories {
@@ -134,7 +131,7 @@ impl CompletedStructuralFrequencyStudy {
                     .objects
                     .root_reference(access, ValueRefKind::ResultObject)
                     .map_err(protocol)?;
-                Ok(StructuralFrequencyHistoryArtifactRoot::new(artifact_root(
+                Ok(ObservationHistoryArtifactRoot::new(artifact_root(
                     &history.checkpoint.objects,
                     reference,
                 )?))
@@ -158,8 +155,8 @@ impl CompletedStructuralFrequencyStudy {
 fn artifact_root(
     objects: &PreparedAnalysisObjects,
     reference: ValueRef,
-) -> NativeExecutionResult<StructuralFrequencyArtifactRoot> {
-    StructuralFrequencyArtifactRoot::new(
+) -> NativeExecutionResult<AnalysisArtifactRoot> {
+    AnalysisArtifactRoot::new(
         reference,
         objects.manifest.kind,
         objects.manifest.logical_identity,

@@ -1,10 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_analysis_fea::execution::{
-    AnalysisObjectManifest, ANALYSIS_CHUNK_MEDIA_TYPE, ANALYSIS_CHUNK_VALUE_SCHEMA,
-    ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
-};
-use runmat_execution::value::{PublishedObjectCatalog, PublishedObjectSource, ValueRef};
+use runmat_execution::value::{PublishedObjectCatalog, PublishedObjectSource};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
@@ -142,62 +138,11 @@ pub(super) fn validate_closure(
     artifact: &PersistedStructuralFrequencyArtifact,
     mut read: impl FnMut(Digest) -> Option<Vec<u8>>,
 ) -> Result<(), String> {
-    let mut expected = BTreeMap::<Digest, (u64, &str, &str)>::new();
-    for root in all_roots(&artifact.artifact_roots) {
-        let reference = root.reference();
-        if reference.value_schema != ANALYSIS_MANIFEST_VALUE_SCHEMA
-            || reference.media_type != ANALYSIS_MANIFEST_MEDIA_TYPE
-        {
-            return Err("structural frequency root is not an analysis manifest object".into());
-        }
-        insert_expected(&mut expected, reference)?;
-        let bytes = read(reference.logical_digest)
-            .ok_or_else(|| "structural frequency artifact root is missing".to_string())?;
-        if bytes.len() as u64 != reference.encoded_length
-            || Digest::sha256(&bytes) != reference.logical_digest
-        {
-            return Err("structural frequency artifact root failed content verification".into());
-        }
-        let manifest = AnalysisObjectManifest::from_canonical_bytes(&bytes)
-            .map_err(|error| error.to_string())?;
-        if manifest.kind != root.expected_kind()
-            || manifest.logical_identity != root.expected_logical_identity()
-            || manifest.payload_digest != root.expected_payload_digest()
-        {
-            return Err(
-                "structural frequency artifact root differs from its typed expectation".into(),
-            );
-        }
-        for chunk in &manifest.chunks {
-            let declared = artifact
-                .object_catalog
-                .objects
-                .iter()
-                .find(|candidate| candidate.logical_digest == chunk.digest)
-                .ok_or_else(|| {
-                    "structural frequency manifest names an undeclared chunk".to_string()
-                })?;
-            if declared.encoded_length != chunk.encoded_length
-                || declared.value_schema != ANALYSIS_CHUNK_VALUE_SCHEMA
-                || declared.media_type != ANALYSIS_CHUNK_MEDIA_TYPE
-            {
-                return Err(
-                    "structural frequency chunk reference differs from its manifest".into(),
-                );
-            }
-            insert_expected(&mut expected, declared)?;
-        }
-    }
-    let declared = artifact
-        .object_catalog
-        .objects
-        .iter()
-        .map(|reference| reference.logical_digest)
-        .collect::<BTreeSet<_>>();
-    if declared != expected.keys().copied().collect() {
-        return Err("structural frequency catalog contains missing or unreferenced objects".into());
-    }
-    Ok(())
+    crate::analysis::artifact_root::closure::validate_closure(
+        &all_roots(&artifact.artifact_roots),
+        &artifact.object_catalog,
+        |digest| Ok(read(digest)),
+    )
 }
 
 pub(super) fn same_content(
@@ -262,7 +207,7 @@ pub(super) fn artifact_record(
 
 fn all_roots(
     index: &StructuralFrequencyArtifactRootIndex,
-) -> Vec<&crate::analysis::StructuralFrequencyArtifactRoot> {
+) -> Vec<&crate::analysis::AnalysisArtifactRoot> {
     let mut roots = vec![index.result(), index.receipt(), index.resource_usage()];
     for sample in index.samples() {
         roots.push(sample.fields());
@@ -272,21 +217,4 @@ fn all_roots(
     }
     roots.extend(index.histories().iter().map(|history| history.checkpoint()));
     roots
-}
-
-fn insert_expected<'a>(
-    expected: &mut BTreeMap<Digest, (u64, &'a str, &'a str)>,
-    reference: &'a ValueRef,
-) -> Result<(), String> {
-    let facts = (
-        reference.encoded_length,
-        reference.media_type.as_str(),
-        reference.value_schema.as_str(),
-    );
-    match expected.insert(reference.logical_digest, facts) {
-        Some(existing) if existing != facts => {
-            Err("structural frequency catalog aliases one digest with different metadata".into())
-        }
-        _ => Ok(()),
-    }
 }

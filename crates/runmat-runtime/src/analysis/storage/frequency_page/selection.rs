@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::{
-    execution::StructuralFrequencyPublicationManifest,
+    execution::{FrequencySamplePublicationManifest, StructuralFrequencyPublicationManifest},
     results::field::{RecoveredFieldArtifactEntry, RecoveredFieldNumericRepresentation},
 };
 
@@ -85,6 +85,41 @@ pub(super) fn select_candidates<'a>(
             Err(AnalysisFieldPageLookup::SampleSelectionRequired(samples))
         }
     }
+}
+
+pub(super) fn select_sample_field<'a>(
+    publication: &'a FrequencySamplePublicationManifest,
+    selection: &AnalysisFieldSelection,
+) -> Result<SelectedField<'a>, AnalysisFieldPageLookup> {
+    if selection.sample.is_none() && publication.samples().len() > 1 {
+        return Err(AnalysisFieldPageLookup::SampleSelectionRequired(
+            publication
+                .samples()
+                .iter()
+                .map(|sample| {
+                    runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
+                        sample.entry.frequency_hz(),
+                    )
+                })
+                .collect(),
+        ));
+    }
+    let sample = publication
+        .select_sample(selection.sample)
+        .map_err(|_| AnalysisFieldPageLookup::SampleNotFound)?;
+    let sample_index = sample.entry.ordinal() as usize;
+    select_candidates(
+        sample
+            .fields
+            .fields
+            .iter()
+            .map(|entry| SelectedField {
+                sample_index,
+                entry,
+            })
+            .collect(),
+        selection,
+    )
 }
 
 #[derive(Clone, Copy)]

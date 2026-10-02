@@ -29,7 +29,7 @@ use super::render_tiles::{
 
 mod discovery;
 mod frequency;
-mod frequency_page;
+pub(super) mod frequency_page;
 mod object_payload;
 mod observations;
 pub use observations::{

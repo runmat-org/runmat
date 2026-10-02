@@ -1,7 +1,8 @@
 mod selection;
 
 use runmat_analysis_fea::execution::{
-    AnalysisObjectManifest, StructuralFrequencyPublicationManifest,
+    AnalysisObjectManifest, FrequencySamplePublicationManifest,
+    StructuralFrequencyPublicationManifest,
 };
 use runmat_analysis_fea::results::field::{
     RecoveredFieldArtifactEntry, RecoveredFieldNumericRepresentation, RecoveredFieldPartition,
@@ -10,14 +11,17 @@ use runmat_analysis_fea::results::field::{
 use runmat_execution::Digest;
 
 use crate::analysis::{
-    AnalysisFieldDescriptor, AnalysisFieldPageValues, AnalysisFieldRequestOptions,
-    AnalysisFieldSelection, StructuralFrequencyArtifactRoot, StructuralFrequencyArtifactRootIndex,
+    AnalysisArtifactRoot, AnalysisFieldDescriptor, AnalysisFieldPageValues,
+    AnalysisFieldRequestOptions, AnalysisFieldSelection, FrequencySampleArtifactRoots,
+    StructuralFrequencyArtifactRootIndex,
 };
 
 use super::AnalysisFieldPageLookup;
-use selection::{empty_values, page_result, select_field, LogicalPage};
 #[cfg(test)]
-use selection::{select_candidates, SelectedField};
+use selection::select_candidates;
+use selection::{
+    empty_values, page_result, select_field, select_sample_field, LogicalPage, SelectedField,
+};
 
 pub(super) fn load_page(
     run_id: &str,
@@ -25,12 +29,37 @@ pub(super) fn load_page(
     publication: &StructuralFrequencyPublicationManifest,
     selection: &AnalysisFieldSelection,
     options: AnalysisFieldRequestOptions,
-    mut read: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
+    read: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
 ) -> Result<AnalysisFieldPageLookup, String> {
     let selected = match select_field(publication, selection) {
         Ok(selected) => selected,
         Err(lookup) => return Ok(lookup),
     };
+    load_selected_page(run_id, selected, artifact_roots.samples(), options, read)
+}
+
+pub(in crate::analysis) fn load_sample_page(
+    run_id: &str,
+    artifact_roots: &[FrequencySampleArtifactRoots],
+    publication: &FrequencySamplePublicationManifest,
+    selection: &AnalysisFieldSelection,
+    options: AnalysisFieldRequestOptions,
+    read: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
+) -> Result<AnalysisFieldPageLookup, String> {
+    let selected = match select_sample_field(publication, selection) {
+        Ok(selected) => selected,
+        Err(lookup) => return Ok(lookup),
+    };
+    load_selected_page(run_id, selected, artifact_roots, options, read)
+}
+
+fn load_selected_page(
+    run_id: &str,
+    selected: SelectedField<'_>,
+    artifact_roots: &[FrequencySampleArtifactRoots],
+    options: AnalysisFieldRequestOptions,
+    mut read: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
+) -> Result<AnalysisFieldPageLookup, String> {
     let descriptor = AnalysisFieldDescriptor::from_recovered_entry(selected.entry)?;
     let page = LogicalPage::new(descriptor.value_count, options)?;
     let representation = selected.entry.definition.numeric_representation();
@@ -45,9 +74,8 @@ pub(super) fn load_page(
     }
 
     let root = artifact_roots
-        .samples()
         .get(selected.sample_index)
-        .ok_or_else(|| "structural frequency sample has no artifact root".to_string())?
+        .ok_or_else(|| "frequency sample has no artifact root".to_string())?
         .fields();
     let object_manifest = read_root_manifest(root, &mut read)?;
     let values = read_logical_values(selected.entry, &object_manifest, page, &mut read)?;
@@ -155,16 +183,16 @@ fn partition_overlap(
 }
 
 fn read_root_manifest(
-    root: &StructuralFrequencyArtifactRoot,
+    root: &AnalysisArtifactRoot,
     read: &mut impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
 ) -> Result<AnalysisObjectManifest, String> {
     let reference = root.reference();
     let bytes = read(reference.logical_digest)?
-        .ok_or_else(|| "structural frequency field root is missing".to_string())?;
+        .ok_or_else(|| "frequency field root is missing".to_string())?;
     if bytes.len() as u64 != reference.encoded_length
         || Digest::sha256(&bytes) != reference.logical_digest
     {
-        return Err("structural frequency field root failed content verification".into());
+        return Err("frequency field root failed content verification".into());
     }
     let manifest =
         AnalysisObjectManifest::from_canonical_bytes(&bytes).map_err(|error| error.to_string())?;
@@ -172,7 +200,7 @@ fn read_root_manifest(
         || manifest.logical_identity != root.expected_logical_identity()
         || manifest.payload_digest != root.expected_payload_digest()
     {
-        return Err("structural frequency field root differs from its typed expectation".into());
+        return Err("frequency field root differs from its typed expectation".into());
     }
     Ok(manifest)
 }

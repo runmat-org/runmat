@@ -700,8 +700,8 @@ pub fn import_exact_structural_study_result(
 pub(super) fn runtime_artifact_root(
     objects: &runmat_analysis_execution::PreparedAnalysisObjects,
     reference: ValueRef,
-) -> NativeExecutionResult<runmat_runtime::analysis::StructuralFrequencyArtifactRoot> {
-    runmat_runtime::analysis::StructuralFrequencyArtifactRoot::new(
+) -> NativeExecutionResult<runmat_runtime::analysis::AnalysisArtifactRoot> {
+    runmat_runtime::analysis::AnalysisArtifactRoot::new(
         reference,
         objects.manifest.kind,
         objects.manifest.logical_identity,
