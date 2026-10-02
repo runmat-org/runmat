@@ -1,13 +1,14 @@
 //! Causal resident submission and its one checked coefficient preparation.
 
+use super::preparation::{
+    prepared_real_coefficients, provider_resource_error, to_real_vec, PREPARATION_CHUNK,
+};
 use super::*;
 use runmat_accelerate_api::{
     upload_numeric_protecting, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
     NumericUploadError, ProviderIirCoefficientSource, ProviderPrecision,
     ProviderPreparedIirCoefficients,
 };
-
-const PREPARATION_CHUNK: usize = 4096;
 
 #[derive(Clone, Copy)]
 enum UploadRole {
@@ -36,91 +37,6 @@ fn upload_error(role: UploadRole, source: NumericUploadError) -> RuntimeError {
         error,
         runmat_accelerate_api::ProviderExecutionError::from_source(source),
     )
-}
-
-fn resource_error(source: std::collections::TryReserveError) -> RuntimeError {
-    let mut error = filter_error(&FILTER_ERROR_INTERNAL);
-    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-    crate::runtime_error::with_provider_execution_source(
-        error,
-        runmat_accelerate_api::ProviderExecutionError::from_source(source),
-    )
-}
-
-fn rounded_source(value: f64, precision: ProviderPrecision) -> Option<f64> {
-    if !value.is_finite() {
-        return None;
-    }
-    let rounded = match precision {
-        ProviderPrecision::F32 => f64::from(value as f32),
-        ProviderPrecision::F64 => value,
-    };
-    rounded.is_finite().then_some(rounded)
-}
-
-/// The old WGPU resident-coefficient route uploaded source coefficients,
-/// downloaded them in physical precision, normalized in f64, then uploaded
-/// normalized buffers. Prepare those same rounded values once on the host.
-async fn prepared_real_coefficients(
-    source_b: &[Complex<f64>],
-    source_a: &[Complex<f64>],
-    order: usize,
-    precision: ProviderPrecision,
-    cooperation: &mut SignalCooperation,
-) -> BuiltinResult<Option<(Vec<f64>, Vec<f64>)>> {
-    let Some(leading) = source_a.first() else {
-        return Ok(None);
-    };
-    if leading.im != 0.0 {
-        return Ok(None);
-    }
-    let Some(a0) = rounded_source(leading.re, precision) else {
-        return Ok(None);
-    };
-    if a0 == 0.0 {
-        return Ok(None);
-    }
-    let mut numerator = Vec::new();
-    let mut denominator = Vec::new();
-    numerator.try_reserve_exact(order).map_err(resource_error)?;
-    denominator
-        .try_reserve_exact(order)
-        .map_err(resource_error)?;
-    for start in (0..order).step_by(PREPARATION_CHUNK) {
-        let end = start.saturating_add(PREPARATION_CHUNK).min(order);
-        for index in start..end {
-            let b = source_b
-                .get(index)
-                .copied()
-                .unwrap_or_else(|| Complex::new(0.0, 0.0));
-            let a = source_a
-                .get(index)
-                .copied()
-                .unwrap_or_else(|| Complex::new(0.0, 0.0));
-            if b.im != 0.0 || a.im != 0.0 {
-                return Ok(None);
-            }
-            let (Some(b), Some(a)) = (
-                rounded_source(b.re, precision),
-                rounded_source(a.re, precision),
-            ) else {
-                return Ok(None);
-            };
-            let b = b / a0;
-            let a = if index == 0 { 1.0 } else { a / a0 };
-            if !b.is_finite()
-                || !a.is_finite()
-                || (precision == ProviderPrecision::F32
-                    && (!(b as f32).is_finite() || !(a as f32).is_finite()))
-            {
-                return Ok(None);
-            }
-            numerator.push(b);
-            denominator.push(a);
-        }
-        cooperation.completed((end - start) as u64).await?;
-    }
-    Ok(Some((numerator, denominator)))
 }
 
 enum Coefficients {
@@ -311,7 +227,7 @@ pub(super) async fn try_filter_gpu(
         if provider.precision() == ProviderPrecision::F32 {
             single_values
                 .try_reserve_exact(values.len())
-                .map_err(resource_error)?;
+                .map_err(provider_resource_error)?;
             for chunk in values.chunks(PREPARATION_CHUNK) {
                 single_values.extend(chunk.iter().map(|value| *value as f32));
                 cooperation.completed(chunk.len() as u64).await?;
@@ -384,24 +300,6 @@ pub(super) async fn try_filter_gpu(
         output: Value::GpuTensor(output),
         final_state,
     }))
-}
-
-pub(super) async fn to_real_vec(
-    data: &[Complex<f64>],
-    cooperation: &mut SignalCooperation,
-) -> BuiltinResult<Option<Vec<f64>>> {
-    let mut out = Vec::new();
-    out.try_reserve_exact(data.len()).map_err(resource_error)?;
-    for chunk in data.chunks(PREPARATION_CHUNK) {
-        for value in chunk {
-            if value.im != 0.0 {
-                return Ok(None);
-            }
-            out.push(value.re);
-        }
-        cooperation.completed(chunk.len() as u64).await?;
-    }
-    Ok(Some(out))
 }
 
 #[cfg(test)]

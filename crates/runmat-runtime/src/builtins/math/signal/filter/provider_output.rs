@@ -36,10 +36,6 @@ impl ProviderOutputContext<'_> {
             output,
             final_state,
         } = result;
-        if self.state_len > 0 && final_state.is_none() {
-            return Err(gpu_helpers::reject_gpu_output(output, invalid_output()));
-        }
-
         let mut borrowed = vec![self.numerator, self.denominator];
         if let Some(original) = self.original_numerator {
             borrowed.push(original);
@@ -55,6 +51,12 @@ impl ProviderOutputContext<'_> {
             provider: self.provider,
             caller_inputs: &borrowed,
         };
+        // Keep every caller reference live across even this early rejection.
+        // reject_gpu_output releases only the result's owning reference; an
+        // aliased borrowed input cannot be physically retired here.
+        if self.state_len > 0 && final_state.is_none() {
+            return Err(gpu_helpers::reject_gpu_output(output, invalid_output()));
+        }
         let output_contract = resident_output::floating_contract(
             self.signal,
             self.signal.shape().to_vec(),
