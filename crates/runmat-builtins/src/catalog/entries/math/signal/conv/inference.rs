@@ -43,7 +43,10 @@ fn selector(
     if !matches!(
         value.kind,
         ValueKindFact::Unknown | ValueKindFact::Character | ValueKindFact::String
-    ) {
+    ) || matches!(value.kind, ValueKindFact::String) && value.shape.is_definitely_nonscalar()
+        || matches!(value.kind, ValueKindFact::Character)
+            && character_is_known_multirow(&value.shape)
+    {
         diagnostics.push(argument_error(
             "RM-CATALOG-CONV-SHAPE",
             "conv shape must be full, same, or valid",
@@ -65,6 +68,10 @@ fn selector(
             None
         }
     }
+}
+
+fn character_is_known_multirow(shape: &ShapeFact) -> bool {
+    matches!(shape, ShapeFact::Shaped { dims } if matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1))
 }
 
 #[derive(Clone, Copy)]
