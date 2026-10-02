@@ -356,6 +356,7 @@ fn invalid_host_degree_precedes_resident_integer_download() {
         .upload_numeric_raw(&HostNumericTensorView {
             data: HostNumericDataView::I64(&integers),
             shape: &[2, 1],
+            storage: GpuTensorStorage::Real,
         })
         .unwrap();
     let y = provider

@@ -74,7 +74,9 @@ use runmat_geometry_core::{
 };
 #[cfg(feature = "plot-core")]
 use runmat_meshing_core::fixtures::split_material_through_hole_plate_geometry;
-use runmat_meshing_core::fixtures::{nested_tetrahedron_shell_geometry, through_hole_plate_geometry};
+use runmat_meshing_core::fixtures::{
+    nested_tetrahedron_shell_geometry, through_hole_plate_geometry,
+};
 use runmat_meshing_core::{
     contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
     AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
