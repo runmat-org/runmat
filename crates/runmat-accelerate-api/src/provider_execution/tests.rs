@@ -47,6 +47,14 @@ fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
     let wrapped = ProviderExecutionError::from_source(unsupported);
     assert!(wrapped.is_unsupported());
     assert!(!ProviderExecutionError::from(anyhow::anyhow!("execution failed")).is_unsupported());
+
+    let staged = ProviderExecutionError::from_source(ProviderExecutionError::from(
+        crate::unsupported_provider_operation("stage unsupported after upload"),
+    ))
+    .after_effect();
+    assert!(!staged.is_unsupported());
+    assert!(staged.source().unwrap().source().is_some());
+    assert!(!ProviderExecutionError::from_source(staged).is_unsupported());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -15,6 +15,15 @@ type Source = Box<dyn Error + 'static>;
 #[derive(Debug)]
 pub struct ProviderExecutionError {
     source: ExecutionSource,
+    /// A failure after provider effects must not authorize host replay even
+    /// when its retained original cause was a typed Unsupported response.
+    disposition: FallbackDisposition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FallbackDisposition {
+    PreEffect,
+    AfterEffect,
 }
 
 #[derive(Debug)]
@@ -41,6 +50,7 @@ impl ProviderExecutionError {
     pub fn from_source(error: impl Error + Send + Sync + 'static) -> Self {
         Self {
             source: ExecutionSource::Local(Box::new(error)),
+            disposition: FallbackDisposition::PreEffect,
         }
     }
 
@@ -48,13 +58,30 @@ impl ProviderExecutionError {
     pub fn from_source(error: impl Error + 'static) -> Self {
         Self {
             source: ExecutionSource::Local(Box::new(error)),
+            disposition: FallbackDisposition::PreEffect,
         }
+    }
+
+    /// Keep the original error chain while disabling numerical replay after
+    /// any staging, submission, or output-allocation effect.
+    pub fn after_effect(mut self) -> Self {
+        self.disposition = FallbackDisposition::AfterEffect;
+        self
     }
 
     /// Only an explicit provider unsupported marker permits numerical fallback.
     pub fn is_unsupported(&self) -> bool {
+        if self.disposition == FallbackDisposition::AfterEffect {
+            return false;
+        }
         let mut error: &(dyn Error + 'static) = self.source.as_error();
         loop {
+            if error
+                .downcast_ref::<Self>()
+                .is_some_and(|nested| nested.disposition == FallbackDisposition::AfterEffect)
+            {
+                return false;
+            }
             if error.is::<crate::UnsupportedProviderOperation>() {
                 return true;
             }
@@ -70,6 +97,7 @@ impl From<anyhow::Error> for ProviderExecutionError {
     fn from(error: anyhow::Error) -> Self {
         Self {
             source: ExecutionSource::Shared(error),
+            disposition: FallbackDisposition::PreEffect,
         }
     }
 }
