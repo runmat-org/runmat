@@ -110,36 +110,14 @@ pub(crate) fn select_exact_host_upload(
         ),
         revision,
     };
-    let candidate = WholeWorkCandidate {
-        kind: ExecutionCandidateKind::SharedRuntime,
-        execution_location: CandidateExecutionLocation::Host,
-        preparation: CandidatePreparationState::Ready,
-        output_residency: CandidateOutputResidency::Provider { device_id },
-        presentation: CandidateOutputPresentation::ProviderUpload {
-            device_id,
-            transfer_bytes: Some(transfer_bytes),
-            host_result_bytes: Some(ResourceByteBound::Known(transfer_bytes)),
-            host_scratch_bytes: ResourceByteBound::Known(transfer_bytes),
-            provider_scratch_bytes: ResourceByteBound::Unavailable(
-                ResourceBoundUnavailable::NoScratchBound,
-            ),
-            queue_slots: u32::try_from(upload.outputs.len()).unwrap_or(u32::MAX),
-            preparation: CandidatePreparationState::Ready,
-        },
-        route_facts: Digest::sha256(serde_json::to_vec(&upload).expect("typed route serializes")),
-        cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
-        resources: CandidateResourceDemand {
-            cpu_millicores: 1_000,
-            // Physical provider retention may include padding/alignment and
-            // is not the host payload or transfer byte count. Unknown stays
-            // unknown under a finite provider memory budget.
-            retained_bytes: physical_retained_bound(estimate.output_bytes),
-            scratch_bytes: request.host_compute_scratch,
-            queue_slots: 0,
-            peak_live: None,
-        },
-        transactional_results: true,
-    };
+    let candidate = upload_candidate(
+        device_id,
+        transfer_bytes,
+        estimate.output_bytes,
+        request.host_compute_scratch,
+        u32::try_from(upload.outputs.len()).unwrap_or(u32::MAX),
+        Digest::sha256(serde_json::to_vec(&upload).expect("typed route serializes")),
+    );
     let parallel = runtime
         .service_ports()
         .parallel()
@@ -187,6 +165,46 @@ pub(crate) fn select_exact_host_upload(
     )))
 }
 
+fn upload_candidate(
+    device_id: u32,
+    transfer_bytes: u64,
+    physical_retained_bytes: Option<u64>,
+    host_compute_scratch: ResourceByteBound,
+    queue_slots: u32,
+    route_facts: Digest,
+) -> WholeWorkCandidate {
+    WholeWorkCandidate {
+        kind: ExecutionCandidateKind::SharedRuntime,
+        execution_location: CandidateExecutionLocation::Host,
+        preparation: CandidatePreparationState::Ready,
+        output_residency: CandidateOutputResidency::Provider { device_id },
+        presentation: CandidateOutputPresentation::ProviderUpload {
+            device_id,
+            transfer_bytes: Some(transfer_bytes),
+            host_result_bytes: Some(ResourceByteBound::Known(transfer_bytes)),
+            host_scratch_bytes: ResourceByteBound::Known(transfer_bytes),
+            provider_scratch_bytes: ResourceByteBound::Unavailable(
+                ResourceBoundUnavailable::NoScratchBound,
+            ),
+            queue_slots,
+            preparation: CandidatePreparationState::Ready,
+        },
+        route_facts,
+        cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
+        resources: CandidateResourceDemand {
+            cpu_millicores: 1_000,
+            // Physical provider retention may include padding/alignment and
+            // is not the host payload or transfer byte count. Unknown stays
+            // unknown under a finite provider memory budget.
+            retained_bytes: physical_retained_bound(physical_retained_bytes),
+            scratch_bytes: host_compute_scratch,
+            queue_slots: 0,
+            peak_live: None,
+        },
+        transactional_results: true,
+    }
+}
+
 fn physical_retained_bound(output_bytes: Option<u64>) -> ResourceByteBound {
     output_bytes
         .map(ResourceByteBound::Known)
@@ -198,6 +216,64 @@ fn physical_retained_bound(output_bytes: Option<u64>) -> ResourceByteBound {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_execution::{PlacementRevision, ProviderResourceSnapshot};
+
+    fn budget_request(logical: u64, physical: u64, capacity: u64) -> WholeWorkPlacementRequest {
+        let digest = Digest::sha256(b"physical-host-upload-budget");
+        WholeWorkPlacementRequest {
+            signature: PlacementSignature {
+                region: None,
+                operation: "imhist".into(),
+                runtime_facts: digest,
+                revision: PlacementRevision {
+                    program: None,
+                    catalog: digest,
+                    compiler: digest,
+                    provider: digest,
+                    policy: digest,
+                },
+            },
+            constraint: WholeWorkConstraint::AnyLegal,
+            candidates: vec![upload_candidate(
+                17,
+                logical,
+                Some(physical),
+                ResourceByteBound::Known(0),
+                1,
+                digest,
+            )],
+            resources: PlacementResourceSnapshot {
+                cpu_millicores_available: 1_000,
+                memory_available_bytes: Some(1_024),
+                cancellation_requested: false,
+                providers: vec![ProviderResourceSnapshot {
+                    device_id: 17,
+                    capacity_bytes: Some(capacity),
+                    scratch_available_bytes: None,
+                    ..Default::default()
+                }],
+                epoch: 0,
+            },
+            deterministic: true,
+            require_transactional_results: false,
+        }
+    }
+
+    #[test]
+    fn shared_service_budgets_physical_retention_not_logical_payload() {
+        let session = runmat_accelerate::placement::PlacementSession::new(
+            runmat_accelerate::placement::PlacementSessionConfig::default(),
+        );
+        assert!(session
+            .select_whole_work(budget_request(32, 40, 39))
+            .is_err());
+        assert!(session
+            .select_whole_work(budget_request(32, 40, 40))
+            .is_ok());
+        // Zero logical elements can still require a nonzero provider buffer.
+        assert!(session.select_whole_work(budget_request(0, 8, 7)).is_err());
+        assert!(session.select_whole_work(budget_request(0, 8, 8)).is_ok());
+    }
 
     #[test]
     fn provider_retention_is_not_logical_transfer_or_unknown_as_zero() {
