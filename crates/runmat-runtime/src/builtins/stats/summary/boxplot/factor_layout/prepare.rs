@@ -3,9 +3,22 @@ use super::*;
 use crate::builtins::stats::summary::boxplot::groups::labels::group_label_text;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
 pub(in crate::builtins::stats::summary::boxplot) fn prepare_layout(
+    boxes: Vec<BoxStats>,
+    options: &BoxplotOptions,
+) -> BuiltinResult<BoxLayout> {
+    futures::executor::block_on(prepare_layout_cooperative(
+        boxes,
+        options,
+        &mut super::super::cooperation::BoxplotCooperation::new(None),
+    ))
+}
+
+pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_cooperative(
     mut boxes: Vec<BoxStats>,
     options: &BoxplotOptions,
+    cooperation: &mut super::super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<BoxLayout> {
     let keys = boxes
         .iter()
@@ -41,22 +54,18 @@ pub(in crate::builtins::stats::summary::boxplot) fn prepare_layout(
         }
     }
     let mut slots = if options.full_factors && factor_count > 0 {
-        cartesian_slots(&levels, &directions, &keys, slot_count)?
+        cartesian_slots(
+            &levels,
+            &directions,
+            &keys,
+            slot_count,
+            options.group_order.is_some(),
+            cooperation,
+        )
+        .await?
     } else {
         observed_slots(&keys, &directions, options.group_order.is_some())
     };
-    if options.full_factors && options.group_order.is_some() {
-        // GroupOrder already resolved public labels to exact typed keys. Keep
-        // those observed keys in the requested order; append unobserved
-        // Cartesian combinations in their deterministic factor order.
-        let observed_rank = keys
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(rank, key)| (key, rank))
-            .collect::<BTreeMap<_, _>>();
-        slots.sort_by_key(|slot| observed_rank.get(&slot.key).copied().unwrap_or(usize::MAX));
-    }
     let positions = slot_positions(&slots, options)?;
     let widths = super::super::plot::widths_for(slots.len(), options);
     for (index, slot) in slots.iter_mut().enumerate() {
@@ -164,12 +173,15 @@ fn observed_slots(
         .collect()
 }
 
-fn cartesian_slots(
+async fn cartesian_slots(
     levels: &[Vec<KeyAtom>],
     reverse: &[bool],
     observed: &[Vec<KeyAtom>],
     count: usize,
+    observed_first: bool,
+    cooperation: &mut super::super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<Vec<FactorSlot>> {
+    cooperation.completed(0).await?;
     let mut slots = Vec::new();
     slots
         .try_reserve_exact(count)
@@ -180,6 +192,20 @@ fn cartesian_slots(
         .enumerate()
         .map(|(index, key)| (key, index))
         .collect::<BTreeMap<_, _>>();
+    if observed_first {
+        // GroupOrder has already put the observed keys in public order. Emit
+        // them first, then append absent Cartesian combinations; no large
+        // synchronous post-expansion sort can monopolize a browser turn.
+        for (index, key) in observed.iter().enumerate() {
+            slots.push(FactorSlot {
+                key: key.clone(),
+                label: String::new(),
+                position: 0.0,
+                box_index: Some(index),
+            });
+            cooperation.completed(1).await?;
+        }
+    }
     let mut digits = vec![0usize; levels.len()];
     for _ in 0..count {
         let key = digits
@@ -195,12 +221,15 @@ fn cartesian_slots(
             })
             .collect::<Vec<_>>();
         let box_index = observed_by_key.get(&key).copied();
-        slots.push(FactorSlot {
-            key,
-            label: String::new(),
-            position: 0.0,
-            box_index,
-        });
+        if !observed_first || box_index.is_none() {
+            slots.push(FactorSlot {
+                key,
+                label: String::new(),
+                position: 0.0,
+                box_index,
+            });
+        }
+        cooperation.completed(1).await?;
         for digit in (0..digits.len()).rev() {
             digits[digit] += 1;
             if digits[digit] < levels[digit].len() {
@@ -209,6 +238,7 @@ fn cartesian_slots(
             digits[digit] = 0;
         }
     }
+    cooperation.completed(0).await?;
     Ok(slots)
 }
 

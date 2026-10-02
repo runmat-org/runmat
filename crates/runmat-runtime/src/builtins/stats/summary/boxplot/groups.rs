@@ -35,10 +35,25 @@ pub(super) fn build_box_stats(
     build_box_layout(x, group, options).map(|layout| layout.boxes)
 }
 
+#[cfg(test)]
 pub(super) fn build_box_layout(
     x: Value,
     group: Option<Value>,
     options: &BoxplotOptions,
+) -> BuiltinResult<super::factor_layout::BoxLayout> {
+    futures::executor::block_on(build_box_layout_cooperative(
+        x,
+        group,
+        options,
+        &mut super::cooperation::BoxplotCooperation::new(None),
+    ))
+}
+
+pub(super) async fn build_box_layout_cooperative(
+    x: Value,
+    group: Option<Value>,
+    options: &BoxplotOptions,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<super::factor_layout::BoxLayout> {
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("{NAME}: {err}")))?;
@@ -74,7 +89,7 @@ pub(super) fn build_box_layout(
             Ok(stats)
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    super::factor_layout::prepare_layout(boxes, options)
+    super::factor_layout::prepare_layout_cooperative(boxes, options, cooperation).await
 }
 
 fn ungrouped_series(tensor: &Tensor) -> Vec<(GroupLabel, Vec<f64>)> {

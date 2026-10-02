@@ -8,7 +8,9 @@ pub(super) use controls::{
     parse_directions, parse_full_factors, parse_gap, parse_separator, validate_direction_count,
     validate_gap_count, validate_separator_count, FactorDirection, FactorGap, FactorSeparator,
 };
+#[cfg(test)]
 pub(super) use prepare::prepare_layout;
+pub(super) use prepare::prepare_layout_cooperative;
 
 #[derive(Clone, Debug)]
 pub(super) struct FactorSlot {

@@ -23,6 +23,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const NAME: &str = "boxplot";
 mod admission;
 mod appearance;
+mod cooperation;
 mod factor_layout;
 mod plan;
 use crate::builtins::common::grouping_keys::KeyAtom;
@@ -248,9 +249,26 @@ fn ensure_sample_group_extensions(x: &Value, group: Option<&Value>) -> BuiltinRe
 #[runtime_builtin(
     name = "boxplot",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::boxplot"
 )]
+pub(crate) async fn boxplot_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    boxplot_in_runtime(runtime.as_ref(), args).await
+}
+
+#[cfg(test)]
 pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    boxplot_in_runtime(None, args).await
+}
+
+async fn boxplot_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = cooperation::BoxplotCooperation::new(runtime);
     let (axes_target, args) = split_leading_axes_handle(args, NAME).map_err(map_plot_error)?;
     if args.is_empty() {
         return Err(invalid("boxplot: expected numeric data"));
@@ -271,6 +289,7 @@ pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let option_plan = BoxplotOptionPlan::admit(args, first_option)?;
     option_plan.admit_host_color_groups(&x)?;
     option_plan.preflight_known_factor_count(admission::known_factor_count(group.as_ref()))?;
+    cooperation.completed(0).await?;
     let mut inputs = vec![x];
     if let Some(group) = group {
         inputs.push(group);
@@ -279,7 +298,7 @@ pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let x = inputs.remove(0);
     let group = inputs.pop();
     let options = option_plan.evaluate().await?;
-    let layout = groups::build_box_layout(x, group, &options)?;
+    let layout = groups::build_box_layout_cooperative(x, group, &options, &mut cooperation).await?;
 
     let prepared = plot::prepare_box_layout(&layout, &options)?;
     apply_axes_target(axes_target, NAME).map_err(map_plot_error)?;
