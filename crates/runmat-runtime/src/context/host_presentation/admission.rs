@@ -9,8 +9,9 @@ use runmat_accelerate_api::observation::{
     ProviderObservationCapability, ProviderObservationSupport,
 };
 use runmat_accelerate_api::{
-    provider_for_handle, GpuTensorHandle, ProviderFeasibilityQuery, ProviderOperationFamily,
-    ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderWorkload,
+    provider_for_handle, GpuTensorHandle, ProviderFeasibility, ProviderFeasibilityQuery,
+    ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation, ProviderResidency,
+    ProviderWorkload,
 };
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
@@ -75,12 +76,13 @@ pub(crate) fn select_exact_host_upload(
             ..ProviderWorkload::default()
         },
     };
-    if !provider.query_feasibility(&upload).is_supported()
-        || !matches!(
-            provider.operation_observation_capability(&upload),
-            ProviderObservationCapability::Supported(_)
-        )
-    {
+    let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(&upload) else {
+        return Ok(None);
+    };
+    if !matches!(
+        provider.operation_observation_capability(&upload),
+        ProviderObservationCapability::Supported(_)
+    ) {
         return Ok(None);
     }
     let device_id = provider.device_id();
@@ -128,7 +130,10 @@ pub(crate) fn select_exact_host_upload(
         cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
         resources: CandidateResourceDemand {
             cpu_millicores: 1_000,
-            retained_bytes: ResourceByteBound::Known(transfer_bytes),
+            // Physical provider retention may include padding/alignment and
+            // is not the host payload or transfer byte count. Unknown stays
+            // unknown under a finite provider memory budget.
+            retained_bytes: physical_retained_bound(estimate.output_bytes),
             scratch_bytes: request.host_compute_scratch,
             queue_slots: 0,
             peak_live: None,
@@ -180,4 +185,40 @@ pub(crate) fn select_exact_host_upload(
         selected,
         receipt,
     )))
+}
+
+fn physical_retained_bound(output_bytes: Option<u64>) -> ResourceByteBound {
+    output_bytes
+        .map(ResourceByteBound::Known)
+        .unwrap_or(ResourceByteBound::Unavailable(
+            ResourceBoundUnavailable::NoRetainedValueBound,
+        ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_retention_is_not_logical_transfer_or_unknown_as_zero() {
+        let logical_transfer = 32;
+        assert_eq!(
+            physical_retained_bound(Some(40)),
+            ResourceByteBound::Known(40)
+        );
+        assert_ne!(
+            physical_retained_bound(Some(40)),
+            ResourceByteBound::Known(logical_transfer)
+        );
+        // A zero-element logical payload can still retain a nonzero provider
+        // allocation floor; never replace the reported physical result by 0.
+        assert_eq!(
+            physical_retained_bound(Some(8)),
+            ResourceByteBound::Known(8)
+        );
+        assert_eq!(
+            physical_retained_bound(None),
+            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound)
+        );
+    }
 }
