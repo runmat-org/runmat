@@ -1,5 +1,9 @@
 //! MATLAB-compatible `deconv` builtin with GPU-aware semantics for RunMat.
 
+#[cfg(test)]
+#[path = "deconv/placement_tests.rs"]
+mod placement_tests;
+
 use num_complex::Complex;
 use runmat_builtins::{
     BuiltinErrorDescriptor, DECONV_ERROR_BUILD_COMPLEX_OUTPUT, DECONV_ERROR_BUILD_OUTPUT,
