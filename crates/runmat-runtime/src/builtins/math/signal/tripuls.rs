@@ -375,7 +375,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::{CharArray, IntegerStorage, NumericStorage};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, NumericStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(tripuls_builtin(t, rest))

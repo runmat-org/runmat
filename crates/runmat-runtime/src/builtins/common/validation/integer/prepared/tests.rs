@@ -33,6 +33,13 @@ impl AccelProvider for AdmissionProbeOwner {
     fn device_info(&self) -> String {
         "integer admission fixture".into()
     }
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("admission should precede transfer") })
+    }
     fn upload(
         &self,
         _: &runmat_accelerate_api::HostTensorView,
@@ -61,6 +68,13 @@ impl runmat_accelerate_api::AccelProvider for CountedIntegerOwner {
     }
     fn device_info(&self) -> String {
         self.inner.device_info()
+    }
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("integer preparation must use native readback") })
     }
     fn upload(
         &self,
