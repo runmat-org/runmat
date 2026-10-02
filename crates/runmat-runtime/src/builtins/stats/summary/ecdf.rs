@@ -398,13 +398,17 @@ fn internal_error_with_cause(cause: RuntimeError) -> RuntimeError {
     owner
 }
 
-#[cfg(feature = "plot-core")]
 #[runtime_builtin(
     name = "cdfplot",
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::ecdf"
 )]
 pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    cdfplot_with_presentation(args).await
+}
+
+#[cfg(feature = "plot-core")]
+async fn cdfplot_with_presentation(args: Vec<Value>) -> BuiltinResult<Value> {
     let (axes_target, args) = split_ecdf_axes_target(args, CDFPLOT_OWNER)?;
     if args.len() != 1 {
         return Err(invalid_argument(
@@ -438,12 +442,7 @@ pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 #[cfg(not(feature = "plot-core"))]
-#[runtime_builtin(
-    name = "cdfplot",
-    binding_variant = "default",
-    builtin_path = "crate::builtins::stats::summary::ecdf"
-)]
-pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn cdfplot_with_presentation(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() != 1 {
         return Err(invalid_argument(
             CDFPLOT_OWNER,
