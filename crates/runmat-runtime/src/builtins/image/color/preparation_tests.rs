@@ -18,7 +18,7 @@ use std::{
     task::{Context, Poll},
 };
 
-const NAMES: [&str; 3] = ["gray2rgb", "rgb2gray", "rgb2hsv"];
+const NAMES: [&str; 4] = ["gray2rgb", "hsv2rgb", "rgb2gray", "rgb2hsv"];
 type Events = Rc<RefCell<Vec<&'static str>>>;
 
 struct Observer(Events);
@@ -146,6 +146,47 @@ fn prepared_host_operand_is_consumed_once_but_result_restores_to_original_reside
     });
 }
 
+#[test]
+fn prepared_hsv_operand_is_used_once_and_restores_original_owner() {
+    use crate::builtins::common::{gpu_helpers, test_support};
+    test_support::with_test_provider(|provider| {
+        let original = Tensor::new(vec![0.0, 1.0, 1.0], vec![1, 1, 3]).unwrap();
+        let source = gpu_helpers::upload_tensor(provider, &original)
+            .unwrap()
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        let prepared =
+            Value::Tensor(Tensor::new(vec![1.0 / 3.0, 1.0, 1.0], vec![1, 1, 3]).unwrap());
+        let events = Events::default();
+        let _context = enter_with_replacement(&events, false, Some(prepared));
+        let result = block_on(dispatcher::call_builtin_async(
+            "hsv2rgb",
+            &[Value::GpuTensor(source.clone())],
+        ))
+        .unwrap();
+        let Value::GpuTensor(output) = result else {
+            panic!("explicit result must be resident");
+        };
+        let owner = runmat_accelerate_api::provider_for_handle(&output).unwrap();
+        assert!(runmat_accelerate_api::same_provider_instance(
+            owner, provider
+        ));
+        assert_eq!(
+            test_support::gather(Value::GpuTensor(output))
+                .unwrap()
+                .materialize_f64(),
+            vec![0.0, 1.0, 0.0]
+        );
+        assert_eq!(
+            test_support::gather(Value::GpuTensor(source))
+                .unwrap()
+                .materialize_f64(),
+            vec![0.0, 1.0, 1.0]
+        );
+        assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+    });
+}
+
 fn valid(name: &str) -> Value {
     if name == "gray2rgb" {
         Value::Tensor(Tensor::new_with_dtype(vec![0.0, 1.0], vec![1, 2], NumericDType::U8).unwrap())
@@ -203,7 +244,7 @@ fn extension_gate_and_empty_rgb_inputs_precede_service() {
         );
         assert!(events.borrow().is_empty());
     }
-    for name in ["rgb2gray", "rgb2hsv"] {
+    for name in ["hsv2rgb", "rgb2gray", "rgb2hsv"] {
         let empty = Value::Tensor(Tensor::new(vec![], vec![0, 1, 3]).unwrap());
         let error = block_on(dispatcher::call_builtin_async(name, &[empty])).unwrap_err();
         let expected = format!("RunMat:{name}:InvalidInput");
@@ -239,7 +280,7 @@ fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
         } else {
             Value::Tensor(Tensor::new(vec![1.0; 3], vec![1, 3]).unwrap())
         };
-        // Nx3 is valid only as a double colormap; uint8 must reject.
+        // Nx3 numeric colormaps reject uint8 for these conversion forms.
         let invalid = if name == "gray2rgb" {
             invalid
         } else {
