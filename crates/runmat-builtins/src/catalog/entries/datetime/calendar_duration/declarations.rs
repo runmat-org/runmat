@@ -2,6 +2,16 @@
 use crate::*;
 use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequirement};
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &CALDAYS_CATALOG_ENTRY,
+    &CALENDARDURATION_CATALOG_ENTRY,
+    &CALMONTHS_CATALOG_ENTRY,
+    &CALQUARTERS_CATALOG_ENTRY,
+    &CALWEEKS_CATALOG_ENTRY,
+    &CALYEARS_CATALOG_ENTRY,
+    &ISCALENDARDURATION_CATALOG_ENTRY,
+];
+
 /// The original RunMat day-array shortcut and empty constructor are retained
 /// for existing projects, but are not the documented matrix/component forms.
 pub const CALENDAR_DURATION_SHORTHAND_EXTENSION: BuiltinExtensionDescriptor =
