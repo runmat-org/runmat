@@ -32,4 +32,5 @@ pub(crate) mod square;
 pub(crate) mod tripuls;
 pub(crate) mod type_resolvers;
 pub(crate) mod unwrap;
+#[cfg(feature = "plot-core")]
 pub(crate) mod zplane;
