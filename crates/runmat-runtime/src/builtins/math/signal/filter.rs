@@ -892,6 +892,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 

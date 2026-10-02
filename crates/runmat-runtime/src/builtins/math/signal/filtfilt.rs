@@ -960,7 +960,7 @@ mod tests {
             source.token(),
         );
         source.cancel(runmat_execution::CancellationReason::User);
-        let error = block_on(filtfilt_builtin_registered(
+        let error = block_on(filtfilt_builtin(
             Some(runtime),
             Value::Num(1.0),
             Value::Num(1.0),

@@ -331,7 +331,6 @@ mod tests {
     use std::cell::Cell;
     use std::future::Future;
     use std::num::NonZeroU64;
-    use std::pin::Pin;
     use std::rc::Rc;
     use std::task::{Context, Poll, Waker};
 
