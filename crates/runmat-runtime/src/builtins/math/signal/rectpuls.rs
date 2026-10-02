@@ -12,8 +12,8 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, PreparedWaveformControl, WaveformControlError, WaveformOutputMode,
-    WindowCooperation,
+    map_real_waveform, PreparedWaveformControl, SignalCooperation, WaveformControlError,
+    WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -101,7 +101,7 @@ async fn rectpuls_in_runtime(
     t: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
     ensure_rectpuls_compatibility(&t, &rest)?;
     let width = prepare_width(&rest)?;

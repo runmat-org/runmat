@@ -5,7 +5,7 @@ use runmat_value::{NumericStorage, Tensor};
 
 use crate::{build_runtime_error, GpuGatherRetry, RuntimeError};
 
-use super::WindowCooperation;
+use super::SignalCooperation;
 
 // Limits uninterrupted coefficient work, not the execution service's yield policy.
 const MAP_CHUNK: usize = 4096;
@@ -60,7 +60,7 @@ pub(crate) async fn map_real_waveform(
     tensor: Tensor,
     mode: WaveformOutputMode,
     evaluate: impl Fn(f64) -> f64,
-    cooperation: &mut WindowCooperation,
+    cooperation: &mut SignalCooperation,
 ) -> Result<Tensor, WaveformMapError> {
     cooperation
         .completed(0)
@@ -191,7 +191,7 @@ async fn map_values<Input: Copy, Output>(
     to_double: impl Fn(Input) -> f64,
     evaluate: &impl Fn(f64) -> f64,
     cast: impl Fn(f64) -> Output,
-    cooperation: &mut WindowCooperation,
+    cooperation: &mut SignalCooperation,
 ) -> Result<Vec<Output>, WaveformMapError> {
     let mut output = Vec::new();
     output

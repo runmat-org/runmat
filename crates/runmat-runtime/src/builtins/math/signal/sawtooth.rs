@@ -21,8 +21,8 @@ use runmat_value::{NumericDType, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, PreparedWaveformControl, WaveformControlError, WaveformOutputMode,
-    WindowCooperation,
+    map_real_waveform, PreparedWaveformControl, SignalCooperation, WaveformControlError,
+    WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -120,7 +120,7 @@ async fn sawtooth_in_runtime(
     t: Value,
     varargin: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
@@ -231,7 +231,7 @@ fn xmax_control_error(error: WaveformControlError) -> RuntimeError {
 async fn sawtooth_gpu(
     handle: GpuTensorHandle,
     xmax: f64,
-    cooperation: &mut WindowCooperation,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
@@ -252,7 +252,7 @@ async fn sawtooth_gpu(
 async fn sawtooth_real(
     value: Value,
     xmax: f64,
-    cooperation: &mut WindowCooperation,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
         .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INVALID_INPUT, err))?;

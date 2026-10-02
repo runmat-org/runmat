@@ -34,7 +34,7 @@ fn single_and_double_mapping_retain_class_shape_and_values() {
         input.clone(),
         WaveformOutputMode::PreserveSingle,
         |x| x + 1.0,
-        &mut WindowCooperation::new(None, "tripuls"),
+        &mut SignalCooperation::new(None, "tripuls"),
     ))
     .unwrap();
     assert_eq!(single.shape, [1, 3]);
@@ -46,7 +46,7 @@ fn single_and_double_mapping_retain_class_shape_and_values() {
         input,
         WaveformOutputMode::Double,
         |x| x + 1.0,
-        &mut WindowCooperation::new(None, "rectpuls"),
+        &mut SignalCooperation::new(None, "rectpuls"),
     ))
     .unwrap();
     assert_eq!(
@@ -69,7 +69,7 @@ fn pending_turn_cancel_and_drop_do_not_publish_waveform() {
         let evaluated = Rc::new(Cell::new(0));
         let count = evaluated.clone();
         let tensor = Tensor::new(vec![1.0; 8193], vec![1, 8193]).unwrap();
-        let mut cooperation = WindowCooperation::with_budget(budget, "square");
+        let mut cooperation = SignalCooperation::with_budget(budget, "square");
         let mut work = Box::pin(map_real_waveform(
             tensor,
             WaveformOutputMode::Double,

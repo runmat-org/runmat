@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, WaveformOutputMode, WindowCooperation,
+    map_real_waveform, SignalCooperation, WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -111,7 +111,7 @@ async fn sinc_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
 ) -> BuiltinResult<Value> {
-    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
     if is_supported_nonfloating_input(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -151,7 +151,7 @@ fn is_supported_nonfloating_input(value: &Value) -> bool {
 
 async fn sinc_gpu(
     handle: GpuTensorHandle,
-    cooperation: &mut WindowCooperation,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_precision(&handle)
@@ -195,7 +195,7 @@ async fn sinc_gpu(
 async fn sinc_gpu_host_fallback(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
-    cooperation: &mut WindowCooperation,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let host = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
@@ -258,7 +258,7 @@ async fn sinc_gpu_host_fallback(
     gpu_helpers::restore_class_preserving_value(handle, host, BUILTIN_NAME)
 }
 
-async fn sinc_real(value: Value, cooperation: &mut WindowCooperation) -> BuiltinResult<Value> {
+async fn sinc_real(value: Value, cooperation: &mut SignalCooperation) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, &e))?;
     Ok(tensor::tensor_into_value(
@@ -266,7 +266,7 @@ async fn sinc_real(value: Value, cooperation: &mut WindowCooperation) -> Builtin
     ))
 }
 
-async fn sinc_tensor(tensor: Tensor, cooperation: &mut WindowCooperation) -> BuiltinResult<Tensor> {
+async fn sinc_tensor(tensor: Tensor, cooperation: &mut SignalCooperation) -> BuiltinResult<Tensor> {
     map_real_waveform(
         tensor,
         WaveformOutputMode::PreserveSingle,
@@ -279,7 +279,7 @@ async fn sinc_tensor(tensor: Tensor, cooperation: &mut WindowCooperation) -> Bui
 
 async fn sinc_complex_tensor(
     tensor: ComplexTensor,
-    cooperation: &mut WindowCooperation,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     cooperation.completed(0).await?;
     let shape = tensor.shape.clone();
@@ -313,7 +313,7 @@ async fn map_complex_values<Input: Copy, Output>(
     values: Vec<Input>,
     into_double: impl Fn(Input) -> (f64, f64),
     from_double: impl Fn((f64, f64)) -> Output,
-    cooperation: &mut WindowCooperation,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Vec<Output>> {
     let mut result = Vec::new();
     result.try_reserve_exact(values.len()).map_err(|cause| {
@@ -837,7 +837,7 @@ mod tests {
             return;
         }
         let tensor = Tensor::new(vec![0.0, 0.5, 1.0, 1.25, 2.0], vec![1, 5]).unwrap();
-        let mut cooperation = WindowCooperation::new(None, BUILTIN_NAME);
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
         let cpu =
             block_on(sinc_real(Value::Tensor(tensor.clone()), &mut cooperation)).expect("cpu sinc");
         let view = runmat_accelerate_api::HostTensorView {
@@ -881,7 +881,7 @@ mod tests {
         let complex =
             ComplexTensor::new(vec![(0.0, 0.0), (0.5, 0.25), (1.0, -0.5)], vec![3, 1]).unwrap();
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
-        let mut cooperation = WindowCooperation::new(None, BUILTIN_NAME);
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
         let gpu = block_on(sinc_gpu(handle, &mut cooperation)).expect("gpu sinc");
         let Value::GpuTensor(out_handle) = gpu else {
             panic!("expected resident gpu output");
