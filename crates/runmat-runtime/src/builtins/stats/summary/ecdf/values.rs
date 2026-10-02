@@ -1,5 +1,7 @@
 //! Host numeric and structural value admission for empirical statistics.
 use super::*;
+use runmat_value::IntValue;
+
 pub(super) fn numeric_vector(value: &Value, builtin: EmpiricalBuiltin) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor_from_value(value.clone(), builtin)?;
     if tensor.rows() > 1 && tensor.cols() > 1 {
