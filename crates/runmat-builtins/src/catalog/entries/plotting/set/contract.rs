@@ -57,7 +57,7 @@ pub const SET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
 pub const SET_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SET.INVALID_ARGUMENT",
     identifier: Some("RunMat:set:InvalidArgument"),
-    when: "Handle or property/value pairs are missing, malformed, or unsupported.",
+    when: "A handle, property-name shape, property/value pair, or owner-validated value is invalid. Some legacy plot-child setters still ignore unsupported style names or values.",
     message: "set: invalid argument",
 };
 pub const SET_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

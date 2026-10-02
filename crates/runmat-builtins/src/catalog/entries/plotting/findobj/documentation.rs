@@ -46,7 +46,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Figure { minimum_figures: 1,
-                assertions: "assert(any(h == f)); assert(~any(h == lineHandle));" },
+                assertions: "assert(any(h == f)); assert(any(h == gca())); assert(~any(h == lineHandle));" },
         },
         BuiltinExample { id: "example-4", title: "Search display names with a regular expression",
             program: "plot(1:3, [1 4 9], 'DisplayName', 'series-a');\nh = findobj('-regexp', 'DisplayName', '^series-')",

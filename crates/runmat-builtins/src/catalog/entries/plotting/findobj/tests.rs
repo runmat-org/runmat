@@ -2,6 +2,27 @@ use super::*;
 use runmat_types::*;
 
 #[test]
+fn structured_signatures_include_control_and_grouped_search_forms() {
+    let labels: Vec<_> = FINDOBJ_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|signature| signature.label)
+        .collect();
+    for form in [
+        "'flat'",
+        "'-depth'",
+        "'-property'",
+        "'-regexp'",
+        "{grouped predicates}",
+    ] {
+        assert!(
+            labels.iter().any(|label| label.contains(form)),
+            "missing {form}"
+        );
+    }
+}
+
+#[test]
 fn findobj_output_class_is_known_but_count_is_dynamic() {
     let result = inference::infer(
         &CallRequest {

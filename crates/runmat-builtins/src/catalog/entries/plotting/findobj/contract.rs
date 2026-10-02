@@ -30,7 +30,7 @@ const ROOTS: [BuiltinParamDescriptor; 2] = [
         description: "Optional flat/depth controls and property predicates.",
     },
 ];
-const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     BuiltinSignatureDescriptor {
         label: "h = findobj()",
         inputs: &[],
@@ -44,6 +44,26 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "h = findobj(objhandles, '-depth', d, filters...)",
         inputs: &ROOTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = findobj(objhandles, 'flat', filters...)",
+        inputs: &ROOTS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = findobj('-property', prop, filters...)",
+        inputs: &FILTERS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = findobj('-regexp', prop, pattern, filters...)",
+        inputs: &FILTERS,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = findobj({grouped predicates}, filters...)",
+        inputs: &FILTERS,
         outputs: &OUTPUT,
     },
 ];
