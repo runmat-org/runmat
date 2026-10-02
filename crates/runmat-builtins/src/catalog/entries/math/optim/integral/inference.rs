@@ -238,6 +238,88 @@ fn known_option(
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PathDomain {
+    Real,
+    Complex,
+    Unknown,
+}
+
+impl PathDomain {
+    fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Complex, _) | (_, Self::Complex) => Self::Complex,
+            (Self::Unknown, _) | (_, Self::Unknown) => Self::Unknown,
+            _ => Self::Real,
+        }
+    }
+}
+
+fn value_domain(value: &ValueFact) -> PathDomain {
+    match value.kind {
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Complex,
+            ..
+        }) => PathDomain::Complex,
+        ValueKindFact::Numeric(_) | ValueKindFact::Logical => PathDomain::Real,
+        _ => PathDomain::Unknown,
+    }
+}
+
+fn path_domain(request: &CallRequest) -> PathDomain {
+    let mut domain = request
+        .arguments
+        .get(1..3)
+        .map_or(PathDomain::Unknown, |bounds| {
+            value_domain(&bounds[0]).combine(value_domain(&bounds[1]))
+        });
+    let rest = request.arguments.len().saturating_sub(3);
+    if rest == 1 {
+        return domain.combine(PathDomain::Unknown);
+    }
+    for index in (3..request.arguments.len()).step_by(2) {
+        match request
+            .literals
+            .literal_args
+            .get(index)
+            .and_then(literal_text)
+            .and_then(|name| IntegralOptionName::parse(&name))
+        {
+            Some(IntegralOptionName::Waypoints) => {
+                domain = domain.combine(
+                    request
+                        .arguments
+                        .get(index + 1)
+                        .map_or(PathDomain::Unknown, value_domain),
+                );
+            }
+            Some(_) => {}
+            None => domain = domain.combine(PathDomain::Unknown),
+        }
+    }
+    domain
+}
+
+fn result_domain(callback: NumericDomain, path: PathDomain) -> Option<NumericDomain> {
+    match (callback, path) {
+        (NumericDomain::Complex, _) | (_, PathDomain::Complex) => Some(NumericDomain::Complex),
+        (NumericDomain::Real, PathDomain::Real) => Some(NumericDomain::Real),
+        _ => None,
+    }
+}
+
+fn definitely_invalid_row(shape: &ShapeFact) -> bool {
+    match shape {
+        ShapeFact::Unknown => false,
+        ShapeFact::Scalar => true,
+        ShapeFact::Ranked { rank } => *rank != 2,
+        ShapeFact::Shaped { dims } => {
+            dims.len() != 2
+                || matches!(dims.first(), Some(runmat_types::DimensionFact::Known(rows)) if *rows != 1)
+        }
+    }
+}
+
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() < 3 {
@@ -262,34 +344,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     scalar_facts::callback(request, &mut diagnostics);
     scalar_bound(request, 1, &mut diagnostics);
     scalar_bound(request, 2, &mut diagnostics);
-    let complex_path = request.arguments.get(1..3).is_some_and(|bounds| {
-        bounds.iter().any(|bound| {
-            matches!(
-                bound.kind,
-                ValueKindFact::Numeric(NumericFact {
-                    domain: NumericDomain::Complex,
-                    ..
-                })
-            )
-        })
-    }) || (3..request.arguments.len()).step_by(2).any(|index| {
-        request
-            .literals
-            .literal_args
-            .get(index)
-            .and_then(literal_text)
-            .and_then(|name| IntegralOptionName::parse(&name))
-            == Some(IntegralOptionName::Waypoints)
-            && request.arguments.get(index + 1).is_some_and(|value| {
-                matches!(
-                    value.kind,
-                    ValueKindFact::Numeric(NumericFact {
-                        domain: NumericDomain::Complex,
-                        ..
-                    })
-                )
-            })
-    });
+    let path_domain = path_domain(request);
     let (callback_mode, array_valued) = controls(request, &mut diagnostics);
     let effective_mode = if array_valued == Some(true) {
         Some(IntegralCallbackMode::Scalar)
@@ -298,35 +353,37 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     } else {
         None
     };
-    let callback_argument = match effective_mode {
-        Some(IntegralCallbackMode::Vectorized) => ValueFact::proven(
-            ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: if complex_path {
-                    NumericDomain::Complex
-                } else {
-                    NumericDomain::Real
+    let callback_argument = match (effective_mode, path_domain) {
+        (Some(IntegralCallbackMode::Vectorized), PathDomain::Real | PathDomain::Complex) => {
+            ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: if path_domain == PathDomain::Complex {
+                        NumericDomain::Complex
+                    } else {
+                        NumericDomain::Real
+                    },
+                }),
+                ShapeFact::Shaped {
+                    dims: vec![
+                        runmat_types::DimensionFact::Known(1),
+                        runmat_types::DimensionFact::Unknown,
+                    ],
                 },
-            }),
-            ShapeFact::Shaped {
-                dims: vec![
-                    runmat_types::DimensionFact::Known(1),
-                    runmat_types::DimensionFact::Unknown,
-                ],
-            },
-            StorageFact::Dense,
-        ),
-        Some(IntegralCallbackMode::Scalar) => {
+                StorageFact::Dense,
+            )
+        }
+        (Some(IntegralCallbackMode::Scalar), PathDomain::Real | PathDomain::Complex) => {
             ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,
-                domain: if complex_path {
+                domain: if path_domain == PathDomain::Complex {
                     NumericDomain::Complex
                 } else {
                     NumericDomain::Real
                 },
             }))
         }
-        None => ValueFact::unknown(DynamicReason::RuntimeValue),
+        _ => ValueFact::unknown(DynamicReason::RuntimeValue),
     };
     let callback = scalar_facts::callback_invocation(request, callback_argument);
     if let Some(callback) = &callback {
@@ -352,10 +409,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                         result.kind,
                         ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
                     );
-                    let row = matches!(&result.shape, ShapeFact::Shaped { dims } if matches!(dims.first(), Some(runmat_types::DimensionFact::Known(1))) && dims.len() == 2);
                     if !numeric
                         || result.storage == StorageFact::Sparse
-                        || (!row && !matches!(result.kind, ValueKindFact::Unknown))
+                        || definitely_invalid_row(&result.shape)
                     {
                         diagnostics.push(argument_error(
                             "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
@@ -393,18 +449,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 .map_or_else(
                     || ValueFact::unknown(DynamicReason::RuntimeValue),
                     |result| {
-                        let domain = match result.kind {
-                            ValueKindFact::Numeric(NumericFact {
-                                domain: NumericDomain::Complex,
-                                ..
-                            }) => NumericDomain::Complex,
-                            ValueKindFact::Numeric(_) | ValueKindFact::Logical if complex_path => {
-                                NumericDomain::Complex
-                            }
-                            ValueKindFact::Numeric(_) | ValueKindFact::Logical => {
-                                NumericDomain::Real
-                            }
+                        let callback_domain = match result.kind {
+                            ValueKindFact::Numeric(NumericFact { domain, .. }) => domain,
+                            ValueKindFact::Logical => NumericDomain::Real,
                             _ => return ValueFact::unknown(DynamicReason::UnresolvedCallable),
+                        };
+                        let Some(domain) = result_domain(callback_domain, path_domain) else {
+                            return ValueFact::unknown(DynamicReason::RuntimeValue);
                         };
                         ValueFact::proven(
                             ValueKindFact::Numeric(NumericFact {
@@ -425,19 +476,17 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     ValueKindFact::Logical => Some(NumericDomain::Real),
                     _ => None,
                 });
-            domain.map_or_else(
-                || ValueFact::unknown(DynamicReason::UnresolvedCallable),
-                |domain| {
-                    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                        class: NumericClass::Double,
-                        domain: if complex_path {
-                            NumericDomain::Complex
-                        } else {
-                            domain
-                        },
-                    }))
-                },
-            )
+            domain
+                .and_then(|domain| result_domain(domain, path_domain))
+                .map_or_else(
+                    || ValueFact::unknown(DynamicReason::UnresolvedCallable),
+                    |domain| {
+                        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                            class: NumericClass::Double,
+                            domain,
+                        }))
+                    },
+                )
         } else {
             ValueFact::unknown(DynamicReason::RuntimeValue)
         }

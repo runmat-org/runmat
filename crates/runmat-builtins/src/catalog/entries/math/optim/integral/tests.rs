@@ -13,6 +13,137 @@ fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>, outputs: usiz
     }
 }
 
+fn callable_with_output(output: ValueFact) -> ValueFact {
+    ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: CapabilitySet::default(),
+        parameters: vec![ValueFact::unknown(DynamicReason::RuntimeValue)],
+        parameters_complete: true,
+        outputs: vec![output],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: vec![],
+        captures_complete: true,
+    }))
+}
+
+#[test]
+fn unknown_bounds_and_waypoint_modes_do_not_prove_real_result_domain() {
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
+    let scalar_mode = [
+        ValueFact::scalar(ValueKindFact::String),
+        ValueFact::scalar(ValueKindFact::Logical),
+    ];
+    let scalar_literals = [
+        LiteralValue::String("Vectorized".into()),
+        LiteralValue::Bool(false),
+    ];
+    let cases = [
+        (vec![unknown.clone(), real.clone()], vec![]),
+        (
+            vec![
+                real.clone(),
+                real.clone(),
+                ValueFact::scalar(ValueKindFact::String),
+                unknown.clone(),
+            ],
+            vec![
+                LiteralValue::String("Waypoints".into()),
+                LiteralValue::Unknown,
+            ],
+        ),
+        (
+            vec![
+                real.clone(),
+                real.clone(),
+                ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+                    std::collections::BTreeMap::new(),
+                    false,
+                ))),
+            ],
+            vec![LiteralValue::Unknown],
+        ),
+    ];
+    for (mut arguments, mut rest_literals) in cases {
+        let struct_option = rest_literals.len() == 1 && arguments.len() == 3;
+        if !struct_option {
+            arguments.extend(scalar_mode.clone());
+            rest_literals.extend(scalar_literals.clone());
+        }
+        let mut call_args = vec![callable_with_output(real.clone())];
+        call_args.extend(arguments);
+        let mut literals = vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+        ];
+        literals.extend(rest_literals);
+        let inferred = inference::infer(&request(call_args, literals, 1), &INTEGRAL_CATALOG_ENTRY);
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+        assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Unknown));
+    }
+}
+
+#[test]
+fn vectorized_numeric_unknown_geometry_is_not_a_false_error() {
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    for shape in [
+        ShapeFact::Unknown,
+        ShapeFact::Ranked { rank: 2 },
+        ShapeFact::from(vec![None, None]),
+    ] {
+        let output = ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: NumericDomain::Real,
+            }),
+            shape,
+            StorageFact::Dense,
+        );
+        let inferred = inference::infer(
+            &request(
+                vec![callable_with_output(output), real.clone(), real.clone()],
+                vec![],
+                1,
+            ),
+            &INTEGRAL_CATALOG_ENTRY,
+        );
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+    }
+    let wrong_row = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), None]),
+        StorageFact::Dense,
+    );
+    let inferred = inference::infer(
+        &request(
+            vec![callable_with_output(wrong_row), real.clone(), real],
+            vec![],
+            1,
+        ),
+        &INTEGRAL_CATALOG_ENTRY,
+    );
+    assert!(
+        inferred
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT")
+    );
+}
+
 #[test]
 fn unknown_callback_does_not_prove_real_or_complex_result() {
     let call = request(
