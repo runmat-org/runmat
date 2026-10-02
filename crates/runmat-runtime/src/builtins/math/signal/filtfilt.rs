@@ -178,11 +178,19 @@ const FILTFILT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "filtfilt: internal error",
 };
 
-const FILTFILT_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const FILTFILT_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTFILT.PROVIDER_FAILED",
+    identifier: Some("RunMat:filtfilt:ProviderFailed"),
+    when: "A forward or reverse provider filtering pass fails operationally.",
+    message: "filtfilt: provider filtering failed",
+};
+
+const FILTFILT_ERRORS: [BuiltinErrorDescriptor; 5] = [
     FILTFILT_ERROR_ARG_COUNT,
     FILTFILT_ERROR_INVALID_COEFFICIENTS,
     FILTFILT_ERROR_INVALID_SIGNAL,
     FILTFILT_ERROR_INTERNAL,
+    FILTFILT_ERROR_PROVIDER_FAILED,
 ];
 
 pub const FILTFILT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -201,6 +209,37 @@ fn filtfilt_error_with_detail(
     detail: impl AsRef<str>,
 ) -> RuntimeError {
     filtfilt_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn provider_pass_error(pass: FilterPass, source: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "{}: {} pass failed",
+        FILTFILT_ERROR_PROVIDER_FAILED.message,
+        pass.label()
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_source(source);
+    if let Some(identifier) = FILTFILT_ERROR_PROVIDER_FAILED.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    let mut error = builder.build();
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
+#[derive(Clone, Copy)]
+enum FilterPass {
+    Forward,
+    Reverse,
+}
+
+impl FilterPass {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Forward => "forward",
+            Self::Reverse => "reverse",
+        }
+    }
 }
 
 fn filtfilt_error_with_message(
@@ -585,22 +624,14 @@ async fn try_filtfilt_gpu(
         return Ok(None);
     }
     let extended = odd_reflect(&input.data, nfact);
-    let first_pass = match gpu_filter_pass(provider, coeffs, &extended, &input.shape, &zi).await {
-        Ok(value) => value,
-        Err(err) => {
-            log::debug!("filtfilt: first GPU pass failed ({err:?}), falling back to host");
-            return Ok(None);
-        }
-    };
+    let first_pass = gpu_filter_pass(provider, coeffs, &extended, &input.shape, &zi)
+        .await
+        .map_err(|source| provider_pass_error(FilterPass::Forward, source))?;
     let mut reversed = first_pass;
     reversed.reverse();
-    let second_pass = match gpu_filter_pass(provider, coeffs, &reversed, &input.shape, &zi).await {
-        Ok(value) => value,
-        Err(err) => {
-            log::debug!("filtfilt: second GPU pass failed ({err:?}), falling back to host");
-            return Ok(None);
-        }
-    };
+    let second_pass = gpu_filter_pass(provider, coeffs, &reversed, &input.shape, &zi)
+        .await
+        .map_err(|source| provider_pass_error(FilterPass::Reverse, source))?;
     let mut restored = second_pass;
     restored.reverse();
     let trimmed = restored[nfact..nfact + input.data.len()]
