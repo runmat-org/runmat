@@ -67,6 +67,10 @@ impl<'a, T: Copy, F: FnMut(&T, &T) -> Ordering> StableSortWork<'a, T, F> {
                     self.values[self.cursor..end].sort_by(&mut self.compare);
                     work += (end - self.cursor) as u64;
                     self.cursor = end;
+                    // A bounded library sort is one indivisible unit. Return
+                    // between runs so the invocation budget can observe each
+                    // completed unit before starting the next run or merge.
+                    return Ok(SortProgress::Pending(work));
                 }
                 Phase::Merge => {
                     if self.merged.is_empty() && self.cursor >= self.values.len() {
