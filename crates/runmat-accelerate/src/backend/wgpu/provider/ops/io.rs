@@ -453,6 +453,7 @@ impl WgpuProvider {
         })??;
         self.telemetry.record_upload_bytes(bytes);
         record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
+        let allocated_bytes = buffer.size();
         self.register_numeric_buffer_produced(
             buffer,
             NumericBufferRegistration {
@@ -460,7 +461,7 @@ impl WgpuProvider {
                 len,
                 physical_element_type: element_type,
                 storage: host.storage,
-                allocated_bytes: bytes,
+                allocated_bytes,
                 usage: crate::backend::wgpu::residency::BufferUsageClass::Generic,
             },
             logical,
@@ -502,7 +503,7 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
     ) -> Result<HostNumericTensorOwned> {
         let entry = self.get_entry_raw(handle)?;
-        let mut data = if entry.allocated_bytes == 0 {
+        let mut data = if entry.len == 0 {
             numeric_data_from_bytes(entry.element_type, &[], entry.len)?
         } else {
             let staging = self.with_emission(|emission, pending| -> Result<_> {
@@ -552,10 +553,15 @@ impl WgpuProvider {
                 shape[1] = info.base_rows;
             }
         }
-        self.telemetry.record_download_bytes(entry.allocated_bytes);
+        let transferred_bytes = if entry.len == 0 {
+            0
+        } else {
+            entry.allocated_bytes
+        };
+        self.telemetry.record_download_bytes(transferred_bytes);
         record_provider_copy(
             runmat_value::HostCopyReason::ProviderReadback,
-            entry.allocated_bytes,
+            transferred_bytes,
         );
         let owned = HostNumericTensorOwned {
             data,

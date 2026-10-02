@@ -23,6 +23,7 @@ pub(crate) struct PlacementWitnessService {
     deferred: RefCell<Vec<Box<dyn RuntimePlacementFeedbackSource>>>,
     cancellation: CancellationSource,
     cancel_on_select: bool,
+    selected_candidate: RefCell<Option<runmat_execution::WholeWorkCandidate>>,
 }
 
 impl PlacementWitnessService {
@@ -38,6 +39,7 @@ impl PlacementWitnessService {
             deferred: RefCell::new(Vec::new()),
             cancellation: CancellationSource::new(),
             cancel_on_select,
+            selected_candidate: RefCell::new(None),
         })
     }
 
@@ -57,6 +59,10 @@ impl PlacementWitnessService {
 
     pub(crate) fn pending(&self) -> usize {
         self.deferred.borrow().len()
+    }
+
+    pub(crate) fn selected_candidate(&self) -> Option<runmat_execution::WholeWorkCandidate> {
+        self.selected_candidate.borrow().clone()
     }
 }
 
@@ -87,6 +93,7 @@ impl RuntimePlacementService for PlacementWitnessService {
             .iter()
             .find(|candidate| candidate.kind.is_provider() == self.prefer_provider)
             .expect("requested physical route must be offered");
+        *self.selected_candidate.borrow_mut() = Some(candidate.clone());
         self.selections.set(self.selections.get() + 1);
         if self.cancel_on_select {
             self.cancellation.cancel(CancellationReason::User);

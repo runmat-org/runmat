@@ -9,7 +9,7 @@ use runmat_accelerate_api::{
     ProviderCapabilitySnapshot, ProviderFeasibility, ProviderFeasibilityQuery,
     ProviderOperationFamily, ProviderRejectionCode, ThreadProviderGuard,
 };
-use runmat_execution::ExecutionCandidateKind;
+use runmat_execution::{CandidateOutputPresentation, ExecutionCandidateKind, ResourceByteBound};
 use runmat_value::Value;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -26,16 +26,26 @@ struct ControlledUploadProvider {
     uploads: AtomicUsize,
     fail_second: bool,
     reject_exact: bool,
+    extra_physical_bytes: u64,
     first_result: Mutex<Option<WeakGpuTensorHandle>>,
 }
 
 impl ControlledUploadProvider {
     fn new(fail_second: bool, reject_exact: bool) -> &'static Self {
+        Self::new_with_extra(fail_second, reject_exact, 0)
+    }
+
+    fn new_with_extra(
+        fail_second: bool,
+        reject_exact: bool,
+        extra_physical_bytes: u64,
+    ) -> &'static Self {
         Box::leak(Box::new(Self {
             inner: InProcessProvider::new(),
             uploads: AtomicUsize::new(0),
             fail_second,
             reject_exact,
+            extra_physical_bytes,
             first_result: Mutex::new(None),
         }))
     }
@@ -85,7 +95,16 @@ impl AccelProvider for ControlledUploadProvider {
                 "deconv.fixture.exact_upload_rejected",
             );
         }
-        self.inner.query_feasibility(query)
+        let feasibility = self.inner.query_feasibility(query);
+        if query.workload.transfer_output_bounds.is_some() {
+            if let ProviderFeasibility::Supported { mut estimate } = feasibility {
+                estimate.output_bytes = estimate
+                    .output_bytes
+                    .and_then(|bytes| bytes.checked_add(self.extra_physical_bytes));
+                return ProviderFeasibility::Supported { estimate };
+            }
+        }
+        feasibility
     }
     fn operation_observation_capability(
         &self,
@@ -170,6 +189,37 @@ fn requested_zero_one_two_outputs_select_only_real_published_work() {
         assert!(numerator.allocation_lease().validate_live().is_ok());
         assert!(denominator.allocation_lease().validate_live().is_ok());
     }
+}
+
+#[test]
+fn host_route_retained_budget_uses_provider_physical_estimate_not_copy_volume() {
+    let _serial = test_support::accel_test_lock();
+    let provider = ControlledUploadProvider::new_with_extra(false, false, 11);
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let (numerator, denominator) = inputs(provider);
+    let service = PlacementWitnessService::new(false);
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _result = block_on(deconv_builtin(
+        Some(service.context()),
+        Value::GpuTensor(numerator.clone()),
+        Value::GpuTensor(denominator.clone()),
+    ))
+    .expect("admitted bounded host route");
+    let candidate = service
+        .selected_candidate()
+        .expect("host candidate selected");
+    let CandidateOutputPresentation::ProviderUpload { transfer_bytes, .. } = candidate.presentation
+    else {
+        panic!("host route presents provider uploads")
+    };
+    assert_eq!(transfer_bytes, Some(64));
+    assert_eq!(
+        candidate.resources.retained_bytes,
+        ResourceByteBound::Known(75)
+    );
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
+    assert!(numerator.allocation_lease().validate_live().is_ok());
+    assert!(denominator.allocation_lease().validate_live().is_ok());
 }
 
 #[test]
