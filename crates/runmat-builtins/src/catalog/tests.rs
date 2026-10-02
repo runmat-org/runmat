@@ -1,6 +1,7 @@
 use super::*;
 use crate::{BuiltinAsyncBehavior, BuiltinCompatibility, BuiltinPurity, BuiltinSemanticKind};
 use runmat_types::{CapabilityRequirement, EffectKind};
+mod complex;
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",

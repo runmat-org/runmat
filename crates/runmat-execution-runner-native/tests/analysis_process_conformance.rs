@@ -165,6 +165,10 @@ async fn parent() {
         signal::run().await;
         return;
     }
+    if std::env::args_os().any(|argument| argument == "--acoustic-signal-only") {
+        signal::run_acoustic().await;
+        return;
+    }
     #[cfg(feature = "occt-native")]
     magnetic_authored::run().await;
     #[cfg(feature = "occt-native")]

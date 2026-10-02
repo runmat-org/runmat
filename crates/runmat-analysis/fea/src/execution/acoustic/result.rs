@@ -267,6 +267,14 @@ impl AcousticHarmonicSolverResult {
     pub fn power_relative_error(&self) -> f64 {
         self.data.power_relative_error
     }
+    /// Accepted net input power, including reflected-wave subtraction at incident faces.
+    pub fn mean_input_power_w(&self) -> f64 {
+        self.data.mean_input_power_w
+    }
+    /// Accepted passive boundary loss, excluding incident-inlet Robin bookkeeping.
+    pub fn mean_impedance_loss_w(&self) -> f64 {
+        self.data.mean_impedance_loss_w
+    }
     pub fn frequency(&self) -> Frequency {
         self.data.frequency
     }

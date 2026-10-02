@@ -5,15 +5,13 @@
 //! returns real input lifted into complex storage with zero imaginary parts and
 //! leaves existing complex input unchanged. Binary inputs must be real numeric.
 
-use runmat_builtins::shape_rules::element_count_if_known;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
+#[cfg(test)]
+use runmat_builtins::catalog::definitions::{COMPLEX_DESCRIPTOR, COMPLEX_INTEGER_CAPABILITIES};
+use runmat_builtins::catalog::definitions::{
+    COMPLEX_ERROR_INTEGER_CLASS, COMPLEX_ERROR_INTERNAL, COMPLEX_ERROR_INVALID_ARGUMENT,
+    COMPLEX_ERROR_INVALID_INPUT, COMPLEX_ERROR_SIZE_MISMATCH,
 };
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
@@ -27,139 +25,6 @@ use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "complex";
-
-const COMPLEX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "If either component is integer, the other component must use the same integer class or be a full scalar double." },
-    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The integer class is retained by the complex result; scalar doubles use integer conversion semantics." },
-];
-
-const COMPLEX_UNARY_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Unary complex preserves the input integer class and adds an exact zero imaginary component.",
-    }];
-
-pub const COMPLEX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Z = complex(integer_A)",
-        inputs: &COMPLEX_UNARY_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "All eight integer classes retain exact real storage and receive a same-class zero imaginary lane.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Z = complex(integer_A, integer_B_or_scalar_double)",
-        inputs: &COMPLEX_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
-        notes: "Host complex integer storage is exact for all eight classes. Resident typed integers gather exactly for composition and restore paired native storage to the owning provider.",
-    },
-];
-
-const COMPLEX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Complex result.",
-}];
-
-const COMPLEX_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Real numeric input to lift into complex storage.",
-}];
-
-const COMPLEX_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Real part operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Imaginary part operand.",
-    },
-];
-
-const COMPLEX_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Z = complex(A)",
-        inputs: &COMPLEX_INPUTS_A,
-        outputs: &COMPLEX_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Z = complex(A, B)",
-        inputs: &COMPLEX_INPUTS_A_B,
-        outputs: &COMPLEX_OUTPUT,
-    },
-];
-
-const COMPLEX_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPLEX.INVALID_ARGUMENT",
-    identifier: Some("RunMat:complex:InvalidArgument"),
-    when: "Argument arity is invalid.",
-    message: "complex: invalid argument",
-};
-
-const COMPLEX_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPLEX.INVALID_INPUT",
-    identifier: Some("RunMat:complex:InvalidInput"),
-    when: "Input value cannot be converted into real numeric tensor inputs.",
-    message: "complex: invalid input",
-};
-
-const COMPLEX_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPLEX.SIZE_MISMATCH",
-    identifier: Some("RunMat:complex:SizeMismatch"),
-    when: "Real and imaginary parts are not compatible for scalar expansion.",
-    message: "complex: size mismatch",
-};
-
-const COMPLEX_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPLEX.INTERNAL",
-    identifier: Some("RunMat:complex:Internal"),
-    when: "Internal complex tensor construction failed.",
-    message: "complex: internal error",
-};
-
-const COMPLEX_ERROR_INTEGER_CLASS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPLEX.INTEGER_CLASS",
-    identifier: Some("RunMat:complex:IntegerClass"),
-    when: "An integer input is paired with an unsupported unlike input class.",
-    message: "complex: integer inputs require matching integer classes or a scalar double",
-};
-
-const COMPLEX_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    COMPLEX_ERROR_INVALID_ARGUMENT,
-    COMPLEX_ERROR_INVALID_INPUT,
-    COMPLEX_ERROR_SIZE_MISMATCH,
-    COMPLEX_ERROR_INTERNAL,
-    COMPLEX_ERROR_INTEGER_CLASS,
-];
-
-pub const COMPLEX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COMPLEX_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COMPLEX_ERRORS,
-};
 
 fn complex_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -175,12 +40,7 @@ fn complex_error_with_detail(
 
 #[runtime_builtin(
     name = "complex",
-    category = "math/elementwise",
-    summary = "Construct complex values from real and imaginary parts.",
-    keywords = "complex,construct,imaginary,real,elementwise",
-    type_resolver(complex_type),
-    integer_capabilities(COMPLEX_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::elementwise::complex::COMPLEX_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::complex"
 )]
 async fn complex_builtin(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -194,80 +54,6 @@ async fn complex_builtin(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             &COMPLEX_ERROR_INVALID_ARGUMENT,
             format!("expected 1 or 2 input arguments, got {}", n + 1),
         )),
-    }
-}
-
-fn complex_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args {
-        [] => Type::Unknown,
-        [input] => complex_unary_type(input),
-        [lhs, rhs] => complex_binary_type(lhs, rhs),
-        _ => Type::Unknown,
-    }
-}
-
-fn complex_unary_type(input: &Type) -> Type {
-    match input {
-        Type::Tensor { shape } | Type::Logical { shape } => tensor_like_type(shape),
-        Type::Num | Type::Int | Type::Bool => Type::Num,
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
-fn complex_binary_type(lhs: &Type, rhs: &Type) -> Type {
-    if is_real_numeric_scalar(lhs) && is_real_numeric_scalar(rhs) {
-        return Type::Num;
-    }
-
-    match (numeric_array_shape(lhs), numeric_array_shape(rhs)) {
-        (Some(lhs_shape), Some(rhs_shape)) => match (lhs_shape, rhs_shape) {
-            (Some(left), Some(right)) if left == right => Type::Tensor {
-                shape: Some(left.clone()),
-            },
-            (None, None) => Type::tensor(),
-            _ => Type::Unknown,
-        },
-        (Some(shape), None) if is_real_numeric_scalar(rhs) => tensor_like_type(shape),
-        (None, Some(shape)) if is_real_numeric_scalar(lhs) => tensor_like_type(shape),
-        (Some(None), _) | (_, Some(None)) => Type::tensor(),
-        _ if matches!(lhs, Type::Unknown) || matches!(rhs, Type::Unknown) => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
-fn tensor_like_type(shape: &Option<Vec<Option<usize>>>) -> Type {
-    match shape {
-        Some(dims) => match element_count_if_known(dims) {
-            Some(1) => Type::Num,
-            _ => Type::Tensor {
-                shape: Some(dims.clone()),
-            },
-        },
-        None => Type::tensor(),
-    }
-}
-
-fn is_real_numeric_scalar(ty: &Type) -> bool {
-    match ty {
-        Type::Num | Type::Int | Type::Bool => true,
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            element_count_if_known(shape) == Some(1)
-        }
-        _ => false,
-    }
-}
-
-fn numeric_array_shape(ty: &Type) -> Option<&Option<Vec<Option<usize>>>> {
-    match ty {
-        Type::Tensor { shape } | Type::Logical { shape } => {
-            if shape.as_ref().and_then(|dims| element_count_if_known(dims)) == Some(1) {
-                None
-            } else {
-                Some(shape)
-            }
-        }
-        _ => None,
     }
 }
 
@@ -703,7 +489,6 @@ pub(crate) mod tests {
     use crate::builtins::common::gpu_helpers;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Type;
     use runmat_value::{
         CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
         StringArray, Tensor, Value,
@@ -726,68 +511,6 @@ pub(crate) mod tests {
         assert_eq!(
             COMPLEX_INTEGER_CAPABILITIES[0].form,
             "Z = complex(integer_A)"
-        );
-    }
-
-    #[test]
-    fn type_resolver_rejects_non_scalar_shape_expansion() {
-        let out = complex_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(1)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Unknown);
-    }
-
-    #[test]
-    fn type_resolver_preserves_equal_shape() {
-        let out = complex_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn type_resolver_scalar_returns_num() {
-        let out = complex_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new()));
-        assert_eq!(out, Type::Num);
-    }
-
-    #[test]
-    fn type_resolver_scalar_array_uses_array_shape() {
-        let out = complex_type(
-            &[
-                Type::Num,
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(3)])
-            }
         );
     }
 

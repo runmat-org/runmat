@@ -32,12 +32,18 @@ use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlay
 
 use super::analysis_resources;
 
+#[path = "signal/acoustic.rs"]
+mod acoustic;
 #[path = "signal/compilation.rs"]
 mod compilation;
 #[path = "signal/fields.rs"]
 mod fields;
 #[path = "signal/named.rs"]
 mod named;
+
+pub(super) async fn run_acoustic() {
+    acoustic::run().await;
+}
 
 pub(super) async fn run() {
     let fixture = SignalFixture::new().await;
@@ -55,6 +61,7 @@ pub(super) async fn run() {
     let remote = fixture.encrypted_remote().await;
     assert_realization(&fixture, &remote, expected, "encrypted remote");
     fields::run().await;
+    run_acoustic().await;
 }
 
 struct SignalFixture {

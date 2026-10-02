@@ -5,12 +5,14 @@ use runmat_types::{
     StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
+mod complex;
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
     match entry.contract.inference_rule.0 {
         "array.full" => infer_full(request, entry),
         "array.zeros" => infer_zeros(request, entry),
         "math.abs" => infer_abs(request, entry),
+        "math.complex" => complex::infer_complex(request, entry),
         "acceleration.gather" => infer_gather(request, entry),
         "aggregate.struct" => infer_struct_builtin(request, entry),
         "introspection.feval" => infer_feval(request, entry),
