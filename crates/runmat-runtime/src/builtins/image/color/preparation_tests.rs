@@ -44,19 +44,27 @@ struct Service {
 }
 impl RuntimeAccelerationService for Service {
     fn supports_operation(&self, operation: &str) -> bool {
-        NAMES.contains(&operation)
+        NAMES.contains(&operation) || operation == "ind2rgb"
     }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,
         request: AdmittedBuiltinPreparation,
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
-        assert!(NAMES.contains(&request.admission().binding.builtin.name));
+        let name = request.admission().binding.builtin.name;
+        assert!(NAMES.contains(&name) || name == "ind2rgb");
         assert_eq!(
             request.form().operation,
             BuiltinPreparationOperation::Sink(BuiltinSinkPreparation::Gather)
         );
-        assert_eq!(request.form().data_arguments, &[0]);
+        assert_eq!(
+            request.form().data_arguments,
+            if name == "ind2rgb" {
+                &[0, 1][..]
+            } else {
+                &[0][..]
+            }
+        );
         self.events.borrow_mut().push("prepare");
         let mut operands = request.into_operands();
         if let Some(replacement) = &self.replacement {
@@ -185,6 +193,68 @@ fn prepared_hsv_operand_is_used_once_and_restores_original_owner() {
         );
         assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
     });
+}
+
+#[test]
+fn indexed_color_two_operand_form_observes_once_and_invalid_host_index_does_not_prepare() {
+    let events = Events::default();
+    let _context = enter(&events, false);
+    let map = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap());
+    let valid = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
+    let entry = runmat_builtins::builtin_catalog_primary_entry_by_name("ind2rgb").unwrap();
+    let BuiltinOperandPreparation::Forms(forms) = entry.placement.preparation else {
+        panic!("missing form");
+    };
+    assert_eq!(forms[0].data_arguments, &[0, 1]);
+    assert!(runmat_builtins::validate_builtin_preparation(entry).is_empty());
+    let output = block_on(dispatcher::call_builtin_async(
+        "ind2rgb",
+        &[valid.clone(), map.clone()],
+    ))
+    .unwrap();
+    let Value::Tensor(output) = output else {
+        panic!("RGB output tensor");
+    };
+    assert_eq!(output.shape, vec![1, 1, 3]);
+    assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+    events.borrow_mut().clear();
+    let invalid = Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap());
+    let error = block_on(dispatcher::call_builtin_async(
+        "ind2rgb",
+        &[invalid, map.clone()],
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:ind2rgb:InvalidIndex"));
+    assert!(events.borrow().is_empty());
+    let invalid_map = Value::Tensor(
+        Tensor::new_with_dtype(vec![1.0, 0.0, 0.0], vec![1, 3], NumericDType::F32).unwrap(),
+    );
+    let error = block_on(dispatcher::call_builtin_async(
+        "ind2rgb",
+        &[valid, invalid_map],
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:ind2rgb:InvalidColormap"));
+    assert!(events.borrow().is_empty());
+}
+
+#[test]
+fn indexed_color_unpolled_and_pending_calls_do_not_publish_preparation() {
+    let events = Events::default();
+    let _context = enter(&events, true);
+    let args = [
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap()),
+    ];
+    drop(dispatcher::call_builtin_async("ind2rgb", &args));
+    assert!(events.borrow().is_empty());
+    let mut call = Box::pin(dispatcher::call_builtin_async("ind2rgb", &args));
+    let waker = futures::task::noop_waker();
+    let mut context = Context::from_waker(&waker);
+    assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
+    assert_eq!(&*events.borrow(), &["prepare"]);
+    drop(call);
+    assert_eq!(&*events.borrow(), &["prepare", "abort"]);
 }
 
 fn valid(name: &str) -> Value {

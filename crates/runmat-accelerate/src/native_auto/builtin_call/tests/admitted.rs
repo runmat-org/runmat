@@ -341,7 +341,7 @@ fn canonical_color_sinks_retain_resident_operands_for_domain_admission() {
         )
         .unwrap();
     let args = [Value::GpuTensor(allocation.handle)];
-    for name in ["gray2rgb", "rgb2gray", "rgb2hsv"] {
+    for name in ["gray2rgb", "hsv2rgb", "rgb2gray", "rgb2hsv"] {
         let prepared =
             futures::executor::block_on(prepare_builtin_call(name, &args, &context)).unwrap();
         assert_eq!(
@@ -358,6 +358,16 @@ fn canonical_color_sinks_retain_resident_operands_for_domain_admission() {
             "{name} must not report legacy feedback"
         );
     }
+    let indexed_args = [
+        args[0].clone(),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap()),
+    ];
+    let prepared =
+        futures::executor::block_on(prepare_builtin_call("ind2rgb", &indexed_args, &context))
+            .unwrap();
+    assert_eq!(prepared.args(), &indexed_args);
+    assert!(probe.requests.borrow().is_empty());
+    assert!(probe.feedback.borrow().is_empty());
 }
 
 #[test]
