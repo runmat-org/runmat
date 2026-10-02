@@ -56,7 +56,7 @@ pub(super) struct PreparedHostControls {
 /// Parsed host payloads are retained, so the execution parser never repeats
 /// large window or frequency-vector work.
 pub(super) async fn preflight_host_controls(
-    rest: &[Value],
+    rest: &[&Value],
     complex_input: bool,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PreparedHostControls> {
@@ -150,7 +150,7 @@ pub(super) async fn preflight_host_controls(
 }
 
 pub(super) async fn materialize_resident_controls(
-    rest: &[Value],
+    rest: &[&Value],
     prepared: &mut PreparedHostControls,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Vec<Option<Value>>> {

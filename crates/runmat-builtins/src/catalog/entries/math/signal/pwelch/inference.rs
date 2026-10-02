@@ -4,11 +4,11 @@ use runmat_types::*;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
-    let invalid_arity = request.arguments.is_empty() || request.arguments.len() > 8;
+    let invalid_arity = request.arguments.is_empty() || request.arguments.len() > 10;
     if invalid_arity {
         diagnostics.push(argument_error(
             "RM-CATALOG-PWELCH-ARITY",
-            "pwelch expects a signal and at most seven controls",
+            "pwelch expects a signal, at most seven positional controls, and an optional Parent pair",
             request.arguments.len().saturating_sub(1),
         ));
     }
@@ -65,6 +65,45 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 "RM-CATALOG-PWELCH-RANGE",
                 "one-sided Welch spectra require a real signal",
                 index,
+            ));
+        }
+    }
+    let mut parent_seen = false;
+    for (index, literal) in request.literals.literal_args.iter().enumerate().skip(1) {
+        if !literal_text(literal).is_some_and(|text| text.eq_ignore_ascii_case("parent")) {
+            continue;
+        }
+        if parent_seen || index + 1 >= request.arguments.len() {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-PWELCH-PARENT",
+                "Parent requires one existing axes handle",
+                index,
+            ));
+            continue;
+        }
+        parent_seen = true;
+        let target = &request.arguments[index + 1];
+        let definitely_invalid = match &target.kind {
+            ValueKindFact::Numeric(_) => match &target.shape {
+                ShapeFact::Shaped { dims } => dims
+                    .iter()
+                    .any(|dim| matches!(dim, DimensionFact::Known(size) if *size != 1)),
+                ShapeFact::Unknown | ShapeFact::Scalar | ShapeFact::Ranked { .. } => false,
+            },
+            ValueKindFact::Unknown => false,
+            _ => true,
+        };
+        let definitely_root = request
+            .literals
+            .literal_args
+            .get(index + 1)
+            .and_then(LiteralContext::numeric_from_literal)
+            .is_some_and(|handle| handle == 0.0);
+        if definitely_invalid || definitely_root {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-PWELCH-PARENT",
+                "Parent must be an axes handle scalar",
+                index + 1,
             ));
         }
     }

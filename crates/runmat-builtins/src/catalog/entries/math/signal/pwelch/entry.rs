@@ -15,11 +15,17 @@ pub const PWELCH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
-        purity: BuiltinPurity::Pure,
+        // Numerical calls remain side-effect free; zero-output and Parent forms
+        // mutate a figure, so the identity-wide declaration is conservative.
+        purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &[EffectKind::MaySuspend, EffectKind::MayThrow],
+        effects: &[
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+            EffectKind::UserInterface,
+        ],
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {

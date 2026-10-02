@@ -103,6 +103,63 @@ fn shorter_dft_folds_the_segment_modulo_its_length() {
 }
 
 #[test]
+#[cfg(feature = "plot-core")]
+fn no_output_welch_publishes_a_line_in_the_current_axes() {
+    let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+    let _ = crate::builtins::plotting::clear_figure(None);
+    let axes = crate::builtins::plotting::state::current_axes_state();
+    let before = crate::builtins::plotting::state::plot_child_handles_for_axes(
+        axes.handle,
+        axes.active_index,
+    )
+    .len();
+    let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    let output = call(
+        x,
+        &[Value::Num(4.0), Value::Num(0.0), Value::Num(4.0)],
+        Some(0),
+    )
+    .unwrap();
+    assert!(matches!(output, Value::OutputList(values) if values.is_empty()));
+    let after = crate::builtins::plotting::state::plot_child_handles_for_axes(
+        axes.handle,
+        axes.active_index,
+    )
+    .len();
+    assert_eq!(after, before + 1);
+}
+
+#[test]
+#[cfg(feature = "plot-core")]
+fn parent_name_value_uses_existing_axes_identity_only() {
+    let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+    let axes = crate::builtins::plotting::state::current_axes_state();
+    let target =
+        crate::builtins::plotting::state::encode_axes_handle(axes.handle, axes.active_index);
+    let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
+    let output = call(
+        x.clone(),
+        &[
+            Value::Num(4.0),
+            Value::Num(0.0),
+            Value::Num(4.0),
+            Value::String("Parent".into()),
+            Value::Num(target),
+        ],
+        Some(2),
+    )
+    .unwrap();
+    assert!(matches!(output, Value::OutputList(values) if values.len() == 2));
+    let error = call(
+        x,
+        &[Value::String("Parent".into()), Value::Num(0.0)],
+        Some(1),
+    )
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidParent"));
+}
+
+#[test]
 fn descriptor_is_registered() {
     let builtin = builtin_function_by_name(BUILTIN_NAME).expect("pwelch builtin");
     let descriptor = builtin.descriptor.expect("descriptor");

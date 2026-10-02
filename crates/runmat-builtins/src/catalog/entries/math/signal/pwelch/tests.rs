@@ -23,6 +23,41 @@ fn infer(input: ValueFact, outputs: RequestedOutputCount) -> CallInference {
 }
 
 #[test]
+fn parent_literal_requires_a_scalar_axes_candidate() {
+    let signal = signal(
+        NumericClass::Double,
+        NumericDomain::Real,
+        ResidencyFact::Host,
+    );
+    let name = ValueFact::scalar(ValueKindFact::String);
+    let invalid_target = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Dense,
+    );
+    let result = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![signal, name, invalid_target],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Parent".into()),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-PARENT"));
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
 fn output_class_is_signal_derived_and_residency_is_not_proven() {
     for class in [
         NumericClass::Single,
