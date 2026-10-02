@@ -7,15 +7,16 @@ use super::{
 use crate::builtins::common::random;
 use crate::BuiltinResult;
 
-pub(super) fn run_kmeans(
+pub(super) async fn run_kmeans_cooperative(
     data: &PreparedData,
     k: usize,
     options: &Options,
+    cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<ReplicateResult> {
-    let starts = initial_centers(data, k, options)?;
+    let starts = initial_centers(data, k, options, cooperation).await?;
     let mut best = None;
     for centers in starts {
-        let result = run_replicate(data, centers, options)?;
+        let result = run_replicate(data, centers, options, cooperation).await?;
         if best
             .as_ref()
             .map(|current: &ReplicateResult| result.objective < current.objective)
@@ -23,37 +24,55 @@ pub(super) fn run_kmeans(
         {
             best = Some(result);
         }
+        cooperation.completed(1).await?;
     }
     best.ok_or_else(|| internal("kmeans: no replicate produced a result"))
 }
 
-fn initial_centers(
+async fn initial_centers(
     data: &PreparedData,
     k: usize,
     options: &Options,
+    cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<Vec<Vec<f64>>>> {
     match &options.start {
-        StartSpec::Numeric(centers) => Ok(vec![centers.clone()]),
-        StartSpec::NumericPages(pages) => Ok(pages.clone()),
+        StartSpec::Numeric(centers) => Ok(vec![clone_rows(centers, cooperation).await?]),
+        StartSpec::NumericPages(pages) => {
+            let mut starts = Vec::new();
+            starts.try_reserve_exact(pages.len()).map_err(|_| invalid("kmeans: replicate starts exceed available memory"))?;
+            for page in pages {
+                starts.push(clone_rows(page, cooperation).await?);
+            }
+            Ok(starts)
+        }
         _ if k > data.rows.len() && options.empty_action != EmptyAction::Drop => Err(invalid(
             "kmeans: k cannot exceed the number of complete observations unless EmptyAction is 'drop'",
         )),
-        StartSpec::Named(KmeansStart::Plus) => (0..options.replicates)
-            .map(|_| plus_start(data, k, options.distance))
-            .collect(),
-        StartSpec::Named(KmeansStart::Sample) => (0..options.replicates)
-            .map(|_| sample_start(data, k))
-            .collect(),
-        StartSpec::Named(KmeansStart::Uniform) => (0..options.replicates)
-            .map(|_| uniform_start(data, k))
-            .collect(),
-        StartSpec::Named(KmeansStart::Cluster) => (0..options.replicates)
-            .map(|_| cluster_start(data, k, options))
-            .collect(),
+        StartSpec::Named(start) => {
+            let mut starts = Vec::new();
+            starts
+                .try_reserve_exact(options.replicates)
+                .map_err(|_| invalid("kmeans: replicate starts exceed available memory"))?;
+            for _ in 0..options.replicates {
+                let centers = match start {
+                    KmeansStart::Plus => plus_start(data, k, options.distance, cooperation).await?,
+                    KmeansStart::Sample => sample_start(data, k, cooperation).await?,
+                    KmeansStart::Uniform => uniform_start(data, k, cooperation).await?,
+                    KmeansStart::Cluster => cluster_start(data, k, options, cooperation).await?,
+                };
+                starts.push(centers);
+                cooperation.completed(1).await?;
+            }
+            Ok(starts)
+        }
     }
 }
 
-fn sample_start(data: &PreparedData, k: usize) -> BuiltinResult<Vec<Vec<f64>>> {
+async fn sample_start(
+    data: &PreparedData,
+    k: usize,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<Vec<f64>>> {
     if k > data.rows.len() {
         return Err(invalid(
             "kmeans: Start 'sample' requires k no larger than the number of complete observations",
@@ -63,15 +82,28 @@ fn sample_start(data: &PreparedData, k: usize) -> BuiltinResult<Vec<Vec<f64>>> {
         .into_iter()
         .enumerate()
         .collect::<Vec<_>>();
-    scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
-    Ok(scored
-        .into_iter()
-        .take(k)
-        .map(|(idx, _)| data.rows[idx].clone())
-        .collect())
+    super::sort::stable_sort_by(
+        &mut scored,
+        |a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal),
+        cooperation,
+    )
+    .await?;
+    let mut centers = Vec::new();
+    centers
+        .try_reserve_exact(k)
+        .map_err(|_| invalid("kmeans: sample centers exceed available memory"))?;
+    for (idx, _) in scored.into_iter().take(k) {
+        centers.push(clone_row(&data.rows[idx], cooperation).await?);
+    }
+    Ok(centers)
 }
 
-fn plus_start(data: &PreparedData, k: usize, distance: Distance) -> BuiltinResult<Vec<Vec<f64>>> {
+async fn plus_start(
+    data: &PreparedData,
+    k: usize,
+    distance: Distance,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<Vec<f64>>> {
     if k > data.rows.len() {
         return Err(invalid(
             "kmeans: Start 'plus' requires k no larger than the number of complete observations",
@@ -79,26 +111,33 @@ fn plus_start(data: &PreparedData, k: usize, distance: Distance) -> BuiltinResul
     }
     let uniforms = random::generate_uniform(k.max(1), NAME)?;
     let first = ((uniforms[0] * data.rows.len() as f64).floor() as usize).min(data.rows.len() - 1);
-    let mut centers = vec![data.rows[first].clone()];
+    let mut centers = vec![clone_row(&data.rows[first], cooperation).await?];
     while centers.len() < k {
-        let mut weights = Vec::with_capacity(data.rows.len());
+        let mut weights = Vec::new();
+        weights
+            .try_reserve_exact(data.rows.len())
+            .map_err(|_| invalid("kmeans: start weights exceed available memory"))?;
         let mut total = 0.0;
         for row in &data.rows {
-            let best = centers
-                .iter()
-                .map(|center| distance_value(row, center, distance))
-                .fold(f64::INFINITY, f64::min);
+            let mut best = f64::INFINITY;
+            for center in &centers {
+                best = best.min(distance_value(row, center, distance, cooperation).await?);
+            }
             let weight = if best.is_finite() { best.max(0.0) } else { 0.0 };
             weights.push(weight);
             total += weight;
+            cooperation.completed(1).await?;
         }
         let next = if total <= EPS {
-            first_unused_row(data, &centers, distance).unwrap_or(0)
+            first_unused_row(data, &centers, distance, cooperation)
+                .await?
+                .unwrap_or(0)
         } else {
             let mut threshold = uniforms[centers.len()] * total;
             let mut selected = data.rows.len() - 1;
             for (idx, weight) in weights.iter().enumerate() {
                 threshold -= *weight;
+                cooperation.completed(1).await?;
                 if threshold <= 0.0 {
                     selected = idx;
                     break;
@@ -106,24 +145,38 @@ fn plus_start(data: &PreparedData, k: usize, distance: Distance) -> BuiltinResul
             }
             selected
         };
-        centers.push(data.rows[next].clone());
+        centers.push(clone_row(&data.rows[next], cooperation).await?);
     }
     Ok(centers)
 }
 
-fn first_unused_row(
+async fn first_unused_row(
     data: &PreparedData,
     centers: &[Vec<f64>],
     distance: Distance,
-) -> Option<usize> {
-    data.rows.iter().position(|row| {
-        centers
-            .iter()
-            .all(|center| distance_value(row, center, distance) > EPS)
-    })
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Option<usize>> {
+    for (row_index, row) in data.rows.iter().enumerate() {
+        let mut unused = true;
+        for center in centers {
+            let separated = distance_value(row, center, distance, cooperation).await? > EPS;
+            if !separated {
+                unused = false;
+                break;
+            }
+        }
+        if unused {
+            return Ok(Some(row_index));
+        }
+    }
+    Ok(None)
 }
 
-fn uniform_start(data: &PreparedData, k: usize) -> BuiltinResult<Vec<Vec<f64>>> {
+async fn uniform_start(
+    data: &PreparedData,
+    k: usize,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<Vec<f64>>> {
     let cols = data.cols;
     let mut mins = vec![f64::INFINITY; cols];
     let mut maxs = vec![f64::NEG_INFINITY; cols];
@@ -131,6 +184,7 @@ fn uniform_start(data: &PreparedData, k: usize) -> BuiltinResult<Vec<Vec<f64>>> 
         for col in 0..cols {
             mins[col] = mins[col].min(row[col]);
             maxs[col] = maxs[col].max(row[col]);
+            cooperation.completed(1).await?;
         }
     }
     let uniforms = random::generate_uniform(k * cols, NAME)?;
@@ -144,17 +198,23 @@ fn uniform_start(data: &PreparedData, k: usize) -> BuiltinResult<Vec<Vec<f64>>> 
             } else {
                 lo
             };
+            cooperation.completed(1).await?;
         }
     }
     Ok(centers)
 }
 
-fn cluster_start(data: &PreparedData, k: usize, options: &Options) -> BuiltinResult<Vec<Vec<f64>>> {
+async fn cluster_start(
+    data: &PreparedData,
+    k: usize,
+    options: &Options,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<Vec<f64>>> {
     let sample_size = data.rows.len().div_ceil(10).max(k).min(data.rows.len());
     let rows = if sample_size == data.rows.len() {
-        data.rows.clone()
+        clone_rows(&data.rows, cooperation).await?
     } else {
-        sample_start(data, sample_size)?
+        sample_start(data, sample_size, cooperation).await?
     };
     let subset = PreparedData {
         rows,
@@ -165,45 +225,67 @@ fn cluster_start(data: &PreparedData, k: usize, options: &Options) -> BuiltinRes
     if subset.rows.len() == k {
         return Ok(subset.rows);
     }
-    let centers = plus_start(&subset, k, options.distance)?;
+    let centers = plus_start(&subset, k, options.distance, cooperation).await?;
     let preliminary = Options {
         distance: options.distance,
         empty_action: EmptyAction::Singleton,
         max_iter: options.max_iter.clamp(1, 10),
         online_phase: false,
         replicates: 1,
-        start: StartSpec::Numeric(centers.clone()),
+        start: StartSpec::Numeric(clone_rows(&centers, cooperation).await?),
     };
-    run_replicate(&subset, centers, &preliminary).map(|result| result.centers)
+    run_replicate(&subset, centers, &preliminary, cooperation)
+        .await
+        .map(|result| result.centers)
 }
 
-fn run_replicate(
+async fn run_replicate(
     data: &PreparedData,
     mut centers: Vec<Vec<f64>>,
     options: &Options,
+    cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<ReplicateResult> {
     let k = centers.len();
-    let mut idx = vec![0usize; data.rows.len()];
+    let mut idx = Vec::new();
+    idx.try_reserve_exact(data.rows.len())
+        .map_err(|_| invalid("kmeans: assignments exceed available memory"))?;
+    for _ in &data.rows {
+        idx.push(0);
+        cooperation.completed(1).await?;
+    }
     let iterations = if options.online_phase {
         options.max_iter.saturating_mul(2)
     } else {
         options.max_iter
     };
     for _ in 0..iterations {
-        let assignment = assign_rows(&data.rows, &centers, options.distance);
-        let changed = assignment.changed_from(&idx);
+        let assignment = assign_rows(&data.rows, &centers, options.distance, cooperation).await?;
+        let changed = assignment.changed_from(&idx, cooperation).await?;
         idx = assignment.idx;
-        let next_centers = update_centers(data, &idx, &assignment.distances, &centers, options)?;
+        let next_centers = update_centers(
+            data,
+            &idx,
+            &assignment.distances,
+            &centers,
+            options,
+            cooperation,
+        )
+        .await?;
         centers = next_centers;
+        cooperation.completed(1).await?;
         if !changed {
             break;
         }
     }
-    let assignment = assign_rows(&data.rows, &centers, options.distance);
+    let assignment = assign_rows(&data.rows, &centers, options.distance, cooperation).await?;
     idx = assignment.idx;
     let distances = assignment.distances;
-    let sumd = sum_distances(k, &idx, &distances);
-    let objective = sumd.iter().filter(|value| value.is_finite()).sum::<f64>();
+    let sumd = sum_distances(k, &idx, &distances, cooperation).await?;
+    let mut objective = 0.0;
+    for value in sumd.iter().filter(|value| value.is_finite()) {
+        objective += value;
+        cooperation.completed(1).await?;
+    }
     Ok(ReplicateResult {
         idx_valid: idx,
         centers,
@@ -219,20 +301,47 @@ struct Assignment {
 }
 
 impl Assignment {
-    fn changed_from(&self, previous: &[usize]) -> bool {
-        self.idx != previous
+    async fn changed_from(
+        &self,
+        previous: &[usize],
+        cooperation: &mut super::cooperation::KmeansCooperation,
+    ) -> BuiltinResult<bool> {
+        if self.idx.len() != previous.len() {
+            return Ok(true);
+        }
+        for (current, old) in self.idx.iter().zip(previous) {
+            let changed = current != old;
+            cooperation.completed(1).await?;
+            if changed {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
-fn assign_rows(rows: &[Vec<f64>], centers: &[Vec<f64>], distance: Distance) -> Assignment {
-    let mut idx = Vec::with_capacity(rows.len());
-    let mut all_distances = Vec::with_capacity(rows.len());
+async fn assign_rows(
+    rows: &[Vec<f64>],
+    centers: &[Vec<f64>],
+    distance: Distance,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Assignment> {
+    let mut idx = Vec::new();
+    idx.try_reserve_exact(rows.len())
+        .map_err(|_| invalid("kmeans: assignments exceed available memory"))?;
+    let mut all_distances = Vec::new();
+    all_distances
+        .try_reserve_exact(rows.len())
+        .map_err(|_| invalid("kmeans: distances exceed available memory"))?;
     for row in rows {
         let mut best_idx = 0usize;
         let mut best_distance = f64::INFINITY;
-        let mut row_distances = Vec::with_capacity(centers.len());
+        let mut row_distances = Vec::new();
+        row_distances
+            .try_reserve_exact(centers.len())
+            .map_err(|_| invalid("kmeans: distances exceed available memory"))?;
         for (center_idx, center) in centers.iter().enumerate() {
-            let d = distance_value(row, center, distance);
+            let d = distance_value(row, center, distance, cooperation).await?;
             row_distances.push(d);
             if d < best_distance {
                 best_distance = d;
@@ -241,24 +350,27 @@ fn assign_rows(rows: &[Vec<f64>], centers: &[Vec<f64>], distance: Distance) -> A
         }
         idx.push(best_idx);
         all_distances.push(row_distances);
+        cooperation.completed(1).await?;
     }
-    Assignment {
+    Ok(Assignment {
         idx,
         distances: all_distances,
-    }
+    })
 }
 
-fn update_centers(
+async fn update_centers(
     data: &PreparedData,
     idx: &[usize],
     distances: &[Vec<f64>],
     previous: &[Vec<f64>],
     options: &Options,
+    cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     let k = previous.len();
     let mut members = vec![Vec::new(); k];
     for (row, cluster) in idx.iter().enumerate() {
         members[*cluster].push(row);
+        cooperation.completed(1).await?;
     }
     let mut centers = vec![vec![f64::NAN; data.cols]; k];
     let mut singleton_rows = vec![false; data.rows.len()];
@@ -270,21 +382,32 @@ fn update_centers(
                         "kmeans: empty cluster encountered and EmptyAction is 'error'",
                     ))
                 }
-                EmptyAction::Drop => continue,
+                EmptyAction::Drop => {
+                    cooperation.completed(1).await?;
+                    continue;
+                }
                 EmptyAction::Singleton => {
-                    let row = furthest_assigned_row(distances, idx, &singleton_rows);
+                    let row =
+                        furthest_assigned_row(distances, idx, &singleton_rows, cooperation).await?;
                     singleton_rows[row] = true;
-                    centers[cluster] = data.rows[row].clone();
+                    centers[cluster] = clone_row(&data.rows[row], cooperation).await?;
                 }
             }
         } else {
-            centers[cluster] = centroid_for(&data.rows, &members[cluster], options.distance);
+            centers[cluster] =
+                centroid_for(&data.rows, &members[cluster], options.distance, cooperation).await?;
         }
+        cooperation.completed(1).await?;
     }
     Ok(centers)
 }
 
-fn furthest_assigned_row(distances: &[Vec<f64>], idx: &[usize], excluded: &[bool]) -> usize {
+async fn furthest_assigned_row(
+    distances: &[Vec<f64>],
+    idx: &[usize],
+    excluded: &[bool],
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<usize> {
     let mut best_row = 0usize;
     let mut best_distance = f64::NEG_INFINITY;
     for (row, cluster) in idx.iter().enumerate() {
@@ -296,21 +419,36 @@ fn furthest_assigned_row(distances: &[Vec<f64>], idx: &[usize], excluded: &[bool
             best_distance = distance;
             best_row = row;
         }
+        cooperation.completed(1).await?;
     }
-    best_row
+    Ok(best_row)
 }
 
-fn centroid_for(rows: &[Vec<f64>], members: &[usize], distance: Distance) -> Vec<f64> {
+async fn centroid_for(
+    rows: &[Vec<f64>],
+    members: &[usize],
+    distance: Distance,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<f64>> {
     let cols = rows[0].len();
     match distance {
         Distance::Cityblock | Distance::Hamming => {
             let mut center = vec![0.0; cols];
             for col in 0..cols {
-                let mut values = members
-                    .iter()
-                    .map(|row| rows[*row][col])
-                    .collect::<Vec<_>>();
-                values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+                let mut values = Vec::new();
+                values
+                    .try_reserve_exact(members.len())
+                    .map_err(|_| invalid("kmeans: centroid samples exceed available memory"))?;
+                for row in members {
+                    values.push(rows[*row][col]);
+                    cooperation.completed(1).await?;
+                }
+                super::sort::stable_sort_by(
+                    &mut values,
+                    |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal),
+                    cooperation,
+                )
+                .await?;
                 let mid = values.len() / 2;
                 center[col] = if values.len() % 2 == 0 {
                     (values[mid - 1] + values[mid]) / 2.0
@@ -320,24 +458,27 @@ fn centroid_for(rows: &[Vec<f64>], members: &[usize], distance: Distance) -> Vec
                 if distance == Distance::Hamming {
                     center[col] = if center[col] >= 0.5 { 1.0 } else { 0.0 };
                 }
+                cooperation.completed(1).await?;
             }
-            center
+            Ok(center)
         }
         _ => {
             let mut center = vec![0.0; cols];
             for row in members {
                 for (col, value) in center.iter_mut().enumerate().take(cols) {
                     *value += rows[*row][col];
+                    cooperation.completed(1).await?;
                 }
             }
             for value in &mut center {
                 *value /= members.len() as f64;
+                cooperation.completed(1).await?;
             }
             match distance {
                 Distance::Cosine | Distance::Correlation => {
-                    normalize_or_nan(center, distance == Distance::Correlation)
+                    Ok(normalize_or_nan(center, distance == Distance::Correlation))
                 }
-                _ => center,
+                _ => Ok(center),
             }
         }
     }
@@ -348,49 +489,91 @@ fn normalize_or_nan(row: Vec<f64>, center: bool) -> Vec<f64> {
         .unwrap_or_else(|| vec![f64::NAN; row.len()])
 }
 
-fn sum_distances(k: usize, idx: &[usize], distances: &[Vec<f64>]) -> Vec<f64> {
+async fn clone_row(
+    row: &[f64],
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(row.len())
+        .map_err(|_| invalid("kmeans: centers exceed available memory"))?;
+    for &value in row {
+        copy.push(value);
+        cooperation.completed(1).await?;
+    }
+    Ok(copy)
+}
+
+async fn clone_rows(
+    rows: &[Vec<f64>],
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<Vec<f64>>> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(rows.len())
+        .map_err(|_| invalid("kmeans: centers exceed available memory"))?;
+    for row in rows {
+        copy.push(clone_row(row, cooperation).await?);
+    }
+    Ok(copy)
+}
+
+async fn sum_distances(
+    k: usize,
+    idx: &[usize],
+    distances: &[Vec<f64>],
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<f64>> {
     let mut sumd = vec![0.0; k];
     for (row, cluster) in idx.iter().enumerate() {
         let value = distances[row][*cluster];
         if value.is_finite() {
             sumd[*cluster] += value;
         }
+        cooperation.completed(1).await?;
     }
-    sumd
+    Ok(sumd)
 }
 
-fn distance_value(row: &[f64], center: &[f64], distance: Distance) -> f64 {
-    if row.iter().any(|v| v.is_nan()) || center.iter().any(|v| v.is_nan()) {
-        return f64::NAN;
+async fn distance_value(
+    row: &[f64],
+    center: &[f64],
+    distance: Distance,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<f64> {
+    for value in row {
+        let missing = value.is_nan();
+        cooperation.completed(1).await?;
+        if missing {
+            return Ok(f64::NAN);
+        }
     }
-    match distance {
-        Distance::SqEuclidean => row
-            .iter()
-            .zip(center.iter())
-            .map(|(a, b)| {
+    for value in center {
+        let missing = value.is_nan();
+        cooperation.completed(1).await?;
+        if missing {
+            return Ok(f64::NAN);
+        }
+    }
+    let mut sum = 0.0;
+    let mut mismatches = 0usize;
+    for (a, b) in row.iter().zip(center.iter()) {
+        match distance {
+            Distance::SqEuclidean => {
                 let diff = a - b;
-                diff * diff
-            })
-            .sum(),
-        Distance::Cityblock => row
-            .iter()
-            .zip(center.iter())
-            .map(|(a, b)| (a - b).abs())
-            .sum(),
-        Distance::Cosine | Distance::Correlation => {
-            1.0 - row
-                .iter()
-                .zip(center.iter())
-                .map(|(a, b)| a * b)
-                .sum::<f64>()
+                sum += diff * diff;
+            }
+            Distance::Cityblock => sum += (a - b).abs(),
+            Distance::Cosine | Distance::Correlation => sum += a * b,
+            Distance::Hamming => {
+                if (a - b).abs() > EPS {
+                    mismatches += 1;
+                }
+            }
         }
-        Distance::Hamming => {
-            let mismatches = row
-                .iter()
-                .zip(center.iter())
-                .filter(|(a, b)| (*a - *b).abs() > EPS)
-                .count();
-            mismatches as f64 / row.len() as f64
-        }
+        cooperation.completed(1).await?;
     }
+    Ok(match distance {
+        Distance::SqEuclidean | Distance::Cityblock => sum,
+        Distance::Cosine | Distance::Correlation => 1.0 - sum,
+        Distance::Hamming => mismatches as f64 / row.len() as f64,
+    })
 }

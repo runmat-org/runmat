@@ -61,6 +61,146 @@ fn preparation_yields_on_real_observation_work_and_preserves_native_values() {
     assert_eq!(actual.original_to_valid, expected.original_to_valid);
     assert!(turns.get() >= 4);
 }
+
+#[test]
+fn clustering_numerics_match_with_and_without_forced_cpu_turns() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::cell::Cell;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+
+    let data = prepare_data(
+        tensor(vec![0.0, 1.0, 9.0, 10.0], 4, 1),
+        Distance::SqEuclidean,
+    )
+    .unwrap();
+    let options = Options {
+        start: StartSpec::Numeric(vec![vec![0.0], vec![10.0]]),
+        ..Options::default()
+    };
+    let expected = block_on(compute::run_kmeans_cooperative(
+        &data,
+        2,
+        &options,
+        &mut cooperation::KmeansCooperation::new(None),
+    ))
+    .unwrap();
+    let source = CancellationSource::new();
+    let turns = Rc::new(Cell::new(0));
+    let counted = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let actual = block_on(compute::run_kmeans_cooperative(
+        &data,
+        2,
+        &options,
+        &mut cooperation::KmeansCooperation::with_budget(budget),
+    ))
+    .unwrap();
+    assert_eq!(actual.idx_valid, expected.idx_valid);
+    assert_eq!(actual.centers, expected.centers);
+    assert_eq!(actual.sumd, expected.sumd);
+    assert_eq!(actual.distances, expected.distances);
+    assert_eq!(actual.objective.to_bits(), expected.objective.to_bits());
+    assert!(turns.get() > 20);
+}
+
+#[test]
+fn cancellation_during_assignment_prevents_a_partial_replicate() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::cell::Cell;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+
+    let data = prepare_data(
+        tensor(vec![0.0, 1.0, 9.0, 10.0], 4, 1),
+        Distance::SqEuclidean,
+    )
+    .unwrap();
+    let options = Options {
+        start: StartSpec::Numeric(vec![vec![0.0], vec![10.0]]),
+        ..Options::default()
+    };
+    let source = Rc::new(CancellationSource::new());
+    let turns = Rc::new(Cell::new(0));
+    let cancel_on_turn = source.clone();
+    let counted = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            if counted.get() == 12 {
+                cancel_on_turn.cancel(CancellationReason::User);
+            }
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let error = block_on(compute::run_kmeans_cooperative(
+        &data,
+        2,
+        &options,
+        &mut cooperation::KmeansCooperation::with_budget(budget),
+    ))
+    .expect_err("cancelled assignment must not publish a replicate");
+    assert_eq!(turns.get(), 12);
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}
+
+#[test]
+fn cancellation_during_output_materialization_prevents_publication() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::cell::Cell;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+
+    let data = prepare_data(
+        tensor(vec![0.0, 1.0, 9.0, 10.0], 4, 1),
+        Distance::SqEuclidean,
+    )
+    .unwrap();
+    let result = ReplicateResult {
+        idx_valid: vec![1, 1, 2, 2],
+        centers: vec![vec![0.5], vec![9.5]],
+        sumd: vec![0.5, 0.5],
+        distances: vec![vec![0.25, 90.25]; 4],
+        objective: 1.0,
+    };
+    let source = Rc::new(CancellationSource::new());
+    let turns = Rc::new(Cell::new(0));
+    let cancel_on_turn = source.clone();
+    let counted = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            if counted.get() == 3 {
+                cancel_on_turn.cancel(CancellationReason::User);
+            }
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let error = block_on(output::outputs_for_count_cooperative(
+        result,
+        &data,
+        &mut cooperation::KmeansCooperation::with_budget(budget),
+    ))
+    .expect_err("cancelled output materialization cannot publish a partial result");
+    assert_eq!(turns.get(), 3);
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
 }

@@ -20,6 +20,7 @@ mod compute;
 mod geometry;
 mod options;
 mod output;
+mod sort;
 #[cfg(test)]
 mod admission_tests;
 #[cfg(test)]
@@ -28,7 +29,6 @@ mod tests;
 #[cfg(test)]
 use crate::builtins::common::random;
 use admission::{BorrowedOperands, OptionHeader};
-use compute::run_kmeans;
 #[cfg(test)]
 use geometry::prepare_data;
 use geometry::{
@@ -37,7 +37,6 @@ use geometry::{
 #[cfg(test)]
 use options::{bool_option, is_empty_numeric, parse_positive_usize};
 use options::{parse_k, parse_options};
-use output::outputs_for_count;
 #[cfg(test)]
 use runmat_builtins::{KMEANS_EXTENSIONS, KMEANS_INTEGER_CAPABILITIES};
 
@@ -179,10 +178,11 @@ async fn kmeans_in_runtime(
     let data = geometry::prepare_data_cooperative(x, options.distance, &mut cooperation).await?;
     let k = parse_k(&k, &options.start)?;
     validate_options(&mut options, k, &data, &mut cooperation).await?;
-    let result = run_kmeans(&data, k, &options)?;
-    let value = outputs_for_count(result, &data)?;
+    let result = compute::run_kmeans_cooperative(&data, k, &options, &mut cooperation).await?;
+    let value = output::outputs_for_count_cooperative(result, &data, &mut cooperation).await?;
     cooperation.completed(0).await?;
-    restore_kmeans_value(value, output_source.as_ref(), &borrowed)
+    restore_kmeans_value_cooperative(value, output_source.as_ref(), &borrowed, &mut cooperation)
+        .await
 }
 
 #[cfg(test)]
@@ -197,10 +197,25 @@ fn value_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHan
     Some(handle.clone())
 }
 
+#[cfg(test)]
 fn restore_kmeans_value(
     value: Value,
     source: Option<&runmat_accelerate_api::GpuTensorHandle>,
     borrowed: &BorrowedOperands,
+) -> BuiltinResult<Value> {
+    futures::executor::block_on(restore_kmeans_value_cooperative(
+        value,
+        source,
+        borrowed,
+        &mut cooperation::KmeansCooperation::new(None),
+    ))
+}
+
+async fn restore_kmeans_value_cooperative(
+    value: Value,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    borrowed: &BorrowedOperands,
+    cooperation: &mut cooperation::KmeansCooperation,
 ) -> BuiltinResult<Value> {
     let Some(source) = source else {
         return Ok(value);
@@ -209,7 +224,11 @@ fn restore_kmeans_value(
         Value::Tensor(_) => {
             let protected = borrowed.protected().iter().collect::<Vec<_>>();
             let intent = borrowed.intent_sources().iter().collect::<Vec<_>>();
-            restore_one_kmeans_output(value, source, &protected, &intent)
+            let restored = restore_one_kmeans_output(value, source, &protected, &intent)?;
+            if let Err(error) = cooperation.completed(0).await {
+                return Err(retire_staged_outputs(vec![restored], error));
+            }
+            Ok(restored)
         }
         Value::OutputList(values) => {
             let mut restored = Vec::with_capacity(values.len());
@@ -223,6 +242,9 @@ fn restore_kmeans_value(
                 match restore_one_kmeans_output(value, source, &protected, &intent) {
                     Ok(value) => restored.push(value),
                     Err(error) => return Err(retire_staged_outputs(restored, error)),
+                }
+                if let Err(error) = cooperation.completed(0).await {
+                    return Err(retire_staged_outputs(restored, error));
                 }
             }
             Ok(Value::OutputList(restored))
