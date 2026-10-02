@@ -156,6 +156,15 @@ pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
     ensure_filtfilt_extensions([&b, &a, &x])?;
     preflight_iir_operands(IirForm::ZeroPhase, &b, &a, &x, None)
         .map_err(filtfilt_preflight_error)?;
+    for (value, descriptor) in [
+        (&b, &FILTFILT_ERROR_INVALID_COEFFICIENTS),
+        (&a, &FILTFILT_ERROR_INVALID_COEFFICIENTS),
+        (&x, &FILTFILT_ERROR_INVALID_SIGNAL),
+    ] {
+        if let Value::GpuTensor(handle) = value {
+            resident_output::owner(handle, || filtfilt_error(descriptor))?;
+        }
+    }
     let b = gather_wide_integer_for_exactness(b).await?;
     let a = gather_wide_integer_for_exactness(a).await?;
     let x = gather_wide_integer_for_exactness(x).await?;
@@ -1183,6 +1192,47 @@ mod tests {
         );
         assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         b.release().expect("release original resident coefficients");
+    }
+
+    #[test]
+    fn later_stale_resident_signal_precedes_numerator_download() {
+        let _lock = test_support::accel_test_lock();
+        let provider: &'static OperationalFailureProvider =
+            Box::leak(Box::new(OperationalFailureProvider {
+                inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                downloads: std::sync::atomic::AtomicUsize::new(0),
+            }));
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let numerator = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 1.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let signal = provider
+            .upload(&HostTensorView {
+                data: &[1.0; 8],
+                shape: &[1, 8],
+            })
+            .unwrap();
+        let stale_signal = signal.clone();
+        signal.release().unwrap();
+        let error = call(
+            Value::GpuTensor(numerator.clone()),
+            Value::Num(1.0),
+            Value::GpuTensor(stale_signal),
+        )
+        .expect_err("signal lease must be checked before numerator transfer");
+        assert_eq!(error.identifier(), FILTFILT_ERROR_INVALID_SIGNAL.identifier);
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(std::error::Error::source(&error).is_some());
+        assert_eq!(
+            provider.downloads.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(numerator.allocation_lease().validate_live().is_ok());
     }
 
     #[test]

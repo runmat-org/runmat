@@ -8,9 +8,30 @@ pub(super) fn operands(
     denominator: &Value,
     signal: &Value,
     initial: Option<&Value>,
+    dimension: Option<&Value>,
 ) -> BuiltinResult<()> {
     preflight_iir_operands(IirForm::Causal, numerator, denominator, signal, initial)
         .map_err(own_error)
+}
+
+pub(super) fn resident_owners(
+    numerator: &Value,
+    denominator: &Value,
+    signal: &Value,
+    initial: Option<&Value>,
+) -> BuiltinResult<()> {
+    for (value, descriptor) in [
+        (Some(numerator), &FILTER_ERROR_INVALID_COEFFICIENTS),
+        (Some(denominator), &FILTER_ERROR_INVALID_COEFFICIENTS),
+        (Some(signal), &FILTER_ERROR_INVALID_SIGNAL),
+        (initial, &FILTER_ERROR_INVALID_INITIAL_STATE),
+        (dimension, &FILTER_ERROR_INVALID_DIMENSION),
+    ] {
+        if let Some(Value::GpuTensor(handle)) = value {
+            super::super::resident_output::owner(handle, || filter_error(descriptor))?;
+        }
+    }
+    Ok(())
 }
 
 fn own_error(fault: IirAdmissionFault) -> RuntimeError {
@@ -110,6 +131,43 @@ mod tests {
         );
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
         b.release().expect("release borrowed numerator");
+    }
+
+    #[test]
+    fn later_stale_signal_precedes_numerator_download() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let provider: &'static CountedProvider = Box::leak(Box::new(CountedProvider {
+            delegate: InProcessProvider::new(),
+            downloads: AtomicUsize::new(0),
+        }));
+        let _scope = ThreadProviderGuard::set(Some(provider));
+        let numerator = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 1.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let signal = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let stale_signal = signal.clone();
+        signal.release().unwrap();
+        let Err(error) = block_on(super::super::evaluate(
+            Value::GpuTensor(numerator.clone()),
+            Value::Num(1.0),
+            Value::GpuTensor(stale_signal),
+            &[],
+        )) else {
+            panic!("signal lease must be checked before numerator transfer");
+        };
+        assert_eq!(error.identifier(), FILTER_ERROR_INVALID_SIGNAL.identifier);
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(std::error::Error::source(&error).is_some());
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert!(numerator.allocation_lease().validate_live().is_ok());
     }
 
     #[test]

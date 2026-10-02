@@ -237,6 +237,7 @@ impl FilterArgs {
             Some(Value::GpuTensor(_)) | None => None,
             Some(value) => Some(parse_dimension_arg(value).await?),
         };
+        preflight::resident_owners(&b, &a, &x, zi_value.as_ref(), dim_value.as_ref())?;
 
         let coeffs_b = CoeffInput::from_value(CoefficientRole::Numerator, b).await?;
         let coeffs_a = CoeffInput::from_value(CoefficientRole::Denominator, a).await?;
