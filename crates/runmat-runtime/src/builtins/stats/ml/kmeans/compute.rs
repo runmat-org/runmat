@@ -77,12 +77,15 @@ async fn sample_start(
             "kmeans: Start 'sample' requires k no larger than the number of complete observations",
         ));
     }
-    let mut scored = cooperation
-        .uniform(data.rows.len())
-        .await?
-        .into_iter()
-        .enumerate()
-        .collect::<Vec<_>>();
+    let uniforms = cooperation.uniform(data.rows.len()).await?;
+    let mut scored = Vec::new();
+    scored
+        .try_reserve_exact(uniforms.len())
+        .map_err(|_| invalid("kmeans: sample scores exceed available memory"))?;
+    for (index, draw) in uniforms.into_iter().enumerate() {
+        scored.push((index, draw));
+        cooperation.completed(1).await?;
+    }
     super::sort::stable_sort_by(
         &mut scored,
         |a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal),
@@ -179,8 +182,8 @@ async fn uniform_start(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     let cols = data.cols;
-    let mut mins = vec![f64::INFINITY; cols];
-    let mut maxs = vec![f64::NEG_INFINITY; cols];
+    let mut mins = filled(cols, f64::INFINITY, cooperation).await?;
+    let mut maxs = filled(cols, f64::NEG_INFINITY, cooperation).await?;
     for row in &data.rows {
         for col in 0..cols {
             mins[col] = mins[col].min(row[col]);
@@ -192,7 +195,13 @@ async fn uniform_start(
         .checked_mul(cols)
         .ok_or_else(|| invalid("kmeans: uniform start shape overflow"))?;
     let uniforms = cooperation.uniform(draw_count).await?;
-    let mut centers = vec![vec![0.0; cols]; k];
+    let mut centers = Vec::new();
+    centers
+        .try_reserve_exact(k)
+        .map_err(|_| invalid("kmeans: uniform centers exceed available memory"))?;
+    for _ in 0..k {
+        centers.push(filled(cols, 0.0, cooperation).await?);
+    }
     for center in 0..k {
         for col in 0..cols {
             let lo = mins[col];
@@ -220,10 +229,18 @@ async fn cluster_start(
     } else {
         sample_start(data, sample_size, cooperation).await?
     };
+    let mut original_to_valid = Vec::new();
+    original_to_valid
+        .try_reserve_exact(sample_size)
+        .map_err(|_| invalid("kmeans: subset indices exceed available memory"))?;
+    for row in 0..sample_size {
+        original_to_valid.push(Some(row));
+        cooperation.completed(1).await?;
+    }
     let subset = PreparedData {
         rows,
         original_row_count: sample_size,
-        original_to_valid: (0..sample_size).map(Some).collect(),
+        original_to_valid,
         cols: data.cols,
     };
     if subset.rows.len() == k {
@@ -371,13 +388,30 @@ async fn update_centers(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     let k = previous.len();
-    let mut members = vec![Vec::new(); k];
+    let mut counts = filled(k, 0usize, cooperation).await?;
+    for cluster in idx {
+        counts[*cluster] += 1;
+        cooperation.completed(1).await?;
+    }
+    let mut members = filled(k, Vec::<usize>::new(), cooperation).await?;
+    for (member, count) in members.iter_mut().zip(counts) {
+        member
+            .try_reserve_exact(count)
+            .map_err(|_| invalid("kmeans: cluster members exceed available memory"))?;
+        cooperation.completed(1).await?;
+    }
     for (row, cluster) in idx.iter().enumerate() {
         members[*cluster].push(row);
         cooperation.completed(1).await?;
     }
-    let mut centers = vec![vec![f64::NAN; data.cols]; k];
-    let mut singleton_rows = vec![false; data.rows.len()];
+    let mut centers = Vec::new();
+    centers
+        .try_reserve_exact(k)
+        .map_err(|_| invalid("kmeans: centers exceed available memory"))?;
+    for _ in 0..k {
+        centers.push(filled(data.cols, f64::NAN, cooperation).await?);
+    }
+    let mut singleton_rows = filled(data.rows.len(), false, cooperation).await?;
     for cluster in 0..k {
         if members[cluster].is_empty() {
             match options.empty_action {
@@ -437,7 +471,7 @@ async fn centroid_for(
     let cols = rows[0].len();
     match distance {
         Distance::Cityblock | Distance::Hamming => {
-            let mut center = vec![0.0; cols];
+            let mut center = filled(cols, 0.0, cooperation).await?;
             for col in 0..cols {
                 let mut values = Vec::new();
                 values
@@ -467,7 +501,7 @@ async fn centroid_for(
             Ok(center)
         }
         _ => {
-            let mut center = vec![0.0; cols];
+            let mut center = filled(cols, 0.0, cooperation).await?;
             for row in members {
                 for (col, value) in center.iter_mut().enumerate().take(cols) {
                     *value += rows[*row][col];
@@ -520,13 +554,29 @@ async fn clone_rows(
     Ok(copy)
 }
 
+async fn filled<T: Clone>(
+    len: usize,
+    value: T,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<T>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|_| invalid("kmeans: clustering workspace exceeds available memory"))?;
+    for _ in 0..len {
+        values.push(value.clone());
+        cooperation.completed(1).await?;
+    }
+    Ok(values)
+}
+
 async fn sum_distances(
     k: usize,
     idx: &[usize],
     distances: &[Vec<f64>],
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<f64>> {
-    let mut sumd = vec![0.0; k];
+    let mut sumd = filled(k, 0.0, cooperation).await?;
     for (row, cluster) in idx.iter().enumerate() {
         let value = distances[row][*cluster];
         if value.is_finite() {

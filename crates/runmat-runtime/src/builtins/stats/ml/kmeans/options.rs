@@ -77,9 +77,12 @@ pub(super) async fn parse_numeric_start_cooperative(
         let k = tensor.shape[0];
         let cols = tensor.shape[1];
         let reps = tensor.shape[2];
-        let mut pages = Vec::with_capacity(reps);
+        let mut pages = Vec::new();
+        pages
+            .try_reserve_exact(reps)
+            .map_err(|_| invalid("kmeans: numeric Start pages exceed available memory"))?;
         for page in 0..reps {
-            let mut centers = vec![vec![0.0; cols]; k];
+            let mut centers = start_centers(k, cols, cooperation).await?;
             for col in 0..cols {
                 for (row, center_row) in centers.iter_mut().enumerate().take(k) {
                     let offset = row + col * k + page * k * cols;
@@ -96,7 +99,7 @@ pub(super) async fn parse_numeric_start_cooperative(
         Ok(StartSpec::NumericPages(pages))
     } else {
         let (rows, cols) = tensor_rows_cols(&tensor);
-        let mut centers = vec![vec![0.0; cols]; rows];
+        let mut centers = start_centers(rows, cols, cooperation).await?;
         for col in 0..cols {
             for (row, center_row) in centers.iter_mut().enumerate().take(rows) {
                 let value = tensor::tensor_value_f64(&tensor, col * rows + row);
@@ -109,6 +112,28 @@ pub(super) async fn parse_numeric_start_cooperative(
         }
         Ok(StartSpec::Numeric(centers))
     }
+}
+
+async fn start_centers(
+    rows: usize,
+    cols: usize,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<Vec<f64>>> {
+    let mut centers = Vec::new();
+    centers
+        .try_reserve_exact(rows)
+        .map_err(|_| invalid("kmeans: numeric Start exceeds available memory"))?;
+    for _ in 0..rows {
+        let mut row = Vec::new();
+        row.try_reserve_exact(cols)
+            .map_err(|_| invalid("kmeans: numeric Start exceeds available memory"))?;
+        for _ in 0..cols {
+            row.push(0.0);
+            cooperation.completed(1).await?;
+        }
+        centers.push(row);
+    }
+    Ok(centers)
 }
 
 pub(super) fn parse_positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
