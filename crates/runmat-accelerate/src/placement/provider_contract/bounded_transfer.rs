@@ -6,6 +6,30 @@ use runmat_accelerate_api::{
     ProviderResourceEstimate, ProviderStorage,
 };
 
+#[cfg(all(test, feature = "wgpu"))]
+#[path = "bounded_transfer/tests.rs"]
+mod tests;
+
+#[cfg(feature = "wgpu")]
+pub(super) fn wgpu_dense_feasibility(
+    snapshot: &ProviderCapabilitySnapshot,
+    query: &ProviderFeasibilityQuery,
+    precision: runmat_accelerate_api::ProviderPrecision,
+) -> ProviderFeasibility {
+    // An empty WGPU numeric upload still owns one storage element. This is a
+    // physical estimate; logical transfer volume remains zero.
+    let empty_floor = ProviderElementType::from(precision).byte_width();
+    super::dense_feasibility_with_bytes(snapshot, query, |representation| {
+        representation.checked_byte_len().map(|bytes| {
+            if bytes == 0 && query.operation.0 == "transfer.upload" {
+                empty_floor
+            } else {
+                bytes
+            }
+        })
+    })
+}
+
 pub(super) fn feasibility(
     snapshot: &ProviderCapabilitySnapshot,
     query: &ProviderFeasibilityQuery,

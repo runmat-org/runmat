@@ -212,7 +212,9 @@ fn capability_inventory_matches_implemented_hooks() {
     ));
     #[cfg(feature = "wgpu")]
     {
-        let device = super::super::wgpu_capability_snapshot(&provider);
+        let device = super::super::wgpu_capability_snapshot(&provider, 4096);
+        assert_eq!(device.max_allocation_bytes, Some(4096));
+        assert_eq!(device.device.memory_bytes, provider.memory_limit);
         assert!(device.supports_operation(
             &ProviderOperationIdentity::new("conv"),
             ProviderOperationFamily::Library

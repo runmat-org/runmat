@@ -289,7 +289,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
-        crate::placement::wgpu_capability_snapshot(self)
+        crate::placement::wgpu_capability_snapshot(self, self.adapter_limits.max_buffer_size)
     }
 
     fn execution_accelerator_device(
@@ -315,7 +315,7 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
-        crate::placement::wgpu_feasibility(self, query)
+        crate::placement::wgpu_feasibility(self, query, self.adapter_limits.max_buffer_size)
     }
 
     fn estimate_cost(
