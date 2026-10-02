@@ -9,12 +9,12 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor::tensor_into_value;
-use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
     admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
-    prepared_real_integer_tensor, PreparedWaveformControl, SignalCooperation, WaveformControlError,
-    WaveformOutputMode,
+    prepared_real_integer_tensor, waveform_input_tensor, PreparedWaveformControl,
+    SignalCooperation, WaveformControlError, WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -128,7 +128,8 @@ async fn tripuls_in_runtime(
     t: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&TRIPULS_ERROR_INTERNAL);
     cooperation.completed(0).await?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || rest
@@ -347,8 +348,15 @@ async fn tripuls_real(
     skew: f64,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INVALID_INPUT, err))?;
+    let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
+        .await
+        .map_err(|error| {
+            error.into_runtime_error(
+                BUILTIN_NAME,
+                &TRIPULS_ERROR_INVALID_INPUT,
+                &TRIPULS_ERROR_INTERNAL,
+            )
+        })?;
     map_real_waveform(
         tensor,
         WaveformOutputMode::PreserveSingle,

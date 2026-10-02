@@ -18,7 +18,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::output_precision::SignalPrecision;
 use crate::builtins::math::signal::common::{
-    map_real_waveform, prepared_real_integer_tensor, SignalCooperation, WaveformOutputMode,
+    admit_resident_waveform_operand, map_real_waveform, prepared_real_integer_tensor,
+    waveform_input_tensor, SignalCooperation, WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -112,7 +113,8 @@ async fn sinc_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
 ) -> BuiltinResult<Value> {
-    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&SINC_ERROR_INTERNAL);
     cooperation.completed(0).await?;
     if is_supported_nonfloating_input(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -121,25 +123,22 @@ async fn sinc_in_runtime(
         )?;
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
-    let prepared_payload = if matches!(
-        &value,
-        Value::Int(_)
-            | Value::Num(_)
-            | Value::Bool(_)
-            | Value::LogicalArray(_)
-            | Value::Tensor(_)
-            | Value::GpuTensor(_)
-    ) {
-        Some(
+    admit_resident_waveform_operand(&value, BUILTIN_NAME, "input")?;
+    // Only a resident wide integer needs a retained native readback. Host
+    // integer sinc has an exact zero/nonzero rule and must not do a separate
+    // binary64-exactness scan before its numerical pass.
+    let prepared_payload = match &value {
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle)
+                .is_some_and(|element| element.element_size() > 4) =>
+        {
             cooperation
-                .prepare_integer_boundary(&value, &SINC_NONFLOATING_INPUT_EXTENSION, "input")
+                .prepare_integer_receipt(&value, &SINC_NONFLOATING_INPUT_EXTENSION)
                 .await?
-                .into_resident_payload(),
-        )
-    } else {
-        None
-    }
-    .flatten();
+                .into_resident_payload()
+        }
+        _ => None,
+    };
     match value {
         Value::GpuTensor(handle) => sinc_gpu(handle, prepared_payload, &mut cooperation).await,
         Value::Complex(re, im) => {
@@ -302,8 +301,15 @@ async fn sinc_gpu_host_fallback(
 }
 
 async fn sinc_real(value: Value, cooperation: &mut SignalCooperation) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, &e))?;
+    let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
+        .await
+        .map_err(|error| {
+            error.into_runtime_error(
+                BUILTIN_NAME,
+                &SINC_ERROR_INVALID_INPUT,
+                &SINC_ERROR_INTERNAL,
+            )
+        })?;
     Ok(tensor::tensor_into_value(
         sinc_tensor(tensor, cooperation).await?,
     ))
@@ -565,6 +571,9 @@ mod tests {
             Value::Num(value) => assert_eq!(value, 0.0),
             other => panic!("expected scalar, got {other:?}"),
         }
+        let wide = call(Value::Int(IntValue::U64(u64::MAX)))
+            .expect("nonzero native integer has exact sinc zero without a binary64 cast");
+        assert!(matches!(wide, Value::Num(0.0)));
     }
 
     #[test]
@@ -775,6 +784,62 @@ mod tests {
             }
             other => panic!("expected host tensor fallback, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn stale_resident_input_rejects_before_sinc_hook_or_download() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        #[derive(Default)]
+        struct CountedSincProvider {
+            inner: runmat_accelerate::simple_provider::InProcessProvider,
+            hooks: AtomicUsize,
+            downloads: AtomicUsize,
+        }
+        impl AccelProvider for CountedSincProvider {
+            fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                self.inner.upload(host)
+            }
+            fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                self.downloads.fetch_add(1, Ordering::SeqCst);
+                self.inner.download(handle)
+            }
+            fn device_info(&self) -> String {
+                self.inner.device_info()
+            }
+            fn device_id(&self) -> u32 {
+                self.inner.device_id()
+            }
+            fn unary_sinc<'a>(
+                &'a self,
+                _: &'a GpuTensorHandle,
+            ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+                self.hooks.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async {
+                    Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "unary_sinc",
+                    ))
+                })
+            }
+        }
+
+        let _guard = test_support::accel_test_lock();
+        let provider: &'static CountedSincProvider =
+            Box::leak(Box::new(CountedSincProvider::default()));
+        let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 1.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let stale = handle.clone();
+        handle.release().unwrap();
+        let error = call(Value::GpuTensor(stale)).expect_err("expired input lease");
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(std::error::Error::source(&error).is_some());
+        assert_eq!(provider.hooks.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     }
 
     #[test]

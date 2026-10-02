@@ -17,12 +17,12 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor::tensor_into_value;
-use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
     admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
-    prepared_real_integer_tensor, PreparedWaveformControl, SignalCooperation, WaveformControlError,
-    WaveformOutputMode, WaveformSampleError,
+    prepared_real_integer_tensor, waveform_input_tensor, PreparedWaveformControl,
+    SignalCooperation, WaveformControlError, WaveformOutputMode, WaveformSampleError,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -118,7 +118,8 @@ async fn square_in_runtime(
     t: Value,
     varargin: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&SQUARE_ERROR_INTERNAL);
     cooperation.completed(0).await?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
@@ -282,8 +283,15 @@ async fn square_real(
     duty: f64,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INVALID_INPUT, err))?;
+    let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
+        .await
+        .map_err(|error| {
+            error.into_runtime_error(
+                BUILTIN_NAME,
+                &SQUARE_ERROR_INVALID_INPUT,
+                &SQUARE_ERROR_INTERNAL,
+            )
+        })?;
     map_real_waveform(
         tensor,
         WaveformOutputMode::PreserveSingle,

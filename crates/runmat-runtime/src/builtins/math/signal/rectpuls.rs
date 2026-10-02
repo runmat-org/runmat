@@ -9,12 +9,12 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor::tensor_into_value;
-use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
     admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
-    prepared_real_integer_tensor, PreparedWaveformControl, SignalCooperation, WaveformControlError,
-    WaveformOutputMode,
+    prepared_real_integer_tensor, waveform_input_tensor, PreparedWaveformControl,
+    SignalCooperation, WaveformControlError, WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -104,7 +104,8 @@ async fn rectpuls_in_runtime(
     t: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&RECTPULS_ERROR_INTERNAL);
     cooperation.completed(0).await?;
     ensure_rectpuls_compatibility(&t, &rest)?;
     let mut width = prepare_width(&rest)?;
@@ -134,7 +135,7 @@ async fn rectpuls_in_runtime(
         .map_err(|detail| rectpuls_error_with_detail(&RECTPULS_ERROR_INVALID_INPUT, detail))?
     {
         Some(tensor) => tensor,
-        None => rectpuls_input_tensor(t).await?,
+        None => rectpuls_input_tensor(t, &mut cooperation).await?,
     };
     let output = map_real_waveform(
         tensor,
@@ -251,7 +252,10 @@ fn width_control_error(error: WaveformControlError) -> RuntimeError {
     }
 }
 
-async fn rectpuls_input_tensor(value: Value) -> BuiltinResult<Tensor> {
+async fn rectpuls_input_tensor(
+    value: Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Tensor> {
     match value {
         Value::GpuTensor(handle) => {
             gpu_helpers::gather_tensor_async(&handle)
@@ -270,8 +274,15 @@ async fn rectpuls_input_tensor(value: Value) -> BuiltinResult<Tensor> {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             Err(rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))
         }
-        other => tensor::value_into_tensor_for(BUILTIN_NAME, other)
-            .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INVALID_INPUT, err)),
+        other => waveform_input_tensor(other, BUILTIN_NAME, cooperation)
+            .await
+            .map_err(|error| {
+                error.into_runtime_error(
+                    BUILTIN_NAME,
+                    &RECTPULS_ERROR_INVALID_INPUT,
+                    &RECTPULS_ERROR_INTERNAL,
+                )
+            }),
     }
 }
 
