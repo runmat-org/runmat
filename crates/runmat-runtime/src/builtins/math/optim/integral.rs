@@ -20,6 +20,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
+use crate::builtins::math::optim::quadrature::{
+    simpson, QuadratureCooperation, QuadratureIdentity,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "integral";
@@ -92,14 +95,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "integral",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::optim::integral"
 )]
+async fn integral_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    function: Value,
+    a: Value,
+    b: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    integral_in_runtime(runtime.as_ref(), function, a, b, rest).await
+}
+
+#[cfg(test)]
 async fn integral_builtin(
     function: Value,
     a: Value,
     b: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    integral_in_runtime(None, function, a, b, rest).await
+}
+
+async fn integral_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: Value,
+    a: Value,
+    b: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Integral, runtime);
+    cooperation.completed(0).await?;
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(integral_error_with_detail(
             &INTEGRAL_ERROR_TOO_MANY_OUTPUTS,
@@ -125,15 +152,17 @@ async fn integral_builtin(
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
     if a == b {
+        cooperation.completed(0).await?;
         return Ok(Value::Num(0.0));
     }
 
     let sign = if b < a { -1.0 } else { 1.0 };
     let lo = a.min(b);
     let hi = a.max(b);
-    let result = integrate_finite_scalar(&function, lo, hi, &options)
+    let result = integrate_finite_scalar(&function, lo, hi, &options, &mut cooperation)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
+    cooperation.completed(0).await?;
     Ok(Value::Num(sign * result))
 }
 
@@ -522,11 +551,12 @@ async fn integrate_finite_scalar(
     a: f64,
     b: f64,
     options: &IntegralOptions,
+    cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<f64> {
-    let fa = call_integrand(function, a).await?;
+    let fa = call_integrand(function, a, cooperation).await?;
     let m = 0.5 * (a + b);
-    let fm = call_integrand(function, m).await?;
-    let fb = call_integrand(function, b).await?;
+    let fm = call_integrand(function, m, cooperation).await?;
+    let fb = call_integrand(function, b, cooperation).await?;
     let mut evals = 3usize;
     let whole = simpson(a, b, fa, fm, fb);
     let tol = options.abs_tol.max(options.rel_tol * whole.abs());
@@ -544,6 +574,7 @@ async fn integrate_finite_scalar(
         },
         &mut evals,
         options.max_fun_evals,
+        cooperation,
     )
     .await
 }
@@ -566,7 +597,9 @@ async fn adaptive_simpson(
     state: SimpsonState,
     evals: &mut usize,
     max_fun_evals: usize,
+    cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<f64> {
+    cooperation.completed(0).await?;
     if *evals + 2 > max_fun_evals {
         return Err(integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_INPUT,
@@ -577,8 +610,8 @@ async fn adaptive_simpson(
     let c = 0.5 * (state.a + state.b);
     let d = 0.5 * (state.a + c);
     let e = 0.5 * (c + state.b);
-    let fd = call_integrand(function, d).await?;
-    let fe = call_integrand(function, e).await?;
+    let fd = call_integrand(function, d, cooperation).await?;
+    let fe = call_integrand(function, e, cooperation).await?;
     *evals += 2;
 
     let left = simpson(state.a, c, state.fa, fd, state.fm);
@@ -609,6 +642,7 @@ async fn adaptive_simpson(
         },
         evals,
         max_fun_evals,
+        cooperation,
     )
     .await?;
     let right_value = adaptive_simpson(
@@ -625,6 +659,7 @@ async fn adaptive_simpson(
         },
         evals,
         max_fun_evals,
+        cooperation,
     )
     .await?;
     Ok(left_value + right_value)
@@ -634,12 +669,14 @@ fn scalar_tensor_value(tensor: &Tensor) -> Option<f64> {
     tensor::tensor_values_f64(tensor).into_iter().next()
 }
 
-fn simpson(a: f64, b: f64, fa: f64, fm: f64, fb: f64) -> f64 {
-    (b - a) * (fa + 4.0 * fm + fb) / 6.0
-}
-
-async fn call_integrand(function: &Value, x: f64) -> BuiltinResult<f64> {
+async fn call_integrand(
+    function: &Value,
+    x: f64,
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<f64> {
+    cooperation.completed(0).await?;
     let value = call_function(function, vec![Value::Num(x)]).await?;
+    cooperation.completed(1).await?;
     let value = crate::dispatcher::gather_if_needed_async(&value).await?;
     match value {
         Value::Num(n) if n.is_finite() => Ok(n),
@@ -1088,5 +1125,30 @@ mod tests {
             error.identifier(),
             runmat_builtins::FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED.identifier
         );
+    }
+
+    #[test]
+    fn registered_invocation_observes_preexisting_cancellation_before_callback() {
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::rc::Rc;
+
+        let source = CancellationSource::new();
+        source.cancel(CancellationReason::User);
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let error = block_on(integral_builtin_registered(
+            Some(runtime),
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(error.source.is_some());
     }
 }

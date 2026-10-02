@@ -20,6 +20,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, value_to_scalar};
+use crate::builtins::math::optim::quadrature::{
+    midpoint, simpson, QuadratureCooperation, QuadratureIdentity,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "quad";
@@ -99,14 +102,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "quad",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::optim::quad"
 )]
+async fn quad_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    function: Value,
+    a: Value,
+    b: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    quad_in_runtime(runtime.as_ref(), function, a, b, rest).await
+}
+
+#[cfg(test)]
 pub(super) async fn quad_builtin(
     function: Value,
     a: Value,
     b: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    quad_in_runtime(None, function, a, b, rest).await
+}
+
+async fn quad_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: Value,
+    a: Value,
+    b: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Quad, runtime);
+    cooperation.completed(0).await?;
     validate_requested_outputs()?;
     ensure_quad_extensions(&a, &b, &rest)?;
     preflight_quad_inputs(&a, &b, &rest)?;
@@ -131,13 +158,14 @@ pub(super) async fn quad_builtin(
         let sign = if b < a { -1.0 } else { 1.0 };
         let lo = a.min(b);
         let hi = a.max(b);
-        let mut result = integrate_quad(&function, lo, hi, &options)
+        let mut result = integrate_quad(&function, lo, hi, &options, &mut cooperation)
             .await
             .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
         result.q *= sign;
         result
     };
 
+    cooperation.completed(0).await?;
     finalize(result)
 }
 
@@ -488,11 +516,12 @@ async fn integrate_quad(
     a: f64,
     b: f64,
     options: &QuadOptions,
+    cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<QuadResult> {
-    let fa = call_integrand(function, a, &options.extra_args).await?;
+    let fa = call_integrand(function, a, &options.extra_args, cooperation).await?;
     let c = midpoint(a, b);
-    let fc = call_integrand(function, c, &options.extra_args).await?;
-    let fb = call_integrand(function, b, &options.extra_args).await?;
+    let fc = call_integrand(function, c, &options.extra_args, cooperation).await?;
+    let fb = call_integrand(function, b, &options.extra_args, cooperation).await?;
     let whole = simpson(a, b, fa, fc, fb);
     let mut func_count = 3usize;
     let mut trace = options.trace.then_some(QuadTrace);
@@ -511,6 +540,7 @@ async fn integrate_quad(
         },
         &mut func_count,
         &mut trace,
+        cooperation,
     )
     .await?;
     Ok(QuadResult { q, func_count })
@@ -535,7 +565,9 @@ async fn adaptive_simpson(
     state: SimpsonState,
     func_count: &mut usize,
     trace: &mut Option<QuadTrace>,
+    cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<f64> {
+    cooperation.completed(0).await?;
     if *func_count + 2 > MAX_FUN_EVALS {
         return Err(quad_error_with_detail(
             &QUAD_ERROR_INVALID_INPUT,
@@ -546,8 +578,8 @@ async fn adaptive_simpson(
     let c = midpoint(state.a, state.b);
     let d = midpoint(state.a, c);
     let e = midpoint(c, state.b);
-    let fd = call_integrand(function, d, extra_args).await?;
-    let fe = call_integrand(function, e, extra_args).await?;
+    let fd = call_integrand(function, d, extra_args, cooperation).await?;
+    let fe = call_integrand(function, e, extra_args, cooperation).await?;
     *func_count += 2;
 
     let left = simpson(state.a, c, state.fa, fd, state.fc);
@@ -582,6 +614,7 @@ async fn adaptive_simpson(
         },
         func_count,
         trace,
+        cooperation,
     )
     .await?;
     let right_value = adaptive_simpson(
@@ -599,24 +632,24 @@ async fn adaptive_simpson(
         },
         func_count,
         trace,
+        cooperation,
     )
     .await?;
     Ok(left_value + right_value)
 }
 
-fn midpoint(a: f64, b: f64) -> f64 {
-    a + (b - a) * 0.5
-}
-
-fn simpson(a: f64, b: f64, fa: f64, fm: f64, fb: f64) -> f64 {
-    (b - a) * (fa + 4.0 * fm + fb) / 6.0
-}
-
-async fn call_integrand(function: &Value, x: f64, extra_args: &[Value]) -> BuiltinResult<f64> {
+async fn call_integrand(
+    function: &Value,
+    x: f64,
+    extra_args: &[Value],
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<f64> {
+    cooperation.completed(0).await?;
     let mut args = Vec::with_capacity(1 + extra_args.len());
     args.push(Value::Num(x));
     args.extend(extra_args.iter().cloned());
     let value = call_function(function, args).await?;
+    cooperation.completed(1).await?;
     let value =
         prepare_quad_floating_value("integrand result", value, &INTEGER_CALLBACK_EXTENSION).await?;
     value_to_scalar(NAME, value)
@@ -1094,5 +1127,30 @@ mod tests {
             error.identifier(),
             runmat_builtins::FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED.identifier,
         );
+    }
+
+    #[test]
+    fn registered_quad_observes_preexisting_cancellation_before_callback() {
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::rc::Rc;
+
+        let source = CancellationSource::new();
+        source.cancel(CancellationReason::User);
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let error = block_on(quad_builtin_registered(
+            Some(runtime),
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(error.source.is_some());
     }
 }
