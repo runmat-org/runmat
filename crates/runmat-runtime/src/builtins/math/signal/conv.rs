@@ -378,9 +378,6 @@ fn try_conv_gpu(
     ) {
         return Ok((None, None));
     }
-    let output_bytes = u64::try_from(output_len)
-        .ok()
-        .and_then(|len| len.checked_mul(if single_output { 4 } else { 8 }));
     let placement = super::common::convolution::placement::select_pair(
         runtime,
         BUILTIN_NAME,
@@ -389,7 +386,7 @@ fn try_conv_gpu(
         runmat_accelerate_api::ProviderConvolutionForm::Vector {
             orientation: provider_orientation,
         },
-        output_bytes,
+        &contract.shape,
     )?;
     if placement
         .as_ref()

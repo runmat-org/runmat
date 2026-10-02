@@ -344,18 +344,13 @@ fn try_conv2_gpu(
     ) {
         return Ok((None, None));
     }
-    let output_bytes = u64::try_from(rows)
-        .ok()
-        .zip(u64::try_from(cols).ok())
-        .and_then(|(rows, cols)| rows.checked_mul(cols))
-        .and_then(|elements| elements.checked_mul(if single_output { 4 } else { 8 }));
     let placement = super::common::convolution::placement::select_pair(
         runtime,
         BUILTIN_NAME,
         [lhs, rhs],
         mode,
         runmat_accelerate_api::ProviderConvolutionForm::Matrix,
-        output_bytes,
+        &contract.shape,
     )?;
     if placement
         .as_ref()

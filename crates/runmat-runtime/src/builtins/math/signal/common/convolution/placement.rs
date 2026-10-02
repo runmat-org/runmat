@@ -114,7 +114,7 @@ pub(crate) fn select_pair(
     handles: [&GpuTensorHandle; 2],
     mode: ConvolutionMode,
     form: ProviderConvolutionForm,
-    host_result_bytes: Option<u64>,
+    host_output_shape: &[usize],
 ) -> BuiltinResult<Option<SelectedConvolution>> {
     let Some(runtime) = runtime else {
         return Ok(None);
@@ -163,11 +163,28 @@ pub(crate) fn select_pair(
     let Some(right) = representation(handles[1], element) else {
         return Ok(None);
     };
+    let Some(output_shape) = host_output_shape
+        .iter()
+        .copied()
+        .map(u64::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+    else {
+        return Ok(None);
+    };
+    let output = ProviderRepresentation {
+        element_type: element,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: output_shape,
+        residency: ProviderResidency::Device,
+    };
+    let host_result_bytes = output.checked_byte_len();
     let query = ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new(operation),
         family: ProviderOperationFamily::Library,
         inputs: vec![left, right],
-        outputs: Vec::new(),
+        outputs: vec![output.clone()],
         workload: ProviderWorkload {
             convolution: Some(ProviderConvolutionWorkload {
                 form,
@@ -226,7 +243,20 @@ pub(crate) fn select_pair(
         },
         transactional_results: true,
     };
-    let mut candidates = vec![host];
+    let mut candidates = Vec::new();
+    let host_upload = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new("transfer.upload"),
+        family: ProviderOperationFamily::Upload,
+        inputs: vec![ProviderRepresentation {
+            residency: ProviderResidency::Host,
+            ..output.clone()
+        }],
+        outputs: vec![output],
+        workload: ProviderWorkload::default(),
+    };
+    if provider.query_feasibility(&host_upload).is_supported() {
+        candidates.push(host);
+    }
     if let ProviderFeasibility::Supported { estimate } = feasibility {
         candidates.push(WholeWorkCandidate {
             kind: ExecutionCandidateKind::ProviderOperation,
@@ -253,6 +283,9 @@ pub(crate) fn select_pair(
             },
             transactional_results: capability.concurrency.transactional_results,
         });
+    }
+    if candidates.is_empty() {
+        return Ok(None);
     }
     let parallel = runtime
         .service_ports()
@@ -299,7 +332,7 @@ pub(crate) fn select_pair(
         runtime: runtime.clone(),
         selected: chosen,
         started: Instant::now(),
-        provider_route: index == 1,
+        provider_route: candidates[index].kind.is_provider(),
         backing,
     }))
 }
