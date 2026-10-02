@@ -92,3 +92,31 @@ fn known_zero_denominator_and_excess_outputs_are_diagnosed() {
     assert!(!excess.diagnostics.is_empty());
     assert!(excess.outputs.len() <= 2);
 }
+
+#[test]
+fn canonical_metadata_retains_requested_output_and_error_contract() {
+    let labels = DECONV_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|signature| signature.label)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        vec![
+            "Q = deconv(numerator, denominator)",
+            "[Q, R] = deconv(numerator, denominator)"
+        ]
+    );
+    assert_eq!(
+        DECONV_DESCRIPTOR.output_mode,
+        BuiltinOutputMode::ByRequestedOutputCount
+    );
+    assert!(DECONV_DESCRIPTOR
+        .errors
+        .iter()
+        .any(|error| error.code == "RM.DECONV.DENOMINATOR_INVALID"));
+    assert!(DECONV_DESCRIPTOR
+        .errors
+        .iter()
+        .any(|error| error.code == "RM.DECONV.TOO_MANY_OUTPUTS"));
+}

@@ -3,12 +3,9 @@
 use num_complex::Complex;
 use runmat_accelerate_api::{ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CONV_ERROR_ARG_COUNT, CONV_ERROR_BUILD_COMPLEX_OUTPUT,
+    CONV_ERROR_BUILD_OUTPUT, CONV_ERROR_CONVERSION, CONV_ERROR_GATHER_FAILED,
+    CONV_ERROR_INVALID_INPUT, CONV_ERROR_SHAPE_INVALID,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::ConvolutionMode as ConvMode;
@@ -19,7 +16,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::signal::type_resolvers::conv_type;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv")]
@@ -50,140 +46,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "conv";
-
-const CONV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Convolution result.",
-}];
-
-const CONV_SIG_AB_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input vector/scalar.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input vector/scalar.",
-    },
-];
-
-const CONV_SIG_SHAPE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input vector/scalar.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input vector/scalar.",
-    },
-    BuiltinParamDescriptor {
-        name: "shape",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"full\""),
-        description: "Output shape: \"full\", \"same\", or \"valid\".",
-    },
-];
-
-const CONV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "C = conv(A, B)",
-        inputs: &CONV_SIG_AB_INPUTS,
-        outputs: &CONV_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = conv(A, B, shape)",
-        inputs: &CONV_SIG_SHAPE_INPUTS,
-        outputs: &CONV_OUTPUT,
-    },
-];
-
-const CONV_ERROR_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV.SHAPE_INVALID",
-    identifier: Some("RunMat:conv:ShapeInvalid"),
-    when: "Third argument is missing or not one of full/same/valid.",
-    message: "conv: third argument must be the string 'full', 'same', or 'valid'",
-};
-
-const CONV_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV.ARG_COUNT",
-    identifier: Some("RunMat:conv:ArgCount"),
-    when: "More than three input arguments are provided.",
-    message: "conv: expected at most three input arguments",
-};
-
-const CONV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV.INVALID_INPUT",
-    identifier: Some("RunMat:conv:InvalidInput"),
-    when: "An input value is not numeric/logical scalar/vector/tensor compatible.",
-    message: "conv: unsupported input type",
-};
-
-const CONV_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV.CONVERSION",
-    identifier: Some("RunMat:conv:Conversion"),
-    when: "Input conversion from logical/gpu tensor into host numeric domain fails.",
-    message: "conv: input conversion failed",
-};
-
-const CONV_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV.GATHER_FAILED",
-    identifier: Some("RunMat:conv:GatherFailed"),
-    when: "GPU input cannot be gathered for host fallback normalization.",
-    message: "conv: failed to gather GPU input",
-};
-
-const CONV_ERROR_BUILD_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV.BUILD_OUTPUT",
-    identifier: Some("RunMat:conv:BuildOutput"),
-    when: "Output tensor allocation fails.",
-    message: "conv: failed to build tensor",
-};
-
-const CONV_ERROR_BUILD_COMPLEX_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV.BUILD_COMPLEX_OUTPUT",
-    identifier: Some("RunMat:conv:BuildComplexOutput"),
-    when: "Output complex tensor allocation fails.",
-    message: "conv: failed to build complex tensor",
-};
-
-const CONV_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    CONV_ERROR_SHAPE_INVALID,
-    CONV_ERROR_ARG_COUNT,
-    CONV_ERROR_INVALID_INPUT,
-    CONV_ERROR_CONVERSION,
-    CONV_ERROR_GATHER_FAILED,
-    CONV_ERROR_BUILD_OUTPUT,
-    CONV_ERROR_BUILD_COMPLEX_OUTPUT,
-];
-
-pub const CONV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CONV_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CONV_ERRORS,
-};
-
-const CONV_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "u", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight real or complex integer classes are documented; values cross the explicit floating convolution boundary before multiplication and accumulation." },
-    BuiltinIntegerInputCapability { name: "v", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Mixed integer classes are documented and independently converted to the selected floating output domain." },
-];
-pub const CONV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "w = conv(integer_u, integer_v, shape?)", inputs: &CONV_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The output is single when either numeric input is single and double otherwise; integer and logical inputs never produce an integer result. Full orientation follows the compatibility target's both-columns rule, while same/valid follow u. Resident integer inputs gather exactly through their owning provider before floating convolution and the floating result is restored to that provider." }];
 
 fn conv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     conv_error_with_message(error.message, error)
@@ -223,13 +85,7 @@ fn conv_error_with_source(
 
 #[runtime_builtin(
     name = "conv",
-    category = "math/signal",
-    summary = "Compute one-dimensional linear convolution.",
-    keywords = "conv,convolution,signal processing,gpu",
-    accel = "custom",
-    type_resolver(conv_type),
-    integer_capabilities(CONV_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::signal::conv::CONV_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::conv"
 )]
 async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -748,7 +604,6 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{ComplexStorage, IntValue, IntegerStorage, LogicalArray, Tensor};
 
     fn error_message(error: RuntimeError) -> String {
@@ -799,45 +654,6 @@ pub(crate) mod tests {
         assert_eq!(provider.downloads(), 0);
         left.handle.allocation_lease().validate_live().unwrap();
         assert_eq!(left.probe.retirements(), 0);
-    }
-
-    #[test]
-    fn conv_type_full_uses_lengths() {
-        let out = conv_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(2)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn conv_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("conv builtin");
-        let descriptor = builtin.descriptor.expect("conv descriptor");
-        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
-        assert!(labels.contains(&"C = conv(A, B)"));
-        assert!(labels.contains(&"C = conv(A, B, shape)"));
-        assert!(descriptor
-            .errors
-            .iter()
-            .any(|err| err.code == "RM.CONV.SHAPE_INVALID"));
-        assert_eq!(CONV_INTEGER_CAPABILITIES.len(), 1);
-        assert!(CONV_INTEGER_CAPABILITIES[0]
-            .inputs
-            .iter()
-            .all(|input| input.classes.len() == 8));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

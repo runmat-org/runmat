@@ -3,12 +3,10 @@
 use num_complex::Complex;
 use runmat_accelerate_api::ProviderConvMode;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CONV2_ERROR_ARG_COUNT, CONV2_ERROR_BUILD_COMPLEX_OUTPUT,
+    CONV2_ERROR_BUILD_OUTPUT, CONV2_ERROR_CONVERSION, CONV2_ERROR_GATHER_FAILED,
+    CONV2_ERROR_INVALID_INPUT, CONV2_ERROR_MATRIX_REQUIRED, CONV2_ERROR_SHAPE_INVALID,
+    CONV2_ERROR_VECTOR_REQUIRED,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::ConvolutionMode as Conv2Mode;
@@ -19,7 +17,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::signal::type_resolvers::conv2_type;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv2")]
@@ -50,247 +47,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "conv2";
-
-const CONV2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "2-D convolution result.",
-}];
-
-const CONV2_SIG_AB_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First matrix input.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second matrix input.",
-    },
-];
-
-const CONV2_SIG_AB_SHAPE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First matrix input.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second matrix input.",
-    },
-    BuiltinParamDescriptor {
-        name: "shape",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"full\""),
-        description: "Output shape: \"full\", \"same\", or \"valid\".",
-    },
-];
-
-const CONV2_SIG_SEPARABLE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "hcol",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column vector kernel component.",
-    },
-    BuiltinParamDescriptor {
-        name: "hrow",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row vector kernel component.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-];
-
-const CONV2_SIG_SEPARABLE_SHAPE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "hcol",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column vector kernel component.",
-    },
-    BuiltinParamDescriptor {
-        name: "hrow",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row vector kernel component.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "shape",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"full\""),
-        description: "Output shape: \"full\", \"same\", or \"valid\".",
-    },
-];
-
-const CONV2_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "C = conv2(A, B)",
-        inputs: &CONV2_SIG_AB_INPUTS,
-        outputs: &CONV2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = conv2(A, B, shape)",
-        inputs: &CONV2_SIG_AB_SHAPE_INPUTS,
-        outputs: &CONV2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = conv2(hcol, hrow, A)",
-        inputs: &CONV2_SIG_SEPARABLE_INPUTS,
-        outputs: &CONV2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = conv2(hcol, hrow, A, shape)",
-        inputs: &CONV2_SIG_SEPARABLE_SHAPE_INPUTS,
-        outputs: &CONV2_OUTPUT,
-    },
-];
-
-const CONV2_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.ARG_COUNT",
-    identifier: Some("RunMat:conv2:ArgCount"),
-    when: "More than four input arguments are provided.",
-    message: "conv2: expected at most four input arguments",
-};
-
-const CONV2_ERROR_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.SHAPE_INVALID",
-    identifier: Some("RunMat:conv2:ShapeInvalid"),
-    when: "Shape argument is not one of full/same/valid.",
-    message: "conv2: shape argument must be the string 'full', 'same', or 'valid'",
-};
-
-const CONV2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.INVALID_INPUT",
-    identifier: Some("RunMat:conv2:InvalidInput"),
-    when: "An operand is not numeric/logical scalar/vector/matrix compatible.",
-    message: "conv2: unsupported input type",
-};
-
-const CONV2_ERROR_VECTOR_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.VECTOR_REQUIRED",
-    identifier: Some("RunMat:conv2:VectorRequired"),
-    when: "Separable hcol/hrow inputs are not vectors.",
-    message: "conv2: vector input required",
-};
-
-const CONV2_ERROR_MATRIX_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.MATRIX_REQUIRED",
-    identifier: Some("RunMat:conv2:MatrixRequired"),
-    when: "Input matrix has non-singleton dimensions beyond 2-D.",
-    message: "conv2: input must be 2-D",
-};
-
-const CONV2_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.CONVERSION",
-    identifier: Some("RunMat:conv2:Conversion"),
-    when: "Input conversion from logical/gpu tensor into host matrix domain fails.",
-    message: "conv2: input conversion failed",
-};
-
-const CONV2_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.GATHER_FAILED",
-    identifier: Some("RunMat:conv2:GatherFailed"),
-    when: "GPU input cannot be gathered for host fallback normalization.",
-    message: "conv2: failed to gather GPU input",
-};
-
-const CONV2_ERROR_BUILD_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.BUILD_OUTPUT",
-    identifier: Some("RunMat:conv2:BuildOutput"),
-    when: "Output tensor allocation fails.",
-    message: "conv2: failed to build tensor",
-};
-
-const CONV2_ERROR_BUILD_COMPLEX_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.BUILD_COMPLEX_OUTPUT",
-    identifier: Some("RunMat:conv2:BuildComplexOutput"),
-    when: "Output complex tensor allocation fails.",
-    message: "conv2: failed to build complex tensor",
-};
-
-const CONV2_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    CONV2_ERROR_ARG_COUNT,
-    CONV2_ERROR_SHAPE_INVALID,
-    CONV2_ERROR_INVALID_INPUT,
-    CONV2_ERROR_VECTOR_REQUIRED,
-    CONV2_ERROR_MATRIX_REQUIRED,
-    CONV2_ERROR_CONVERSION,
-    CONV2_ERROR_GATHER_FAILED,
-    CONV2_ERROR_BUILD_OUTPUT,
-    CONV2_ERROR_BUILD_COMPLEX_OUTPUT,
-];
-
-pub const CONV2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CONV2_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CONV2_ERRORS,
-};
-
-const CONV2_INTEGER_AB_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight real or complex integer classes are documented and cross the floating convolution boundary before arithmetic." },
-    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Mixed integer classes are documented and converted independently to the selected floating output domain." },
-];
-const CONV2_INTEGER_SEPARABLE_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "u",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The separable column kernel accepts all eight real or complex integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "v",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The separable row kernel accepts all eight real or complex integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The signal matrix accepts all eight real or complex integer classes.",
-    },
-];
-pub const CONV2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "C = conv2(integer_A, integer_B, shape?)", inputs: &CONV2_INTEGER_AB_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The output is single when any numeric input is single and double otherwise. Integer inputs never produce an integer result; resident integers gather exactly before the direct convolution boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "C = conv2(integer_u, integer_v, integer_A, shape?)", inputs: &CONV2_INTEGER_SEPARABLE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The separable form applies the same single-dominant floating output rule across all three numeric arguments and preserves documented full/same/valid shapes." },
-];
 
 fn conv2_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     conv2_error_with_message(error.message, error)
@@ -330,13 +86,7 @@ fn conv2_error_with_source(
 
 #[runtime_builtin(
     name = "conv2",
-    category = "math/signal",
-    summary = "Compute two-dimensional convolution.",
-    keywords = "conv2,2d convolution,image filtering,gpu",
-    accel = "custom",
-    type_resolver(conv2_type),
-    integer_capabilities(CONV2_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::signal::conv2::CONV2_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::conv2"
 )]
 async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -873,7 +623,6 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{ComplexStorage, IntegerStorage, LogicalArray};
 
     fn error_message(error: RuntimeError) -> String {
@@ -913,47 +662,6 @@ pub(crate) mod tests {
         assert_eq!(error.identifier(), CONV2_ERROR_MATRIX_REQUIRED.identifier);
         assert_eq!(provider.downloads(), 0);
         input.handle.allocation_lease().validate_live().unwrap();
-    }
-
-    #[test]
-    fn conv2_type_full_uses_dimensions() {
-        let out = conv2_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(3), Some(2)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(1)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(4), Some(2)])
-            }
-        );
-    }
-
-    #[test]
-    fn conv2_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("conv2 builtin");
-        let descriptor = builtin.descriptor.expect("conv2 descriptor");
-        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
-        assert!(labels.contains(&"C = conv2(A, B)"));
-        assert!(labels.contains(&"C = conv2(A, B, shape)"));
-        assert!(labels.contains(&"C = conv2(hcol, hrow, A)"));
-        assert!(labels.contains(&"C = conv2(hcol, hrow, A, shape)"));
-        assert!(descriptor
-            .errors
-            .iter()
-            .any(|err| err.code == "RM.CONV2.SHAPE_INVALID"));
-        assert_eq!(CONV2_INTEGER_CAPABILITIES.len(), 2);
-        assert!(CONV2_INTEGER_CAPABILITIES
-            .iter()
-            .flat_map(|capability| capability.inputs)
-            .all(|input| input.classes.len() == 8));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

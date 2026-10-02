@@ -104,3 +104,30 @@ fn malformed_selector_or_kernel_geometry_cannot_prove_output() {
     assert!(!bad_selector.diagnostics.is_empty());
     assert_eq!(bad_selector.outputs[0].kind, ValueKindFact::Unknown);
 }
+
+#[test]
+fn canonical_metadata_retains_four_forms_and_integer_classes() {
+    let labels = CONV2_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|signature| signature.label)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        vec![
+            "C = conv2(A, B)",
+            "C = conv2(A, B, shape)",
+            "C = conv2(hcol, hrow, A)",
+            "C = conv2(hcol, hrow, A, shape)"
+        ]
+    );
+    assert!(CONV2_DESCRIPTOR
+        .errors
+        .iter()
+        .any(|error| error.code == "RM.CONV2.SHAPE_INVALID"));
+    assert_eq!(CONV2_INTEGER_CAPABILITIES.len(), 2);
+    assert!(CONV2_INTEGER_CAPABILITIES
+        .iter()
+        .flat_map(|capability| capability.inputs)
+        .all(|input| input.classes.len() == 8));
+}

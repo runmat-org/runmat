@@ -84,3 +84,22 @@ fn valid_empty_second_vector_keeps_first_orientation_and_length() {
         ShapeFact::from(vec![Some(4), Some(1)])
     );
 }
+
+#[test]
+fn canonical_descriptor_retains_original_signatures_errors_and_integer_scope() {
+    let labels = CONV_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|signature| signature.label)
+        .collect::<Vec<_>>();
+    assert_eq!(labels, vec!["C = conv(A, B)", "C = conv(A, B, shape)"]);
+    assert!(CONV_DESCRIPTOR
+        .errors
+        .iter()
+        .any(|error| error.code == "RM.CONV.SHAPE_INVALID"));
+    assert_eq!(CONV_INTEGER_CAPABILITIES.len(), 1);
+    assert!(CONV_INTEGER_CAPABILITIES[0]
+        .inputs
+        .iter()
+        .all(|input| input.classes.len() == 8));
+}

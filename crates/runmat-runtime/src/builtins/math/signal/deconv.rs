@@ -2,12 +2,10 @@
 
 use num_complex::Complex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, DECONV_ERROR_BUILD_COMPLEX_OUTPUT, DECONV_ERROR_BUILD_OUTPUT,
+    DECONV_ERROR_DENOMINATOR_INVALID, DECONV_ERROR_GATHER_FAILED, DECONV_ERROR_INVALID_INPUT,
+    DECONV_ERROR_TOO_MANY_OUTPUTS, DECONV_ERROR_VECTOR_REQUIRED, DECONV_INTEGER_INPUT_EXTENSION,
+    DECONV_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, LogicalArray, NumericDType, Tensor, Value};
@@ -17,7 +15,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::signal::type_resolvers::deconv_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::deconv")]
@@ -48,170 +45,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "deconv";
-
-const DECONV_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "deconv-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "deconv with typed-integer coefficients is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DeconvIntegerInputExtension"),
-};
-const DECONV_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "deconv-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "deconv with logical coefficients is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DeconvLogicalInputExtension"),
-};
-const DECONV_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    DECONV_INTEGER_INPUT_EXTENSION,
-    DECONV_LOGICAL_INPUT_EXTENSION,
-];
-const DECONV_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "numerator",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "denominator",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
-    },
-];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[Q,R] = deconv(integer_numerator, integer_denominator)",
-        inputs: &DECONV_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Each authoritative coefficient is checked for exact binary64 representation before polynomial division; resident inputs gather through their owners and results return to the first resident owner.",
-    }];
-
-const DECONV_OUTPUT_Q: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Q",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Quotient polynomial coefficients.",
-}];
-
-const DECONV_OUTPUT_QR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Q",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Quotient polynomial coefficients.",
-    },
-    BuiltinParamDescriptor {
-        name: "R",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Remainder polynomial coefficients.",
-    },
-];
-
-const DECONV_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "numerator",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numerator coefficients.",
-    },
-    BuiltinParamDescriptor {
-        name: "denominator",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Denominator coefficients.",
-    },
-];
-
-const DECONV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Q = deconv(numerator, denominator)",
-        inputs: &DECONV_INPUTS,
-        outputs: &DECONV_OUTPUT_Q,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Q, R] = deconv(numerator, denominator)",
-        inputs: &DECONV_INPUTS,
-        outputs: &DECONV_OUTPUT_QR,
-    },
-];
-
-const DECONV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.INVALID_INPUT",
-    identifier: Some("RunMat:deconv:InvalidInput"),
-    when: "Numerator/denominator input value is not supported for polynomial conversion.",
-    message: "deconv: unsupported input type",
-};
-
-const DECONV_ERROR_VECTOR_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.VECTOR_REQUIRED",
-    identifier: Some("RunMat:deconv:VectorRequired"),
-    when: "Input is not scalar/row/column vector.",
-    message: "deconv: inputs must be scalars, row vectors, or column vectors",
-};
-
-const DECONV_ERROR_DENOMINATOR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.DENOMINATOR_INVALID",
-    identifier: Some("RunMat:deconv:DenominatorInvalid"),
-    when: "Denominator is empty or contains only exact zero coefficients.",
-    message: "deconv: denominator is invalid",
-};
-
-const DECONV_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.GATHER_FAILED",
-    identifier: Some("RunMat:deconv:GatherFailed"),
-    when: "GPU input cannot be gathered for host fallback normalization.",
-    message: "deconv: failed to gather GPU input",
-};
-
-const DECONV_ERROR_BUILD_COMPLEX_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.BUILD_COMPLEX_OUTPUT",
-    identifier: Some("RunMat:deconv:BuildComplexOutput"),
-    when: "Complex output tensor allocation fails.",
-    message: "deconv: failed to build complex tensor",
-};
-
-const DECONV_ERROR_BUILD_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.BUILD_OUTPUT",
-    identifier: Some("RunMat:deconv:BuildOutput"),
-    when: "Real output tensor allocation fails.",
-    message: "deconv: failed to build tensor",
-};
-const DECONV_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:deconv:TooManyOutputs"),
-    when: "More than two outputs are requested.",
-    message: "deconv: too many output arguments",
-};
-
-const DECONV_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    DECONV_ERROR_INVALID_INPUT,
-    DECONV_ERROR_VECTOR_REQUIRED,
-    DECONV_ERROR_DENOMINATOR_INVALID,
-    DECONV_ERROR_GATHER_FAILED,
-    DECONV_ERROR_BUILD_COMPLEX_OUTPUT,
-    DECONV_ERROR_BUILD_OUTPUT,
-    DECONV_ERROR_TOO_MANY_OUTPUTS,
-];
-
-pub const DECONV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DECONV_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DECONV_ERRORS,
-};
 
 fn deconv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     deconv_error_with_message(error.message, error)
@@ -251,14 +84,7 @@ fn deconv_error_with_source(
 
 #[runtime_builtin(
     name = "deconv",
-    category = "math/signal",
-    summary = "Compute one-dimensional deconvolution.",
-    keywords = "deconv,deconvolution,polynomial division,signal,gpu",
-    accel = "custom",
-    type_resolver(deconv_type),
-    extensions(DECONV_EXTENSIONS),
-    integer_capabilities(INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::signal::deconv::DECONV_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
 async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
@@ -777,7 +603,6 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage};
 
     fn error_message(error: RuntimeError) -> String {
@@ -808,69 +633,6 @@ pub(crate) mod tests {
         assert_eq!(error.identifier(), DECONV_ERROR_VECTOR_REQUIRED.identifier);
         assert_eq!(provider.downloads(), 0);
         numerator.handle.allocation_lease().validate_live().unwrap();
-    }
-
-    #[test]
-    fn deconv_type_uses_numerator_orientation() {
-        let out = deconv_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(5)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
-    }
-
-    #[test]
-    fn deconv_type_denominator_longer_returns_scalar_zero_shape() {
-        let output = deconv_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(2)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            output,
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
-    }
-
-    #[test]
-    fn deconv_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("deconv builtin");
-        let descriptor = builtin.descriptor.expect("deconv descriptor");
-        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
-        assert!(labels.contains(&"Q = deconv(numerator, denominator)"));
-        assert!(labels.contains(&"[Q, R] = deconv(numerator, denominator)"));
-        assert_eq!(
-            descriptor.output_mode,
-            BuiltinOutputMode::ByRequestedOutputCount
-        );
-        assert!(descriptor
-            .errors
-            .iter()
-            .any(|err| err.code == "RM.DECONV.DENOMINATOR_INVALID"));
-        assert!(descriptor
-            .errors
-            .iter()
-            .any(|err| err.code == "RM.DECONV.TOO_MANY_OUTPUTS"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
