@@ -84,16 +84,18 @@ fn wide_integer_operand_reads_once_and_preserves_borrowed_input() {
     let _selected = ThreadProviderGuard::set(Some(provider));
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let input = provider.wide_input(vec![1u64 << 54, 0]);
+    let denominator = provider.wide_input(vec![1]);
     let result = block_on(deconv_builtin(
         None,
         Value::GpuTensor(input.clone()),
-        Value::Num(1.0),
+        Value::GpuTensor(denominator.clone()),
     ))
     .expect("exact wide deconvolution");
     assert!(matches!(result, Value::GpuTensor(_)));
-    assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 2);
     assert_eq!(provider.other_downloads.load(Ordering::SeqCst), 0);
     assert!(input.allocation_lease().validate_live().is_ok());
+    assert!(denominator.allocation_lease().validate_live().is_ok());
 }
 
 #[test]
