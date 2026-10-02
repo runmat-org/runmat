@@ -578,7 +578,7 @@ impl SignalInput {
         let materialized = Self::from_value(value)?;
         if materialized.shape != self.shape
             || materialized.is_complex != self.is_complex
-            || !matches!(materialized.payload, SignalPayload::Host(_))
+            || !matches!(&materialized.payload, SignalPayload::Host(_))
         {
             return Err(filter_error(&FILTER_ERROR_INVALID_SIGNAL));
         }
