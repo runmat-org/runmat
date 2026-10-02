@@ -459,7 +459,7 @@ fn with_sign(magnitude: f64, sign_source: f64) -> f64 {
 }
 
 pub(crate) fn brent_min_tolerance(x: f64, params: BrentParams) -> f64 {
-    params.tol_x + 3.0 * x.abs() * f64::EPSILON.sqrt()
+    params.tol_x + (3.0 * f64::EPSILON.sqrt()) * x.abs()
 }
 
 #[cfg(test)]
@@ -593,6 +593,37 @@ mod tests {
         assert!(result.x.is_finite());
         assert!(result.fval.is_finite());
         assert!(result.fval <= 1.0e-4, "{}", result.fval);
+    }
+
+    #[test]
+    fn large_same_sign_finite_bounds_do_not_overflow_tolerance_or_stop_after_one_sample() {
+        let lower = 0.5 * f64::MAX;
+        let upper = 0.75 * f64::MAX;
+        let params = BrentParams {
+            tol_x: 1.0e-4,
+            max_iter: 2000,
+            max_fun_evals: 2000,
+        };
+        assert!(brent_min_tolerance(upper, params).is_finite());
+        let mut cooperation = ScalarCooperation::new(OptimSolver::Fminbnd, None);
+        let result = futures::executor::block_on(brent_min(
+            "fminbnd",
+            &mut cooperation,
+            &Value::FunctionHandle("abs".into()),
+            lower,
+            upper,
+            params,
+            None,
+        ))
+        .unwrap();
+        assert!(result.converged);
+        assert!(
+            result.func_count > 1,
+            "the initial golden point is not the minimum"
+        );
+        assert!(result.x.is_finite() && result.fval.is_finite());
+        assert!(result.x >= lower && result.x <= lower * (1.0 + 1.0e-6));
+        assert_eq!(result.fval, result.x);
     }
 
     #[test]

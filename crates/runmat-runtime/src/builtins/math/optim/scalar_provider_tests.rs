@@ -12,6 +12,92 @@ struct RejectDownloadProvider {
     downloads: AtomicUsize,
 }
 
+struct CancelAfterDownloadProvider {
+    owner: TestAllocationOwner,
+    downloads: AtomicUsize,
+    cancellation: runmat_execution::cancellation::CancellationSource,
+}
+
+impl AccelProvider for CancelAfterDownloadProvider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+
+    fn device_info(&self) -> String {
+        "scalar optimization cancellation fixture".into()
+    }
+
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        panic!("the scalar solver must not upload")
+    }
+
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        panic!("the scalar solver must use the typed numeric download")
+    }
+
+    fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        let cancellation = self.cancellation.clone();
+        Box::pin(async move {
+            cancellation.cancel(runmat_execution::CancellationReason::User);
+            Ok(HostNumericTensorOwned {
+                data: HostNumericDataOwned::F64(vec![0.0]),
+                shape: vec![1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+        })
+    }
+}
+
+#[test]
+fn cancellation_after_first_bound_download_prevents_second_download_and_callback() {
+    use std::rc::Rc;
+
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let cancellation = runmat_execution::cancellation::CancellationSource::new();
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        cancellation.token(),
+    );
+    let provider = Box::leak(Box::new(CancelAfterDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+        cancellation,
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let lower = provider
+        .owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![0.0]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let upper = provider
+        .owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![1.0]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let error = block_on(super::fminbnd::fminbnd_builtin_registered(
+        Some(runtime),
+        Value::FunctionHandle("sin".into()),
+        Value::GpuTensor(lower.handle.clone()),
+        Value::GpuTensor(upper.handle.clone()),
+        Vec::new(),
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(lower.probe.retirements(), 0);
+    assert_eq!(upper.probe.retirements(), 0);
+    lower.handle.release().unwrap();
+    upper.handle.release().unwrap();
+}
+
 impl AccelProvider for RejectDownloadProvider {
     fn device_id(&self) -> u32 {
         self.owner.device_id()
@@ -65,8 +151,32 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
             storage: GpuTensorStorage::ComplexInterleaved,
         })
         .unwrap();
+    let unavailable_upper = provider
+        .owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![1.0]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    unavailable_upper.probe.mark_unavailable();
     let function = || Value::FunctionHandle("sin".into());
     let resident = || Value::GpuTensor(real.handle.clone());
+
+    let bad_upper_lease = block_on(super::fminbnd::fminbnd_builtin(
+        Value::FunctionHandle("sin".into()),
+        resident(),
+        Value::GpuTensor(unavailable_upper.handle.clone()),
+        Vec::new(),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        bad_upper_lease.gpu_gather_retry(),
+        crate::GpuGatherRetry::Never
+    );
+    assert!(bad_upper_lease.source.is_some());
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(real.probe.retirements(), 0);
 
     let invalid_callback = block_on(super::fminbnd::fminbnd_builtin(
         Value::Num(3.0),

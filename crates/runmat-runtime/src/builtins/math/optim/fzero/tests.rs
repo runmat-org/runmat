@@ -36,6 +36,50 @@ fn registered_fzero_preserves_invocation_cancellation_before_solver_effects() {
 }
 
 #[test]
+fn dropping_a_pending_callback_abandons_the_solver_without_publication() {
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+
+    struct DropCount(Arc<AtomicUsize>);
+    impl Drop for DropCount {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let observed_calls = calls.clone();
+    let observed_drop = dropped.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |_function, _args, _requested_outputs| {
+            observed_calls.fetch_add(1, Ordering::SeqCst);
+            let guard = DropCount(observed_drop.clone());
+            crate::sequence::single_value_future(async move {
+                let _guard = guard;
+                futures::future::pending::<()>().await;
+                Ok(Value::Num(0.0))
+            })
+        },
+    )));
+    let mut call = Box::pin(fzero_builtin(
+        Value::BoundFunctionHandle {
+            name: "pending_callback".into(),
+            function: 7_711,
+        },
+        Value::Num(0.0),
+        Vec::new(),
+    ));
+    let mut context = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(dropped.load(Ordering::SeqCst), 0);
+    drop(call);
+    assert_eq!(dropped.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn fzero_bracketed_builtin_handle() {
     let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let root = block_on(fzero_builtin(

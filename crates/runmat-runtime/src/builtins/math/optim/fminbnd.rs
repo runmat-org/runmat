@@ -108,7 +108,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     execution_stack = "process",
     builtin_path = "crate::builtins::math::optim::fminbnd"
 )]
-async fn fminbnd_builtin_registered(
+pub(super) async fn fminbnd_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     function: Value,
     x1: Value,
@@ -177,6 +177,7 @@ async fn fminbnd_in_runtime(
     let x1 = scalar_bound("lower bound", x1)
         .await
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
+    cooperation.completed(0).await?;
     let x2 = crate::builtins::math::optim::common::prepare_floating_value(
         NAME,
         x2,

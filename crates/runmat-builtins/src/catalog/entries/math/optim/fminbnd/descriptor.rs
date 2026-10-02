@@ -134,7 +134,17 @@ const FMINBND_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
-const FMINBND_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+const FMINBND_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "fminbnd(fun, x1, x2)",
+        inputs: &FMINBND_INPUTS_CORE,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "fminbnd(fun, x1, x2, options)",
+        inputs: &FMINBND_INPUTS_WITH_OPTIONS,
+        outputs: &[],
+    },
     BuiltinSignatureDescriptor {
         label: "x = fminbnd(fun, x1, x2)",
         inputs: &FMINBND_INPUTS_CORE,

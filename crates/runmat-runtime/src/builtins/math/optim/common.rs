@@ -150,17 +150,23 @@ pub(crate) fn preflight_scalar_operand(
             .with_gpu_gather_retry(GpuGatherRetry::Never)
             .build()
     };
-    if !matches!(value, Value::GpuTensor(_))
-        && !crate::builtins::common::validation::native_integer_value_is_exact_f64(value)
-    {
-        return Err(invalid("must be exactly representable as double"));
-    }
     match value {
         Value::Num(number) if geometry.accepts(1) && number.is_finite() => Ok(()),
-        Value::Int(_) | Value::Bool(_) if geometry.accepts(1) => Ok(()),
+        Value::Int(_) if geometry.accepts(1) => {
+            if crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+                Ok(())
+            } else {
+                Err(invalid("must be exactly representable as double"))
+            }
+        }
+        Value::Bool(_) if geometry.accepts(1) => Ok(()),
         Value::LogicalArray(array) if geometry.accepts(array.data.len()) => Ok(()),
         Value::Tensor(tensor) if geometry.accepts(tensor.len()) => {
-            if (0..tensor.len()).all(|index| tensor::tensor_value_f64(tensor, index).is_finite()) {
+            if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+                Err(invalid("must be exactly representable as double"))
+            } else if (0..tensor.len())
+                .all(|index| tensor::tensor_value_f64(tensor, index).is_finite())
+            {
                 Ok(())
             } else {
                 Err(invalid("must be finite"))
@@ -172,15 +178,36 @@ pub(crate) fn preflight_scalar_operand(
                 .iter()
                 .try_fold(1_usize, |total, axis| total.checked_mul(*axis));
             if runmat_accelerate_api::handle_storage(handle)
-                == runmat_accelerate_api::GpuTensorStorage::Real
-                && count.is_some_and(|count| geometry.accepts(count))
+                != runmat_accelerate_api::GpuTensorStorage::Real
+                || !count.is_some_and(|count| geometry.accepts(count))
             {
-                Ok(())
-            } else {
-                Err(invalid(
+                return Err(invalid(
                     "must be a real scalar or admitted two-element interval",
-                ))
+                ));
             }
+            handle.allocation_lease().validate_live().map_err(|error| {
+                build_runtime_error(format!(
+                    "{name}: {role} has an invalid resident lease: {error}"
+                ))
+                .with_builtin(name)
+                .with_source(error)
+                .with_gpu_gather_retry(GpuGatherRetry::Never)
+                .build()
+            })?;
+            if crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none() {
+                return Err(invalid("has no owning provider"));
+            }
+            let element =
+                crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(handle)
+                    .map_err(|error| invalid(&format!("has invalid physical metadata: {error}")))?;
+            if !crate::builtins::common::gpu_helpers::numeric_descriptor_matches(
+                handle,
+                element,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            ) {
+                return Err(invalid("has inconsistent physical metadata"));
+            }
+            Ok(())
         }
         _ => Err(invalid(
             "must be a finite real scalar or admitted two-element interval",

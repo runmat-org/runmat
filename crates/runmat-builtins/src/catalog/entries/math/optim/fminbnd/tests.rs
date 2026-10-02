@@ -64,3 +64,16 @@ fn known_complex_bounds_and_nonstruct_options_are_diagnosed() {
     assert!(facts.diagnostics.len() >= 2);
     assert!(matches!(facts.outputs[0].kind, ValueKindFact::Unknown));
 }
+
+#[test]
+fn known_nonscalar_callback_text_is_not_inferred_as_valid() {
+    let mut call = request(0.0, 5.0, 1);
+    call.arguments[0] = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    );
+    let facts = inference::infer(&call, &FMINBND_CATALOG_ENTRY);
+    assert!(!facts.diagnostics.is_empty());
+    assert!(matches!(facts.outputs[0].kind, ValueKindFact::Unknown));
+}

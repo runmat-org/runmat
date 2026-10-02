@@ -50,3 +50,52 @@ fn malformed_initial_geometry_and_excessive_outputs_do_not_prove_success() {
     assert!(!invalid.diagnostics.is_empty());
     assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
 }
+
+#[test]
+fn callback_capabilities_and_known_text_geometry_are_preserved() {
+    let mut known = request(NumericClass::Double, 1, 1);
+    known.arguments[0] = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: CapabilitySet(std::collections::BTreeSet::from([
+            CapabilityRequirement::Filesystem,
+        ])),
+        parameters: vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }))],
+        parameters_complete: true,
+        outputs: vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }))],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: vec![],
+        captures_complete: true,
+    }));
+    let inference = inference::infer(&known, &FZERO_CATALOG_ENTRY);
+    assert!(inference.diagnostics.is_empty());
+    assert!(inference
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
+
+    known.arguments[0] = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    let invalid = inference::infer(&known, &FZERO_CATALOG_ENTRY);
+    assert!(!invalid.diagnostics.is_empty());
+    assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
+
+    known.arguments[0] = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    );
+    assert!(!inference::infer(&known, &FZERO_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+}

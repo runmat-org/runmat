@@ -120,7 +120,17 @@ const FZERO_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const FZERO_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+const FZERO_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "fzero(fun, x0)",
+        inputs: &FZERO_INPUTS_CORE,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "fzero(fun, x0, options)",
+        inputs: &FZERO_INPUTS_WITH_OPTIONS,
+        outputs: &[],
+    },
     BuiltinSignatureDescriptor {
         label: "x = fzero(fun, x0)",
         inputs: &FZERO_INPUTS_CORE,

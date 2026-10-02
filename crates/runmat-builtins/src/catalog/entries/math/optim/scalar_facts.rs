@@ -2,8 +2,9 @@
 
 use crate::catalog::inference::argument_error;
 use runmat_types::{
-    CallRequest, DynamicReason, InferenceDiagnostic, NumericClass, NumericDomain, NumericFact,
-    ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, DimensionFact, DynamicReason, InferenceDiagnostic, LiteralContext,
+    NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ShapeFact,
+    StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -11,20 +12,54 @@ pub(super) fn callback(request: &CallRequest, diagnostics: &mut Vec<InferenceDia
     let Some(value) = request.arguments.first() else {
         return;
     };
-    if !matches!(
+    let valid_kind = matches!(
         value.kind,
         ValueKindFact::Callable(_)
             | ValueKindFact::Object(_)
             | ValueKindFact::String
             | ValueKindFact::Character
             | ValueKindFact::Unknown
-    ) {
+    );
+    let valid_text_geometry = match value.kind {
+        ValueKindFact::Character => !matches!(
+            &value.shape,
+            ShapeFact::Shaped { dims }
+                if matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1)
+        ),
+        ValueKindFact::String => {
+            !value.shape.element_count().is_some_and(|count| count != 1)
+                && !matches!(
+                    &value.shape,
+                    ShapeFact::Shaped { dims }
+                        if dims.iter().any(|dim| matches!(dim, DimensionFact::Known(count) if *count != 1))
+                )
+        }
+        _ => true,
+    };
+    if !valid_kind || !valid_text_geometry {
         diagnostics.push(argument_error(
             "RM-CATALOG-SCALAR-OPT-CALLBACK",
             "the first argument must identify a callable scalar function",
             0,
         ));
     }
+}
+
+pub(super) fn callback_invocation(
+    request: &CallRequest,
+    argument_class: NumericClass,
+) -> Option<CallInference> {
+    let ValueKindFact::Callable(callable) = &request.arguments.first()?.kind else {
+        return None;
+    };
+    Some(crate::infer_callable_call(
+        callable,
+        &CallRequest {
+            arguments: vec![host_scalar(argument_class)],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    ))
 }
 
 pub(super) fn real_numeric(
