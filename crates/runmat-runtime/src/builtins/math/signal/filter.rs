@@ -1,5 +1,6 @@
 //! MATLAB-compatible `filter` builtin with GPU-aware semantics for RunMat.
 mod provider_output;
+mod preflight;
 
 use std::cmp::max;
 
@@ -21,8 +22,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-
-const EPS: f64 = 1.0e-12;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -233,6 +232,12 @@ impl FilterArgs {
             other => other,
         };
 
+        preflight::operands(&b, &a, &x, zi_value.as_ref())?;
+        let host_dim = match dim_value.as_ref() {
+            Some(Value::GpuTensor(_)) | None => None,
+            Some(value) => Some(parse_dimension_arg(value).await?),
+        };
+
         let coeffs_b = CoeffInput::from_value(CoefficientRole::Numerator, b).await?;
         let coeffs_a = CoeffInput::from_value(CoefficientRole::Denominator, a).await?;
 
@@ -246,7 +251,10 @@ impl FilterArgs {
         let signal = SignalInput::from_value(x).await?;
 
         let dim = if let Some(dim_val) = dim_value {
-            parse_dimension_arg(&dim_val).await?
+            match host_dim {
+                Some(dim) => dim,
+                None => parse_dimension_arg(&dim_val).await?,
+            }
         } else {
             default_dimension_from_shape(&signal.shape)
         };
@@ -1206,7 +1214,7 @@ fn states_to_column_major_complex(
 fn to_real_vec(data: &[Complex<f64>]) -> Option<Vec<f64>> {
     let mut out = Vec::with_capacity(data.len());
     for c in data {
-        if c.im.abs() > EPS {
+        if c.im != 0.0 {
             return None;
         }
         out.push(c.re);
