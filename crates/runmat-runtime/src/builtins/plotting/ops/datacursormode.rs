@@ -471,8 +471,8 @@ pub fn set_data_cursor_object_properties(
     }
     let snapshot = snapshot_from_object(&handle)?;
     for pair in args.chunks_exact(2) {
-        let name = super::style::value_as_string(&pair[0])
-            .ok_or_else(|| invalid("datacursormode property names must be text"))?;
+        let name = super::properties::property_name_text(&pair[0], "set")
+            .map_err(|_| invalid("datacursormode property names must be scalar text"))?;
         apply_property(snapshot.figure, &name, &pair[1])?;
         write_object_property(&handle, &name, pair[1].clone())?;
     }

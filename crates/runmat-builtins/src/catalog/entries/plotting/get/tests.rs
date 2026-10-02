@@ -107,3 +107,59 @@ fn get_property_text_geometry_rejects_known_arrays_but_keeps_unknown_shapes() {
         .diagnostics
         .is_empty());
 }
+
+#[test]
+fn control_object_get_uses_partial_scalar_text_geometry() {
+    for class in [
+        standard::ZOOM_CONTROL,
+        standard::PAN_CONTROL,
+        standard::DATA_CURSOR_CONTROL,
+    ] {
+        let handle = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(class.owned()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }));
+        for (kind, shape, invalid) in [
+            (
+                ValueKindFact::String,
+                ShapeFact::from(vec![Some(1), Some(1)]),
+                false,
+            ),
+            (
+                ValueKindFact::String,
+                ShapeFact::from(vec![Some(2), None]),
+                true,
+            ),
+            (
+                ValueKindFact::String,
+                ShapeFact::from(vec![None, Some(0)]),
+                true,
+            ),
+            (
+                ValueKindFact::String,
+                ShapeFact::from(vec![None, None]),
+                false,
+            ),
+            (
+                ValueKindFact::Character,
+                ShapeFact::from(vec![Some(2), None]),
+                true,
+            ),
+            (ValueKindFact::Character, ShapeFact::Unknown, false),
+        ] {
+            let mut name = ValueFact::scalar(kind);
+            name.shape = shape;
+            let inferred = infer(vec![handle.clone(), name], vec![]);
+            assert_eq!(!inferred.diagnostics.is_empty(), invalid);
+            if invalid {
+                assert!(matches!(
+                    inferred.outputs[0].certainty,
+                    CertaintyFact::Dynamic(_)
+                ));
+            }
+        }
+    }
+}

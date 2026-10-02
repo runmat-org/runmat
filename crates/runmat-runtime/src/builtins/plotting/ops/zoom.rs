@@ -625,8 +625,8 @@ pub fn set_zoom_object_properties(
     let snapshot = snapshot_from_object(&handle)?;
     let mut idx = 0;
     while idx < args.len() {
-        let name = super::style::value_as_string(&args[idx])
-            .ok_or_else(|| invalid("zoom property names must be text"))?;
+        let name = super::properties::property_name_text(&args[idx], "set")
+            .map_err(|_| invalid("zoom property names must be scalar text"))?;
         let value = &args[idx + 1];
         apply_zoom_property(snapshot.figure, &name, value)?;
         write_object_property(&handle, &name, value.clone())?;

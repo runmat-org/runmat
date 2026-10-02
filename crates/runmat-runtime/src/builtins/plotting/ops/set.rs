@@ -158,6 +158,64 @@ mod tests {
     }
 
     #[test]
+    fn interaction_control_properties_share_scalar_text_name_boundary() {
+        let _guard = setup();
+        let controls = [
+            crate::builtins::plotting::zoom::zoom_builtin(Vec::new()).expect("zoom object"),
+            crate::builtins::plotting::pan::pan_builtin(Vec::new()).expect("pan object"),
+            crate::builtins::plotting::datacursormode::datacursormode_builtin(Vec::new())
+                .expect("data cursor object"),
+        ];
+        for control in controls {
+            let scalar_name = || {
+                Value::StringArray(
+                    runmat_value::StringArray::new_2d(vec!["Enable".into()], 1, 1)
+                        .expect("scalar property name"),
+                )
+            };
+            set_builtin(vec![
+                control.clone(),
+                scalar_name(),
+                Value::String("off".into()),
+            ])
+            .expect("scalar string array property name");
+            assert_eq!(
+                get_builtin(vec![control.clone(), scalar_name()]).expect("get scalar name"),
+                Value::String("off".into())
+            );
+            set_builtin(vec![
+                control.clone(),
+                Value::String("NotAProperty".into()),
+                Value::String("on".into()),
+            ])
+            .expect_err("unknown property must not mutate control state");
+            for invalid_name in [
+                Value::StringArray(
+                    runmat_value::StringArray::new_2d(vec!["Enable".into(), "Motion".into()], 1, 2)
+                        .expect("two strings"),
+                ),
+                Value::CharArray(
+                    runmat_value::CharArray::new(vec!['E', 'n', 'a', 'b'], 2, 2)
+                        .expect("two character rows"),
+                ),
+            ] {
+                set_builtin(vec![
+                    control.clone(),
+                    invalid_name.clone(),
+                    Value::String("on".into()),
+                ])
+                .expect_err("non-scalar property name must fail before mutation");
+                get_builtin(vec![control.clone(), invalid_name])
+                    .expect_err("get must reject the same non-scalar name");
+                assert_eq!(
+                    get_builtin(vec![control.clone(), scalar_name()]).expect("state unchanged"),
+                    Value::String("off".into())
+                );
+            }
+        }
+    }
+
+    #[test]
     fn set_updates_text_handle_properties() {
         let _guard = setup();
         let h = title_builtin(vec![Value::String("Signal".into())]).unwrap();
