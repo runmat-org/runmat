@@ -1,21 +1,22 @@
 //! The shared text boundary for convolution shape selectors.
 
 use runmat_value::Value;
+use std::borrow::Cow;
 
-pub(crate) enum ConvolutionSelectorText {
-    Text(String),
+pub(crate) enum ConvolutionSelectorText<'a> {
+    Text(Cow<'a, str>),
     MalformedText,
     NotText,
 }
 
-pub(crate) fn convolution_selector_text(value: &Value) -> ConvolutionSelectorText {
+pub(crate) fn convolution_selector_text(value: &Value) -> ConvolutionSelectorText<'_> {
     match value {
-        Value::String(text) => ConvolutionSelectorText::Text(text.clone()),
+        Value::String(text) => ConvolutionSelectorText::Text(Cow::Borrowed(text.as_str())),
         Value::StringArray(array) if array.data.len() == 1 => {
-            ConvolutionSelectorText::Text(array.data[0].clone())
+            ConvolutionSelectorText::Text(Cow::Borrowed(array.data[0].as_str()))
         }
         Value::CharArray(chars) if chars.rows == 1 && chars.shape.len() <= 2 => {
-            ConvolutionSelectorText::Text(chars.data.iter().collect())
+            ConvolutionSelectorText::Text(Cow::Owned(chars.data.iter().collect()))
         }
         Value::StringArray(_) | Value::CharArray(_) => ConvolutionSelectorText::MalformedText,
         _ => ConvolutionSelectorText::NotText,
