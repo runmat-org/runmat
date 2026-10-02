@@ -2,8 +2,10 @@ use super::*;
 use crate::simple_provider::InProcessProvider;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
-    provider_iir_zero_phase_query, HostTensorView, ProviderIirFilterResult,
-    ProviderIirZeroPhaseIndexPlan, ProviderPreparedIirCoefficients, ThreadProviderGuard,
+    provider_iir_zero_phase_query, test_support::TestAllocationOwner, GpuTensorStorage,
+    GpuTensorView, HostTensorView, NumericElementType, ProviderExecutionCompletionError,
+    ProviderIirFilterResult, ProviderIirZeroPhaseIndexPlan, ProviderPreparedIirCoefficients,
+    ThreadProviderGuard,
 };
 use runmat_execution::cancellation::CancellationSource;
 
@@ -217,6 +219,67 @@ fn filter_pair_alias_to_borrowed_control_preserves_caller_and_retires_sibling() 
         block_on(provider.download(&caller_control)).unwrap().data,
         vec![1.0, 2.0]
     );
+}
+
+#[test]
+fn malformed_view_cannot_be_minted_from_a_live_physical_allocation() {
+    let allocation = TestAllocationOwner::new()
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    assert!(allocation
+        .handle
+        .with_view(GpuTensorView::contiguous(vec![3, 1]))
+        .is_err());
+    assert!(allocation.handle.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
+fn rejected_filter_pair_retains_primary_and_failed_retirement_owner() {
+    let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let source = || {
+        provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[2, 1],
+            })
+            .expect("provider operand")
+    };
+    let input = source();
+    let numerator = source();
+    let denominator = source();
+    let owner = TestAllocationOwner::new();
+    let failing = owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let sibling = owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    failing
+        .probe
+        .fail_retirement("fixture retained first output");
+    let mut stages = Stages::new(provider, [&input, &numerator, &denominator], &[]).unwrap();
+    let Err(rejection) = stages.admit_filter_result(
+        ProviderIirFilterResult {
+            output: failing.handle,
+            final_state: Some(sibling.handle),
+        },
+        &[2, 1],
+        &[2, 1],
+        true,
+    ) else {
+        panic!("foreign callback pair must be rejected")
+    };
+    let error = stages.finish(Err(rejection)).unwrap_err();
+    let completion = std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<ProviderExecutionCompletionError>())
+        .expect("primary and cleanup must retain their typed owners");
+    assert!(completion.primary().is_some());
+    assert_eq!(completion.cleanup_errors().len(), 1);
+    assert!(!error.is_unsupported());
+    assert_eq!(failing.probe.retirements(), 1);
+    assert_eq!(sibling.probe.retirements(), 1);
+    assert!(input.allocation_lease().validate_live().is_ok());
 }
 
 #[test]

@@ -151,24 +151,13 @@ impl<'a> Stages<'a> {
             }
         };
         let distinct = self.is_distinct(handle, sibling);
-        let physical_extent = shape
-            .iter()
-            .try_fold(1u64, |count, &extent| {
-                count.checked_mul(u64::try_from(extent).ok()?)
-            })
-            .is_some_and(|count| {
-                handle.physical().element_capacity() >= count
-                    && count
-                        .checked_mul(handle.physical().element_type().element_size() as u64)
-                        .is_some_and(|bytes| handle.physical().payload_bytes() >= bytes)
-            });
         exact_owner
             && handle.device_id() == self.provider.device_id()
             && handle.allocation_lease().validate_live().is_ok()
             && handle.shape() == shape
             && handle.view().layout() == GpuTensorLayout::Contiguous
             && valid_class
-            && physical_extent
+            && handle.view().validate(handle.physical()).is_ok()
             && distinct
     }
 
