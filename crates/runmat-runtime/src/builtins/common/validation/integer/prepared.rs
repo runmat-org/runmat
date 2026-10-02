@@ -25,7 +25,7 @@ const SCAN_CHUNK: usize = 4096;
 #[derive(Debug)]
 pub enum IntegerBoundaryFailure {
     Execution(ExecutionServiceError),
-    Operational(RuntimeError),
+    Operational(Box<RuntimeError>),
     AggregateNeedsTraversal,
 }
 
@@ -38,7 +38,7 @@ impl IntegerBoundaryFailure {
                 error.gpu_gather_retry = GpuGatherRetry::Never;
                 error
             }
-            Self::Operational(error) => error,
+            Self::Operational(error) => *error,
             Self::AggregateNeedsTraversal => build_runtime_error(
                 "integer exactness check: aggregate payload requires a lifetime-safe traversal",
             )
@@ -186,30 +186,64 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
                     resident_payload,
                 });
             };
+            // A device namespace alone is not an allocation authority. Check
+            // the existing lease and physical view before even a metadata-only
+            // exactness receipt is returned for a narrow integer class.
+            handle.allocation_lease().validate_live().map_err(|cause| {
+                IntegerBoundaryFailure::Operational(Box::new(
+                    build_runtime_error(format!(
+                        "integer exactness check: input allocation is unavailable: {cause}"
+                    ))
+                    .with_source(cause)
+                    .with_gpu_gather_retry(GpuGatherRetry::Never)
+                    .build(),
+                ))
+            })?;
+            handle.view().validate(handle.physical()).map_err(|cause| {
+                IntegerBoundaryFailure::Operational(Box::new(
+                    build_runtime_error(format!(
+                        "integer exactness check: input view is invalid: {cause}"
+                    ))
+                    .with_source(cause)
+                    .with_gpu_gather_retry(GpuGatherRetry::Never)
+                    .build(),
+                ))
+            })?;
+            let expected_len =
+                crate::builtins::common::spec::checked_reduction_elements(handle.shape())
+                    .ok_or_else(|| {
+                        IntegerBoundaryFailure::Operational(Box::new(
+                            build_runtime_error(
+                                "integer exactness check: input shape exceeds platform range",
+                            )
+                            .with_gpu_gather_retry(GpuGatherRetry::Never)
+                            .build(),
+                        ))
+                    })?;
             if handle_storage(handle) != GpuTensorStorage::Real
                 || handle_is_logical(handle)
                 || handle_precision(handle).is_some()
                 || !gpu_class_metadata_matches(handle, None, Some(expected_type), false)
             {
-                return Err(IntegerBoundaryFailure::Operational(
+                return Err(IntegerBoundaryFailure::Operational(Box::new(
                     build_runtime_error(
                         "integer exactness check: input handle has contradictory integer metadata",
                     )
                     .with_gpu_gather_retry(GpuGatherRetry::Never)
                     .build(),
-                ));
+                )));
             }
             if expected_type.element_size() <= 4 {
                 true
             } else {
                 let provider = exact_provider_for_handle(handle).ok_or_else(|| {
-                    IntegerBoundaryFailure::Operational(
+                    IntegerBoundaryFailure::Operational(Box::new(
                         build_runtime_error(
                             "integer exactness check: no acceleration provider owns the input handle",
                         )
                         .with_gpu_gather_retry(GpuGatherRetry::Never)
                         .build(),
-                    )
+                    ))
                 })?;
                 let _residency = ResidencyRestoreGuard::new(handle);
                 let gathered = provider
@@ -222,10 +256,8 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
                         .with_gpu_gather_retry(GpuGatherRetry::Never)
                         .build();
                         error.source = Some(source_error.into_boxed_dyn_error());
-                        IntegerBoundaryFailure::Operational(error)
+                        IntegerBoundaryFailure::Operational(Box::new(error))
                     })?;
-                let expected_len =
-                    crate::builtins::common::spec::checked_reduction_elements(handle.shape());
                 let actual_len = match &gathered.data {
                     HostIntegerDataOwned::I8(values) => values.len(),
                     HostIntegerDataOwned::I16(values) => values.len(),
@@ -238,15 +270,15 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
                 };
                 if gathered.shape != handle.shape()
                     || gathered.data.element_type() != expected_type
-                    || expected_len != Some(actual_len)
+                    || expected_len != actual_len
                 {
-                    return Err(IntegerBoundaryFailure::Operational(
+                    return Err(IntegerBoundaryFailure::Operational(Box::new(
                         build_runtime_error(
                             "integer exactness check: provider returned contradictory integer payload metadata",
                         )
                         .with_gpu_gather_retry(GpuGatherRetry::Never)
                         .build(),
-                    ));
+                    )));
                 }
                 let exact = scan_download(&gathered.data, &mut cooperation).await?;
                 resident_payload = Some(gathered);

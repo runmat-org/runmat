@@ -19,6 +19,33 @@ struct CountedIntegerOwner {
     fail_download: bool,
 }
 
+struct AdmissionProbeOwner {
+    owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+    downloads: AtomicUsize,
+}
+
+impl AccelProvider for AdmissionProbeOwner {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "integer admission fixture".into()
+    }
+    fn upload(
+        &self,
+        _: &runmat_accelerate_api::HostTensorView,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        anyhow::bail!("test allocation owner supplies input")
+    }
+    fn download_integer<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelIntegerDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("admission should precede transfer") })
+    }
+}
+
 impl runmat_accelerate_api::AccelProvider for CountedIntegerOwner {
     fn device_id(&self) -> u32 {
         self.inner.device_id()
@@ -247,4 +274,73 @@ fn resident_provider_failure_keeps_original_cause_and_source_lease() {
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     assert!(futures::executor::block_on(provider.inner.download_integer(&handle)).is_ok());
     handle.release().unwrap();
+}
+
+#[test]
+fn unavailable_lease_and_contradictory_storage_fail_before_download() {
+    use runmat_accelerate_api::{
+        GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned, NumericElementType,
+    };
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider: &'static AdmissionProbeOwner = Box::leak(Box::new(AdmissionProbeOwner {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    for data in [
+        HostNumericDataOwned::I32(vec![1]),
+        HostNumericDataOwned::I64(vec![1]),
+    ] {
+        let allocation = provider
+            .owner
+            .allocate_numeric(HostNumericTensorOwned {
+                data,
+                shape: vec![1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        allocation.probe.mark_unavailable();
+        let value = Value::GpuTensor(allocation.handle.clone());
+        let error =
+            match futures::executor::block_on(prepare_direct_integer_f64_boundary(&value, None)) {
+                Err(IntegerBoundaryFailure::Operational(error)) => error,
+                _ => panic!("unavailable lease must fail"),
+            };
+        assert!(error.source.is_some());
+        assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+
+    let complex = provider
+        .owner
+        .allocate_zeroed(
+            vec![1, 1],
+            NumericElementType::I64,
+            GpuTensorStorage::ComplexInterleaved,
+        )
+        .unwrap();
+    let complex_value = Value::GpuTensor(complex.handle.clone());
+    assert!(matches!(
+        futures::executor::block_on(prepare_direct_integer_f64_boundary(&complex_value, None)),
+        Err(IntegerBoundaryFailure::Operational(_))
+    ));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn canonical_view_constructor_rejects_shape_overflow_before_any_transfer() {
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, GpuTensorView, NumericElementType,
+    };
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::U64, GpuTensorStorage::Real)
+        .unwrap();
+    let malformed = allocation
+        .handle
+        .with_view(GpuTensorView::contiguous(vec![usize::MAX, 2]));
+    assert!(
+        malformed.is_err(),
+        "owner must reject overflow before a handle exists"
+    );
 }
