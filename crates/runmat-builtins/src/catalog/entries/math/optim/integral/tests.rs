@@ -28,6 +28,124 @@ fn callable_with_output(output: ValueFact) -> ValueFact {
     }))
 }
 
+fn waypoint_path_request(
+    lower: ValueFact,
+    upper: ValueFact,
+    options: Vec<(LiteralValue, ValueFact)>,
+) -> CallRequest {
+    let row = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), None]),
+        StorageFact::Dense,
+    );
+    let mut arguments = vec![callable_with_output(row), lower, upper];
+    let mut literals = vec![
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+    ];
+    for (name, value) in options {
+        arguments.push(ValueFact::scalar(ValueKindFact::String));
+        arguments.push(value);
+        literals.push(name);
+        literals.push(LiteralValue::Unknown);
+    }
+    request(arguments, literals, 1)
+}
+
+#[test]
+fn duplicate_waypoints_and_dynamic_names_follow_last_value_wins_domain() {
+    use inference::PathDomain;
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    let complex = scalar(NumericClass::Double, NumericDomain::Complex);
+    let waypoint = || LiteralValue::String("Waypoints".into());
+    let complex_then_real = waypoint_path_request(
+        real.clone(),
+        real.clone(),
+        vec![(waypoint(), complex.clone()), (waypoint(), real.clone())],
+    );
+    assert_eq!(inference::path_domain(&complex_then_real), PathDomain::Real);
+    let inferred_real = inference::infer(&complex_then_real, &INTEGRAL_CATALOG_ENTRY);
+    assert!(
+        inferred_real.diagnostics.is_empty(),
+        "{:?}",
+        inferred_real.diagnostics
+    );
+    assert_eq!(
+        inferred_real.outputs[0].numeric().unwrap().domain,
+        NumericDomain::Real
+    );
+    let real_then_complex = waypoint_path_request(
+        real.clone(),
+        real.clone(),
+        vec![(waypoint(), real.clone()), (waypoint(), complex.clone())],
+    );
+    assert_eq!(
+        inference::path_domain(&real_then_complex),
+        PathDomain::Complex
+    );
+    let inferred_complex = inference::infer(&real_then_complex, &INTEGRAL_CATALOG_ENTRY);
+    assert!(
+        inferred_complex.diagnostics.is_empty(),
+        "{:?}",
+        inferred_complex.diagnostics
+    );
+    assert_eq!(
+        inferred_complex.outputs[0].numeric().unwrap().domain,
+        NumericDomain::Complex
+    );
+    let dynamic_after_complex = waypoint_path_request(
+        real.clone(),
+        real.clone(),
+        vec![
+            (waypoint(), complex.clone()),
+            (LiteralValue::Unknown, real.clone()),
+        ],
+    );
+    assert_eq!(
+        inference::path_domain(&dynamic_after_complex),
+        PathDomain::Unknown
+    );
+    let inferred_dynamic = inference::infer(&dynamic_after_complex, &INTEGRAL_CATALOG_ENTRY);
+    assert!(
+        inferred_dynamic.diagnostics.is_empty(),
+        "{:?}",
+        inferred_dynamic.diagnostics
+    );
+    assert!(matches!(
+        inferred_dynamic.outputs[0].kind,
+        ValueKindFact::Unknown
+    ));
+    let known_after_dynamic = waypoint_path_request(
+        real.clone(),
+        real.clone(),
+        vec![
+            (waypoint(), complex.clone()),
+            (LiteralValue::Unknown, real.clone()),
+            (waypoint(), real.clone()),
+        ],
+    );
+    assert_eq!(
+        inference::path_domain(&known_after_dynamic),
+        PathDomain::Real
+    );
+    let complex_bounds = waypoint_path_request(
+        complex.clone(),
+        real,
+        vec![
+            (waypoint(), complex),
+            (
+                LiteralValue::Unknown,
+                scalar(NumericClass::Double, NumericDomain::Real),
+            ),
+        ],
+    );
+    assert_eq!(inference::path_domain(&complex_bounds), PathDomain::Complex);
+}
+
 #[test]
 fn unknown_bounds_and_waypoint_modes_do_not_prove_real_result_domain() {
     let real = scalar(NumericClass::Double, NumericDomain::Real);
@@ -136,12 +254,10 @@ fn vectorized_numeric_unknown_geometry_is_not_a_false_error() {
         ),
         &INTEGRAL_CATALOG_ENTRY,
     );
-    assert!(
-        inferred
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT")
-    );
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT"));
 }
 
 #[test]

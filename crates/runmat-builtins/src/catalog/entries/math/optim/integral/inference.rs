@@ -238,8 +238,8 @@ fn known_option(
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PathDomain {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PathDomain {
     Real,
     Complex,
     Unknown,
@@ -266,8 +266,8 @@ fn value_domain(value: &ValueFact) -> PathDomain {
     }
 }
 
-fn path_domain(request: &CallRequest) -> PathDomain {
-    let mut domain = request
+pub(super) fn path_domain(request: &CallRequest) -> PathDomain {
+    let bounds = request
         .arguments
         .get(1..3)
         .map_or(PathDomain::Unknown, |bounds| {
@@ -275,8 +275,11 @@ fn path_domain(request: &CallRequest) -> PathDomain {
         });
     let rest = request.arguments.len().saturating_sub(3);
     if rest == 1 {
-        return domain.combine(PathDomain::Unknown);
+        return bounds.combine(PathDomain::Unknown);
     }
+    // Runtime option parsing is last-value-wins. Keep the bounds separate so
+    // an earlier complex Waypoints value cannot outlive a later real one.
+    let mut waypoints = None;
     for index in (3..request.arguments.len()).step_by(2) {
         match request
             .literals
@@ -286,7 +289,7 @@ fn path_domain(request: &CallRequest) -> PathDomain {
             .and_then(|name| IntegralOptionName::parse(&name))
         {
             Some(IntegralOptionName::Waypoints) => {
-                domain = domain.combine(
+                waypoints = Some(
                     request
                         .arguments
                         .get(index + 1)
@@ -294,10 +297,10 @@ fn path_domain(request: &CallRequest) -> PathDomain {
                 );
             }
             Some(_) => {}
-            None => domain = domain.combine(PathDomain::Unknown),
+            None => waypoints = Some(PathDomain::Unknown),
         }
     }
-    domain
+    bounds.combine(waypoints.unwrap_or(PathDomain::Real))
 }
 
 fn result_domain(callback: NumericDomain, path: PathDomain) -> Option<NumericDomain> {
