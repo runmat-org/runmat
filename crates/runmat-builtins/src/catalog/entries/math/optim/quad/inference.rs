@@ -121,6 +121,20 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
+    let mut callback_arguments = vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }))];
+    callback_arguments.extend(request.arguments.iter().skip(5).cloned());
+    let callback = scalar_facts::callback_invocation_with_arguments(request, callback_arguments);
+    if let Some(callback) = &callback {
+        scalar_facts::real_scalar_callback_result(
+            callback,
+            &mut diagnostics,
+            "RM-CATALOG-QUAD-CALLBACK-RESULT",
+        );
+        diagnostics.extend(callback.diagnostics.iter().cloned());
+    }
     let scalar = if diagnostics.is_empty() {
         scalar_facts::host_scalar(NumericClass::Double)
     } else {
@@ -129,17 +143,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut contract = CallContract::fixed(vec![scalar.clone(), scalar]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
-    let mut callback_arguments = vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-        class: NumericClass::Double,
-        domain: NumericDomain::Real,
-    }))];
-    callback_arguments.extend(request.arguments.iter().skip(5).cloned());
-    if let Some(callback) =
-        scalar_facts::callback_invocation_with_arguments(request, callback_arguments)
-    {
+    if let Some(callback) = callback {
         contract.effects.0.extend(callback.effects.0);
         contract.capabilities.0.extend(callback.capabilities.0);
-        diagnostics.extend(callback.diagnostics);
     }
     let mut inference = infer_call(&contract, request);
     inference.diagnostics.extend(diagnostics);

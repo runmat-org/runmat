@@ -107,3 +107,42 @@ fn known_invalid_empty_text_tolerance_does_not_prove_result() {
     assert!(!result.diagnostics.is_empty());
     assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
 }
+
+#[test]
+fn known_invalid_callback_result_never_proves_quad_outputs() {
+    let mut vector = scalar();
+    vector.shape = ShapeFact::Shaped {
+        dims: vec![DimensionFact::Known(2), DimensionFact::Known(1)],
+    };
+    for output in [
+        ValueFact::scalar(ValueKindFact::String),
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        })),
+        vector,
+    ] {
+        let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+            identity: None,
+            capabilities: CapabilitySet::default(),
+            parameters: vec![scalar()],
+            parameters_complete: true,
+            outputs: vec![output],
+            outputs_complete: true,
+            variadic_inputs: false,
+            variadic_outputs: false,
+            captures: vec![],
+            captures_complete: true,
+        }));
+        let call = request(vec![callback, scalar(), scalar()], 2);
+        let result = inference::infer(&call, &QUAD_CATALOG_ENTRY);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-QUAD-CALLBACK-RESULT"));
+        assert!(result
+            .outputs
+            .iter()
+            .all(|output| matches!(output.kind, ValueKindFact::Unknown)));
+    }
+}

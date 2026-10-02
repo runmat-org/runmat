@@ -3,8 +3,9 @@ use super::IntegralOptionName;
 use crate::catalog::inference::{argument_error, literal_text};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DynamicReason, NumericClass,
-    NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    infer_call, CallContract, CallInference, CallRequest, DynamicReason, LiteralContext,
+    LiteralValue, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact,
+    ValueKindFact,
 };
 
 fn scalar_bound(
@@ -41,6 +42,8 @@ fn scalar_bound(
 
 fn controls(request: &CallRequest, diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>) {
     let rest = request.arguments.len().saturating_sub(3);
+    let mut known_abs_tol = Some(IntegralOptionName::DEFAULT_ABS_TOL);
+    let mut known_rel_tol = Some(IntegralOptionName::DEFAULT_REL_TOL);
     if rest == 1 {
         let option = &request.arguments[3];
         if !matches!(
@@ -91,14 +94,107 @@ fn controls(request: &CallRequest, diagnostics: &mut Vec<runmat_types::Inference
             .get(index)
             .and_then(literal_text)
         {
-            if IntegralOptionName::parse(text).is_none() {
+            if let Some(option) = IntegralOptionName::parse(text) {
+                let literal = request.literals.literal_args.get(index + 1);
+                let value = request.arguments.get(index + 1);
+                known_option(
+                    option,
+                    literal,
+                    value,
+                    index + 1,
+                    diagnostics,
+                    &mut known_abs_tol,
+                    &mut known_rel_tol,
+                );
+            } else {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-INTEGRAL-OPTION-NAME",
                     "unsupported integral option",
                     index,
                 ));
             }
+        } else {
+            // A runtime option name could overwrite either tolerance.
+            known_abs_tol = None;
+            known_rel_tol = None;
         }
+    }
+    if known_abs_tol == Some(0.0) && known_rel_tol == Some(0.0) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-INTEGRAL-TOLERANCES",
+            "AbsTol and RelTol cannot both be zero",
+            3,
+        ));
+    }
+    if known_abs_tol.is_some_and(|value| value < 0.0)
+        || known_rel_tol.is_some_and(|value| value < 0.0)
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-INTEGRAL-TOLERANCES",
+            "integral tolerances must be nonnegative",
+            3,
+        ));
+    }
+}
+
+fn known_option(
+    option: IntegralOptionName,
+    literal: Option<&LiteralValue>,
+    value: Option<&ValueFact>,
+    index: usize,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+    known_abs_tol: &mut Option<f64>,
+    known_rel_tol: &mut Option<f64>,
+) {
+    let numeric = literal.and_then(|literal| match literal {
+        LiteralValue::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
+        other => LiteralContext::numeric_from_literal(other),
+    });
+    let known_bad_kind = value.is_some_and(|fact| {
+        !matches!(
+            fact.kind,
+            ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Real,
+                ..
+            }) | ValueKindFact::Logical
+                | ValueKindFact::Unknown
+        ) || fact.storage == StorageFact::Sparse
+            || fact.shape.element_count().is_some_and(|count| count != 1)
+    });
+    let bad = match option {
+        IntegralOptionName::AbsTol | IntegralOptionName::RelTol => {
+            if option == IntegralOptionName::AbsTol {
+                *known_abs_tol = numeric;
+            } else {
+                *known_rel_tol = numeric;
+            }
+            numeric.is_some_and(|number| !number.is_finite()) || known_bad_kind
+        }
+        IntegralOptionName::MaxFunEvals | IntegralOptionName::MaxIntervalCount => {
+            numeric.is_some_and(|number| {
+                !number.is_finite()
+                    || number.fract() != 0.0
+                    || number < 5.0
+                    || number > usize::MAX as f64
+                    || (usize::BITS == 64 && number == usize::MAX as f64)
+            }) || known_bad_kind
+        }
+        IntegralOptionName::ArrayValued => {
+            let flag = match literal {
+                Some(LiteralValue::Bool(flag)) => Some(*flag),
+                _ => numeric.map(|number| number != 0.0),
+            };
+            flag == Some(true)
+                || numeric.is_some_and(|number| number != 0.0 && number != 1.0)
+                || known_bad_kind
+        }
+    };
+    if bad {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-INTEGRAL-OPTION-VALUE",
+            "invalid integral option value",
+            index,
+        ));
     }
 }
 
@@ -127,6 +223,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     scalar_bound(request, 1, &mut diagnostics);
     scalar_bound(request, 2, &mut diagnostics);
     controls(request, &mut diagnostics);
+    let callback = scalar_facts::callback_invocation(
+        request,
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+    );
+    if let Some(callback) = &callback {
+        scalar_facts::real_scalar_callback_result(
+            callback,
+            &mut diagnostics,
+            "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
+        );
+        diagnostics.extend(callback.diagnostics.iter().cloned());
+    }
     let value = if diagnostics.is_empty() {
         scalar_facts::host_scalar(NumericClass::Double)
     } else {
@@ -135,16 +246,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut contract = CallContract::fixed(vec![value]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
-    if let Some(callback) = scalar_facts::callback_invocation(
-        request,
-        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
-            domain: NumericDomain::Real,
-        })),
-    ) {
+    if let Some(callback) = callback {
         contract.effects.0.extend(callback.effects.0);
         contract.capabilities.0.extend(callback.capabilities.0);
-        diagnostics.extend(callback.diagnostics);
     }
     let mut inference = infer_call(&contract, request);
     inference.diagnostics.extend(diagnostics);

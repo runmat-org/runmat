@@ -10,6 +10,9 @@ pub enum IntegralOptionName {
 }
 
 impl IntegralOptionName {
+    pub const DEFAULT_ABS_TOL: f64 = 1.0e-10;
+    pub const DEFAULT_REL_TOL: f64 = 1.0e-6;
+
     pub fn parse(text: &str) -> Option<Self> {
         match text.trim().to_ascii_lowercase().as_str() {
             "abstol" => Some(Self::AbsTol),

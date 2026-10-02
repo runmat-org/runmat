@@ -69,6 +69,32 @@ pub(super) fn callback_invocation_with_arguments(
     ))
 }
 
+pub(super) fn real_scalar_callback_result(
+    callback: &CallInference,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+    code: &'static str,
+) {
+    let Some(result) = callback.outputs.first() else {
+        return;
+    };
+    let class_ok = matches!(
+        result.kind,
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        }) | ValueKindFact::Logical
+            | ValueKindFact::Unknown
+    );
+    let scalar = !result.shape.element_count().is_some_and(|count| count != 1);
+    if !class_ok || !scalar || result.storage == StorageFact::Sparse {
+        diagnostics.push(argument_error(
+            code,
+            "quadrature callback must return a real numeric scalar",
+            0,
+        ));
+    }
+}
+
 pub(super) fn real_numeric(
     value: Option<&ValueFact>,
     index: usize,

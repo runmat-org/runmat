@@ -27,8 +27,6 @@ use crate::builtins::math::optim::quadrature::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "integral";
-const DEFAULT_ABS_TOL: f64 = 1.0e-10;
-const DEFAULT_REL_TOL: f64 = 1.0e-6;
 const DEFAULT_MAX_FUN_EVALS: usize = 10_000;
 const MAX_DEPTH: usize = 30;
 
@@ -306,18 +304,53 @@ struct IntegralOptions {
 impl IntegralOptions {
     fn defaults() -> Self {
         Self {
-            abs_tol: DEFAULT_ABS_TOL,
-            rel_tol: DEFAULT_REL_TOL,
+            abs_tol: IntegralOptionName::DEFAULT_ABS_TOL,
+            rel_tol: IntegralOptionName::DEFAULT_REL_TOL,
             max_fun_evals: DEFAULT_MAX_FUN_EVALS,
         }
     }
 
     fn preflight_host(rest: &[(IntegralOptionName, &Value)]) -> BuiltinResult<()> {
         let mut check = Self::defaults();
+        let mut known_abs_tol = Some(check.abs_tol);
+        let mut known_rel_tol = Some(check.rel_tol);
         for &(name, value) in rest {
-            if !matches!(value, Value::GpuTensor(_)) {
-                check.apply_option(name, value)?;
+            if matches!(value, Value::GpuTensor(_)) {
+                match name {
+                    IntegralOptionName::AbsTol => known_abs_tol = None,
+                    IntegralOptionName::RelTol => known_rel_tol = None,
+                    IntegralOptionName::MaxFunEvals
+                    | IntegralOptionName::MaxIntervalCount
+                    | IntegralOptionName::ArrayValued => {}
+                }
+                continue;
             }
+            check.apply_option(name, value)?;
+            match name {
+                IntegralOptionName::AbsTol => known_abs_tol = Some(check.abs_tol),
+                IntegralOptionName::RelTol => known_rel_tol = Some(check.rel_tol),
+                IntegralOptionName::MaxFunEvals
+                | IntegralOptionName::MaxIntervalCount
+                | IntegralOptionName::ArrayValued => {}
+            }
+        }
+        if known_abs_tol == Some(0.0) && known_rel_tol == Some(0.0) {
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                "AbsTol and RelTol cannot both be zero",
+            ));
+        }
+        if known_abs_tol.is_some_and(|value| value < 0.0) {
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                "AbsTol must be nonnegative",
+            ));
+        }
+        if known_rel_tol.is_some_and(|value| value < 0.0) {
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                "RelTol must be nonnegative",
+            ));
         }
         Ok(())
     }
@@ -1109,6 +1142,28 @@ mod tests {
             .allocation_lease()
             .validate_live()
             .unwrap();
+
+        let zero_tolerances = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::GpuTensor(bound.handle.clone()),
+            Value::Num(1.0),
+            vec![
+                Value::from("AbsTol"),
+                Value::GpuTensor(valid_option.handle.clone()),
+                Value::from("AbsTol"),
+                Value::Num(0.0),
+                Value::from("RelTol"),
+                Value::Num(0.0),
+            ],
+        ))
+        .expect_err("known effective zero tolerances fail before resident access");
+        assert_eq!(
+            zero_tolerances.identifier(),
+            INTEGRAL_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(bound.probe.retirements(), 0);
+        assert_eq!(valid_option.probe.retirements(), 0);
     }
 
     #[test]
