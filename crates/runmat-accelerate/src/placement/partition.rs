@@ -434,6 +434,12 @@ fn candidate_resource_adjustment_ns(
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
     }
+    let host_published_bound = match presentation {
+        CandidateOutputPresentation::ProviderUpload {
+            host_result_bytes, ..
+        } => host_result_bytes.unwrap_or(demand.retained_bytes),
+        CandidateOutputPresentation::Direct => demand.retained_bytes,
+    };
     match output_residency {
         CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {
             host_peak = host_peak
@@ -450,7 +456,7 @@ fn candidate_resource_adjustment_ns(
         }
         CandidateOutputResidency::Mirrored { device_id } => {
             host_peak = host_peak
-                .add(demand.retained_bytes)
+                .add(host_published_bound)
                 .ok_or(ResourceAdmissionError::Overflow)?;
             let retained = provider_demands.entry(device_id).or_default();
             *retained = retained

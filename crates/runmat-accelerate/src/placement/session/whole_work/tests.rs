@@ -416,6 +416,65 @@ fn upload_admission_distinguishes_host_payload_from_provider_retention() {
 }
 
 #[test]
+fn mirrored_upload_uses_distinct_host_and_provider_retention_once() {
+    let session = PlacementSession::default();
+    let mut host = host_with_provider_presentation();
+    host.output_residency = CandidateOutputResidency::Mirrored { device_id: 7 };
+    host.resources.scratch_bytes = 0.into();
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
+        device_id: 7,
+        transfer_bytes: Some(16),
+        host_result_bytes: Some(32.into()),
+        host_scratch_bytes: 0.into(),
+        provider_scratch_bytes: 0.into(),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+    };
+    let mut enough = request(vec![host]);
+    enough.resources.memory_available_bytes = Some(32);
+    enough.resources.providers[0].capacity_bytes = Some(16);
+    enough.resources.providers[0].scratch_available_bytes = Some(16);
+    assert!(session.select_whole_work(enough.clone()).is_ok());
+    enough.resources.memory_available_bytes = Some(31);
+    assert_eq!(
+        session
+            .select_whole_work(enough)
+            .err()
+            .expect("host under budget")
+            .code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn bounded_host_compute_and_upload_admit_under_finite_memory() {
+    let session = PlacementSession::default();
+    let mut host = host_with_provider_presentation();
+    host.resources.scratch_bytes = 80.into();
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
+        device_id: 7,
+        transfer_bytes: Some(16),
+        host_result_bytes: Some(16.into()),
+        host_scratch_bytes: 16.into(),
+        provider_scratch_bytes: 8.into(),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+    };
+    let mut bounded = request(vec![host]);
+    bounded.resources.memory_available_bytes = Some(112);
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+    bounded.resources.memory_available_bytes = Some(111);
+    assert_eq!(
+        session
+            .select_whole_work(bounded)
+            .err()
+            .expect("one byte short")
+            .code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
 fn provider_required_does_not_admit_a_host_upload_route() {
     let session = PlacementSession::default();
     let mut only_host_upload = request(vec![host_with_provider_presentation()]);

@@ -41,6 +41,11 @@ fn bounded_upload_keeps_exact_shape_unclaimed_and_checks_late_shape() {
     assert!(bound.admits(&actual));
     actual.shape = vec![1, 9];
     assert!(!bound.admits(&actual));
+    let logical = ProviderTransferOutputBound {
+        element_type: ProviderElementType::Logical,
+        ..bound.clone()
+    };
+    assert_eq!(logical.max_bytes(), None);
     let decoded: ProviderFeasibilityQuery =
         serde_json::from_slice(&serde_json::to_vec(&query).unwrap()).unwrap();
     assert_eq!(decoded, query);

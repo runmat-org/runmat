@@ -25,9 +25,14 @@ pub struct ProviderTransferOutputBound {
 
 impl ProviderTransferOutputBound {
     pub fn max_bytes(&self) -> Option<u64> {
-        self.max_elements
-            .max(1)
-            .checked_mul(self.element_type.byte_width())
+        // Packed logical/short integer uploads vary by backend. Only native
+        // floating payloads have a provider-independent physical width.
+        let width = match self.element_type {
+            ProviderElementType::F32 => 4,
+            ProviderElementType::F64 => 8,
+            _ => return None,
+        };
+        self.max_elements.max(1).checked_mul(width)
     }
 
     pub fn admits(&self, actual: &ProviderRepresentation) -> bool {

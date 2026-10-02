@@ -510,7 +510,10 @@ fn dense_feasibility_with_bytes(
         }
         let mut total = 0_u64;
         for bound in bounds {
-            if !snapshot.element_types.contains(&bound.element_type)
+            if !matches!(
+                bound.element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            ) || !snapshot.element_types.contains(&bound.element_type)
                 || bound.storage != ProviderStorage::DenseReal
                 || bound.layout != ProviderLayout::ColumnMajorContiguous
                 || bound.residency != ProviderResidency::Device
