@@ -1,4 +1,4 @@
-use crate::builtins::fea::contracts::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
 use crate::builtins::fea::contracts::identities::{
     FEA_MODEL_CLASS, FEA_PAYLOAD_JSON_PROPERTY, MODEL_NAME,
 };

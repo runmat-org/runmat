@@ -1,7 +1,7 @@
 use crate::analysis::analysis_create_model_op;
 use crate::analysis::AnalysisCreateModelIntentSpec;
 use crate::analysis::AnalysisCreateModelProfile;
-use crate::builtins::fea::contracts::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     BOUNDARY_CONDITION_NAME, DOMAIN_NAME, FEA_BOUNDARY_CONDITION_CLASS, FEA_DOMAIN_CLASS,
     FEA_INTERFACE_CLASS, FEA_LOAD_CASE_CLASS, FEA_MATERIAL_ASSIGNMENT_CLASS, FEA_MATERIAL_CLASS,

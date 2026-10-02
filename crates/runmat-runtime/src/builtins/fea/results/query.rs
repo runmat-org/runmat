@@ -2,7 +2,7 @@ use crate::analysis::analysis_results_by_run_id_op;
 use crate::analysis::analysis_run_study_op;
 use crate::analysis::AnalysisResultsQuery;
 use crate::analysis::AnalysisStudySpec;
-use crate::builtins::fea::contracts::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     FEA_PAYLOAD_JSON_PROPERTY, FEA_RESULTS_CLASS, FEA_RUN_ID_CONTEXT_PROPERTY,
     FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_STUDY_CONTEXT_JSON_PROPERTY,

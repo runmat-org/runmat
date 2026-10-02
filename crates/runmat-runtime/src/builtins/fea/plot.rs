@@ -1,8 +1,8 @@
 #[cfg(feature = "plot-core")]
 use crate::analysis::{analysis_results_by_run_id_op, AnalysisResultsQuery, AnalysisStudySpec};
 #[cfg(feature = "plot-core")]
-use crate::builtins::fea::contracts::descriptors::ERROR_INPUT;
-use crate::builtins::fea::contracts::descriptors::ERROR_OPERATION;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
+use runmat_builtins::fea_contract::descriptors::ERROR_OPERATION;
 use crate::builtins::fea::contracts::identities::PLOT_NAME;
 #[cfg(feature = "plot-core")]
 use crate::builtins::fea::contracts::identities::{FEA_FIELD_CLASS, FEA_STUDY_CLASS};

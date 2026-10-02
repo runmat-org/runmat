@@ -1,5 +1,5 @@
 use crate::analysis::AnalysisFieldDescriptor;
-use crate::builtins::fea::contracts::descriptors::ERROR_INTERNAL;
+use runmat_builtins::fea_contract::descriptors::ERROR_INTERNAL;
 use crate::builtins::fea::contracts::identities::{
     FEA_FIELD_CLASS, FEA_PAYLOAD_JSON_PROPERTY, FIELD_NAME,
 };

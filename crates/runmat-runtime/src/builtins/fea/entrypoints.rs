@@ -9,7 +9,7 @@ use crate::builtins::fea::boundary::create_boundary_condition_object_from_args;
 use crate::builtins::fea::comparison::{
     create_compare_object_from_args, create_trends_object_from_args,
 };
-use crate::builtins::fea::contracts::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     FEA_PLAN_CLASS, FEA_VALIDATION_CLASS, PLAN_NAME, RUN_NAME, STUDY_NAME, VALIDATE_NAME,
 };

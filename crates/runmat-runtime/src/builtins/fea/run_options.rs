@@ -9,7 +9,7 @@ use crate::analysis::AnalysisRunKind;
 use crate::analysis::AnalysisRunOptions;
 use crate::analysis::AnalysisThermalRunOptions;
 use crate::analysis::AnalysisTransientRunOptions;
-use crate::builtins::fea::contracts::descriptors::ERROR_INPUT;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::{FEA_RUN_OPTIONS_CLASS, RUN_OPTIONS_NAME};
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::{parse_scalar_enum, scalar_string};

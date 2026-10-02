@@ -2,7 +2,7 @@ use crate::analysis::analysis_results_compare_op;
 use crate::analysis::analysis_trends_op;
 use crate::analysis::AnalysisResultsCompareQuery;
 use crate::analysis::AnalysisTrendsQuery;
-use crate::builtins::fea::contracts::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     COMPARE_NAME, FEA_COMPARE_CLASS, FEA_PAYLOAD_JSON_PROPERTY, FEA_TRENDS_CLASS, TRENDS_NAME,
 };

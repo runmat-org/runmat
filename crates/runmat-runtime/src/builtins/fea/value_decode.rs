@@ -1,5 +1,5 @@
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::fea::contracts::descriptors::ERROR_INPUT;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::MODEL_NAME;
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::scalar_string;

@@ -1,4 +1,4 @@
-use crate::builtins::fea::contracts::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
 use crate::builtins::fea::contracts::identities::{MATERIAL_ASSIGNMENT_NAME, MATERIAL_NAME};
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::{parse_scalar_enum, scalar_string};

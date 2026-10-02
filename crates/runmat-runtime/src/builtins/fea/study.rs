@@ -13,7 +13,7 @@ use crate::analysis::AnalysisStudySpec;
 use crate::analysis::AnalysisStudySweepSpec;
 use crate::analysis::AnalysisThermalRunOptions;
 use crate::analysis::AnalysisTransientRunOptions;
-use crate::builtins::fea::contracts::descriptors::ERROR_INPUT;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::{STUDY_NAME, SWEEP_NAME};
 use crate::builtins::fea::errors::{builtin_error, sanitize_id};
 use crate::builtins::fea::geometry::{

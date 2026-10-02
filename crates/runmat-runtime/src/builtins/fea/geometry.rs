@@ -1,6 +1,6 @@
 use crate::analysis::AnalysisCreateModelProfile;
 use crate::analysis::AnalysisRunKind;
-use crate::builtins::fea::contracts::descriptors::ERROR_INPUT;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::STUDY_NAME;
 use crate::builtins::fea::errors::{builtin_error, builtin_error_with_source};
 use crate::builtins::fea::study::StudyConstructorOptions;

@@ -4,7 +4,7 @@ use crate::analysis::AnalysisStudySweepFailureEntry;
 use crate::analysis::AnalysisStudySweepPlanData;
 use crate::analysis::AnalysisStudySweepSpec;
 use crate::analysis::FeaResolvedDocument;
-use crate::builtins::fea::contracts::descriptors::{ERROR_INTERNAL, ERROR_OPERATION};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     FEA_PAYLOAD_JSON_PROPERTY, FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
     FEA_STUDY_SPEC_JSON_PROPERTY, FEA_SWEEP_CLASS, FEA_SWEEP_SPEC_JSON_PROPERTY, PLAN_NAME,

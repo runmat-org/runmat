@@ -8,7 +8,7 @@ use crate::analysis::{
 use crate::operations::OperationContext;
 use crate::BuiltinResult;
 
-use super::contracts::descriptors::{ERROR_INPUT, ERROR_OPERATION};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_OPERATION};
 use super::contracts::identities::AUTHOR_STUDY_NAME;
 use super::errors::{builtin_error, builtin_error_with_source, operation_error};
 use super::geometry::{geometry_asset_from_value_with_builtin, parse_scalar_enum, scalar_string};

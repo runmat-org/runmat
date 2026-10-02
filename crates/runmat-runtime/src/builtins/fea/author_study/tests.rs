@@ -1,7 +1,7 @@
 use futures::executor::block_on;
 use runmat_value::{Tensor, Value};
 
-use super::super::contracts::descriptors::ERROR_INTERNAL;
+use runmat_builtins::fea_contract::descriptors::ERROR_INTERNAL;
 use super::super::contracts::identities::{
     FEA_PAYLOAD_JSON_PROPERTY, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_STUDY_SPEC_JSON_PROPERTY,
 };

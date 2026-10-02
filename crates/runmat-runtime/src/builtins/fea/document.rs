@@ -2,7 +2,7 @@ use crate::analysis::load_fea_document_from_path_async;
 use crate::analysis::AnalysisStudySpec;
 use crate::analysis::AnalysisStudySweepSpec;
 use crate::analysis::FeaResolvedDocument;
-use crate::builtins::fea::contracts::descriptors::{ERROR_INPUT, ERROR_LOAD};
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_LOAD};
 use crate::builtins::fea::contracts::identities::{
     FEA_STUDY_CLASS, FEA_STUDY_SPEC_JSON_PROPERTY, FEA_SWEEP_CLASS, FEA_SWEEP_SPEC_JSON_PROPERTY,
     LOAD_NAME,
