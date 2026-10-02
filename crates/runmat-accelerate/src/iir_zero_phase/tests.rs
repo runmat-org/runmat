@@ -168,3 +168,72 @@ fn mismatched_sealed_plan_rejects_before_provider_work() {
     assert_eq!(provider.telemetry_snapshot(), before);
     assert!(input.allocation_lease().validate_live().is_ok());
 }
+
+fn identity_case(data: &[f64; 8]) -> ProviderExecutionResult<Vec<f64>> {
+    let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let input = provider
+        .upload(&HostTensorView {
+            data,
+            shape: &[8, 1],
+        })
+        .unwrap();
+    let coefficients = ProviderPreparedIirCoefficients::upload(
+        provider,
+        &[1.0, 0.0],
+        &[1.0, 0.0],
+        provider.precision(),
+        &[&input],
+    )
+    .unwrap();
+    let cancellation = CancellationSource::new();
+    let indices =
+        ProviderIirZeroPhaseIndexPlan::prepare_direct([8, 1], 2, 0, 3, &cancellation.token())
+            .unwrap();
+    let request = ProviderIirZeroPhaseRequest {
+        input: &input,
+        coefficients: &coefficients,
+        indices: &indices,
+        initial_state: &[0.0],
+        axis: 0,
+        reflection_len: 3,
+        capability_revision: provider.capability_snapshot().revision,
+        cancellation: cancellation.token(),
+    };
+    let output = block_on(provider.iir_zero_phase(&request))?;
+    Ok(block_on(provider.download(&output))
+        .map_err(ProviderExecutionError::from)?
+        .data)
+}
+
+fn has_fault(error: &ProviderExecutionError, expected: ProviderIirZeroPhaseFault) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(cause) = current {
+        if cause.downcast_ref::<ProviderIirZeroPhaseFault>() == Some(&expected) {
+            return true;
+        }
+        current = cause.source();
+    }
+    false
+}
+
+#[test]
+fn extreme_constant_reflection_stays_finite_without_clipping() {
+    let samples = [1.0e308; 8];
+    let actual = identity_case(&samples).expect("finite constant has a finite identity result");
+    assert_eq!(actual, samples);
+}
+
+#[test]
+fn nonfinite_input_and_unrepresentable_reflection_have_distinct_typed_faults() {
+    let nonfinite = [f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let error = identity_case(&nonfinite).unwrap_err();
+    assert!(has_fault(&error, ProviderIirZeroPhaseFault::NonFiniteInput));
+
+    let overflowing = [f64::MAX, 0.0, 0.0, -f64::MAX, 0.0, 0.0, 0.0, 0.0];
+    let error = identity_case(&overflowing).unwrap_err();
+    assert!(has_fault(
+        &error,
+        ProviderIirZeroPhaseFault::UnrepresentableReflection
+    ));
+}
