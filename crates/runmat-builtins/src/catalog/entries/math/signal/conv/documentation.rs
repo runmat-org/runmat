@@ -7,7 +7,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Compute one-dimensional linear convolution in MATLAB and RunMat.",
     description: "`conv(a, b)` computes one-dimensional linear convolution. It accepts real or complex row and column vectors, scalars, logical values, and all eight fixed-width integer classes. Either single input selects single output; otherwise the output is double. Integer arithmetic crosses an explicit floating-point boundary before multiplication and accumulation.",
     keywords: &["conv", "convolution", "linear convolution", "signal processing", "polynomial multiplication", "gpu"],
-    related: &["fft", "ifft", "fftshift", "gpuArray", "gather", "conv2", "deconv", "filter", "cconv"],
+    related: &["fft", "ifft", "fftshift", "gpuArray", "gather", "conv2", "deconv", "filter"],
     sections: &[
         BuiltinDocumentationSection { heading: "Shape and orientation", paragraphs: &[
             "The optional shape selector is `full` (default), `same`, or `valid`. Full convolution is a row unless both inputs are columns. Same and valid follow the first input's orientation when it is unambiguous.",
@@ -31,15 +31,15 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     example_exemption: None,
     faqs: &[
-        BuiltinDocumentationFaq { question: "Does `conv` require row vectors?", answer: "No. It accepts rows, columns, and scalars; genuine matrices and N-D arrays require `conv2` or `convn`. Full orientation follows the both-columns rule, while same and valid normally follow the first input." },
+        BuiltinDocumentationFaq { question: "Does `conv` require row vectors?", answer: "No. It accepts rows, columns, and scalars. Use `conv2` for matrices; RunMat does not currently provide `convn` for general N-D convolution. Full orientation follows the both-columns rule, while same and valid normally follow the first input." },
         BuiltinDocumentationFaq { question: "What happens when an input is empty?", answer: "The result is normally empty. With `conv(u, [], 'valid')`, RunMat returns zeros with the length and orientation of `u` and the selected floating class and complexity." },
         BuiltinDocumentationFaq { question: "How is `same` computed?", answer: "It selects the central portion of the full convolution with the first input's length." },
         BuiltinDocumentationFaq { question: "When should I use `valid`?", answer: "Use it for results whose sliding window fits without zero padding." },
         BuiltinDocumentationFaq { question: "Does `conv` support single precision?", answer: "Either single numeric input selects single output; otherwise logical, integer, and double inputs produce double. Integer arithmetic uses floating rounding and overflow rather than saturation." },
         BuiltinDocumentationFaq { question: "Will the result stay on the GPU?", answer: "A same-owner, same-device real floating pair can use the native provider hook. Other supported resident values gather through their owners, and eligible floating results return to the first owner. Typed complex integer host inputs are supported; resident typed complex integer buffers are not encoded by the current provider ABI." },
-        BuiltinDocumentationFaq { question: "Can I convolve matrices or N-D arrays?", answer: "No. Use `conv2` or `convn` for multidimensional convolution." },
+        BuiltinDocumentationFaq { question: "Can I convolve matrices or N-D arrays?", answer: "`conv` accepts vectors and scalars. Use `conv2` for matrices; general N-D convolution through `convn` is not currently available in RunMat." },
         BuiltinDocumentationFaq { question: "How do I use an impulse kernel?", answer: "Use a `1` followed by zeros; convolution with a discrete delta retains the input with corresponding padding." },
-        BuiltinDocumentationFaq { question: "What about circular convolution?", answer: "Use `cconv`, or multiply transforms and then apply an inverse FFT." },
+        BuiltinDocumentationFaq { question: "What about circular convolution?", answer: "For a circular convolution of length n, multiply `fft(a, n)` by `fft(b, n)` elementwise and apply `ifft` to the product. RunMat does not currently provide `cconv`." },
         BuiltinDocumentationFaq { question: "Are there GPU tuning controls?", answer: "No. The provider chooses kernel launch settings." },
     ],
     links: &[
