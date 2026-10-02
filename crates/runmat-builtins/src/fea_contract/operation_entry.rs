@@ -52,7 +52,10 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
                 EffectKind::MaySuspend,
                 EffectKind::MayThrow,
             ],
-            &[CapabilityRequirement::Filesystem],
+            // The configured artifact store may be in memory. FilesystemRead
+            // records the default backend's possible effect, not a universal
+            // capability prerequisite for this identity.
+            &[],
         ),
         OperationEffectProfile::Figure => (
             BuiltinPurity::Impure,
@@ -64,10 +67,7 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
                 EffectKind::MaySuspend,
                 EffectKind::MayThrow,
             ],
-            &[
-                CapabilityRequirement::Filesystem,
-                CapabilityRequirement::UserInterface,
-            ],
+            &[CapabilityRequirement::UserInterface],
         ),
     };
     BuiltinCatalogEntry {
@@ -94,7 +94,11 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
         },
         placement: BuiltinPlacementContract {
             preparation: BuiltinOperandPreparation::RuntimeOwned,
-            portability: BuiltinPortability::NativeOnly,
+            // FEA entrypoints are registered on wasm too. Browser calls need
+            // an installed filesystem provider for paths/evidence and the
+            // appropriate plotting host for figures; their absence is a
+            // capability/service failure, not a blanket native-only identity.
+            portability: BuiltinPortability::NativeAndWasm,
             accelerator: definition.accelerator,
             residency: BuiltinResidencyPolicy::Host,
             fusion: BuiltinFusionPolicy::Boundary,

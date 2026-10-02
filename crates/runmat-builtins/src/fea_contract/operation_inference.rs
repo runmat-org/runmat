@@ -2,6 +2,10 @@
 //! authority for document content, artifact availability, and solver validity.
 
 use super::constructor_inference::host_text;
+use super::identities::{
+    FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_SWEEP_CLASS, FEA_TRENDS_CLASS,
+    FEA_VALIDATION_CLASS,
+};
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
@@ -21,12 +25,12 @@ pub enum FeaEvidenceKind {
 }
 
 impl FeaEvidenceKind {
-    const fn result_class(self) -> &'static str {
+    const fn result_class(self) -> StaticClassIdentity {
         match self {
-            Self::Validate => "fea.Validation",
-            Self::Plan => "fea.Plan",
-            Self::Run => "fea.RunResult",
-            Self::Trends => "fea.Trends",
+            Self::Validate => FEA_VALIDATION_CLASS,
+            Self::Plan => FEA_PLAN_CLASS,
+            Self::Run => FEA_RUN_RESULT_CLASS,
+            Self::Trends => FEA_TRENDS_CLASS,
         }
     }
 }
@@ -35,7 +39,7 @@ fn result_object(kind: FeaEvidenceKind) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(StaticClassIdentity::new(kind.result_class()).owned()),
+            runtime_class: Some(kind.result_class().owned()),
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),
@@ -51,10 +55,10 @@ fn possible_document(value: &ValueFact) -> bool {
     }
     match &value.kind {
         ValueKindFact::Unknown => true,
-        ValueKindFact::Object(object) => object.runtime_class.as_ref().is_none_or(|class| {
-            class.is(StaticClassIdentity::new("fea.Study"))
-                || class.is(StaticClassIdentity::new("fea.Sweep"))
-        }),
+        ValueKindFact::Object(object) => object
+            .runtime_class
+            .as_ref()
+            .is_none_or(|class| class.is(FEA_STUDY_CLASS) || class.is(FEA_SWEEP_CLASS)),
         _ => host_text(value),
     }
 }
@@ -76,7 +80,7 @@ pub fn infer_evidence(
 ) -> CallInference {
     let mut diagnostics = Vec::new();
     if kind == FeaEvidenceKind::Trends {
-        if request.arguments.len() % 2 != 0 {
+        if !request.arguments.len().is_multiple_of(2) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-FEA-ARITY",
                 "fea.trends requires complete name/value pairs",
@@ -134,7 +138,41 @@ pub fn infer_evidence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_types::{DynamicReason, NumericClass, NumericFact};
+    use crate::fea_contract::{
+        descriptors::FEA_VALIDATE_DESCRIPTOR,
+        operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
+    };
+    use crate::{
+        BuiltinAcceleratorPolicy, BuiltinCatalogProvenance, BuiltinDistributedPolicy,
+        BuiltinDocumentation,
+    };
+    use runmat_types::{
+        DynamicReason, LiteralContext, LiteralValue, NumericClass, NumericFact, OutputSelection,
+        RequestedOutputCount,
+    };
+
+    fn entry() -> BuiltinCatalogEntry {
+        operation_entry::entry(OperationEntryDefinition {
+            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+            name: "fea.validate",
+            documentation: BuiltinDocumentation::EMPTY,
+            descriptor: &FEA_VALIDATE_DESCRIPTOR,
+            inference: |request, entry| infer_evidence(request, entry, FeaEvidenceKind::Validate),
+            integer_capabilities: &[],
+            integer_audit: None,
+            effects: OperationEffectProfile::EvidenceWrite,
+            accelerator: BuiltinAcceleratorPolicy::Forbidden,
+            distributed: BuiltinDistributedPolicy::Unsupported,
+        })
+    }
+
+    fn request(arguments: Vec<ValueFact>) -> CallRequest {
+        CallRequest {
+            literals: LiteralContext::new(vec![LiteralValue::Unknown; arguments.len()]),
+            arguments,
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        }
+    }
 
     #[test]
     fn document_and_window_shapes_are_conservative() {
@@ -147,5 +185,17 @@ mod tests {
         }));
         non_scalar.shape = ShapeFact::from(vec![Some(2), Some(1)]);
         assert!(!possible_positive_window(&non_scalar));
+        let invalid = infer_evidence(
+            &request(vec![non_scalar]),
+            &entry(),
+            FeaEvidenceKind::Validate,
+        );
+        assert!(invalid
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-DOCUMENT"));
+        assert!(
+            matches!(&invalid.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_VALIDATION_CLASS)))
+        );
     }
 }

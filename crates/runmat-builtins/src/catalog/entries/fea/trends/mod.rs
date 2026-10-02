@@ -36,7 +36,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "FEA evidence", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/evidence") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/comparison.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Trends artifact query", location: "crates/runmat-runtime/src/analysis/tests.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "FEA integer feedback", location: "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" }],
-    notes: &["The artifact store is process-local filesystem state; WindowSize preflight must precede lookup. Distributed WindowSize materialization would currently precede this validation."],
+    notes: &["The configured artifact store may be filesystem-backed or in memory. WindowSize must be a host structural scalar; distributed numeric values are not accepted."],
 });
 pub const FEA_TRENDS_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {

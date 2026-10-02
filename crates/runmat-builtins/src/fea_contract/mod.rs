@@ -4,9 +4,9 @@
 
 pub mod descriptors;
 pub mod example_fixtures;
+pub mod identities;
 pub mod catalog_entry;
 pub mod constructor_inference;
-pub use constructor_inference as inference;
 pub mod integer;
 pub mod operation_entry;
 pub mod operation_inference;

@@ -1,7 +1,7 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition, ConstructorEntryDefinition},
     descriptors::FEA_DOMAIN_DESCRIPTOR,
-    inference::{infer_constructor, FeaConstructorKind},
+    constructor_inference::{infer_constructor, FeaConstructorKind},
     integer::FEA_DOMAIN_INTEGER_CAPABILITIES,
 };
 use crate::*;

@@ -65,10 +65,7 @@ pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.authorStudy",
-    category = "fea",
-    summary = "Author a typed FEA study from compact mesh authoring evidence.",
-    keywords = "fea,study,author,mesh,evidence,agent",
-    descriptor(crate::builtins::fea::FEA_AUTHOR_STUDY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_author_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -246,11 +243,7 @@ pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.plot",
-    category = "fea",
-    summary = "Create a RunMat figure for an FEA result field on its geometry mesh.",
-    keywords = "fea,plot,visualize,mesh,von_mises,stress,field",
-    descriptor(crate::builtins::fea::FEA_PLOT_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -259,11 +252,7 @@ pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.compare",
-    category = "fea",
-    summary = "Compare two persisted FEA runs by run id.",
-    keywords = "fea,compare,run_id,quality",
-    descriptor(crate::builtins::fea::FEA_COMPARE_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_compare_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

@@ -33,7 +33,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "Using FEA", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/results/constructors.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Result field metadata", location: "crates/runmat-runtime/src/builtins/fea/tests/results_and_plotting.rs::fea_results_field_exposes_values_metadata_and_plot_context" }],
-    notes: &["The public closed-cube solve/query example requires executable qualification. A field object can contain device-reference metadata even though this builtin performs no provider transfer."],
+    notes: &["A field object may carry a device-reference descriptor; extracting it does not transfer or materialize device values."],
 });
 pub const FEA_FIELD_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {

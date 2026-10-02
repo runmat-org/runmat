@@ -1,40 +1,4 @@
-pub(in crate::builtins::fea) const FEA_STUDY_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Study");
-pub(in crate::builtins::fea) const FEA_SWEEP_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Sweep");
-pub(in crate::builtins::fea) const FEA_VALIDATION_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Validation");
-pub(in crate::builtins::fea) const FEA_PLAN_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Plan");
-pub(in crate::builtins::fea) const FEA_RUN_RESULT_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.RunResult");
-pub(in crate::builtins::fea) const FEA_MODEL_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Model");
-pub(in crate::builtins::fea) const FEA_MATERIAL_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Material");
-pub(in crate::builtins::fea) const FEA_MATERIAL_ASSIGNMENT_CLASS:
-    runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.MaterialAssignment");
-pub(in crate::builtins::fea) const FEA_BOUNDARY_CONDITION_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.BoundaryCondition");
-pub(in crate::builtins::fea) const FEA_LOAD_CASE_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.LoadCase");
-pub(in crate::builtins::fea) const FEA_STEP_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Step");
-pub(in crate::builtins::fea) const FEA_DOMAIN_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Domain");
-pub(in crate::builtins::fea) const FEA_INTERFACE_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Interface");
-pub(in crate::builtins::fea) const FEA_RUN_OPTIONS_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.RunOptions");
-pub(in crate::builtins::fea) const FEA_RESULTS_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Results");
-pub(in crate::builtins::fea) const FEA_FIELD_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Field");
-pub(in crate::builtins::fea) const FEA_COMPARE_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Compare");
-pub(in crate::builtins::fea) const FEA_TRENDS_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("fea.Trends");
+pub(in crate::builtins::fea) use runmat_builtins::fea_contract::identities::*;
 pub(in crate::builtins::fea) const FEA_STUDY_SPEC_JSON_PROPERTY: &str =
     "__runmat_fea_study_spec_json";
 pub(in crate::builtins::fea) const FEA_SWEEP_SPEC_JSON_PROPERTY: &str =

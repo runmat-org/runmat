@@ -1,5 +1,11 @@
 //! Shared, typed static facts for the FEA object-constructor family.
 
+use super::identities::{
+    FEA_BOUNDARY_CONDITION_CLASS, FEA_DOMAIN_CLASS, FEA_INTERFACE_CLASS, FEA_LOAD_CASE_CLASS,
+    FEA_MATERIAL_ASSIGNMENT_CLASS, FEA_MATERIAL_CLASS, FEA_MODEL_CLASS, FEA_RUN_OPTIONS_CLASS,
+    FEA_STEP_CLASS, FEA_STUDY_CLASS, FEA_SWEEP_CLASS,
+};
+
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
@@ -12,6 +18,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeaConstructorKind {
+    AuthorStudy,
     Study,
     Sweep,
     Step,
@@ -29,6 +36,7 @@ pub enum FeaConstructorKind {
 impl FeaConstructorKind {
     const fn positional(self) -> usize {
         match self {
+            Self::AuthorStudy => 3,
             Self::Study | Self::Sweep | Self::Step | Self::Model | Self::MaterialAssignment => 2,
             Self::BoundaryCondition | Self::LoadCase | Self::Interface => 3,
             Self::RunOptions | Self::Material | Self::Domain | Self::LoadDocument => 1,
@@ -36,20 +44,20 @@ impl FeaConstructorKind {
     }
 
     const fn class(self) -> Option<StaticClassIdentity> {
-        Some(StaticClassIdentity::new(match self {
-            Self::Study => "fea.Study",
-            Self::Sweep => "fea.Sweep",
-            Self::Step => "fea.Step",
-            Self::RunOptions => "fea.RunOptions",
-            Self::Model => "fea.Model",
-            Self::Material => "fea.Material",
-            Self::MaterialAssignment => "fea.MaterialAssignment",
-            Self::BoundaryCondition => "fea.BoundaryCondition",
-            Self::LoadCase => "fea.LoadCase",
-            Self::Domain => "fea.Domain",
-            Self::Interface => "fea.Interface",
+        Some(match self {
+            Self::AuthorStudy | Self::Study => FEA_STUDY_CLASS,
+            Self::Sweep => FEA_SWEEP_CLASS,
+            Self::Step => FEA_STEP_CLASS,
+            Self::RunOptions => FEA_RUN_OPTIONS_CLASS,
+            Self::Model => FEA_MODEL_CLASS,
+            Self::Material => FEA_MATERIAL_CLASS,
+            Self::MaterialAssignment => FEA_MATERIAL_ASSIGNMENT_CLASS,
+            Self::BoundaryCondition => FEA_BOUNDARY_CONDITION_CLASS,
+            Self::LoadCase => FEA_LOAD_CASE_CLASS,
+            Self::Domain => FEA_DOMAIN_CLASS,
+            Self::Interface => FEA_INTERFACE_CLASS,
             Self::LoadDocument => return None,
-        }))
+        })
     }
 
     const fn is_document_load(self) -> bool {
@@ -84,7 +92,7 @@ fn possible_host_study(fact: &ValueFact) -> bool {
             ValueKindFact::Object(object) => object
                 .runtime_class
                 .as_ref()
-                .is_none_or(|class| class.is(StaticClassIdentity::new("fea.Study"))),
+                .is_none_or(|class| class.is(FEA_STUDY_CLASS)),
             _ => false,
         }
 }
@@ -125,7 +133,8 @@ pub fn infer_constructor(
     } else if kind == FeaConstructorKind::Step {
         request.arguments.len() == 2
     } else {
-        request.arguments.len() >= positional && (request.arguments.len() - positional) % 2 == 0
+        request.arguments.len() >= positional
+            && (request.arguments.len() - positional).is_multiple_of(2)
     };
     if !arity_valid {
         diagnostics.push(argument_error(
@@ -135,8 +144,10 @@ pub fn infer_constructor(
         ));
     }
     for index in 0..request.arguments.len().min(positional) {
-        if matches!(kind, FeaConstructorKind::Model | FeaConstructorKind::Study)
-            && index == 1
+        if matches!(
+            kind,
+            FeaConstructorKind::Model | FeaConstructorKind::Study | FeaConstructorKind::AuthorStudy
+        ) && index == 1
             && !path_study
         {
             let input = &request.arguments[index];
@@ -151,7 +162,25 @@ pub fn infer_constructor(
             if !valid {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-GEOMETRY",
-                    "fea.model geometry must be a host geometry.Asset",
+                    "FEA model/study authoring geometry must be a host geometry.Asset",
+                    index,
+                ));
+            }
+        } else if kind == FeaConstructorKind::AuthorStudy && index == 2 {
+            let summary = &request.arguments[index];
+            if matches!(summary.residency, ResidencyFact::Device { .. })
+                || !matches!(
+                    &summary.kind,
+                    ValueKindFact::Unknown
+                        | ValueKindFact::Struct(_)
+                        | ValueKindFact::Object(_)
+                        | ValueKindFact::String
+                        | ValueKindFact::Character
+                )
+            {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FEA-AUTHORING-SUMMARY",
+                    "fea.authorStudy requires a host mesh-authoring summary object or JSON text",
                     index,
                 ));
             }
@@ -220,13 +249,15 @@ pub fn infer_constructor(
                 }
             }
         }
-        if matches!(kind, FeaConstructorKind::Model | FeaConstructorKind::Study)
-            && all_option_names_known
+        if matches!(
+            kind,
+            FeaConstructorKind::Model | FeaConstructorKind::Study | FeaConstructorKind::AuthorStudy
+        ) && all_option_names_known
             && !has_profile
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-FEA-PROFILE",
-                "FEA model and study constructors require a Profile option",
+                "FEA model and study authoring constructors require a Profile option",
                 positional,
             ));
         }
@@ -346,7 +377,7 @@ mod tests {
         assert!(valid.diagnostics.is_empty());
         assert_eq!(valid.outputs[0].residency, ResidencyFact::Host);
         assert!(
-            matches!(&valid.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(StaticClassIdentity::new("fea.Model"))))
+            matches!(&valid.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_MODEL_CLASS)))
         );
     }
 
@@ -468,5 +499,45 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "RM-CATALOG-FEA-FAILFAST"));
+    }
+
+    #[test]
+    fn author_study_requires_summary_and_profile_before_result_class() {
+        let text = ValueFact::scalar(ValueKindFact::String);
+        let geometry = ValueFact::proven(
+            ValueKindFact::Object(ObjectFact {
+                class: None,
+                runtime_class: Some(StaticClassIdentity::new("geometry.Asset").owned()),
+                properties: BTreeMap::new(),
+                properties_complete: false,
+                handle_semantics: Some(false),
+            }),
+            ShapeFact::Scalar,
+            StorageFact::Opaque,
+        );
+        let numeric_summary =
+            ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
+                class: runmat_types::NumericClass::Double,
+                domain: runmat_types::NumericDomain::Real,
+            }));
+        let inferred = infer_constructor(
+            &request(
+                vec![text, geometry, numeric_summary],
+                vec![LiteralValue::Unknown; 3],
+            ),
+            &entry(),
+            FeaConstructorKind::AuthorStudy,
+        );
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-AUTHORING-SUMMARY"));
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-PROFILE"));
+        assert!(
+            matches!(&inferred.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_STUDY_CLASS)))
+        );
     }
 }

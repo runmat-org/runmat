@@ -40,7 +40,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "FEA solves", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/solves") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/entrypoints.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Closed-cube linear-static operation", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_run_study_executes_linear_static_path" }],
-    notes: &["The public closed-cube STL fixture mirrors the tested operation topology but still requires executable catalog-example qualification. Distributed document/object admission lacks a prevalidated partition-local solver route."],
+    notes: &["A distributed array cannot stand in for a study document or typed FEA object; no partition-local solver route is exposed by this builtin."],
 });
 pub const FEA_RUN_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {

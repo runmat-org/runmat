@@ -2,6 +2,9 @@
 //! and field presence are deliberately not fabricated from an input class.
 
 use super::constructor_inference::host_text;
+use super::identities::{
+    FEA_COMPARE_CLASS, FEA_FIELD_CLASS, FEA_RESULTS_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
+};
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
@@ -20,15 +23,14 @@ pub enum FeaResultKind {
     Plot,
 }
 
-fn possible_object(value: &ValueFact, classes: &[&'static str]) -> bool {
+fn possible_object(value: &ValueFact, classes: &[StaticClassIdentity]) -> bool {
     !matches!(value.residency, ResidencyFact::Device { .. })
         && match &value.kind {
             ValueKindFact::Unknown => true,
-            ValueKindFact::Object(object) => object.runtime_class.as_ref().is_none_or(|class| {
-                classes
-                    .iter()
-                    .any(|name| class.is(StaticClassIdentity::new(name)))
-            }),
+            ValueKindFact::Object(object) => object
+                .runtime_class
+                .as_ref()
+                .is_none_or(|class| classes.iter().any(|identity| class.is(*identity))),
             _ => false,
         }
 }
@@ -38,18 +40,18 @@ fn possible_run_reference(value: &ValueFact, accept_results: bool) -> bool {
         || possible_object(
             value,
             if accept_results {
-                &["fea.RunResult", "fea.Results"]
+                &[FEA_RUN_RESULT_CLASS, FEA_RESULTS_CLASS]
             } else {
-                &["fea.RunResult"]
+                &[FEA_RUN_RESULT_CLASS]
             },
         )
 }
 
-fn object_result(class: &'static str) -> ValueFact {
+fn object_result(class: StaticClassIdentity) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(StaticClassIdentity::new(class).owned()),
+            runtime_class: Some(class.owned()),
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),
@@ -67,7 +69,7 @@ pub fn infer_result(
     let mut diagnostics = Vec::new();
     let result = match kind {
         FeaResultKind::Results => {
-            if request.arguments.is_empty() || request.arguments.len() % 2 == 0 {
+            if request.arguments.is_empty() || request.arguments.len().is_multiple_of(2) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-ARITY",
                     "fea.results requires a run reference and complete name/value pairs",
@@ -103,7 +105,7 @@ pub fn infer_result(
                     ));
                 }
             }
-            object_result("fea.Results")
+            object_result(FEA_RESULTS_CLASS)
         }
         FeaResultKind::Field => {
             if request.arguments.len() != 2 {
@@ -135,7 +137,7 @@ pub fn infer_result(
                     1,
                 ));
             }
-            object_result("fea.Field")
+            object_result(FEA_FIELD_CLASS)
         }
         FeaResultKind::Compare => {
             if request.arguments.len() != 2 {
@@ -154,7 +156,7 @@ pub fn infer_result(
                     ));
                 }
             }
-            object_result("fea.Compare")
+            object_result(FEA_COMPARE_CLASS)
         }
         FeaResultKind::Plot => {
             if request.arguments.is_empty() {
@@ -167,7 +169,12 @@ pub fn infer_result(
             if request.arguments.first().is_some_and(|value| {
                 !possible_object(
                     value,
-                    &["fea.RunResult", "fea.Results", "fea.Field", "fea.Study"],
+                    &[
+                        FEA_RUN_RESULT_CLASS,
+                        FEA_RESULTS_CLASS,
+                        FEA_FIELD_CLASS,
+                        FEA_STUDY_CLASS,
+                    ],
                 )
             }) {
                 diagnostics.push(argument_error(
@@ -188,7 +195,32 @@ pub fn infer_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_types::DynamicReason;
+    use crate::fea_contract::{
+        integer::FEA_FIELD_DESCRIPTOR,
+        operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
+    };
+    use crate::{
+        BuiltinAcceleratorPolicy, BuiltinCatalogProvenance, BuiltinDistributedPolicy,
+        BuiltinDocumentation,
+    };
+    use runmat_types::{
+        DynamicReason, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
+    };
+
+    fn entry() -> BuiltinCatalogEntry {
+        operation_entry::entry(OperationEntryDefinition {
+            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+            name: "fea.field",
+            documentation: BuiltinDocumentation::EMPTY,
+            descriptor: &FEA_FIELD_DESCRIPTOR,
+            inference: |request, entry| infer_result(request, entry, FeaResultKind::Field),
+            integer_capabilities: &[],
+            integer_audit: None,
+            effects: OperationEffectProfile::ArtifactRead,
+            accelerator: BuiltinAcceleratorPolicy::Forbidden,
+            distributed: BuiltinDistributedPolicy::Unsupported,
+        })
+    }
 
     #[test]
     fn result_references_do_not_accept_numeric_or_resident_values() {
@@ -201,5 +233,22 @@ mod tests {
         assert!(possible_run_reference(&unknown, true));
         unknown.residency = ResidencyFact::Device { provider: None };
         assert!(!possible_run_reference(&unknown, true));
+
+        let inferred = infer_result(
+            &CallRequest {
+                arguments: vec![number, ValueFact::scalar(ValueKindFact::String)],
+                literals: LiteralContext::new(vec![LiteralValue::Unknown; 2]),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+            },
+            &entry(),
+            FeaResultKind::Field,
+        );
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-RUN"));
+        assert!(
+            matches!(&inferred.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_FIELD_CLASS)))
+        );
     }
 }

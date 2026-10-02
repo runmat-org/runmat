@@ -36,7 +36,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[BuiltinDocumentationLink { label: "FEA operation reference", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/operation-reference") }],
     implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/results/constructors.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Result query and field", location: "crates/runmat-runtime/src/builtins/fea/tests/results_and_plotting.rs::fea_results_field_exposes_values_metadata_and_plot_context" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Exact selector boundary", location: "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" }],
-    notes: &["The closed-cube public run/query example awaits executable qualification. Distributed selector values cannot be prevalidated before current top-level materialization."],
+    notes: &["Result selectors are host structural or text values; execution-owned distributed arrays are not accepted as selectors."],
 });
 pub const FEA_RESULTS_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {

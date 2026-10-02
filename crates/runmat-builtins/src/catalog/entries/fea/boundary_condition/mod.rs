@@ -1,6 +1,6 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition, ConstructorEntryDefinition},
-    inference::{infer_constructor, FeaConstructorKind},
+    constructor_inference::{infer_constructor, FeaConstructorKind},
     integer::{FEA_BOUNDARY_CONDITION_DESCRIPTOR, FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES},
 };
 use crate::*;
