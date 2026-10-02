@@ -1,5 +1,6 @@
 //! Host figure scene and CDF-plot summary publication.
 use super::*;
+use std::cmp::Ordering;
 pub(super) fn plot_ecdf_line(
     builtin: EmpiricalBuiltin,
     eval: &EcdfEvaluation,

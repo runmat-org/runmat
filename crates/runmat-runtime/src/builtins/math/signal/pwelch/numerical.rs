@@ -199,7 +199,12 @@ pub(super) async fn column_explicit_frequency_periodogram(
 
 /// Segment powers are nonnegative. An online mean avoids overflow in the sum
 /// when the final mean remains representable.
-fn combine_trace(current: f64, observed: f64, completed: usize, trace: WelchTrace) -> f64 {
+pub(super) fn combine_trace(
+    current: f64,
+    observed: f64,
+    completed: usize,
+    trace: WelchTrace,
+) -> f64 {
     if completed == 0 {
         return observed;
     }

@@ -1,3 +1,4 @@
+use super::numerical::combine_trace;
 use super::*;
 
 fn preparation_failure(

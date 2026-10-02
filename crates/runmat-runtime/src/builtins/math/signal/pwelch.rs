@@ -1,5 +1,6 @@
 //! MATLAB-compatible Welch power spectral density estimate.
 
+use self::signal::preflight_signal_carrier;
 use num_complex::Complex;
 use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,

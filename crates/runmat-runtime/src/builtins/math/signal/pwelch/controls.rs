@@ -63,7 +63,7 @@ pub(super) async fn preflight_host_controls(
     let mut prepared = PreparedHostControls::default();
     let mut next_positional = ControlRole::Window;
     let mut options_started = false;
-    for (index, value) in rest.iter().enumerate() {
+    for value in rest {
         cooperation.completed(1).await?;
         let decoded = keyword(value);
         let begins_options = decoded
