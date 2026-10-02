@@ -1496,10 +1496,15 @@ mod tests {
             Value::FunctionHandle("__integral_endpoint_sqrt".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            Vec::new(),
+            vec![
+                Value::from("AbsTol"),
+                Value::Num(1.0e-10),
+                Value::from("RelTol"),
+                Value::Num(1.0e-8),
+            ],
         ))
         .expect("the callback is never evaluated at singular endpoint zero");
-        assert!(matches!(endpoint, Value::Num(value) if (value - 2.0).abs() < 1.0e-6));
+        assert!(matches!(endpoint, Value::Num(value) if (value - 2.0).abs() < 1.0e-7));
 
         let right = block_on(integral_builtin(
             Value::FunctionHandle("__integral_exp_tail".into()),
