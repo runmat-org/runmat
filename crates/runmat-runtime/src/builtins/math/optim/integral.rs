@@ -80,6 +80,7 @@ fn quadrature_arithmetic_error(error: QuadratureArithmeticError) -> RuntimeError
             &INTEGRAL_ERROR_INVALID_INPUT,
             "array-valued callback changed its output size",
         ),
+        QuadratureArithmeticError::Execution(source) => source,
     }
 }
 

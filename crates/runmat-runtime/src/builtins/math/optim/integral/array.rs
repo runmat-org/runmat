@@ -1,6 +1,7 @@
 //! Array-valued integral callbacks share the adaptive traversal with scalar callbacks.
 
 use runmat_value::{Tensor, Value};
+use std::sync::Arc;
 
 use super::{
     integral_error_with_detail, integral_map_error, quadrature_arithmetic_error, IntegralOptions,
@@ -24,7 +25,7 @@ struct ArrayEvaluator<'a> {
 }
 
 impl ArrayEvaluator<'_> {
-    async fn sample(&mut self, x: f64) -> BuiltinResult<Vec<f64>> {
+    async fn sample(&mut self, x: f64) -> BuiltinResult<Arc<Vec<f64>>> {
         self.cooperation.completed(0).await?;
         let value = call_function(self.function, [Value::Num(x)]).await?;
         self.cooperation.completed(1).await?;
@@ -92,7 +93,7 @@ impl ArrayEvaluator<'_> {
         } else {
             self.shape = Some(shape);
         }
-        Ok(values)
+        Ok(Arc::new(values))
     }
 }
 
@@ -147,10 +148,14 @@ fn admit_callback_value(value: &Value, expected: Option<&[usize]>) -> BuiltinRes
 }
 
 impl QuadratureEvaluator for ArrayEvaluator<'_> {
-    type Sample = Vec<f64>;
+    type Sample = Arc<Vec<f64>>;
 
     async fn checkpoint(&mut self) -> BuiltinResult<()> {
         self.cooperation.completed(0).await
+    }
+
+    async fn charge(&mut self, units: u64) -> BuiltinResult<()> {
+        self.cooperation.completed(units).await
     }
 
     async fn evaluate(&mut self, x: f64) -> BuiltinResult<Self::Sample> {
@@ -241,7 +246,7 @@ pub(super) async fn integrate_array_valued(
     values
         .try_reserve_exact(estimate.0.len())
         .map_err(resource_error)?;
-    for value in estimate.0 {
+    for &value in estimate.0.iter() {
         let signed = value.multiply_f64(sign);
         values.push(
             signed

@@ -2,6 +2,7 @@
 //! at the owning `integral` or `quad` entrypoint.
 
 use crate::{BuiltinResult, RuntimeError};
+use std::sync::Arc;
 
 use super::algebra::{AdaptiveEstimate, QuadratureSample};
 use super::{ArrayEstimate, QuadratureArithmeticError, ScaledEstimate};
@@ -10,6 +11,9 @@ pub(crate) trait QuadratureEvaluator {
     type Sample: QuadratureSample;
 
     async fn checkpoint(&mut self) -> BuiltinResult<()>;
+    async fn charge(&mut self, _units: u64) -> BuiltinResult<()> {
+        self.checkpoint().await
+    }
     async fn evaluate(&mut self, x: f64) -> BuiltinResult<Self::Sample>;
     async fn evaluate_many<const N: usize>(
         &mut self,
@@ -69,7 +73,7 @@ pub(crate) async fn integrate<E: QuadratureEvaluator<Sample = f64>>(
     Ok(AdaptiveSimpsonResult { q, evaluations })
 }
 
-pub(crate) async fn integrate_array<E: QuadratureEvaluator<Sample = Vec<f64>>>(
+pub(crate) async fn integrate_array<E: QuadratureEvaluator<Sample = Arc<Vec<f64>>>>(
     evaluator: &mut E,
     a: f64,
     b: f64,
@@ -85,12 +89,14 @@ async fn integrate_domain<E: QuadratureEvaluator>(
     evaluator.checkpoint().await?;
     let m = evaluator.midpoint(a, b);
     let [fa, fm, fb] = evaluator.evaluate_many([a, m, b]).await?;
-    let whole = E::Sample::simpson(a, b, &fa, &fm, &fb)
+    let whole = E::Sample::simpson(a, b, &fa, &fm, &fb, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
     let mut evaluations = 3_usize;
     let (absolute_tolerance, relative_tolerance) = evaluator.tolerances();
     let tol = whole
-        .tolerance(absolute_tolerance, relative_tolerance)
+        .tolerance(absolute_tolerance, relative_tolerance, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
     let depth = evaluator.max_depth();
     let q = adapt(
@@ -130,27 +136,38 @@ async fn adapt<E: QuadratureEvaluator>(
     let [fd, fe] = evaluator.evaluate_many([d, e]).await?;
     *evaluations += 2;
 
-    let left = E::Sample::simpson(state.a, c, &state.fa, &fd, &state.fm)
+    let left = E::Sample::simpson(state.a, c, &state.fa, &fd, &state.fm, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
-    let right = E::Sample::simpson(c, state.b, &state.fm, &fe, &state.fb)
+    let right = E::Sample::simpson(c, state.b, &state.fm, &fe, &state.fb, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
     let refined = left
-        .add(&right)
+        .add(&right, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
     let error = refined
-        .subtract(&state.whole)
+        .subtract(&state.whole, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
     evaluator.refined(*evaluations, state.a, state.b, &refined, &error);
     let accepted_error = state
         .tol
-        .multiply_f64(15.0)
+        .multiply_f64(15.0, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
-    if error.abs_le(&accepted_error) {
+    if error
+        .abs_le(&accepted_error, evaluator)
+        .await
+        .map_err(|error| evaluator.arithmetic_error(error))?
+    {
         let correction = error
-            .multiply_f64(1.0 / 15.0)
+            .multiply_f64(1.0 / 15.0, evaluator)
+            .await
             .map_err(|error| evaluator.arithmetic_error(error))?;
         return refined
-            .add(&correction)
+            .add(&correction, evaluator)
+            .await
             .map_err(|error| evaluator.arithmetic_error(error));
     }
     if state.depth == 0 {
@@ -159,7 +176,8 @@ async fn adapt<E: QuadratureEvaluator>(
 
     let child_tolerance = state
         .tol
-        .multiply_f64(0.5)
+        .multiply_f64(0.5, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
     let left_value = Box::pin(adapt(
         evaluator,
@@ -192,9 +210,14 @@ async fn adapt<E: QuadratureEvaluator>(
     ))
     .await?;
     left_value
-        .add(&right_value)
+        .add(&right_value, evaluator)
+        .await
         .map_err(|error| evaluator.arithmetic_error(error))
 }
+
+#[cfg(test)]
+#[path = "adaptive/array_tests.rs"]
+mod array_tests;
 
 #[cfg(test)]
 mod tests {

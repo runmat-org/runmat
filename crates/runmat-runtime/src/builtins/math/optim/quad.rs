@@ -76,6 +76,7 @@ fn quad_arithmetic_error(error: QuadratureArithmeticError) -> RuntimeError {
             &QUAD_ERROR_INVALID_INPUT,
             "callback changed its output size",
         ),
+        QuadratureArithmeticError::Execution(source) => source,
     }
 }
 
