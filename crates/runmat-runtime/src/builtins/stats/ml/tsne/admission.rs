@@ -9,6 +9,8 @@ use crate::BuiltinResult;
 use runmat_value::Value;
 
 mod materialize;
+mod exactness;
+pub(super) use exactness::{ensure_exact_tsne_floating_options, ensure_exact_tsne_integer_value};
 pub(super) use materialize::materialize_options;
 
 pub(super) type OptionHeader = (TsneOption, Value);
