@@ -3,7 +3,63 @@ use runmat_builtins::{OptimOptionField, OptimSolver};
 use runmat_value::{CharArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::context::RuntimeContext;
+use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
+
+pub(crate) struct ScalarCooperation {
+    budget: Option<CpuCooperationBudget>,
+    namespace: Option<String>,
+    solver: OptimSolver,
+}
+
+impl ScalarCooperation {
+    pub(crate) fn new(solver: OptimSolver, runtime: Option<&RuntimeContext>) -> Self {
+        Self {
+            budget: runtime.map(RuntimeContext::cpu_cooperation),
+            namespace: runtime.map(RuntimeContext::error_namespace),
+            solver,
+        }
+    }
+
+    pub(crate) async fn completed(&mut self, units: u64) -> BuiltinResult<()> {
+        if let Some(budget) = self.budget.as_mut() {
+            budget
+                .checkpoint(units)
+                .await
+                .map_err(|source| match source {
+                    source @ ExecutionServiceError::Cancelled => {
+                        let namespace = self.namespace.as_deref().unwrap_or("RunMat");
+                        build_runtime_error(format!(
+                            "{}: execution was cancelled",
+                            self.solver.name()
+                        ))
+                        .with_identifier(format!("{namespace}:Cancelled"))
+                        .with_builtin(self.solver.name())
+                        .with_source(source)
+                        .with_gpu_gather_retry(GpuGatherRetry::Never)
+                        .build()
+                    }
+                    other => {
+                        let mut failure = other.into_runtime_error();
+                        failure.context = failure.context.with_builtin(self.solver.name());
+                        failure.gpu_gather_retry = GpuGatherRetry::Never;
+                        failure
+                    }
+                })?;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_budget(solver: OptimSolver, budget: CpuCooperationBudget) -> Self {
+        Self {
+            budget: Some(budget),
+            namespace: Some("RunMat".into()),
+            solver,
+        }
+    }
+}
 
 pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -105,6 +161,82 @@ pub(crate) fn is_typed_integer_value(value: &Value) -> bool {
 pub(crate) fn is_logical_value(value: &Value) -> bool {
     matches!(value, Value::Bool(_) | Value::LogicalArray(_))
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ScalarOperandGeometry {
+    Scalar,
+    ScalarOrPair,
+}
+
+impl ScalarOperandGeometry {
+    fn accepts(self, count: usize) -> bool {
+        match self {
+            Self::Scalar => count == 1,
+            Self::ScalarOrPair => count == 1 || count == 2,
+        }
+    }
+}
+
+/// Checks host-visible operand facts before the first provider operation. It
+/// deliberately does not inspect resident numerical payloads.
+pub(crate) fn preflight_scalar_operand(
+    solver: OptimSolver,
+    value: &Value,
+    geometry: ScalarOperandGeometry,
+    role: &str,
+    numeric_extension: &BuiltinExtensionDescriptor,
+    resident_extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    let name = solver.name();
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(resident_extension, name)?;
+    }
+    if is_typed_integer_value(value) || is_logical_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(numeric_extension, name)?;
+    }
+    let invalid = |detail: &str| {
+        build_runtime_error(format!("{name}: {role} {detail}"))
+            .with_builtin(name)
+            .with_gpu_gather_retry(GpuGatherRetry::Never)
+            .build()
+    };
+    if !matches!(value, Value::GpuTensor(_))
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64(value)
+    {
+        return Err(invalid("must be exactly representable as double"));
+    }
+    match value {
+        Value::Num(number) if geometry.accepts(1) && number.is_finite() => Ok(()),
+        Value::Int(_) | Value::Bool(_) if geometry.accepts(1) => Ok(()),
+        Value::LogicalArray(array) if geometry.accepts(array.data.len()) => Ok(()),
+        Value::Tensor(tensor) if geometry.accepts(tensor.len()) => {
+            if (0..tensor.len()).all(|index| tensor::tensor_value_f64(tensor, index).is_finite()) {
+                Ok(())
+            } else {
+                Err(invalid("must be finite"))
+            }
+        }
+        Value::GpuTensor(handle) => {
+            let count = handle
+                .shape()
+                .iter()
+                .try_fold(1_usize, |total, axis| total.checked_mul(*axis));
+            if runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+                && count.is_some_and(|count| geometry.accepts(count))
+            {
+                Ok(())
+            } else {
+                Err(invalid(
+                    "must be a real scalar or admitted two-element interval",
+                ))
+            }
+        }
+        _ => Err(invalid(
+            "must be a finite real scalar or admitted two-element interval",
+        )),
+    }
 }
 
 pub(crate) async fn prepare_floating_value(

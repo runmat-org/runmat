@@ -15,7 +15,7 @@ use runmat_builtins::OptimSolver;
 use runmat_value::Value;
 
 use crate::builtins::math::optim::common::{
-    call_scalar_function, call_scalar_function_with_precision, optim_error,
+    call_scalar_function, call_scalar_function_with_precision, optim_error, ScalarCooperation,
 };
 use crate::BuiltinResult;
 
@@ -92,12 +92,14 @@ pub(crate) enum BrentZeroStepKind {
 /// tracks calls performed by the caller while constructing the bracket.
 pub(crate) async fn brent_zero(
     name: &str,
+    cooperation: &mut ScalarCooperation,
     function: &Value,
     bracket: BrentZeroBracket,
     params: BrentParams,
     single: bool,
     mut observer: Option<&mut dyn BrentZeroObserver>,
 ) -> BuiltinResult<BrentZeroResult> {
+    cooperation.completed(0).await?;
     if bracket.fa == 0.0 {
         return Ok(BrentZeroResult {
             x: bracket.a,
@@ -138,6 +140,7 @@ pub(crate) async fn brent_zero(
     }
 
     for iter in 1..=params.max_iter {
+        cooperation.completed(1).await?;
         if fb.signum() == fc.signum() {
             c = a;
             fc = fa;
@@ -217,6 +220,7 @@ pub(crate) async fn brent_zero(
         };
         fb = call_scalar_function_with_precision(name, OptimSolver::Fzero, function, b, single)
             .await?;
+        cooperation.completed(0).await?;
         evals += 1;
 
         if let Some(observer) = observer.as_deref_mut() {
@@ -269,12 +273,14 @@ const CGOLD: f64 = 0.381_966_011_250_105_15;
 /// `Display = 'iter'`).
 pub(crate) async fn brent_min(
     name: &str,
+    cooperation: &mut ScalarCooperation,
     function: &Value,
     a: f64,
     b: f64,
     params: BrentParams,
     mut observer: Option<&mut dyn BrentMinObserver>,
 ) -> BuiltinResult<BrentMinResult> {
+    cooperation.completed(0).await?;
     if !a.is_finite() || !b.is_finite() {
         return Err(optim_error(
             name,
@@ -287,6 +293,7 @@ pub(crate) async fn brent_min(
     if width.abs() <= f64::EPSILON * scale {
         let x = a + width * 0.5;
         let fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x).await?;
+        cooperation.completed(0).await?;
         if let Some(observer) = observer.as_deref_mut() {
             observer.on_iteration(0, 1, x, fx, BrentStepKind::Initial);
         }
@@ -303,6 +310,7 @@ pub(crate) async fn brent_min(
     let mut w = x;
     let mut v = x;
     let mut fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x).await?;
+    cooperation.completed(0).await?;
     let mut fw = fx;
     let mut fv = fx;
     let mut func_count = 1usize;
@@ -314,6 +322,7 @@ pub(crate) async fn brent_min(
     }
 
     for iter in 1..=params.max_iter {
+        cooperation.completed(1).await?;
         let xm = 0.5 * (a + b);
         let tol1 = brent_min_tolerance(x, params);
         let tol2 = 2.0 * tol1;
@@ -370,6 +379,7 @@ pub(crate) async fn brent_min(
             });
         }
         let fu = call_scalar_function(name, OptimSolver::Fminbnd, function, u).await?;
+        cooperation.completed(0).await?;
         func_count += 1;
 
         if fu <= fx {
@@ -432,13 +442,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn active_brent_iteration_observes_invocation_cancellation_before_callback() {
+        use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::num::NonZeroU64;
+        use std::rc::Rc;
+
+        let source = Rc::new(CancellationSource::new());
+        let cancel_on_turn = source.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                cancel_on_turn.cancel(CancellationReason::User);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let mut cooperation = ScalarCooperation::with_budget(OptimSolver::Fzero, budget);
+        let error = futures::executor::block_on(brent_zero(
+            "fzero",
+            &mut cooperation,
+            &Value::FunctionHandle("sin".into()),
+            BrentZeroBracket {
+                a: -1.0,
+                b: 1.0,
+                fa: -1.0,
+                fb: 1.0,
+                evals: 2,
+            },
+            BrentParams {
+                tol_x: 1.0e-8,
+                max_iter: 8,
+                max_fun_evals: 8,
+            },
+            false,
+            None,
+        ))
+        .expect_err("active iteration must observe cancellation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(matches!(
+                error.source.as_deref().and_then(|source| source
+                    .downcast_ref::<crate::execution::ExecutionServiceError>(
+                )),
+                Some(crate::execution::ExecutionServiceError::Cancelled)
+            ));
+    }
+
+    #[test]
     fn tiny_opposite_sign_values_remain_a_valid_bracket() {
+        let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
         let positive = f64::MIN_POSITIVE;
         let negative = -positive;
         assert_eq!(positive * negative, -0.0);
         assert_ne!(positive.signum(), negative.signum());
         let result = futures::executor::block_on(brent_zero(
             "fzero",
+            &mut cooperation,
             &Value::FunctionHandle("sin".into()),
             BrentZeroBracket {
                 a: -1.0,
@@ -466,8 +527,10 @@ mod tests {
 
     #[test]
     fn brent_zero_rejects_nonzero_collapsed_bracket() {
+        let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
         let err = futures::executor::block_on(brent_zero(
             "fzero",
+            &mut cooperation,
             &Value::FunctionHandle("sin".into()),
             BrentZeroBracket {
                 a: 1.0,

@@ -45,6 +45,10 @@ fn minimum_facts_preserve_conditional_empty_geometry_and_requested_outputs() {
 
     let excessive = inference::infer(&request(0.0, 5.0, 5), &FMINBND_CATALOG_ENTRY);
     assert!(!excessive.diagnostics.is_empty());
+    assert!(excessive
+        .outputs
+        .iter()
+        .all(|fact| matches!(fact.kind, ValueKindFact::Unknown)));
 }
 
 #[test]
@@ -58,4 +62,5 @@ fn known_complex_bounds_and_nonstruct_options_are_diagnosed() {
         .push(ValueFact::scalar(ValueKindFact::String));
     let facts = inference::infer(&call, &FMINBND_CATALOG_ENTRY);
     assert!(facts.diagnostics.len() >= 2);
+    assert!(matches!(facts.outputs[0].kind, ValueKindFact::Unknown));
 }

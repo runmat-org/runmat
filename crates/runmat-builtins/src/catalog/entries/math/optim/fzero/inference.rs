@@ -70,6 +70,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     contract.capabilities = entry.contract.capability_set();
     let mut inferred = infer_call(&contract, request);
     inferred.dynamic_outputs = request.outputs.requested.known_count().is_none();
+    if !diagnostics.is_empty() {
+        inferred.outputs.iter_mut().for_each(|output| {
+            *output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
+        });
+    }
     inferred.diagnostics.extend(diagnostics);
     inferred
 }

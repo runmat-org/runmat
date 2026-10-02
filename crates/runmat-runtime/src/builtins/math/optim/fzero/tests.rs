@@ -6,6 +6,36 @@ use runmat_value::{IntegerStorage, Tensor};
 use std::sync::Arc;
 
 #[test]
+fn registered_fzero_preserves_invocation_cancellation_before_solver_effects() {
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::rc::Rc;
+
+    let source = CancellationSource::new();
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        source.token(),
+    );
+    source.cancel(CancellationReason::User);
+    let error = block_on(fzero_builtin_registered(
+        Some(runtime),
+        Value::FunctionHandle("sin".into()),
+        Value::Num(0.0),
+        Vec::new(),
+    ))
+    .expect_err("cancelled invocation must not call callback");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
+    assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+}
+
+#[test]
 fn fzero_bracketed_builtin_handle() {
     let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let root = block_on(fzero_builtin(
@@ -18,6 +48,19 @@ fn fzero_bracketed_builtin_handle() {
         Value::Num(n) => assert!((n - std::f64::consts::PI).abs() < 1.0e-6),
         other => panic!("unexpected value {other:?}"),
     }
+}
+
+#[test]
+fn fzero_accepts_admitted_logical_interval_without_widening_its_control_class() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let interval = runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
+    let root = block_on(fzero_builtin(
+        Value::FunctionHandle("sin".into()),
+        Value::LogicalArray(interval),
+        Vec::new(),
+    ))
+    .unwrap();
+    assert!(matches!(root, Value::Num(value) if value == 0.0));
 }
 
 #[test]
@@ -107,6 +150,7 @@ fn fzero_single_callback_result_selects_single_default_tolerance() {
         },
     )));
     let options = FzeroOptions::from_struct(None).unwrap();
+    let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
     let bracket = block_on(bracket_from_endpoints(
         &Value::BoundFunctionHandle {
             name: "single_result".into(),
@@ -115,6 +159,7 @@ fn fzero_single_callback_result_selects_single_default_tolerance() {
         0.0,
         2.0,
         false,
+        &mut cooperation,
     ))
     .unwrap();
     assert!(bracket.function_single);

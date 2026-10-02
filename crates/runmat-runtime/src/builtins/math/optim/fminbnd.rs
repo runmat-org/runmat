@@ -14,9 +14,10 @@
 //! `TolX`, `MaxIter`, `MaxFunEvals`, and `Display`.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, OptimDisplay, OptimOptionField, FMINBND_CALLBACK_NUMERIC_EXTENSION,
-    FMINBND_ERROR_INVALID_ARGUMENT, FMINBND_ERROR_INVALID_INPUT, FMINBND_ERROR_TOO_MANY_OUTPUTS,
-    FMINBND_INPUT_NUMERIC_EXTENSION, FMINBND_OPTION_EXTENSION, FMINBND_RESIDENT_EXTENSION,
+    BuiltinErrorDescriptor, OptimDisplay, OptimOptionField, OptimSolver,
+    FMINBND_CALLBACK_NUMERIC_EXTENSION, FMINBND_ERROR_INVALID_ARGUMENT,
+    FMINBND_ERROR_INVALID_INPUT, FMINBND_ERROR_TOO_MANY_OUTPUTS, FMINBND_INPUT_NUMERIC_EXTENSION,
+    FMINBND_OPTION_EXTENSION, FMINBND_RESIDENT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, StructValue, Tensor, Value};
@@ -29,7 +30,9 @@ use crate::builtins::common::tensor;
 use crate::builtins::math::optim::brent::{
     brent_min, BrentMinObserver, BrentMinResult, BrentParams, BrentStepKind,
 };
-use crate::builtins::math::optim::common::ScalarOptionFields;
+use crate::builtins::math::optim::common::{
+    preflight_scalar_operand, ScalarCooperation, ScalarOperandGeometry, ScalarOptionFields,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "fminbnd";
@@ -101,15 +104,39 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fminbnd",
     binding_variant = "default",
+    context = true,
     execution_stack = "process",
     builtin_path = "crate::builtins::math::optim::fminbnd"
 )]
-async fn fminbnd_builtin(
+async fn fminbnd_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
     function: Value,
     x1: Value,
     x2: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    fminbnd_in_runtime(runtime.as_ref(), function, x1, x2, rest).await
+}
+
+#[cfg(test)]
+pub(super) async fn fminbnd_builtin(
+    function: Value,
+    x1: Value,
+    x2: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    fminbnd_in_runtime(None, function, x1, x2, rest).await
+}
+
+async fn fminbnd_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: Value,
+    x1: Value,
+    x2: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = ScalarCooperation::new(OptimSolver::Fminbnd, runtime);
+    cooperation.completed(0).await?;
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 4) {
         return Err(fminbnd_error_with_detail(
             &FMINBND_ERROR_TOO_MANY_OUTPUTS,
@@ -126,6 +153,17 @@ async fn fminbnd_builtin(
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
     let options = FminbndOptions::from_struct(options_struct.as_ref())
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
+    for (value, role) in [(&x1, "lower bound"), (&x2, "upper bound")] {
+        preflight_scalar_operand(
+            OptimSolver::Fminbnd,
+            value,
+            ScalarOperandGeometry::Scalar,
+            role,
+            &FMINBND_INPUT_NUMERIC_EXTENSION,
+            &FMINBND_RESIDENT_EXTENSION,
+        )
+        .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
+    }
     let x1 = crate::builtins::math::optim::common::prepare_floating_value(
         NAME,
         x1,
@@ -150,6 +188,7 @@ async fn fminbnd_builtin(
     let x2 = scalar_bound("upper bound", x2)
         .await
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
+    cooperation.completed(0).await?;
 
     if !x1.is_finite() || !x2.is_finite() {
         return Err(fminbnd_error_with_detail(
@@ -161,9 +200,10 @@ async fn fminbnd_builtin(
         return finalize_inconsistent_bounds(&options);
     }
 
-    let outcome = run_solver(&function, x1, x2, &options)
+    let outcome = run_solver(&function, x1, x2, &options, &mut cooperation)
         .await
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
+    cooperation.completed(0).await?;
     finalize(outcome, &options)
 }
 
@@ -377,6 +417,7 @@ async fn run_solver(
     lo: f64,
     hi: f64,
     options: &FminbndOptions,
+    cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<Outcome> {
     let mut iter_log = IterDisplay::new(options.display);
     let observer: Option<&mut dyn BrentMinObserver> =
@@ -387,6 +428,7 @@ async fn run_solver(
         };
     let inner = brent_min(
         NAME,
+        cooperation,
         function,
         lo,
         hi,

@@ -14,6 +14,7 @@ pub(super) fn callback(request: &CallRequest, diagnostics: &mut Vec<InferenceDia
     if !matches!(
         value.kind,
         ValueKindFact::Callable(_)
+            | ValueKindFact::Object(_)
             | ValueKindFact::String
             | ValueKindFact::Character
             | ValueKindFact::Unknown
@@ -44,6 +45,7 @@ pub(super) fn real_numeric(
         .shape
         .element_count()
         .is_some_and(|count| !allowed_counts.contains(&count))
+        || value.storage == StorageFact::Sparse
     {
         diagnostics.push(argument_error(
             "RM-CATALOG-SCALAR-OPT-INPUT",

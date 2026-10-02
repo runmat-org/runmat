@@ -39,4 +39,14 @@ fn bracket_and_scalar_precision_facts_follow_initial_input() {
 fn malformed_initial_geometry_and_excessive_outputs_do_not_prove_success() {
     let invalid = inference::infer(&request(NumericClass::Double, 3, 5), &FZERO_CATALOG_ENTRY);
     assert!(!invalid.diagnostics.is_empty());
+    assert!(invalid
+        .outputs
+        .iter()
+        .all(|fact| matches!(fact.kind, ValueKindFact::Unknown)));
+
+    let mut sparse = request(NumericClass::Double, 2, 1);
+    sparse.arguments[1].storage = StorageFact::Sparse;
+    let invalid = inference::infer(&sparse, &FZERO_CATALOG_ENTRY);
+    assert!(!invalid.diagnostics.is_empty());
+    assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
 }

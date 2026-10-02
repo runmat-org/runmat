@@ -10,6 +10,37 @@ use runmat_value::IntegerStorage;
 use runmat_value::Value as V;
 
 #[test]
+fn registered_fminbnd_preserves_invocation_cancellation_before_solver_effects() {
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::rc::Rc;
+
+    let source = CancellationSource::new();
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        source.token(),
+    );
+    source.cancel(CancellationReason::User);
+    let error = block_on(fminbnd_builtin_registered(
+        Some(runtime),
+        Value::FunctionHandle("sin".into()),
+        Value::Num(0.0),
+        Value::Num(1.0),
+        Vec::new(),
+    ))
+    .expect_err("cancelled invocation must not call objective");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
+    assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+}
+
+#[test]
 fn excessive_requested_outputs_fail_before_callback_evaluation() {
     let _outputs = crate::output_count::push_output_count(Some(5));
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
