@@ -1,5 +1,6 @@
 use super::*;
 mod continuum;
+mod interface;
 use crate::fixtures::{fixture_model, replace_fixture_excitations, FixtureId};
 use crate::topology::test_meshes::slab_mesh;
 use runmat_analysis_core::{

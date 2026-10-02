@@ -17,11 +17,17 @@ boundary values, not a body force or pressure-to-load conversion. Unspecified ex
 faces have the homogeneous natural rigid-wall condition. Explicit boundaries support
 rigid walls and positive real specific impedance. Prescribed pressure uses affine lifting.
 
-Unsupported radiation, periodic/Bloch constraints, incident sources, material attenuation,
+Matching translated exterior-face periodic/Bloch constraints use unit-phase pressure
+relations; rotated and nonmatching pairing remains unsupported.
+
+Unsupported radiation, incident sources, material attenuation,
 nonuniform distributions, interior boundary selection and structural/coupled models fail
-closed. Production admission, authored native study dispatch, process restart and GPU/distributed
-execution remain unqualified. The public/runtime graph route remains a separately
-identified experimental proxy until its callers can migrate with qualification evidence.
+closed. Production admission, process restart and GPU/distributed execution remain
+unqualified. Authored canonical study execution and shared complex field publication
+are connected; the bounded eight-case native matched-duct matrix, generated/explicit
+equivalence and authenticated cold fields are retained in
+[the right-LU qualification](acoustic-right-lu.md). This does not qualify every
+boundary, source, frequency schedule or legacy graph entry point.
 
 ## Equations and independent references
 
@@ -272,10 +278,11 @@ nodal complex pressure and volume-averaged element velocity, with immutable mesh
 projection identity, source evidence and power metrics.
 
 Stage 8 remains open. Required follow-on work includes wider Tet10/curved continuum envelopes,
-heterogeneous interfaces, cavity eigenfrequencies and resonance/uniqueness diagnostics,
+heterogeneous interfaces beyond the [aligned planar two-fluid benchmark](acoustic-material-interface.md),
+cavity eigenfrequencies and resonance/uniqueness diagnostics,
 radiation references, complex/frequency-dependent impedance where advertised,
-periodic/Bloch constraints, incident-field support, explicit/generated spectrum
-equivalence, measured resource qualification and accuracy reports, authored native-study integration,
+rotated/nonmatching periodic/Bloch constraints, incident-field support, wider explicit/generated spectrum
+equivalence, measured resource qualification and accuracy reports, broader authored native-study qualification,
 observations/storage and cold restart, parallel frequency execution and blocking release
 evidence. These library tests do not qualify those gates or remove the graph route's
 remaining caller migration obligation.
