@@ -17,6 +17,7 @@ mod matmul;
 mod numeric_reduction;
 mod integer_floating_sum;
 mod gather;
+mod iir;
 mod deep_learning_activation;
 mod imfilter;
 #[cfg(test)]
@@ -7241,17 +7242,29 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow!("iir_filter: signal length overflow"))?;
             let zi_shape = zi.as_ref().map(|handle| handle.shape().to_vec());
 
+            let signal_physical = x.physical().element_type();
             let (b_data, a_data, x_data, zi_data) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let b_buf = guard.get(b).cloned().ok_or_else(|| {
-                    anyhow!("iir_filter: unknown numerator buffer {}", b.buffer_id())
-                })?;
-                let a_buf = guard.get(a).cloned().ok_or_else(|| {
-                    anyhow!("iir_filter: unknown denominator buffer {}", a.buffer_id())
-                })?;
-                let x_buf = guard.get(x).cloned().ok_or_else(|| {
-                    anyhow!("iir_filter: unknown signal buffer {}", x.buffer_id())
-                })?;
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("iir_filter: allocation owner is poisoned"))?;
+                let b_buf = iir::floating_payload(
+                    b,
+                    guard.get(b).ok_or_else(|| {
+                        anyhow!("iir_filter: unknown numerator buffer {}", b.buffer_id())
+                    })?,
+                )?;
+                let a_buf = iir::floating_payload(
+                    a,
+                    guard.get(a).ok_or_else(|| {
+                        anyhow!("iir_filter: unknown denominator buffer {}", a.buffer_id())
+                    })?,
+                )?;
+                let x_buf = iir::floating_payload(
+                    x,
+                    guard.get(x).ok_or_else(|| {
+                        anyhow!("iir_filter: unknown signal buffer {}", x.buffer_id())
+                    })?,
+                )?;
                 ensure!(
                     b_buf.len() == nb,
                     "iir_filter: numerator length mismatch (shape implies {}, buffer has {})",
@@ -7282,12 +7295,15 @@ impl AccelProvider for InProcessProvider {
                         runmat_accelerate_api::handle_storage(zi_handle) == x_storage,
                         "iir_filter: initial conditions storage must match the signal"
                     );
-                    Some(guard.get(zi_handle).cloned().ok_or_else(|| {
-                        anyhow!(
-                            "iir_filter: unknown initial state buffer {}",
-                            zi_handle.buffer_id()
-                        )
-                    })?)
+                    Some(iir::floating_payload(
+                        zi_handle,
+                        guard.get(zi_handle).ok_or_else(|| {
+                            anyhow!(
+                                "iir_filter: unknown initial state buffer {}",
+                                zi_handle.buffer_id()
+                            )
+                        })?,
+                    )?)
                 } else {
                     None
                 };
@@ -7435,10 +7451,18 @@ impl AccelProvider for InProcessProvider {
                 states_to_column_major(&states, state_len, dim_idx, &shape_ext, lane_factor)
             };
 
-            let output_handle =
-                self.allocate_tensor_with_storage(output, x.shape().to_vec(), x_storage)?;
-            let final_state_handle =
-                self.allocate_tensor_with_storage(final_state_data, state_shape, x_storage)?;
+            let output_handle = self.allocate_produced(
+                iir::output_payload(output, signal_physical)?,
+                x.shape().to_vec(),
+                x_storage,
+                false,
+            )?;
+            let final_state_handle = self.allocate_produced(
+                iir::output_payload(final_state_data, signal_physical)?,
+                state_shape,
+                x_storage,
+                false,
+            )?;
 
             Ok(ProviderIirFilterResult {
                 output: output_handle,
@@ -11178,6 +11202,56 @@ mod tests {
             &[(3.0, 30.0)],
             &[1, 1],
         );
+    }
+
+    #[test]
+    fn iir_filter_preserves_native_single_signal_and_state_storage() {
+        let provider = InProcessProvider::new();
+        let b = real_handle(&provider, &[0.5, 0.5], &[1, 2]);
+        let a = real_handle(&provider, &[1.0], &[1, 1]);
+        let x = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.0, 3.0, 5.0]),
+                shape: &[1, 3],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("single signal");
+        let result = block_on(provider.iir_filter(
+            &b,
+            &a,
+            &x,
+            ProviderIirFilterOptions {
+                dim: 1,
+                zi: None,
+                unit_denominator: false,
+            },
+        ))
+        .expect("single IIR result");
+        let final_state = result.final_state.expect("final state");
+        assert_eq!(
+            block_on(provider.download_numeric(&result.output))
+                .expect("single output")
+                .data,
+            HostNumericDataOwned::F32(vec![0.5, 2.0, 4.0])
+        );
+        assert_eq!(
+            block_on(provider.download_numeric(&final_state))
+                .expect("single final state")
+                .data,
+            HostNumericDataOwned::F32(vec![2.5])
+        );
+        assert!(matches!(
+            numeric_registry()
+                .lock_for(provider.device_id)
+                .expect("numeric registry")
+                .get(&result.output),
+            Some(InProcessNumericData::F32(_))
+        ));
+        final_state.release().expect("release state");
+        result.output.release().expect("release result");
+        x.release().expect("release input");
+        a.release().expect("release denominator");
+        b.release().expect("release numerator");
     }
 
     #[test]
