@@ -44,6 +44,27 @@ fn indexed() -> (ValueFact, LiteralValue) {
 }
 
 #[test]
+fn indexed_character_control_accepts_flattened_row_column_and_nd_geometry() {
+    for shape in [
+        ShapeFact::from(vec![Some(1), Some(7)]),
+        ShapeFact::from(vec![Some(7), Some(1)]),
+        ShapeFact::from(vec![Some(1), Some(1), Some(7)]),
+    ] {
+        let result = call(
+            &crate::IM2DOUBLE_CATALOG_ENTRY,
+            ImageOutputClass::Double,
+            input(NumericClass::UInt8, ShapeFact::Scalar),
+            Some((
+                ValueFact::proven(ValueKindFact::Character, shape, StorageFact::Dense),
+                LiteralValue::Character("indexed".into()),
+            )),
+            1,
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+}
+
+#[test]
 fn each_conversion_keeps_nd_shape_and_proves_its_output_class() {
     let shape = ShapeFact::from(vec![Some(2), Some(3), Some(4), Some(0)]);
     for (entry, class, expected) in [

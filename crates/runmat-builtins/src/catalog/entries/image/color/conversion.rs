@@ -53,13 +53,9 @@ pub(super) fn infer(
     let mode = if let Some(option) = request.arguments.get(1) {
         let invalid_geometry = match option.kind {
             ValueKindFact::String => option.shape.is_definitely_nonscalar(),
-            ValueKindFact::Character => {
-                matches!(
-                    &option.shape,
-                    ShapeFact::Shaped { dims }
-                        if matches!(dims.first(), Some(runmat_types::DimensionFact::Known(rows)) if *rows != 1)
-                ) || option.shape.rank().is_some_and(|rank| rank != 2)
-            }
+            // Runtime flattens character payloads, including columns and N-D
+            // CharArray values, before decoding the option spelling.
+            ValueKindFact::Character => false,
             _ => false,
         };
         if !matches!(

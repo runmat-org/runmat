@@ -10,7 +10,7 @@ use futures::executor::block_on;
 use runmat_builtins::{
     BuiltinOperandPreparation, BuiltinPreparationOperation, BuiltinSinkPreparation,
 };
-use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
+use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor, Value};
 use std::{
     cell::RefCell,
     future::Future,
@@ -19,6 +19,27 @@ use std::{
 };
 
 const NAMES: [&str; 3] = ["im2double", "im2uint8", "im2uint16"];
+
+#[test]
+fn indexed_char_array_control_flattens_row_column_and_nd_geometry() {
+    let events = Events::default();
+    let _context = enter(&events);
+    for shape in [vec![1, 7], vec![7, 1], vec![1, 1, 7]] {
+        let option = CharArray::new_with_shape("indexed".chars().collect(), shape).unwrap();
+        for name in NAMES {
+            block_on(dispatcher::call_builtin_async(
+                name,
+                &[
+                    Value::Int(IntValue::U8(1)),
+                    Value::CharArray(option.clone()),
+                ],
+            ))
+            .unwrap();
+            assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+            events.borrow_mut().clear();
+        }
+    }
+}
 type Events = Rc<RefCell<Vec<&'static str>>>;
 
 struct Observer(Events);

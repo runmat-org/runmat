@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Classes and modes", paragraphs: &[
             "Normal mode preserves uint8; rescales uint16 and int16 from their full ranges; clamps floating values to [0,1], scales by 255, and rounds; logical false/true becomes 0/255.",
             "Indexed mode preserves uint8 indices, converts uint16 indices with a range check, and subtracts one from one-based double indices. Logical values become 0 or 1.",
-            "Normal mode admits double, single, int16, uint8, uint16, and logical images. Indexed mode admits double, uint8, uint16, and logical; unsupported integer and complex classes reject. Scalar and N-D array shapes are preserved.",
+            "Normal mode admits double, single, int16, uint8, uint16, and logical images. Indexed mode admits double, uint8, uint16, and logical; unsupported integer and complex classes reject. Array geometry is preserved except that a one-element result is published as a scalar.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
             "Conversion uses authoritative host storage and is a fusion boundary. Resident inputs are gathered through their exact owner and supported results are restored to that owner when possible; explicit device intent is preserved or fails. The operation can suspend and throw.",
@@ -54,7 +54,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinDocumentationLink { label: "Shared color residency", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/common.rs") },
         ],
         verification: &[
-            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Image classes and indexed conversion", location: "crates/runmat-runtime/src/builtins/image/color/im2uint8.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Image classes and indexed conversion", location: "crates/runmat-runtime/src/builtins/image/color/im2uint8/tests.rs" },
         ],
         notes: &[],
     },
