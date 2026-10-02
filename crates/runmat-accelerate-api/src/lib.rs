@@ -25,7 +25,8 @@ mod native_device;
 mod iir;
 pub use iir::{
     provider_iir_zero_phase_query, ProviderIirCoefficientSource, ProviderIirFilterOptions,
-    ProviderIirFilterResult, ProviderIirZeroPhaseFault, ProviderIirZeroPhaseRequest,
+    ProviderIirFilterResult, ProviderIirIndexCancelled, ProviderIirZeroPhaseFault,
+    ProviderIirZeroPhaseIndexBuilder, ProviderIirZeroPhaseIndexPlan, ProviderIirZeroPhaseRequest,
     ProviderPreparedIirCoefficients,
 };
 mod logical_upload;

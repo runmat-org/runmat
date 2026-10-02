@@ -1,4 +1,9 @@
 //! One numerical coefficient source for each provider IIR invocation.
+mod index_plan;
+pub use index_plan::{
+    ProviderIirIndexCancelled, ProviderIirZeroPhaseIndexBuilder, ProviderIirZeroPhaseIndexPlan,
+};
+
 use runmat_execution::cancellation::CancellationToken;
 use serde::Serialize;
 
@@ -48,6 +53,7 @@ pub struct ProviderIirFilterResult {
 pub struct ProviderIirZeroPhaseRequest<'a> {
     pub input: &'a GpuTensorHandle,
     pub coefficients: &'a ProviderPreparedIirCoefficients,
+    pub indices: &'a ProviderIirZeroPhaseIndexPlan,
     pub initial_state: &'a [f64],
     pub axis: usize,
     pub reflection_len: usize,
@@ -97,6 +103,15 @@ impl ProviderIirZeroPhaseRequest<'_> {
                 && numerator.physical().element_type() == self.input.physical().element_type()
                 && denominator.physical().element_type() == self.input.physical().element_type(),
             "iir_zero_phase: prepared coefficient physical class mismatch"
+        );
+        anyhow::ensure!(
+            self.indices.matches(
+                self.input.shape(),
+                numerator.shape()[0],
+                self.axis,
+                self.reflection_len,
+            ),
+            "iir_zero_phase: reflected index plan does not match submitted operands"
         );
         let coefficient_len = self
             .coefficients

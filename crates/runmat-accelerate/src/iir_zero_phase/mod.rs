@@ -1,17 +1,16 @@
 //! Provider-owned reflected two-pass IIR route over resident primitives.
-mod indices;
 mod stages;
 #[cfg(test)]
 mod tests;
 
 use anyhow::{anyhow, ensure};
-use indices::IndexPlan;
 use runmat_accelerate_api::{
     handle_integer_type, handle_is_logical, handle_precision, handle_storage, provider_for_handle,
     same_provider_instance, upload_numeric_protecting, AccelProvider, GpuTensorHandle,
     GpuTensorStorage, HostNumericDataView, HostNumericTensorView, ProviderExecutionError,
     ProviderExecutionResult, ProviderIirCoefficientSource, ProviderIirFilterOptions,
-    ProviderIirZeroPhaseFault, ProviderIirZeroPhaseRequest, ProviderPrecision,
+    ProviderIirZeroPhaseFault, ProviderIirZeroPhaseIndexPlan, ProviderIirZeroPhaseRequest,
+    ProviderPrecision,
 };
 use runmat_execution::CancellationReason;
 use stages::{StageClass, Stages};
@@ -115,7 +114,7 @@ pub(crate) async fn execute(
             "iir_zero_phase: initial state length mismatch"
         )));
     }
-    let indices = IndexPlan::new(request).map_err(ProviderExecutionError::from)?;
+    let indices = request.indices;
     let single_state =
         prepared_state(request, provider.precision()).map_err(ProviderExecutionError::from)?;
     let mut stages = Stages::new(
@@ -132,7 +131,7 @@ pub(crate) async fn execute(
     let result = execute_staged(
         provider,
         request,
-        &indices,
+        indices,
         single_state.as_deref(),
         &mut stages,
     )
@@ -157,11 +156,11 @@ fn ensure_distinct(request: &ProviderIirZeroPhaseRequest<'_>) -> anyhow::Result<
 async fn execute_staged(
     provider: &dyn AccelProvider,
     request: &ProviderIirZeroPhaseRequest<'_>,
-    indices: &IndexPlan,
+    indices: &ProviderIirZeroPhaseIndexPlan,
     single_state: Option<&[f32]>,
     stages: &mut Stages<'_>,
 ) -> ProviderExecutionResult<usize> {
-    let shape = &indices.extended_shape;
+    let shape = indices.extended_shape();
     verify_finite(
         provider,
         stages,
@@ -173,7 +172,7 @@ async fn execute_staged(
     check_cancel(request)?;
     let edge = stages.admit(
         provider
-            .gather_linear(request.input, &indices.edge, shape)
+            .gather_linear(request.input, indices.edge(), shape)
             .map_err(ProviderExecutionError::from)?,
         shape,
         StageClass::Real,
@@ -181,7 +180,7 @@ async fn execute_staged(
     check_cancel(request)?;
     let neighbor = stages.admit(
         provider
-            .gather_linear(request.input, &indices.neighbor, shape)
+            .gather_linear(request.input, indices.neighbor(), shape)
             .map_err(ProviderExecutionError::from)?,
         shape,
         StageClass::Real,
@@ -219,7 +218,7 @@ async fn execute_staged(
             provider,
             &HostNumericTensorView {
                 data,
-                shape: &indices.state_shape,
+                shape: indices.state_shape(),
                 storage: GpuTensorStorage::Real,
             },
             &[
@@ -229,7 +228,7 @@ async fn execute_staged(
             ],
         )
         .map_err(ProviderExecutionError::from_source)?;
-        Some(stages.admit(state, &indices.state_shape, StageClass::Real)?)
+        Some(stages.admit(state, indices.state_shape(), StageClass::Real)?)
     };
     let first_zi = scale_endpoint(
         provider,
@@ -237,8 +236,8 @@ async fn execute_staged(
         stages,
         reflected,
         state,
-        &indices.first_endpoint,
-        &indices.state_shape,
+        indices.first_endpoint(),
+        indices.state_shape(),
     )
     .await?;
     let first = pass(
@@ -248,7 +247,7 @@ async fn execute_staged(
         reflected,
         first_zi,
         shape,
-        &indices.state_shape,
+        indices.state_shape(),
     )
     .await?;
     check_cancel(request)?;
@@ -258,8 +257,8 @@ async fn execute_staged(
         stages,
         first,
         state,
-        &indices.second_endpoint,
-        &indices.state_shape,
+        indices.second_endpoint(),
+        indices.state_shape(),
     )
     .await?;
     let reversed = stages.admit(
@@ -276,7 +275,7 @@ async fn execute_staged(
         reversed,
         second_zi,
         shape,
-        &indices.state_shape,
+        indices.state_shape(),
     )
     .await?;
     check_cancel(request)?;
@@ -288,7 +287,7 @@ async fn execute_staged(
         StageClass::Real,
     )?;
     let output = provider
-        .gather_linear(stages.get(restored), &indices.trim, request.input.shape())
+        .gather_linear(stages.get(restored), indices.trim(), request.input.shape())
         .map_err(ProviderExecutionError::from)?;
     let output = stages.admit(output, request.input.shape(), StageClass::Real)?;
     check_cancel(request)?;

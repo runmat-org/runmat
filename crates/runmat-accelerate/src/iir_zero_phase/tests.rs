@@ -2,8 +2,8 @@ use super::*;
 use crate::simple_provider::InProcessProvider;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
-    provider_iir_zero_phase_query, HostTensorView, ProviderPreparedIirCoefficients,
-    ThreadProviderGuard,
+    provider_iir_zero_phase_query, HostTensorView, ProviderIirZeroPhaseIndexPlan,
+    ProviderPreparedIirCoefficients, ThreadProviderGuard,
 };
 use runmat_execution::cancellation::CancellationSource;
 
@@ -26,9 +26,13 @@ fn impulse(provider: &'static InProcessProvider, shape: [usize; 2], axis: usize)
     )
     .expect("one normalized resident coefficient set");
     let cancellation = CancellationSource::new();
+    let indices =
+        ProviderIirZeroPhaseIndexPlan::prepare_direct(shape, 2, axis, 3, &cancellation.token())
+            .expect("sealed reflection plan");
     let request = ProviderIirZeroPhaseRequest {
         input: &input,
         coefficients: &coefficients,
+        indices: &indices,
         initial_state: &[0.5],
         axis,
         reflection_len: 3,
@@ -81,9 +85,13 @@ fn pre_cancelled_zero_phase_request_does_not_publish_output() {
     )
     .unwrap();
     let cancellation = CancellationSource::new();
+    let indices =
+        ProviderIirZeroPhaseIndexPlan::prepare_direct([8, 1], 2, 0, 3, &cancellation.token())
+            .unwrap();
     let request = ProviderIirZeroPhaseRequest {
         input: &input,
         coefficients: &coefficients,
+        indices: &indices,
         initial_state: &[0.0],
         axis: 0,
         reflection_len: 3,
@@ -120,4 +128,43 @@ fn rejected_borrowed_stage_alias_does_not_retire_the_caller_operand() {
         block_on(provider.download(&input)).unwrap().data,
         vec![1.0, 2.0]
     );
+}
+
+#[test]
+fn mismatched_sealed_plan_rejects_before_provider_work() {
+    let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let input = provider
+        .upload(&HostTensorView {
+            data: &[1.0; 8],
+            shape: &[8, 1],
+        })
+        .unwrap();
+    let coefficients = ProviderPreparedIirCoefficients::upload(
+        provider,
+        &[1.0, 0.0],
+        &[1.0, 0.0],
+        provider.precision(),
+        &[&input],
+    )
+    .unwrap();
+    let cancellation = CancellationSource::new();
+    let wrong_axis =
+        ProviderIirZeroPhaseIndexPlan::prepare_direct([1, 8], 2, 1, 3, &cancellation.token())
+            .unwrap();
+    let request = ProviderIirZeroPhaseRequest {
+        input: &input,
+        coefficients: &coefficients,
+        indices: &wrong_axis,
+        initial_state: &[0.0],
+        axis: 0,
+        reflection_len: 3,
+        capability_revision: provider.capability_snapshot().revision,
+        cancellation: cancellation.token(),
+    };
+    provider.reset_telemetry();
+    let before = provider.telemetry_snapshot();
+    assert!(block_on(provider.iir_zero_phase(&request)).is_err());
+    assert_eq!(provider.telemetry_snapshot(), before);
+    assert!(input.allocation_lease().validate_live().is_ok());
 }

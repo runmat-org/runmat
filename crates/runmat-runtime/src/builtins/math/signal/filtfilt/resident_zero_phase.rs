@@ -3,7 +3,8 @@ use num_complex::Complex;
 use runmat_accelerate_api::{
     handle_integer_type, handle_is_logical, handle_precision, handle_storage,
     provider_iir_zero_phase_query, GpuTensorHandle, GpuTensorStorage, ProviderIirZeroPhaseFault,
-    ProviderIirZeroPhaseRequest, ProviderPrecision, ProviderPreparedIirCoefficients,
+    ProviderIirZeroPhaseIndexBuilder, ProviderIirZeroPhaseRequest, ProviderPrecision,
+    ProviderPreparedIirCoefficients,
 };
 use runmat_execution::cancellation::CancellationSource;
 use runmat_value::{NumericDType, Value};
@@ -149,6 +150,33 @@ pub(super) async fn try_execute(
     let numerator = real_coefficients(&coeffs.b, cooperation).await?;
     let denominator = real_coefficients(&coeffs.a, cooperation).await?;
     let zi = real_coefficients(&zi, cooperation).await?;
+    let shape: [usize; 2] = input.shape().try_into().map_err(|_| {
+        filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, "resident vector rank mismatch")
+    })?;
+    let mut index_builder =
+        ProviderIirZeroPhaseIndexBuilder::new(shape, coeffs.order, axis, reflection_len).map_err(
+            |source| {
+                crate::runtime_error::with_provider_execution_source(
+                    filtfilt_error_with_detail(
+                        &FILTFILT_ERROR_INTERNAL,
+                        "resident reflection index preparation failed",
+                    ),
+                    source.into(),
+                )
+            },
+        )?;
+    while let Some(work) = index_builder.advance_chunk() {
+        cooperation.completed(work as u64).await?;
+    }
+    let indices = index_builder.finish().map_err(|source| {
+        crate::runtime_error::with_provider_execution_source(
+            filtfilt_error_with_detail(
+                &FILTFILT_ERROR_INTERNAL,
+                "resident reflection index preparation failed",
+            ),
+            source.into(),
+        )
+    })?;
     let mut protected = Vec::new();
     protected
         .try_reserve_exact(borrowed.len().saturating_add(1))
@@ -186,6 +214,7 @@ pub(super) async fn try_execute(
     let request = ProviderIirZeroPhaseRequest {
         input,
         coefficients: &prepared,
+        indices: &indices,
         initial_state: &zi,
         axis,
         reflection_len,
