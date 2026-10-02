@@ -17,9 +17,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::fft::common::ensure_wide_integer_data_exact;
 use crate::builtins::math::signal::common::{
-    complex_vector_to_value_with_dtype, preflight_iir_operands, signal_error,
-    value_to_complex_vector, vector_is_row, ComplexVectorInput, IirAdmissionFault, IirFaultKind,
-    IirForm, IirOperand,
+    complex_vector_to_value_with_dtype, preflight_iir_operands, value_to_complex_vector,
+    vector_is_row, ComplexVectorInput, IirAdmissionFault, IirFaultKind, IirForm, IirOperand,
 };
 use crate::builtins::math::signal::filter;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -63,6 +62,32 @@ fn filtfilt_error_with_detail(
     detail: impl AsRef<str>,
 ) -> RuntimeError {
     filtfilt_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn filtfilt_error_with_source(
+    descriptor: &'static BuiltinErrorDescriptor,
+    detail: &'static str,
+    source: RuntimeError,
+    after_provider_effect: bool,
+) -> RuntimeError {
+    let span = source.span;
+    let context = source.context.clone();
+    let retry = source.gpu_gather_retry;
+    let mut builder = build_runtime_error(format!("{}: {detail}", descriptor.message))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    let mut error = builder.build();
+    error.span = span;
+    error.context = context;
+    error.gpu_gather_retry = if after_provider_effect {
+        crate::GpuGatherRetry::Never
+    } else {
+        retry
+    };
+    error
 }
 
 fn provider_pass_error(pass: FilterPass, source: RuntimeError) -> RuntimeError {
@@ -139,17 +164,34 @@ pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
     let b_input = value_to_complex_vector(BUILTIN_NAME, "numerator", b)
         .await
-        .map_err(|err| {
-            filtfilt_error_with_detail(&FILTFILT_ERROR_INVALID_COEFFICIENTS, err.message())
+        .map_err(|source| {
+            filtfilt_error_with_source(
+                &FILTFILT_ERROR_INVALID_COEFFICIENTS,
+                "numerator conversion failed",
+                source,
+                false,
+            )
         })?;
     let a_input = value_to_complex_vector(BUILTIN_NAME, "denominator", a)
         .await
-        .map_err(|err| {
-            filtfilt_error_with_detail(&FILTFILT_ERROR_INVALID_COEFFICIENTS, err.message())
+        .map_err(|source| {
+            filtfilt_error_with_source(
+                &FILTFILT_ERROR_INVALID_COEFFICIENTS,
+                "denominator conversion failed",
+                source,
+                false,
+            )
         })?;
     let x_input = value_to_complex_vector(BUILTIN_NAME, "signal", x)
         .await
-        .map_err(|err| filtfilt_error_with_detail(&FILTFILT_ERROR_INVALID_SIGNAL, err.message()))?;
+        .map_err(|source| {
+            filtfilt_error_with_source(
+                &FILTFILT_ERROR_INVALID_SIGNAL,
+                "signal conversion failed",
+                source,
+                false,
+            )
+        })?;
 
     let coeffs = NormalizedCoefficients::new(&b_input.data, &a_input.data)?;
     if x_input.data.is_empty() {
@@ -185,7 +227,14 @@ pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
         b_input.is_complex || a_input.is_complex || x_input.is_complex,
         output_dtype,
     )
-    .map_err(|err| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, err.message()))
+    .map_err(|source| {
+        filtfilt_error_with_source(
+            &FILTFILT_ERROR_INTERNAL,
+            "result construction failed",
+            source,
+            false,
+        )
+    })
 }
 
 fn filtfilt_preflight_error(fault: IirAdmissionFault) -> RuntimeError {
@@ -212,9 +261,11 @@ async fn gather_wide_integer_for_exactness(value: Value) -> BuiltinResult<Value>
         return gpu_helpers::gather_value_async(&value)
             .await
             .map_err(|source| {
-                filtfilt_error_with_detail(
+                filtfilt_error_with_source(
                     &FILTFILT_ERROR_INVALID_SIGNAL,
-                    format!("wide integer gather failed: {source}"),
+                    "wide integer gather failed",
+                    source,
+                    true,
                 )
             });
     }
@@ -334,7 +385,7 @@ fn filtfilt_host(
     }
 
     let zi = lfilter_zi(coeffs)?;
-    let extended = odd_reflect(signal, nfact);
+    let extended = odd_reflect(signal, nfact)?;
     let first = extended[0];
     let y = direct_form_filter(coeffs, &extended, &scale_state(&zi, first));
     let mut reversed = y;
@@ -346,21 +397,57 @@ fn filtfilt_host(
     Ok(restored[nfact..nfact + signal.len()].to_vec())
 }
 
-fn odd_reflect(signal: &[Complex<f64>], nfact: usize) -> Vec<Complex<f64>> {
+fn odd_reflect(signal: &[Complex<f64>], nfact: usize) -> BuiltinResult<Vec<Complex<f64>>> {
     if nfact == 0 {
-        return signal.to_vec();
+        return Ok(signal.to_vec());
     }
-    let mut out = Vec::with_capacity(signal.len() + 2 * nfact);
-    let left_edge = signal[0] * Complex::new(2.0, 0.0);
+    let total = nfact
+        .checked_mul(2)
+        .and_then(|padding| signal.len().checked_add(padding))
+        .ok_or_else(|| {
+            filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, "reflection length overflow")
+        })?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(total).map_err(|source| {
+        let mut builder = build_runtime_error(format!(
+            "{}: reflection allocation failed",
+            FILTFILT_ERROR_INTERNAL.message
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+        if let Some(identifier) = FILTFILT_ERROR_INTERNAL.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        let mut wrapped = builder.build();
+        wrapped.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        wrapped
+    })?;
+    let left_edge = signal[0];
     for idx in (1..=nfact).rev() {
-        out.push(left_edge - signal[idx]);
+        out.push(reflected_sample(left_edge, signal[idx])?);
     }
     out.extend_from_slice(signal);
-    let right_edge = signal[signal.len() - 1] * Complex::new(2.0, 0.0);
+    let right_edge = signal[signal.len() - 1];
     for offset in 1..=nfact {
-        out.push(right_edge - signal[signal.len() - 1 - offset]);
+        out.push(reflected_sample(
+            right_edge,
+            signal[signal.len() - 1 - offset],
+        )?);
     }
-    out
+    Ok(out)
+}
+
+fn reflected_sample(edge: Complex<f64>, neighbor: Complex<f64>) -> BuiltinResult<Complex<f64>> {
+    let real = edge.re + (edge.re - neighbor.re);
+    let imaginary = edge.im + (edge.im - neighbor.im);
+    if real.is_finite() && imaginary.is_finite() {
+        Ok(Complex::new(real, imaginary))
+    } else {
+        Err(filtfilt_error_with_detail(
+            &FILTFILT_ERROR_INVALID_SIGNAL,
+            "endpoint reflection is outside the floating-point range",
+        ))
+    }
 }
 
 fn scale_state(zi: &[Complex<f64>], scale: Complex<f64>) -> Vec<Complex<f64>> {
@@ -500,7 +587,7 @@ async fn try_filtfilt_gpu(
     if zi.iter().any(|z| z.im != 0.0) {
         return Ok(None);
     }
-    let extended = odd_reflect(&input.data, nfact);
+    let extended = odd_reflect(&input.data, nfact)?;
     let first_pass = gpu_filter_pass(provider, coeffs, &extended, &input.shape, &zi)
         .await
         .map_err(|source| provider_pass_error(FilterPass::Forward, source))?;
@@ -519,10 +606,10 @@ async fn try_filtfilt_gpu(
         data: &trimmed,
         shape: &input.shape,
     };
-    let handle = provider.upload(&view).map_err(|e| {
-        filtfilt_error_with_detail(
-            &FILTFILT_ERROR_INTERNAL,
-            format!("provider upload failed: {e}"),
+    let handle = provider.upload(&view).map_err(|source| {
+        crate::runtime_error::with_provider_execution_source(
+            filtfilt_error_with_detail(&FILTFILT_ERROR_PASS_FAILED, "result upload failed"),
+            source.into(),
         )
     })?;
     Ok(Some(Value::GpuTensor(handle)))
@@ -548,10 +635,10 @@ async fn gpu_filter_pass(
             data: &real_signal,
             shape: &shape,
         })
-        .map_err(|e| {
-            filtfilt_error_with_detail(
-                &FILTFILT_ERROR_INTERNAL,
-                format!("provider signal upload failed: {e}"),
+        .map_err(|source| {
+            crate::runtime_error::with_provider_execution_source(
+                filtfilt_error_with_detail(&FILTFILT_ERROR_PASS_FAILED, "signal upload failed"),
+                source.into(),
             )
         })?;
     let b = Tensor::new(
@@ -584,11 +671,12 @@ async fn gpu_filter_pass(
         Value::GpuTensor(handle) => {
             gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|flow| {
-                    signal_error(
-                        BUILTIN_NAME,
-                        FILTFILT_ERROR_INTERNAL.identifier,
-                        format!("filtfilt: provider result gather failed: {flow:?}"),
+                .map_err(|source| {
+                    filtfilt_error_with_source(
+                        &FILTFILT_ERROR_PASS_FAILED,
+                        "provider result gather failed",
+                        source,
+                        true,
                     )
                 })?
         }
@@ -749,6 +837,31 @@ mod tests {
         };
         assert_eq!(output.shape, vec![1, 8]);
         assert!(output.materialize_f64().iter().any(|&(_, im)| im != 0.0));
+    }
+
+    #[test]
+    fn finite_large_constant_reflection_does_not_overflow_before_identity_filter() {
+        let signal = Tensor::new(vec![1.0e308; 8], vec![1, 8]).unwrap();
+        let identity_with_state = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+        let output = call(
+            Value::Tensor(identity_with_state),
+            Value::Num(1.0),
+            Value::Tensor(signal),
+        )
+        .expect("representable large constant reflection");
+        let (values, shape) = tensor_data(output);
+        assert_eq!(shape, vec![1, 8]);
+        assert_eq!(values, vec![1.0e308; 8]);
+
+        let signal = Tensor::new(
+            vec![f64::MAX, -f64::MAX, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            vec![1, 8],
+        )
+        .unwrap();
+        let b = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+        let error = call(Value::Tensor(b), Value::Num(1.0), Value::Tensor(signal))
+            .expect_err("unrepresentable endpoint reflection");
+        assert_eq!(error.identifier(), FILTFILT_ERROR_INVALID_SIGNAL.identifier);
     }
 
     #[test]
