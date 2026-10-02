@@ -1,4 +1,5 @@
 pub mod codec;
+pub mod convolution;
 pub mod contract;
 pub mod declaration;
 pub mod dimension;
@@ -16,6 +17,7 @@ pub mod symbolic;
 pub mod version;
 
 pub use contract::*;
+pub use convolution::ConvolutionMode;
 pub use declaration::{
     ClassArrayPayload, ClassArrayShape, ClassDeclaration, ClassKind, EnumerationDeclaration,
     EventDeclaration, ExternalClassDeclaration, ExternalMethodDeclaration,

@@ -11,6 +11,7 @@ use runmat_builtins::{
     BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::ConvolutionMode as ConvMode;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
@@ -317,13 +318,6 @@ fn value_is_complex(value: &Value) -> bool {
 const EPS: f64 = 1e-12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConvMode {
-    Full,
-    Same,
-    Valid,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OrientationHint {
     Row,
     Column,
@@ -358,13 +352,7 @@ fn parse_mode(args: &[Value]) -> BuiltinResult<ConvMode> {
             let Some(text) = tensor::value_to_string(&args[0]) else {
                 return Err(conv_error(&CONV_ERROR_SHAPE_INVALID));
             };
-            let lowered = text.trim().to_ascii_lowercase();
-            match lowered.as_str() {
-                "full" => Ok(ConvMode::Full),
-                "same" => Ok(ConvMode::Same),
-                "valid" => Ok(ConvMode::Valid),
-                _ => Err(conv_error(&CONV_ERROR_SHAPE_INVALID)),
-            }
+            ConvMode::decode(&text).ok_or_else(|| conv_error(&CONV_ERROR_SHAPE_INVALID))
         }
         _ => Err(conv_error(&CONV_ERROR_ARG_COUNT)),
     }

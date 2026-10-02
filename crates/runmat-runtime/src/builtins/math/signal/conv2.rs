@@ -11,6 +11,7 @@ use runmat_builtins::{
     BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::ConvolutionMode as Conv2Mode;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
@@ -426,13 +427,6 @@ fn value_is_complex(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_storage(handle) == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Conv2Mode {
-    Full,
-    Same,
-    Valid,
-}
-
 fn try_conv2_gpu(
     a: &Value,
     b: &Value,
@@ -614,15 +608,8 @@ fn parse_mode_value(value: &Value) -> BuiltinResult<Option<Conv2Mode>> {
     let Some(text) = tensor::value_to_string(value) else {
         return Ok(None);
     };
-    let lowered = text.trim().to_ascii_lowercase();
-    let mode = match lowered.as_str() {
-        "full" => Conv2Mode::Full,
-        "same" => Conv2Mode::Same,
-        "valid" => Conv2Mode::Valid,
-        _ => {
-            return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID));
-        }
-    };
+    let mode = Conv2Mode::decode(&text)
+        .ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID))?;
     Ok(Some(mode))
 }
 
