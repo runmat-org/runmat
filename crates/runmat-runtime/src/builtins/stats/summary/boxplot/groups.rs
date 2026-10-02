@@ -3,7 +3,7 @@ use super::plot::color_for;
 use super::statistics::stats_for_values;
 use super::*;
 pub(super) mod labels;
-use crate::builtins::common::grouping_keys::{GroupIndex, KeyAtom, KeyOrder};
+use crate::builtins::common::grouping_keys::{GroupIndex, GroupIndexBuildError, KeyAtom, KeyOrder};
 pub(super) use labels::{char_rows, number_label, numeric_scalar_label};
 use labels::{group_label_text, group_labels, validate_group_like, GroupLabel};
 
@@ -65,7 +65,7 @@ pub(super) async fn build_box_layout_cooperative(
         return Err(invalid("boxplot: X must not be empty"));
     }
     let mut groups = match group {
-        Some(group) => grouped_series(&tensor, group, options)?,
+        Some(group) => grouped_series(&tensor, group, options, cooperation).await?,
         None => ungrouped_series(&tensor),
     };
     if let Some(color_group) = &options.color_group {
@@ -107,10 +107,11 @@ fn ungrouped_series(tensor: &Tensor) -> Vec<(GroupLabel, Vec<f64>)> {
         .collect()
 }
 
-fn grouped_series(
+async fn grouped_series(
     tensor: &Tensor,
     group: Value,
     options: &BoxplotOptions,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<Vec<(GroupLabel, Vec<f64>)>> {
     let values = tensor::tensor_values_f64_cow(tensor);
     let tensor_len = values.len();
@@ -144,8 +145,12 @@ fn grouped_series(
     } else {
         KeyOrder::FirstAppearance
     };
-    let grouped =
-        GroupIndex::build(labels, order).map_err(|err| invalid(format!("boxplot: {err}")))?;
+    let grouped = GroupIndex::build_cooperative(labels, order, cooperation.budget())
+        .await
+        .map_err(|error| match error {
+            GroupIndexBuildError::Invalid(message) => invalid(format!("boxplot: {message}")),
+            GroupIndexBuildError::Service(error) => cooperation.service_error(error),
+        })?;
     let groups = grouped
         .keys
         .into_iter()

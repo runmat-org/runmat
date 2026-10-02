@@ -1,6 +1,17 @@
-use std::collections::BTreeMap;
+use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 
 use super::KeyAtom;
+
+mod builder;
+use builder::{BuildProgress, GroupIndexBuilder};
+
+/// The semantic group grammar and execution service remain separate failure
+/// domains. Callers adapt each at their public builtin boundary.
+#[derive(Debug)]
+pub(crate) enum GroupIndexBuildError {
+    Invalid(String),
+    Service(ExecutionServiceError),
+}
 
 /// A tuple key; each component retains its typed identity until presentation.
 pub(crate) type GroupKey = Vec<KeyAtom>;
@@ -24,83 +35,58 @@ pub(crate) struct GroupIndex {
 
 impl GroupIndex {
     pub(crate) fn build(rows: Vec<Option<GroupKey>>, order: KeyOrder) -> Result<Self, String> {
-        match order {
-            KeyOrder::Sorted => Self::sorted(rows),
-            KeyOrder::FirstAppearance => Self::first_appearance(rows),
-            KeyOrder::Explicit(keys) => Self::explicit(rows, keys),
-        }
+        Self::build_from_builder(GroupIndexBuilder::new(rows, order))
     }
 
-    fn sorted(rows: Vec<Option<GroupKey>>) -> Result<Self, String> {
-        let mut buckets = BTreeMap::<GroupKey, Vec<usize>>::new();
-        for (row, key) in rows.iter().enumerate() {
-            if let Some(key) = key {
-                buckets.entry(key.clone()).or_default().push(row);
-            }
-        }
-        let keys = buckets.keys().cloned().collect::<Vec<_>>();
-        Self::from_keys_and_rows(rows, keys)
-    }
-
-    fn first_appearance(rows: Vec<Option<GroupKey>>) -> Result<Self, String> {
-        let mut key_indices = BTreeMap::<GroupKey, usize>::new();
-        let mut keys = Vec::new();
-        for key in rows.iter().flatten() {
-            if !key_indices.contains_key(key) {
-                key_indices.insert(key.clone(), keys.len());
-                keys.push(key.clone());
-            }
-        }
-        Self::from_keys_and_rows(rows, keys)
-    }
-
-    fn explicit(rows: Vec<Option<GroupKey>>, keys: Vec<GroupKey>) -> Result<Self, String> {
-        let mut seen = BTreeMap::new();
-        for (index, key) in keys.iter().enumerate() {
-            if seen.insert(key, index).is_some() {
-                return Err("explicit group order contains a duplicate key".into());
-            }
-        }
-        Self::from_keys_and_rows(rows, keys)
-    }
-
-    fn from_keys_and_rows(
+    /// The synchronous and cooperative drivers run the same bounded exact-key
+    /// state machine; neither driver enters a nested executor.
+    pub(crate) async fn build_cooperative(
         rows: Vec<Option<GroupKey>>,
-        keys: Vec<GroupKey>,
-    ) -> Result<Self, String> {
-        let key_indices = keys
-            .iter()
-            .enumerate()
-            .map(|(index, key)| (key, index))
-            .collect::<BTreeMap<_, _>>();
-        let mut ids = Vec::with_capacity(rows.len());
-        let mut first_rows = vec![None; keys.len()];
-        let mut row_groups = vec![Vec::new(); keys.len()];
-        for (row, key) in rows.into_iter().enumerate() {
-            let Some(key) = key else {
-                ids.push(f64::NAN);
-                continue;
-            };
-            let index = key_indices
-                .get(&key)
-                .copied()
-                .ok_or_else(|| "group observation is absent from the explicit order".to_string())?;
-            ids.push(index as f64 + 1.0);
-            first_rows[index].get_or_insert(row);
-            row_groups[index].push(row);
+        order: KeyOrder,
+        budget: Option<&mut CpuCooperationBudget>,
+    ) -> Result<Self, GroupIndexBuildError> {
+        let mut builder = GroupIndexBuilder::new(rows, order);
+        let Some(budget) = budget else {
+            return Self::build_from_builder(builder).map_err(GroupIndexBuildError::Invalid);
+        };
+        budget
+            .checkpoint(0)
+            .await
+            .map_err(GroupIndexBuildError::Service)?;
+        loop {
+            match builder.step().map_err(GroupIndexBuildError::Invalid)? {
+                BuildProgress::Work(units) => budget
+                    .checkpoint(units)
+                    .await
+                    .map_err(GroupIndexBuildError::Service)?,
+                BuildProgress::Complete(index) => return Ok(index),
+            }
         }
-        Ok(Self {
-            ids,
-            keys,
-            first_rows,
-            row_groups,
-        })
+    }
+
+    fn build_from_builder(mut builder: GroupIndexBuilder) -> Result<Self, String> {
+        loop {
+            match builder.step()? {
+                BuildProgress::Work(_) => {}
+                BuildProgress::Complete(index) => return Ok(index),
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::CpuCooperationPolicy;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use runmat_value::IntValue;
+    use std::cell::Cell;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
 
     fn text(value: &str) -> GroupKey {
         vec![KeyAtom::Text(value.into())]
@@ -128,5 +114,221 @@ mod tests {
         assert_eq!(index.ids[2], 2.0);
         assert_eq!(index.first_rows, vec![None, Some(0), None]);
         assert_eq!(index.row_groups, vec![vec![], vec![0, 2], vec![]]);
+    }
+
+    #[test]
+    fn synchronous_consumer_is_safe_inside_an_async_executor() {
+        let rows = vec![Some(text("b")), Some(text("a")), Some(text("b"))];
+        let (sorted, stable) = futures::executor::block_on(async {
+            (
+                GroupIndex::build(rows.clone(), KeyOrder::Sorted).unwrap(),
+                GroupIndex::build(rows, KeyOrder::FirstAppearance).unwrap(),
+            )
+        });
+        assert_eq!(sorted.ids, vec![2.0, 1.0, 2.0]);
+        assert_eq!(stable.ids, vec![1.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn cooperative_budget_charges_text_bytes_and_factor_arity() {
+        let source = CancellationSource::new();
+        let turns = Rc::new(Cell::new(0));
+        let counted = turns.clone();
+        let mut budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(16).unwrap()),
+            source.token(),
+            move || {
+                counted.set(counted.get() + 1);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let key = vec![KeyAtom::Text("x".repeat(32)), KeyAtom::Logical(true)];
+        let index = futures::executor::block_on(GroupIndex::build_cooperative(
+            vec![Some(key.clone())],
+            KeyOrder::Sorted,
+            Some(&mut budget),
+        ))
+        .unwrap();
+        assert_eq!(index.keys, vec![key]);
+        assert!(turns.get() >= 1, "long text must charge more than one row");
+    }
+
+    #[test]
+    fn cooperative_index_preserves_exact_order_and_row_membership() {
+        let rows = vec![Some(text("b")), None, Some(text("a")), Some(text("b"))];
+        for order in [KeyOrder::Sorted, KeyOrder::FirstAppearance] {
+            let expected = GroupIndex::build(rows.clone(), order.clone()).unwrap();
+            let source = CancellationSource::new();
+            let turns = Rc::new(Cell::new(0));
+            let counted = turns.clone();
+            let mut budget = CpuCooperationBudget::with_test_turn(
+                CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+                source.token(),
+                move || {
+                    counted.set(counted.get() + 1);
+                    Box::pin(async { Ok(()) })
+                },
+            );
+            let actual = futures::executor::block_on(GroupIndex::build_cooperative(
+                rows.clone(),
+                order,
+                Some(&mut budget),
+            ))
+            .unwrap();
+            for (actual, expected) in actual.ids.iter().zip(&expected.ids) {
+                if expected.is_nan() {
+                    assert!(actual.is_nan());
+                } else {
+                    assert_eq!(actual, expected);
+                }
+            }
+            assert_eq!(actual.row_groups, expected.row_groups);
+            assert_eq!(actual.first_rows, expected.first_rows);
+            assert_eq!(actual.keys, expected.keys);
+            assert!(turns.get() >= rows.len());
+        }
+    }
+
+    #[test]
+    fn explicit_cooperative_order_matches_sync_and_preserves_diagnostics() {
+        let rows = vec![Some(text("b")), None, Some(text("b"))];
+        let order = KeyOrder::Explicit(vec![text("a"), text("b"), text("c")]);
+        let expected = GroupIndex::build(rows.clone(), order.clone()).unwrap();
+        let actual =
+            futures::executor::block_on(GroupIndex::build_cooperative(rows, order, None)).unwrap();
+        assert_eq!(actual.keys, expected.keys);
+        assert_eq!(actual.first_rows, expected.first_rows);
+        assert_eq!(actual.row_groups, expected.row_groups);
+        assert_eq!(actual.ids[0], expected.ids[0]);
+        assert!(actual.ids[1].is_nan());
+        assert_eq!(actual.ids[2], expected.ids[2]);
+
+        let duplicate = KeyOrder::Explicit(vec![text("a"), text("a")]);
+        let sync = GroupIndex::build(vec![], duplicate.clone()).unwrap_err();
+        let cooperative =
+            futures::executor::block_on(GroupIndex::build_cooperative(vec![], duplicate, None))
+                .unwrap_err();
+        assert_eq!(sync, "explicit group order contains a duplicate key");
+        assert!(matches!(cooperative, GroupIndexBuildError::Invalid(message) if message == sync));
+
+        let missing = KeyOrder::Explicit(vec![text("a")]);
+        let sync = GroupIndex::build(vec![Some(text("b"))], missing.clone()).unwrap_err();
+        let cooperative = futures::executor::block_on(GroupIndex::build_cooperative(
+            vec![Some(text("b"))],
+            missing,
+            None,
+        ))
+        .unwrap_err();
+        assert_eq!(sync, "group observation is absent from the explicit order");
+        assert!(matches!(cooperative, GroupIndexBuildError::Invalid(message) if message == sync));
+    }
+
+    #[test]
+    fn empty_tuples_and_mixed_wide_integer_atoms_keep_exact_identity() {
+        let wide = (1u64 << 53) + 1;
+        let keys = vec![
+            vec![],
+            vec![
+                KeyAtom::Integer(IntValue::U64(wide)),
+                KeyAtom::Text("x".into()),
+            ],
+            vec![
+                KeyAtom::Integer(IntValue::I64(wide as i64)),
+                KeyAtom::Text("x".into()),
+            ],
+            vec![
+                KeyAtom::Integer(IntValue::U64(wide + 1)),
+                KeyAtom::Text("x".into()),
+            ],
+        ];
+        let rows = keys.iter().cloned().map(Some).collect();
+        let sync = GroupIndex::build(rows, KeyOrder::FirstAppearance).unwrap();
+        assert_eq!(sync.keys.len(), 3);
+        assert_eq!(sync.ids, vec![1.0, 2.0, 2.0, 3.0]);
+        assert_eq!(sync.row_groups, vec![vec![0], vec![1, 2], vec![3]]);
+        let cooperative = futures::executor::block_on(GroupIndex::build_cooperative(
+            keys.into_iter().map(Some).collect(),
+            KeyOrder::FirstAppearance,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(cooperative.keys, sync.keys);
+        assert_eq!(cooperative.ids, sync.ids);
+    }
+
+    struct PendingTurn {
+        dropped: Rc<Cell<bool>>,
+    }
+
+    impl Future for PendingTurn {
+        type Output = Result<(), ExecutionServiceError>;
+
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for PendingTurn {
+        fn drop(&mut self) {
+            self.dropped.set(true);
+        }
+    }
+
+    #[test]
+    fn abandoning_pending_cooperative_turn_drops_it_without_publishing() {
+        let source = CancellationSource::new();
+        let entered = Rc::new(Cell::new(false));
+        let dropped = Rc::new(Cell::new(false));
+        let turn_entered = entered.clone();
+        let turn_dropped = dropped.clone();
+        let mut budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                turn_entered.set(true);
+                Box::pin(PendingTurn {
+                    dropped: turn_dropped.clone(),
+                })
+            },
+        );
+        let mut pending = Box::pin(GroupIndex::build_cooperative(
+            vec![Some(text("a"))],
+            KeyOrder::Sorted,
+            Some(&mut budget),
+        ));
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        assert!(matches!(pending.as_mut().poll(&mut context), Poll::Pending));
+        assert!(entered.get());
+        assert!(!dropped.get());
+        drop(pending);
+        assert!(
+            dropped.get(),
+            "pending service turn must be retired on drop"
+        );
+    }
+
+    #[test]
+    fn cooperative_index_cancellation_keeps_service_error_typed() {
+        let source = Rc::new(CancellationSource::new());
+        let cancel_on_turn = source.clone();
+        let mut budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                cancel_on_turn.cancel(CancellationReason::User);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let error = futures::executor::block_on(GroupIndex::build_cooperative(
+            vec![Some(text("a")), Some(text("b"))],
+            KeyOrder::Sorted,
+            Some(&mut budget),
+        ))
+        .expect_err("cancelled grouping cannot publish an index");
+        assert!(matches!(
+            error,
+            GroupIndexBuildError::Service(ExecutionServiceError::Cancelled)
+        ));
     }
 }

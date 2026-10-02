@@ -2,7 +2,7 @@
 
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
-use crate::{build_runtime_error, BuiltinResult};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::{internal_with_source, NAME};
 
@@ -33,7 +33,16 @@ impl BoxplotCooperation {
         let Some(budget) = self.budget.as_mut() else {
             return Ok(());
         };
-        budget.checkpoint(units).await.map_err(|error| match error {
+        let result = budget.checkpoint(units).await;
+        result.map_err(|error| self.service_error(error))
+    }
+
+    pub(super) fn budget(&mut self) -> Option<&mut CpuCooperationBudget> {
+        self.budget.as_mut()
+    }
+
+    pub(super) fn service_error(&self, error: ExecutionServiceError) -> RuntimeError {
+        match error {
             ExecutionServiceError::Cancelled => {
                 let namespace = self.namespace.as_deref().unwrap_or("RunMat");
                 build_runtime_error("boxplot: execution was cancelled")
@@ -42,10 +51,10 @@ impl BoxplotCooperation {
                     .build()
             }
             other => internal_with_source(
-                "boxplot: execution service failed during factor expansion",
+                "boxplot: execution service failed during preparation",
                 other.into_runtime_error(),
             ),
-        })
+        }
     }
 }
 

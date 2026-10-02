@@ -4,4 +4,4 @@ mod atom;
 mod index;
 
 pub(crate) use atom::{format_integer, KeyAtom};
-pub(crate) use index::{GroupIndex, KeyOrder};
+pub(crate) use index::{GroupIndex, GroupIndexBuildError, KeyOrder};
