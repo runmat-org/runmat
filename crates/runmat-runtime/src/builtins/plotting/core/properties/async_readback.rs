@@ -413,6 +413,117 @@ mod tests {
         ));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "requires an actual native WGPU adapter"]
+    fn exported_resident_line_retains_borrowed_allocations_until_coordinate_publication() {
+        use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderPrecision};
+        use runmat_plot::gpu::{line::LineGpuInputs, GpuInputBuffer, ScalarType};
+        use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
+
+        let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
+        let _plot_guard = lock_plot_registry();
+        ensure_plot_test_env();
+        crate::builtins::plotting::reset_plot_state();
+        let handle = host_line();
+        let provider =
+            runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(Default::default())
+                .expect("actual WGPU device required");
+        crate::builtins::plotting::context::ensure_context_from_provider()
+            .expect("install the provider's shared device access");
+        let x = provider
+            .upload(&HostTensorView {
+                data: &[1.25, -3.5],
+                shape: &[1, 2],
+            })
+            .expect("upload x");
+        let y = provider
+            .upload(&HostTensorView {
+                data: &[4.75, -2.0],
+                shape: &[1, 2],
+            })
+            .expect("upload y");
+        let x_wire = x.wire_descriptor();
+        let y_wire = y.wire_descriptor();
+        let x_export = runmat_accelerate_api::export_wgpu_buffer(&x).expect("owned x export");
+        let y_export = runmat_accelerate_api::export_wgpu_buffer(&y).expect("owned y export");
+        let scalar = ScalarType::from_is_f64(x_export.precision == ProviderPrecision::F64);
+        let (child, _, _) = plot_child_element_snapshot(handle).expect("line snapshot");
+        let PlotChildHandleState::Line(state) = child else {
+            panic!("expected line child");
+        };
+        super::super::super::state::update_plot_element(state.figure, state.plot_index, |plot| {
+            *plot = PlotElement::Line(LinePlot::from_gpu_xy(
+                LineGpuInputs {
+                    x_buffer: GpuInputBuffer::from(x_export),
+                    y_buffer: GpuInputBuffer::from(y_export),
+                    len: 2,
+                    scalar,
+                },
+                LineGpuStyle {
+                    color: glam::Vec4::ONE,
+                    line_width: 1.0,
+                    line_style: LineStyle::Solid,
+                    marker: None,
+                    handle_visibility: "on".into(),
+                },
+                runmat_plot::core::BoundingBox::default(),
+                None,
+            ));
+        })
+        .expect("install provider-owned line source");
+        drop(x);
+        drop(y);
+        assert!(provider.acquire_live(&x_wire).is_ok());
+        assert!(provider.acquire_live(&y_wire).is_ok());
+
+        let target = resolve_plot_handle(&Value::Num(handle), "get").expect("handle");
+        let Value::Tensor(x_before) =
+            block_on(get_properties_async(target, Some("XData"), "get")).expect("exported x")
+        else {
+            panic!("expected typed x tensor");
+        };
+        assert_eq!(x_before.materialize_f64(), vec![1.25, -3.5]);
+        let target = resolve_plot_handle(&Value::Num(handle), "get").expect("handle");
+        let Value::Tensor(y_before) =
+            block_on(get_properties_async(target, Some("YData"), "get")).expect("exported y")
+        else {
+            panic!("expected typed y tensor");
+        };
+        assert_eq!(y_before.materialize_f64(), vec![4.75, -2.0]);
+        assert!(provider.acquire_live(&x_wire).is_ok());
+        assert!(provider.acquire_live(&y_wire).is_ok());
+
+        let target = resolve_plot_handle(&Value::Num(handle), "set").expect("handle");
+        block_on(set_properties_async(
+            target,
+            &[
+                Value::String("XData".into()),
+                Value::Tensor(Tensor::new(vec![8.0, 9.0], vec![1, 2]).expect("new x")),
+                Value::String("YData".into()),
+                Value::Tensor(Tensor::new(vec![-6.0, 7.0], vec![1, 2]).expect("new y")),
+            ],
+            "set",
+        ))
+        .expect("publish replacement coordinates");
+        assert!(provider.acquire_live(&x_wire).is_err());
+        assert!(provider.acquire_live(&y_wire).is_err());
+        let target = resolve_plot_handle(&Value::Num(handle), "get").expect("handle");
+        let Value::Tensor(x_after) =
+            block_on(get_properties_async(target, Some("XData"), "get")).expect("new x")
+        else {
+            panic!("expected new x tensor");
+        };
+        assert_eq!(x_after.materialize_f64(), vec![8.0, 9.0]);
+        let target = resolve_plot_handle(&Value::Num(handle), "get").expect("handle");
+        let Value::Tensor(y_after) =
+            block_on(get_properties_async(target, Some("YData"), "get")).expect("new y")
+        else {
+            panic!("expected new y tensor");
+        };
+        assert_eq!(y_after.materialize_f64(), vec![-6.0, 7.0]);
+    }
+
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test::wasm_bindgen_test(async)]
     async fn browser_resident_line_pending_set_drop_and_stale_revision() {
@@ -421,6 +532,7 @@ mod tests {
         use std::future::Future;
         use std::sync::Arc;
         use std::task::{Context, Poll};
+        use wgpu::util::DeviceExt;
 
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
@@ -442,15 +554,23 @@ mod tests {
             .await
             .expect("browser hardware gate requires a WebGPU device");
         let access = runmat_accelerate_api::WgpuDeviceAccess::new(device, queue);
+        let source_bytes: Vec<u8> = [1.25f32, -3.5]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect();
         let source = Arc::new(
             access
                 .with_shared(|emission| {
-                    emission.device().create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("browser-graphics-property-resident-source"),
-                        size: 8,
-                        usage: wgpu::BufferUsages::COPY_SRC,
-                        mapped_at_creation: false,
-                    })
+                    let buffer =
+                        emission
+                            .device()
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("browser-graphics-property-resident-source"),
+                                contents: &source_bytes,
+                                usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+                            });
+                    emission.queue().submit(std::iter::empty());
+                    buffer
                 })
                 .expect("create resident source"),
         );
@@ -505,7 +625,10 @@ mod tests {
         let original = get_properties_async(target, Some("XData"), "get")
             .await
             .expect("cancelled readback remains reusable");
-        assert_ne!(original, replacement[1]);
+        let Value::Tensor(ref original_tensor) = original else {
+            panic!("expected resident single tensor");
+        };
+        assert_eq!(original_tensor.materialize_f64(), vec![1.25, -3.5]);
 
         let target = resolve_plot_handle(&Value::Num(handle), "set").expect("handle");
         let mut stale = Box::pin(set_properties_async(target, &replacement, "set"));
