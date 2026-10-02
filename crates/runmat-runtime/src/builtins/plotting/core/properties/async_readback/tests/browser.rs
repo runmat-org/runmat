@@ -6,58 +6,14 @@ async fn browser_resident_line_pending_set_drop_and_stale_revision() {
     use runmat_plot::gpu::{line::LineGpuInputs, GpuInputBuffer, ScalarType};
     use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
     use std::future::Future;
-    use std::sync::Arc;
     use std::task::{Context, Poll};
-    use wgpu::util::DeviceExt;
 
     let _guard = lock_plot_registry();
     ensure_plot_test_env();
     crate::builtins::plotting::reset_plot_state();
     let handle = host_line();
 
-    let instance = Arc::new(wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::BROWSER_WEBGPU,
-        ..Default::default()
-    }));
-    let adapter = Arc::new(
-        instance
-            .request_adapter(&wgpu::RequestAdapterOptions::default())
-            .await
-            .expect("browser hardware gate requires a WebGPU adapter"),
-    );
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default(), None)
-        .await
-        .expect("browser hardware gate requires a WebGPU device");
-    let access = runmat_accelerate_api::WgpuDeviceAccess::new(device, queue);
-    let source_bytes: Vec<u8> = [1.25f32, -3.5]
-        .into_iter()
-        .flat_map(f32::to_le_bytes)
-        .collect();
-    let source = Arc::new(
-        access
-            .with_shared(|emission| {
-                let buffer =
-                    emission
-                        .device()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("browser-graphics-property-resident-source"),
-                            contents: &source_bytes,
-                            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-                        });
-                emission.queue().submit(std::iter::empty());
-                buffer
-            })
-            .expect("create resident source"),
-    );
-    runmat_plot::install_shared_wgpu_context(runmat_plot::SharedWgpuContext {
-        instance,
-        access,
-        adapter_info: adapter.get_info(),
-        limits: adapter.limits(),
-        features: adapter.features(),
-        adapter,
-    });
+    let (source, _access) = super::browser_sources::install_browser_source(&[1.25, -3.5]).await;
     let (child, _, _) = plot_child_element_snapshot(handle).expect("line snapshot");
     let PlotChildHandleState::Line(state) = child else {
         panic!("expected line child");
