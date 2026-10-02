@@ -464,6 +464,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn set_visible_figure_display_properties_request_presentation() {
         let _guard = setup();
         let fig =
