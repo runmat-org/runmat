@@ -2,9 +2,24 @@
 use num_complex::Complex;
 
 use super::{
-    filtfilt_error_with_detail, NormalizedCoefficients, FILTFILT_ERROR_INVALID_COEFFICIENTS,
+    filtfilt_error_with_detail, NormalizedCoefficients, BUILTIN_NAME, FILTFILT_ERROR_INTERNAL,
+    FILTFILT_ERROR_INVALID_COEFFICIENTS,
 };
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
+use std::collections::TryReserveError;
+
+fn allocation_error(source: TryReserveError) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "{}: initial-state allocation failed",
+        FILTFILT_ERROR_INTERNAL.message
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_source(source);
+    if let Some(identifier) = FILTFILT_ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.with_gpu_gather_retry(GpuGatherRetry::Never).build()
+}
 
 fn finite(value: Complex<f64>) -> bool {
     value.re.is_finite() && value.im.is_finite()
@@ -29,7 +44,22 @@ pub(super) fn lfilter_zi(coeffs: &NormalizedCoefficients) -> BuiltinResult<Vec<C
     if n == 0 {
         return Ok(Vec::new());
     }
-    let mut matrix = vec![vec![Complex::new(0.0, 0.0); n]; n];
+    n.checked_mul(n)
+        .and_then(|elements| elements.checked_mul(std::mem::size_of::<Complex<f64>>()))
+        .ok_or_else(|| {
+            let mut error =
+                filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, "initial-state size overflow");
+            error.gpu_gather_retry = GpuGatherRetry::Never;
+            error
+        })?;
+    let mut matrix = Vec::new();
+    matrix.try_reserve_exact(n).map_err(allocation_error)?;
+    for _ in 0..n {
+        let mut row = Vec::new();
+        row.try_reserve_exact(n).map_err(allocation_error)?;
+        row.resize(n, Complex::new(0.0, 0.0));
+        matrix.push(row);
+    }
     for (row, row_values) in matrix.iter_mut().enumerate() {
         for (col, value) in row_values.iter_mut().enumerate() {
             if row == col {
@@ -45,9 +75,11 @@ pub(super) fn lfilter_zi(coeffs: &NormalizedCoefficients) -> BuiltinResult<Vec<C
             *value -= a_t;
         }
     }
-    let rhs = (0..n)
-        .map(|idx| coeffs.b[idx + 1] - coeffs.a[idx + 1] * coeffs.b[0])
-        .collect::<Vec<_>>();
+    let mut rhs = Vec::new();
+    rhs.try_reserve_exact(n).map_err(allocation_error)?;
+    for idx in 0..n {
+        rhs.push(coeffs.b[idx + 1] - coeffs.a[idx + 1] * coeffs.b[0]);
+    }
     solve_linear(matrix, rhs)
 }
 
@@ -91,13 +123,15 @@ fn solve_linear(
             rhs.swap(pivot_row, pivot_idx);
         }
         let pivot = matrix[pivot_idx][pivot_idx];
-        let pivot_row_values = matrix[pivot_idx].clone();
         let pivot_rhs = rhs[pivot_idx];
-        for row in pivot_idx + 1..n {
-            let factor = matrix[row][pivot_idx] / pivot;
+        let (pivot_rows, trailing_rows) = matrix.split_at_mut(pivot_idx + 1);
+        let pivot_row_values = &pivot_rows[pivot_idx];
+        for (offset, values) in trailing_rows.iter_mut().enumerate() {
+            let row = pivot_idx + 1 + offset;
+            let factor = values[pivot_idx] / pivot;
             for (col, pivot_value) in pivot_row_values.iter().enumerate().skip(pivot_idx) {
-                matrix[row][col] -= factor * *pivot_value;
-                if !finite(matrix[row][col]) {
+                values[col] -= factor * *pivot_value;
+                if !finite(values[col]) {
                     return Err(range_error());
                 }
             }
@@ -108,7 +142,9 @@ fn solve_linear(
         }
     }
 
-    let mut out = vec![Complex::new(0.0, 0.0); n];
+    let mut out = Vec::new();
+    out.try_reserve_exact(n).map_err(allocation_error)?;
+    out.resize(n, Complex::new(0.0, 0.0));
     for row in (0..n).rev() {
         let mut acc = rhs[row];
         for (col, value) in matrix[row].iter().enumerate().skip(row + 1) {
@@ -168,5 +204,45 @@ mod tests {
             vec![Complex::new(f64::MAX, 0.0)],
         )
         .is_err());
+    }
+
+    #[test]
+    fn multistate_scaled_pivoting_reconstructs_independent_real_and_complex_solutions() {
+        let real = solve_linear(
+            vec![
+                vec![Complex::new(1.0e-14, 0.0), Complex::new(1.0, 0.0)],
+                vec![Complex::new(1.0, 0.0), Complex::new(1.0, 0.0)],
+            ],
+            vec![Complex::new(3.0 + 2.0e-14, 0.0), Complex::new(5.0, 0.0)],
+        )
+        .expect("two-state real solution");
+        assert!((real[0].re - 2.0).abs() < 1.0e-10);
+        assert!((real[1].re - 3.0).abs() < 1.0e-10);
+
+        let complex = solve_linear(
+            vec![
+                vec![Complex::new(1.0e-14, 1.0e-14), Complex::new(0.0, 0.0)],
+                vec![Complex::new(0.0, 0.0), Complex::new(2.0, -1.0)],
+            ],
+            vec![Complex::new(1.0, 1.0), Complex::new(3.0, 1.0)],
+        )
+        .expect("two-state complex solution");
+        assert!((complex[0].re - 1.0e14).abs() <= 1.0);
+        assert!(complex[0].im.abs() <= 1.0);
+        assert!((complex[1].re - 1.0).abs() < 1.0e-12);
+        assert!((complex[1].im - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn quadratic_workspace_overflow_is_a_structured_internal_error() {
+        let impossible = NormalizedCoefficients {
+            b: Vec::new(),
+            a: Vec::new(),
+            order: usize::MAX,
+            state_len: usize::MAX,
+        };
+        let error = lfilter_zi(&impossible).expect_err("checked square size before indexing");
+        assert_eq!(error.identifier(), FILTFILT_ERROR_INTERNAL.identifier);
+        assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
     }
 }
