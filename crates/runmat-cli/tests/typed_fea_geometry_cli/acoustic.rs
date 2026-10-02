@@ -6,7 +6,12 @@ mod duct;
 
 #[test]
 fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog() {
-    for quadratic in [false, true] {
+    for (quadratic, frequencies) in [
+        (false, vec![0.2]),
+        (true, vec![0.2]),
+        (false, vec![0.2, 0.3]),
+        (true, vec![0.2, 0.3]),
+    ] {
         let project = TempDir::new().unwrap();
         fs::create_dir(project.path().join("src")).unwrap();
         fs::write(project.path().join("runmat.toml"),
@@ -21,6 +26,14 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
         } else {
             STUDY.to_owned()
         };
+        let source = source.replace(
+            "frequencies = [0.2]",
+            if frequencies.len() == 1 {
+                "frequencies = [0.2]"
+            } else {
+                "frequencies = [0.2, 0.3]"
+            },
+        );
         fs::write(project.path().join("src/main.fea"), source).unwrap();
         let output = runmat(
             &project,
@@ -76,44 +89,59 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             .all(|e| e.order == order));
         // A new store after producer process exit: no live solver storage remains.
         let store = FilesystemAnalysisArtifactStore::new(project.path().join("artifacts"));
-        let retained = store
-            .load_run(run_ids[0].as_str().unwrap())
-            .unwrap()
-            .unwrap();
+        let run_id = run_ids[0].as_str().unwrap();
+        assert!(store.load_run(run_id).unwrap().is_none());
+        let retained = store.load_acoustic_frequency(run_id).unwrap().unwrap();
         assert_eq!(
-            retained.run.identity.family(),
+            retained.identity.family(),
             runmat_analysis_core::PhysicsFamily::Acoustic
         );
         assert!(!retained.production_publishable);
-        assert!(retained.thermal_results.is_none() && retained.modal_results.is_none());
-        let pressure = retained
-            .run
-            .fields
-            .iter()
-            .find(|f| f.field_id == "acoustic.pressure")
+        let runmat_runtime::analysis::AnalysisStudyStepNumericalResultData::AcousticFrequency(
+            numerical,
+        ) = &retained.numerical_result
+        else {
+            panic!("expected exact frequency result");
+        };
+        assert_eq!(numerical.entries.len(), frequencies.len());
+        assert_eq!(numerical.publication.samples().len(), frequencies.len());
+        let omitted = store
+            .load_field_page(
+                run_id,
+                &runmat_runtime::analysis::AnalysisFieldSelection::new("acoustic.pressure", None),
+                runmat_runtime::analysis::AnalysisFieldRequestOptions::default(),
+            )
             .unwrap();
-        let values = pressure.as_host_f64().unwrap();
-        assert_eq!(values.len(), 2 * mesh.topology.nodes.len());
-        // Small-k limit in a unit cavity with p=1 on every wall; this is an execution
-        // witness, not the independent duct/cavity convergence qualification gate.
-        for p in values.chunks_exact(2) {
-            assert!((p[0] - 1.0).abs() < 1e-5 && p[1].abs() < 1e-10, "{p:?}");
+        if frequencies.len() > 1 {
+            assert!(matches!(
+                omitted,
+                runmat_runtime::analysis::storage::AnalysisFieldPageLookup::SampleSelectionRequired(
+                    _
+                )
+            ));
+        } else {
+            assert!(matches!(
+                omitted,
+                runmat_runtime::analysis::storage::AnalysisFieldPageLookup::Page(_)
+            ));
         }
-        let velocity = retained
-            .run
-            .fields
-            .iter()
-            .find(|f| f.field_id == "acoustic.particle_velocity")
-            .unwrap();
-        assert_eq!(
-            velocity.as_host_f64().unwrap().len(),
-            6 * mesh.topology.volume_elements.len()
+        assert!(
+            matches!(store.load_field_page(run_id,
+            &runmat_runtime::analysis::AnalysisFieldSelection::new("acoustic.pressure", Some(
+                runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(999.0))),
+            runmat_runtime::analysis::AnalysisFieldRequestOptions::default()).unwrap(),
+            runmat_runtime::analysis::storage::AnalysisFieldPageLookup::SampleNotFound)
         );
-        assert!(velocity
-            .as_host_f64()
-            .unwrap()
-            .iter()
-            .all(|v| v.is_finite()));
+        for frequency in &frequencies {
+            let pressure = field_values(&store, run_id, "acoustic.pressure", *frequency);
+            let velocity = field_values(&store, run_id, "acoustic.particle_velocity", *frequency);
+            assert_eq!(pressure.len(), 2 * mesh.topology.nodes.len());
+            assert_eq!(velocity.len(), 6 * mesh.topology.volume_elements.len());
+            for p in pressure.chunks_exact(2) {
+                assert!((p[0] - 1.0).abs() < 1e-5 && p[1].abs() < 1e-10, "{p:?}");
+            }
+            assert!(velocity.iter().all(|v| v.is_finite()));
+        }
         let catalog = &manifest["numerical_evidence"]["catalog"];
         assert!(catalog["objects"].as_array().unwrap().len() > 3);
         let object_paths = manifest["numerical_evidence"]["object_artifact_paths"]
@@ -150,22 +178,43 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             runmat_execution_artifact::cache::CacheExport::write_verified(&mut cold, &logical)
                 .unwrap();
         }
-        let states = manifest["public_run"]["states"].as_array().unwrap();
-        assert_eq!(states.len(), 1);
-        let state = runmat_analysis_fea::execution::CanonicalSemanticState::from_canonical_bytes(
-            &fs::read(
-                project
-                    .path()
-                    .join(states[0]["artifact_path"].as_str().unwrap()),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(state.kind, runmat_analysis_core::StateKind::AcousticComplex);
-        let acoustic = state.payload.acoustic().unwrap();
-        assert_eq!(acoustic.frequency.hertz, 0.2);
-        assert_eq!(acoustic.fields.fields()[0].storage(), pressure);
-        assert_eq!(acoustic.fields.fields()[1].storage(), velocity);
+        assert!(manifest["public_run"]["states"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        let states = numerical
+            .entries
+            .iter()
+            .map(|entry| {
+                assert_eq!(entry.states.len(), 1);
+                let state = entry.states[0].clone();
+                assert_eq!(state.kind, runmat_analysis_core::StateKind::AcousticComplex);
+                assert_eq!(
+                    state.payload.acoustic().unwrap().frequency.hertz,
+                    entry.entry.frequency_hz()
+                );
+                let payload = state.payload.acoustic().unwrap();
+                assert_eq!(
+                    payload.fields.fields()[0].storage().as_host_f64().unwrap(),
+                    field_values(
+                        &store,
+                        run_id,
+                        "acoustic.pressure",
+                        entry.entry.frequency_hz()
+                    )
+                );
+                assert_eq!(
+                    payload.fields.fields()[1].storage().as_host_f64().unwrap(),
+                    field_values(
+                        &store,
+                        run_id,
+                        "acoustic.particle_velocity",
+                        entry.entry.frequency_hz()
+                    )
+                );
+                state
+            })
+            .collect::<Vec<_>>();
         let root: runmat_execution::value::ValueRef =
             serde_json::from_value(manifest["numerical_evidence"]["root"].clone()).unwrap();
         let access = runmat_execution_artifact::ArtifactAccess {
@@ -181,8 +230,55 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             limits,
         )
         .unwrap();
-        assert_eq!(completed.states[0].state, state);
-        assert_eq!(completed.result.result.mesh_digest(), mesh.canonical_digest);
+        assert_eq!(completed.entries.len(), frequencies.len());
+        for ((entry, state), frequency) in completed.entries.iter().zip(&states).zip(&frequencies) {
+            assert_eq!(entry.states[0].state, *state);
+            assert_eq!(entry.result.result.mesh_digest(), mesh.canonical_digest);
+            assert_eq!(entry.entry.frequency_hz(), *frequency);
+        }
+        // Replay consumes the exact saved entry/phase inventory; it never reruns a solve.
+        let mut omitted = completed.entry_closures();
+        omitted.pop();
+        assert!(runmat_analysis_execution::import_acoustic_study_completion(
+            &cold,
+            completed.preparation().unwrap(),
+            omitted,
+            completed.assembly_closure.clone(),
+            completed.wave_wall_millis,
+        )
+        .is_err());
+        if frequencies.len() > 1 {
+            let mut reversed = completed.entry_closures();
+            reversed.reverse();
+            assert!(runmat_analysis_execution::import_acoustic_study_completion(
+                &cold,
+                completed.preparation().unwrap(),
+                reversed,
+                completed.assembly_closure.clone(),
+                completed.wave_wall_millis,
+            )
+            .is_err());
+        }
+        let mut missing_state = completed.entry_closures();
+        let ordinal = missing_state[0]
+            .closures
+            .iter()
+            .position(|closure| {
+                matches!(
+                    closure.phase,
+                    runmat_analysis_execution::AcousticStudyResultPhase::State { .. }
+                )
+            })
+            .unwrap();
+        missing_state[0].closures.remove(ordinal);
+        assert!(runmat_analysis_execution::import_acoustic_study_completion(
+            &cold,
+            completed.preparation().unwrap(),
+            missing_state,
+            completed.assembly_closure.clone(),
+            completed.wave_wall_millis,
+        )
+        .is_err());
         assert!(runmat_analysis_execution::import_acoustic_study_root(
             &cold,
             &root,
@@ -194,7 +290,15 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
         let (completion, _source) =
             runmat_execution_runner_native::acoustic_study_completion_from_source(completed, cold)
                 .unwrap();
-        assert_eq!(completion.states, vec![state]);
+        assert_eq!(
+            completion
+                .entries
+                .iter()
+                .flat_map(|entry| entry.states.clone())
+                .collect::<Vec<_>>(),
+            states
+        );
+        assert_eq!(completion.publication.samples().len(), frequencies.len());
     }
 }
 
@@ -242,3 +346,81 @@ study response {
     analysis sound { acoustic harmonic { frequencies = [0.2] Hz } }
 }
 "#;
+
+fn field_values(
+    store: &FilesystemAnalysisArtifactStore,
+    run_id: &str,
+    field_id: &str,
+    frequency: f64,
+) -> Vec<f64> {
+    let selection = runmat_runtime::analysis::AnalysisFieldSelection {
+        field_id: field_id.into(),
+        sample: Some(
+            runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(frequency),
+        ),
+    };
+    let mut values = Vec::new();
+    let mut offset = 0;
+    let total = loop {
+        let runmat_runtime::analysis::storage::AnalysisFieldPageLookup::Page(page) = store
+            .load_field_page(
+                run_id,
+                &selection,
+                runmat_runtime::analysis::AnalysisFieldRequestOptions {
+                    offset: Some(offset),
+                    limit: None,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("exact acoustic sample page missing");
+        };
+        assert_eq!(page.offset, offset);
+        assert_eq!(
+            page.count,
+            runmat_runtime::analysis::ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT
+                .min(page.total_count - offset)
+        );
+        assert_eq!(
+            page.truncated,
+            offset > 0 || offset + page.count < page.total_count
+        );
+        let runmat_runtime::analysis::AnalysisFieldPageValues::ComplexInterleaved(chunk) =
+            page.values
+        else {
+            panic!("acoustic fields must preserve complex values");
+        };
+        assert_eq!(chunk.len(), 2 * page.count);
+        values.extend(chunk);
+        offset += page.count;
+        if offset == page.total_count {
+            break page.total_count;
+        }
+        assert!(page.count > 0);
+    };
+    let runmat_runtime::analysis::storage::AnalysisFieldPageLookup::Page(partial) = store
+        .load_field_page(
+            run_id,
+            &selection,
+            runmat_runtime::analysis::AnalysisFieldRequestOptions {
+                offset: Some(1),
+                limit: Some(7),
+            },
+        )
+        .unwrap()
+    else {
+        panic!("exact acoustic partial page missing");
+    };
+    assert_eq!(
+        (partial.offset, partial.count, partial.total_count),
+        (1, 7, total)
+    );
+    assert!(partial.truncated);
+    assert_eq!(
+        partial.values,
+        runmat_runtime::analysis::AnalysisFieldPageValues::ComplexInterleaved(
+            values[2..16].to_vec()
+        )
+    );
+    values
+}

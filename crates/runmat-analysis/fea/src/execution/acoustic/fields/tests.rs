@@ -5,6 +5,108 @@ use crate::{
 };
 
 #[test]
+fn sampled_native_catalog_profiles_cover_partition_boundaries() {
+    use crate::results::field::{
+        RecoveredFieldArtifactManifest, RecoveredFieldPartition,
+        RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
+    };
+    let mesh = slab_mesh(1);
+    let result = super::super::tests::workload().execute(&mesh).unwrap();
+    let source = result.native_field_request_from_result().unwrap();
+    // Shape-only synthetic values, not independent numerical/physics evidence.
+    for count in [
+        RECOVERED_FIELD_PARTITION_ENTITY_COUNT - 1,
+        RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
+        RECOVERED_FIELD_PARTITION_ENTITY_COUNT + 1,
+        2 * RECOVERED_FIELD_PARTITION_ENTITY_COUNT + 1,
+    ] {
+        let request = FieldRecoveryRequest::new(
+            source.producer,
+            source.source,
+            source.topology,
+            native_acoustic_field_plan(count, count).unwrap(),
+        )
+        .unwrap();
+        let definitions = [
+            native_acoustic_field_definition("acoustic.pressure", &request.plan.requirements[0])
+                .unwrap(),
+            native_acoustic_field_definition(
+                "acoustic.particle_velocity",
+                &request.plan.requirements[1],
+            )
+            .unwrap(),
+        ];
+        for frequency in [0.1, 0.2, 0.3] {
+            let sample = RecoveredFieldSample::FrequencyHertz(frequency);
+            let fields = definitions
+                .iter()
+                .map(|definition| {
+                    let shape = definition.storage_shape(count).unwrap();
+                    let width = definition.storage_component_count().unwrap();
+                    RecoveredField::new(
+                        definition.clone(),
+                        sample,
+                        AnalysisField::host_f64(
+                            definition.field_id(),
+                            shape,
+                            vec![f64::MAX; count * width],
+                        ),
+                    )
+                    .unwrap()
+                })
+                .collect();
+            let artifact = RecoveredFieldArtifact::new(
+                request.identity(),
+                request.source,
+                request.topology.discretization_digest(),
+                RecoveredFieldEntityCounts {
+                    nodes: count,
+                    volume_elements: count,
+                    ..native_acoustic_entity_counts(&result)
+                },
+                fields,
+            )
+            .unwrap();
+            let profile = RecoveredFieldArtifactManifest::profile_sampled_shape(
+                &request,
+                &definitions,
+                &[count, count],
+                sample,
+            )
+            .unwrap();
+            let manifest = artifact.manifest().unwrap().canonical_bytes().unwrap();
+            assert!(manifest.len() as u64 <= profile.encoded_bytes_upper_bound);
+            assert!(
+                runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+                    &manifest
+                )
+                .unwrap()
+                    <= profile.materialization_resident_bytes_estimate
+            );
+            for field in artifact.fields() {
+                let partitions = canonical_field_partitions(field).unwrap();
+                assert_eq!(
+                    partitions.len(),
+                    count.div_ceil(RECOVERED_FIELD_PARTITION_ENTITY_COUNT)
+                );
+                for partition in partitions {
+                    let projected = RecoveredFieldPartition::profile_shape(
+                        field.definition(),
+                        sample,
+                        partition.source_indices.len(),
+                    )
+                    .unwrap();
+                    let bytes = partition.canonical_bytes().unwrap();
+                    assert!(bytes.len() as u64 <= projected.encoded_bytes_upper_bound);
+                    assert!(runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(&bytes).unwrap()
+                        <= projected.materialization_resident_bytes_estimate);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn cold_complex_acoustic_fields_use_generic_domains_and_partition_exactly() {
     for quadratic in [false, true] {
         let mesh = if quadratic {

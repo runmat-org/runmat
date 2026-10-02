@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use runmat_analysis_fea::{
     execution::{
-        AcousticHarmonicWorkload, AnalysisNumericalObjectKind, AnalysisObjectManifest,
+        AcousticFrequencyWorkload, AnalysisNumericalObjectKind, AnalysisObjectManifest,
         ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
     },
     study::{
@@ -27,10 +27,8 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    import_acoustic_study_completion, AcousticStudyPreparation, AcousticStudyResultClosure,
-    CompletedAcousticStudy,
-};
+use super::completion::{AcousticStudyAssemblyClosure, AcousticStudyEntryClosure};
+use super::{import_acoustic_study_completion, AcousticStudyPreparation, CompletedAcousticStudy};
 use crate::{
     import_analysis_objects, prepare_analysis_objects, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisCapabilityRequirement, AnalysisOutputPolicy,
@@ -47,7 +45,7 @@ mod tests;
 struct PreparationWire {
     policy: AcousticStudyPlanningPolicy,
     compiled: CompiledAnalysisStudy,
-    workload: AcousticHarmonicWorkload,
+    workload: AcousticFrequencyWorkload,
     mesh: SolverMeshArtifact,
     frozen_project_digest: Option<Digest>,
     program_revision: ProgramRevision,
@@ -59,10 +57,10 @@ struct PreparationWire {
 }
 
 impl PreparationWire {
-    fn new(preparation: AcousticStudyPreparation) -> Self {
+    fn new(preparation: AcousticStudyPreparation) -> AnalysisBridgeResult<Self> {
         let limits = preparation.output_policy.inventory_limits();
-        let workload = preparation.workload().clone();
-        Self {
+        let workload = preparation.frequency_workload()?;
+        Ok(Self {
             policy: preparation.policy,
             compiled: preparation.product.compiled,
             workload,
@@ -74,7 +72,7 @@ impl PreparationWire {
             max_objects: limits.max_objects,
             max_object_bytes: limits.max_object_bytes,
             max_total_bytes: limits.max_total_bytes,
-        }
+        })
     }
 
     fn into_preparation(
@@ -94,13 +92,8 @@ impl PreparationWire {
         }
         let plan = plan_acoustic_study(&self.compiled, self.policy)
             .map_err(|error| invalid(&error.to_string()))?;
-        let [frequency] = plan.frequencies() else {
-            return Err(invalid("acoustic root must retain one exact frequency"));
-        };
-        if frequency.workload() != &self.workload {
-            return Err(invalid("acoustic root workload differs from authored plan"));
-        }
-        Ok(AcousticStudyPreparation {
+        let expected_workload = self.workload;
+        let preparation = AcousticStudyPreparation {
             policy: self.policy,
             product: AcousticStudyProduct {
                 compiled: self.compiled,
@@ -112,7 +105,13 @@ impl PreparationWire {
             program_revision: self.program_revision,
             output_policy,
             required_capabilities: self.required_capabilities,
-        })
+        };
+        if preparation.frequency_workload()? != expected_workload {
+            return Err(invalid(
+                "acoustic root workload differs from entire exact authored plan",
+            ));
+        }
+        Ok(preparation)
     }
 }
 
@@ -121,7 +120,9 @@ impl PreparationWire {
 struct CompletionWire {
     schema_version: u16,
     preparation: PreparationWire,
-    closures: Vec<AcousticStudyResultClosure>,
+    entries: Vec<AcousticStudyEntryClosure>,
+    assembly: AcousticStudyAssemblyClosure,
+    wave_wall_millis: u64,
     descendants: PublishedObjectCatalog,
 }
 
@@ -142,9 +143,11 @@ pub fn prepare_acoustic_study_root(
     let descendants = descendant_catalog(completed, &access)?;
     check_inventory(&descendants.objects, &access, policy.inventory_limits())?;
     let wire = CompletionWire {
-        schema_version: 1,
-        preparation: PreparationWire::new(preparation),
-        closures: completed.result_closures().to_vec(),
+        schema_version: 2,
+        preparation: PreparationWire::new(preparation)?,
+        entries: completed.entry_closures(),
+        assembly: completed.assembly_closure.clone(),
+        wave_wall_millis: completed.wave_wall_millis,
         descendants,
     };
     let bytes = encode_contract(PREFIX, "acoustic-study-completion", &wire, LIMITS)?;
@@ -163,8 +166,11 @@ pub fn prepare_acoustic_study_root(
     check_inventory(&inventory, &access, policy.inventory_limits())?;
     let catalog = PublishedObjectCatalog::new(vec![root.clone()], inventory)?;
     let mut new_objects = objects.objects;
-    new_objects.extend(completed.baseline_usage.objects.objects.iter().cloned());
-    new_objects.extend(completed.terminal_usage.objects.objects.iter().cloned());
+    for entry in &completed.entries {
+        new_objects.extend(entry.baseline_usage.objects.objects.iter().cloned());
+        new_objects.extend(entry.terminal_usage.objects.objects.iter().cloned());
+    }
+    new_objects.extend(completed.resource_usage.objects.objects.iter().cloned());
     let mut by_digest = BTreeMap::new();
     for object in new_objects {
         object.validate()?;
@@ -213,7 +219,7 @@ pub fn import_acoustic_study_root(
     }
     let wire: CompletionWire =
         decode_contract(PREFIX, "acoustic-study-completion", &payload, LIMITS)?;
-    if wire.schema_version != 1 {
+    if wire.schema_version != 2 {
         return Err(invalid("unsupported acoustic completion schema"));
     }
     if wire.preparation.max_objects > limits.max_objects
@@ -234,7 +240,13 @@ pub fn import_acoustic_study_root(
     }
     let expected_descendants = wire.descendants;
     let preparation = wire.preparation.into_preparation(access.clone())?;
-    let completed = import_acoustic_study_completion(source, preparation, wire.closures)?;
+    let completed = import_acoustic_study_completion(
+        source,
+        preparation,
+        wire.entries,
+        wire.assembly,
+        wire.wave_wall_millis,
+    )?;
     if descendant_catalog(&completed, access)? != expected_descendants {
         return Err(invalid(
             "acoustic completion has missing, substituted or unrelated descendants",
@@ -249,11 +261,16 @@ fn descendant_catalog(
 ) -> AnalysisBridgeResult<PublishedObjectCatalog> {
     let mut roots = Vec::new();
     let mut objects = Vec::new();
-    for closure in completed.result_closures() {
+    let responses = completed
+        .entries
+        .iter()
+        .flat_map(|entry| entry.closures.iter().map(|closure| &closure.response))
+        .chain(std::iter::once(&completed.assembly_closure.response));
+    for response in responses {
         let ProgramExecutionResponse::ExternalizedSuccess {
             outputs,
             result_objects,
-        } = &closure.response
+        } = response
         else {
             return Err(invalid(
                 "acoustic completion must contain externalized phase responses",
@@ -267,7 +284,12 @@ fn descendant_catalog(
         }
         objects.extend(result_objects.iter().cloned());
     }
-    for usage in [&completed.baseline_usage, &completed.terminal_usage] {
+    let usages = completed
+        .entries
+        .iter()
+        .flat_map(|entry| [&entry.baseline_usage, &entry.terminal_usage])
+        .chain(std::iter::once(&completed.resource_usage));
+    for usage in usages {
         roots.push(
             usage
                 .objects

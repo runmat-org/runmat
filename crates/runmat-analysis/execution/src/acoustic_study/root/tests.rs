@@ -11,15 +11,18 @@ fn preparation_codec_preserves_authored_and_execution_inputs() {
     let input = preparation();
     let access = input.artifact_access.clone();
     let compiled = input.product.compiled.clone();
-    let workload = input.workload().clone();
+    let workload = input.frequency_workload().unwrap();
     let revision = input.program_revision.clone();
     let expected_digest = compiled.definition_digest().unwrap();
     let expected_workload = workload.identity().unwrap();
-    let wire = PreparationWire::new(input);
+    let wire = PreparationWire::new(input).unwrap();
     let decoded = roundtrip(&wire).into_preparation(access.clone()).unwrap();
     assert_eq!(decoded.product.compiled, compiled);
-    assert_eq!(decoded.workload(), &workload);
-    assert_eq!(decoded.workload().identity().unwrap(), expected_workload);
+    assert_eq!(decoded.frequency_workload().unwrap(), workload);
+    assert_eq!(
+        decoded.frequency_workload().unwrap().identity().unwrap(),
+        expected_workload
+    );
     assert_eq!(decoded.program_revision, revision);
     assert_eq!(decoded.artifact_access, access);
     assert_eq!(decoded.output_policy.chunk_bytes(), wire.chunk_bytes);
@@ -36,7 +39,10 @@ fn preparation_codec_preserves_authored_and_execution_inputs() {
         wire.max_total_bytes
     );
     let coordinator = AcousticStudyCoordinator::new(decoded).unwrap();
-    assert_eq!(coordinator.phase(), AcousticStudyPhase::ReadyForSolve);
+    assert_eq!(
+        coordinator.entries()[0].phase(),
+        AcousticStudyPhase::ReadyForSolve
+    );
     assert_eq!(
         coordinator.compiled_study().definition_digest().unwrap(),
         expected_digest
@@ -44,18 +50,51 @@ fn preparation_codec_preserves_authored_and_execution_inputs() {
 }
 
 #[test]
+fn preparation_codec_retains_entire_multi_frequency_plan() {
+    let mut input = preparation();
+    input.product.compiled.model.sequence.steps[0].independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![0.1, 0.2, 0.3]);
+    input.product.plan = plan_acoustic_study(&input.product.compiled, input.policy).unwrap();
+    let workload = input.frequency_workload().unwrap();
+    let access = input.artifact_access.clone();
+    let wire = PreparationWire::new(input).unwrap();
+    let decoded = roundtrip(&wire).into_preparation(access).unwrap();
+    assert_eq!(decoded.frequency_workload().unwrap(), workload);
+    assert_eq!(decoded.product.plan.frequencies().len(), 3);
+    assert_eq!(
+        decoded
+            .product
+            .plan
+            .frequency_plan()
+            .reference_frequency_hz(),
+        0.1
+    );
+    let coordinator = AcousticStudyCoordinator::new(decoded).unwrap();
+    assert_eq!(coordinator.entries().len(), 3);
+}
+
+#[test]
+fn preparation_codec_does_not_normalize_invalid_authored_frequency_order() {
+    let mut input = preparation();
+    input.product.compiled.model.sequence.steps[0].independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![0.3, 0.1, 0.2]);
+    assert!(plan_acoustic_study(&input.product.compiled, input.policy).is_err());
+    assert!(AcousticStudyCoordinator::new(input).is_err());
+}
+
+#[test]
 fn preparation_wire_rejects_invalid_or_silently_clamped_policy() {
     for chunk_bytes in [0, usize::MAX] {
         let input = preparation();
         let access = input.artifact_access.clone();
-        let mut wire = PreparationWire::new(input);
+        let mut wire = PreparationWire::new(input).unwrap();
         wire.chunk_bytes = chunk_bytes;
         assert!(roundtrip(&wire).into_preparation(access).is_err());
     }
     for zero_limit in 0..3 {
         let input = preparation();
         let access = input.artifact_access.clone();
-        let mut wire = PreparationWire::new(input);
+        let mut wire = PreparationWire::new(input).unwrap();
         match zero_limit {
             0 => wire.max_objects = 0,
             1 => wire.max_object_bytes = 0,
@@ -70,10 +109,10 @@ fn decoded_preparation_cannot_authorize_forged_numerical_inputs() {
     for forgery in 0..3 {
         let input = preparation();
         let access = input.artifact_access.clone();
-        let mut wire = PreparationWire::new(input);
+        let mut wire = PreparationWire::new(input).unwrap();
         match forgery {
             0 => wire.compiled.model.geometry_revision += 1,
-            1 => wire.workload.solver.relative_tolerance *= 0.5,
+            1 => wire.policy.krylov_restart += 1,
             _ => wire.mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO,
         }
         let decoded = roundtrip(&wire).into_preparation(access);

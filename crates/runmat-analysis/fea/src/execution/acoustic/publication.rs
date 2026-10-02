@@ -24,14 +24,14 @@ impl AcousticHarmonicWorkload {
         let [declaration] = step.state_outputs.as_slice() else {
             return Ok(None);
         };
-        Ok((frequencies.as_slice() == [self.frequency.hertz]
+        Ok((frequencies.contains(&self.frequency.hertz)
             && declaration.kind == StateKind::AcousticComplex
             && declaration.completeness == StateCompleteness::Complete
             && declaration.persistence != StatePersistence::CheckpointOnly)
             .then_some(declaration))
     }
 
-    /// An ambiguous frequency sweep has no single semantic-state publication inventory.
+    /// The request is scoped to this entry's original result, never to an aggregate phasor.
     pub fn state_publication_requests(
         &self,
         topology_digest: Digest,

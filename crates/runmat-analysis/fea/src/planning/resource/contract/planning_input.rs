@@ -3,6 +3,7 @@ use super::*;
 impl FeaResourcePlanningInput {
     pub const fn topology_digest(&self) -> Digest {
         match &self.demand {
+            FeaResourceDemand::AcousticFrequencyAssembly(demand) => demand.topology_digest,
             // Accuracy is scoped to the semantic numerical result, not a mesh operation.
             FeaResourceDemand::AccuracyEvaluation(demand) => demand.source_result.digest(),
             FeaResourceDemand::ResultPublication(demand) => demand.source_result.digest(),
@@ -92,6 +93,7 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::ObservationHistoryFinalization(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
+            | FeaResourceDemand::AcousticFrequencyAssembly(_)
             | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 Some(&demand.operator.observations)
@@ -138,6 +140,7 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::ObservationHistoryFinalization(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
+            | FeaResourceDemand::AcousticFrequencyAssembly(_)
             | FeaResourceDemand::StructuralTransientResultAssembly(_) => {
                 static MONOLITHIC: PartitioningPolicy = PartitioningPolicy::Monolithic;
                 &MONOLITHIC
@@ -189,6 +192,7 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::ObservationHistoryFinalization(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
+            | FeaResourceDemand::AcousticFrequencyAssembly(_)
             | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 Some(&demand.operator)
@@ -233,6 +237,7 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::ObservationHistoryFinalization(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
+            | FeaResourceDemand::AcousticFrequencyAssembly(_)
             | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 Some(&mut demand.operator)

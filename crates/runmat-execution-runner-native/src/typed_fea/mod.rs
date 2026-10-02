@@ -381,7 +381,13 @@ async fn execute_case(
                 precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
                 quality_policy: runmat_runtime::analysis::QualityPolicy::Strict,
                 mode_count: 1,
-                residual_warn_threshold: result.completion.workload.solver.relative_tolerance,
+                residual_warn_threshold: result
+                    .completion
+                    .entries
+                    .iter()
+                    .map(|entry| entry.workload.solver.relative_tolerance)
+                    .reduce(f64::min)
+                    .ok_or("acoustic completion omits its frequency entries")?,
             };
             let identity =
                 runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(

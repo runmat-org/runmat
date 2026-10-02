@@ -10,7 +10,9 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{cache::CacheImport, ArtifactResult};
 use runmat_runtime::analysis::{
-    AcousticStudyCompletion, AcousticStudyObjectSource, AcousticStudySource,
+    AcousticStudyCompletion, AcousticStudyEntryCompletion, AcousticStudyObjectSource,
+    AcousticStudySource, AnalysisArtifactRoot, FrequencySampleArtifactRootInventory,
+    FrequencySampleArtifactRoots, FrequencySamplePublicationAccess,
 };
 
 struct RetainedAcousticSource<S> {
@@ -56,7 +58,9 @@ impl<S: CacheImport + Send + Sync> AcousticStudySource for RetainedAcousticSourc
         let replay = import_acoustic_study_completion(
             self,
             self.completed.preparation().map_err(|e| e.to_string())?,
-            self.completed.result_closures().to_vec(),
+            self.completed.entry_closures(),
+            self.completed.assembly_closure.clone(),
+            self.completed.wave_wall_millis,
         )
         .map_err(|error| error.to_string())?;
         let expected = completion(&replay)?;
@@ -72,31 +76,101 @@ impl<S: CacheImport + Send + Sync> AcousticStudySource for RetainedAcousticSourc
 
 fn completion(completed: &CompletedAcousticStudy) -> Result<AcousticStudyCompletion, String> {
     let root = prepare_acoustic_study_root(completed).map_err(|error| error.to_string())?;
+    let preparation = completed.preparation().map_err(|e| e.to_string())?;
+    let access = &preparation.artifact_access;
+    let artifact_root = |objects: &runmat_analysis_execution::PreparedAnalysisObjects| {
+        AnalysisArtifactRoot::new(
+            objects
+                .root_reference(access, runmat_execution::value::ValueRefKind::ResultObject)
+                .map_err(|e| e.to_string())?,
+            objects.manifest.kind,
+            objects.manifest.logical_identity,
+            objects.manifest.payload_digest,
+        )
+    };
+    let publication_root = artifact_root(&completed.assembly.publication_objects)?;
+    let mut references = completed
+        .assembly
+        .publication_objects
+        .unique_references(access, runmat_execution::value::ValueRefKind::ResultObject)
+        .map_err(|e| e.to_string())?;
+    let mut roots = vec![publication_root.reference().clone()];
+    let mut samples = Vec::new();
+    for fields in &completed.assembly.fields {
+        let fields_root = artifact_root(fields)?;
+        roots.push(fields_root.reference().clone());
+        references.extend(
+            fields
+                .unique_references(access, runmat_execution::value::ValueRefKind::ResultObject)
+                .map_err(|e| e.to_string())?,
+        );
+        samples.push(FrequencySampleArtifactRoots::new(fields_root, None));
+    }
+    let mut unique = BTreeMap::new();
+    for reference in references {
+        if let Some(previous) = unique.insert(reference.id, reference.clone()) {
+            if previous != reference {
+                return Err(
+                    "acoustic publication contains conflicting authority references".into(),
+                );
+            }
+        }
+    }
+    let publication_catalog =
+        runmat_execution::value::PublishedObjectCatalog::new(roots, unique.into_values().collect())
+            .map_err(|e| e.to_string())?;
+    let authority = completed
+        .assembly
+        .result
+        .publication_authority()
+        .map_err(|e| e.to_string())?;
+    let publication_roots = FrequencySampleArtifactRootInventory::new(
+        publication_root,
+        samples,
+        &FrequencySamplePublicationAccess {
+            publication: &completed.assembly.publication,
+            authority: &authority,
+            object_catalog: &publication_catalog,
+        },
+    )?;
     Ok(AcousticStudyCompletion {
-        host_workload_digest: completed
-            .result_closures()
-            .first()
-            .ok_or("acoustic completion omits solve")?
-            .workload
-            .identity
-            .digest(),
         compiled: completed.compiled.clone(),
         workload: completed.workload.clone(),
-        result: completed.result.result.clone(),
-        numerical_receipt: completed.result.numerical_receipt.clone(),
-        accuracy: completed.accuracy.artifact.clone(),
-        states: completed
-            .states
+        result: completed.assembly.result.clone(),
+        entries: completed
+            .entries
             .iter()
-            .map(|state| state.state.clone())
-            .collect(),
-        baseline_usage: completed.baseline_usage.evidence.clone(),
-        terminal_usage: completed.terminal_usage.evidence.clone(),
-        publication: completed.publication.result.clone(),
-        frozen_project_digest: completed
-            .preparation()
-            .map_err(|e| e.to_string())?
-            .frozen_project_digest,
+            .map(|entry| {
+                let solve = entry
+                    .result_closures()
+                    .iter()
+                    .find(|closure| {
+                        closure.phase == runmat_analysis_execution::AcousticStudyResultPhase::Solve
+                    })
+                    .ok_or("acoustic entry omits its exact solve phase")?;
+                Ok(AcousticStudyEntryCompletion {
+                    entry: entry.entry,
+                    workload: entry.workload.clone(),
+                    host_workload_digest: solve.workload.identity.digest(),
+                    result: entry.result.result.clone(),
+                    numerical_receipt: entry.result.numerical_receipt.clone(),
+                    accuracy: entry.accuracy.artifact.clone(),
+                    states: entry
+                        .states
+                        .iter()
+                        .map(|state| state.state.clone())
+                        .collect(),
+                    baseline_usage: entry.baseline_usage.evidence.clone(),
+                    terminal_usage: entry.terminal_usage.evidence.clone(),
+                    publication: entry.publication.result.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        resource_usage: completed.resource_usage.evidence.clone(),
+        publication: completed.assembly.publication.clone(),
+        publication_catalog,
+        publication_roots,
+        frozen_project_digest: preparation.frozen_project_digest,
         root: root.root,
         catalog: root.catalog,
     })

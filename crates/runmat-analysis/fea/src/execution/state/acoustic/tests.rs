@@ -119,24 +119,46 @@ fn acoustic_detached_publication_is_source_bound_and_borrowed_profile_bounded() 
 }
 
 #[test]
-fn acoustic_ambiguous_numerical_frequency_has_no_single_state_inventory() {
+fn acoustic_sweep_entries_keep_distinct_original_complex_state_authority() {
     let mesh = slab_mesh(2);
-    let mut workload = crate::execution::acoustic::tests::workload();
-    workload.model.sequence.steps[0].independent_domain =
+    let mut template = crate::execution::acoustic::tests::workload();
+    template.model.sequence.steps[0].independent_domain =
         IndependentDomain::FrequencyHertz(vec![0.2, 0.4]);
-    let result = workload.execute(&mesh).unwrap();
+    let sweep = crate::execution::AcousticFrequencyWorkload::new(template.clone()).unwrap();
     let topology = Digest::from_bytes(*mesh.canonical_digest.bytes());
-    assert!(workload
-        .state_publication_requests(topology, result.source_result_identity().unwrap())
-        .unwrap()
-        .is_empty());
-    assert!(result.state_publication_requests().unwrap().is_empty());
-    assert!(result
-        .state_publication_profiles(Digest::sha256(result.canonical_bytes().unwrap()))
-        .unwrap()
-        .entries()
-        .is_empty());
-    assert!(CanonicalSemanticState::from_acoustic_result(&workload, &mesh, &result).is_err());
+    let mut states = Vec::new();
+    for entry in sweep.plan().entries().unwrap() {
+        let workload = sweep.entry(entry).unwrap();
+        assert_eq!(workload.model, template.model);
+        let result = workload.execute(&mesh).unwrap();
+        let requests = workload
+            .state_publication_requests(topology, result.source_result_identity().unwrap())
+            .unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests, result.state_publication_requests().unwrap());
+        let profiles = result
+            .state_publication_profiles(Digest::sha256(result.canonical_bytes().unwrap()))
+            .unwrap();
+        assert_eq!(profiles.entries().len(), 1);
+        let state =
+            CanonicalSemanticState::from_acoustic_result(&workload, &mesh, &result).unwrap();
+        assert_eq!(
+            state.payload.acoustic().unwrap().frequency.hertz,
+            entry.frequency_hz()
+        );
+        assert_eq!(
+            state.source_result,
+            result.source_result_identity().unwrap()
+        );
+        assert_eq!(
+            state,
+            CanonicalSemanticState::from_acoustic_publication(&requests[0], &result).unwrap()
+        );
+        states.push(state);
+    }
+    assert_eq!(states[0].state_id, states[1].state_id);
+    assert_ne!(states[0].source_result, states[1].source_result);
+    assert_ne!(states[0].identity, states[1].identity);
 }
 
 #[test]

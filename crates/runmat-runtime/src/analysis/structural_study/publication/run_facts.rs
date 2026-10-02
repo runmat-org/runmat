@@ -22,6 +22,30 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                 numerical_result: crate::analysis::AnalysisStudyStepNumericalResultData::Standard,
                 standard_persistence: Some(data),
                 frequency_persistence: None,
+                acoustic_frequency_persistence: None,
+            }
+        }
+        CompletedStudyStepRun::AcousticFrequency(run) => {
+            let run = *run;
+            let operation = run_operation_for_identity(&run.identity)
+                .expect("admitted acoustic-frequency identity has a runtime operation");
+            CompletedRunFacts {
+                identity: run.identity,
+                operation: operation.name().to_string(),
+                op_version: operation.version().to_string(),
+                run_id: run.run_id,
+                run_status: run.run_status,
+                numerically_acceptable: run.numerically_acceptable,
+                production_publishable: run.production_publishable,
+                solver_convergence: run.solver_convergence,
+                result_quality: run.result_quality,
+                quality_reasons: run.quality_reasons,
+                production_publication_reasons: run.production_publication_reasons,
+                provenance: run.provenance,
+                numerical_result: run.numerical_result,
+                standard_persistence: None,
+                frequency_persistence: None,
+                acoustic_frequency_persistence: Some(run.persistence),
             }
         }
         CompletedStudyStepRun::StructuralFrequency(run) => {
@@ -44,6 +68,7 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                 numerical_result: run.numerical_result,
                 standard_persistence: None,
                 frequency_persistence: Some(run.persistence),
+                acoustic_frequency_persistence: None,
             }
         }
         CompletedStudyStepRun::StructuralResponseSpectrum(run) => {
@@ -69,6 +94,7 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                     ),
                 standard_persistence: Some(run.persistence),
                 frequency_persistence: None,
+                acoustic_frequency_persistence: None,
             }
         }
         CompletedStudyStepRun::StructuralRandomResponse(run) => {
@@ -94,6 +120,7 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                     ),
                 standard_persistence: Some(run.persistence),
                 frequency_persistence: None,
+                acoustic_frequency_persistence: None,
             }
         }
     }

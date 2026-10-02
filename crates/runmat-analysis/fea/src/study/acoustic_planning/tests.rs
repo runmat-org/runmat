@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use runmat_analysis_core::{
     AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
     AnalysisProcedure, AnalysisSequence, BoundaryOperator, IndependentDomain,
@@ -141,14 +143,20 @@ fn rejects_unimplemented_publication_and_missing_state() {
 }
 
 #[test]
-fn rejects_multi_frequency_state_without_a_sweep_selector() {
+fn plans_sweep_with_original_authored_model_and_entry_scoped_states() {
     let mut study = compiled_duct();
     study.model.sequence.steps[0].independent_domain =
         IndependentDomain::FrequencyHertz(vec![0.2, 0.4]);
-    assert!(matches!(
-        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()),
-        Err(AcousticStudyPlanningError::AmbiguousFrequencySweepState)
-    ));
+    let plan = plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()).unwrap();
+    assert_eq!(plan.frequency_plan().frequencies_hz(), &[0.2, 0.4]);
+    let mut sources = BTreeSet::new();
+    for planned in plan.frequencies() {
+        assert_eq!(planned.workload().model, study.model);
+        let result = planned.workload().execute(&slab_mesh(2)).unwrap();
+        let requests = result.state_publication_requests().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(sources.insert(result.source_result_identity().unwrap()));
+    }
 }
 
 #[test]
@@ -165,5 +173,20 @@ fn rejects_invalid_policy_and_formulation_mismatch() {
     assert!(matches!(
         plan_acoustic_study(&study, policy),
         Err(AcousticStudyPlanningError::FormulationRequirementMismatch)
+    ));
+}
+
+#[test]
+fn rejects_sweep_exceeding_the_unchanged_authored_sample_ceiling() {
+    let mut study = compiled_duct();
+    study.model.sequence.steps[0].independent_domain =
+        IndependentDomain::FrequencyHertz(vec![0.1, 0.2, 0.3]);
+    study.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_samples = 2;
+    assert!(matches!(
+        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()),
+        Err(AcousticStudyPlanningError::SampleLimitExceeded)
     ));
 }

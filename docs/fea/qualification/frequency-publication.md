@@ -1,7 +1,7 @@
 # Shared frequency publication contract
 
-This is a metadata/publication contract, not a qualified authored frequency-sweep
-execution envelope. Existing singleton product guards remain in force.
+This documents the shared publication contract and the governed authored acoustic
+sweep cutover. Neither is a production qualification of the acoustic formulation.
 
 ## Authority and invariants
 
@@ -45,7 +45,7 @@ cargo test --locked -p runmat-analysis-core -p runmat-analysis-execution --lib
 cargo clippy --locked -p runmat-analysis-core -p runmat-analysis-fea -p runmat-analysis-execution --lib --tests --no-deps -- -D warnings
 ```
 
-## Remaining whole-chain work
+## Shared cold numerical access
 
 The runtime now has shared typed artifact roots, a complete ordered frequency
 sample-root inventory, and an admitted publication handle. Admission compares
@@ -77,10 +77,78 @@ and structural study storage16/16. Runtime/native library compilation passes.
 Strict lint reports the eight existing field_scene/render_tiles/storage findings;
 architecture reports the same three runtime module debts. No waiver was added.
 
-Complete governed
-ordered coordination, per-sample state/sequence closure, resource accounting,
-runtime/native authored publication and independent multi-frequency CAD/cold
-evidence before removing singleton guards. Preserve existing structural behavior
-through that migration; do not introduce an acoustic-private paging lifecycle.
+## Governed authored acoustic sweep
+
+The coordinator owns one independent entry lifecycle per exact authored frequency:
+solve, original numerical receipt, accuracy evaluation, acoustic-complex state,
+baseline usage and terminal publication. Native execution submits independent
+entry waves through the shared analysis task pool, subject to its admitted capacity.
+The same state declaration can appear at each coordinate, but each state retains
+its own frequency and original source result. No first/last/reference sample or
+aggregate is presented as one acoustic phasor state.
+
+A separately admitted worker task assembles original accepted entries and publishes
+their native fields and shared sample metadata. It has its own resource plan and
+actual terminal scheduler accounting, not an invented aggregate numerical receipt.
+Worker rederivation honors the original authored resource ceiling intersected with
+the shared post-processing envelope. Recovery copies the accepted original fields;
+neither aggregate publication nor cold reopening reruns the numerical solver.
+
+Portable completion roots retain every entry's ordered phase closures, the aggregate
+task closure and recorded graph elapsed time. Cold replay validates original
+response/accounting associations rather than manufacturing new scheduler evidence.
+Public runtime completion uses the shared study-completion path and exposes states
+inside their explicit frequency entries; the flat single-state list is empty.
+Scientific queries require exact sample selection and use the shared admitted
+partition reader, including singleton omission when unambiguous.
+
+The current authored envelope remains one fresh direct harmonic step with one
+complete acoustic-complex state declaration. Dependent sequences, restart,
+observations and authored output declarations remain guarded pending their full
+implementation and evidence. Numerical and resource limits are not relaxed.
+The graph records successful terminal phase attempts supplied by the shared pool,
+not exhaustive failed-retry billing. Full completion authentication still decodes
+the bounded numerical closure; lazy partition reads are not a measured peak-memory
+qualification of that authentication path.
+
+Native worker tests cover Tet4/Tet10, two/three frequencies, reversed original
+completion, cold field objects, differing input/worker chunk policies, corrupt or
+missing selected partitions, source substitution and low authored-memory rejection.
+The authored CAD/process witness passes Tet4/Tet10 at singleton and two-frequency
+schedules. After producer exit it verifies all bounded pressure/velocity pages,
+exact partial complex reads and per-entry original states; cold completion replay
+rejects omitted/reversed entries, a missing state phase and foreign root authority.
+Its paging helper traverses the default bounded pages rather than raising their
+limit. Aggregate accounting retains full mesh input residency but does not project
+the non-emitted mesh as each output; the same original authored ceiling applies.
+The original fine Tet10 duct regressions exposed a second overprojection: one
+generic maximum payload was charged to all three distinct outputs. Current admission
+uses the shared streaming serializer for the borrowed aggregate and sampled native
+catalog/partition shape profiles for fields. Publication metadata reserves64KiB per
+entry plus every catalog descriptor; that bound is restricted to the current fixed
+native definitions and absence of observations. Full input/validation workspace,
+canonical materialization, transport and one field manifest per frequency remain
+accounted. No authored or local-pool ceiling was raised. Tests compare profiles with
+actual encoded/resident contracts, including immediately below/at/above partition
+boundaries and several frequency coordinates. This is admission evidence, not a
+measurement of peak process memory.
+Post-integration checks pass: the execution bridge175/175, native acoustic
+selection14/14, shared roots6/6 and structural storage16/16. The selected runtime
+frequency regressions pass41/41 in both isolated and integrated trees; this includes
+non-FEA builtins and is not41 independent physics cases. Existing bounded evidence
+and scalar-metadata reader checks also pass in the integrated worktree.
+The original matched, incident-pressure and volume-flow duct matrices each pass
+all eight unchanged cases and terminal refinement/source-equivalence, original full/
+partial field and cold-completion checks. Terminal durations are2821.73s,2804.98s
+and2805.13s respectively. Both element orders and original generated/explicit meshes
+are retained under the unchanged authored targets and1GiB pool. These close this
+cutover's original regression gate, not the broader acoustic qualification gates.
+Final shared core/FEA/bridge strict lint passes; runtime/native lint retains eight
+prior findings. Isolated architecture reports two prior rendering debts; mixed-main
+architecture additionally reports existing assessment/observation/structural-root
+debt and a stale assembly ratchet. No suppression or size-ceiling increase is used.
+Broader resonance/uniqueness, original radiation acceptance, measured
+resources, all advertised placement shapes and blocking release evidence remain
+separate mandatory gates.
 No Stage 8, production, distributed/GPU, measured-memory, restart or release gate
-is promoted by this contract.
+is promoted by these tests.

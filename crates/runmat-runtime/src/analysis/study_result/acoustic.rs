@@ -1,7 +1,8 @@
 //! Placement-neutral accepted acoustic evidence with authenticated object-source authority.
 use runmat_analysis_fea::execution::{
-    AcousticHarmonicSolverResult, AcousticHarmonicWorkload, AcousticNumericalReceiptArtifact,
-    CanonicalSemanticState,
+    AcousticFrequencyResult, AcousticFrequencyWorkload, AcousticHarmonicSolverResult,
+    AcousticHarmonicWorkload, AcousticNumericalReceiptArtifact, CanonicalSemanticState,
+    FrequencySamplePublicationManifest,
 };
 use runmat_execution::{
     value::{PublishedObjectCatalog, PublishedObjectSource, ValueRef},
@@ -12,6 +13,23 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcousticStudyCompletion {
     pub compiled: runmat_analysis_fea::study::CompiledAnalysisStudy,
+    pub workload: AcousticFrequencyWorkload,
+    pub result: AcousticFrequencyResult,
+    pub entries: Vec<AcousticStudyEntryCompletion>,
+    pub publication: FrequencySamplePublicationManifest,
+    pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+    pub publication_catalog: PublishedObjectCatalog,
+    pub publication_roots: super::super::FrequencySampleArtifactRootInventory,
+    pub frozen_project_digest: Option<Digest>,
+    pub root: ValueRef,
+    pub catalog: PublishedObjectCatalog,
+}
+
+/// Original numerical and lifecycle evidence for one exact authored frequency entry.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcousticStudyEntryCompletion {
+    pub entry: runmat_analysis_fea::frequency::FrequencyResponsePlanEntry,
     pub workload: AcousticHarmonicWorkload,
     pub host_workload_digest: Digest,
     pub result: AcousticHarmonicSolverResult,
@@ -21,9 +39,6 @@ pub struct AcousticStudyCompletion {
     pub baseline_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
     pub terminal_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
     pub publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
-    pub frozen_project_digest: Option<Digest>,
-    pub root: ValueRef,
-    pub catalog: PublishedObjectCatalog,
 }
 
 /// Placement owns replay authentication; runtime owns public artifact projection only.

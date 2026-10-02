@@ -61,4 +61,15 @@ pub trait AnalysisArtifactStore: Send + Sync {
         &self,
         run_id: &str,
     ) -> Result<Option<AnalysisStudyStepRunData>, String>;
+    fn persist_acoustic_frequency(
+        &self,
+        step: &AnalysisStudyStepRunData,
+        object_catalog: &runmat_execution::value::PublishedObjectCatalog,
+        artifact_roots: &crate::analysis::FrequencySampleArtifactRootInventory,
+        source: &dyn runmat_execution::value::PublishedObjectSource,
+    ) -> Result<AnalysisArtifactRecord, String>;
+    fn load_acoustic_frequency(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<AnalysisStudyStepRunData>, String>;
 }

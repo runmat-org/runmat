@@ -1,0 +1,174 @@
+//! Shared global and explicitly entry-scoped authored state publication admission.
+use super::*;
+
+pub(super) fn validate_entry_scoped_acoustic_states(
+    context: &OperationContext,
+    authored: &runmat_analysis_core::ProcedureStep,
+    result: &crate::analysis::AcousticFrequencyResultsData,
+) -> Result<(), OperationErrorEnvelope> {
+    let invalid = |message: &str| {
+        completion_error(
+            context,
+            "RM.FEA.RUN_STUDY.STATE_INVENTORY_MISMATCH",
+            message,
+        )
+    };
+    let entries = result
+        .workload
+        .plan()
+        .entries()
+        .map_err(|e| invalid(&e.to_string()))?;
+    if entries.len() != result.entries.len()
+        || result.entries.len() != result.result.results().len()
+    {
+        return Err(invalid(
+            "acoustic state inventory does not cover every exact frequency entry",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for ((planned, entry), numerical) in entries
+        .iter()
+        .zip(&result.entries)
+        .zip(result.result.results())
+    {
+        if planned != &entry.entry
+            || numerical != &entry.result
+            || entry.workload.step_id != authored.step_id
+            || entry.workload.model.sequence.steps.as_slice() != [authored.clone()]
+            || entry.states.len() != authored.state_outputs.len()
+        {
+            return Err(invalid(
+                "acoustic entry-scoped state inventory differs from its authored declaration",
+            ));
+        }
+        for (state, declaration) in entry.states.iter().zip(&authored.state_outputs) {
+            state.validate().map_err(|e| invalid(&e.to_string()))?;
+            let payload = state
+                .payload
+                .acoustic()
+                .ok_or_else(|| invalid("acoustic entry has a different state payload"))?;
+            if state.producer != numerical.producer()
+                || state.source_result
+                    != numerical
+                        .source_result_identity()
+                        .map_err(|e| invalid(&e.to_string()))?
+                || state.state_id != declaration.state_id
+                || state.kind != declaration.kind
+                || state.completeness != declaration.completeness
+                || state.persistence != declaration.persistence
+                || payload.frequency.hertz != planned.frequency_hz()
+                || !seen.insert((planned.ordinal(), declaration.state_id.clone()))
+            {
+                return Err(invalid(
+                    "acoustic state differs from its exact frequency/declaration/result source",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_and_persist_states(
+    context: &OperationContext,
+    study_fingerprint: &str,
+    sequence_identity: SequenceIdentity,
+    model: &AnalysisModel,
+    solver_results: &BTreeMap<ProcedureStepId, SolverResultIdentity>,
+    states: Vec<CanonicalSemanticState>,
+    entry_scoped_state_steps: &BTreeSet<ProcedureStepId>,
+) -> Result<Vec<AnalysisStudyStatePublicationData>, OperationErrorEnvelope> {
+    let expected = model
+        .sequence
+        .steps
+        .iter()
+        .filter(|step| !entry_scoped_state_steps.contains(&step.step_id))
+        .flat_map(|step| {
+            step.state_outputs
+                .iter()
+                .map(move |declaration| (step, declaration))
+        })
+        .collect::<Vec<_>>();
+    if states.len() != expected.len() {
+        return Err(completion_error(
+            context,
+            "RM.FEA.RUN_STUDY.STATE_INVENTORY_MISMATCH",
+            "published states do not exactly cover the authored declarations",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for (state, (producer, declaration)) in states.iter().zip(&expected) {
+        state
+            .validate()
+            .map_err(|error| completion_error(context, "RM.FEA.RUN_STUDY.STATE_INVALID", error))?;
+        let producer_identity = StepIdentity::from_solver_contract(sequence_identity, producer)
+            .map_err(|error| completion_error(context, "RM.FEA.RUN_STUDY.STATE_INVALID", error))?;
+        if state.producer != producer_identity
+            || state.state_id != declaration.state_id
+            || state.kind != declaration.kind
+            || state.completeness != declaration.completeness
+            || state.persistence != declaration.persistence
+            || solver_results.get(&producer.step_id) != Some(&state.source_result)
+            || !seen.insert((producer.step_id.clone(), declaration.state_id.clone()))
+        {
+            return Err(completion_error(
+                context,
+                "RM.FEA.RUN_STUDY.STATE_INVENTORY_MISMATCH",
+                "published state identity, order, declaration, or solver lineage changed",
+            ));
+        }
+    }
+    let mut results = Vec::with_capacity(states.len());
+    for (state, (producer, _)) in states.into_iter().zip(expected) {
+        let artifact_path = persist_semantic_state(study_fingerprint, &state).map_err(|error| {
+            completion_storage_error(
+                context,
+                "RM.FEA.RUN_STUDY.STATE_ARTIFACT_STORE_FAILED",
+                error,
+            )
+        })?;
+        results.push(AnalysisStudyStatePublicationData {
+            producer_step: producer.step_id.clone(),
+            state_id: state.state_id,
+            kind: state.kind,
+            completeness: state.completeness,
+            persistence: state.persistence,
+            identity: state.identity,
+            content_digest: state.content_digest,
+            topology_digest: state.topology_digest,
+            source_result: state.source_result,
+            artifact_path,
+        });
+    }
+    Ok(results)
+}
+
+fn persist_semantic_state(
+    study_fingerprint: &str,
+    state: &CanonicalSemanticState,
+) -> Result<String, String> {
+    let fingerprint = study_fingerprint
+        .strip_prefix("sha256:")
+        .ok_or_else(|| "study fingerprint is not a SHA-256 identity".to_string())?;
+    let state_digest = state
+        .identity
+        .digest()
+        .to_string()
+        .trim_start_matches("sha256:")
+        .to_string();
+    let directory = study_evidence_root()
+        .join(format!("sha256_{fingerprint}"))
+        .join("states");
+    storage::ensure_owned_directory(&directory, "study semantic state directory")?;
+    let path = directory.join(format!("sha256_{state_digest}.state"));
+    let bytes = state.canonical_bytes().map_err(|error| error.to_string())?;
+    match runmat_filesystem::atomic_create_new(&path, &bytes)
+        .map_err(|error| format!("failed to publish immutable semantic state: {error}"))?
+    {
+        runmat_filesystem::AtomicCreateResult::Published { .. } => {}
+        runmat_filesystem::AtomicCreateResult::Existing(existing) if existing == bytes => {}
+        runmat_filesystem::AtomicCreateResult::Existing(_) => {
+            return Err("semantic state identity already contains different content".into());
+        }
+    }
+    Ok(path.display().to_string())
+}

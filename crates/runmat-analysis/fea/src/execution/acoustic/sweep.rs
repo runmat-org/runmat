@@ -122,12 +122,31 @@ impl AcousticFrequencyWorkload {
 
 /// Complete response in exact shared-plan order, retaining every canonical entry's
 /// fields and numerical closure evidence rather than selecting a representative frequency.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "AcousticFrequencyResultWire")]
 pub struct AcousticFrequencyResult {
     workload: AcousticFrequencyWorkload,
     mesh_digest: StableDigest,
     results: Vec<AcousticHarmonicSolverResult>,
+}
+
+// The retained result and pre-assembly borrowed projection use one wire authority.
+#[derive(Serialize)]
+struct ResultSerialization<'a> {
+    workload: &'a AcousticFrequencyWorkload,
+    mesh_digest: StableDigest,
+    results: &'a [AcousticHarmonicSolverResult],
+}
+
+impl Serialize for AcousticFrequencyResult {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        ResultSerialization {
+            workload: &self.workload,
+            mesh_digest: self.mesh_digest,
+            results: &self.results,
+        }
+        .serialize(serializer)
+    }
 }
 
 #[derive(Deserialize)]
@@ -152,6 +171,23 @@ impl TryFrom<AcousticFrequencyResultWire> for AcousticFrequencyResult {
 }
 
 impl AcousticFrequencyResult {
+    /// Admission sizing only: borrows originals without constructing a completed aggregate.
+    /// Plan-order validation remains mandatory at the assembly boundary.
+    pub fn assembly_encoding_profile(
+        workload: &AcousticFrequencyWorkload,
+        mesh: &SolverMeshArtifact,
+        results: &[AcousticHarmonicSolverResult],
+    ) -> AnalysisExecutionResult<runmat_canonical_codec::SerializedCanonicalProfile> {
+        Ok(runmat_canonical_codec::profile_serialized(
+            &ResultSerialization {
+                workload,
+                mesh_digest: mesh.canonical_digest,
+                results,
+            },
+            RESULT_LIMITS,
+        )?)
+    }
+
     /// Pure fan-in: no operator assembly, solve, interpolation or field recovery.
     pub fn assemble(
         workload: AcousticFrequencyWorkload,

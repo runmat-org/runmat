@@ -145,6 +145,17 @@ impl FeaResourceDemand {
                 AnalysisNumericalObjectKind::Observation,
             ) => Some(&demand.output),
             (
+                Self::AcousticFrequencyAssembly(demand),
+                AnalysisNumericalObjectKind::SolverResult,
+            ) => Some(&demand.result_output),
+            (
+                Self::AcousticFrequencyAssembly(demand),
+                AnalysisNumericalObjectKind::FrequencySamplePublication,
+            ) => Some(&demand.publication_output),
+            (Self::AcousticFrequencyAssembly(demand), AnalysisNumericalObjectKind::Field) => {
+                Some(&demand.fields_output)
+            }
+            (
                 Self::StructuralFrequencyResultAssembly(demand),
                 AnalysisNumericalObjectKind::SolverResult,
             ) => Some(&demand.result_output),

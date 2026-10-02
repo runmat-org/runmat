@@ -48,6 +48,7 @@ pub(in crate::analysis) struct ThermalPrefixCompletion {
 
 pub(in crate::analysis) enum CompletedStudyStepRun {
     Standard(Box<OperationEnvelope<AnalysisRunResult>>),
+    AcousticFrequency(Box<crate::analysis::study_publication::CompletedAcousticFrequencyStep>),
     StructuralFrequency(Box<CompletedStructuralFrequencyStep>),
     StructuralResponseSpectrum(Box<CompletedStructuralResponseSpectrumStep>),
     StructuralRandomResponse(Box<CompletedStructuralRandomResponseStep>),

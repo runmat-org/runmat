@@ -1,6 +1,9 @@
 use super::super::*;
 use runmat_analysis_fea::results::observation::SeriesReductionPayload;
 
+mod acoustic_frequency;
+mod structural_frequency;
+
 macro_rules! visit_analysis_result_fields {
     ($run_result:expr, $as_ref:ident, [$($borrow:tt)*], $visit:expr) => {{
         for field in $($borrow)* $run_result.run.fields {
@@ -1260,6 +1263,7 @@ fn analysis_results_op_with_field_inventory(
         transient_results,
         nonlinear_results,
         structural_frequency_results: None,
+        acoustic_frequency_results: None,
         diagnostics: if query.include_diagnostics {
             if query.diagnostic_codes.is_empty() {
                 Some(run_result.run.diagnostics.clone())
@@ -1356,8 +1360,27 @@ pub fn analysis_results_by_run_id_op(
             )
         })?;
         if let Some(frequency) = frequency {
-            return analysis_structural_frequency_results_op(&frequency, query, context);
+            return structural_frequency::results_op(&frequency, query, context);
         }
+        let frequency = storage::load_acoustic_frequency_result(run_id).map_err(|err| {
+            operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to load acoustic frequency artifact: {err}"),
+                BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+            )
+        })?;
+        if let Some(frequency) = frequency {
+            return acoustic_frequency::results_op(&frequency, query, context);
+        }
+
         return Err(operation_error(
             ANALYSIS_RESULTS_OPERATION,
             ANALYSIS_RESULTS_OP_VERSION,
@@ -1381,127 +1404,6 @@ pub fn analysis_results_by_run_id_op(
         }
     }
     Ok(envelope)
-}
-
-fn analysis_structural_frequency_results_op(
-    step: &AnalysisStudyStepRunData,
-    query: AnalysisResultsQuery,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
-    let AnalysisStudyStepNumericalResultData::StructuralFrequency(result) = &step.numerical_result
-    else {
-        return Err(operation_error(
-            ANALYSIS_RESULTS_OPERATION,
-            ANALYSIS_RESULTS_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RESULTS.ARTIFACT_INVALID",
-                error_type: OperationErrorType::Contract,
-                retryable: false,
-                severity: OperationErrorSeverity::Fatal,
-            },
-            "structural frequency store returned another numerical result kind",
-            BTreeMap::from([("run_id".to_string(), step.run_id.clone())]),
-        ));
-    };
-    let publication = &result.publication;
-    let mut descriptors = publication
-        .samples()
-        .iter()
-        .flat_map(|sample| sample.fields.fields.iter().map(frequency_field_descriptor))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| {
-            operation_error(
-                ANALYSIS_RESULTS_OPERATION,
-                ANALYSIS_RESULTS_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RESULTS.ARTIFACT_INVALID",
-                    error_type: OperationErrorType::Contract,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Fatal,
-                },
-                format!("structural frequency field catalog is invalid: {error}"),
-                BTreeMap::from([("run_id".to_string(), step.run_id.clone())]),
-            )
-        })?;
-    if !query.include_fields.is_empty() {
-        for requested in &query.include_fields {
-            if !descriptors.iter().any(|descriptor| {
-                super::super::field_selection::field_id_matches(&descriptor.field_id, requested)
-            }) {
-                return Err(operation_error(
-                    ANALYSIS_RESULTS_OPERATION,
-                    ANALYSIS_RESULTS_OP_VERSION,
-                    &context,
-                    OperationErrorSpec {
-                        error_code: "RM.FEA.RESULTS.FIELD_NOT_FOUND",
-                        error_type: OperationErrorType::Input,
-                        retryable: false,
-                        severity: OperationErrorSeverity::Error,
-                    },
-                    format!("requested FEA field '{requested}' was not produced by run"),
-                    BTreeMap::from([("requested_field".to_string(), requested.clone())]),
-                ));
-            }
-        }
-        descriptors.retain(|descriptor| {
-            query.include_fields.iter().any(|requested| {
-                super::super::field_selection::field_id_matches(&descriptor.field_id, requested)
-            })
-        });
-    }
-    let frequencies = publication
-        .result()
-        .samples()
-        .iter()
-        .map(|sample| sample.plan_entry().frequency_hz())
-        .collect::<Vec<_>>();
-    let receipt = publication.receipt();
-    let summary = AnalysisResultsSummary {
-        field_count: descriptors.len(),
-        total_elements: descriptors
-            .iter()
-            .map(|descriptor| descriptor.element_count)
-            .sum(),
-        frequency_sample_count: frequencies.len(),
-        available_frequencies_hz: frequencies,
-        max_frequency_solver_residual: receipt
-            .samples()
-            .iter()
-            .map(|sample| sample.solver_relative_residual())
-            .reduce(f64::max),
-        max_frequency_balance_error: receipt
-            .samples()
-            .iter()
-            .map(|sample| sample.physical_relative_balance_error())
-            .reduce(f64::max),
-        ..AnalysisResultsSummary::default()
-    };
-    Ok(OperationEnvelope::new(
-        ANALYSIS_RESULTS_OPERATION,
-        ANALYSIS_RESULTS_OP_VERSION,
-        &context,
-        AnalysisResultsData {
-            identity: step.identity.clone(),
-            field_descriptors: descriptors,
-            fields: Vec::new(),
-            modal_results: None,
-            buckling_results: None,
-            thermal_results: None,
-            transient_results: None,
-            nonlinear_results: None,
-            structural_frequency_results: Some(result.as_ref().clone()),
-            diagnostics: query.include_diagnostics.then(Vec::new),
-            run_status: step.run_status,
-            numerically_acceptable: step.numerically_acceptable,
-            production_publishable: step.production_publishable,
-            quality_reasons: step.quality_reasons.clone(),
-            production_publication_reasons: step.production_publication_reasons.clone(),
-            provenance: step.provenance.clone(),
-            summary,
-        },
-    ))
 }
 
 fn frequency_field_descriptor(

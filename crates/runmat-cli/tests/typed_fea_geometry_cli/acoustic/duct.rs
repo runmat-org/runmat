@@ -148,7 +148,7 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
             .all(|e| e.order == order));
         fixture::verify_faces(&mesh, &imported);
         let store = FilesystemAnalysisArtifactStore::new(project.path().join("artifacts"));
-        let retained = store.load_run(run_id).unwrap().unwrap();
+        let retained = store.load_acoustic_frequency(run_id).unwrap().unwrap();
         assert!(
             retained.numerically_acceptable,
             "{:?}",
@@ -156,43 +156,23 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
         );
         assert!(!retained.production_publishable);
         assert_eq!(
-            retained.run.preconditioner,
+            retained.provenance.preconditioner,
             runmat_analysis_fea::contracts::SolverPreconditioner::Ilu0
         );
         let pressure = full_and_partial(&store, run_id, "acoustic.pressure");
         let velocity = full_and_partial(&store, run_id, "acoustic.particle_velocity");
         assert_eq!(pressure.len(), 2 * mesh.topology.nodes.len());
         assert_eq!(velocity.len(), 6 * mesh.topology.volume_elements.len());
-        for (id, shape, values) in [
-            (
-                "acoustic.pressure",
-                vec![mesh.topology.nodes.len(), 2],
-                &pressure,
-            ),
-            (
-                "acoustic.particle_velocity",
-                vec![mesh.topology.volume_elements.len(), 3, 2],
-                &velocity,
-            ),
-        ] {
-            let field = retained
-                .run
-                .fields
-                .iter()
-                .find(|f| f.field_id == id)
-                .unwrap();
-            assert_eq!(field.shape, shape);
-            assert_eq!(field.as_host_f64().unwrap(), values);
-        }
         let completed = closure::reopen(&project, &manifest, &retained, &mesh);
+        let entry = &completed.entries[0];
         assert_eq!(
-            completed.workload.solver.preconditioner,
-            retained.run.preconditioner
+            entry.workload.solver.preconditioner,
+            retained.provenance.preconditioner
         );
-        assert_eq!(completed.workload.solver.maximum_iterations, 4096);
-        fixture::verify_medium(&completed.workload.model, &mesh);
-        fixture::verify_drive(&completed.workload.model, drive, generated);
-        let result = &completed.result.result;
+        assert_eq!(entry.workload.solver.maximum_iterations, 4096);
+        fixture::verify_medium(&entry.workload.model, &mesh);
+        fixture::verify_drive(&entry.workload.model, drive, generated);
+        let result = &entry.result.result;
         let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
         assert!(result
             .ordered_node_ids()
@@ -286,10 +266,10 @@ fn full_and_partial(
             page.truncated,
             offset > 0 || offset + page.count < page.total_count
         );
-        let AnalysisFieldPageValues::Real(chunk) = page.values else {
-            panic!("native acoustic public contract is packed HostF64, not complex entity pages");
+        let AnalysisFieldPageValues::ComplexInterleaved(chunk) = page.values else {
+            panic!("native acoustic public contract preserves complex entity values");
         };
-        assert_eq!(chunk.len(), page.count);
+        assert_eq!(chunk.len(), 2 * page.count);
         values.extend(chunk);
         offset += page.count;
         if offset == page.total_count {
@@ -315,10 +295,10 @@ fn full_and_partial(
         (1, 7, total)
     );
     assert!(partial.truncated);
-    // Deliberately starts in an imaginary component and crosses entity boundaries.
+    // Starts at an exact logical component and reads both phasor components.
     assert_eq!(
         partial.values,
-        AnalysisFieldPageValues::Real(values[1..8].to_vec())
+        AnalysisFieldPageValues::ComplexInterleaved(values[2..16].to_vec())
     );
     values
 }

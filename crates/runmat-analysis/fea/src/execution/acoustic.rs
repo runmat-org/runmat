@@ -29,6 +29,8 @@ pub use receipt::{
 };
 mod sweep;
 pub use sweep::{AcousticFrequencyResult, AcousticFrequencyWorkload};
+mod frequency_assembly;
+pub use frequency_assembly::{assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput};
 #[cfg(test)]
 pub(in crate::execution) mod tests;
 const PREFIX: &[u8] = b"runmat-acoustic-harmonic-workload/v1\0";

@@ -136,9 +136,10 @@ pub use buckling::{
 };
 pub use contract::{
     AcceleratorRequirement, AccuracyEvaluationResourceDemand, AccuracyResourceDemand,
-    AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, ConstraintResourceFacts, Count,
-    ExcitationWorkspaceResourceFacts, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
-    FeaResourcePlanIdentity, FeaResourcePlanningInput, FieldRecoveryResourceFacts, NumericalScalar,
+    AcousticFrequencyAssemblyResourceDemand, AssemblyResourcePolicy, ByteCount,
+    CheckpointArtifactPolicy, ConstraintResourceFacts, Count, ExcitationWorkspaceResourceFacts,
+    FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanIdentity,
+    FeaResourcePlanningInput, FieldRecoveryResourceFacts, NumericalScalar,
     ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
     ObservationPartitionPayloadLayout, ObservationPartitionResourceDemand,
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
@@ -172,6 +173,8 @@ pub use modal::{
     build_structural_modal_resource_plan, structural_modal_receipt_payload_bytes_upper_bound,
     structural_modal_result_payload_bytes_upper_bound,
 };
+mod acoustic_frequency_assembly;
+pub use acoustic_frequency_assembly::build_acoustic_frequency_assembly_resource_plan;
 pub use post_process::{
     build_observation_assembly_resource_plan, build_observation_history_checkpoint_resource_plan,
     build_observation_partition_resource_plan, build_observation_reduction_resource_plan,

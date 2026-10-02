@@ -219,21 +219,21 @@ fn acoustic_prepared_byte_facts_and_production_fail_closed() {
 }
 
 #[test]
-fn declared_and_ambiguous_publication_catalogs_have_exact_admitted_transport_envelopes() {
+fn singleton_and_sweep_entry_publications_have_exact_admitted_transport_envelopes() {
     let mesh = slab_mesh(1);
     let mut declared = workload();
     declared.model.sequence.steps[0].state_outputs[0].state_id.0 = "declared_pressure".repeat(16);
-    let mut ambiguous = declared.clone();
-    ambiguous.model.sequence.steps[0].independent_domain =
+    let mut sweep_entry = declared.clone();
+    sweep_entry.model.sequence.steps[0].independent_domain =
         IndependentDomain::FrequencyHertz(vec![0.2, 0.3]);
-    for (workload, entry_count) in [(declared, 1), (ambiguous, 0)] {
+    for workload in [declared, sweep_entry] {
         let prepared = facts(&workload, &mesh);
         let result = workload.execute(&mesh).unwrap();
         let bytes = result.canonical_bytes().unwrap();
         let profiles = result
             .state_publication_profiles(Digest::sha256(&bytes))
             .unwrap();
-        assert_eq!(profiles.entries().len(), entry_count);
+        assert_eq!(profiles.entries().len(), 1);
         assert!(bytes.len() as u64 <= prepared.result_output.encoded_payload_bytes_upper_bound.0);
         assert!(
             profiles.canonical_bytes().unwrap().len() as u64

@@ -57,6 +57,30 @@ pub fn build_resource_plan(
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
         (
+            FeaResourcePhase::AcousticFrequencyAssembly(workload),
+            FeaResourceDemand::AcousticFrequencyAssembly(demand),
+        ) if *workload == demand.workload => {
+            if demand.entry_count.0 == 0 {
+                return Err(ResourcePlanningError::Invalid(
+                    "acoustic assembly requires complete entries".into(),
+                ));
+            }
+            host_phase::build_host_phase_resource_plan(
+                input.clone(),
+                host_phase::HostPhaseAccounting::host_only(
+                    demand.topology_digest,
+                    &demand.inputs,
+                    demand.workspace_bytes_upper_bound,
+                    ByteCount(0),
+                    &[
+                        &demand.result_output,
+                        &demand.publication_output,
+                        &demand.fields_output,
+                    ],
+                ),
+            )
+        }
+        (
             FeaResourcePhase::FluidSteadySolve(workload),
             FeaResourceDemand::FluidSteadySolve(demand),
         ) if *workload == demand.projection.workload => fluid::solve(input.clone(), demand),

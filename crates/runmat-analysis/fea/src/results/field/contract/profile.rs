@@ -9,10 +9,20 @@ impl RecoveredFieldArtifactManifest {
         definitions: &[RecoveredFieldDefinition],
         counts: &[usize],
     ) -> Result<SerializedCanonicalProfile, RecoveredFieldError> {
+        Self::profile_sampled_shape(request, definitions, counts, RecoveredFieldSample::Final)
+    }
+
+    /// One catalog in the actual sample variant, without field values or real descriptors.
+    pub fn profile_sampled_shape(
+        request: &crate::execution::FieldRecoveryRequest,
+        definitions: &[RecoveredFieldDefinition],
+        counts: &[usize],
+        sample: RecoveredFieldSample,
+    ) -> Result<SerializedCanonicalProfile, RecoveredFieldError> {
         let entries = RecoveredFieldArtifactEntry::profile_sampled_catalog_shape(
             definitions,
             counts,
-            RecoveredFieldSample::Final,
+            sample,
             1,
         )?;
         let header = Self {

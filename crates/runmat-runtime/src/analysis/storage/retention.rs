@@ -53,6 +53,11 @@ pub(super) fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
                 persisted.metadata.run_id,
                 parse_recorded_at(&persisted.created_at),
             ),
+            PersistedAnalysisArtifact::AcousticFrequency(persisted) => (
+                persisted.step.identity,
+                persisted.step.run_id,
+                parse_recorded_at(&persisted.created_at),
+            ),
             PersistedAnalysisArtifact::StructuralFrequency(persisted) => (
                 persisted.step.identity,
                 persisted.step.run_id,

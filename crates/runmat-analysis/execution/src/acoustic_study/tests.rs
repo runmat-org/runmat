@@ -105,7 +105,8 @@ fn acoustic_standalone_coordinator_rejects_foreign_mesh_policy_and_definition() 
 
 #[test]
 fn acoustic_standalone_owned_solve_cannot_be_skipped_or_prepared_twice() {
-    let mut study = AcousticStudyCoordinator::new(preparation()).unwrap();
+    let mut coordinator = AcousticStudyCoordinator::new(preparation()).unwrap();
+    let study = coordinator.entry_mut(0).unwrap();
     assert!(study.prepare_accuracy().is_err());
     assert!(study.prepare_next_state().is_err());
     assert!(study.freeze_baseline().is_err());
@@ -121,7 +122,7 @@ fn acoustic_standalone_owned_solve_cannot_be_skipped_or_prepared_twice() {
     assert!(study.prepare_solve().is_err());
     assert!(study.result().is_none());
     assert!(!study.is_complete());
-    assert!(study.into_completed().is_err());
+    assert!(coordinator.into_completed().is_err());
 }
 
 struct EmptyStore;
@@ -136,7 +137,8 @@ impl CacheImport for EmptyStore {
 
 #[test]
 fn acoustic_failed_response_never_advances_or_installs_usage() {
-    let mut study = AcousticStudyCoordinator::new(preparation()).unwrap();
+    let mut coordinator = AcousticStudyCoordinator::new(preparation()).unwrap();
+    let study = coordinator.entry_mut(0).unwrap();
     let task = study.prepare_solve().unwrap();
     let accounting = AttemptResourceAccounting {
         attempt_id: AttemptId::derive(&[b"attempt"]),
@@ -162,14 +164,14 @@ fn acoustic_failed_response_never_advances_or_installs_usage() {
         .is_err());
     assert_eq!(study.phase(), AcousticStudyPhase::AwaitingSolve);
     assert!(study.result().is_none());
-    assert!(study.usage.is_none());
-    assert!(study.closures.is_empty());
+    assert!(study.baseline_usage().is_none());
 }
 
 #[test]
 fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() {
-    assert!(import_acoustic_study_completion(&EmptyStore, preparation(), Vec::new()).is_err());
-    let mut study = AcousticStudyCoordinator::new(preparation()).unwrap();
+    let mut coordinator = AcousticStudyCoordinator::new(preparation()).unwrap();
+    let study = coordinator.entry_mut(0).unwrap();
+    let entry = study.entry();
     let task = study.prepare_solve().unwrap();
     let accounting = AttemptResourceAccounting {
         attempt_id: AttemptId::derive(&[b"attempt"]),
@@ -193,7 +195,22 @@ fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() 
         &response,
         &accounting,
     );
-    assert!(import_acoustic_study_completion(&EmptyStore, preparation(), vec![closure]).is_err());
+    let assembly = super::completion::AcousticStudyAssemblyClosure {
+        workload: task.host.workload.clone(),
+        response: response.clone(),
+        accounting: accounting.clone(),
+    };
+    assert!(import_acoustic_study_completion(
+        &EmptyStore,
+        preparation(),
+        vec![super::completion::AcousticStudyEntryClosure {
+            entry,
+            closures: vec![closure]
+        }],
+        assembly,
+        1
+    )
+    .is_err());
     let mut different = preparation();
     different.frozen_project_digest = Some(Digest::sha256("foreign-project"));
     different.program_revision = ProgramRevision::new(
@@ -210,7 +227,7 @@ fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() 
     )
     .unwrap();
     let mut foreign = AcousticStudyCoordinator::new(different).unwrap();
-    let foreign_task = foreign.prepare_solve().unwrap();
+    let foreign_task = foreign.entry_mut(0).unwrap().prepare_solve().unwrap();
     assert_ne!(task.host.workload, foreign_task.host.workload);
     let closure = AcousticStudyResultClosure::new(
         AcousticStudyResultPhase::Solve,
@@ -218,5 +235,46 @@ fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() 
         &response,
         &accounting,
     );
-    assert!(import_acoustic_study_completion(&EmptyStore, preparation(), vec![closure]).is_err());
+    let assembly = super::completion::AcousticStudyAssemblyClosure {
+        workload: task.host.workload.clone(),
+        response: response.clone(),
+        accounting: accounting.clone(),
+    };
+    assert!(import_acoustic_study_completion(
+        &EmptyStore,
+        preparation(),
+        vec![super::completion::AcousticStudyEntryClosure {
+            entry,
+            closures: vec![closure]
+        }],
+        assembly,
+        1
+    )
+    .is_err());
+}
+
+#[test]
+fn authored_frequency_sweep_creates_every_exact_entry_without_parent_singleton_api() {
+    let mut input = preparation();
+    input.product.compiled.model.sequence.steps[0].independent_domain =
+        IndependentDomain::FrequencyHertz(vec![0.2, 0.3]);
+    input.product.plan = plan_acoustic_study(&input.product.compiled, input.policy).unwrap();
+    let expected = input
+        .product
+        .plan
+        .frequencies()
+        .iter()
+        .map(|f| f.entry())
+        .collect::<Vec<_>>();
+    let mut study = AcousticStudyCoordinator::new(input).unwrap();
+    assert_eq!(study.entries().len(), 2);
+    assert_eq!(
+        study
+            .entries()
+            .iter()
+            .map(|entry| entry.entry())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert!(study.prepare_assembly().is_err());
 }

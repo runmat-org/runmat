@@ -40,5 +40,8 @@ mod structural;
 pub(super) mod thermal;
 
 pub use acoustic::publish_acoustic_study_result;
+pub(in crate::analysis) use acoustic::{
+    AcousticFrequencyPersistence, CompletedAcousticFrequencyStep,
+};
 pub use structural::publish_structural_study_result;
 pub use thermal::publish_thermal_study_result;

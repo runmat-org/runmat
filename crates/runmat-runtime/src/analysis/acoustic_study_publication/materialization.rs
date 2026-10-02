@@ -1,103 +1,119 @@
-//! Copy accepted native pressure/velocity to shared cold-query fields; no operator evaluation.
-use super::*;
+//! Publish complete frequency metadata over original immutable field partitions.
 use crate::analysis::*;
 use runmat_analysis_fea::{
     contracts::{ExecutionBackend, SolverMethod},
     planning::resource::FeaResourcePhase,
     solve::backend::kind::LinearAlgebraBackendKind,
-    ComputeBackend, FeaRunResult,
+    ComputeBackend,
 };
+
+#[derive(Clone)]
+pub(in crate::analysis) struct AcousticFrequencyPersistence {
+    pub publication_catalog: runmat_execution::value::PublishedObjectCatalog,
+    pub publication_roots: FrequencySampleArtifactRootInventory,
+    pub source: AcousticStudyObjectSource,
+}
+
+pub(in crate::analysis) struct CompletedAcousticFrequencyStep {
+    pub identity: runmat_analysis_fea::AnalysisRunIdentity,
+    pub run_id: String,
+    pub run_status: RunStatus,
+    pub numerically_acceptable: bool,
+    pub production_publishable: bool,
+    pub solver_convergence: QualityGate,
+    pub result_quality: QualityGate,
+    pub quality_reasons: Vec<QualityReason>,
+    pub production_publication_reasons: Vec<ProductionPublicationReason>,
+    pub provenance: RunProvenance,
+    pub numerical_result: AnalysisStudyStepNumericalResultData,
+    pub persistence: AcousticFrequencyPersistence,
+}
 
 pub(super) fn admit(
     completed: &AcousticStudyCompletion,
-    mesh: &SolverMeshArtifact,
+    source: &AcousticStudyObjectSource,
     options: &AnalysisAcousticRunOptions,
     run_id: &str,
-    context: &OperationContext,
-) -> Result<OperationEnvelope<AnalysisRunResult>, String> {
-    let accuracy_owner =
-        crate::analysis::structural_study::lifecycle::accuracy_completion::classify_accuracy;
-    crate::analysis::structural_study::lifecycle::accuracy_completion::validate_publication_chain(
-        completed.host_workload_digest,
-        &FeaResourcePhase::AcousticHarmonic(
-            completed.workload.identity().map_err(|e| e.to_string())?,
-        ),
-        &completed.accuracy,
-        &completed.baseline_usage,
-        &completed.terminal_usage,
-        &completed.publication,
-    )?;
-    let accuracy = accuracy_owner(&completed.accuracy);
-    let request = completed
-        .result
-        .native_field_request(&completed.workload, mesh)
-        .map_err(|e| e.to_string())?;
-    let fields = completed
-        .result
-        .recover_native_fields(&completed.workload, mesh, &request)
-        .map_err(|e| e.to_string())?
-        .into_fields()
-        .into_iter()
-        .map(|f| f.into_storage())
-        .collect();
-    let run = FeaRunResult {
-        identity: completed.result.formulation().clone(),
-        requested_backend: ComputeBackend::Cpu,
-        execution_backend: ExecutionBackend::Cpu,
-        solver_backend: LinearAlgebraBackendKind::CpuReference,
-        solver_device_apply_k_ratio: 0.0,
-        solver_method: SolverMethod::AcousticCanonicalHelmholtzGmres,
-        preconditioner: completed.workload.solver.preconditioner,
-        solver_host_sync_count: 0,
-        accelerator_evidence: Vec::new(),
-        diagnostics: Vec::new(),
-        spatial_projection_evidence: completed.result.source_evidence().to_vec(),
-        structural_static_balance: None,
-        structural_constraint_result: None,
-        structural_connector_result: None,
-        observations: Vec::new(),
-        observation_histories: Vec::new(),
-        series_reductions: Vec::new(),
-        fields,
+) -> Result<CompletedAcousticFrequencyStep, String> {
+    let [common, ..] = completed.entries.as_slice() else {
+        return Err("acoustic frequency completion is empty".into());
     };
+    let identity = common.result.formulation().clone();
+    if completed.entries.iter().any(|entry| {
+        entry.result.formulation() != &identity || entry.workload.solver != common.workload.solver
+    }) {
+        return Err("acoustic entries differ in common formulation or numerical controls".into());
+    }
+    let mut quality_reasons = Vec::new();
+    let mut solver_convergence = QualityGate::Pass;
+    let mut result_quality = QualityGate::Pass;
+    for entry in &completed.entries {
+        crate::analysis::structural_study::lifecycle::accuracy_completion::validate_publication_chain(
+            entry.host_workload_digest,
+            &FeaResourcePhase::AcousticHarmonic(entry.workload.identity().map_err(|e| e.to_string())?),
+            &entry.accuracy, &entry.baseline_usage, &entry.terminal_usage, &entry.publication,
+        )?;
+        let accuracy =
+            crate::analysis::structural_study::lifecycle::accuracy_completion::classify_accuracy(
+                &entry.accuracy,
+            );
+        solver_convergence = worst_gate(solver_convergence, accuracy.solver_convergence);
+        result_quality = worst_gate(result_quality, accuracy.result_quality);
+        quality_reasons.extend(accuracy.quality_reasons);
+    }
+    let numerically_acceptable =
+        solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass;
+    let run_status =
+        crate::analysis::result_policy::classify_run_status(result_quality, numerically_acceptable);
     let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, accuracy.numerically_acceptable);
-    let provenance = RunProvenance {
-        requested_backend: run.requested_backend,
-        execution_backend: run.execution_backend,
-        solver_backend: run.solver_backend,
-        solver_device_apply_k_ratio: run.solver_device_apply_k_ratio,
-        solver_host_sync_count: run.solver_host_sync_count,
-        precision_mode: contracts::format_precision_mode(options.precision_mode),
-        deterministic_mode: options.deterministic_mode,
-        solver_method: run.solver_method,
-        preconditioner: run.preconditioner,
-        quality_policy: contracts::format_quality_policy(options.quality_policy),
-        fallback_events: Vec::new(),
-    };
-    let result = AnalysisRunResult {
+        crate::analysis::result_policy::evaluate_identity_production_publication(
+            &identity,
+            numerically_acceptable,
+        );
+    Ok(CompletedAcousticFrequencyStep {
+        identity,
         run_id: run_id.into(),
-        run,
-        render_topology: render_topology_from_solver_mesh(Some(mesh)),
-        modal_results: None,
-        buckling_results: None,
-        thermal_results: None,
-        transient_results: None,
-        nonlinear_results: None,
-        model_validity: QualityGate::Pass,
-        solver_convergence: accuracy.solver_convergence,
-        result_quality: accuracy.result_quality,
-        run_status: accuracy.run_status,
-        numerically_acceptable: accuracy.numerically_acceptable,
+        run_status,
+        numerically_acceptable,
         production_publishable,
-        quality_reasons: accuracy.quality_reasons,
+        solver_convergence,
+        result_quality,
+        quality_reasons,
         production_publication_reasons,
-        provenance,
-    };
-    Ok(OperationEnvelope::new(
-        AnalysisOperation::Acoustic.name(),
-        AnalysisOperation::Acoustic.version(),
-        context,
-        result,
-    ))
+        provenance: RunProvenance {
+            requested_backend: ComputeBackend::Cpu,
+            execution_backend: ExecutionBackend::Cpu,
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
+            solver_device_apply_k_ratio: 0.0,
+            solver_host_sync_count: 0,
+            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            deterministic_mode: options.deterministic_mode,
+            solver_method: SolverMethod::AcousticCanonicalHelmholtzGmres,
+            preconditioner: common.workload.solver.preconditioner,
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
+            fallback_events: Vec::new(),
+        },
+        numerical_result: AnalysisStudyStepNumericalResultData::AcousticFrequency(Box::new(
+            AcousticFrequencyResultsData {
+                workload: completed.workload.clone(),
+                result: completed.result.clone(),
+                publication: completed.publication.clone(),
+                entries: completed.entries.clone(),
+                resource_usage: completed.resource_usage.clone(),
+            },
+        )),
+        persistence: AcousticFrequencyPersistence {
+            publication_catalog: completed.publication_catalog.clone(),
+            publication_roots: completed.publication_roots.clone(),
+            source: source.clone(),
+        },
+    })
+}
+
+fn worst_gate(left: QualityGate, right: QualityGate) -> QualityGate {
+    match (left, right) {
+        (QualityGate::Fail, _) | (_, QualityGate::Fail) => QualityGate::Fail,
+        (QualityGate::Warn, _) | (_, QualityGate::Warn) => QualityGate::Warn,
+        _ => QualityGate::Pass,
+    }
 }

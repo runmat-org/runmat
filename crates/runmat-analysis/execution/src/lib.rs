@@ -99,7 +99,15 @@ mod structural_modal_response_spectrum_study;
 mod structural_modal_transient_study;
 mod structural_prestress_producer;
 pub use structural_prestress_producer::ThermalPrestressSource;
+mod acoustic_frequency_assembly;
 mod acoustic_harmonic_plan;
+pub use acoustic_frequency_assembly::{
+    decode_acoustic_frequency_assembly_entries, import_acoustic_frequency_assembly,
+    prepare_acoustic_frequency_assembly_task, prepare_acoustic_frequency_field_objects,
+    rederive_acoustic_frequency_assembly_resource_plan,
+    validate_acoustic_frequency_assembly_entries, AcousticFrequencyAssemblyPreparation,
+    ImportedAcousticFrequencyAssembly, PreparedAcousticFrequencyAssemblyTask,
+};
 mod electrical_state_profiles;
 mod electrical_static_plan;
 mod electrical_static_result;
@@ -187,9 +195,10 @@ pub use acoustic_harmonic_result::{
 pub use acoustic_state_profiles::acoustic_state_publication_profiles;
 pub use acoustic_study::{
     import_acoustic_study_completion, import_acoustic_study_root, prepare_acoustic_study_root,
-    AcousticStudyCoordinator, AcousticStudyPhase, AcousticStudyPreparation,
+    AcousticStudyAssemblyClosure, AcousticStudyCoordinator, AcousticStudyEntryClosure,
+    AcousticStudyEntryCoordinator, AcousticStudyPhase, AcousticStudyPreparation,
     AcousticStudyResultClosure, AcousticStudyResultPhase, CompletedAcousticStudy,
-    PreparedAcousticStudyRoot,
+    CompletedAcousticStudyEntry, PreparedAcousticStudyRoot,
 };
 mod structural_prestressed_frequency_study;
 mod structural_prestressed_modal_frequency_study;

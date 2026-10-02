@@ -42,6 +42,7 @@ pub enum AnalysisNumericalObjectKind {
     FieldSourceBinding,
     FrequencySamplePublication,
     AcousticHarmonicWorkload,
+    AcousticFrequencyWorkload,
     ElectricalStaticWorkload,
     MagnetostaticWorkload,
     MaxwellHarmonicWorkload,

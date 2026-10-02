@@ -193,6 +193,7 @@ pub(super) fn artifact_record(
             .into_iter()
             .collect(),
         AnalysisStudyStepNumericalResultData::Standard
+        | AnalysisStudyStepNumericalResultData::AcousticFrequency(_)
         | AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(_)
         | AnalysisStudyStepNumericalResultData::StructuralRandomResponse(_) => Vec::new(),
     };

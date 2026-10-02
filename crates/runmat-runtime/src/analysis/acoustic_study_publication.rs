@@ -11,6 +11,9 @@ use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 mod admission;
 #[path = "acoustic_study_publication/materialization.rs"]
 mod materialization;
+pub(in crate::analysis) use materialization::{
+    AcousticFrequencyPersistence, CompletedAcousticFrequencyStep,
+};
 
 pub fn publish_acoustic_study_result(
     completed: &AcousticStudyCompletion,
@@ -32,13 +35,17 @@ pub fn publish_acoustic_study_result(
         definition,
     )
     .map_err(invalid)?;
+    let [authored_step] = completed.compiled.model.sequence.steps.as_slice() else {
+        return Err(invalid(
+            "acoustic publication requires one authored step".into(),
+        ));
+    };
     let run_id = publication_identity.local_run_id(
         runmat_analysis_core::PhysicsFamily::Acoustic,
         definition,
-        &completed.workload.step_id,
+        &authored_step.step_id,
     );
-    let run =
-        materialization::admit(completed, mesh, options, &run_id, &context).map_err(invalid)?;
+    let run = materialization::admit(completed, source, options, &run_id).map_err(invalid)?;
     let object_artifact_paths = source.persist(completed, definition).map_err(invalid)?;
     let persisted = super::meshing::persist_mesh_output(&crate::meshing::MeshingExecutionOutput {
         artifact: mesh.clone(),
@@ -47,9 +54,9 @@ pub fn publish_acoustic_study_result(
     })
     .map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
-        step_id: completed.workload.step_id.clone(),
+        step_id: authored_step.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        requirement: completed.workload.formulation_requirement,
+        requirement: completed.compiled.formulation_requirement,
         solver_options: super::AnalysisSolverOptions::AcousticHelmholtz(options.clone()),
     };
     let prepared = super::structural_study::standalone_completion(
@@ -60,18 +67,18 @@ pub fn publish_acoustic_study_result(
     )
     .map_err(invalid)?;
     let step = super::structural_study::CompletedStudyStep {
-        step_id: completed.workload.step_id.clone(),
+        step_id: authored_step.step_id.clone(),
         solver_result_identity: completed
             .result
             .source_result_identity()
             .map_err(|e| invalid(e.to_string()))?,
-        run: super::structural_study::CompletedStudyStepRun::Standard(Box::new(run)),
+        run: super::structural_study::CompletedStudyStepRun::AcousticFrequency(Box::new(run)),
         resolved_solver_options: super::AnalysisSolverOptions::AcousticHelmholtz(options.clone()),
     };
     let mut published = super::complete_study_run(
         prepared,
         vec![step],
-        completed.states.clone(),
+        Vec::new(),
         completed.frozen_project_digest,
     )?;
     let manifest = super::study_result_manifest::StudyResultManifest::new(

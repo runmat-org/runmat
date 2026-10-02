@@ -11,8 +11,9 @@ use runmat_execution_runner::AttemptResourceAccounting;
 
 use crate::{
     analysis_task_pool::{
-        execute_governed_analysis_phase, AnalysisTaskBatchPolicy, AnalysisTaskDependency,
-        AnalysisTaskPool, ExecutedAnalysisTask,
+        execute_analysis_task_batch, execute_governed_analysis_phase, planned_resource_attempt,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask,
+        PreparedAnalysisTask,
     },
     NativeExecutionError, NativeExecutionResult,
 };
@@ -40,72 +41,104 @@ pub(crate) async fn execute_with_pool(
     let scope_id = pool.scope_id();
     let pool_id = pool.pool_id();
     let mut coordinator = AcousticStudyCoordinator::new(preparation).map_err(protocol)?;
-    let state_ids: Vec<_> = coordinator
-        .selected_step()
-        .state_outputs
+    let started = std::time::Instant::now();
+    let mut preceding = vec![None; coordinator.entries().len()];
+    while coordinator
+        .entries()
         .iter()
-        .map(|declaration| declaration.state_id.clone())
-        .collect();
-    let solve = coordinator.prepare_solve().map_err(protocol)?;
-    let (executed, accounting) = execute_one(
-        pool,
-        &solve.host,
-        &solve.program,
-        &solve.resource_plan,
-        Vec::new(),
-        &policy,
-    )
-    .await?;
-    let mut preceding = dependency(&executed);
-    coordinator
-        .complete_solve(pool, executed.response, accounting)
-        .map_err(protocol)?;
-
-    let accuracy = coordinator.prepare_accuracy().map_err(protocol)?;
-    let (executed, accounting) = execute_one(
-        pool,
-        &accuracy.host,
-        &accuracy.program,
-        &accuracy.resource_plan,
-        vec![preceding],
-        &policy,
-    )
-    .await?;
-    preceding = dependency(&executed);
-    coordinator
-        .complete_accuracy(pool, executed.response, accounting)
-        .map_err(protocol)?;
-
-    for _state_id in state_ids {
-        let state = coordinator.prepare_next_state().map_err(protocol)?;
-        let (executed, accounting) = execute_one(
+        .any(|entry| !entry.is_complete())
+    {
+        validate_pool(pool, scope_id, pool_id)?;
+        let mut ordinals = Vec::new();
+        for (ordinal, entry) in coordinator
+            .entries_mut()
+            .map_err(protocol)?
+            .iter_mut()
+            .enumerate()
+        {
+            if !entry.is_complete() {
+                entry.prepare_next().map_err(protocol)?;
+                ordinals.push(ordinal);
+            }
+        }
+        let tasks = ordinals
+            .iter()
+            .map(|&ordinal| {
+                let (host, program, plan) = coordinator.entries()[ordinal]
+                    .pending_task()
+                    .map_err(protocol)?;
+                Ok(PreparedAnalysisTask {
+                    host,
+                    program,
+                    resource_plan: Some(plan),
+                    fallback_resources: policy.resources.clone(),
+                    dependencies: preceding[ordinal].into_iter().collect(),
+                })
+            })
+            .collect::<NativeExecutionResult<Vec<_>>>()?;
+        let executed = execute_analysis_task_batch(
             pool,
-            &state.host,
-            &state.program,
-            &state.resource_plan,
-            vec![preceding],
-            &policy,
+            tasks,
+            AnalysisTaskBatchPolicy {
+                retry: policy.retry,
+                deadline_unix_millis: policy.deadline_unix_millis,
+                priority: policy.priority,
+            },
         )
-        .await?;
-        preceding = dependency(&executed);
-        coordinator
-            .complete_next_state(pool, executed.response, accounting)
-            .map_err(protocol)?;
+        .await
+        .map_err(|error| {
+            let requests = ordinals
+                .iter()
+                .map(|&ordinal| {
+                    coordinator.entries()[ordinal]
+                        .pending_task()
+                        .map(|(_, _, plan)| {
+                            (ordinal, plan.input.phase.clone(), plan.request.clone())
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>();
+            protocol(format!(
+                "acoustic entry wave failed: {error}; admitted requests: {requests:?}"
+            ))
+        })?;
+        validate_pool(pool, scope_id, pool_id)?;
+        if executed.len() != ordinals.len() {
+            return Err(protocol(
+                "acoustic task wave response inventory differs from submitted entries",
+            ));
+        }
+        for (ordinal, executed) in ordinals.into_iter().zip(executed) {
+            let (_, _, plan) = coordinator.entries()[ordinal]
+                .pending_task()
+                .map_err(protocol)?;
+            let attempt = planned_resource_attempt(plan, &executed)?;
+            let dependency = dependency(&executed);
+            coordinator
+                .entry_mut(ordinal)
+                .map_err(protocol)?
+                .complete_next(pool, executed.response, attempt.accounting)
+                .map_err(protocol)?;
+            preceding[ordinal] = Some(dependency);
+        }
     }
-
-    coordinator.freeze_baseline().map_err(protocol)?;
-    let publication = coordinator.prepare_publication().map_err(protocol)?;
+    let assembly = coordinator.prepare_assembly().map_err(protocol)?;
+    validate_pool(pool, scope_id, pool_id)?;
     let (executed, accounting) = execute_one(
         pool,
-        &publication.host,
-        &publication.program,
-        &publication.resource_plan,
-        vec![preceding],
+        &assembly.host,
+        &assembly.program,
+        &assembly.resource_plan,
+        preceding
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| protocol("acoustic assembly is missing a terminal entry dependency"))?,
         &policy,
     )
     .await?;
+    let elapsed = u64::try_from(started.elapsed().as_millis())
+        .map_err(|_| protocol("acoustic task graph elapsed time overflow"))?;
     coordinator
-        .complete_publication(pool, executed.response, accounting)
+        .complete_assembly(pool, executed.response, accounting, elapsed)
         .map_err(protocol)?;
     if pool.scope_id() != scope_id || pool.pool_id() != pool_id {
         return Err(protocol(
@@ -137,6 +170,12 @@ async fn execute_one(
         },
     )
     .await
+    .map_err(|error| {
+        protocol(format!(
+            "acoustic aggregate phase {:?} failed: {error}; admitted request: {:?}",
+            plan.input.phase, plan.request,
+        ))
+    })
 }
 
 fn dependency(executed: &ExecutedAnalysisTask) -> AnalysisTaskDependency {
@@ -144,6 +183,19 @@ fn dependency(executed: &ExecutedAnalysisTask) -> AnalysisTaskDependency {
         identity: executed.identity,
         task_id: executed.task_id,
     }
+}
+
+fn validate_pool(
+    pool: &impl AnalysisTaskPool,
+    scope_id: runmat_execution::ExecutionScopeId,
+    pool_id: runmat_execution::PoolId,
+) -> NativeExecutionResult<()> {
+    if pool.scope_id() != scope_id || pool.pool_id() != pool_id {
+        return Err(protocol(
+            "acoustic execution pool or scope changed between phases",
+        ));
+    }
+    Ok(())
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

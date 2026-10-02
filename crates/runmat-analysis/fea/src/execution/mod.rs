@@ -8,9 +8,9 @@ pub use crate::pipeline::thermal::PreparedThermalSolve;
 mod accuracy;
 mod acoustic;
 pub use acoustic::{
-    AcousticFrequencyResult, AcousticFrequencyWorkload, AcousticHarmonicSolverResult,
-    AcousticHarmonicWorkload, AcousticNumericalReceipt, AcousticNumericalReceiptArtifact,
-    ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
+    assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput, AcousticFrequencyResult,
+    AcousticFrequencyWorkload, AcousticHarmonicSolverResult, AcousticHarmonicWorkload,
+    AcousticNumericalReceipt, AcousticNumericalReceiptArtifact, ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod accuracy_source;
 mod buckling_result;

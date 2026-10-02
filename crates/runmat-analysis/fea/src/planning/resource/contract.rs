@@ -53,7 +53,7 @@ mod transient_block_demand;
 mod transient_recovery_demand;
 mod transient_scope_demand;
 pub use assembly_demand::{
-    StructuralFrequencyResultAssemblyResourceDemand,
+    AcousticFrequencyAssemblyResourceDemand, StructuralFrequencyResultAssemblyResourceDemand,
     StructuralModalResponseSpectrumAssemblyResourceDemand,
     StructuralRandomResponseAssemblyResourceDemand,
     StructuralTransientResultAssemblyResourceDemand,
@@ -251,6 +251,7 @@ pub enum PartitioningPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "request")]
 pub enum FeaResourcePhase {
+    AcousticFrequencyAssembly(AnalysisWorkloadIdentity),
     FluidSteadySolve(AnalysisWorkloadIdentity),
     FluidFieldRecovery(FieldRecoveryRequestIdentity),
     AcousticHarmonic(AnalysisWorkloadIdentity),
@@ -350,6 +351,7 @@ pub use observation_demand::{
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
 pub enum FeaResourceDemand {
+    AcousticFrequencyAssembly(AcousticFrequencyAssemblyResourceDemand),
     FluidSteadySolve(FluidSteadySolveResourceDemand),
     FluidFieldRecovery(FluidFieldRecoveryResourceDemand),
     AcousticHarmonic(AcousticHarmonicResourceDemand),

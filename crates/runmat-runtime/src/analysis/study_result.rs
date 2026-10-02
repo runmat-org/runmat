@@ -14,7 +14,10 @@ pub use electrical::{
 pub use magnetic::{MagneticStudyCompletion, MagneticStudyObjectSource, MagneticStudySource};
 pub use maxwell::{MaxwellStudyCompletion, MaxwellStudyObjectSource, MaxwellStudySource};
 pub(super) mod thermal;
-pub use acoustic::{AcousticStudyCompletion, AcousticStudyObjectSource, AcousticStudySource};
+pub use acoustic::{
+    AcousticStudyCompletion, AcousticStudyEntryCompletion, AcousticStudyObjectSource,
+    AcousticStudySource,
+};
 mod thermal_completion;
 pub(super) mod thermal_observation_admission;
 mod thermal_observations;

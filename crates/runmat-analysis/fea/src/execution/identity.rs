@@ -361,6 +361,12 @@ impl AccuracyIdentity {
 }
 
 impl NumericalPlanIdentity {
+    pub fn from_acoustic_frequency_workload(
+        workload: AnalysisWorkloadIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("acoustic-frequency-numerical-plan", &(workload, topology))
+    }
     /// Original steady finite-volume workload and mesh; independent of placement/chunks.
     pub fn from_fluid_steady_workload(
         workload: AnalysisWorkloadIdentity,

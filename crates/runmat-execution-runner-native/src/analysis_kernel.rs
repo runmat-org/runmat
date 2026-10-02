@@ -94,6 +94,7 @@ use runmat_analysis_fea::{
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 mod accuracy_evaluation;
+mod acoustic_frequency_assembly;
 mod acoustic_harmonic;
 mod buckling;
 #[cfg(test)]
@@ -130,6 +131,9 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::Solve => structural_linear::execute(invocation),
             AnalysisWorkKind::SolveThermal => thermal::execute(invocation),
             AnalysisWorkKind::SolveAcousticHarmonic => acoustic_harmonic::execute(invocation),
+            AnalysisWorkKind::AssembleAcousticFrequencyResult => {
+                acoustic_frequency_assembly::execute(invocation)
+            }
             AnalysisWorkKind::SolveElectricalStatic => electrical_static::execute(invocation),
             AnalysisWorkKind::SolveMagnetostatic => magnetostatic::execute(invocation),
             AnalysisWorkKind::SolveMaxwellHarmonic => maxwell_harmonic::execute(invocation),

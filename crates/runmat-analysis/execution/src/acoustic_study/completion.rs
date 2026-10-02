@@ -23,6 +23,23 @@ pub struct AcousticStudyResultClosure {
     pub accounting: AttemptResourceAccounting,
 }
 
+/// Canonical frequency coordinate scopes every saved entry phase.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcousticStudyEntryClosure {
+    pub entry: runmat_analysis_fea::frequency::FrequencyResponsePlanEntry,
+    pub closures: Vec<AcousticStudyResultClosure>,
+}
+
+/// Original metered aggregate task response; never substitutes a numerical receipt.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcousticStudyAssemblyClosure {
+    pub workload: AnalysisWorkloadRequest,
+    pub response: ProgramExecutionResponse,
+    pub accounting: AttemptResourceAccounting,
+}
+
 impl AcousticStudyResultClosure {
     pub(super) fn new(
         phase: AcousticStudyResultPhase,
@@ -68,33 +85,57 @@ impl CompletedAcousticStudy {
         self.replay.policy
     }
 
-    pub fn result_closures(&self) -> &[AcousticStudyResultClosure] {
-        &self.closures
+    pub fn entry_closures(&self) -> Vec<AcousticStudyEntryClosure> {
+        self.entries
+            .iter()
+            .map(|entry| AcousticStudyEntryClosure {
+                entry: entry.entry,
+                closures: entry.closures.clone(),
+            })
+            .collect()
     }
 
-    /// Original validated preparation, retained for durable artifact packaging.
+    /// Reconstruct exact authored planning and validate every original entry receipt.
     pub fn preparation(&self) -> AnalysisBridgeResult<AcousticStudyPreparation> {
+        let entry_attempts = self.entries.iter().try_fold(0_usize, |total, entry| {
+            total
+                .checked_add(entry.closures.len())
+                .ok_or_else(|| invalid("acoustic entry attempt inventory overflow"))
+        })?;
+        if entry_attempts.checked_add(1) != Some(self.resource_usage.evidence.attempts.len()) {
+            return Err(invalid("acoustic aggregate resource inventory omits or adds an actual entry/assembly attempt"));
+        }
         self.compiled
             .validate_against(&self.replay.mesh)
-            .map_err(|error| invalid(error.to_string()))?;
-        self.result.numerical_receipt.validate_against(
-            &self.workload,
-            &self.result.result,
-            &self.replay.mesh,
-        )?;
+            .map_err(|e| invalid(e.to_string()))?;
         let plan = plan_acoustic_study(&self.compiled, self.replay.policy)
-            .map_err(|error| invalid(error.to_string()))?;
-        let [frequency] = plan.frequencies() else {
+            .map_err(|e| invalid(e.to_string()))?;
+        if plan.frequency_plan() != self.workload.plan()
+            || plan.frequencies().len() != self.entries.len()
+        {
             return Err(invalid(
-                "completed acoustic plan must contain one frequency",
-            ));
-        };
-        if frequency.workload() != &self.workload {
-            return Err(invalid(
-                "completed acoustic workload differs from authored plan",
+                "completed acoustic frequencies differ from exact authored planning",
             ));
         }
-        Ok(AcousticStudyPreparation {
+        for (planned, entry) in plan.frequencies().iter().zip(&self.entries) {
+            if planned.entry() != entry.entry || planned.workload() != &entry.workload {
+                return Err(invalid(
+                    "completed acoustic entry differs from its exact authored workload",
+                ));
+            }
+            entry.result.numerical_receipt.validate_against(
+                &entry.workload,
+                &entry.result.result,
+                &self.replay.mesh,
+            )?;
+        }
+        self.assembly
+            .result
+            .validate_for(&self.workload, &self.replay.mesh)?;
+        self.assembly
+            .publication
+            .validate_for(&self.assembly.result.publication_authority()?)?;
+        let preparation = AcousticStudyPreparation {
             policy: self.replay.policy,
             product: AcousticStudyProduct {
                 compiled: self.compiled.clone(),
@@ -106,71 +147,102 @@ impl CompletedAcousticStudy {
             program_revision: self.replay.program_revision.clone(),
             output_policy: self.replay.output_policy,
             required_capabilities: self.replay.required_capabilities.clone(),
-        })
+        };
+        if preparation.frequency_workload()? != self.workload {
+            return Err(invalid(
+                "completed acoustic aggregate workload differs from its authored preparation",
+            ));
+        }
+        Ok(preparation)
     }
 }
 
-/// Reconstruct every task from authored inputs and consume its saved response/accounting pair.
-/// No unmetered shortcut: source imports, admission and terminal usage checks run unchanged.
+/// Reconstruct every entry task and aggregate task from authored inputs. Saved scheduler
+/// response/accounting associations are imported, never reexecuted or relabelled.
 pub fn import_acoustic_study_completion(
     source: &impl CacheImport,
     preparation: AcousticStudyPreparation,
-    closures: Vec<AcousticStudyResultClosure>,
+    entries: Vec<AcousticStudyEntryClosure>,
+    assembly: AcousticStudyAssemblyClosure,
+    wave_wall_millis: u64,
 ) -> AnalysisBridgeResult<CompletedAcousticStudy> {
     let mut study = AcousticStudyCoordinator::new(preparation)?;
-    let mut closures = closures.into_iter();
-    loop {
-        // These transitions have no worker response. Rebuild them instead of trusting a label.
-        if study.phase() == AcousticStudyPhase::ReadyForBaseline {
-            study.freeze_baseline()?;
+    if study.entries().len() != entries.len() {
+        return Err(invalid(
+            "acoustic completion omits or adds frequency entries",
+        ));
+    }
+    for (ordinal, saved) in entries.into_iter().enumerate() {
+        let entry = study.entry_mut(ordinal)?;
+        if entry.entry() != saved.entry {
+            return Err(invalid(
+                "acoustic completion frequency order or coordinate differs from exact plan",
+            ));
         }
-        if study.phase() == AcousticStudyPhase::Complete {
-            break;
+        let mut closures = saved.closures.into_iter();
+        loop {
+            if entry.phase() == AcousticStudyPhase::ReadyForBaseline {
+                entry.freeze_baseline()?;
+            }
+            if entry.phase() == AcousticStudyPhase::Complete {
+                break;
+            }
+            let (phase, host) = match entry.phase() {
+                AcousticStudyPhase::ReadyForSolve => (
+                    AcousticStudyResultPhase::Solve,
+                    &entry.prepare_solve()?.host,
+                ),
+                AcousticStudyPhase::ReadyForAccuracy => (
+                    AcousticStudyResultPhase::Accuracy,
+                    &entry.prepare_accuracy()?.host,
+                ),
+                AcousticStudyPhase::ReadyForState { ordinal } => (
+                    AcousticStudyResultPhase::State { ordinal },
+                    &entry.prepare_next_state()?.host,
+                ),
+                AcousticStudyPhase::ReadyForPublication => (
+                    AcousticStudyResultPhase::Publication,
+                    &entry.prepare_publication()?.host,
+                ),
+                _ => {
+                    return Err(invalid(
+                        "acoustic completion replay reached an awaiting phase",
+                    ))
+                }
+            };
+            let closure = closures
+                .next()
+                .ok_or_else(|| invalid("acoustic entry completion omits an authored phase"))?;
+            closure.validate_for(phase, host)?;
+            match phase {
+                AcousticStudyResultPhase::Solve => {
+                    entry.complete_solve(source, closure.response, closure.accounting)?
+                }
+                AcousticStudyResultPhase::Accuracy => {
+                    entry.complete_accuracy(source, closure.response, closure.accounting)?
+                }
+                AcousticStudyResultPhase::State { .. } => {
+                    entry.complete_next_state(source, closure.response, closure.accounting)?
+                }
+                AcousticStudyResultPhase::Publication => {
+                    entry.complete_publication(source, closure.response, closure.accounting)?
+                }
+            }
         }
-        let (phase, host) = match study.phase() {
-            AcousticStudyPhase::ReadyForSolve => (
-                AcousticStudyResultPhase::Solve,
-                &study.prepare_solve()?.host,
-            ),
-            AcousticStudyPhase::ReadyForAccuracy => (
-                AcousticStudyResultPhase::Accuracy,
-                &study.prepare_accuracy()?.host,
-            ),
-            AcousticStudyPhase::ReadyForState { ordinal } => (
-                AcousticStudyResultPhase::State { ordinal },
-                &study.prepare_next_state()?.host,
-            ),
-            AcousticStudyPhase::ReadyForPublication => (
-                AcousticStudyResultPhase::Publication,
-                &study.prepare_publication()?.host,
-            ),
-            _ => {
-                return Err(invalid(
-                    "acoustic completion replay reached an awaiting phase",
-                ))
-            }
-        };
-        let closure = closures
-            .next()
-            .ok_or_else(|| invalid("acoustic completion omits an authored phase"))?;
-        closure.validate_for(phase, host)?;
-        match phase {
-            AcousticStudyResultPhase::Solve => {
-                study.complete_solve(source, closure.response, closure.accounting)?
-            }
-            AcousticStudyResultPhase::Accuracy => {
-                study.complete_accuracy(source, closure.response, closure.accounting)?
-            }
-            AcousticStudyResultPhase::State { .. } => {
-                study.complete_next_state(source, closure.response, closure.accounting)?
-            }
-            AcousticStudyResultPhase::Publication => {
-                study.complete_publication(source, closure.response, closure.accounting)?
-            }
+        if closures.next().is_some() {
+            return Err(invalid("acoustic entry completion contains an extra phase"));
         }
     }
-    if closures.next().is_some() {
-        return Err(invalid("acoustic completion contains an extra phase"));
+    if study.prepare_assembly()?.host.workload != assembly.workload {
+        return Err(invalid(
+            "acoustic assembly closure differs from reconstructed aggregate task",
+        ));
     }
+    study.complete_assembly(
+        source,
+        assembly.response,
+        assembly.accounting,
+        wave_wall_millis,
+    )?;
     study.into_completed()
 }

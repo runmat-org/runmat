@@ -5,6 +5,19 @@ use super::{ByteCount, Count, PreparedInputResourceFacts, PreparedOutputResource
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct AcousticFrequencyAssemblyResourceDemand {
+    pub workload: crate::execution::AnalysisWorkloadIdentity,
+    pub topology_digest: Digest,
+    pub entry_count: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub workspace_bytes_upper_bound: ByteCount,
+    pub result_output: PreparedOutputResourceFacts,
+    pub publication_output: PreparedOutputResourceFacts,
+    pub fields_output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StructuralFrequencyResultAssemblyResourceDemand {
     pub scope_digest: Digest,
     pub entry_count: Count,

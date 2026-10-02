@@ -20,6 +20,60 @@ use runmat_analysis_core::{
 mod tests;
 
 impl AcousticHarmonicSolverResult {
+    /// Catalog and partition encoding profiles from native shape, without copying values.
+    /// This is sizing authority only, not a published field or numerical receipt.
+    pub fn native_field_encoding_profiles(
+        &self,
+    ) -> AnalysisExecutionResult<(
+        runmat_canonical_codec::SerializedCanonicalProfile,
+        runmat_canonical_codec::SerializedCanonicalProfile,
+    )> {
+        use crate::results::field::{
+            RecoveredFieldArtifactManifest, RecoveredFieldPartition,
+            RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
+        };
+        let request = self.native_field_request_from_result()?;
+        let sample = RecoveredFieldSample::FrequencyHertz(self.frequency().hertz);
+        let definitions = [
+            native_acoustic_field_definition("acoustic.pressure", &request.plan.requirements[0])?,
+            native_acoustic_field_definition(
+                "acoustic.particle_velocity",
+                &request.plan.requirements[1],
+            )?,
+        ];
+        let counts = [
+            self.ordered_node_ids().len(),
+            self.ordered_element_ids().len(),
+        ];
+        let catalog = RecoveredFieldArtifactManifest::profile_sampled_shape(
+            &request,
+            &definitions,
+            &counts,
+            sample,
+        )
+        .map_err(invalid)?;
+        let mut complete = catalog;
+        for (definition, count) in definitions.iter().zip(counts) {
+            let mut remaining = count;
+            while remaining != 0 {
+                let entities = remaining.min(RECOVERED_FIELD_PARTITION_ENTITY_COUNT);
+                let partition =
+                    RecoveredFieldPartition::profile_shape(definition, sample, entities)
+                        .map_err(invalid)?;
+                complete.encoded_bytes_upper_bound = complete
+                    .encoded_bytes_upper_bound
+                    .checked_add(partition.encoded_bytes_upper_bound)
+                    .ok_or_else(|| invalid("native field encoding profile overflow"))?;
+                complete.materialization_resident_bytes_estimate = complete
+                    .materialization_resident_bytes_estimate
+                    .checked_add(partition.materialization_resident_bytes_estimate)
+                    .ok_or_else(|| invalid("native field materialization profile overflow"))?;
+                remaining -= entities;
+            }
+        }
+        Ok((catalog, complete))
+    }
+
     /// Exact publication request for native nodal pressure and element-average particle velocity.
     /// The producer, source result and storage topology are authenticated before planning.
     pub fn native_field_request(

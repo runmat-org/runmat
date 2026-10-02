@@ -1,6 +1,6 @@
 //! Authenticate the complete retained closure before writing public artifacts.
 use super::*;
-use runmat_analysis_core::{AnalysisProcedure, IndependentDomain, PhysicsFamily};
+use runmat_analysis_core::{AnalysisProcedure, PhysicsFamily};
 
 pub(super) fn validate(
     completed: &AcousticStudyCompletion,
@@ -31,32 +31,88 @@ pub(super) fn validate(
     let [step] = completed.compiled.model.sequence.steps.as_slice() else {
         return Err("acoustic publication requires one fresh independent authored step".into());
     };
-    if completed.workload.model != completed.compiled.model
-        || completed.workload.step_id != step.step_id
-        || step.family != PhysicsFamily::Acoustic
+    if step.family != PhysicsFamily::Acoustic
         || step.procedure != AnalysisProcedure::HarmonicResponse
-        || step.independent_domain
-            != IndependentDomain::FrequencyHertz(vec![completed.workload.frequency.hertz])
         || !step.observations.is_empty()
         || !completed.compiled.outputs.is_empty()
-        || completed.workload.formulation_requirement != completed.compiled.formulation_requirement
     {
-        return Err("acoustic publication requires exact singleton workload without unsupported observations".into());
+        return Err("acoustic publication requires an exact independent authored workload without unsupported observations".into());
     }
-    validate_options(options, completed.workload.solver.relative_tolerance)?;
+    completed
+        .result
+        .validate_for(&completed.workload, mesh)
+        .map_err(|e| e.to_string())?;
+    let authority = completed
+        .result
+        .publication_authority()
+        .map_err(|e| e.to_string())?;
+    completed
+        .publication
+        .validate_for(&authority)
+        .map_err(|e| e.to_string())?;
+    completed.publication_roots.admit(
+        crate::analysis::FrequencySamplePublicationAccess {
+            publication: &completed.publication,
+            authority: &authority,
+            object_catalog: &completed.publication_catalog,
+        },
+        |digest| {
+            let reference = completed
+                .publication_catalog
+                .objects
+                .iter()
+                .find(|reference| reference.logical_digest == digest)
+                .ok_or("acoustic publication reference is absent from its catalog")?;
+            runmat_execution::value::PublishedObjectSource::read_verified(source, reference)
+                .map(Some)
+        },
+    )?;
+    let [first, ..] = completed.entries.as_slice() else {
+        return Err("acoustic publication omits frequency entries".into());
+    };
+    validate_options(options, first.workload.solver.relative_tolerance)?;
     let plan = runmat_analysis_fea::study::plan_acoustic_study(
         &completed.compiled,
         runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
-            formulation_requirement: completed.workload.formulation_requirement,
-            krylov_restart: completed.workload.solver.restart,
-            maximum_iterations: completed.workload.solver.maximum_iterations,
-            power_balance_relative_tolerance: completed.workload.power_balance_relative_tolerance,
+            formulation_requirement: first.workload.formulation_requirement,
+            krylov_restart: first.workload.solver.restart,
+            maximum_iterations: first.workload.solver.maximum_iterations,
+            power_balance_relative_tolerance: first.workload.power_balance_relative_tolerance,
         },
     )
     .map_err(|e| e.to_string())?;
-    if !matches!(plan.frequencies(), [frequency] if frequency.workload() == &completed.workload) {
+    if plan.frequency_plan() != completed.workload.plan()
+        || plan.frequencies().len() != completed.entries.len()
+        || completed.result.results().len() != completed.entries.len()
+    {
         return Err("acoustic publication workload differs from exact authored planning".into());
     }
+    for ((planned, completed), result) in plan
+        .frequencies()
+        .iter()
+        .zip(&completed.entries)
+        .zip(completed.result.results())
+    {
+        if planned.entry() != completed.entry
+            || planned.workload() != &completed.workload
+            || result != &completed.result
+        {
+            return Err(
+                "acoustic publication entry differs from its exact plan and aggregate result"
+                    .into(),
+            );
+        }
+        validate_options(options, completed.workload.solver.relative_tolerance)?;
+        validate_entry(completed, mesh, step)?;
+    }
+    Ok(())
+}
+
+fn validate_entry(
+    completed: &crate::analysis::AcousticStudyEntryCompletion,
+    mesh: &SolverMeshArtifact,
+    step: &runmat_analysis_core::ProcedureStep,
+) -> Result<(), String> {
     completed
         .result
         .validate_for(&completed.workload, mesh)

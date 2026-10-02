@@ -136,9 +136,6 @@ pub fn plan_acoustic_study(
         .first()
         .copied()
         .ok_or(AcousticStudyPlanningError::EmptyFrequencyDomain)?;
-    if authored_frequencies.len() != 1 {
-        return Err(AcousticStudyPlanningError::AmbiguousFrequencySweepState);
-    }
     let frequency_plan = FrequencyResponsePlan::new(reference, authored_frequencies, &[])
         .map_err(|error| AcousticStudyPlanningError::Frequency(error.to_string()))?;
     if frequency_plan.frequencies_hz().len() > step.accuracy.resources.maximum_samples {
@@ -201,8 +198,6 @@ pub enum AcousticStudyPlanningError {
     UnsupportedPublication,
     #[error("acoustic planning requires exactly one complete acoustic-complex state output")]
     UnsupportedStatePublication,
-    #[error("one acoustic-complex state cannot represent a multi-frequency sweep")]
-    AmbiguousFrequencySweepState,
     #[error("acoustic harmonic response requires at least one authored frequency")]
     EmptyFrequencyDomain,
     #[error("acoustic frequency count exceeds the authored resource ceiling")]

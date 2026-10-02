@@ -105,6 +105,7 @@ pub enum AnalysisWorkKind {
     SolveFluidSteady,
     SolveThermal,
     SolveAcousticHarmonic,
+    AssembleAcousticFrequencyResult,
     SolveElectricalStatic,
     SolveMagnetostatic,
     SolveMaxwellHarmonic,
