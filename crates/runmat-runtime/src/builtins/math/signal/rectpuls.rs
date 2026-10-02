@@ -119,10 +119,10 @@ async fn rectpuls_in_runtime(
     }
     if let Some(control) = &width {
         control
-            .admit_resident_metadata(BUILTIN_NAME)
+            .admit_resident_metadata(BUILTIN_NAME, &RECTPULS_ERROR_INTERNAL)
             .map_err(width_control_error)?;
     }
-    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample")?;
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &RECTPULS_ERROR_INTERNAL)?;
     // Authenticate every resident operand before preparation can download a
     // wide integer sample. The same handles later protect output restoration.
     let (gpu_source, resident_inputs) = rectpuls_gpu_source(&t, &rest)?;

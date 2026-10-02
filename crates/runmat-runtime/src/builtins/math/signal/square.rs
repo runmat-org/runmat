@@ -153,10 +153,10 @@ async fn square_in_runtime(
     }
     if let Some(control) = &duty {
         control
-            .admit_resident_metadata(BUILTIN_NAME)
+            .admit_resident_metadata(BUILTIN_NAME, &SQUARE_ERROR_INTERNAL)
             .map_err(duty_control_error)?;
     }
-    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample")?;
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &SQUARE_ERROR_INTERNAL)?;
     let prepared = cooperation
         .prepare_integer_boundary(&t, &SQUARE_NONFLOATING_INPUT_EXTENSION, "sample-time")
         .await?;
@@ -402,6 +402,38 @@ mod tests {
         assert_eq!(error.identifier(), SQUARE_ERROR_INVALID_INPUT.identifier);
         assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
         assert!(borrowed.allocation_lease().validate_live().is_ok());
+    }
+
+    #[test]
+    fn resident_sample_owner_metadata_keeps_square_context_before_download() {
+        use std::sync::atomic::Ordering;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let (provider, _) = counted_control(true);
+        let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let foreign_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = foreign_owner
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let borrowed = allocation.handle.clone();
+        let error = call(Value::GpuTensor(allocation.handle))
+            .expect_err("resident sample without an active owner must be rejected");
+        assert_eq!(error.identifier(), SQUARE_ERROR_INTERNAL.identifier);
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let original = error
+            .source
+            .as_deref()
+            .and_then(|cause| cause.downcast_ref::<RuntimeError>())
+            .expect("typed metadata failure retained as source");
+        assert_ne!(original.identifier(), SQUARE_ERROR_INTERNAL.identifier);
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+        borrowed.allocation_lease().validate_live().unwrap();
+        assert_eq!(allocation.probe.retirements(), 0);
     }
 
     #[test]

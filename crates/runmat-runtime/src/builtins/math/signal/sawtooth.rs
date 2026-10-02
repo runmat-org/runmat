@@ -156,10 +156,10 @@ async fn sawtooth_in_runtime(
     }
     if let Some(control) = &xmax {
         control
-            .admit_resident_metadata(BUILTIN_NAME)
+            .admit_resident_metadata(BUILTIN_NAME, &SAWTOOTH_ERROR_INTERNAL)
             .map_err(xmax_control_error)?;
     }
-    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample")?;
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &SAWTOOTH_ERROR_INTERNAL)?;
     let prepared = cooperation
         .prepare_integer_boundary(&t, &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION, "t")
         .await?;

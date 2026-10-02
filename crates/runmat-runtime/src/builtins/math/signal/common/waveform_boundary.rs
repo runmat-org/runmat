@@ -85,11 +85,28 @@ pub(crate) fn admit_resident_waveform_operand(
     value: &Value,
     builtin: &'static str,
     role: &str,
+    internal: &'static BuiltinErrorDescriptor,
 ) -> Result<(), RuntimeError> {
     let Value::GpuTensor(handle) = value else {
         return Ok(());
     };
-    validation::validate_resident_metadata(value)?;
+    validation::validate_resident_metadata(value).map_err(|source| {
+        let span = source.span;
+        let mut builder = build_runtime_error(format!(
+            "{}: resident {role} metadata is invalid: {}",
+            internal.message,
+            source.message()
+        ))
+        .with_builtin(builtin)
+        .with_source(source)
+        .with_gpu_gather_retry(GpuGatherRetry::Never);
+        if let Some(identifier) = internal.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        let mut owner = builder.build();
+        owner.span = span;
+        owner
+    })?;
     handle
         .allocation_lease()
         .validate_live()

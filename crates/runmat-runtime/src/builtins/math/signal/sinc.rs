@@ -123,7 +123,7 @@ async fn sinc_in_runtime(
         )?;
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
-    admit_resident_waveform_operand(&value, BUILTIN_NAME, "input")?;
+    admit_resident_waveform_operand(&value, BUILTIN_NAME, "input", &SINC_ERROR_INTERNAL)?;
     // Only a resident wide integer needs a retained native readback. Host
     // integer sinc has an exact zero/nonzero rule and must not do a separate
     // binary64-exactness scan before its numerical pass.

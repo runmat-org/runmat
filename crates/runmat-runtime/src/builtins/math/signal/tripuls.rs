@@ -162,14 +162,14 @@ async fn tripuls_in_runtime(
     }
     if let Some(width) = &controls.0 {
         width
-            .admit_resident_metadata(BUILTIN_NAME)
+            .admit_resident_metadata(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL)
             .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
     }
     if let Some(skew) = &controls.1 {
-        skew.admit_resident_metadata(BUILTIN_NAME)
+        skew.admit_resident_metadata(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL)
             .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
     }
-    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample")?;
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &TRIPULS_ERROR_INTERNAL)?;
     let resident_inputs: Vec<_> = std::iter::once(&t)
         .chain(rest.iter())
         .filter_map(|value| match value {

@@ -1,7 +1,7 @@
 //! Scalar waveform controls: host-visible admission precedes device access.
 
 use runmat_accelerate_api::{handle_storage, GpuTensorStorage};
-use runmat_builtins::BuiltinExtensionDescriptor;
+use runmat_builtins::{BuiltinErrorDescriptor, BuiltinExtensionDescriptor};
 use runmat_value::Value;
 
 use crate::builtins::common::{gpu_helpers, tensor, validation};
@@ -69,6 +69,7 @@ impl<'a> PreparedWaveformControl<'a> {
     pub(crate) fn admit_resident_metadata(
         &self,
         builtin: &'static str,
+        internal: &'static BuiltinErrorDescriptor,
     ) -> Result<(), WaveformControlError> {
         let Self::Resident {
             value, extension, ..
@@ -80,7 +81,7 @@ impl<'a> PreparedWaveformControl<'a> {
             crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)
                 .map_err(WaveformControlError::Boundary)?;
         }
-        admit_resident_waveform_operand(value, builtin, "control")
+        admit_resident_waveform_operand(value, builtin, "control", internal)
             .map_err(WaveformControlError::Boundary)
     }
 
