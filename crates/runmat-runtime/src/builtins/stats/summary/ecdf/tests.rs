@@ -37,6 +37,14 @@ fn numeric_ecdf_remains_available_without_presentation() {
         .as_deref()
         .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
         .is_some());
+    let logical = Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![2, 1]).unwrap());
+    let error = block_on(ecdf_builtin(vec![logical]))
+        .expect_err("valid logical statement still requires presentation");
+    assert!(error
+        .source
+        .as_deref()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
 }
 
 #[cfg(not(feature = "plot-core"))]
@@ -323,6 +331,30 @@ fn ecdf_returns_unique_sorted_points_with_initial_zero() {
     let outputs = output_tensors(value);
     assert_eq!(outputs[0].materialize_f64(), vec![0.0, 0.25, 0.75, 1.0]);
     assert_eq!(outputs[1].materialize_f64(), vec![1.0, 1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn ecdf_logical_vector_preserves_shape_and_numeric_steps() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let sample = Value::LogicalArray(
+        LogicalArray::new(vec![0, 1, 1, 0], vec![4, 1]).expect("logical vector"),
+    );
+    let outputs = output_tensors(block_on(ecdf_builtin(vec![sample])).expect("logical ecdf"));
+    assert_eq!(outputs[0].materialize_f64(), vec![0.0, 0.5, 1.0]);
+    assert_eq!(outputs[1].materialize_f64(), vec![0.0, 0.0, 1.0]);
+    assert_eq!(outputs[0].shape, vec![3, 1]);
+    assert_eq!(outputs[1].shape, vec![3, 1]);
+}
+
+#[test]
+fn ecdf_logical_sample_geometry_matches_numeric_sample_admission() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    for (data, shape) in [(vec![], vec![0, 1]), (vec![1; 6], vec![2, 3])] {
+        let sample = Value::LogicalArray(LogicalArray::new(data, shape).unwrap());
+        let error = block_on(ecdf_builtin(vec![sample])).expect_err("invalid logical shape");
+        assert_eq!(error.identifier(), Some("RunMat:ecdf:InvalidArgument"));
+    }
 }
 
 #[test]

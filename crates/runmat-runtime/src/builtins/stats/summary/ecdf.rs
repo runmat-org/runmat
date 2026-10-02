@@ -285,7 +285,8 @@ fn preflight_ecdf_sample(value: &Value) -> BuiltinResult<()> {
             }
             handle.shape()
         }
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => return Ok(()),
+        Value::LogicalArray(array) => &array.shape,
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Ok(()),
         _ => {
             return Err(invalid_argument(
                 ECDF_OWNER,

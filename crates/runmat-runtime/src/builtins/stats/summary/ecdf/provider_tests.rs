@@ -273,6 +273,17 @@ fn unavailable_ecdf_statement_form_does_not_download_resident_inputs() {
         Some("RunMat:ecdf:InvalidArgument")
     );
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    for (data, shape) in [(vec![], vec![0, 1]), (vec![1; 6], vec![2, 3])] {
+        let logical = Value::LogicalArray(LogicalArray::new(data, shape).unwrap());
+        let error = block_on(ecdf_builtin(vec![
+            logical,
+            Value::from("Frequency"),
+            Value::GpuTensor(allocation.handle.clone()),
+        ]))
+        .expect_err("known invalid logical shape must precede missing presentation");
+        assert_eq!(error.identifier(), Some("RunMat:ecdf:InvalidArgument"));
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
     let error = block_on(ecdf_builtin(vec![Value::GpuTensor(
         allocation.handle.clone(),
     )]))
