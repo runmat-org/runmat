@@ -1,7 +1,7 @@
 use std::collections::{btree_map::IntoKeys, BTreeMap};
 
 use super::{GroupIndex, GroupKey, KeyOrder};
-use crate::builtins::common::grouping_keys::KeyAtom;
+use crate::builtins::common::grouping_keys::group_key_work_units;
 
 pub(super) enum BuildProgress {
     Work(u64),
@@ -61,7 +61,7 @@ impl GroupIndexBuilder {
                 Phase::CollectSorted => {
                     if let Some(row) = self.rows.get(self.cursor) {
                         let work = row.as_ref().map_or(1, |key| {
-                            let work = key_work_units(key);
+                            let work = group_key_work_units(key);
                             if !self.sorted.contains_key(key) {
                                 self.sorted.insert(key.clone(), ());
                             }
@@ -75,7 +75,7 @@ impl GroupIndexBuilder {
                 }
                 Phase::DrainSorted => {
                     if let Some(key) = self.sorted_keys.as_mut().and_then(Iterator::next) {
-                        let work = key_work_units(&key);
+                        let work = group_key_work_units(&key);
                         self.keys.push(key);
                         return Ok(BuildProgress::Work(work));
                     }
@@ -86,7 +86,7 @@ impl GroupIndexBuilder {
                 Phase::CollectFirstAppearance => {
                     if let Some(row) = self.rows.get(self.cursor) {
                         let work = row.as_ref().map_or(1, |key| {
-                            let work = key_work_units(key);
+                            let work = group_key_work_units(key);
                             if !self.key_indices.contains_key(key) {
                                 self.key_indices.insert(key.clone(), self.keys.len());
                                 self.keys.push(key.clone());
@@ -101,7 +101,7 @@ impl GroupIndexBuilder {
                 }
                 Phase::ValidateExplicit => {
                     if let Some(key) = self.keys.get(self.cursor) {
-                        let work = key_work_units(key);
+                        let work = group_key_work_units(key);
                         if self.key_indices.insert(key.clone(), self.cursor).is_some() {
                             return Err("explicit group order contains a duplicate key".into());
                         }
@@ -113,7 +113,7 @@ impl GroupIndexBuilder {
                 }
                 Phase::IndexKeys => {
                     if let Some(key) = self.keys.get(self.cursor) {
-                        let work = key_work_units(key);
+                        let work = group_key_work_units(key);
                         if !self.key_indices.contains_key(key) {
                             self.key_indices.insert(key.clone(), self.cursor);
                         }
@@ -129,7 +129,7 @@ impl GroupIndexBuilder {
                     if let Some(row) = self.rows.get_mut(self.cursor) {
                         let current = self.cursor;
                         let work = if let Some(key) = row.take() {
-                            let work = key_work_units(&key);
+                            let work = group_key_work_units(&key);
                             let index = self.key_indices.get(&key).copied().ok_or_else(|| {
                                 "group observation is absent from the explicit order".to_string()
                             })?;
@@ -157,14 +157,4 @@ impl GroupIndexBuilder {
             }
         }
     }
-}
-
-fn key_work_units(key: &[KeyAtom]) -> u64 {
-    key.iter().fold(1u64, |units, atom| {
-        let component = match atom {
-            KeyAtom::Text(text) => u64::try_from(text.len()).unwrap_or(u64::MAX).max(1),
-            _ => 1,
-        };
-        units.saturating_add(component)
-    })
 }

@@ -1,9 +1,13 @@
 //! Group identity, sample grouping, and box statistics.
 use super::plot::color_for;
-use super::statistics::stats_for_values;
+use super::statistics::stats_for_values_cooperative;
 use super::*;
 pub(super) mod labels;
-use crate::builtins::common::grouping_keys::{GroupIndex, GroupIndexBuildError, KeyAtom, KeyOrder};
+#[cfg(test)]
+mod tests;
+use crate::builtins::common::grouping_keys::{
+    group_key_work_units, GroupIndex, GroupIndexBuildError, KeyAtom, KeyOrder,
+};
 pub(super) use labels::{char_rows, number_label, numeric_scalar_label};
 use labels::{group_label_text, group_labels, validate_group_like, GroupLabel};
 
@@ -64,47 +68,82 @@ pub(super) async fn build_box_layout_cooperative(
     if tensor_len == 0 {
         return Err(invalid("boxplot: X must not be empty"));
     }
-    let mut groups = match group {
+    let groups = match group {
         Some(group) => grouped_series(&tensor, group, options, cooperation).await?,
-        None => ungrouped_series(&tensor),
+        None => ungrouped_series(&tensor, cooperation).await?,
     };
     if let Some(color_group) = &options.color_group {
         validate_group_like(&tensor, color_group)?;
     }
-    groups.retain(|(_, values)| values.iter().any(|value| !value.is_nan()));
+    let mut nonmissing = Vec::new();
+    nonmissing
+        .try_reserve_exact(groups.len())
+        .map_err(|_| invalid("boxplot: groups exceed available memory"))?;
+    for group in groups {
+        let mut has_observation = false;
+        for value in &group.1 {
+            has_observation |= !value.is_nan();
+            cooperation.completed(1).await?;
+        }
+        if has_observation {
+            nonmissing.push(group);
+        }
+    }
+    let mut groups = nonmissing;
     if groups.is_empty() {
         return Err(invalid(
             "boxplot: data must contain at least one non-NaN value",
         ));
     }
-    apply_group_order(&mut groups, options)?;
-    let boxes = groups
-        .into_iter()
-        .enumerate()
-        .map(|(idx, (label, values))| {
-            let display = group_label_text(&label);
-            let mut stats = stats_for_values(display, values, options.whisker)?;
-            stats.group_key = label;
-            stats.color = color_for(idx, &options.box_colors);
-            Ok(stats)
-        })
-        .collect::<BuiltinResult<Vec<_>>>()?;
+    apply_group_order(&mut groups, options, cooperation).await?;
+    let mut boxes = Vec::new();
+    boxes
+        .try_reserve_exact(groups.len())
+        .map_err(|_| invalid("boxplot: statistics exceed available memory"))?;
+    for (idx, (label, values)) in groups.into_iter().enumerate() {
+        let display = group_label_text(&label);
+        cooperation.completed(group_key_work_units(&label)).await?;
+        let mut stats =
+            stats_for_values_cooperative(display, values, options.whisker, cooperation).await?;
+        stats.group_key = label;
+        stats.color = color_for(idx, &options.box_colors);
+        boxes.push(stats);
+    }
     super::factor_layout::prepare_layout_cooperative(boxes, options, cooperation).await
 }
 
-fn ungrouped_series(tensor: &Tensor) -> Vec<(GroupLabel, Vec<f64>)> {
-    let values = tensor::tensor_values_f64_cow(tensor);
+async fn ungrouped_series(
+    tensor: &Tensor,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<Vec<(GroupLabel, Vec<f64>)>> {
     if tensor.rows == 1 || tensor.cols == 1 {
-        return vec![(vec![KeyAtom::Text("1".to_string())], values.to_vec())];
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(tensor::tensor_element_len(tensor))
+            .map_err(|_| invalid("boxplot: data exceeds available memory"))?;
+        for index in 0..tensor::tensor_element_len(tensor) {
+            values.push(tensor::tensor_value_f64(tensor, index));
+            cooperation.completed(1).await?;
+        }
+        return Ok(vec![(vec![KeyAtom::Text("1".to_string())], values)]);
     }
-    (0..tensor.cols)
-        .map(|col| {
-            let values = (0..tensor.rows)
-                .map(|row| values[col * tensor.rows + row])
-                .collect::<Vec<_>>();
-            (vec![KeyAtom::Text((col + 1).to_string())], values)
-        })
-        .collect()
+    let mut groups = Vec::new();
+    groups
+        .try_reserve_exact(tensor.cols)
+        .map_err(|_| invalid("boxplot: groups exceed available memory"))?;
+    for col in 0..tensor.cols {
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(tensor.rows)
+            .map_err(|_| invalid("boxplot: data exceeds available memory"))?;
+        for row in 0..tensor.rows {
+            values.push(tensor::tensor_value_f64(tensor, col * tensor.rows + row));
+            cooperation.completed(1).await?;
+        }
+        groups.push((vec![KeyAtom::Text((col + 1).to_string())], values));
+        cooperation.completed(1).await?;
+    }
+    Ok(groups)
 }
 
 async fn grouped_series(
@@ -113,15 +152,22 @@ async fn grouped_series(
     options: &BoxplotOptions,
     cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<Vec<(GroupLabel, Vec<f64>)>> {
-    let values = tensor::tensor_values_f64_cow(tensor);
-    let tensor_len = values.len();
+    let tensor_len = tensor::tensor_element_len(tensor);
     let labels = match group_labels(&group, tensor_len) {
         Ok(labels) => labels,
         Err(err) if tensor.rows > 1 && tensor.cols > 1 => {
             let row_labels = group_labels(&group, tensor.rows).map_err(|_| err)?;
-            let mut labels = Vec::with_capacity(tensor_len);
+            let mut labels = Vec::new();
+            labels
+                .try_reserve_exact(tensor_len)
+                .map_err(|_| invalid("boxplot: grouping labels exceed available memory"))?;
             for _col in 0..tensor.cols {
-                labels.extend(row_labels.iter().cloned());
+                for label in &row_labels {
+                    cooperation
+                        .completed(label.as_ref().map_or(1, |key| group_key_work_units(key)))
+                        .await?;
+                    labels.push(label.clone());
+                }
             }
             labels
         }
@@ -132,14 +178,13 @@ async fn grouped_series(
             "boxplot: grouping variables must have the same number of elements as X",
         ));
     }
-    let float_order = labels
-        .iter()
-        .flatten()
-        .all(|label| matches!(label.as_slice(), [KeyAtom::Number(_)]));
-    let integer_order = labels
-        .iter()
-        .flatten()
-        .all(|label| matches!(label.as_slice(), [KeyAtom::Integer(_)]));
+    let mut float_order = true;
+    let mut integer_order = true;
+    for label in labels.iter().flatten() {
+        float_order &= matches!(label.as_slice(), [KeyAtom::Number(_)]);
+        integer_order &= matches!(label.as_slice(), [KeyAtom::Integer(_)]);
+        cooperation.completed(group_key_work_units(label)).await?;
+    }
     let order = if float_order || integer_order {
         KeyOrder::Sorted
     } else {
@@ -151,12 +196,22 @@ async fn grouped_series(
             GroupIndexBuildError::Invalid(message) => invalid(format!("boxplot: {message}")),
             GroupIndexBuildError::Service(error) => cooperation.service_error(error),
         })?;
-    let groups = grouped
-        .keys
-        .into_iter()
-        .zip(grouped.row_groups)
-        .map(|(key, rows)| (key, rows.into_iter().map(|row| values[row]).collect()))
-        .collect::<Vec<_>>();
+    let mut groups = Vec::new();
+    groups
+        .try_reserve_exact(grouped.keys.len())
+        .map_err(|_| invalid("boxplot: groups exceed available memory"))?;
+    for (key, rows) in grouped.keys.into_iter().zip(grouped.row_groups) {
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(rows.len())
+            .map_err(|_| invalid("boxplot: group observations exceed available memory"))?;
+        for row in rows {
+            values.push(tensor::tensor_value_f64(tensor, row));
+            cooperation.completed(1).await?;
+        }
+        groups.push((key, values));
+        cooperation.completed(1).await?;
+    }
 
     if groups.is_empty() && options.group_order.is_some() {
         return Err(invalid("boxplot: GroupOrder did not match any data groups"));
@@ -164,9 +219,10 @@ async fn grouped_series(
     Ok(groups)
 }
 
-fn apply_group_order(
+async fn apply_group_order(
     groups: &mut Vec<(GroupLabel, Vec<f64>)>,
     options: &BoxplotOptions,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<()> {
     let Some(order) = &options.group_order else {
         return Ok(());
@@ -175,15 +231,20 @@ fn apply_group_order(
     // the presentation label must never become the internal grouping identity.
     let mut by_label = BTreeMap::<String, Vec<usize>>::new();
     for (index, (key, _)) in groups.iter().enumerate() {
+        cooperation.completed(group_key_work_units(key)).await?;
         by_label
             .entry(group_label_text(key))
             .or_default()
             .push(index);
     }
-    let mut entries = std::mem::take(groups)
-        .into_iter()
-        .map(Some)
-        .collect::<Vec<_>>();
+    let mut entries = Vec::new();
+    entries
+        .try_reserve_exact(groups.len())
+        .map_err(|_| invalid("boxplot: group order exceeds available memory"))?;
+    for group in std::mem::take(groups) {
+        entries.push(Some(group));
+        cooperation.completed(1).await?;
+    }
     for label in order {
         if let Some(indices) = by_label.get(label) {
             if indices.len() != 1 {
@@ -195,6 +256,7 @@ fn apply_group_order(
                 groups.push(entry);
             }
         }
+        cooperation.completed(1).await?;
     }
     if groups.is_empty() {
         return Err(invalid("boxplot: GroupOrder did not match any data groups"));

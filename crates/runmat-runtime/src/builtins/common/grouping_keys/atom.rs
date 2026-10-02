@@ -13,6 +13,18 @@ pub(crate) enum KeyAtom {
     Text(String),
 }
 
+/// Approximate the work of visiting and copying one typed group key. This is
+/// scheduling work, not a memory reservation or a bound on map comparisons.
+pub(crate) fn group_key_work_units(key: &[KeyAtom]) -> u64 {
+    key.iter().fold(1u64, |units, atom| {
+        let component = match atom {
+            KeyAtom::Text(text) => u64::try_from(text.len()).unwrap_or(u64::MAX).max(1),
+            _ => 1,
+        };
+        units.saturating_add(component)
+    })
+}
+
 impl KeyAtom {
     pub(crate) fn from_numeric(value: NumericScalar) -> Option<Self> {
         match value {

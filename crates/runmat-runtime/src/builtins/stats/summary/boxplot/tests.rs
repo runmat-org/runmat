@@ -1165,7 +1165,13 @@ fn plot_style_controls_defaults_but_later_explicit_appearance_wins() {
         NotchStyle::On.effective(compact.compact),
         NotchStyle::Marker
     );
-    let stats = statistics::stats_for_values("A".into(), vec![1.0, 2.0, 3.0, 4.0], 1.5).unwrap();
+    let stats = futures::executor::block_on(statistics::stats_for_values_cooperative(
+        "A".into(),
+        vec![1.0, 2.0, 3.0, 4.0],
+        1.5,
+        &mut cooperation::BoxplotCooperation::new(None),
+    ))
+    .unwrap();
     let (outline_x, outline_y) = appearance::box_outline(&stats, NotchStyle::On).unwrap();
     assert_eq!(outline_x.len(), 11);
     assert_eq!(outline_y.len(), outline_x.len());

@@ -1,6 +1,5 @@
 //! Box plot compatibility helper.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use glam::Vec4;

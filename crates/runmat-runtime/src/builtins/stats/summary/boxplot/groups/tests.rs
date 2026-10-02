@@ -1,0 +1,61 @@
+use super::*;
+use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
+use std::cell::Cell;
+use std::num::NonZeroU64;
+use std::rc::Rc;
+
+#[test]
+fn ungrouped_matrix_preserves_column_order_and_numerics_with_cooperation() {
+    let source = CancellationSource::new();
+    let turns = Rc::new(Cell::new(0));
+    let counted = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let mut cooperation = super::super::cooperation::BoxplotCooperation::with_budget(budget);
+    let data = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap());
+    let layout = futures::executor::block_on(build_box_layout_cooperative(
+        data,
+        None,
+        &BoxplotOptions::default(),
+        &mut cooperation,
+    ))
+    .unwrap();
+    assert_eq!(layout.boxes.len(), 2);
+    assert_eq!(layout.boxes[0].median, 2.0);
+    assert_eq!(layout.boxes[1].median, 3.0);
+    assert_eq!(layout.boxes[0].observation_count, 2);
+    assert_eq!(layout.boxes[1].observation_count, 2);
+    assert!(turns.get() >= 4);
+}
+
+#[test]
+fn cancellation_during_ungrouped_sample_copy_prevents_layout() {
+    let source = Rc::new(CancellationSource::new());
+    let cancel_on_turn = source.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            cancel_on_turn.cancel(CancellationReason::User);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let mut cooperation = super::super::cooperation::BoxplotCooperation::with_budget(budget);
+    let data = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+    let error = futures::executor::block_on(build_box_layout_cooperative(
+        data,
+        None,
+        &BoxplotOptions::default(),
+        &mut cooperation,
+    ))
+    .expect_err("cancelled sample preparation cannot produce a layout");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}

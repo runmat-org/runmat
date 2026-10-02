@@ -51,6 +51,9 @@ async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
 mod ordered;
 use ordered::*;
 
+mod cooperative_sort;
+pub(crate) use cooperative_sort::{stable_sort_non_nan_f64, CooperativeSortError};
+
 mod quantiles;
 use quantiles::{parse_quantile_args, quantile_tensor};
 use runmat_builtins::QuantileRequestUnit;
