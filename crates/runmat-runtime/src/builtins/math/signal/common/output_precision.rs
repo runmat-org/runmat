@@ -16,6 +16,14 @@ pub(crate) enum SignalPrecision {
 }
 
 impl SignalPrecision {
+    pub(crate) fn from_numeric_dtype(dtype: NumericDType) -> Self {
+        if dtype == NumericDType::F32 {
+            Self::Single
+        } else {
+            Self::Double
+        }
+    }
+
     pub(crate) fn of(signal: &Value) -> Self {
         let single = match signal {
             Value::Tensor(value) => value.numeric_dtype() == NumericDType::F32,

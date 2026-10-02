@@ -1,0 +1,160 @@
+use super::*;
+
+fn preparation_failure(
+    cause: impl std::fmt::Display + Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> RuntimeError {
+    let mut error = pwelch_error_with_detail(
+        &PWELCH_ERROR_INTERNAL,
+        format!("provider output preparation failed: {cause}"),
+    );
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    crate::runtime_error::with_provider_execution_source(error, cause.into())
+}
+
+pub(super) async fn output_gpu(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    rows: usize,
+    cols: usize,
+    options: &PwelchOptions,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> BuiltinResult<Option<Value>> {
+    let FrequencyGrid::Uniform { nfft } = options.grid else {
+        return Ok(None);
+    };
+    let window_len = options.window.len();
+    let step = window_len - options.noverlap;
+    let starts = segment_starts(rows, window_len, step);
+    let segment_count = starts.len();
+    let window_energy = options.window.iter().map(|v| v * v).sum::<f64>();
+    if window_energy <= 0.0 || !window_energy.is_finite() {
+        return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+    }
+    let denominator = match options.scale {
+        SpectrumScale::Psd => options.fs.unwrap_or(2.0 * std::f64::consts::PI) * window_energy,
+        SpectrumScale::Power => window_energy,
+    };
+    let input_len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+    let frame_count = segment_count
+        .checked_mul(cols)
+        .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+    let range = gpu_range(options.range);
+    let provider =
+        super::super::resident_output::owner(handle, || pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+    let request = ProviderSpectralRequest {
+        input: handle,
+        input_len,
+        input_complex: runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        window: &options.window,
+        nfft,
+        frame_count,
+        frame_mode: ProviderSpectralFrameMode::ColumnSliding {
+            hop: step,
+            input_rows: rows,
+            frames_per_column: segment_count,
+        },
+        range,
+        denominator,
+    };
+    let estimate = match provider.uniform_spectral_estimate(&request).await {
+        Ok(estimate) => estimate,
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                pwelch_error_with_detail(
+                    &PWELCH_ERROR_INTERNAL,
+                    format!("provider spectral estimate failed: {error}"),
+                ),
+                error,
+            ))
+        }
+    };
+    let output_error = || {
+        pwelch_error_with_detail(
+            &PWELCH_ERROR_INTERNAL,
+            "provider returned malformed spectral output",
+        )
+    };
+    let estimate = super::super::resident_output::spectral(
+        estimate,
+        &request,
+        provider,
+        protected,
+        output_error,
+    )?;
+    let context = super::super::resident_output::OutputContext {
+        input: handle,
+        provider,
+        caller_inputs: protected,
+    };
+
+    let ps_frames = match provider.reshape(&estimate.ps, &[estimate.rows, segment_count, cols]) {
+        Ok(ps_frames) => ps_frames,
+        Err(err) => return Err(preparation_failure(err)),
+    };
+    let mut contract = super::super::resident_output::floating_contract(
+        handle,
+        vec![estimate.rows, segment_count, cols],
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
+    let ps_frames = context.admit(ps_frames, &contract, &[], output_error)?;
+    let ps_mean = match provider.reduce_mean_nd(&ps_frames, &[1]).await {
+        Ok(ps_mean) => ps_mean,
+        Err(err) => return Err(preparation_failure(err)),
+    };
+    contract.shape = vec![estimate.rows, 1, cols];
+    let mut protected_mean = vec![&estimate.s];
+    if segment_count > 1 {
+        protected_mean.extend([&ps_frames, &estimate.ps]);
+    }
+    let ps_mean = context.admit(ps_mean, &contract, &protected_mean, output_error)?;
+    drop(protected_mean);
+    let pxx = match provider.reshape(&ps_mean, &[estimate.rows, cols]) {
+        Ok(pxx) => pxx,
+        Err(err) => return Err(preparation_failure(err)),
+    };
+    contract.shape = vec![estimate.rows, cols];
+    let mut protected_final = vec![&estimate.s];
+    if segment_count > 1 {
+        protected_final.extend([&ps_frames, &estimate.ps]);
+    }
+    let pxx = context.admit(pxx, &contract, &protected_final, output_error)?;
+    drop(protected_final);
+
+    drop(ps_frames);
+    drop(ps_mean);
+    drop(estimate.s);
+    drop(estimate.ps);
+    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(pxx)?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Some(Value::OutputList(Vec::new())));
+        }
+        if out_count == 1 {
+            return Ok(Some(Value::OutputList(vec![pxx])));
+        }
+        let f_values = frequency_vector(nfft, options.fs, options.range);
+        let f_shape = [estimate.rows, 1usize];
+        let f = SignalPrecision::of_handle(handle)
+            .real(f_values, f_shape.to_vec())
+            .map_err(|cause| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, cause))?;
+        let mut protected_frequency = protected.to_vec();
+        let Value::GpuTensor(pxx_handle) = &pxx else {
+            unreachable!("adopted PSD")
+        };
+        protected_frequency.push(pxx_handle);
+        let f = super::super::resident_output::restore(
+            handle,
+            Value::Tensor(f),
+            BUILTIN_NAME,
+            &protected_frequency,
+        )?;
+        return Ok(Some(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![pxx, f],
+        )));
+    }
+    Ok(Some(pxx))
+}
