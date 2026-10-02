@@ -178,11 +178,11 @@ const FILTFILT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "filtfilt: internal error",
 };
 
-const FILTFILT_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTFILT.PROVIDER_FAILED",
-    identifier: Some("RunMat:filtfilt:ProviderFailed"),
-    when: "A forward or reverse provider filtering pass fails operationally.",
-    message: "filtfilt: provider filtering failed",
+const FILTFILT_ERROR_PASS_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTFILT.PASS_FAILED",
+    identifier: Some("RunMat:filtfilt:PassFailed"),
+    when: "A forward or reverse pass fails during preparation, provider execution, or readback.",
+    message: "filtfilt: filtering pass failed",
 };
 
 const FILTFILT_ERRORS: [BuiltinErrorDescriptor; 5] = [
@@ -190,7 +190,7 @@ const FILTFILT_ERRORS: [BuiltinErrorDescriptor; 5] = [
     FILTFILT_ERROR_INVALID_COEFFICIENTS,
     FILTFILT_ERROR_INVALID_SIGNAL,
     FILTFILT_ERROR_INTERNAL,
-    FILTFILT_ERROR_PROVIDER_FAILED,
+    FILTFILT_ERROR_PASS_FAILED,
 ];
 
 pub const FILTFILT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -214,12 +214,12 @@ fn filtfilt_error_with_detail(
 fn provider_pass_error(pass: FilterPass, source: RuntimeError) -> RuntimeError {
     let mut builder = build_runtime_error(format!(
         "{}: {} pass failed",
-        FILTFILT_ERROR_PROVIDER_FAILED.message,
+        FILTFILT_ERROR_PASS_FAILED.message,
         pass.label()
     ))
     .with_builtin(BUILTIN_NAME)
     .with_source(source);
-    if let Some(identifier) = FILTFILT_ERROR_PROVIDER_FAILED.identifier {
+    if let Some(identifier) = FILTFILT_ERROR_PASS_FAILED.identifier {
         builder = builder.with_identifier(identifier);
     }
     let mut error = builder.build();
@@ -730,8 +730,9 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        handle_precision, provider_for_handle, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
-        HostTensorView, ProviderPrecision,
+        handle_precision, provider_for_handle, AccelDownloadFuture, AccelProvider,
+        AccelProviderFuture, GpuTensorHandle, HostTensorView, ProviderIirFilterOptions,
+        ProviderIirFilterResult, ProviderPrecision,
     };
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::ComplexTensor;
@@ -952,6 +953,60 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(provider.free_count(), 1);
+    }
+
+    struct OperationalFailureProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl AccelProvider for OperationalFailureProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+        fn device_info(&self) -> String {
+            "filtfilt-operational-failure".into()
+        }
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+        fn iir_filter<'a>(
+            &'a self,
+            _b: &'a GpuTensorHandle,
+            _a: &'a GpuTensorHandle,
+            _x: &'a GpuTensorHandle,
+            _options: ProviderIirFilterOptions,
+        ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async { Err(anyhow::anyhow!("device failed during filter pass")) })
+        }
+    }
+
+    #[test]
+    fn resident_pass_operational_failure_keeps_cause_and_does_not_replay() {
+        let _lock = test_support::accel_test_lock();
+        let provider: &'static OperationalFailureProvider =
+            Box::leak(Box::new(OperationalFailureProvider {
+                inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            }));
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let x = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                shape: &[1, 8],
+            })
+            .unwrap();
+        let b = Tensor::new(vec![0.5, 0.5], vec![1, 2]).unwrap();
+        let error = call(Value::Tensor(b), Value::Num(1.0), Value::GpuTensor(x))
+            .expect_err("operational pass failure must terminate");
+        assert_eq!(error.identifier(), FILTFILT_ERROR_PASS_FAILED.identifier);
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(std::error::Error::source(&error).is_some());
+        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
