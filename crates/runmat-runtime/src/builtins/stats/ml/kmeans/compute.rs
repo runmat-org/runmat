@@ -476,17 +476,17 @@ async fn centroid_for(
             }
             match distance {
                 Distance::Cosine | Distance::Correlation => {
-                    Ok(normalize_or_nan(center, distance == Distance::Correlation))
+                    super::geometry::direction_or_nan(
+                        &center,
+                        distance == Distance::Correlation,
+                        cooperation,
+                    )
+                    .await
                 }
                 _ => Ok(center),
             }
         }
     }
-}
-
-fn normalize_or_nan(row: Vec<f64>, center: bool) -> Vec<f64> {
-    super::super::pairwise_metric::unit_direction(&row, center)
-        .unwrap_or_else(|| vec![f64::NAN; row.len()])
 }
 
 async fn clone_row(

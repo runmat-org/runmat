@@ -1,69 +1,10 @@
 //! Scale-free row normalization shared by clustering and embedding metrics.
 
-/// Return a unit-length direction for finite data. A zero (or constant,
-/// when centered) row has no direction and is reported to the caller.
-pub(in crate::builtins::stats::ml) fn unit_direction(
-    row: &[f64],
-    center: bool,
-) -> Option<Vec<f64>> {
-    if row.is_empty() || row.iter().any(|value| !value.is_finite()) {
-        return None;
-    }
-    let mut values = if center {
-        // Difference from a reference before scaling. Dividing subnormals
-        // by row length first can underflow and invent a nonconstant row.
-        let reference = row[0];
-        let differences = row
-            .iter()
-            .map(|value| value - reference)
-            .collect::<Vec<_>>();
-        if differences.iter().all(|value| value.is_finite()) {
-            differences
-        } else {
-            // Opposite finite extremes can overflow their difference even
-            // though the unit direction itself remains representable.
-            let scale = row.iter().fold(0.0_f64, |max, value| max.max(value.abs()));
-            row.iter()
-                .map(|value| value / scale - reference / scale)
-                .collect()
-        }
-    } else {
-        row.to_vec()
-    };
-    let scale = values
-        .iter()
-        .fold(0.0_f64, |max, value| max.max(value.abs()));
-    if scale == 0.0 {
-        return None;
-    }
-    for value in &mut values {
-        *value /= scale;
-    }
-    if center {
-        let count = values.len() as f64;
-        let mean = values.iter().map(|value| value / count).sum::<f64>();
-        for value in &mut values {
-            *value -= mean;
-        }
-    }
-    let scale = values
-        .iter()
-        .fold(0.0_f64, |max, value| max.max(value.abs()));
-    if scale == 0.0 {
-        return None;
-    }
-    let squared = values
-        .iter()
-        .map(|value| (value / scale).powi(2))
-        .sum::<f64>();
-    let norm = squared.sqrt();
-    Some(
-        values
-            .into_iter()
-            .map(|value| (value / scale) / norm)
-            .collect(),
-    )
-}
+mod direction;
+
+pub(in crate::builtins::stats::ml) use direction::{
+    unit_direction, DirectionError, DirectionProgress, DirectionWork,
+};
 
 #[cfg(test)]
 mod tests {

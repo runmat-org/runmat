@@ -112,8 +112,13 @@ pub(super) async fn prepare_data_cooperative(
         if has_nan {
             original_to_valid.push(None);
         } else {
-            let transformed = transform_row(&row_values, distance)?;
-            if transformed.iter().any(|value| value.is_nan()) {
+            let transformed = transform_row(&row_values, distance, cooperation).await?;
+            let mut degenerate = false;
+            for value in &transformed {
+                degenerate |= value.is_nan();
+                cooperation.completed(1).await?;
+            }
+            if degenerate {
                 original_to_valid.push(None);
             } else {
                 original_to_valid.push(Some(rows.len()));
@@ -142,20 +147,73 @@ pub(super) fn tensor_rows_cols(tensor: &Tensor) -> (usize, usize) {
     }
 }
 
-fn transform_row(row: &[f64], distance: Distance) -> BuiltinResult<Vec<f64>> {
+async fn transform_row(
+    row: &[f64],
+    distance: Distance,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<f64>> {
     match distance {
-        Distance::Cosine | Distance::Correlation => Ok(
-            super::super::pairwise_metric::unit_direction(row, distance == Distance::Correlation)
-                .unwrap_or_else(|| vec![f64::NAN; row.len()]),
-        ),
-        Distance::Hamming => {
-            if row.iter().any(|value| *value != 0.0 && *value != 1.0) {
-                return Err(invalid("kmeans: Hamming distance requires binary X values"));
-            }
-            Ok(row.to_vec())
+        Distance::Cosine | Distance::Correlation => {
+            direction_or_nan(row, distance == Distance::Correlation, cooperation).await
         }
-        Distance::SqEuclidean | Distance::Cityblock => Ok(row.to_vec()),
+        Distance::Hamming => {
+            for value in row {
+                let invalid_value = *value != 0.0 && *value != 1.0;
+                cooperation.completed(1).await?;
+                if invalid_value {
+                    return Err(invalid("kmeans: Hamming distance requires binary X values"));
+                }
+            }
+            copy_row(row, cooperation).await
+        }
+        Distance::SqEuclidean | Distance::Cityblock => copy_row(row, cooperation).await,
     }
+}
+
+pub(super) async fn direction_or_nan(
+    row: &[f64],
+    center: bool,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    use super::super::pairwise_metric::{DirectionError, DirectionProgress, DirectionWork};
+
+    let mut work = DirectionWork::new(row, center);
+    loop {
+        match work.advance().map_err(|error| match error {
+            DirectionError::Resource => invalid("kmeans: direction exceeds available memory"),
+        })? {
+            DirectionProgress::Pending(units) => cooperation.completed(units).await?,
+            DirectionProgress::Complete(direction, units) => {
+                cooperation.completed(units).await?;
+                if let Some(direction) = direction {
+                    return Ok(direction);
+                }
+                let mut nan_row = Vec::new();
+                nan_row
+                    .try_reserve_exact(row.len())
+                    .map_err(|_| invalid("kmeans: direction exceeds available memory"))?;
+                for _ in row {
+                    nan_row.push(f64::NAN);
+                    cooperation.completed(1).await?;
+                }
+                return Ok(nan_row);
+            }
+        }
+    }
+}
+
+async fn copy_row(
+    row: &[f64],
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(row.len())
+        .map_err(|_| invalid("kmeans: observations exceed available memory"))?;
+    for value in row {
+        copy.push(*value);
+        cooperation.completed(1).await?;
+    }
+    Ok(copy)
 }
 
 pub(super) async fn validate_options(
@@ -166,7 +224,7 @@ pub(super) async fn validate_options(
 ) -> BuiltinResult<()> {
     match &mut options.start {
         StartSpec::Numeric(centers) => {
-            validate_centers(centers, k, data.cols)?;
+            validate_centers(centers, k, data.cols, cooperation).await?;
             transform_centers(centers, options.distance, cooperation).await?;
             options.replicates = 1;
         }
@@ -177,7 +235,7 @@ pub(super) async fn validate_options(
                 ));
             }
             for centers in &mut *pages {
-                validate_centers(centers, k, data.cols)?;
+                validate_centers(centers, k, data.cols, cooperation).await?;
                 transform_centers(centers, options.distance, cooperation).await?;
             }
             options.replicates = pages.len();
@@ -214,30 +272,46 @@ async fn transform_centers(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<()> {
     for center in centers {
-        let transformed = transform_row(center, distance)?;
-        if transformed.iter().any(|value| value.is_nan()) {
+        let transformed = transform_row(center, distance, cooperation).await?;
+        let mut degenerate = false;
+        for value in &transformed {
+            degenerate |= value.is_nan();
+            cooperation.completed(1).await?;
+        }
+        if degenerate {
             return Err(invalid(
                 "kmeans: numeric Start contains a degenerate centroid for the selected Distance",
             ));
         }
         *center = transformed;
-        cooperation.completed(center.len() as u64).await?;
     }
     Ok(())
 }
 
-fn validate_centers(centers: &[Vec<f64>], k: usize, cols: usize) -> BuiltinResult<()> {
-    if centers.len() != k || centers.iter().any(|row| row.len() != cols) {
+async fn validate_centers(
+    centers: &[Vec<f64>],
+    k: usize,
+    cols: usize,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<()> {
+    if centers.len() != k {
         return Err(invalid(
             "kmeans: numeric Start must be k-by-p or k-by-p-by-r",
         ));
     }
-    if centers
-        .iter()
-        .flat_map(|row| row.iter())
-        .any(|value| !value.is_finite())
-    {
-        return Err(invalid("kmeans: numeric Start values must be finite"));
+    for row in centers {
+        if row.len() != cols {
+            return Err(invalid(
+                "kmeans: numeric Start must be k-by-p or k-by-p-by-r",
+            ));
+        }
+        for value in row {
+            let nonfinite = !value.is_finite();
+            cooperation.completed(1).await?;
+            if nonfinite {
+                return Err(invalid("kmeans: numeric Start values must be finite"));
+            }
+        }
     }
     Ok(())
 }
