@@ -214,11 +214,7 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.run",
-    category = "fea",
-    summary = "Run a FEA study or sweep.",
-    keywords = "fea,run,study,sweep,solve",
-    descriptor(crate::builtins::fea::FEA_RUN_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
@@ -232,11 +228,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.results",
-    category = "fea",
-    summary = "Load or project FEA run results for post-processing.",
-    keywords = "fea,results,run_id,fields,diagnostics",
-    descriptor(crate::builtins::fea::FEA_RESULTS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_RESULTS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -245,11 +237,7 @@ pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.field",
-    category = "fea",
-    summary = "Extract a field from FEA results or a run result.",
-    keywords = "fea,field,displacement,von_mises,post",
-    descriptor(crate::builtins::fea::FEA_FIELD_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

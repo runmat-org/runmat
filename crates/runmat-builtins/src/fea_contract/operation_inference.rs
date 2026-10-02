@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 pub enum FeaEvidenceKind {
     Validate,
     Plan,
+    Run,
     Trends,
 }
 
@@ -24,6 +25,7 @@ impl FeaEvidenceKind {
         match self {
             Self::Validate => "fea.Validation",
             Self::Plan => "fea.Plan",
+            Self::Run => "fea.RunResult",
             Self::Trends => "fea.Trends",
         }
     }
@@ -112,7 +114,7 @@ pub fn infer_evidence(
         if request.arguments.len() != 1 {
             diagnostics.push(argument_error(
                 "RM-CATALOG-FEA-ARITY",
-                "FEA validation and planning require exactly one document, study, or sweep",
+                "FEA validation, planning, and solving require exactly one document, study, or sweep",
                 request.arguments.len(),
             ));
         }
