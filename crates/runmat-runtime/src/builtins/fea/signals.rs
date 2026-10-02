@@ -12,7 +12,7 @@ use runmat_analysis_core::{
     Moment, Signal, SignalApproximationEvidence, SignalExtrapolation, SignalId,
     SignalInterpolation, SignalKnot, SignalOrdinate, SignalPrecision, SignalProvenance,
     SignalRepresentation, SignalShape, SignalValue, TabulatedSignal, TabulatedSignalDomain,
-    Traction,
+    Traction, VolumeFlowRate,
 };
 use runmat_execution::value::CallableValue;
 
@@ -38,6 +38,7 @@ pub(super) const CURRENT_DENSITY_SIGNAL_CLASS: &str = "fea.CurrentDensitySignal"
 pub(super) const CHARGE_DENSITY_SIGNAL_CLASS: &str = "fea.ChargeDensitySignal";
 pub(super) const MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS: &str = "fea.MagneticVectorPotentialSignal";
 pub(super) const MASS_FLOW_SIGNAL_CLASS: &str = "fea.MassFlowSignal";
+pub(super) const VOLUME_FLOW_SIGNAL_CLASS: &str = "fea.VolumeFlowSignal";
 
 const SIGNAL_FIELDS: &[&str] = &["signal", FROZEN_GENERATOR_PROPERTY];
 const SIGNAL_REQUIRED_FIELDS: &[&str] = &["signal"];
@@ -509,6 +510,17 @@ scalar_signal!(
     MassFlowRate,
     PhysicalSignal::MassFlowRate
 );
+scalar_signal!(
+    volume_flow_constant,
+    VOLUME_FLOW_DESCRIPTOR,
+    VOLUME_FLOW_SIGNATURES,
+    "fea.VolumeFlowSignal.constantCubicMetersPerSecond",
+    "signal = fea.VolumeFlowSignal.constantCubicMetersPerSecond(id, value)",
+    "Create a constant volume-flow signal in cubic meters per second.",
+    VOLUME_FLOW_SIGNAL_CLASS,
+    VolumeFlowRate,
+    PhysicalSignal::VolumeFlowRate
+);
 
 pub(super) mod bindings;
 pub(crate) mod callable;
@@ -653,6 +665,7 @@ fn signal_class_name(quantity: runmat_analysis_core::PhysicalQuantityKind) -> &'
         ElectricChargeDensity => CHARGE_DENSITY_SIGNAL_CLASS,
         MagneticVectorPotential => MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS,
         MassFlowRate => MASS_FLOW_SIGNAL_CLASS,
+        VolumeFlowRate => VOLUME_FLOW_SIGNAL_CLASS,
     }
 }
 
@@ -681,6 +694,7 @@ fn signal_class_quantity(class_name: &str) -> Option<runmat_analysis_core::Physi
         CHARGE_DENSITY_SIGNAL_CLASS => ElectricChargeDensity,
         MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS => MagneticVectorPotential,
         MASS_FLOW_SIGNAL_CLASS => MassFlowRate,
+        VOLUME_FLOW_SIGNAL_CLASS => VolumeFlowRate,
         _ => return None,
     })
 }
@@ -757,6 +771,7 @@ fn time_knot_builtin(class_name: &str) -> &'static str {
         CHARGE_DENSITY_SIGNAL_CLASS => "fea.ChargeDensitySignal.fromTimeKnots",
         MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS => "fea.MagneticVectorPotentialSignal.fromTimeKnots",
         MASS_FLOW_SIGNAL_CLASS => "fea.MassFlowSignal.fromTimeKnots",
+        VOLUME_FLOW_SIGNAL_CLASS => "fea.VolumeFlowSignal.fromTimeKnots",
         _ => unreachable!("signal schemas contain only known classes"),
     }
 }
@@ -787,6 +802,7 @@ fn time_sample_builtin(class_name: &str) -> &'static str {
             "fea.MagneticVectorPotentialSignal.fromTimeSamples"
         }
         MASS_FLOW_SIGNAL_CLASS => "fea.MassFlowSignal.fromTimeSamples",
+        VOLUME_FLOW_SIGNAL_CLASS => "fea.VolumeFlowSignal.fromTimeSamples",
         _ => unreachable!("signal schemas contain only known classes"),
     }
 }
@@ -860,7 +876,7 @@ fn static_method(method: &str, builtin: &str) -> crate::class_registry::RuntimeM
 
 type SignalSchema = (&'static str, &'static str, &'static str, &'static str);
 
-fn signal_schemas() -> [SignalSchema; 22] {
+fn signal_schemas() -> [SignalSchema; 23] {
     [
         (
             DISPLACEMENT_SIGNAL_CLASS,
@@ -994,12 +1010,19 @@ fn signal_schemas() -> [SignalSchema; 22] {
             "constantKilogramsPerSecond",
             "fea.MassFlowSignal.constantKilogramsPerSecond",
         ),
+        (
+            VOLUME_FLOW_SIGNAL_CLASS,
+            "runmat.fea.signal.volume-flow",
+            "constantCubicMetersPerSecond",
+            "fea.VolumeFlowSignal.constantCubicMetersPerSecond",
+        ),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod volume_flow;
     use crate::builtins::fea::signal_policies::{
         extrapolation_reject, interpolation_linear, point_continuity_right,
     };

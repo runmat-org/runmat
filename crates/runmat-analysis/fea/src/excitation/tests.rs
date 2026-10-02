@@ -5,6 +5,7 @@ use crate::fixtures::{
 mod acoustic_incident_pressure;
 mod charge_density;
 mod magnetic_volume_current;
+mod volume_velocity;
 
 use super::{
     realize::{realize_excitations, realize_step_excitations, RealizationError},

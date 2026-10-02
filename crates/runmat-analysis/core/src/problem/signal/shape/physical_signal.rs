@@ -36,6 +36,7 @@ impl PhysicalSignal {
             Self::ElectricChargeDensity(signal) => replace!(signal, ElectricChargeDensity),
             Self::MagneticVectorPotential(signal) => replace!(signal, MagneticVectorPotential),
             Self::MassFlowRate(signal) => replace!(signal, MassFlowRate),
+            Self::VolumeFlowRate(signal) => replace!(signal, VolumeFlowRate),
         }
     }
 }

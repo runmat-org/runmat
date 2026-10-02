@@ -94,6 +94,7 @@ fn evidence_profile(
         matches!(
             load.kind,
             RealizedExcitationKind::NormalVelocity(_)
+                | RealizedExcitationKind::VolumeVelocity(_)
                 | RealizedExcitationKind::AcousticIncidentPressure(_)
         )
     }) {

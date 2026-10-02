@@ -56,6 +56,7 @@ pub enum AuthoredExcitationKind {
     /// Uniform incoming pressure on a planar exterior acoustic boundary.
     AcousticIncidentPressure,
     NormalVelocity,
+    VolumeVelocity,
     InletVelocity,
     MassFlow,
     WallMotion,
@@ -109,6 +110,7 @@ impl AuthoredExcitationKind {
                 PhysicalQuantityKind::Velocity
             }
             Self::MassFlow => PhysicalQuantityKind::MassFlowRate,
+            Self::VolumeVelocity => PhysicalQuantityKind::VolumeFlowRate,
         }
     }
 
@@ -118,7 +120,8 @@ impl AuthoredExcitationKind {
             | Self::Moment
             | Self::ElectricCurrent
             | Self::ElectricCharge
-            | Self::MassFlow => ExcitationDistribution::PreserveResultant,
+            | Self::MassFlow
+            | Self::VolumeVelocity => ExcitationDistribution::PreserveResultant,
             Self::Traction | Self::Pressure | Self::HeatFlux | Self::CurrentDensity => {
                 ExcitationDistribution::IntensityPerArea
             }
@@ -146,6 +149,7 @@ impl AuthoredExcitationKind {
                 | Self::ElectricCurrent
                 | Self::ElectricCharge
                 | Self::MassFlow
+                | Self::VolumeVelocity
         )
     }
 
@@ -354,6 +358,7 @@ fn valid_shape_and_direction(
         | AuthoredExcitationKind::AcousticPressure
         | AuthoredExcitationKind::AcousticIncidentPressure
         | AuthoredExcitationKind::NormalVelocity
+        | AuthoredExcitationKind::VolumeVelocity
         | AuthoredExcitationKind::MassFlow => scalar && !has_direction,
     }
 }

@@ -466,3 +466,14 @@ scalar_time_signal!(
     MassFlowRate,
     PhysicalSignal::MassFlowRate
 );
+scalar_time_signal!(
+    volume_flow_time_samples,
+    VOLUME_FLOW_TIME_DESCRIPTOR,
+    VOLUME_FLOW_TIME_SIGNATURES,
+    "fea.VolumeFlowSignal.fromTimeSamples",
+    "signal = fea.VolumeFlowSignal.fromTimeSamples(id, times, values, interpolation, extrapolation)",
+    "Create a volume-flow history from time samples in cubic meters per second.",
+    VOLUME_FLOW_SIGNAL_CLASS,
+    VolumeFlowRate,
+    PhysicalSignal::VolumeFlowRate
+);

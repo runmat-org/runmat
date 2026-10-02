@@ -212,6 +212,24 @@ pub(super) fn realize_kind(
         ExcitationAction::NormalVelocity(_) => RealizedExcitationKind::NormalVelocity(
             scalar_action!(signal, PhysicalSignal::Velocity, meters_per_second, sample)?,
         ),
+        ExcitationAction::VolumeVelocity(excitation) => {
+            if signal.shape() != &SignalShape::Scalar
+                || excitation.direction.is_some()
+                || excitation.distribution
+                    != runmat_analysis_core::ExcitationDistribution::PreserveResultant
+                || excitation.kinematics != runmat_analysis_core::ExcitationKinematics::FixedFrame
+                || !excitation.projection.preserve_resultant
+                || excitation.projection.preserve_moment
+            {
+                return Err(RealizationError::new("volume velocity requires a fixed-frame scalar total flow with resultant preservation and no direction or moment projection"));
+            }
+            RealizedExcitationKind::VolumeVelocity(scalar_action!(
+                signal,
+                PhysicalSignal::VolumeFlowRate,
+                cubic_meters_per_second,
+                sample
+            )?)
+        }
         ExcitationAction::InletVelocity(_) => {
             RealizedExcitationKind::InletVelocity(directional_vector_action!(
                 action,

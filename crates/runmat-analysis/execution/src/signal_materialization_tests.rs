@@ -966,6 +966,8 @@ mod solid_static;
 
 #[path = "signal_materialization_tests/complex_frequency.rs"]
 mod complex_frequency;
+#[path = "signal_materialization_tests/volume_flow.rs"]
+mod volume_flow;
 
 #[test]
 fn table_content_identity_includes_typed_jump_semantics() {

@@ -457,6 +457,7 @@ export type AuthoredExcitationKind = "force"
   | "acoustic_pressure"
   | "acoustic_incident_pressure"
   | "normal_velocity"
+  | "volume_velocity"
   | "inlet_velocity"
   | "mass_flow"
   | "wall_motion";
@@ -2290,7 +2291,8 @@ export type PhysicalQuantityKind = "displacement"
   | "electric_current_density"
   | "electric_charge_density"
   | "magnetic_vector_potential"
-  | "mass_flow_rate";
+  | "mass_flow_rate"
+  | "volume_flow_rate";
 
 export type PhysicalSignal = { displacement: Signal<Displacement> }
   | { rotation: Signal<Rotation> }
@@ -2313,7 +2315,8 @@ export type PhysicalSignal = { displacement: Signal<Displacement> }
   | { electric_current_density: Signal<ElectricCurrentDensity> }
   | { electric_charge_density: Signal<ElectricChargeDensity> }
   | { magnetic_vector_potential: Signal<MagneticVectorPotential> }
-  | { mass_flow_rate: Signal<MassFlowRate> };
+  | { mass_flow_rate: Signal<MassFlowRate> }
+  | { volume_flow_rate: Signal<VolumeFlowRate> };
 
 export type PhysicsFamily = "structural"
   | "thermal"
@@ -3055,4 +3058,8 @@ export type UnitSystem = "unspecified"
 
 export interface Velocity {
   meters_per_second: number;
+}
+
+export interface VolumeFlowRate {
+  cubic_meters_per_second: number;
 }

@@ -95,6 +95,8 @@ pub enum ExcitationAction {
     /// Uniform incoming pressure; propagation is opposite the exterior outward normal.
     AcousticIncidentPressure(AnalysisExcitation),
     NormalVelocity(AnalysisExcitation),
+    /// Total outward volume flow through one finite acoustic boundary patch.
+    VolumeVelocity(AnalysisExcitation),
     InletVelocity(AnalysisExcitation),
     MassFlow(AnalysisExcitation),
     WallMotion(AnalysisExcitation),
@@ -122,6 +124,7 @@ impl ExcitationAction {
             | Self::AcousticPressure(value)
             | Self::AcousticIncidentPressure(value)
             | Self::NormalVelocity(value)
+            | Self::VolumeVelocity(value)
             | Self::InletVelocity(value)
             | Self::MassFlow(value)
             | Self::WallMotion(value) => value,
@@ -153,6 +156,7 @@ impl ExcitationAction {
             Self::MagneticVolumeCurrentDensity(_) => PhysicalQuantityKind::ElectricCurrentDensity,
             Self::MagneticVectorPotential(_) => PhysicalQuantityKind::MagneticVectorPotential,
             Self::MassFlow(_) => PhysicalQuantityKind::MassFlowRate,
+            Self::VolumeVelocity(_) => PhysicalQuantityKind::VolumeFlowRate,
         }
     }
 
@@ -177,6 +181,7 @@ impl ExcitationAction {
             | Self::AcousticPressure(value)
             | Self::AcousticIncidentPressure(value)
             | Self::NormalVelocity(value)
+            | Self::VolumeVelocity(value)
             | Self::InletVelocity(value)
             | Self::MassFlow(value)
             | Self::WallMotion(value) => value,

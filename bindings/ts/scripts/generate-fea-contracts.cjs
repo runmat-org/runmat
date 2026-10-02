@@ -549,6 +549,7 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     electric_potential: "{ volts: number }", electric_current: "{ amperes: number }", electric_charge: "{ coulombs: number }",
     electric_current_density: "{ amperes_per_square_meter: number }", electric_charge_density: "{ coulombs_per_cubic_meter: number }",
     magnetic_vector_potential: "{ webers_per_meter: number }", mass_flow_rate: "{ kilograms_per_second: number }",
+    volume_flow_rate: "{ cubic_meters_per_second: number }",
   };
   const signalInput = `export type FeaSignalInput = ${readTupleEnumValues(signalSource, "PhysicalSignal").map((variant) => {
     const quantity = signalQuantityTypes[variant];

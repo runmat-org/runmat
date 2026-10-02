@@ -97,6 +97,7 @@ pub(crate) fn time_breakpoints(
             PhysicalSignal::ElectricChargeDensity(signal) => collect!(signal),
             PhysicalSignal::MagneticVectorPotential(signal) => collect!(signal),
             PhysicalSignal::MassFlowRate(signal) => collect!(signal),
+            PhysicalSignal::VolumeFlowRate(signal) => collect!(signal),
         }
     }
     events.sort_by(f64::total_cmp);

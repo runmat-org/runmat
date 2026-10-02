@@ -53,6 +53,7 @@ pub fn canonical_tabulated_signal_content_digest(
         PhysicalSignal::ElectricChargeDensity(value) => canonicalize!(value),
         PhysicalSignal::MagneticVectorPotential(value) => canonicalize!(value),
         PhysicalSignal::MassFlowRate(value) => canonicalize!(value),
+        PhysicalSignal::VolumeFlowRate(value) => canonicalize!(value),
     }
 }
 
@@ -345,6 +346,7 @@ pub fn materialize_signal_for_solver(
             materialize!(MagneticVectorPotential, signal)
         }
         PhysicalSignal::MassFlowRate(signal) => materialize!(MassFlowRate, signal),
+        PhysicalSignal::VolumeFlowRate(signal) => materialize!(VolumeFlowRate, signal),
     })
 }
 

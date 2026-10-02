@@ -185,7 +185,7 @@ pub use problem::quantity::{
     Length, MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Pressure,
     RayleighMassCoefficient, RayleighStiffnessCoefficient, Rotation, SpecificAcousticImpedance,
     Stiffness, SurfaceEmissivity, Temperature, TemperatureDifference, ThermalContactResistance,
-    Traction, Translation, TurbulenceIntensity, Velocity,
+    Traction, Translation, TurbulenceIntensity, Velocity, VolumeFlowRate,
 };
 pub use problem::random_vibration::{
     ComplexSpectralDensity, CrossPowerSpectralDensity, RandomExcitationChannel,

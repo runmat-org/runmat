@@ -105,6 +105,7 @@ pub(crate) enum RealizedExcitationKind {
     AcousticPressure(ComplexScalar),
     AcousticIncidentPressure(ComplexScalar),
     NormalVelocity(ComplexScalar),
+    VolumeVelocity(ComplexScalar),
     InletVelocity(ComplexVector3),
     MassFlow(ComplexScalar),
     WallMotion(ComplexVector3),
@@ -223,6 +224,7 @@ impl RealizedExcitationKind {
                 Self::AcousticIncidentPressure(value.component(component))
             }
             Self::NormalVelocity(value) => Self::NormalVelocity(value.component(component)),
+            Self::VolumeVelocity(value) => Self::VolumeVelocity(value.component(component)),
             Self::InletVelocity(value) => Self::InletVelocity(value.component(component)),
             Self::MassFlow(value) => Self::MassFlow(value.component(component)),
             Self::WallMotion(value) => Self::WallMotion(value.component(component)),

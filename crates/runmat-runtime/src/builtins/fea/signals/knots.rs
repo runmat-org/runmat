@@ -670,6 +670,16 @@ time_knots_builtin!(
     PhysicalSignal::MassFlowRate,
     scalar
 );
+time_knots_builtin!(
+    volume_flow,
+    VOLUME_FLOW_DESCRIPTOR,
+    VOLUME_FLOW_SIGNATURES,
+    "fea.VolumeFlowSignal.fromTimeKnots",
+    VOLUME_FLOW_SIGNAL_CLASS,
+    VolumeFlowRate,
+    PhysicalSignal::VolumeFlowRate,
+    scalar
+);
 
 pub(super) fn ensure_signal_knot_class_registered() {
     static PORTABLE_SCHEMA: Once = Once::new();

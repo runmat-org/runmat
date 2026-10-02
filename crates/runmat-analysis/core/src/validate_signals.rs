@@ -10,6 +10,8 @@ mod deferred_topology_tests;
 mod generator;
 #[cfg(test)]
 mod topology_field_tests;
+#[cfg(test)]
+mod volume_flow_tests;
 
 use generator::validate_generator;
 pub(crate) use generator::validate_generator_invocation;
@@ -44,6 +46,13 @@ pub(crate) fn validate_signals(signals: &[PhysicalSignal]) -> Result<(), Analysi
             PhysicalSignal::ElectricChargeDensity(value) => validate_signal(value),
             PhysicalSignal::MagneticVectorPotential(value) => validate_signal(value),
             PhysicalSignal::MassFlowRate(value) => validate_signal(value),
+            PhysicalSignal::VolumeFlowRate(value) => {
+                if value.shape != SignalShape::Scalar {
+                    Err("volume-flow-rate signals require scalar shape".into())
+                } else {
+                    validate_signal(value)
+                }
+            }
         };
         if let Err(detail) = result {
             return invalid(id, detail);

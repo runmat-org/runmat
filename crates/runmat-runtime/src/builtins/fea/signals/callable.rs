@@ -290,6 +290,15 @@ callable_signal_builtin!(
     SignalShape::Scalar,
     PhysicalSignal::MassFlowRate
 );
+callable_signal_builtin!(
+    volume_flow,
+    VOLUME_FLOW_DESCRIPTOR,
+    VOLUME_FLOW_SIGNATURES,
+    "fea.VolumeFlowSignal.fromFunction",
+    VOLUME_FLOW_SIGNAL_CLASS,
+    SignalShape::Scalar,
+    PhysicalSignal::VolumeFlowRate
+);
 
 fn callable_signal<Q>(
     builtin: &'static str,
@@ -532,6 +541,7 @@ pub(super) fn callable_builtin(class_name: &str) -> &'static str {
         CHARGE_DENSITY_SIGNAL_CLASS => "fea.ChargeDensitySignal.fromFunction",
         MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS => "fea.MagneticVectorPotentialSignal.fromFunction",
         MASS_FLOW_SIGNAL_CLASS => "fea.MassFlowSignal.fromFunction",
+        VOLUME_FLOW_SIGNAL_CLASS => "fea.VolumeFlowSignal.fromFunction",
         _ => unreachable!("signal schemas contain only known classes"),
     }
 }

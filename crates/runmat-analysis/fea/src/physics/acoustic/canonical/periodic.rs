@@ -145,6 +145,7 @@ impl AcousticAssembly {
             if matches!(
                 load.kind,
                 RealizedExcitationKind::NormalVelocity(_)
+                    | RealizedExcitationKind::VolumeVelocity(_)
                     | RealizedExcitationKind::AcousticIncidentPressure(_)
             ) {
                 if let RealizedExcitationTarget::Region(target) = &load.target {

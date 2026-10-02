@@ -282,10 +282,11 @@ pub(super) fn pressure_sources(
         matches!(
             load.kind,
             crate::excitation::RealizedExcitationKind::AcousticIncidentPressure(_)
+                | crate::excitation::RealizedExcitationKind::VolumeVelocity(_)
         )
     }) {
         return Err(
-            "incident pressure requires canonical exterior-face Helmholtz execution".into(),
+            "incident pressure and total volume velocity require canonical exterior-face Helmholtz execution".into(),
         );
     }
     Ok(realized

@@ -16,6 +16,7 @@ mod reference;
 enum Drive {
     NormalVelocity,
     IncidentPressure,
+    VolumeVelocity,
 }
 
 struct Evidence {
@@ -51,9 +52,14 @@ fn authored_incident_duct_refines_and_reopens_full_partial_complex_components() 
     qualify(Drive::IncidentPressure);
 }
 
+#[test]
+fn authored_volume_velocity_duct_refines_and_reopens_full_partial_complex_components() {
+    qualify(Drive::VolumeVelocity);
+}
+
 fn qualify(drive: Drive) {
     // Eight actual processes: two orders, two independently remeshed target sizes,
-    // generated/explicit complex normal-velocity sources. Not a nested mesh rate claim.
+    // generated/explicit complex drives. Not a nested mesh rate claim.
     // Exercise the previously rejecting order first; do not spend four producer runs
     // rediscovering that Tet4 alone cannot establish the all-order closure gate.
     for quadratic in [true, false] {

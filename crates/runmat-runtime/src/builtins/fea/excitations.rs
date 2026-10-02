@@ -497,6 +497,20 @@ action_builtin!(
     ExcitationAction::NormalVelocity
 );
 action_builtin!(
+    acoustic_volume_velocity,
+    ACOUSTIC_VOLUME_VELOCITY_DESCRIPTOR,
+    ACOUSTIC_VOLUME_VELOCITY_SIGNATURES,
+    "fea.AcousticExcitation.volumeVelocity",
+    "volumeVelocity",
+    "Bind total outward volume flow to a finite acoustic boundary patch.",
+    ACOUSTIC_EXCITATION_CLASS,
+    Quantity::VolumeFlowRate,
+    RegionExpectation::Boundary,
+    ExcitationDistribution::PreserveResultant,
+    false,
+    ExcitationAction::VolumeVelocity
+);
+action_builtin!(
     fluid_inlet_velocity,
     FLUID_INLET_VELOCITY_DESCRIPTOR,
     FLUID_INLET_VELOCITY_SIGNATURES,
@@ -749,7 +763,8 @@ fn action_class(action: &ExcitationAction) -> &'static str {
         ExcitationAction::MagneticVectorPotential(_) => MAGNETIC_EXCITATION_CLASS,
         ExcitationAction::AcousticPressure(_)
         | ExcitationAction::AcousticIncidentPressure(_)
-        | ExcitationAction::NormalVelocity(_) => ACOUSTIC_EXCITATION_CLASS,
+        | ExcitationAction::NormalVelocity(_)
+        | ExcitationAction::VolumeVelocity(_) => ACOUSTIC_EXCITATION_CLASS,
         ExcitationAction::InletVelocity(_)
         | ExcitationAction::MassFlow(_)
         | ExcitationAction::WallMotion(_) => FLUID_EXCITATION_CLASS,
@@ -869,6 +884,7 @@ fn excitation_methods(class_name: &str) -> HashMap<String, crate::class_registry
         ACOUSTIC_EXCITATION_CLASS => &[
             ("pressure", "fea.AcousticExcitation.pressure"),
             ("normalVelocity", "fea.AcousticExcitation.normalVelocity"),
+            ("volumeVelocity", "fea.AcousticExcitation.volumeVelocity"),
         ],
         FLUID_EXCITATION_CLASS => &[
             ("inletVelocity", "fea.FluidExcitation.inletVelocity"),
@@ -985,6 +1001,38 @@ mod tests {
             .properties
             .insert("name".into(), Value::String("Load Face".into()));
         Value::Object(object)
+    }
+
+    #[test]
+    fn volume_flow_action_retains_total_quantity_policy_and_portable_class() {
+        let signal = block_on(super::super::signals::volume_flow_constant(
+            "flow".into(),
+            Value::Num(-0.25),
+        ))
+        .unwrap();
+        let value = block_on(acoustic_volume_velocity("speaker".into(), region(), signal)).unwrap();
+        let decoded = crate::execution::value_codec::decode_inline_value(
+            &crate::execution::value_codec::encode_inline_value(&value).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded, value);
+        let actions = bound_excitation_vec_from_value("test", &decoded).unwrap();
+        let ExcitationAction::VolumeVelocity(action) = &actions[0].action else {
+            panic!("volume flow must remain a typed total-flow action");
+        };
+        assert_eq!(action.signal_id.0, "flow");
+        assert_eq!(
+            action.distribution,
+            ExcitationDistribution::PreserveResultant
+        );
+        assert!(action.projection.preserve_resultant && !action.projection.preserve_moment);
+        assert!(action.direction.is_none());
+        let wrong = block_on(super::super::signals::velocity_constant(
+            "speed".into(),
+            Value::Tensor(Tensor::new_2d(vec![1.0, 0.0, 0.0], 1, 3).unwrap()),
+        ))
+        .unwrap();
+        assert!(block_on(acoustic_volume_velocity("bad".into(), region(), wrong)).is_err());
     }
 
     #[test]

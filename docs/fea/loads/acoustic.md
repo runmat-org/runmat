@@ -13,6 +13,7 @@ production qualification of all acoustic declarations or a general exterior-wave
 | `acoustic_pressure` | Pa | Pressure signal on an acoustic boundary |
 | `incident_pressure` | Pa | Uniform normally incoming plane-wave pressure, not total pressure |
 | `normal_velocity` | m/s | Drive a boundary through normal velocity |
+| `volume_velocity` | m³/s | Total outward volume flow over a finite exterior patch |
 | `acoustic.rigid_wall` | `target` | Zero normal velocity |
 | `acoustic.radiation` | `target` | Outgoing-wave truncation |
 | `acoustic.impedance` | `target`, `impedance` | $p=Zv_n$ |
@@ -146,6 +147,32 @@ load piston_velocity {
 Normal velocity models piston/diaphragm motion without prescribing pressure. Its sign follows the
 resolved outward normal. For coupled structural motion, use FSI/acoustic-structure transfer rather
 than manually duplicating a velocity trace.
+
+## How do I prescribe total volume flow rather than speed?
+
+```fea
+signal total_flow : volume_flow_rate over constant { value = -0.01 m^3/s }
+
+excitation volume_driver {
+    volume_velocity {
+        target = geometry.cavity.region.piston
+        signal = signal.total_flow
+    }
+}
+```
+
+`volume_velocity` uses the shared scalar `volume_flow_rate` signal. The total is
+distributed once over the complete selected exterior patch as `v_n=Q/A`, not once
+per face. Its sign is outward-positive; a negative value injects flow into the
+domain. m/s and kg/s signals are different quantities and reject. There is no
+separate direction, follower motion or moment projection. Complex frequency
+samples retain both components through the ordinary shared signal contract.
+
+This bounded CPU implementation is under qualification; see the
+[volume-flow evidence and remaining gates](../qualification/acoustic-volume-velocity.md).
+It is a finite boundary source, not an interior monopole or an arbitrary spatial
+distribution. Do not overlap another acoustic source, pressure prescription,
+rigid/impedance boundary or paired periodic relation on its patch.
 
 ## How do I apply a frequency-dependent piston velocity?
 

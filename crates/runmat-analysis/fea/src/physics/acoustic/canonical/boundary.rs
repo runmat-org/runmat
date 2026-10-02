@@ -19,6 +19,7 @@ use runmat_meshing_core::BoundaryFaceRole;
 use std::collections::BTreeSet;
 
 mod incident;
+mod volume_velocity;
 
 impl AcousticAssembly {
     pub(super) fn with_boundaries(
@@ -36,6 +37,7 @@ impl AcousticAssembly {
         let mut owned = BTreeSet::new();
         let mut pressure_faces = BTreeSet::new();
         let mut velocity_faces = BTreeSet::new();
+        let mut volume_faces = BTreeSet::new();
         for boundary in &model.boundaries {
             if !step.object_is_active(&StepObjectRef::Boundary(boundary.boundary_id.clone())) {
                 continue;
@@ -170,6 +172,23 @@ impl AcousticAssembly {
                         },
                     )?;
                 }
+                RealizedExcitationKind::VolumeVelocity(value) => {
+                    let faces = self.faces(target)?;
+                    if faces.iter().any(|face| {
+                        owned.contains(&face.face_id)
+                            || pressure_faces.contains(&face.face_id)
+                            || velocity_faces.contains(&face.face_id)
+                    }) {
+                        return Err(AcousticHarmonicError::Boundary(
+                            "volume velocity overlaps another acoustic source or boundary".into(),
+                        ));
+                    }
+                    for face in &faces {
+                        velocity_faces.insert(face.face_id);
+                        volume_faces.insert(face.face_id);
+                    }
+                    self.add_volume_velocity(load, value, faces)?;
+                }
                 RealizedExcitationKind::NormalVelocity(value) => {
                     if load.policy.distribution != ExcitationDistribution::UniformKinematic {
                         return Err(AcousticHarmonicError::Unsupported(
@@ -185,7 +204,10 @@ impl AcousticAssembly {
                     )
                     .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
                     for face in faces {
-                        if owned.contains(&face.face_id) || pressure_faces.contains(&face.face_id) {
+                        if owned.contains(&face.face_id)
+                            || pressure_faces.contains(&face.face_id)
+                            || volume_faces.contains(&face.face_id)
+                        {
                             return Err(AcousticHarmonicError::Boundary(
                                 "normal velocity overlaps pressure, rigid or impedance boundary"
                                     .into(),

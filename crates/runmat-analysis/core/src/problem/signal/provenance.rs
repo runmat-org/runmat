@@ -50,6 +50,7 @@ impl PhysicalSignal {
             Self::ElectricChargeDensity(signal) => &signal.provenance,
             Self::MagneticVectorPotential(signal) => &signal.provenance,
             Self::MassFlowRate(signal) => &signal.provenance,
+            Self::VolumeFlowRate(signal) => &signal.provenance,
         }
     }
 }

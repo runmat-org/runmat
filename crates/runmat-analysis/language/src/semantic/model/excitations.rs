@@ -480,6 +480,7 @@ fn kind_policy(
         "acoustic_pressure" => (AuthoredExcitationKind::AcousticPressure, "pressure"),
         "incident_pressure" => (AuthoredExcitationKind::AcousticIncidentPressure, "pressure"),
         "normal_velocity" => (AuthoredExcitationKind::NormalVelocity, "velocity"),
+        "volume_velocity" => (AuthoredExcitationKind::VolumeVelocity, "volume_flow_rate"),
         "inlet_velocity" => (AuthoredExcitationKind::InletVelocity, "velocity"),
         "mass_flow" => (AuthoredExcitationKind::MassFlow, "mass_flow_rate"),
         "wall_motion" => (AuthoredExcitationKind::WallMotion, "velocity"),

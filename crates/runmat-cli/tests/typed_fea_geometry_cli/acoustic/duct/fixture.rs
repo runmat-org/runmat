@@ -58,6 +58,12 @@ pub(super) fn prepare(
             "complex(1 + 0 * frequency, 0.4 + 0 * frequency)",
             INCIDENT_EXPLICIT,
         ),
+        Drive::VolumeVelocity => (
+            "volume_flow_rate",
+            "volume_velocity",
+            "-(1 + 0.4i) * (0 * frequency + 1) / 6",
+            VOLUME_EXPLICIT,
+        ),
     };
     fs::write(project.path().join("src/drive.m"), format!(
         "function value = drive(frequency)\narguments\nfrequency (:,1) double\nend\nvalue = {expression};\nend\n")).unwrap();
@@ -144,6 +150,18 @@ pub(super) fn verify_drive(
             ExcitationAction::AcousticIncidentPressure(_),
             PhysicalSignal::Pressure(s),
         ) => &s.provenance,
+        (
+            Drive::VolumeVelocity,
+            ExcitationAction::VolumeVelocity(action),
+            PhysicalSignal::VolumeFlowRate(s),
+        ) => {
+            assert_eq!(
+                action.distribution,
+                runmat_analysis_core::ExcitationDistribution::PreserveResultant
+            );
+            assert!(action.projection.preserve_resultant && !action.projection.preserve_moment);
+            &s.provenance
+        }
         _ => panic!("source must retain its exact typed acoustic action and quantity"),
     };
     assert_eq!(
@@ -174,6 +192,14 @@ const INCIDENT_EXPLICIT: &str = r#"
 samples = [
     { at = 0.2 Hz, value = { real = 1 Pa, imaginary = 0.4 Pa } },
     { at = 0.4 Hz, value = { real = 1 Pa, imaginary = 0.4 Pa } }
+]
+interpolation = linear
+extrapolation = reject
+"#;
+const VOLUME_EXPLICIT: &str = r#"
+samples = [
+    { at = 0.2 Hz, value = { real = -0.16666666666666666 m^3/s, imaginary = -0.06666666666666667 m^3/s } },
+    { at = 0.4 Hz, value = { real = -0.16666666666666666 m^3/s, imaginary = -0.06666666666666667 m^3/s } }
 ]
 interpolation = linear
 extrapolation = reject

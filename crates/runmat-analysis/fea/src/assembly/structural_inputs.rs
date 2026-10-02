@@ -26,6 +26,7 @@ pub enum StructuralLoadKind {
     MagneticVectorPotential,
     AcousticPressure,
     NormalVelocity,
+    VolumeVelocity,
     InletVelocity,
     MassFlow,
     WallMotion,
@@ -52,6 +53,7 @@ impl StructuralLoadKind {
             Self::MagneticVectorPotential => "magnetic_vector_potential",
             Self::AcousticPressure => "acoustic_pressure",
             Self::NormalVelocity => "normal_velocity",
+            Self::VolumeVelocity => "volume_velocity",
             Self::InletVelocity => "inlet_velocity",
             Self::MassFlow => "mass_flow",
             Self::WallMotion => "wall_motion",
@@ -293,6 +295,9 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::NormalVelocity(_), _) => {
                 (StructuralLoadKind::NormalVelocity, false)
             }
+            (RealizedExcitationKind::VolumeVelocity(_), _) => {
+                (StructuralLoadKind::VolumeVelocity, false)
+            }
             (RealizedExcitationKind::InletVelocity(_), _) => {
                 (StructuralLoadKind::InletVelocity, false)
             }
@@ -426,6 +431,7 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
             StructuralLoadKind::AcousticPressure
         }
         RealizedExcitationKind::NormalVelocity(_) => StructuralLoadKind::NormalVelocity,
+        RealizedExcitationKind::VolumeVelocity(_) => StructuralLoadKind::VolumeVelocity,
         RealizedExcitationKind::InletVelocity(_) => StructuralLoadKind::InletVelocity,
         RealizedExcitationKind::MassFlow(_) => StructuralLoadKind::MassFlow,
         RealizedExcitationKind::WallMotion(_) => StructuralLoadKind::WallMotion,

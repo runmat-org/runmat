@@ -223,6 +223,10 @@ fn signal_kind(
             PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH)?,
             |value| convert(value, PhysicalSignal::MagneticVectorPotential),
         ),
+        "volume_flow_rate" => (
+            PhysicalDimension::VOLUME.divide(PhysicalDimension::TIME)?,
+            |value| convert(value, PhysicalSignal::VolumeFlowRate),
+        ),
         "mass_flow_rate" => (
             PhysicalDimension::MASS.divide(PhysicalDimension::TIME)?,
             |value| convert(value, PhysicalSignal::MassFlowRate),
@@ -347,7 +351,10 @@ pub(super) fn signal_value(
             }
         }
     }
-    let values = vector_components(value)?;
+    let Some(values) = vector_components(value) else {
+        invalid_signal_value(declaration, value, diagnostics);
+        return None;
+    };
     if values.len() != 3 {
         invalid_signal_value(declaration, value, diagnostics);
         return None;
