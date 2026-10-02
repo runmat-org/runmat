@@ -161,13 +161,6 @@ async fn evaluate_requested(
     crate::builtins::common::validation::reject_typed_complex_integer(&denominator, BUILTIN_NAME)?;
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
-    // Complete host-visible exactness admission before either resident readback.
-    for value in [&numerator, &denominator] {
-        if !matches!(value, Value::GpuTensor(_)) {
-            prepare_deconv_integer(value, &mut cooperation).await?;
-        }
-    }
-    preflight_denominator(&denominator, &mut cooperation).await?;
     let integer_or_logical = [&numerator, &denominator]
         .iter()
         .any(|value| value_is_integer_or_logical(value));
@@ -181,6 +174,49 @@ async fn evaluate_requested(
             _ => None,
         })
         .collect::<Vec<_>>();
+    let placement = if requested > 0 && !complex_output {
+        if let Some(numerator_len) = deconv_operand_len(&numerator) {
+            let element_type = if single_output {
+                runmat_accelerate_api::ProviderElementType::F32
+            } else {
+                runmat_accelerate_api::ProviderElementType::F64
+            };
+            let bounds = (0..requested)
+                .map(|index| runmat_accelerate_api::ProviderTransferOutputBound {
+                    element_type,
+                    storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+                    layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+                    residency: runmat_accelerate_api::ProviderResidency::Device,
+                    max_elements: u64::try_from(if index == 0 {
+                        numerator_len.max(1)
+                    } else {
+                        numerator_len
+                    })
+                    .unwrap_or(u64::MAX),
+                })
+                .collect();
+            super::common::convolution::placement::select_bounded_host_variant(
+                runtime,
+                BUILTIN_NAME,
+                "division.host",
+                &[&numerator, &denominator],
+                &resident_inputs,
+                bounds,
+                deconv_host_scratch_bound(&numerator, &denominator),
+            )?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    // Complete host-visible exactness admission before either resident readback.
+    for value in [&numerator, &denominator] {
+        if !matches!(value, Value::GpuTensor(_)) {
+            prepare_deconv_integer(value, &mut cooperation).await?;
+        }
+    }
+    preflight_denominator(&denominator, &mut cooperation).await?;
     let resident_prototype = resident_inputs.first();
     let provider = resident_prototype.and_then(runmat_accelerate_api::provider_for_handle);
     if !resident_inputs.is_empty() && provider.is_none() {
@@ -233,33 +269,111 @@ async fn evaluate_requested(
     let mut remainder = (requested >= 2)
         .then(|| convert_output(remainder_raw, orientation, single_output, complex_output))
         .transpose()?;
+    if let (Some(placement), Some(provider)) = (placement.as_ref(), provider) {
+        let produced = quotient.iter().chain(remainder.iter()).collect::<Vec<_>>();
+        placement.validate_actual_host_outputs(provider, &produced);
+    }
     if let Some(prototype) = resident_prototype {
         let caller_inputs = resident_inputs.iter().collect::<Vec<_>>();
         if let Some(value) = quotient.take() {
-            quotient = Some(gpu_helpers::restore_class_preserving_value_with_operands(
-                prototype,
-                value,
-                BUILTIN_NAME,
-                gpu_helpers::RestoreOperandContext::new(&caller_inputs, &caller_inputs),
-            )?);
+            quotient = Some(
+                runmat_accelerate_api::observation::with_provider_observation(
+                    placement.as_ref().and_then(|selected| selected.recorder()),
+                    || {
+                        gpu_helpers::restore_class_preserving_value_with_operands(
+                            prototype,
+                            value,
+                            BUILTIN_NAME,
+                            gpu_helpers::RestoreOperandContext::new(&caller_inputs, &caller_inputs),
+                        )
+                    },
+                )?,
+            );
         }
         if let Some(value) = remainder.take() {
             let mut protected = caller_inputs.clone();
             if let Some(Value::GpuTensor(handle)) = quotient.as_ref() {
                 protected.push(handle);
             }
-            remainder = Some(gpu_helpers::restore_class_preserving_value_with_operands(
-                prototype,
-                value,
-                BUILTIN_NAME,
-                gpu_helpers::RestoreOperandContext::new(&protected, &caller_inputs),
-            )?);
+            remainder = Some(
+                runmat_accelerate_api::observation::with_provider_observation(
+                    placement.as_ref().and_then(|selected| selected.recorder()),
+                    || {
+                        gpu_helpers::restore_class_preserving_value_with_operands(
+                            prototype,
+                            value,
+                            BUILTIN_NAME,
+                            gpu_helpers::RestoreOperandContext::new(&protected, &caller_inputs),
+                        )
+                    },
+                )?,
+            );
         }
+    }
+    if let Some(placement) = placement {
+        let published = quotient.iter().chain(remainder.iter()).collect::<Vec<_>>();
+        placement.finish_outputs(&published, requested);
     }
     Ok(RequestedDeconvOutputs {
         quotient,
         remainder,
     })
+}
+
+fn deconv_operand_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(tensor) => super::common::convolution::checked_vector_elements(&tensor.shape),
+        Value::ComplexTensor(tensor) => {
+            super::common::convolution::checked_vector_elements(&tensor.shape)
+        }
+        Value::LogicalArray(array) => {
+            super::common::convolution::checked_vector_elements(&array.shape)
+        }
+        Value::GpuTensor(handle) => {
+            super::common::convolution::checked_vector_elements(handle.shape())
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(1),
+        _ => None,
+    }
+}
+
+fn deconv_host_scratch_bound(a: &Value, b: &Value) -> runmat_execution::ResourceByteBound {
+    let bound = (|| {
+        let n = u64::try_from(deconv_operand_len(a)?).ok()?;
+        let m = u64::try_from(deconv_operand_len(b)?).ok()?;
+        let product = if n == 0 || m == 0 {
+            0
+        } else {
+            n.checked_add(m)?.checked_sub(1)?
+        };
+        // Materialized inputs, trimmed working copy, quotient, product and
+        // full-length remainder may coexist. Both requested host outputs are
+        // conservatively counted even for a one-output call.
+        let complex_elements = n
+            .checked_add(m)?
+            .checked_add(n)?
+            .checked_add(n.max(1))?
+            .checked_add(product)?
+            .checked_add(n)?;
+        let numerical = complex_elements
+            .checked_mul(16)?
+            .checked_add(n.max(1).checked_add(n)?.checked_mul(16)?)?;
+        // Resident denominator preflight can read it before ordinary input
+        // conversion; count both readback phases with raw/decoded/value copies.
+        let gather = [a, b].into_iter().try_fold(0_u64, |total, value| {
+            let bytes = match value {
+                Value::GpuTensor(handle) => handle.physical().requested_bytes().checked_mul(6)?,
+                _ => 0,
+            };
+            total.checked_add(bytes)
+        })?;
+        numerical.checked_add(gather)
+    })();
+    bound
+        .map(runmat_execution::ResourceByteBound::Known)
+        .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        ))
 }
 
 async fn preflight_denominator(

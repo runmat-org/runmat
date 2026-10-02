@@ -139,10 +139,32 @@ async fn conv2_builtin(
 
     match extras.len() {
         0 => {
-            let (device_value, placement) =
+            let (device_value, mut placement) =
                 try_conv2_gpu(runtime.as_ref(), &a, &b, mode, single_output)?;
             if let Some(device_value) = device_value {
                 return Ok(device_value);
+            }
+            if placement.is_none() {
+                if let Some(shape) = host_output_shape(&a, &b, None, mode) {
+                    if let Some(outputs) =
+                        super::common::convolution::placement::host_output_representations(
+                            &[shape],
+                            single_output,
+                            complex_output,
+                        )
+                    {
+                        placement = super::common::convolution::placement::select_host_variant(
+                            runtime.as_ref(),
+                            BUILTIN_NAME,
+                            "matrix.host",
+                            Some(mode),
+                            &[&a, &b],
+                            &resident_inputs,
+                            outputs,
+                            host_scratch_bound(&a, &b, None),
+                        )?;
+                    }
+                }
             }
             let restore_recorder = placement.as_ref().and_then(|selected| selected.recorder());
             let result = async move {
@@ -176,24 +198,193 @@ async fn conv2_builtin(
             result
         }
         1 => {
-            let signal = convert_matrix(extras.remove(0), "A", &mut cooperation).await?;
-            let column = convert_vector(a, "H column", &mut cooperation).await?;
-            let row = convert_vector(b, "H row", &mut cooperation).await?;
-            let result = separable::convolve_separable(
-                &signal,
-                &column,
-                &row,
-                mode,
-                single_output,
-                &mut cooperation,
-            )
-            .await?;
-            let output =
-                matrix_to_value(result, single_output, complex_output, &mut cooperation).await?;
-            restore_to_owner(output, &resident_inputs, None)
+            let placement = if let Some(shape) = host_output_shape(&a, &b, extras.first(), mode) {
+                if let Some(outputs) =
+                    super::common::convolution::placement::host_output_representations(
+                        &[shape],
+                        single_output,
+                        complex_output,
+                    )
+                {
+                    super::common::convolution::placement::select_host_variant(
+                        runtime.as_ref(),
+                        BUILTIN_NAME,
+                        "separable.host",
+                        Some(mode),
+                        &[&a, &b, &extras[0]],
+                        &resident_inputs,
+                        outputs,
+                        host_scratch_bound(&a, &b, extras.first()),
+                    )?
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let restore_recorder = placement.as_ref().and_then(|selected| selected.recorder());
+            let result = async move {
+                let signal = convert_matrix(extras.remove(0), "A", &mut cooperation).await?;
+                let column = convert_vector(a, "H column", &mut cooperation).await?;
+                let row = convert_vector(b, "H row", &mut cooperation).await?;
+                let result = separable::convolve_separable(
+                    &signal,
+                    &column,
+                    &row,
+                    mode,
+                    single_output,
+                    &mut cooperation,
+                )
+                .await?;
+                let output =
+                    matrix_to_value(result, single_output, complex_output, &mut cooperation)
+                        .await?;
+                restore_to_owner(output, &resident_inputs, restore_recorder)
+            }
+            .await;
+            if let Some(placement) = placement {
+                placement.finish_value(&result);
+            }
+            result
         }
         _ => Err(conv2_error(&CONV2_ERROR_ARG_COUNT)),
     }
+}
+
+fn host_output_shape(
+    a: &Value,
+    b: &Value,
+    signal: Option<&Value>,
+    mode: Conv2Mode,
+) -> Option<Vec<usize>> {
+    fn shape(value: &Value) -> Option<&[usize]> {
+        match value {
+            Value::Tensor(tensor) => Some(&tensor.shape),
+            Value::ComplexTensor(tensor) => Some(&tensor.shape),
+            Value::LogicalArray(array) => Some(&array.shape),
+            Value::GpuTensor(handle) => Some(handle.shape()),
+            Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(&[1, 1]),
+            _ => None,
+        }
+    }
+    let (rows, cols, kernel_rows, kernel_cols) = if let Some(signal) = signal {
+        let (rows, cols) = conv2_dimensions(shape(signal)?)?;
+        let kernel_rows = super::common::convolution::checked_vector_elements(shape(a)?)?;
+        let kernel_cols = super::common::convolution::checked_vector_elements(shape(b)?)?;
+        (rows, cols, kernel_rows, kernel_cols)
+    } else {
+        let (rows, cols) = conv2_dimensions(shape(a)?)?;
+        let (kernel_rows, kernel_cols) = conv2_dimensions(shape(b)?)?;
+        (rows, cols, kernel_rows, kernel_cols)
+    };
+    let empty = rows == 0 || cols == 0 || kernel_rows == 0 || kernel_cols == 0;
+    let result = match mode {
+        Conv2Mode::Full if empty => (0, 0),
+        Conv2Mode::Full => (
+            rows.checked_add(kernel_rows)?.checked_sub(1)?,
+            cols.checked_add(kernel_cols)?.checked_sub(1)?,
+        ),
+        Conv2Mode::Same => (rows, cols),
+        Conv2Mode::Valid if empty => (0, 0),
+        Conv2Mode::Valid => (
+            rows.checked_sub(kernel_rows)
+                .and_then(|n| n.checked_add(1))
+                .unwrap_or(0),
+            cols.checked_sub(kernel_cols)
+                .and_then(|n| n.checked_add(1))
+                .unwrap_or(0),
+        ),
+    };
+    result.0.checked_mul(result.1)?;
+    Some(vec![result.0, result.1])
+}
+
+fn host_scratch_bound(
+    a: &Value,
+    b: &Value,
+    signal: Option<&Value>,
+) -> runmat_execution::ResourceByteBound {
+    let bound = (|| {
+        fn shape(value: &Value) -> Option<&[usize]> {
+            match value {
+                Value::Tensor(tensor) => Some(&tensor.shape),
+                Value::ComplexTensor(tensor) => Some(&tensor.shape),
+                Value::LogicalArray(array) => Some(&array.shape),
+                Value::GpuTensor(handle) => Some(handle.shape()),
+                Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
+                    Some(&[1, 1])
+                }
+                _ => None,
+            }
+        }
+        let (rows, cols, kr, kc) = if let Some(signal) = signal {
+            let (rows, cols) = conv2_dimensions(shape(signal)?)?;
+            (
+                rows,
+                cols,
+                super::common::convolution::checked_vector_elements(shape(a)?)?,
+                super::common::convolution::checked_vector_elements(shape(b)?)?,
+            )
+        } else {
+            let (rows, cols) = conv2_dimensions(shape(a)?)?;
+            let (kr, kc) = conv2_dimensions(shape(b)?)?;
+            (rows, cols, kr, kc)
+        };
+        let (rows, cols, kr, kc) = (
+            u64::try_from(rows).ok()?,
+            u64::try_from(cols).ok()?,
+            u64::try_from(kr).ok()?,
+            u64::try_from(kc).ok()?,
+        );
+        let signal_count = rows.checked_mul(cols)?;
+        let kernel_count = kr.checked_mul(kc)?;
+        let full_rows = if rows == 0 || kr == 0 {
+            0
+        } else {
+            rows.checked_add(kr)?.checked_sub(1)?
+        };
+        let full_cols = if cols == 0 || kc == 0 {
+            0
+        } else {
+            cols.checked_add(kc)?.checked_sub(1)?
+        };
+        let full = full_rows.checked_mul(full_cols)?;
+        let input_coefficients = if signal.is_some() {
+            signal_count.checked_add(kr)?.checked_add(kc)?
+        } else {
+            signal_count.checked_add(kernel_count)?
+        }
+        .checked_mul(16)?;
+        // Conservative sum of owned Matrix buffers: full result, optional
+        // sliced result, converted output, separable vertical intermediate,
+        // balanced factors, and general-kernel outer product.
+        let intermediates = full
+            .checked_mul(48)?
+            .checked_add(kernel_count.checked_mul(16)?)?
+            .checked_add(full_rows.checked_mul(cols)?.checked_mul(16)?)?
+            .checked_add(kr.checked_add(kc)?.checked_mul(16)?)?;
+        let gather =
+            [Some(a), Some(b), signal]
+                .into_iter()
+                .flatten()
+                .try_fold(0_u64, |total, value| {
+                    let bytes = match value {
+                        Value::GpuTensor(handle) => {
+                            handle.physical().requested_bytes().checked_mul(3)?
+                        }
+                        _ => 0,
+                    };
+                    total.checked_add(bytes)
+                })?;
+        input_coefficients
+            .checked_add(intermediates)?
+            .checked_add(gather)
+    })();
+    bound
+        .map(runmat_execution::ResourceByteBound::Known)
+        .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        ))
 }
 
 fn admit_conv2_operand(value: &Value, vector_required: bool) -> BuiltinResult<()> {
@@ -360,6 +551,7 @@ fn try_conv2_gpu(
         mode,
         runmat_accelerate_api::ProviderConvolutionForm::Matrix,
         &contract.shape,
+        host_scratch_bound(a, b, None),
     )?;
     if placement
         .as_ref()

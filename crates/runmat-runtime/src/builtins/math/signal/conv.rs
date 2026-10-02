@@ -104,9 +104,32 @@ async fn conv_builtin(
     let single_output = value_uses_single(&a) || value_uses_single(&b);
     let complex_output = value_is_complex(&a) || value_is_complex(&b);
     let resident_inputs = resident_inputs([&a, &b]);
-    let (device_value, placement) = try_conv_gpu(runtime.as_ref(), &a, &b, mode, single_output)?;
+    let (device_value, mut placement) =
+        try_conv_gpu(runtime.as_ref(), &a, &b, mode, single_output)?;
     if let Some(device_value) = device_value {
         return Ok(device_value);
+    }
+    if placement.is_none() {
+        if let Some(shape) = host_output_shape(&a, &b, mode) {
+            if let Some(outputs) =
+                super::common::convolution::placement::host_output_representations(
+                    &[shape],
+                    single_output,
+                    complex_output,
+                )
+            {
+                placement = super::common::convolution::placement::select_host_variant(
+                    runtime.as_ref(),
+                    BUILTIN_NAME,
+                    "vector.host",
+                    Some(mode),
+                    &[&a, &b],
+                    &resident_inputs,
+                    outputs,
+                    host_scratch_bound(&a, &b),
+                )?;
+            }
+        }
     }
     let restore_recorder = placement.as_ref().and_then(|selected| selected.recorder());
     let result = async move {
@@ -147,6 +170,100 @@ async fn conv_builtin(
         placement.finish_value(&result);
     }
     result
+}
+
+fn host_output_shape(a: &Value, b: &Value, mode: ConvMode) -> Option<Vec<usize>> {
+    fn shape(value: &Value) -> Option<&[usize]> {
+        match value {
+            Value::Tensor(tensor) => Some(&tensor.shape),
+            Value::ComplexTensor(tensor) => Some(&tensor.shape),
+            Value::LogicalArray(array) => Some(&array.shape),
+            Value::GpuTensor(handle) => Some(handle.shape()),
+            Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(&[1, 1]),
+            _ => None,
+        }
+    }
+    let lhs = conv_meta_from_shape(shape(a)?);
+    let rhs = conv_meta_from_shape(shape(b)?);
+    let len = if lhs.len == 0 || rhs.len == 0 {
+        if mode == ConvMode::Valid && rhs.len == 0 {
+            lhs.len
+        } else {
+            0
+        }
+    } else {
+        match mode {
+            ConvMode::Full => lhs.len.checked_add(rhs.len)?.checked_sub(1)?,
+            ConvMode::Same => lhs.len,
+            ConvMode::Valid => lhs
+                .len
+                .checked_sub(rhs.len)
+                .and_then(|n| n.checked_add(1))
+                .unwrap_or(0),
+        }
+    };
+    let orientation = if mode == ConvMode::Full {
+        if lhs.hint == OrientationHint::Column && rhs.hint == OrientationHint::Column {
+            Orientation::Column
+        } else {
+            Orientation::Row
+        }
+    } else {
+        orientation_from_hints(lhs.hint, rhs.hint)
+    };
+    Some(match orientation {
+        Orientation::Row => vec![1, len],
+        Orientation::Column => vec![len, 1],
+    })
+}
+
+fn host_scratch_bound(a: &Value, b: &Value) -> runmat_execution::ResourceByteBound {
+    let bound = (|| {
+        let len = |value: &Value| -> Option<u64> {
+            let shape = match value {
+                Value::Tensor(tensor) => &tensor.shape,
+                Value::ComplexTensor(tensor) => &tensor.shape,
+                Value::LogicalArray(array) => &array.shape,
+                Value::GpuTensor(handle) => {
+                    return u64::try_from(super::common::convolution::checked_vector_elements(
+                        handle.shape(),
+                    )?)
+                    .ok()
+                }
+                Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
+                    return Some(1)
+                }
+                _ => return None,
+            };
+            u64::try_from(super::common::convolution::checked_vector_elements(shape)?).ok()
+        };
+        let left = len(a)?;
+        let right = len(b)?;
+        let full = if left == 0 || right == 0 {
+            0
+        } else {
+            left.checked_add(right)?.checked_sub(1)?
+        };
+        // Both materialized Complex<f64> inputs; the single path can hold a
+        // Complex<f32> accumulator and converted Complex<f64> full result at
+        // once. Output construction can coexist with the latter. Readback may
+        // hold raw, decoded, and value payloads before coefficient conversion.
+        let coefficients = left.checked_add(right)?.checked_mul(16)?;
+        let work = full.checked_mul(24)?.checked_add(full.checked_mul(16)?)?;
+        let gather = [a, b].into_iter().try_fold(0_u64, |total, value| {
+            let bytes = match value {
+                Value::GpuTensor(handle) => handle.physical().requested_bytes().checked_mul(3)?,
+                _ => 0,
+            };
+            total.checked_add(bytes)
+        })?;
+        coefficients.checked_add(work)?.checked_add(gather)
+    })();
+    bound
+        .map(runmat_execution::ResourceByteBound::Known)
+        .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        ))
 }
 
 fn admit_conv_operand(value: &Value) -> BuiltinResult<()> {
@@ -396,6 +513,7 @@ fn try_conv_gpu(
             orientation: provider_orientation,
         },
         &contract.shape,
+        host_scratch_bound(a, b),
     )?;
     if placement
         .as_ref()
