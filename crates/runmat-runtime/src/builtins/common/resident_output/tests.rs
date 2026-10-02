@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Mutex, OnceLock,
+    Mutex,
 };
 
 struct AliasProvider {
@@ -48,15 +48,11 @@ impl AccelProvider for AliasProvider {
 }
 
 fn provider() -> &'static AliasProvider {
-    static PROVIDER: OnceLock<AliasProvider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| AliasProvider {
+    Box::leak(Box::new(AliasProvider {
         inner: InProcessProvider::new(),
         alias: Mutex::new(None),
         uploads: AtomicUsize::new(0),
-    });
-    *provider.alias.lock().unwrap() = None;
-    provider.uploads.store(0, Ordering::Relaxed);
-    provider
+    }))
 }
 
 #[test]

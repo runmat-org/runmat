@@ -451,6 +451,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn origin_thread_affinity_is_enforced() {
         let releases = Arc::new(ReleaseCounter::default());
         let registry = registry(releases);

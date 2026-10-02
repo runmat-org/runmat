@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
 mod dialog;
-#[cfg(not(target_arch = "wasm32"))]
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -21,7 +20,6 @@ pub mod sandbox;
 mod wasm;
 
 pub use dialog::*;
-#[cfg(not(target_arch = "wasm32"))]
 pub use memory::MemoryFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;
