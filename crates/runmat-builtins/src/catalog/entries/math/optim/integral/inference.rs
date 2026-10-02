@@ -1,5 +1,5 @@
 use super::super::scalar_facts;
-use super::IntegralOptionName;
+use super::{IntegralCallbackMode, IntegralOptionName};
 use crate::catalog::inference::{argument_error, literal_text};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
@@ -40,10 +40,14 @@ fn scalar_bound(
     }
 }
 
-fn controls(request: &CallRequest, diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>) {
+fn controls(
+    request: &CallRequest,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+) -> Option<IntegralCallbackMode> {
     let rest = request.arguments.len().saturating_sub(3);
     let mut known_abs_tol = Some(IntegralOptionName::DEFAULT_ABS_TOL);
     let mut known_rel_tol = Some(IntegralOptionName::DEFAULT_REL_TOL);
+    let mut known_callback_mode = Some(IntegralCallbackMode::Vectorized);
     if rest == 1 {
         let option = &request.arguments[3];
         if !matches!(
@@ -57,7 +61,7 @@ fn controls(request: &CallRequest, diagnostics: &mut Vec<runmat_types::Inference
                 3,
             ));
         }
-        return;
+        return None;
     }
     if !rest.is_multiple_of(2) {
         diagnostics.push(argument_error(
@@ -105,6 +109,7 @@ fn controls(request: &CallRequest, diagnostics: &mut Vec<runmat_types::Inference
                     diagnostics,
                     &mut known_abs_tol,
                     &mut known_rel_tol,
+                    &mut known_callback_mode,
                 );
             } else {
                 diagnostics.push(argument_error(
@@ -117,6 +122,7 @@ fn controls(request: &CallRequest, diagnostics: &mut Vec<runmat_types::Inference
             // A runtime option name could overwrite either tolerance.
             known_abs_tol = None;
             known_rel_tol = None;
+            known_callback_mode = None;
         }
     }
     if known_abs_tol == Some(0.0) && known_rel_tol == Some(0.0) {
@@ -135,6 +141,7 @@ fn controls(request: &CallRequest, diagnostics: &mut Vec<runmat_types::Inference
             3,
         ));
     }
+    known_callback_mode
 }
 
 fn known_option(
@@ -145,6 +152,7 @@ fn known_option(
     diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
     known_abs_tol: &mut Option<f64>,
     known_rel_tol: &mut Option<f64>,
+    known_callback_mode: &mut Option<IntegralCallbackMode>,
 ) {
     let numeric = literal.and_then(|literal| match literal {
         LiteralValue::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
@@ -188,6 +196,12 @@ fn known_option(
                 || numeric.is_some_and(|number| number != 0.0 && number != 1.0)
                 || known_bad_kind
         }
+        IntegralOptionName::Vectorized => {
+            let valid = numeric.is_none_or(|number| number == 0.0 || number == 1.0);
+            *known_callback_mode =
+                numeric.map(|number| IntegralCallbackMode::from_vectorized(number != 0.0));
+            !valid || known_bad_kind
+        }
     };
     if bad {
         diagnostics.push(argument_error(
@@ -222,20 +236,44 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     scalar_facts::callback(request, &mut diagnostics);
     scalar_bound(request, 1, &mut diagnostics);
     scalar_bound(request, 2, &mut diagnostics);
-    controls(request, &mut diagnostics);
-    let callback = scalar_facts::callback_invocation(
-        request,
-        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
-            domain: NumericDomain::Real,
-        })),
-    );
+    let callback_mode = controls(request, &mut diagnostics);
+    let callback_argument = match callback_mode {
+        Some(IntegralCallbackMode::Vectorized) => ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            ShapeFact::Shaped {
+                dims: vec![
+                    runmat_types::DimensionFact::Known(1),
+                    runmat_types::DimensionFact::Unknown,
+                ],
+            },
+            StorageFact::Dense,
+        ),
+        Some(IntegralCallbackMode::Scalar) => {
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }))
+        }
+        None => ValueFact::unknown(DynamicReason::RuntimeValue),
+    };
+    let callback = scalar_facts::callback_invocation(request, callback_argument);
     if let Some(callback) = &callback {
-        scalar_facts::real_scalar_callback_result(
-            callback,
-            &mut diagnostics,
-            "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
-        );
+        match callback_mode {
+            Some(IntegralCallbackMode::Vectorized) => scalar_facts::real_row_batch_callback_result(
+                callback,
+                &mut diagnostics,
+                "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
+            ),
+            Some(IntegralCallbackMode::Scalar) => scalar_facts::real_scalar_callback_result(
+                callback,
+                &mut diagnostics,
+                "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
+            ),
+            None => {}
+        }
         diagnostics.extend(callback.diagnostics.iter().cloned());
     }
     let value = if diagnostics.is_empty() {

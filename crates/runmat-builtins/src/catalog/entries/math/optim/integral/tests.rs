@@ -82,9 +82,27 @@ fn callback_capability_is_transitive() {
         capabilities: CapabilitySet(std::collections::BTreeSet::from([
             CapabilityRequirement::Filesystem,
         ])),
-        parameters: vec![scalar(NumericClass::Double, NumericDomain::Real)],
+        parameters: vec![ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Unknown],
+            },
+            StorageFact::Dense,
+        )],
         parameters_complete: true,
-        outputs: vec![scalar(NumericClass::Double, NumericDomain::Real)],
+        outputs: vec![ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Unknown],
+            },
+            StorageFact::Dense,
+        )],
         outputs_complete: true,
         variadic_inputs: false,
         variadic_outputs: false,
@@ -134,6 +152,62 @@ fn known_invalid_callback_result_never_proves_a_scalar_integral() {
 }
 
 #[test]
+fn callback_shape_facts_follow_typed_vectorized_selector() {
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: CapabilitySet::default(),
+        parameters: vec![real.clone()],
+        parameters_complete: true,
+        outputs: vec![real.clone()],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: vec![],
+        captures_complete: true,
+    }));
+    let default_call = request(
+        vec![callback.clone(), real.clone(), real.clone()],
+        vec![],
+        1,
+    );
+    let default_result = inference::infer(&default_call, &INTEGRAL_CATALOG_ENTRY);
+    assert!(!default_result.diagnostics.is_empty());
+    assert!(matches!(
+        default_result.outputs[0].kind,
+        ValueKindFact::Unknown
+    ));
+
+    let scalar_call = request(
+        vec![
+            callback,
+            real.clone(),
+            real,
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("Vectorized".into()),
+            LiteralValue::Bool(false),
+        ],
+        1,
+    );
+    let scalar_result = inference::infer(&scalar_call, &INTEGRAL_CATALOG_ENTRY);
+    assert!(
+        scalar_result.diagnostics.is_empty(),
+        "{:?}",
+        scalar_result.diagnostics
+    );
+    assert_eq!(
+        scalar_result.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+}
+
+#[test]
 fn option_identity_is_typed_at_the_public_boundary() {
     for (spelling, identity) in [
         ("AbsTol", IntegralOptionName::AbsTol),
@@ -141,6 +215,7 @@ fn option_identity_is_typed_at_the_public_boundary() {
         ("MaxFunEvals", IntegralOptionName::MaxFunEvals),
         ("MaxIntervalCount", IntegralOptionName::MaxIntervalCount),
         ("ArrayValued", IntegralOptionName::ArrayValued),
+        ("Vectorized", IntegralOptionName::Vectorized),
     ] {
         assert_eq!(IntegralOptionName::parse(spelling), Some(identity));
     }

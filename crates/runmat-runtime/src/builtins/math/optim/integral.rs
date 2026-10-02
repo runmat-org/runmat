@@ -6,10 +6,11 @@ use runmat_builtins::{
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, INTEGRAL_DESCRIPTOR,
 };
 use runmat_builtins::{
-    BuiltinErrorDescriptor, IntegralOptionName, INTEGRAL_ERROR_INVALID_ARGUMENT,
-    INTEGRAL_ERROR_INVALID_INPUT, INTEGRAL_ERROR_TOO_MANY_OUTPUTS,
+    BuiltinErrorDescriptor, IntegralCallbackMode, IntegralOptionName,
+    INTEGRAL_ERROR_INVALID_ARGUMENT, INTEGRAL_ERROR_INVALID_INPUT, INTEGRAL_ERROR_TOO_MANY_OUTPUTS,
     INTEGRAL_INTEGER_BOUND_EXTENSION, INTEGRAL_INTEGER_OPTION_EXTENSION,
     INTEGRAL_LOGICAL_BOUND_EXTENSION, INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
+    INTEGRAL_VECTORIZED_OPTION_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Tensor, Value};
@@ -201,6 +202,12 @@ fn preflight_integral_option_extensions(
         value_has_logical_class, value_has_native_integer_class,
     };
     for &(name, value) in options {
+        if name == IntegralOptionName::Vectorized {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGRAL_VECTORIZED_OPTION_EXTENSION,
+                NAME,
+            )?;
+        }
         if value_has_native_integer_class(value) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &INTEGRAL_INTEGER_OPTION_EXTENSION,
@@ -299,6 +306,7 @@ struct IntegralOptions {
     abs_tol: f64,
     rel_tol: f64,
     max_fun_evals: usize,
+    callback_mode: IntegralCallbackMode,
 }
 
 impl IntegralOptions {
@@ -307,6 +315,7 @@ impl IntegralOptions {
             abs_tol: IntegralOptionName::DEFAULT_ABS_TOL,
             rel_tol: IntegralOptionName::DEFAULT_REL_TOL,
             max_fun_evals: DEFAULT_MAX_FUN_EVALS,
+            callback_mode: IntegralCallbackMode::Vectorized,
         }
     }
 
@@ -321,7 +330,8 @@ impl IntegralOptions {
                     IntegralOptionName::RelTol => known_rel_tol = None,
                     IntegralOptionName::MaxFunEvals
                     | IntegralOptionName::MaxIntervalCount
-                    | IntegralOptionName::ArrayValued => {}
+                    | IntegralOptionName::ArrayValued
+                    | IntegralOptionName::Vectorized => {}
                 }
                 continue;
             }
@@ -331,7 +341,8 @@ impl IntegralOptions {
                 IntegralOptionName::RelTol => known_rel_tol = Some(check.rel_tol),
                 IntegralOptionName::MaxFunEvals
                 | IntegralOptionName::MaxIntervalCount
-                | IntegralOptionName::ArrayValued => {}
+                | IntegralOptionName::ArrayValued
+                | IntegralOptionName::Vectorized => {}
             }
         }
         if known_abs_tol == Some(0.0) && known_rel_tol == Some(0.0) {
@@ -394,6 +405,10 @@ impl IntegralOptions {
                         "ArrayValued true is not supported yet",
                     ));
                 }
+            }
+            IntegralOptionName::Vectorized => {
+                self.callback_mode =
+                    IntegralCallbackMode::from_vectorized(bool_option("Vectorized", value)?);
             }
         }
         Ok(())
@@ -611,6 +626,21 @@ impl QuadratureEvaluator for IntegralEvaluator<'_> {
         call_integrand(self.function, x, self.cooperation).await
     }
 
+    async fn evaluate_many<const N: usize>(&mut self, points: [f64; N]) -> BuiltinResult<[f64; N]> {
+        match self.options.callback_mode {
+            IntegralCallbackMode::Vectorized => {
+                call_integrand_batch(self.function, points, self.cooperation).await
+            }
+            IntegralCallbackMode::Scalar => {
+                let mut values = [0.0; N];
+                for (index, point) in points.into_iter().enumerate() {
+                    values[index] = self.evaluate(point).await?;
+                }
+                Ok(values)
+            }
+        }
+    }
+
     fn midpoint(&self, a: f64, b: f64) -> f64 {
         crate::builtins::math::optim::quadrature::midpoint(a, b)
     }
@@ -688,26 +718,83 @@ async fn call_integrand(
     }
 }
 
+async fn call_integrand_batch<const N: usize>(
+    function: &Value,
+    points: [f64; N],
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<[f64; N]> {
+    cooperation.completed(0).await?;
+    let samples = Tensor::new(points.to_vec(), vec![1, N]).map_err(|error| {
+        integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            format!("could not construct callback sample batch: {error}"),
+        )
+    })?;
+    let value = call_function(function, [Value::Tensor(samples)]).await?;
+    cooperation.completed(N as u64).await?;
+    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    let mut result = [0.0; N];
+    match value {
+        Value::Tensor(tensor) if tensor.shape.as_slice() == [1, N] => {
+            for (index, result) in result.iter_mut().enumerate() {
+                *result = tensor::tensor_value_f64(&tensor, index);
+            }
+        }
+        Value::LogicalArray(logical) if logical.shape.as_slice() == [1, N] => {
+            for (index, result) in result.iter_mut().enumerate() {
+                *result = if logical.data[index] != 0 { 1.0 } else { 0.0 };
+            }
+        }
+        _ => {
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_INPUT,
+                "vectorized function must return one real value for each row-vector sample",
+            ))
+        }
+    }
+    if result.iter().any(|value| !value.is_finite()) {
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "function values must be finite real numbers",
+        ));
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::IntegerStorage;
 
+    async fn mapped_helper(x: Value, map: impl Fn(f64) -> f64) -> crate::BuiltinResult<Value> {
+        match x {
+            Value::Tensor(samples) => {
+                let values = (0..samples.len())
+                    .map(|index| map(tensor::tensor_value_f64(&samples, index)))
+                    .collect();
+                Ok(Value::Tensor(
+                    Tensor::new(values, samples.shape).expect("fixed test sample shape"),
+                ))
+            }
+            other => Ok(Value::Num(map(scalar_bound("x", other).await?))),
+        }
+    }
+
     const INTEGRAL_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
         name: "fx",
-        ty: BuiltinParamType::NumericScalar,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Integrand scalar value.",
+        description: "Integrand values for scalar or vector sample input.",
     }];
 
     const INTEGRAL_HELPER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
         name: "x",
-        ty: BuiltinParamType::NumericScalar,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Integrand sample location.",
+        description: "Scalar or row-vector integrand sample locations.",
     }];
 
     const INTEGRAL_HELPER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
@@ -733,8 +820,7 @@ mod tests {
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn square_helper(x: Value) -> crate::BuiltinResult<Value> {
-        let x = scalar_bound("x", x).await?;
-        Ok(Value::Num(x * x))
+        mapped_helper(x, |value| value * value).await
     }
 
     #[runtime_builtin(
@@ -744,7 +830,7 @@ mod tests {
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn one_helper(_x: Value) -> crate::BuiltinResult<Value> {
-        Ok(Value::Num(1.0))
+        mapped_helper(_x, |_| 1.0).await
     }
 
     #[runtime_builtin(
@@ -754,8 +840,7 @@ mod tests {
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn scaled_identity_helper(x: Value) -> crate::BuiltinResult<Value> {
-        let x = scalar_bound("x", x).await?;
-        Ok(Value::Num(x / 1.0e308))
+        mapped_helper(x, |value| value / 1.0e308).await
     }
 
     #[runtime_builtin(
@@ -766,6 +851,22 @@ mod tests {
     )]
     async fn identity_helper(x: Value) -> crate::BuiltinResult<Value> {
         Ok(x)
+    }
+
+    #[runtime_builtin(
+        name = "__integral_scalar_only",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn scalar_only_helper(x: Value) -> crate::BuiltinResult<Value> {
+        let Value::Num(x) = x else {
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_INPUT,
+                "scalar-only callback received a vector batch",
+            ));
+        };
+        Ok(Value::Num(x * x))
     }
 
     #[runtime_builtin(
@@ -787,7 +888,7 @@ mod tests {
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn nan_helper(_x: Value) -> crate::BuiltinResult<Value> {
-        Ok(Value::Num(f64::NAN))
+        mapped_helper(_x, |_| f64::NAN).await
     }
 
     #[runtime_builtin(
@@ -797,7 +898,11 @@ mod tests {
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn integer_tensor_helper(_x: Value) -> crate::BuiltinResult<Value> {
-        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("tensor");
+        let (len, shape) = match _x {
+            Value::Tensor(samples) => (samples.len(), samples.shape),
+            _ => (1, vec![1, 1]),
+        };
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![3; len]), shape).expect("tensor");
         Ok(Value::Tensor(tensor))
     }
 
@@ -895,6 +1000,36 @@ mod tests {
     }
 
     #[test]
+    fn vectorized_default_batches_samples_and_scalar_extension_is_gated() {
+        let default_error = run(
+            Value::FunctionHandle("__integral_scalar_only".into()),
+            0.0,
+            1.0,
+        )
+        .expect_err("the default callback receives a sample row vector");
+        assert!(default_error.message().contains("vector batch"));
+
+        let scalar_form = || {
+            block_on(integral_builtin(
+                Value::FunctionHandle("__integral_scalar_only".into()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                vec![Value::from("Vectorized"), Value::Bool(false)],
+            ))
+        };
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let gated = scalar_form().expect_err("newer scalar-callback selector is gated");
+        assert_eq!(
+            gated.identifier(),
+            INTEGRAL_VECTORIZED_OPTION_EXTENSION.error_identifier
+        );
+        drop(_strict);
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = scalar_form().expect("RunMat scalar callback form");
+        assert!(matches!(result, Value::Num(value) if (value - 1.0/3.0).abs() < 1.0e-8));
+    }
+
+    #[test]
     fn finite_extreme_intervals_keep_representable_results() {
         let constant = run(Value::FunctionHandle("__integral_one".into()), 0.0, 1.0e308)
             .expect("finite constant integral");
@@ -955,13 +1090,13 @@ mod tests {
     #[test]
     fn rejects_vector_valued_integrand_for_initial_scope() {
         let err = run(Value::FunctionHandle("__integral_vector".into()), 0.0, 1.0).unwrap_err();
-        assert!(err.message().contains("finite real scalar"));
+        assert!(err.message().contains("one real value"));
     }
 
     #[test]
     fn rejects_nonfinite_integrand_values() {
         let err = run(Value::FunctionHandle("__integral_nan".into()), 0.0, 1.0).unwrap_err();
-        assert!(err.message().contains("finite real scalar"));
+        assert!(err.message().contains("finite real numbers"));
     }
 
     #[test]

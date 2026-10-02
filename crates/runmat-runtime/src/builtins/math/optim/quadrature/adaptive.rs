@@ -8,6 +8,13 @@ use super::{simpson, ScaledEstimate};
 pub(crate) trait QuadratureEvaluator {
     async fn checkpoint(&mut self) -> BuiltinResult<()>;
     async fn evaluate(&mut self, x: f64) -> BuiltinResult<f64>;
+    async fn evaluate_many<const N: usize>(&mut self, points: [f64; N]) -> BuiltinResult<[f64; N]> {
+        let mut values = [0.0; N];
+        for (index, point) in points.into_iter().enumerate() {
+            values[index] = self.evaluate(point).await?;
+        }
+        Ok(values)
+    }
     fn midpoint(&self, a: f64, b: f64) -> f64;
     fn tolerances(&self) -> (f64, f64);
     fn max_evaluations(&self) -> usize;
@@ -42,10 +49,8 @@ pub(crate) async fn integrate<E: QuadratureEvaluator>(
     b: f64,
 ) -> BuiltinResult<AdaptiveSimpsonResult> {
     evaluator.checkpoint().await?;
-    let fa = evaluator.evaluate(a).await?;
     let m = evaluator.midpoint(a, b);
-    let fm = evaluator.evaluate(m).await?;
-    let fb = evaluator.evaluate(b).await?;
+    let [fa, fm, fb] = evaluator.evaluate_many([a, m, b]).await?;
     let whole = simpson(a, b, fa, fm, fb);
     let mut evaluations = 3_usize;
     let (absolute_tolerance, relative_tolerance) = evaluator.tolerances();
@@ -89,8 +94,7 @@ async fn adapt<E: QuadratureEvaluator>(
     let c = evaluator.midpoint(state.a, state.b);
     let d = evaluator.midpoint(state.a, c);
     let e = evaluator.midpoint(c, state.b);
-    let fd = evaluator.evaluate(d).await?;
-    let fe = evaluator.evaluate(e).await?;
+    let [fd, fe] = evaluator.evaluate_many([d, e]).await?;
     *evaluations += 2;
 
     let left = simpson(state.a, c, state.fa, fd, state.fm);

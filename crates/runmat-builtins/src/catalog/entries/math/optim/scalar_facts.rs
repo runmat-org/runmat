@@ -95,6 +95,43 @@ pub(super) fn real_scalar_callback_result(
     }
 }
 
+pub(super) fn real_row_batch_callback_result(
+    callback: &CallInference,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+    code: &'static str,
+) {
+    let Some(result) = callback.outputs.first() else {
+        return;
+    };
+    let class_ok = matches!(
+        result.kind,
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        }) | ValueKindFact::Logical
+            | ValueKindFact::Unknown
+    );
+    // The same callback is invoked with batches of three and two points.
+    // A fixed result length cannot satisfy both calls.
+    let geometry_ok = match &result.shape {
+        ShapeFact::Scalar => false,
+        ShapeFact::Shaped { dims } => {
+            dims.len() == 2
+                && !matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1)
+                && !matches!(dims.get(1), Some(DimensionFact::Known(_)))
+        }
+        ShapeFact::Ranked { rank } => *rank == 2,
+        ShapeFact::Unknown => true,
+    };
+    if !class_ok || !geometry_ok || result.storage == StorageFact::Sparse {
+        diagnostics.push(argument_error(
+            code,
+            "vectorized quadrature callback must return one real value per row-vector sample",
+            0,
+        ));
+    }
+}
+
 pub(super) fn real_numeric(
     value: Option<&ValueFact>,
     index: usize,

@@ -137,11 +137,20 @@ pub const INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION: BuiltinExtensionDescriptor 
             "integral with logical tolerance or evaluation-count options is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:IntegralLogicalNumericOptionExtension"),
     };
-pub const INTEGRAL_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+pub const INTEGRAL_VECTORIZED_OPTION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "integral-vectorized-option",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "the Vectorized option was introduced after the pinned MATLAB compatibility release",
+        error_identifier: Some("RunMat:compatibility:IntegralVectorizedOptionExtension"),
+    };
+pub const INTEGRAL_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
     INTEGRAL_INTEGER_BOUND_EXTENSION,
     INTEGRAL_LOGICAL_BOUND_EXTENSION,
     INTEGRAL_INTEGER_OPTION_EXTENSION,
     INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
+    INTEGRAL_VECTORIZED_OPTION_EXTENSION,
 ];
 
 const INTEGER_BOUND_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
