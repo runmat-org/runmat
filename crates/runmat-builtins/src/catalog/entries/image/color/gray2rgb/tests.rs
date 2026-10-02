@@ -1,4 +1,5 @@
 use super::*;
+use crate::BuiltinParamType;
 use runmat_types::{
     CallRequest, LiteralContext, NumericClass, NumericFact, OutputSelection, RequestedOutputCount,
 };
@@ -13,6 +14,10 @@ fn request(kind: ValueKindFact, shape: ShapeFact) -> CallRequest {
 
 #[test]
 fn gray2rgb_preserves_exact_integer_and_logical_class_and_appends_channel() {
+    assert_eq!(
+        GRAY2RGB_DESCRIPTOR.signatures[0].outputs[0].ty,
+        BuiltinParamType::Any
+    );
     for kind in [
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::UInt64,
@@ -45,6 +50,10 @@ fn gray2rgb_unknown_and_invalid_shapes_do_not_invent_dimensions() {
         &GRAY2RGB_CATALOG_ENTRY,
     );
     assert_eq!(unknown.outputs[0].shape, ShapeFact::Unknown);
+    assert_eq!(
+        unknown.outputs[0].certainty,
+        runmat_types::CertaintyFact::Dynamic(runmat_types::DynamicReason::RuntimeValue)
+    );
     let invalid = infer(
         &request(
             ValueKindFact::Logical,

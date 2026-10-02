@@ -105,3 +105,25 @@ fn singleton_truecolor_grayscale_is_scalar_and_unknown_shape_stays_unknown() {
     let unknown = call(NumericClass::Double, ShapeFact::Unknown, RgbConversion::Hsv);
     assert_eq!(unknown.outputs[0].shape, ShapeFact::Unknown);
 }
+
+#[test]
+fn unknown_input_class_keeps_dynamic_output_kind_but_known_success_geometry() {
+    let request = CallRequest {
+        arguments: vec![ValueFact::unknown(
+            runmat_types::DynamicReason::RuntimeValue,
+        )],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let inferred = infer(
+        &request,
+        &crate::RGB2GRAY_CATALOG_ENTRY,
+        RgbConversion::Gray,
+    );
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(inferred.outputs[0].shape, ShapeFact::Unknown);
+    assert_eq!(
+        inferred.outputs[0].certainty,
+        runmat_types::CertaintyFact::Dynamic(runmat_types::DynamicReason::RuntimeValue)
+    );
+}

@@ -5,7 +5,7 @@ use runmat_types::{
     NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RgbConversion {
     Gray,
     Hsv,
@@ -163,6 +163,10 @@ pub(super) fn infer(
         None => StorageFact::Unknown,
     };
     let mut output = ValueFact::proven(kind, shape, storage);
+    if output.kind == ValueKindFact::Unknown {
+        output.certainty =
+            runmat_types::CertaintyFact::Dynamic(runmat_types::DynamicReason::RuntimeValue);
+    }
     if !matches!(input.map(|fact| &fact.residency), Some(ResidencyFact::Host)) {
         output.residency = ResidencyFact::Unknown;
     }

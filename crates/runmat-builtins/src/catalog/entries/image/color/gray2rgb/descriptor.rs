@@ -2,10 +2,10 @@ use crate::*;
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "RGB",
-    ty: BuiltinParamType::NumericArray,
+    ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "RGB image with replicated grayscale channels.",
+    description: "Numeric or logical RGB image with replicated grayscale channels.",
 }];
 const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "I",

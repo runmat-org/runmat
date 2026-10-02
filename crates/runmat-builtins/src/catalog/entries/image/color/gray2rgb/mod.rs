@@ -57,6 +57,10 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
         _ => ValueKindFact::Unknown,
     };
     let mut output = ValueFact::proven(kind, shape, StorageFact::Dense);
+    if output.kind == ValueKindFact::Unknown {
+        output.certainty =
+            runmat_types::CertaintyFact::Dynamic(runmat_types::DynamicReason::RuntimeValue);
+    }
     output.residency = ResidencyFact::Host;
     let mut contract = CallContract::fixed(vec![output]);
     contract.effects = entry.contract.effect_set();
