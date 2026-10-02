@@ -29,6 +29,10 @@ use crate::builtins::math::signal::common::{keyword, parse_nonnegative_integer};
 use crate::builtins::math::signal::type_resolvers::envelope_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+#[path = "envelope/admission.rs"]
+mod admission;
+use admission::{preflight_signal_metadata, signal_geometry};
+
 const BUILTIN_NAME: &str = "envelope";
 const EPS: f64 = 1.0e-12;
 
@@ -343,6 +347,20 @@ async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(envelope_error(&ENVELOPE_ERROR_TOO_MANY_OUTPUTS));
     }
+    preflight_signal_metadata(&x)?;
+    #[cfg(not(feature = "plot-core"))]
+    if crate::output_count::current_output_count() == Some(0)
+        || (crate::output_context::requested_output_count() == Some(0)
+            && crate::output_count::current_output_count().is_none())
+    {
+        if let Value::GpuTensor(handle) = &x {
+            super::resident_output::owner(handle, || envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
+        } else {
+            let input = value_to_signal_input(x).await?;
+            let _ = evaluate(input, &options)?;
+        }
+        return Err(crate::plotting_hooks::unavailable_presentation());
+    }
     let source = if let Value::GpuTensor(handle) = &x {
         super::resident_output::owner(handle, || envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
         Some(handle.clone())
@@ -494,7 +512,7 @@ fn provider_envelope_method(options: &EnvelopeOptions) -> Option<ProviderEnvelop
 fn gpu_signal_shape(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> BuiltinResult<Option<(usize, usize, Vec<usize>)>> {
-    if handle.shape().is_empty() || handle.shape().len() > 2 {
+    if handle.shape().is_empty() {
         return Ok(None);
     }
     let Some(handle_len) = handle
@@ -504,23 +522,9 @@ fn gpu_signal_shape(
     else {
         return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
     };
-    let output_shape = tensor::default_shape_for(handle.shape(), handle_len);
-    let Some(total_len) = output_shape
-        .iter()
-        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-    else {
-        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
-    };
-    if total_len == 0 {
-        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
-    }
-    let rows = output_shape.first().copied().unwrap_or(total_len);
-    let cols = output_shape.get(1).copied().unwrap_or(1);
-    if rows == 0 || cols == 0 {
-        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
-    }
+    let (output_shape, rows, cols) = signal_geometry(handle.shape(), handle_len)?;
     if rows == 1 || cols == 1 {
-        Ok(Some((total_len, 1, output_shape)))
+        Ok(Some((handle_len, 1, output_shape)))
     } else {
         Ok(Some((rows, cols, output_shape)))
     }
@@ -599,18 +603,10 @@ fn scalar_signal_input(value: f64) -> BuiltinResult<SignalInput> {
 fn tensor_to_signal_input(tensor: Tensor) -> BuiltinResult<SignalInput> {
     let len = tensor.len();
     let shape_meta = tensor.shape.clone();
+    let (shape, rows, cols) = signal_geometry(&shape_meta, len)?;
     let single_output = tensor.numeric_dtype() == NumericDType::F32;
     let data = tensor::tensor_into_values_f64(tensor);
-    if data.is_empty() || data.iter().any(|value| !value.is_finite()) {
-        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
-    }
-    let shape = tensor::default_shape_for(&shape_meta, len);
-    if shape.len() > 2 || shape.iter().filter(|&&dim| dim > 1).count() > 2 {
-        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
-    }
-    let rows = shape.first().copied().unwrap_or(data.len());
-    let cols = shape.get(1).copied().unwrap_or(1);
-    if rows == 0 || cols == 0 || rows.checked_mul(cols) != Some(data.len()) {
+    if data.iter().any(|value| !value.is_finite()) {
         return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
     }
     Ok(SignalInput {
@@ -995,6 +991,7 @@ fn spline_interpolate(points: &[(usize, f64)], query: &[f64]) -> BuiltinResult<V
     }
 }
 
+#[cfg(feature = "plot-core")]
 async fn render_envelope_plot(eval: &EnvelopeEvaluation) -> BuiltinResult<()> {
     let mut args = Vec::new();
     let x = if eval.input.vector {
@@ -1041,6 +1038,12 @@ async fn render_envelope_plot(eval: &EnvelopeEvaluation) -> BuiltinResult<()> {
     Ok(())
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn render_envelope_plot(_eval: &EnvelopeEvaluation) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn column_value(values: &[f64]) -> BuiltinResult<Value> {
     Tensor::new(values.to_vec(), vec![values.len(), 1])
         .map(Value::Tensor)
@@ -1276,6 +1279,7 @@ mod tests {
             .all(|value| *value >= 2.0));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn output_count_zero_returns_empty_output_list() {
         crate::builtins::plotting::tests::ensure_plot_test_env();
@@ -1284,6 +1288,89 @@ mod tests {
         assert_eq!(out, Value::OutputList(Vec::new()));
     }
 
+    #[cfg(not(feature = "plot-core"))]
+    #[test]
+    fn output_count_zero_preserves_host_validation_before_typed_missing_presentation() {
+        let invalid = call(Value::from("not a signal"), Vec::new(), Some(0))
+            .expect_err("known invalid host input");
+        assert_eq!(
+            invalid.identifier(),
+            ENVELOPE_ERROR_INVALID_SIGNAL.identifier
+        );
+        let unavailable = call(col(vec![1.0, 0.0, -1.0, 0.0]), Vec::new(), Some(0))
+            .expect_err("presentation needs plot-core");
+        assert!(unavailable
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+            .is_some());
+    }
+
+    #[cfg(not(feature = "plot-core"))]
+    #[test]
+    fn resident_statement_preflight_rejects_known_shape_and_storage_without_download() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
+            GpuTensorStorage, HostTensorView, NumericElementType, ThreadProviderGuard,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountedProvider {
+            owner: TestAllocationOwner,
+            downloads: AtomicUsize,
+        }
+        impl AccelProvider for CountedProvider {
+            fn device_id(&self) -> u32 {
+                self.owner.device_id()
+            }
+            fn device_info(&self) -> String {
+                "envelope preflight fixture".into()
+            }
+            fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+                panic!("statement preflight must not upload")
+            }
+            fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                self.downloads.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { panic!("statement preflight must not download") })
+            }
+        }
+
+        let _serial = crate::builtins::common::test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(CountedProvider {
+            owner: TestAllocationOwner::new(),
+            downloads: AtomicUsize::new(0),
+        }));
+        unsafe { runmat_accelerate_api::register_provider(provider) };
+        let _active = ThreadProviderGuard::set(Some(provider));
+        for (shape, storage) in [
+            (vec![0, 1], GpuTensorStorage::Real),
+            (vec![2, 2, 2], GpuTensorStorage::Real),
+            (vec![2, 1], GpuTensorStorage::ComplexInterleaved),
+        ] {
+            let allocation = provider
+                .owner
+                .allocate_zeroed(shape, NumericElementType::F64, storage)
+                .expect("resident fixture");
+            for output_count in [0, 1] {
+                let error = call(
+                    Value::GpuTensor(allocation.handle.clone()),
+                    Vec::new(),
+                    Some(output_count),
+                )
+                .expect_err("known invalid resident metadata");
+                assert_eq!(error.identifier(), ENVELOPE_ERROR_INVALID_SIGNAL.identifier);
+            }
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+            allocation
+                .handle
+                .allocation_lease()
+                .validate_live()
+                .unwrap();
+            assert_eq!(allocation.probe.retirements(), 0);
+        }
+    }
+
+    #[cfg(feature = "plot-core")]
     #[test]
     fn matrix_statement_form_plots_each_channel_without_length_mismatch() {
         crate::builtins::plotting::tests::ensure_plot_test_env();

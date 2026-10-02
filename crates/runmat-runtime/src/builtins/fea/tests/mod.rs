@@ -11,12 +11,14 @@ use super::contracts::identities::{
     PLAN_NAME, RESULTS_NAME, RUN_NAME, RUN_OPTIONS_NAME, STUDY_NAME,
 };
 use super::contracts::integer::FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES;
+#[cfg(feature = "plot-core")]
+use super::entrypoints::fea_plot_builtin;
 use super::entrypoints::{
     fea_boundary_condition_builtin, fea_domain_builtin, fea_field_builtin, fea_interface_builtin,
     fea_load_builtin, fea_load_case_builtin, fea_material_assignment_builtin, fea_material_builtin,
-    fea_model_builtin, fea_plan_builtin, fea_plot_builtin, fea_results_builtin,
-    fea_run_options_builtin, fea_step_builtin, fea_study_builtin, fea_sweep_builtin,
-    fea_trends_builtin, fea_validate_builtin,
+    fea_model_builtin, fea_plan_builtin, fea_results_builtin, fea_run_options_builtin,
+    fea_step_builtin, fea_study_builtin, fea_sweep_builtin, fea_trends_builtin,
+    fea_validate_builtin,
 };
 use super::geometry::geometry_asset_from_value;
 use super::integer_serialization::{
@@ -25,6 +27,7 @@ use super::integer_serialization::{
 };
 use super::options_json::{canonical_field_name, json_deserialize, value_to_json};
 use super::output::{one_base_failure_entries, public_sweep_error};
+#[cfg(feature = "plot-core")]
 use super::plot::{plot_request_from_args, select_generated_figure};
 use super::results::constructors::create_field_object_from_args;
 use super::results::field::{field_to_object, field_values_value};

@@ -95,6 +95,7 @@ fn fea_plot_returns_figure_handle_for_contextual_run_results_and_fields() {
     assert!(matches!(field_handle, Value::Num(handle) if handle >= 1.0));
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn fea_plot_request_accepts_solver_mesh_edge_option() {
     let (run_value, _study) = synthetic_plot_run_value();
