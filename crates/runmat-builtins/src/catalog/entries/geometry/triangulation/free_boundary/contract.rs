@@ -28,7 +28,7 @@ const METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
 pub const INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
     identifier: Some("RunMat:DelaunayTri:InvalidArgument"),
-    when: "The receiver or its connectivity property is malformed.",
+    when: "Constructor, object, constraint, or query inputs are malformed.",
     message: "DelaunayTri: invalid argument",
 };
 pub const UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

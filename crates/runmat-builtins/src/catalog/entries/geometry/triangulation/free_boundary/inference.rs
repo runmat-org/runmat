@@ -5,8 +5,7 @@ use runmat_types::{
     ValueKindFact,
 };
 
-const CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("DelaunayTri");
+const CLASS: runmat_types::StaticClassIdentity = super::super::delaunay_tri::DELAUNAY_TRI_CLASS;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
