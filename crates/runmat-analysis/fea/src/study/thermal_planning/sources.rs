@@ -21,6 +21,16 @@ pub(super) fn validate(
     mixed_context: bool,
 ) -> Result<(), ThermalStudyPlanningError> {
     let model = &workload.model;
+    if workload.backend != crate::ComputeBackend::Cpu
+        && model
+            .boundaries
+            .iter()
+            .any(|boundary| matches!(boundary.operator, BoundaryOperator::ThermalRadiation { .. }))
+    {
+        return Err(invalid(
+            "nonlinear thermal radiation requires the admitted CPU backend",
+        ));
+    }
     let step = model
         .sequence
         .steps
@@ -100,6 +110,11 @@ pub(super) fn validate(
                     sample_prescribed_heat_flux(value, &model.signals, sample).map_err(invalid)?
                 }
                 BoundaryOperator::ThermalConvection {
+                    ambient_temperature,
+                    ..
+                } => sample_prescribed_temperature(ambient_temperature, &model.signals, sample)
+                    .map_err(invalid)?,
+                BoundaryOperator::ThermalRadiation {
                     ambient_temperature,
                     ..
                 } => sample_prescribed_temperature(ambient_temperature, &model.signals, sample)

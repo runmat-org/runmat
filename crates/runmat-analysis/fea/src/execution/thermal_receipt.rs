@@ -23,6 +23,9 @@ pub struct ThermalNumericalReceipt {
     pub first_sample_time_s: f64,
     pub terminal_sample_time_s: f64,
     pub maximum_relative_linear_residual: f64,
+    pub nonlinear_sample_count: usize,
+    pub maximum_relative_nonlinear_residual: Option<f64>,
+    pub maximum_relative_nonlinear_increment: Option<f64>,
     pub maximum_relative_energy_residual: f64,
     pub residual_target: f64,
     pub reference_temperature_k: f64,
@@ -131,6 +134,24 @@ impl ThermalNumericalReceiptArtifact {
             || !r.residual_target.is_finite()
             || r.residual_target <= 0.0
             || r.maximum_relative_linear_residual > r.residual_target
+            || !match (
+                r.maximum_relative_nonlinear_residual,
+                r.maximum_relative_nonlinear_increment,
+            ) {
+                (None, None) => r.nonlinear_sample_count == 0,
+                (Some(residual), Some(increment)) => {
+                    let count = if r.accepted_sample_count == 1 {
+                        1
+                    } else {
+                        r.accepted_sample_count - 1
+                    };
+                    r.nonlinear_sample_count as u64 == count
+                        && [residual, increment].iter().all(|value| {
+                            value.is_finite() && *value >= 0.0 && *value <= r.residual_target
+                        })
+                }
+                _ => false,
+            }
             || !r.maximum_relative_energy_residual.is_finite()
             || r.maximum_relative_energy_residual < 0.0
             || r.maximum_relative_energy_residual > r.residual_target
@@ -228,6 +249,19 @@ fn evidence(
         step,
     )?;
     let schedule = workload.solve_schedule().map_err(invalid)?;
+    let nonlinear = workload.model.boundaries.iter().any(|boundary| {
+        matches!(
+            boundary.operator,
+            runmat_analysis_core::BoundaryOperator::ThermalRadiation { .. }
+        )
+    });
+    if (nonlinear && metadata.nonlinear_evidence.len() != schedule.solve_count())
+        || (!nonlinear && !metadata.nonlinear_evidence.is_empty())
+    {
+        return Err(invalid(
+            "nonlinear accepted evidence differs from original boundary law",
+        ));
+    }
     let maximum = metadata
         .residual_norms
         .iter()
@@ -257,6 +291,21 @@ fn evidence(
         first_sample_time_s: schedule.points_s()[0],
         terminal_sample_time_s: *schedule.points_s().last().unwrap(),
         maximum_relative_linear_residual: maximum,
+        nonlinear_sample_count: metadata.nonlinear_evidence.len(),
+        maximum_relative_nonlinear_residual: nonlinear.then(|| {
+            metadata
+                .nonlinear_evidence
+                .iter()
+                .map(|evidence| evidence.relative_equilibrium_residual)
+                .fold(0.0_f64, f64::max)
+        }),
+        maximum_relative_nonlinear_increment: nonlinear.then(|| {
+            metadata
+                .nonlinear_evidence
+                .iter()
+                .map(|evidence| evidence.relative_increment)
+                .fold(0.0_f64, f64::max)
+        }),
         maximum_relative_energy_residual: metadata
             .energy_balances
             .iter()

@@ -12,6 +12,8 @@ use runmat_analysis_core::{
 use runmat_execution::Digest;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
+mod nonlinear;
+
 fn receipt(order: ElementOrder) -> ThermalNumericalReceiptArtifact {
     receipt_with_energy(order, None)
 }

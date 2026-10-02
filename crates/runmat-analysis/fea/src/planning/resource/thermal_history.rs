@@ -68,6 +68,7 @@ impl ThermalHistoryResourceFacts {
         // even when a particular array contains only S-1 or zero entries.
         let sample_arrays = (4 * std::mem::size_of::<f64>()
             + std::mem::size_of::<crate::contracts::ThermalEnergyBalance>()
+            + std::mem::size_of::<crate::contracts::ThermalNonlinearSampleEvidence>()
             + std::mem::size_of::<crate::results::field::RecoveredFieldSample>())
             as u64;
         let retained_metadata_bytes = samples

@@ -164,6 +164,8 @@ const fn method_is_compatible(
         }
         TemporalImplementation::ThermalSteadyLinearSolve
         | TemporalImplementation::ThermalBackwardEuler
+        | TemporalImplementation::ThermalSteadyDampedNewton
+        | TemporalImplementation::ThermalBackwardEulerDampedNewton
         | TemporalImplementation::ElectrostaticPotentialLinearSolve
         | TemporalImplementation::SteadyConductionPotentialLinearSolve => {
             matches!(

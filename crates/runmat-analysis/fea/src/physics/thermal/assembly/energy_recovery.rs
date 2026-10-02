@@ -126,6 +126,27 @@ impl ThermalOperatorAssembly {
                     .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
             }
         }
+        if model
+            .boundaries
+            .iter()
+            .any(|boundary| matches!(boundary.operator, BoundaryOperator::ThermalRadiation { .. }))
+        {
+            self.visit_radiation_scalar_reference(
+                model,
+                sample,
+                reference_temperature_k,
+                temperature_k,
+                |face, form| {
+                    boundary_loss.add(form.outward_power_w);
+                    boundary_absolute.add(form.absolute_transfer_w);
+                    for (local, &node) in face.node_indices.iter().enumerate() {
+                        if self.prescribed_temperature_k[node].is_some() {
+                            nodal_reaction[node] -= form.outward_nodal_power_w[local];
+                        }
+                    }
+                },
+            )?;
+        }
         // Both claims describe the same recovered nodal transfers. Summing the
         // unrounded quadrature terms separately can exceed the nodal L1 scale
         // by rounding alone when every reaction has the same sign.

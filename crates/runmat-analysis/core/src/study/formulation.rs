@@ -53,6 +53,8 @@ pub enum TemporalImplementation {
     StructuralScalarResidualIteration,
     ThermalSteadyLinearSolve,
     ThermalBackwardEuler,
+    ThermalSteadyDampedNewton,
+    ThermalBackwardEulerDampedNewton,
     ElectrostaticPotentialLinearSolve,
     SteadyConductionPotentialLinearSolve,
     MagnetostaticWeakCoulombSaddleSolve,

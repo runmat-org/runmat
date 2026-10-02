@@ -249,6 +249,16 @@ impl AccuracySourceReceipt {
                 }
                 Self::Thermal(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Nonlinear
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound =>
+                {
+                    receipt.receipt().maximum_relative_nonlinear_residual.map(|residual| (
+                        residual,
+                        "maximum accepted original free-coordinate nonlinear thermal equilibrium residual divided by physical power scale; separate from inner linear correction residual, with accepted increments and energy closure required; not spatial or temporal accuracy",
+                    ))
+                }
+                Self::Thermal(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic
                         && criterion.evidence == RequiredAccuracyEvidence::ResidualBound =>
                 {

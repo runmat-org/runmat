@@ -29,6 +29,7 @@ impl FeaThermalRunResult {
             run: &self.run,
             time_points_s: &self.time_points_s,
             residual_norms: &self.residual_norms,
+            nonlinear_evidence: &self.nonlinear_evidence,
             residual_target: self.residual_target,
             energy_balances: &self.energy_balances,
             reference_temperature_k: self.reference_temperature_k,
@@ -146,6 +147,7 @@ pub(super) struct ThermalResultMetadata<'a> {
     pub run: &'a crate::FeaRunResult,
     pub time_points_s: &'a [f64],
     pub residual_norms: &'a [f64],
+    pub nonlinear_evidence: &'a [crate::contracts::ThermalNonlinearSampleEvidence],
     pub residual_target: f64,
     pub energy_balances: &'a [crate::contracts::ThermalEnergyBalance],
     pub reference_temperature_k: f64,
@@ -210,6 +212,40 @@ impl ThermalResultMetadata<'_> {
             return Err(invalid());
         }
         validate_portable_fields(&self.run.fields)?;
+        let nonlinear = self
+            .run
+            .identity
+            .realization()
+            .temporals
+            .iter()
+            .any(|temporal| {
+                matches!(temporal,
+            runmat_analysis_core::TemporalImplementation::ThermalSteadyDampedNewton
+                | runmat_analysis_core::TemporalImplementation::ThermalBackwardEulerDampedNewton)
+            });
+        if nonlinear == self.nonlinear_evidence.is_empty()
+            || (nonlinear
+                && (self.run.requested_backend != crate::ComputeBackend::Cpu
+                    || self.run.execution_backend != crate::ExecutionBackend::Cpu))
+        {
+            return Err(invalid());
+        }
+        if !self.nonlinear_evidence.is_empty() {
+            if self.nonlinear_evidence.len() != residuals {
+                return Err(invalid());
+            }
+            let first =
+                usize::from(self.run.identity.procedure() == AnalysisProcedure::TransientResponse);
+            for (evidence, time) in self
+                .nonlinear_evidence
+                .iter()
+                .zip(&self.time_points_s[first..])
+            {
+                if evidence.time_s != *time || !evidence.satisfies(self.residual_target) {
+                    return Err(invalid());
+                }
+            }
+        }
         for balance in self.energy_balances {
             balance
                 .validate()

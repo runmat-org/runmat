@@ -22,6 +22,7 @@ pub use magnetic::admit_canonical_magnetostatic;
 pub(crate) use magnetic::realization as canonical_magnetic_realization;
 pub use maxwell::{admit_canonical_maxwell, canonical_maxwell_realization};
 pub use nonstructural::admit_nonstructural;
+pub(crate) use nonstructural::admit_nonstructural_with_temporal;
 pub use realizations::{registered_formulations, RegisteredFormulation};
 pub use structural::{
     structural_exact_realization, thermomechanical_exact_realization, StructuralRealizationInput,

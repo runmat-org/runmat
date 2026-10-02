@@ -53,6 +53,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
                 &result.ordered_node_ids,
                 &result.ordered_element_ids,
                 &result.initial_state,
+                &result.nonlinear_evidence,
             ),
             CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
         )

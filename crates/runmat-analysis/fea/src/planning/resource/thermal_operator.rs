@@ -70,8 +70,10 @@ impl ThermalOperatorResourceFacts {
         // plus a possible accelerator prepared-system clone and the explicitly stored diagonal
         // zero damping matrix. This excludes provider-owned buffers. Steady/CPU use fewer copies.
         let diagonal_bytes = csr_bytes(rows, rows)?;
+        // Nonlinear radiation also constructs the shared-support tangent assembler and
+        // finalized Jacobian while the conductivity/capacity assemblies remain live.
         let csr_payload_bytes = csr_bytes(rows, entries)?
-            .checked_mul(8)
+            .checked_mul(10)
             .and_then(|bytes| bytes.checked_add(diagonal_bytes))
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal simultaneous CSR payloads",

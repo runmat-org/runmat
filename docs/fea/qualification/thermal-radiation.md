@@ -1,9 +1,10 @@
-# Thermal surface-to-ambient radiation — bounded face-form evidence
+# Thermal surface-to-ambient radiation — bounded nonlinear procedure
 
-Status: experimental local operator and authored contract. **Not an admitted thermal solve.**
-Plan ownership: Stage 5 radiation boundaries, nonlinear closure and heat accounting. The
-canonical thermal assembler deliberately rejects `ThermalRadiation` until the whole nonlinear
-procedure is wired. No Stage 5, restart, resource or production gate is promoted by these tests.
+Status: experimental CPU FP64 canonical Tet4/Tet10 steady and backward-Euler execution.
+Plan ownership: Stage 5 radiation boundaries, nonlinear closure and heat accounting.
+Linear thermal operator entry points still reject radiation explicitly; the nonlinear route
+retains the actual boundary law and Jacobian. This bounded envelope does not complete Stage5
+or qualify GPU, distributed execution, numerical process restart or production release.
 
 ## Law and independent references
 
@@ -27,7 +28,10 @@ Tri6 radiation forms can reach degree ten even on flat faces. Curved faces requi
 of the **actual residual and tangent**, not just geometry moments, at relative tolerance 1e-10
 scaled by physical transfer and integrated tangent. Exact zero transfers have no ambient-T floor.
 Whole-triangle quadratic orientation checks remain mandatory. Scratch is fixed face-local arrays;
-this does not yet establish whole-procedure peak memory or backend admission.
+this does not establish measured whole-process peak memory. Numerical admission conservatively
+reserves 10 simultaneous full-support CSR payloads, a diagonal damping payload and 24N double
+scratch values, plus the existing masks/component traversal, fields, source/solver metadata,
+nonlinear evidence and serialized result profiles. Original resident ceilings are unchanged.
 
 Tests cover:
 
@@ -41,12 +45,57 @@ Tests cover:
 - negative interpolated Tri6 Kelvin despite nonnegative nodal Kelvin;
 - authored lowering, dimensionless emissivity, model validation and boundary wire roundtrip.
 
+## Whole-procedure acceptance and independent witnesses
+
+The shared sparse conductivity/capacity operators are reused. Newton uses the original
+free-coordinate residual, consistent radiation tangent, exact prescribed increments and
+typed invalid-Kelvin backtracking. At most 32 corrections and 24 trials per correction are
+permitted. Acceptance requires equilibrium, accepted departure-coordinate increment and
+original physical heat balance all at the unchanged workload target. Inner PCG residuals
+are retained separately; they are not nonlinear acceptance. No absolute-temperature or
+dimensioned power floor creates an artificial convergence claim.
+
+Actual nonlinear sample records enter result metadata and numerical identity. Receipts
+bind their presence to the original boundary law and retain maximum equilibrium/increment
+errors. Distinct steady/BE damped-Newton formulation identities prevent a linear-solve label.
+Nonlinear `GlobalEquilibrium/ResidualBound` accuracy evidence uses the original nonlinear
+residual, not the last linear correction. Semantic-state publication binds the exact retained
+result identity; it does not recalculate or substitute a lost temperature field.
+
+On a unit-length/unit-area slab, `k=2`, hot face 400 K, ambient 300 K and emissivity 0.7,
+independent monotone bisection solves `k(400-Ts)=epsilon*sigma*(Ts^4-300^4)`.
+Both element orders reproduce the exact linear temperature, gradient, flux, radiation loss
+and prescribed-boundary power. A 1 K initial reference exercises genuine backtracking.
+Invalid Kelvin, insufficient original resources and GPU radiation requests reject execution.
+
+The manufactured continuum is `T(x,t)=400-10x-20t^2`, `rho*c=1`, `k=2`, over 0–1 s.
+Generation is `-40t`, left temperature is prescribed, sides insulated and right incoming
+flux is `epsilon*sigma*(T(1,t)^4-300^4)-20`. Original tabulated values are exact at solve
+knots; no false interpolation-error certificate is supplied. A real prior linear steady
+producer supplies the spatial initial temperature through the shared retained-field artifact
+and canonical initial-field binding, not point-target admission or fabricated solution data.
+
+Maximum errors over all applicable snapshots at 8/16/32 intervals:
+
+| Order | Temperature, K | Gradient/flux, relative | Storage-rate error divided by40 W/m³ |
+| --- | --- | --- | --- |
+| Tet4 | .225594 / .112780 / .0563825 | .0451187 / .0225560 / .0112765 | .0624221 / .0312189 / .0156116 |
+| Tet10 | .217295 / .108646 / .0543175 | .0434362 / .0217177 / .0108576 | .0623301 / .0311816 / .0155952 |
+
+Each field must improve by more than 1.8 per halving of the timestep; the original finest
+temperature bound remains 0.1 K. These are independent temporal checks on fixed spatial meshes,
+not a spatial-convergence certificate or a new absolute flux/storage accuracy bound.
+All accepted samples also satisfy the unchanged 1e-9 nonlinear/linear/physical-power target.
+Canonical manifest/receipt/state roundtrips retain source lineage; missing/excess nonlinear
+evidence rejects publication, and accepted-record tampering changes numerical identity and
+invalidates the original receipt/state request. These are portable object roundtrips, not a
+failed-process restart or remote worker witness.
+
 ## Required continuation / gate decision
 
-Keep admission closed until damped Newton steady and backward-Euler execution, positivity,
-nullspace/anchor handling, residual-based nonlinear acceptance, physical boundary heat accounting,
-source/signal equivalence, resource reservations and backend provenance are implemented together.
-Then require spatial/time convergence and independent equilibrium/cooling references, hot/cold
-workload execution, invalid-source/geometry tests, solver-specific restart and accuracy evidence.
+Production remains closed. Required continuation includes broader independent spatial and
+curved whole-procedure references, authored/generated signal equivalence, actual worker/cold
+process execution, solver-specific restart, satisfied full accuracy policies, measured usage
+and blocking release evidence. Existing face-form curved/quadrature tests do not prove those.
 Temperature-dependent material coefficients remain a separate real Stage 5 requirement.
 Enclosure/view factors and participating-medium radiation are outside this bounded ambient law.

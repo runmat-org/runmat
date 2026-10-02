@@ -21,6 +21,7 @@ use crate::{
 
 mod backend_evidence;
 mod diagnostics;
+mod nonlinear;
 mod snapshots;
 mod transient;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
@@ -241,6 +242,7 @@ pub(super) fn run(
         residual_norms: outcome.residual_norms,
         residual_target: options.residual_target,
         energy_balances: outcome.energy_balances,
+        nonlinear_evidence: outcome.nonlinear_evidence,
         reference_temperature_k: domain.reference_temperature.kelvin,
         initial_state: initial.evidence,
     };
@@ -262,6 +264,7 @@ struct ProcedureOutcome {
     recovered: RecoveredSnapshots,
     residual_norms: Vec<f64>,
     energy_balances: Vec<ThermalEnergyBalance>,
+    nonlinear_evidence: Vec<crate::contracts::ThermalNonlinearSampleEvidence>,
     source_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
     last_solve: LinearSolveResult,
     host_sync_count: u32,
@@ -283,6 +286,9 @@ struct SteadySolveInput<'a> {
 }
 
 fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
+    if nonlinear::has_radiation(input.model) {
+        return nonlinear::solve_steady(input);
+    }
     let SteadySolveInput {
         assembly,
         model,
@@ -345,6 +351,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         recovered,
         residual_norms: vec![solve.residual_norm / rhs_norm],
         energy_balances: vec![energy_balance],
+        nonlinear_evidence: Vec::new(),
         source_evidence: assembly.source_evidence.clone(),
         host_sync_count: solve.host_sync_count,
         device_apply_count: solve.device_apply_k_count,

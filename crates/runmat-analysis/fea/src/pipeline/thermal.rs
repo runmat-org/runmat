@@ -99,6 +99,17 @@ fn prepare_validated_model<'a>(
     step: &'a ProcedureStep,
 ) -> Result<PreparedThermalSolve<'a>, FeaRunError> {
     validate_step(step, options.procedure)?;
+    let radiation = model.boundaries.iter().any(|boundary| {
+        matches!(
+            boundary.operator,
+            runmat_analysis_core::BoundaryOperator::ThermalRadiation { .. }
+        )
+    });
+    if radiation && backend != ComputeBackend::Cpu {
+        return Err(FeaRunError::InvalidModel(
+            "nonlinear thermal radiation requires the admitted CPU backend".into(),
+        ));
+    }
     crate::planning::resource::require_initial_field_ceiling(
         &options.initial_fields,
         crate::execution::THERMAL_WORKLOAD_LIMITS,
@@ -110,13 +121,28 @@ fn prepare_validated_model<'a>(
         mesh,
         &options.initial_fields,
     )?;
-    let identity = crate::admission::admit_nonstructural(
+    let temporal = match (options.procedure, radiation) {
+        (ThermalProcedureControl::Steady, false) => {
+            runmat_analysis_core::TemporalImplementation::ThermalSteadyLinearSolve
+        }
+        (ThermalProcedureControl::Steady, true) => {
+            runmat_analysis_core::TemporalImplementation::ThermalSteadyDampedNewton
+        }
+        (ThermalProcedureControl::BackwardEuler { .. }, false) => {
+            runmat_analysis_core::TemporalImplementation::ThermalBackwardEuler
+        }
+        (ThermalProcedureControl::BackwardEuler { .. }, true) => {
+            runmat_analysis_core::TemporalImplementation::ThermalBackwardEulerDampedNewton
+        }
+    };
+    let identity = crate::admission::admit_nonstructural_with_temporal(
         PhysicsFamily::Thermal,
         options.procedure.procedure(),
         Some(mesh),
         runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
         runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
         options.formulation_requirement,
+        Some(temporal),
     )?;
     let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;
     let facts = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(

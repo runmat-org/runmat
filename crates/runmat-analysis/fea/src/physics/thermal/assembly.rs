@@ -2,7 +2,6 @@ use runmat_analysis_core::{
     AnalysisConstraint, AnalysisModel, BoundaryOperator, PrescribedValue, Temperature,
     ThermalConstraintKind,
 };
-use thiserror::Error;
 
 use crate::{
     algebra::{
@@ -25,6 +24,9 @@ mod convergence_tests;
 #[cfg(test)]
 mod element_density_tests;
 mod energy_recovery;
+mod error;
+pub(crate) use error::ThermalAssemblyError;
+mod nonlinear;
 mod recovery;
 mod steady;
 mod steady_reference;
@@ -56,6 +58,7 @@ impl ThermalOperatorAssembly {
         previous_temperature_k: &[f64],
         reference_temperature_k: &[f64],
     ) -> Result<AssembledRealSystem, ThermalAssemblyError> {
+        self.reject_radiation_in_linear_route(model)?;
         if !time_step_s.is_finite()
             || time_step_s <= 0.0
             || previous_temperature_k.len() != self.projection.nodes.len()
@@ -111,58 +114,6 @@ impl ThermalOperatorAssembly {
         AssembledRealSystem::try_new(operators, constrained, rhs)
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))
     }
-}
-
-#[derive(Debug, Error, Clone, PartialEq)]
-pub(crate) enum ThermalAssemblyError {
-    #[error("thermal sparse operator construction failed: {0}")]
-    SparseOperator(String),
-    #[error("thermal analysis projection is invalid: {0}")]
-    InvalidProjection(String),
-    #[error("volume region {region_id} has no thermal material assignment")]
-    MissingMaterial { region_id: String },
-    #[error("thermal material coverage is invalid: {0}")]
-    InvalidMaterialCoverage(String),
-    #[error("thermal excitation {excitation_id} uses an unsupported complex ordinate")]
-    ComplexSource { excitation_id: String },
-    #[error("thermal excitation {excitation_id} does not resolve any {entity_kind}")]
-    UnmappedSource {
-        excitation_id: String,
-        entity_kind: &'static str,
-    },
-    #[error("thermal excitation {excitation_id} failed scalar conservation with relative error {relative_error} above tolerance {relative_tolerance}")]
-    ProjectionConservation {
-        excitation_id: String,
-        relative_error: f64,
-        relative_tolerance: f64,
-    },
-    #[error(
-        "thermal boundary or constraint {operator_id} signal could not be realized: {message}"
-    )]
-    SignalRealization {
-        operator_id: String,
-        message: String,
-    },
-    #[error("thermal boundary or constraint {operator_id} uses an unsupported complex ordinate")]
-    ComplexBoundary { operator_id: String },
-    #[error("thermal boundary or constraint {operator_id} does not resolve any boundary faces")]
-    UnmappedBoundary { operator_id: String },
-    #[error("thermal radiation boundary {operator_id} requires the nonlinear radiation solver, which is not yet admitted")]
-    RadiationNotAdmitted { operator_id: String },
-    #[error("thermal constraints prescribe conflicting temperatures at solver node {node_id}")]
-    ConflictingTemperature { node_id: u64 },
-    #[error("temperature-field excitation {excitation_id} uses an unsupported complex ordinate")]
-    ComplexTemperatureField { excitation_id: String },
-    #[error("temperature-field excitation {excitation_id} does not resolve any solver nodes")]
-    UnmappedTemperatureField { excitation_id: String },
-    #[error(
-        "temperature-field excitations {first_excitation_id} and {second_excitation_id} prescribe conflicting temperatures at {location}"
-    )]
-    ConflictingTemperatureFields {
-        first_excitation_id: String,
-        second_excitation_id: String,
-        location: String,
-    },
 }
 
 /// The caller owns one property map compiled from its immutable authored model for the run.
@@ -411,10 +362,23 @@ pub(crate) fn assemble(
             .boundary_faces_for_target(&boundary.target)
             .peekable();
         match &boundary.operator {
-            BoundaryOperator::ThermalRadiation { .. } => {
-                return Err(ThermalAssemblyError::RadiationNotAdmitted {
-                    operator_id: boundary.boundary_id.clone(),
-                });
+            BoundaryOperator::ThermalRadiation {
+                ambient_temperature,
+                emissivity,
+            } => {
+                let ambient = sample_ambient_temperature(
+                    model,
+                    &boundary.boundary_id,
+                    ambient_temperature,
+                    sample,
+                )?;
+                super::radiation::outward_flux_and_tangent(ambient, ambient, *emissivity)
+                    .map_err(ThermalAssemblyError::Radiation)?;
+                if faces.peek().is_none() {
+                    return Err(ThermalAssemblyError::UnmappedBoundary {
+                        operator_id: boundary.boundary_id.clone(),
+                    });
+                }
             }
             BoundaryOperator::ThermalHeatFlux { value } => {
                 let heat_flux = sample_prescribed_heat_flux(value, &model.signals, sample)

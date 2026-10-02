@@ -68,55 +68,64 @@ pub fn registered_formulations(
 }
 
 fn thermal_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
-    let temporal = match procedure {
-        AnalysisProcedure::Static => TemporalImplementation::ThermalSteadyLinearSolve,
-        AnalysisProcedure::TransientResponse => TemporalImplementation::ThermalBackwardEuler,
+    let temporals = match procedure {
+        AnalysisProcedure::Static => [
+            TemporalImplementation::ThermalSteadyLinearSolve,
+            TemporalImplementation::ThermalSteadyDampedNewton,
+        ],
+        AnalysisProcedure::TransientResponse => [
+            TemporalImplementation::ThermalBackwardEuler,
+            TemporalImplementation::ThermalBackwardEulerDampedNewton,
+        ],
         _ => return Vec::new(),
     };
-    [
-        (
-            SpatialOperatorImplementation::ThermalGalerkinConduction,
-            ConstitutiveImplementation::IsotropicThermalConduction,
-            temporal,
-            vec![TopologyImplementation::CanonicalSolverMeshTet4],
-            RecoveryImplementation::ThermalSolverMeshGradient,
-            vec![SourceImplementation::CanonicalVolumeProjection],
-            vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
-        ),
-        (
-            SpatialOperatorImplementation::ThermalGalerkinConduction,
-            ConstitutiveImplementation::IsotropicThermalConduction,
-            temporal,
-            vec![TopologyImplementation::CanonicalSolverMeshTet10],
-            RecoveryImplementation::ThermalSolverMeshGradient,
-            vec![SourceImplementation::CanonicalVolumeProjection],
-            vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
-        ),
-    ]
-    .into_iter()
-    .map(
-        |(
-            spatial_operator,
-            constitutive,
-            temporal,
-            topologies,
-            recovery,
-            sources,
-            boundary_transfers,
-        )| ExactFormulationRealization {
-            components: vec![ExactFormulationComponent {
+    temporals
+        .into_iter()
+        .flat_map(|temporal| {
+            [
+                (
+                    SpatialOperatorImplementation::ThermalGalerkinConduction,
+                    ConstitutiveImplementation::IsotropicThermalConduction,
+                    temporal,
+                    vec![TopologyImplementation::CanonicalSolverMeshTet4],
+                    RecoveryImplementation::ThermalSolverMeshGradient,
+                    vec![SourceImplementation::CanonicalVolumeProjection],
+                    vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
+                ),
+                (
+                    SpatialOperatorImplementation::ThermalGalerkinConduction,
+                    ConstitutiveImplementation::IsotropicThermalConduction,
+                    temporal,
+                    vec![TopologyImplementation::CanonicalSolverMeshTet10],
+                    RecoveryImplementation::ThermalSolverMeshGradient,
+                    vec![SourceImplementation::CanonicalVolumeProjection],
+                    vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
+                ),
+            ]
+        })
+        .map(
+            |(
                 spatial_operator,
                 constitutive,
-                recovery,
+                temporal,
                 topologies,
+                recovery,
                 sources,
-            }],
-            temporals: vec![temporal],
-            coupling: CouplingImplementation::Uncoupled,
-            boundary_transfers,
-        },
-    )
-    .collect()
+                boundary_transfers,
+            )| ExactFormulationRealization {
+                components: vec![ExactFormulationComponent {
+                    spatial_operator,
+                    constitutive,
+                    recovery,
+                    topologies,
+                    sources,
+                }],
+                temporals: vec![temporal],
+                coupling: CouplingImplementation::Uncoupled,
+                boundary_transfers,
+            },
+        )
+        .collect()
 }
 
 fn electromagnetic_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {

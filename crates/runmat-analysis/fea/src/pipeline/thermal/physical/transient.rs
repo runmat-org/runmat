@@ -24,6 +24,16 @@ pub(super) fn solve_transient(
     let mut recovered = RecoveredSnapshots::with_capacity(solve_times.len());
     let mut residual_norms = Vec::with_capacity(solve_times.len() - 1);
     let mut energy_balances = Vec::with_capacity(solve_times.len() - 1);
+    let mut nonlinear_evidence = Vec::new();
+    if nonlinear::has_radiation(input.model) {
+        nonlinear_evidence
+            .try_reserve_exact(solve_times.len() - 1)
+            .map_err(|error| {
+                crate::planning::resource::ResourcePlanningError::Invalid(format!(
+                    "cannot reserve admitted thermal nonlinear evidence: {error}"
+                ))
+            })?;
+    }
     let mut source_evidence = input.initial_assembly.source_evidence.clone();
     // Retain departures throughout integration. Reconstructing absolute Kelvin between
     // steps would lose the small increments used for physical storage/energy recovery.
@@ -83,6 +93,43 @@ pub(super) fn solve_transient(
         operators.verify_matrix(&assembly.conductivity)?;
         operators.verify_matrix(&assembly.capacity)?;
         source_evidence.extend(assembly.source_evidence.clone());
+        if nonlinear::has_radiation(input.model) {
+            let accepted = nonlinear::solve(nonlinear::NonlinearSolveInput {
+                assembly: &assembly,
+                model: input.model,
+                sample,
+                reference_temperature_k: &reference_temperature_k,
+                initial_departure_k: &previous,
+                previous_departure_k: Some(&previous),
+                time_step_s,
+                time_s,
+                algebra: input.algebra,
+                facts: input.facts,
+                residual_target: input.residual_target,
+            })?;
+            nonlinear::add_count(&mut host_sync_count, accepted.host_sync_count)?;
+            nonlinear::add_count(&mut device_apply_count, accepted.device_apply_count)?;
+            nonlinear::add_count(
+                &mut device_apply_attempt_count,
+                accepted.device_apply_attempt_count,
+            )?;
+            accelerator_evidence.extend(accepted.accelerator_evidence);
+            residual_norms.push(accepted.relative_linear_residual);
+            energy_balances.push(accepted.energy_balance);
+            nonlinear_evidence.push(accepted.evidence);
+            push_recovered_snapshot(
+                &assembly,
+                &accepted.solve.solution,
+                Some(&previous),
+                time_step_s,
+                reference,
+                &mut recovered,
+            )?;
+            previous = accepted.solve.solution.clone();
+            time_points_s.push(time_s);
+            last_solve = Some(accepted.solve);
+            continue;
+        }
         let operator = assembly
             .transient_operator(
                 input.model,
@@ -181,6 +228,7 @@ pub(super) fn solve_transient(
         recovered,
         residual_norms,
         energy_balances,
+        nonlinear_evidence,
         source_evidence,
         last_solve: last_solve.expect("validated transient controls perform at least one solve"),
         host_sync_count,

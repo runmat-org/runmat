@@ -39,8 +39,12 @@ impl ThermalWorkspaceResourceFacts {
         // writes directly into that destination after energy/flux/storage recovery.
         // Two system masks plus a possible accelerator prepared-mask clone = 3N bools.
         // Accelerator host iteration uses fewer vectors; device/provider storage is excluded.
+        // Radiation Newton additionally retains current/trial departure, old/new physical
+        // residuals, conductivity product, relative source, capacity rate/product, tangent
+        // anchor weights and absolute steady recovery coordinates. Reserve all ten N-vectors
+        // conservatively, including linear procedures; no resident ceiling is increased.
         let solver_vector_bytes = add(
-            scale(nodes, 14 * 8)?,
+            scale(nodes, 24 * 8)?,
             scale(nodes, 3 * std::mem::size_of::<bool>() as u64)?,
         )?;
         // Initial assembly remains live during step assembly: each has applied source,
@@ -118,7 +122,7 @@ mod tests {
     #[test]
     fn workspace_counts_live_arrays_and_checks_overflow() {
         let facts = ThermalWorkspaceResourceFacts::from_counts(10, 2, ByteCount(100)).unwrap();
-        assert_eq!(facts.solver_vector_bytes.0, 10 * (14 * 8 + 3));
+        assert_eq!(facts.solver_vector_bytes.0, 10 * (24 * 8 + 3));
         assert_eq!(
             facts.assembly_vector_bytes.0,
             10 * (32 + 2 * std::mem::size_of::<Option<f64>>() as u64) + 2 * 48

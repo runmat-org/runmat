@@ -57,6 +57,10 @@ impl ThermalSolverResultManifest {
                     count: elements,
                 },
                 (),
+                Repeated {
+                    value: nonlinear_profile_value(),
+                    count: solves,
+                },
             ),
             PROFILE_LIMITS,
         )?)
@@ -136,6 +140,10 @@ impl ThermalSolverResultManifest {
                     value: ThermalEnergyBalance::from_powers(0.0, 0.0, 0.0, 0.0),
                     count: solves,
                 },
+                Repeated {
+                    value: nonlinear_profile_value(),
+                    count: solves,
+                },
             ),
             PROFILE_LIMITS,
         )?)
@@ -190,6 +198,7 @@ fn skeleton(
         ordered_element_ids: Vec::new(),
         time_points_s: Vec::new(),
         residual_norms: Vec::new(),
+        nonlinear_evidence: Vec::new(),
         residual_target: 0.0,
         energy_balances: Vec::new(),
         reference_temperature_k: 0.0,
@@ -206,4 +215,16 @@ fn skeleton(
         },
         fields: Vec::new(),
     })
+}
+
+fn nonlinear_profile_value() -> crate::contracts::ThermalNonlinearSampleEvidence {
+    crate::contracts::ThermalNonlinearSampleEvidence {
+        time_s: 0.0,
+        iteration_count: crate::contracts::THERMAL_MAXIMUM_NEWTON_CORRECTIONS,
+        backtracking_count: crate::contracts::THERMAL_MAXIMUM_NEWTON_CORRECTIONS
+            * crate::contracts::THERMAL_MAXIMUM_BACKTRACKING_TRIALS,
+        relative_equilibrium_residual: 0.0,
+        relative_increment: 0.0,
+        power_scale_w: 0.0,
+    }
 }

@@ -17,6 +17,7 @@ impl ThermalOperatorAssembly {
         sample: ExcitationSamplePoint<'_>,
         reference_temperature_k: &[f64],
     ) -> Result<AssembledRealSystem, ThermalAssemblyError> {
+        self.reject_radiation_in_linear_route(model)?;
         let stiffness = self.conductivity.clone();
         let mut rhs = self.relative_source(model, sample, reference_temperature_k)?;
         for (node, value) in self.prescribed_temperature_k.iter().enumerate() {

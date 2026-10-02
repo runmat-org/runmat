@@ -134,7 +134,7 @@ fn radiation_is_never_silently_dropped_by_linear_thermal_assembly() {
             emissivity: runmat_analysis_core::SurfaceEmissivity::new(0.8),
         },
     });
-    let error = assemble(
+    let assembly = assemble(
         &model,
         &mesh,
         crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
@@ -143,7 +143,14 @@ fn radiation_is_never_silently_dropped_by_linear_thermal_assembly() {
         &RealizedExcitations::default(),
         ExcitationSamplePoint::Static,
     )
-    .unwrap_err();
+    .unwrap();
+    let error = assembly
+        .steady_increment_operator(
+            &model,
+            ExcitationSamplePoint::Static,
+            &vec![300.0; assembly.projection.nodes.len()],
+        )
+        .unwrap_err();
     assert_eq!(
         error,
         ThermalAssemblyError::RadiationNotAdmitted {
@@ -151,6 +158,8 @@ fn radiation_is_never_silently_dropped_by_linear_thermal_assembly() {
         }
     );
 }
+
+mod radiation;
 
 #[test]
 fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics() {

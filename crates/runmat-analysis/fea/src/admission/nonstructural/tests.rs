@@ -65,3 +65,46 @@ fn thermal_admission_preserves_missing_mesh_error() {
     assert!(matches!(error, FeaRunError::InvalidModel(message)
         if message == "no meshless FEA pipeline admission branch is defined for Thermal"));
 }
+
+#[test]
+fn nonlinear_thermal_identity_is_exact_and_remains_experimental() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        for (procedure, temporal) in [
+            (
+                AnalysisProcedure::Static,
+                TemporalImplementation::ThermalSteadyDampedNewton,
+            ),
+            (
+                AnalysisProcedure::TransientResponse,
+                TemporalImplementation::ThermalBackwardEulerDampedNewton,
+            ),
+        ] {
+            let admit = |requirement| {
+                admit_nonstructural_with_temporal(
+                    PhysicsFamily::Thermal,
+                    procedure,
+                    Some(&mesh),
+                    SourceImplementation::CanonicalVolumeProjection,
+                    BoundaryTransferImplementation::CanonicalBoundaryProjection,
+                    requirement,
+                    Some(temporal),
+                )
+            };
+            let identity = admit(FormulationRequirement::Experimental).unwrap();
+            assert_eq!(identity.realization().temporals, vec![temporal]);
+            assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
+            assert!(admit(FormulationRequirement::Production).is_err());
+            assert!(admit_nonstructural_with_temporal(
+                PhysicsFamily::Thermal,
+                procedure,
+                Some(&mesh),
+                SourceImplementation::CanonicalVolumeProjection,
+                BoundaryTransferImplementation::CanonicalBoundaryProjection,
+                FormulationRequirement::Experimental,
+                Some(TemporalImplementation::AcousticCanonicalHarmonicSolve),
+            )
+            .is_err());
+        }
+    }
+}

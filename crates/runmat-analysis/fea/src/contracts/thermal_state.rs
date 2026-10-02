@@ -9,7 +9,12 @@ use super::FeaRunResult;
 
 mod energy;
 mod initial_evidence;
+mod nonlinear_evidence;
 pub use energy::{ThermalEnergyBalance, ThermalEnergyBalanceError, ThermalPowerScale};
+pub use nonlinear_evidence::{
+    ThermalNonlinearSampleEvidence, THERMAL_MAXIMUM_BACKTRACKING_TRIALS,
+    THERMAL_MAXIMUM_NEWTON_CORRECTIONS,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -67,6 +72,9 @@ pub struct FeaThermalRunResult {
     pub heat_flux_snapshots: Vec<AnalysisField>,
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
+    /// Final original nonlinear equilibrium evidence, never a Newton correction residual.
+    /// Empty only for a linear thermal workload; the receipt checks the original source law.
+    pub nonlinear_evidence: Vec<ThermalNonlinearSampleEvidence>,
     pub residual_target: f64,
     /// One global power balance per solve (no initial-only transient sample).
     pub energy_balances: Vec<ThermalEnergyBalance>,

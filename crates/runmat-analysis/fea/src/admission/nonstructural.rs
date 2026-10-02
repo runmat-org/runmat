@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
     AnalysisProcedure, BoundaryTransferImplementation, FormulationRequirement, PhysicsFamily,
-    SolutionSpace, SourceImplementation, TopologyImplementation,
+    SolutionSpace, SourceImplementation, TemporalImplementation, TopologyImplementation,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
@@ -17,6 +17,26 @@ pub fn admit_nonstructural(
     source: SourceImplementation,
     boundary_transfer: BoundaryTransferImplementation,
     requirement: FormulationRequirement,
+) -> Result<AnalysisRunIdentity, FeaRunError> {
+    admit_nonstructural_with_temporal(
+        family,
+        procedure,
+        solver_mesh,
+        source,
+        boundary_transfer,
+        requirement,
+        None,
+    )
+}
+
+pub(crate) fn admit_nonstructural_with_temporal(
+    family: PhysicsFamily,
+    procedure: AnalysisProcedure,
+    solver_mesh: Option<&SolverMeshArtifact>,
+    source: SourceImplementation,
+    boundary_transfer: BoundaryTransferImplementation,
+    requirement: FormulationRequirement,
+    temporal: Option<TemporalImplementation>,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     if family == PhysicsFamily::Electromagnetic && procedure == AnalysisProcedure::Static {
         return Err(FeaRunError::InvalidModel(
@@ -53,6 +73,7 @@ pub fn admit_nonstructural(
             has_topology
                 && has_source
                 && realization.boundary_transfers.contains(&boundary_transfer)
+                && temporal.is_none_or(|selected| realization.temporals == vec![selected])
         })
         .map(|entry| entry.realization().clone())
         .ok_or_else(|| {

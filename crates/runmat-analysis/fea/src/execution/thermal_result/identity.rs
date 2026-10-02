@@ -9,7 +9,7 @@ use serde::Serialize;
 // Tuple order is part of numerical identity. Generic borrowed/repeated inventories preserve that
 // same wire authority without building hypothetical histories for resource admission.
 #[derive(Serialize)]
-pub(in crate::execution) struct IdentitySerialization<'a, T, F, R, E, N, L, I>(
+pub(in crate::execution) struct IdentitySerialization<'a, T, F, R, E, N, L, I, H>(
     pub ThermalNumericalIntentIdentity,
     pub &'a AnalysisRunIdentity,
     pub T,
@@ -23,6 +23,7 @@ pub(in crate::execution) struct IdentitySerialization<'a, T, F, R, E, N, L, I>(
     pub N,
     pub L,
     pub I,
+    pub H,
 );
 
 impl ThermalResultMetadata<'_> {
@@ -44,6 +45,7 @@ impl ThermalResultMetadata<'_> {
             self.ordered_node_ids,
             self.ordered_element_ids,
             self.initial_state,
+            self.nonlinear_evidence,
         )
     }
 
