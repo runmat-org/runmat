@@ -98,6 +98,7 @@ pub(super) async fn tensor_to_signal_columns(
     let rows = tensor.rows();
     let cols = tensor.cols();
     let output_precision = SignalPrecision::from_numeric_dtype(tensor.numeric_dtype());
+    let mut work = CompletedWork::default();
     if rows == 1 || cols == 1 {
         let len = tensor_utils::tensor_element_len(&tensor);
         let mut values = Vec::with_capacity(len);
@@ -106,8 +107,11 @@ pub(super) async fn tensor_to_signal_columns(
                 tensor_utils::tensor_value_f64(&tensor, index),
                 0.0,
             ));
-            cooperation.completed(1).await?;
+            if let Some(units) = work.record(1) {
+                cooperation.completed(units).await?;
+            }
         }
+        work.finish(cooperation).await?;
         return Ok(SignalColumns {
             columns: vec![values],
             rows: rows.max(cols),
@@ -124,10 +128,13 @@ pub(super) async fn tensor_to_signal_columns(
                 tensor_utils::tensor_value_f64(&tensor, row + col * rows),
                 0.0,
             ));
-            cooperation.completed(1).await?;
+            if let Some(units) = work.record(1) {
+                cooperation.completed(units).await?;
+            }
         }
         columns.push(column);
     }
+    work.finish(cooperation).await?;
     Ok(SignalColumns {
         columns,
         rows,
@@ -151,6 +158,7 @@ pub(super) async fn complex_tensor_to_signal_columns(
     let cols = tensor.cols;
     let output_precision = SignalPrecision::from_numeric_dtype(tensor.numeric_dtype());
     let is_complex = true;
+    let mut work = CompletedWork::default();
     if rows == 1 || cols == 1 {
         let len = rows.max(cols);
         let mut values = Vec::with_capacity(len);
@@ -159,8 +167,11 @@ pub(super) async fn complex_tensor_to_signal_columns(
                 .numeric_value_at(index)
                 .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
             values.push(Complex::new(scalar_f64(re), scalar_f64(im)));
-            cooperation.completed(1).await?;
+            if let Some(units) = work.record(1) {
+                cooperation.completed(units).await?;
+            }
         }
+        work.finish(cooperation).await?;
         return Ok(SignalColumns {
             columns: vec![values],
             rows: rows.max(cols),
@@ -177,10 +188,13 @@ pub(super) async fn complex_tensor_to_signal_columns(
                 .numeric_value_at(row + col * rows)
                 .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
             column.push(Complex::new(scalar_f64(re), scalar_f64(im)));
-            cooperation.completed(1).await?;
+            if let Some(units) = work.record(1) {
+                cooperation.completed(units).await?;
+            }
         }
         columns.push(column);
     }
+    work.finish(cooperation).await?;
     Ok(SignalColumns {
         columns,
         rows,

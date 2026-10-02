@@ -19,7 +19,7 @@ pub(super) async fn output_gpu(
     protected: &[&runmat_accelerate_api::GpuTensorHandle],
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Option<Value>> {
-    cooperation.completed(0).await?;
+    cooperation.completed(1).await?;
     let FrequencyGrid::Uniform { nfft } = options.grid else {
         return Ok(None);
     };
@@ -28,10 +28,14 @@ pub(super) async fn output_gpu(
     let starts = segment_starts(rows, window_len, step, cooperation).await?;
     let segment_count = starts.len();
     let mut window_energy = 0.0;
+    let mut work = CompletedWork::default();
     for value in &options.window {
         window_energy += value * value;
-        cooperation.completed(1).await?;
+        if let Some(units) = work.record(1) {
+            cooperation.completed(units).await?;
+        }
     }
+    work.finish(cooperation).await?;
     if window_energy <= 0.0 || !window_energy.is_finite() {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }
@@ -77,7 +81,6 @@ pub(super) async fn output_gpu(
             ))
         }
     };
-    cooperation.completed(0).await?;
     let output_error = || {
         pwelch_error_with_detail(
             &PWELCH_ERROR_INTERNAL,
@@ -91,6 +94,9 @@ pub(super) async fn output_gpu(
         protected,
         output_error,
     )?;
+    // A suspended call must hold only admitted provider results. Raw handles
+    // are validated as one output batch before this cancellation point.
+    cooperation.completed(1).await?;
     let context = super::super::resident_output::OutputContext {
         input: handle,
         provider,
@@ -111,13 +117,13 @@ pub(super) async fn output_gpu(
         Ok(ps_mean) => ps_mean,
         Err(err) => return Err(preparation_failure(err)),
     };
-    cooperation.completed(0).await?;
     contract.shape = vec![estimate.rows, 1, cols];
     let mut protected_mean = vec![&estimate.s];
     if segment_count > 1 {
         protected_mean.extend([&ps_frames, &estimate.ps]);
     }
     let ps_mean = context.admit(ps_mean, &contract, &protected_mean, output_error)?;
+    cooperation.completed(1).await?;
     drop(protected_mean);
     let pxx = match provider.reshape(&ps_mean, &[estimate.rows, cols]) {
         Ok(pxx) => pxx,

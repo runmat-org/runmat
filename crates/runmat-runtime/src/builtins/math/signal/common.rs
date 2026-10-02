@@ -11,8 +11,10 @@ pub(super) mod output_precision;
 mod cooperation;
 mod window_generation;
 pub(crate) mod window_provider;
-pub(crate) use cooperation::SignalCooperation;
-pub(crate) use window_generation::{window_allocation_error, window_tensor};
+pub(crate) use cooperation::{SignalCooperation, SIGNAL_WORK_CHUNK};
+pub(crate) use window_generation::{
+    hamming_coefficient, symmetric_window_values, window_allocation_error, window_tensor,
+};
 
 const EPS: f64 = 1.0e-12;
 

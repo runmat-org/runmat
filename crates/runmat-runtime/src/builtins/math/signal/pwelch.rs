@@ -23,8 +23,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::signal::common::output_precision::SignalPrecision;
 use crate::builtins::math::signal::common::{
-    gpu_matrix_shape, parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector,
-    SignalCooperation,
+    gpu_matrix_shape, hamming_coefficient, parse_nonnegative_integer, parse_scalar_f64,
+    symmetric_window_values, value_to_complex_vector, window_allocation_error, SignalCooperation,
+    WindowArgError, SIGNAL_WORK_CHUNK,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -32,6 +33,27 @@ const BUILTIN_NAME: &str = "pwelch";
 const DEFAULT_NFFT_MIN: usize = 256;
 const MAX_NFFT: usize = 1 << 22;
 const EPS: f64 = 1.0e-12;
+#[derive(Default)]
+struct CompletedWork {
+    pending: u64,
+}
+
+impl CompletedWork {
+    fn record(&mut self, units: u64) -> Option<u64> {
+        self.pending = self.pending.saturating_add(units);
+        if self.pending >= SIGNAL_WORK_CHUNK {
+            Some(std::mem::take(&mut self.pending))
+        } else {
+            None
+        }
+    }
+
+    async fn finish(&mut self, cooperation: &mut SignalCooperation) -> BuiltinResult<()> {
+        cooperation
+            .completed(std::mem::take(&mut self.pending))
+            .await
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::pwelch")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -124,6 +146,22 @@ fn pwelch_control_error(
     error.source = Some(Box::new(source));
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     error
+}
+
+fn pwelch_window_generation_error(error: WindowArgError) -> RuntimeError {
+    match error {
+        WindowArgError::Allocation(cause) => {
+            window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause)
+        }
+        WindowArgError::Execution(error) => error,
+        WindowArgError::InvalidLength => pwelch_error(&PWELCH_ERROR_INVALID_WINDOW),
+        WindowArgError::TensorBuild(detail) => {
+            pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, detail)
+        }
+        WindowArgError::TooManyOptions
+        | WindowArgError::InvalidOptionType
+        | WindowArgError::UnknownOption(_) => pwelch_error(&PWELCH_ERROR_INTERNAL),
+    }
 }
 
 fn pwelch_error_with_message(

@@ -590,8 +590,17 @@ fn pwelch_wgpu_keeps_uniform_outputs_resident_and_matches_cpu() {
 
 #[test]
 fn default_window_uses_eight_overlapped_sections() {
-    assert_eq!(default_window(900).len(), 200);
-    assert_eq!(default_window(1).len(), 1);
+    let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+    assert_eq!(
+        block_on(default_window(900, &mut cooperation))
+            .unwrap()
+            .len(),
+        200
+    );
+    assert_eq!(
+        block_on(default_window(1, &mut cooperation)).unwrap().len(),
+        1
+    );
 }
 
 #[test]
@@ -644,13 +653,19 @@ mod cooperation_tests {
                 move || Box::pin(PendingTurn(count.clone())),
             );
             let mut cooperation = SignalCooperation::with_budget(budget, BUILTIN_NAME);
-            let mut future = Box::pin(cooperative_hamming_window(64, &mut cooperation));
+            let mut future = Box::pin(symmetric_window_values(
+                8193,
+                hamming_coefficient,
+                &mut cooperation,
+            ));
             let waker = noop_waker();
             let mut context = Context::from_waker(&waker);
             assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
             if cancel {
                 source.cancel(CancellationReason::User);
-                let Poll::Ready(Err(error)) = future.as_mut().poll(&mut context) else {
+                let Poll::Ready(Err(WindowArgError::Execution(error))) =
+                    future.as_mut().poll(&mut context)
+                else {
                     panic!("cancelled window generation must not publish a window");
                 };
                 assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -712,3 +727,6 @@ mod cooperation_tests {
         ));
     }
 }
+
+#[path = "tests/cooperation_resident.rs"]
+mod cooperation_resident;

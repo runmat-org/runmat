@@ -247,7 +247,7 @@ pub(super) async fn parse_options(
     let window = if let Some(value) = rest.get(idx) {
         if is_empty(value) {
             idx += 1;
-            default_window(input_len)
+            default_window(input_len, cooperation).await?
         } else if let Some(keyword) = keywords.get(idx).and_then(Option::as_ref) {
             return Err(pwelch_error_with_detail(
                 &PWELCH_ERROR_INVALID_WINDOW,
@@ -264,7 +264,7 @@ pub(super) async fn parse_options(
             }
         }
     } else {
-        default_window(input_len)
+        default_window(input_len, cooperation).await?
     };
     let window_len = window.len();
 
@@ -412,13 +412,17 @@ pub(super) async fn parse_frequency_grid(
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
     }
     let mut frequencies = Vec::with_capacity(vector.data.len());
+    let mut work = CompletedWork::default();
     for value in vector.data {
-        cooperation.completed(1).await?;
+        if let Some(units) = work.record(1) {
+            cooperation.completed(units).await?;
+        }
         if value.im.abs() > EPS || !value.re.is_finite() {
             return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
         }
         frequencies.push(value.re);
     }
+    work.finish(cooperation).await?;
     Ok(FrequencyGrid::Explicit { frequencies })
 }
 
@@ -457,7 +461,9 @@ pub(super) async fn parse_window(
             if len > MAX_NFFT {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
             }
-            return cooperative_hamming_window(len, cooperation).await;
+            return symmetric_window_values(len, hamming_coefficient, cooperation)
+                .await
+                .map_err(pwelch_window_generation_error);
         }
         Value::Tensor(t) if tensor_utils::is_scalar_tensor(t) => {
             let len = parse_nonnegative_integer(BUILTIN_NAME, "window", value).map_err(|err| {
@@ -469,7 +475,9 @@ pub(super) async fn parse_window(
             if len > MAX_NFFT {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
             }
-            return cooperative_hamming_window(len, cooperation).await;
+            return symmetric_window_values(len, hamming_coefficient, cooperation)
+                .await
+                .map_err(pwelch_window_generation_error);
         }
         _ => {}
     }
@@ -480,12 +488,16 @@ pub(super) async fn parse_window(
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }
     let mut out = Vec::with_capacity(vector.data.len());
+    let mut work = CompletedWork::default();
     for value in vector.data {
-        cooperation.completed(1).await?;
+        if let Some(units) = work.record(1) {
+            cooperation.completed(units).await?;
+        }
         if value.im.abs() > EPS || !value.re.is_finite() {
             return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
         }
         out.push(value.re);
     }
+    work.finish(cooperation).await?;
     Ok(out)
 }

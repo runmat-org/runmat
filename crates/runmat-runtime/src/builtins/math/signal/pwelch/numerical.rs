@@ -9,10 +9,14 @@ pub(super) async fn compute_pwelch(
     let window_len = options.window.len();
     let step = window_len - options.noverlap;
     let mut scale = 0.0;
+    let mut work = CompletedWork::default();
     for value in &options.window {
         scale += value * value;
-        cooperation.completed(1).await?;
+        if let Some(units) = work.record(1) {
+            cooperation.completed(units).await?;
+        }
     }
+    work.finish(cooperation).await?;
     if scale <= 0.0 || !scale.is_finite() {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }
@@ -93,32 +97,43 @@ pub(super) async fn column_uniform_periodogram(
 ) -> BuiltinResult<Vec<f64>> {
     let starts = segment_starts(column.len(), window.len(), step, cooperation).await?;
     let mut accum = vec![0.0; nfft];
+    let mut work = CompletedWork::default();
     for &start in &starts {
         cooperation.completed(0).await?;
-        buffer.fill(Complex::new(0.0, 0.0));
-        cooperation.completed(buffer.len() as u64).await?;
+        for chunk in buffer.chunks_mut(SIGNAL_WORK_CHUNK as usize) {
+            chunk.fill(Complex::new(0.0, 0.0));
+            cooperation.completed(chunk.len() as u64).await?;
+        }
         for idx in 0..window.len() {
             let sample = column
                 .get(start + idx)
                 .copied()
                 .unwrap_or_else(|| Complex::new(0.0, 0.0));
             buffer[idx] = sample * window[idx];
-            cooperation.completed(1).await?;
+            if let Some(units) = work.record(1) {
+                cooperation.completed(units).await?;
+            }
         }
         // RustFFT is a synchronous leaf; cancellation is checked on both sides.
-        cooperation.completed(0).await?;
+        work.finish(cooperation).await?;
         fft.process(buffer);
         cooperation.completed(buffer.len() as u64).await?;
         for (dst, value) in accum.iter_mut().zip(buffer.iter()) {
             *dst += value.norm_sqr() / density_scale;
-            cooperation.completed(1).await?;
+            if let Some(units) = work.record(1) {
+                cooperation.completed(units).await?;
+            }
         }
+        work.finish(cooperation).await?;
     }
     let segment_count = starts.len() as f64;
     for value in &mut accum {
         *value /= segment_count;
-        cooperation.completed(1).await?;
+        if let Some(units) = work.record(1) {
+            cooperation.completed(units).await?;
+        }
     }
+    work.finish(cooperation).await?;
     Ok(accum)
 }
 
@@ -134,6 +149,7 @@ pub(super) async fn column_explicit_frequency_periodogram(
     let starts = segment_starts(column.len(), window.len(), step, cooperation).await?;
     let mut pxx = vec![0.0; frequencies.len()];
     let fs_scale = fs.map(|fs| 2.0 * std::f64::consts::PI / fs);
+    let mut work = CompletedWork::default();
     for &start in &starts {
         cooperation.completed(0).await?;
         for (freq_idx, &frequency) in frequencies.iter().enumerate() {
@@ -147,17 +163,24 @@ pub(super) async fn column_explicit_frequency_periodogram(
                 let phase = -omega * idx as f64;
                 let twiddle = Complex::new(phase.cos(), phase.sin());
                 sum += sample * window[idx] * twiddle;
-                cooperation.completed(1).await?;
+                if let Some(units) = work.record(1) {
+                    cooperation.completed(units).await?;
+                }
             }
             pxx[freq_idx] += sum.norm_sqr() / density_scale;
-            cooperation.completed(1).await?;
+            if let Some(units) = work.record(1) {
+                cooperation.completed(units).await?;
+            }
         }
     }
     let segment_count = starts.len() as f64;
     for value in &mut pxx {
         *value /= segment_count;
-        cooperation.completed(1).await?;
+        if let Some(units) = work.record(1) {
+            cooperation.completed(units).await?;
+        }
     }
+    work.finish(cooperation).await?;
     Ok(PwelchEvaluation {
         pxx,
         f: frequencies.to_vec(),
@@ -173,13 +196,17 @@ pub(super) async fn select_range(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PwelchEvaluation> {
     let freq_scale = fs.unwrap_or(2.0 * std::f64::consts::PI);
+    let mut work = CompletedWork::default();
     match range {
         FrequencyRange::Twosided => {
             let mut f = Vec::with_capacity(nfft);
             for idx in 0..nfft {
                 f.push(freq_scale * idx as f64 / nfft as f64);
-                cooperation.completed(1).await?;
+                if let Some(units) = work.record(1) {
+                    cooperation.completed(units).await?;
+                }
             }
+            work.finish(cooperation).await?;
             Ok(PwelchEvaluation {
                 pxx: power,
                 f,
@@ -194,8 +221,11 @@ pub(super) async fn select_range(
             let mut f = Vec::with_capacity(nfft);
             for idx in 0..nfft {
                 f.push(freq_scale * (idx as f64 - offset as f64) / nfft as f64);
-                cooperation.completed(1).await?;
+                if let Some(units) = work.record(1) {
+                    cooperation.completed(units).await?;
+                }
             }
+            work.finish(cooperation).await?;
             Ok(PwelchEvaluation {
                 pxx: power,
                 f,
@@ -212,13 +242,18 @@ pub(super) async fn select_range(
                 if !is_dc && !is_nyquist {
                     *value *= 2.0;
                 }
-                cooperation.completed(1).await?;
+                if let Some(units) = work.record(1) {
+                    cooperation.completed(units).await?;
+                }
             }
             let mut f = Vec::with_capacity(len);
             for idx in 0..len {
                 f.push(freq_scale * idx as f64 / nfft as f64);
-                cooperation.completed(1).await?;
+                if let Some(units) = work.record(1) {
+                    cooperation.completed(units).await?;
+                }
             }
+            work.finish(cooperation).await?;
             Ok(PwelchEvaluation { pxx, f, columns: 1 })
         }
     }
@@ -255,46 +290,35 @@ pub(super) async fn segment_starts(
     }
     let mut starts = Vec::new();
     let mut start = 0usize;
-    while start + window_len <= signal_len {
+    let mut work = CompletedWork::default();
+    let last_start = signal_len - window_len;
+    while start <= last_start {
         starts.push(start);
-        start += step;
-        cooperation.completed(1).await?;
+        if let Some(units) = work.record(1) {
+            cooperation.completed(units).await?;
+        }
+        let Some(next) = start.checked_add(step) else {
+            break;
+        };
+        start = next;
     }
+    work.finish(cooperation).await?;
     if starts.is_empty() {
         starts.push(0);
     }
     Ok(starts)
 }
 
-pub(super) fn default_window(input_len: usize) -> Vec<f64> {
+pub(super) async fn default_window(
+    input_len: usize,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<f64>> {
     let section_len = if input_len <= 1 {
         1
     } else {
         ((2 * input_len) / 9).clamp(1, DEFAULT_NFFT_MIN)
     };
-    hamming_window(section_len)
-}
-
-pub(super) fn hamming_window(len: usize) -> Vec<f64> {
-    (0..len).map(|idx| hamming_coefficient(idx, len)).collect()
-}
-
-pub(super) async fn cooperative_hamming_window(
-    len: usize,
-    cooperation: &mut SignalCooperation,
-) -> BuiltinResult<Vec<f64>> {
-    let mut values = Vec::with_capacity(len);
-    for idx in 0..len {
-        values.push(hamming_coefficient(idx, len));
-        cooperation.completed(1).await?;
-    }
-    Ok(values)
-}
-
-fn hamming_coefficient(idx: usize, len: usize) -> f64 {
-    if len == 1 {
-        return 1.0;
-    }
-    let phase = 2.0 * std::f64::consts::PI * idx as f64 / (len - 1) as f64;
-    0.54 - 0.46 * phase.cos()
+    symmetric_window_values(section_len, hamming_coefficient, cooperation)
+        .await
+        .map_err(pwelch_window_generation_error)
 }

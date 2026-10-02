@@ -3,13 +3,48 @@
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_value::{NumericStorage, Tensor, Value};
 
+use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 use crate::{build_runtime_error, GpuGatherRetry, RuntimeError};
 
-use super::{SignalCooperation, WindowArgError, WindowOptions, WindowOutputType, WindowSampling};
+use super::{
+    SignalCooperation, WindowArgError, WindowOptions, WindowOutputType, WindowSampling,
+    SIGNAL_WORK_CHUNK,
+};
 
 // Bounded work between calls to the execution-owned budget, not a scheduling
 // threshold. The execution service alone decides whether a task turn is due.
-const COEFFICIENT_CHUNK: usize = 4096;
+const COEFFICIENT_CHUNK: usize = SIGNAL_WORK_CHUNK as usize;
+
+/// One coefficient definition for Hamming windows, including windows used by
+/// spectral estimators. `effective_len` includes periodic extension if any.
+pub(crate) fn hamming_coefficient(idx: usize, effective_len: usize) -> f64 {
+    if effective_len == 1 {
+        return 1.0;
+    }
+    let denom = (effective_len - 1) as f64;
+    0.54 - 0.46 * cospi_real(2.0 * idx as f64 / denom)
+}
+
+/// A borrowed coefficient program with the same checked allocation and
+/// bounded work accounting as public window construction, without a tensor
+/// allocation or class conversion at the caller.
+pub(crate) async fn symmetric_window_values(
+    len: usize,
+    coeff: impl Fn(usize, usize) -> f64,
+    cooperation: &mut SignalCooperation,
+) -> Result<Vec<f64>, WindowArgError> {
+    cooperation
+        .completed(0)
+        .await
+        .map_err(WindowArgError::Execution)?;
+    if len == 0 {
+        return Err(WindowArgError::InvalidLength);
+    }
+    if len == 1 {
+        return Ok(vec![1.0]);
+    }
+    populate(len, len, &coeff, std::convert::identity, cooperation).await
+}
 
 pub(crate) fn window_allocation_error(
     builtin: &'static str,
