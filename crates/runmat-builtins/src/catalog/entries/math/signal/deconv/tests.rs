@@ -147,4 +147,8 @@ fn canonical_metadata_retains_requested_output_and_error_contract() {
         .errors
         .iter()
         .any(|error| error.code == "RM.DECONV.TOO_MANY_OUTPUTS"));
+    assert!(DECONV_DESCRIPTOR.errors.iter().any(|error| {
+        error.code == "RM.DECONV.LATE_UPLOAD_ADMISSION"
+            && error.identifier == Some("RunMat:Placement:LateUploadAdmissionFailed")
+    }));
 }

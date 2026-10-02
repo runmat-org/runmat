@@ -94,7 +94,13 @@ pub const DECONV_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDe
     when: "More than two outputs are requested.",
     message: "deconv: too many output arguments",
 };
-const ERRORS: [BuiltinErrorDescriptor; 7] = [
+pub const DECONV_ERROR_LATE_UPLOAD_ADMISSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DECONV.LATE_UPLOAD_ADMISSION",
+    identifier: Some("RunMat:Placement:LateUploadAdmissionFailed"),
+    when: "A computed deconv result exceeds its admitted upload bound or the owning provider rejects its exact upload representation.",
+    message: "deconv: result cannot be restored by the admitted provider upload",
+};
+const ERRORS: [BuiltinErrorDescriptor; 8] = [
     DECONV_ERROR_INVALID_INPUT,
     DECONV_ERROR_VECTOR_REQUIRED,
     DECONV_ERROR_DENOMINATOR_INVALID,
@@ -102,6 +108,7 @@ const ERRORS: [BuiltinErrorDescriptor; 7] = [
     DECONV_ERROR_BUILD_COMPLEX_OUTPUT,
     DECONV_ERROR_BUILD_OUTPUT,
     DECONV_ERROR_TOO_MANY_OUTPUTS,
+    DECONV_ERROR_LATE_UPLOAD_ADMISSION,
 ];
 pub const DECONV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,

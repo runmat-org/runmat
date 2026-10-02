@@ -8,8 +8,8 @@ use num_complex::Complex;
 use runmat_builtins::{
     BuiltinErrorDescriptor, DECONV_ERROR_BUILD_COMPLEX_OUTPUT, DECONV_ERROR_BUILD_OUTPUT,
     DECONV_ERROR_DENOMINATOR_INVALID, DECONV_ERROR_GATHER_FAILED, DECONV_ERROR_INVALID_INPUT,
-    DECONV_ERROR_TOO_MANY_OUTPUTS, DECONV_ERROR_VECTOR_REQUIRED, DECONV_INTEGER_INPUT_EXTENSION,
-    DECONV_LOGICAL_INPUT_EXTENSION,
+    DECONV_ERROR_LATE_UPLOAD_ADMISSION, DECONV_ERROR_TOO_MANY_OUTPUTS,
+    DECONV_ERROR_VECTOR_REQUIRED, DECONV_INTEGER_INPUT_EXTENSION, DECONV_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
@@ -275,16 +275,21 @@ async fn evaluate_requested(
         .transpose()?;
     if let (Some(placement), Some(provider)) = (placement.as_ref(), provider) {
         let produced = quotient.iter().chain(remainder.iter()).collect::<Vec<_>>();
-        if !placement.validate_actual_host_outputs(provider, &produced) {
+        if let Err(cause) = placement.validate_actual_host_outputs(provider, &produced) {
             // The selected whole-call route promised a bounded, exact-upload
             // presentation. A late rejection cannot be repaired by running a
             // different effectful restore beneath the same failed receipt.
-            return Err(build_runtime_error(
-                "deconv result cannot be restored by the admitted provider upload",
-            )
-            .with_builtin(BUILTIN_NAME)
-            .with_identifier("RunMat:Placement:LateUploadAdmissionFailed")
-            .build());
+            return Err(
+                build_runtime_error(DECONV_ERROR_LATE_UPLOAD_ADMISSION.message)
+                    .with_builtin(BUILTIN_NAME)
+                    .with_identifier(
+                        DECONV_ERROR_LATE_UPLOAD_ADMISSION
+                            .identifier
+                            .expect("late upload admission descriptor identifier"),
+                    )
+                    .with_source(cause)
+                    .build(),
+            );
         }
     }
     if let Some(prototype) = resident_prototype {

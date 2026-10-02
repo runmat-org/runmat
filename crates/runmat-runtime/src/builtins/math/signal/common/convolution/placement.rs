@@ -13,8 +13,8 @@ use runmat_accelerate_api::{
     same_provider_instance, GpuTensorHandle, ProviderConvolutionForm,
     ProviderConvolutionInputBackings, ProviderConvolutionWorkload, ProviderElementType,
     ProviderFeasibility, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
-    ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderStorage,
-    ProviderTransferOutputBound, ProviderWorkload,
+    ProviderOperationIdentity, ProviderRejection, ProviderRepresentation, ProviderResidency,
+    ProviderStorage, ProviderTransferOutputBound, ProviderWorkload,
 };
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
@@ -43,6 +43,64 @@ pub(crate) struct SelectedConvolution {
     expected_device: u32,
 }
 
+#[derive(Debug)]
+pub(crate) enum LateUploadAdmissionError {
+    OutputCount {
+        expected: usize,
+        actual: usize,
+    },
+    UnsupportedOutput {
+        index: usize,
+    },
+    ShapeOverflow {
+        index: usize,
+    },
+    BoundMismatch {
+        index: usize,
+        actual: ProviderRepresentation,
+        bound: ProviderTransferOutputBound,
+    },
+    ProviderRejected {
+        rejection: ProviderRejection,
+    },
+}
+
+impl std::fmt::Display for LateUploadAdmissionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OutputCount { expected, actual } => {
+                write!(f, "expected {expected} outputs, got {actual}")
+            }
+            Self::UnsupportedOutput { index } => write!(
+                f,
+                "output {} has no admitted dense real transfer representation",
+                index + 1
+            ),
+            Self::ShapeOverflow { index } => write!(
+                f,
+                "output {} shape exceeds provider representation limits",
+                index + 1
+            ),
+            Self::BoundMismatch {
+                index,
+                actual,
+                bound,
+            } => write!(
+                f,
+                "output {} representation {actual:?} exceeds admitted bound {bound:?}",
+                index + 1
+            ),
+            Self::ProviderRejected { rejection } => write!(
+                f,
+                "provider rejected exact upload: {:?} ({:?})",
+                rejection.code, rejection.detail
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LateUploadAdmissionError {}
+
 impl SelectedConvolution {
     pub(crate) fn provider_route(&self) -> bool {
         self.provider_route
@@ -59,72 +117,86 @@ impl SelectedConvolution {
         &self,
         provider: &dyn runmat_accelerate_api::AccelProvider,
         values: &[&Value],
-    ) -> bool {
+    ) -> Result<(), LateUploadAdmissionError> {
         let Some(bounds) = &self.expected_bounds else {
-            return true;
+            return Ok(());
         };
-        let actual = values
-            .iter()
-            .map(|value| {
+        let validate = || {
+            if values.len() != bounds.len() {
+                return Err(LateUploadAdmissionError::OutputCount {
+                    expected: bounds.len(),
+                    actual: values.len(),
+                });
+            }
+            let mut actual = Vec::with_capacity(values.len());
+            for (index, (value, bound)) in values.iter().zip(bounds).enumerate() {
                 let (element_type, shape) = match value {
-                    Value::Tensor(tensor) if tensor.integer_storage().is_none() => (
-                        if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
-                            ProviderElementType::F32
-                        } else {
-                            ProviderElementType::F64
-                        },
-                        tensor
+                    Value::Tensor(tensor) if tensor.integer_storage().is_none() => {
+                        let shape = tensor
                             .shape
                             .iter()
                             .copied()
                             .map(u64::try_from)
                             .collect::<Result<Vec<_>, _>>()
-                            .ok()?,
-                    ),
+                            .map_err(|_| LateUploadAdmissionError::ShapeOverflow { index })?;
+                        let element_type =
+                            if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+                                ProviderElementType::F32
+                            } else {
+                                ProviderElementType::F64
+                            };
+                        (element_type, shape)
+                    }
                     Value::Num(_) => (ProviderElementType::F64, vec![1, 1]),
-                    _ => return None,
+                    _ => return Err(LateUploadAdmissionError::UnsupportedOutput { index }),
                 };
-                Some(ProviderRepresentation {
+                let representation = ProviderRepresentation {
                     element_type,
                     storage: ProviderStorage::DenseReal,
                     layout: ProviderLayout::ColumnMajorContiguous,
                     shape,
                     residency: ProviderResidency::Device,
-                })
-            })
-            .collect::<Option<Vec<_>>>();
-        let valid = actual.as_ref().is_some_and(|actual| {
-            actual.len() == bounds.len()
-                && actual
+                };
+                if !bound.admits(&representation) {
+                    return Err(LateUploadAdmissionError::BoundMismatch {
+                        index,
+                        actual: representation,
+                        bound: bound.clone(),
+                    });
+                }
+                actual.push(representation);
+            }
+            let query = ProviderFeasibilityQuery {
+                operation: ProviderOperationIdentity::new("transfer.upload"),
+                family: ProviderOperationFamily::Upload,
+                inputs: actual
                     .iter()
-                    .zip(bounds)
-                    .all(|(representation, bound)| bound.admits(representation))
-                && provider
-                    .query_feasibility(&ProviderFeasibilityQuery {
-                        operation: ProviderOperationIdentity::new("transfer.upload"),
-                        family: ProviderOperationFamily::Upload,
-                        inputs: actual
-                            .iter()
-                            .cloned()
-                            .map(|mut input| {
-                                input.residency = ProviderResidency::Host;
-                                input
-                            })
-                            .collect(),
-                        outputs: actual.clone(),
-                        workload: ProviderWorkload {
-                            requested_outputs: u32::try_from(actual.len()).ok(),
-                            ..ProviderWorkload::default()
-                        },
+                    .cloned()
+                    .map(|mut input| {
+                        input.residency = ProviderResidency::Host;
+                        input
                     })
-                    .is_supported()
-        });
-        if !valid {
+                    .collect(),
+                outputs: actual,
+                workload: ProviderWorkload {
+                    requested_outputs: u32::try_from(values.len()).ok(),
+                    ..ProviderWorkload::default()
+                },
+            };
+            match provider.query_feasibility(&query) {
+                ProviderFeasibility::Supported { .. } => Ok(()),
+                ProviderFeasibility::Rejected { rejection } => {
+                    Err(LateUploadAdmissionError::ProviderRejected { rejection })
+                }
+            }
+        };
+        let result = validate();
+        if result.is_err() {
             if let Some(recorder) = self.recorder() {
                 recorder.fail(ProviderObservationFailure::SharedRuntimeFallback);
             }
         }
-        valid
+        result
     }
 
     pub(crate) fn revalidate(&self, handles: [&GpuTensorHandle; 2]) -> BuiltinResult<bool> {
