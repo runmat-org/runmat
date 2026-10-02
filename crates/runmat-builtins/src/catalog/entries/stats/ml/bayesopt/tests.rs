@@ -63,10 +63,12 @@ fn discarded_result_keeps_search_effects_without_inventing_an_output() {
     assert!(result.diagnostics.is_empty());
     assert!(result.outputs.is_empty());
     assert_eq!(result.effects, BAYESOPT_CATALOG_ENTRY.contract.effect_set());
-    assert!(BAYESOPT_DESCRIPTOR
-        .signatures
-        .iter()
-        .any(|signature| signature.outputs.is_empty()));
+    for label in ["bayesopt(fun, vars)", "bayesopt(fun, vars, Name, Value)"] {
+        assert!(BAYESOPT_DESCRIPTOR
+            .signatures
+            .iter()
+            .any(|signature| signature.label == label && signature.outputs.is_empty()));
+    }
 }
 
 #[test]

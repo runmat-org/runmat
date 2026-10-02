@@ -30,7 +30,7 @@ const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 }];
 const BASE: [BuiltinParamDescriptor; 2] = [FUN, VARS];
 const FULL: [BuiltinParamDescriptor; 3] = [FUN, VARS, OPTIONS];
-const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "results = bayesopt(fun, vars)",
         inputs: &BASE,
@@ -40,6 +40,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         label: "results = bayesopt(fun, vars, Name, Value)",
         inputs: &FULL,
         outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "bayesopt(fun, vars)",
+        inputs: &BASE,
+        outputs: &[],
     },
     BuiltinSignatureDescriptor {
         label: "bayesopt(fun, vars, Name, Value)",
