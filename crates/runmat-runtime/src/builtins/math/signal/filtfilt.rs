@@ -401,7 +401,7 @@ impl NormalizedCoefficients {
             ));
         }
         let a0 = a[0];
-        if a0.norm() <= EPS {
+        if a0 == Complex::new(0.0, 0.0) {
             return Err(filtfilt_error_with_detail(
                 &FILTFILT_ERROR_INVALID_COEFFICIENTS,
                 "denominator coefficient a(1) must be non-zero",
@@ -411,11 +411,11 @@ impl NormalizedCoefficients {
         let mut b_norm = vec![Complex::new(0.0, 0.0); order];
         let mut a_norm = vec![Complex::new(0.0, 0.0); order];
         for (idx, coeff) in b.iter().enumerate() {
-            b_norm[idx] = *coeff / a0;
+            b_norm[idx] = divide_by_leading_coefficient(*coeff, a0);
         }
         a_norm[0] = Complex::new(1.0, 0.0);
         for (idx, coeff) in a.iter().enumerate().skip(1) {
-            a_norm[idx] = *coeff / a0;
+            a_norm[idx] = divide_by_leading_coefficient(*coeff, a0);
         }
         Ok(Self {
             b: b_norm,
@@ -426,10 +426,15 @@ impl NormalizedCoefficients {
     }
 
     fn is_real(&self) -> bool {
-        self.b
-            .iter()
-            .chain(self.a.iter())
-            .all(|z| z.im.abs() <= EPS)
+        self.b.iter().chain(self.a.iter()).all(|z| z.im == 0.0)
+    }
+}
+
+fn divide_by_leading_coefficient(value: Complex<f64>, leading: Complex<f64>) -> Complex<f64> {
+    if leading.im == 0.0 {
+        Complex::new(value.re / leading.re, value.im / leading.re)
+    } else {
+        value / leading
     }
 }
 
@@ -620,7 +625,7 @@ async fn try_filtfilt_gpu(
     }
 
     let zi = lfilter_zi(coeffs)?;
-    if zi.iter().any(|z| z.im.abs() > EPS) {
+    if zi.iter().any(|z| z.im != 0.0) {
         return Ok(None);
     }
     let extended = odd_reflect(&input.data, nfact);
@@ -841,6 +846,37 @@ mod tests {
             logical.identifier(),
             FILTFILT_LOGICAL_INPUT_EXTENSION.error_identifier
         );
+    }
+
+    #[test]
+    fn nonzero_subnormal_denominator_is_not_classified_as_zero() {
+        let signal = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let output = call(
+            Value::Num(1.0e-300),
+            Value::Num(1.0e-300),
+            Value::Tensor(signal),
+        )
+        .expect("finite nonzero denominator");
+        let (values, shape) = tensor_data(output);
+        assert_eq!(shape, vec![1, 2]);
+        assert_eq!(values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn tiny_nonzero_imaginary_coefficient_remains_complex() {
+        let signal = Tensor::new((1..=8).map(f64::from).collect(), vec![1, 8]).unwrap();
+        let numerator = ComplexTensor::new(vec![(1.0, 0.0), (0.0, 1.0e-300)], vec![1, 2]).unwrap();
+        let output = call(
+            Value::ComplexTensor(numerator),
+            Value::Num(1.0),
+            Value::Tensor(signal),
+        )
+        .expect("small imaginary coefficient");
+        let Value::ComplexTensor(output) = output else {
+            panic!("complex coefficient must produce complex output");
+        };
+        assert_eq!(output.shape, vec![1, 8]);
+        assert!(output.materialize_f64().iter().any(|&(_, im)| im != 0.0));
     }
 
     #[test]
