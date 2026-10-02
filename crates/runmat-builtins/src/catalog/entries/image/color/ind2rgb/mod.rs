@@ -173,5 +173,7 @@ pub const IND2RGB_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     suppress_auto_output: false,
 };
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&IND2RGB_CATALOG_ENTRY];
+
 #[cfg(test)]
 mod tests;

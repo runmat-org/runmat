@@ -168,5 +168,7 @@ pub const LAB2RGB_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     suppress_auto_output: false,
 };
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&LAB2RGB_CATALOG_ENTRY];
+
 #[cfg(test)]
 mod tests;
