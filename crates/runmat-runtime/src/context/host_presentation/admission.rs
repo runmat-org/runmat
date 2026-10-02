@@ -10,9 +10,9 @@ use runmat_accelerate_api::observation::{
     ProviderObservationCapability, ProviderObservationSupport,
 };
 use runmat_accelerate_api::{
-    provider_for_handle, same_provider_instance, GpuTensorHandle, ProviderFeasibility,
-    ProviderFeasibilityQuery, ProviderOperationFamily, ProviderOperationIdentity,
-    ProviderRepresentation, ProviderResidency, ProviderWorkload,
+    provider_for_handle, GpuTensorHandle, ProviderFeasibility, ProviderFeasibilityQuery,
+    ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation, ProviderResidency,
+    ProviderWorkload,
 };
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
@@ -62,20 +62,24 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
     let Some(provider) = provider_for_handle(request.owner) else {
         return Ok(None);
     };
-    if readbacks.is_empty()
-        || readbacks.iter().any(|source| {
-            source.device_id() != provider.device_id()
-                || source.allocation_lease().validate_live().is_err()
-                || provider_for_handle(source)
-                    .is_none_or(|owner| !same_provider_instance(owner, provider))
+    // A binary host conversion may gather from two independently owned
+    // devices. Only the final publication is constrained to `request.owner`.
+    let source_providers = readbacks
+        .iter()
+        .map(|source| {
+            provider_for_handle(source).filter(|source_provider| {
+                source.device_id() == source_provider.device_id()
+                    && source.allocation_lease().validate_live().is_ok()
+            })
         })
-    {
-        return Err(build_runtime_error(
-            "host readback source is not a live allocation of the result owner",
-        )
-        .with_identifier("RunMat:Placement:InvalidReadbackOwner")
-        .build());
-    }
+        .collect::<Option<Vec<_>>>();
+    let Some(source_providers) = source_providers.filter(|providers| !providers.is_empty()) else {
+        return Err(
+            build_runtime_error("host readback source has no live allocation owner")
+                .with_identifier("RunMat:Placement:InvalidReadbackOwner")
+                .build(),
+        );
+    };
     if request.outputs.is_empty()
         || request.outputs.iter().any(|output| {
             output.residency != ProviderResidency::Device || output.checked_byte_len().is_none()
@@ -116,21 +120,32 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
     ) {
         return Ok(None);
     }
-    let readback_host_workspace =
-        readbacks
-            .iter()
-            .try_fold(ResourceByteBound::Known(0), |total, source| {
-                combine_host_scratch(
-                    total,
-                    provider.download_numeric_host_workspace_bound(source),
-                )
-            })?;
+    let readback_host_workspace = readbacks.iter().zip(&source_providers).try_fold(
+        ResourceByteBound::Known(0),
+        |total, (source, source_provider)| {
+            combine_host_scratch(
+                total,
+                source_provider.download_numeric_host_workspace_bound(source),
+            )
+        },
+    )?;
     let total_host_scratch =
         combine_host_scratch(request.host_compute_scratch, readback_host_workspace)?;
     let device_id = provider.device_id();
+    // The reusable decision must invalidate when any readback owner's
+    // capability changes, not just when the upload owner's capability does.
+    let source_capabilities = source_providers
+        .iter()
+        .map(|source_provider| {
+            (
+                source_provider.device_id(),
+                source_provider.capability_snapshot(),
+            )
+        })
+        .collect::<Vec<_>>();
     let provider_digest = Digest::sha256(
-        serde_json::to_vec(&provider.capability_snapshot())
-            .expect("capability snapshot serializes"),
+        serde_json::to_vec(&(provider.capability_snapshot(), &source_capabilities))
+            .expect("capability snapshots serialize"),
     );
     let Some(revision) =
         service.whole_work_revision(runtime.program_revision().cloned(), provider_digest)
@@ -148,8 +163,10 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
                 readback_host_workspace,
                 readbacks
                     .iter()
-                    .map(|source| {
+                    .zip(&source_providers)
+                    .map(|(source, source_provider)| {
                         (
+                            source_provider.device_id(),
                             source.shape(),
                             source.physical().element_type(),
                             source.view().layout(),
@@ -177,16 +194,25 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
         .parallel()
         .map(|port| port.placement_resources())
         .unwrap_or_default();
-    let provider_resource = provider.placement_resources();
+    let mut provider_resources = vec![provider.placement_resources()];
+    for source_provider in &source_providers {
+        if !provider_resources
+            .iter()
+            .any(|resource| resource.device_id == source_provider.device_id())
+        {
+            provider_resources.push(source_provider.placement_resources());
+        }
+    }
+    provider_resources.sort_by_key(|resource| resource.device_id);
     let digest = Digest::sha256(
-        serde_json::to_vec(&(parallel.epoch, &provider_resource))
+        serde_json::to_vec(&(parallel.epoch, &provider_resources))
             .expect("resource snapshot serializes"),
     );
     let resources = PlacementResourceSnapshot {
         cpu_millicores_available: parallel.cpu_millicores_available,
         memory_available_bytes: parallel.memory_available_bytes,
         cancellation_requested: runtime.is_cancelled(),
-        providers: vec![provider_resource],
+        providers: provider_resources,
         epoch: u64::from_le_bytes(digest.bytes()[..8].try_into().expect("digest length")),
     };
     let selected = service.select_whole_work(WholeWorkPlacementRequest {

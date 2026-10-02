@@ -382,3 +382,52 @@ fn indexed_color_two_resident_readbacks_select_one_owner_and_finite_quota_reject
     assert!(indexed.allocation_lease().validate_live().is_ok());
     assert!(map.allocation_lease().validate_live().is_ok());
 }
+
+#[test]
+fn indexed_color_gathers_two_providers_and_restores_only_to_explicit_map_owner() {
+    let (index_provider, _index_guard) = provider();
+    let (map_provider, _map_guard) = provider();
+    assert_ne!(index_provider.device_id(), map_provider.device_id());
+    let indexed = gpu_helpers::upload_tensor(
+        index_provider,
+        &Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap(),
+    )
+    .unwrap();
+    let map = gpu_helpers::upload_tensor(
+        map_provider,
+        &Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap(),
+    )
+    .unwrap()
+    .with_provenance(GpuHandleProvenance::Explicit)
+    .unwrap();
+    index_provider.reset_telemetry();
+    map_provider.reset_telemetry();
+    let witness = Rc::new(Witness::default());
+    let runtime = runmat_accelerate::native_auto::install_preparation_service(witness.context());
+    let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+        &runtime,
+        "ind2rgb",
+        &[
+            Value::GpuTensor(indexed.clone()),
+            Value::GpuTensor(map.clone()),
+        ],
+    ))
+    .expect("cross-provider indexed conversion") else {
+        panic!("cross-provider output must restore to explicit map owner")
+    };
+    assert_eq!(output.shape(), &[1, 2, 3]);
+    assert!(provider_for_handle(&output)
+        .is_some_and(|owner| same_provider_instance(owner, map_provider)));
+    assert!(runmat_accelerate_api::handle_is_explicit(&output));
+    assert!(!output.shares_allocation_with(&indexed));
+    assert!(!output.shares_allocation_with(&map));
+    assert_eq!(index_provider.telemetry_snapshot().upload_bytes, 0);
+    assert!(index_provider.telemetry_snapshot().download_bytes > 0);
+    assert!(map_provider.telemetry_snapshot().download_bytes > 0);
+    assert!(map_provider.telemetry_snapshot().upload_bytes > 0);
+    assert_eq!(witness.selections.get(), 1);
+    witness.drain();
+    assert_eq!(witness.feedback.borrow().len(), 1);
+    assert!(indexed.allocation_lease().validate_live().is_ok());
+    assert!(map.allocation_lease().validate_live().is_ok());
+}
