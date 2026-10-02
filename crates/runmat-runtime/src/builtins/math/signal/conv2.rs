@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::signal::common::SignalCooperation;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv2")]
@@ -84,12 +85,29 @@ fn conv2_error_with_source(
     builder.build()
 }
 
+fn conv2_allocation_error(cause: std::collections::TryReserveError) -> RuntimeError {
+    let mut builder = build_runtime_error(CONV2_ERROR_BUILD_OUTPUT.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(cause)
+        .with_gpu_gather_retry(GpuGatherRetry::Never);
+    if let Some(identifier) = CONV2_ERROR_BUILD_OUTPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "conv2",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::conv2"
 )]
-async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn conv2_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    a: Value,
+    b: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let mut extras = rest;
     let mode = extract_mode(&mut extras)?;
     if extras.len() > 1 {
@@ -101,6 +119,8 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
     if let Some(signal) = extras.first() {
         admit_conv2_operand(signal, false)?;
     }
+    let mut cooperation = SignalCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    cooperation.completed(0).await?;
     let single_output =
         value_uses_single(&a) || value_uses_single(&b) || extras.iter().any(value_uses_single);
     let complex_output =
@@ -122,11 +142,13 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             let left = convert_matrix(a, "conv2", "A").await?;
             let right = convert_matrix(b, "conv2", "B").await?;
             if mode == Conv2Mode::Full && left.cols == 1 && right.rows == 1 {
-                let result = outer_product(&left.data, &right.data, single_output);
+                let result =
+                    outer_product(&left.data, &right.data, single_output, &mut cooperation).await?;
                 let output = matrix_to_value(result, single_output, complex_output)?;
                 return restore_to_owner(output, &resident_inputs);
             }
-            let result = conv2_matrices(&left, &right, mode, single_output);
+            let result =
+                conv2_matrices(&left, &right, mode, single_output, &mut cooperation).await?;
             let output = matrix_to_value(result, single_output, complex_output)?;
             restore_to_owner(output, &resident_inputs)
         }
@@ -134,8 +156,9 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             let signal = convert_matrix(extras.remove(0), "conv2", "A").await?;
             let column = convert_vector(a, "conv2", "H column").await?;
             let row = convert_vector(b, "conv2", "H row").await?;
-            let kernel = outer_product(&column, &row, single_output);
-            let result = conv2_matrices(&signal, &kernel, mode, single_output);
+            let kernel = outer_product(&column, &row, single_output, &mut cooperation).await?;
+            let result =
+                conv2_matrices(&signal, &kernel, mode, single_output, &mut cooperation).await?;
             let output = matrix_to_value(result, single_output, complex_output)?;
             restore_to_owner(output, &resident_inputs)
         }
@@ -327,12 +350,15 @@ struct Matrix {
 }
 
 impl Matrix {
-    fn zeros(rows: usize, cols: usize) -> Self {
-        Self {
-            rows,
-            cols,
-            data: vec![Complex::new(0.0, 0.0); rows.saturating_mul(cols)],
-        }
+    fn zeros(rows: usize, cols: usize) -> BuiltinResult<Self> {
+        let len = rows
+            .checked_mul(cols)
+            .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(len)
+            .map_err(conv2_allocation_error)?;
+        data.resize(len, Complex::new(0.0, 0.0));
+        Ok(Self { rows, cols, data })
     }
 
     fn is_empty(&self) -> bool {
@@ -355,7 +381,13 @@ impl Matrix {
         self.data[idx] += value;
     }
 
-    fn slice(&self, row_start: usize, row_end: usize, col_start: usize, col_end: usize) -> Self {
+    fn slice(
+        &self,
+        row_start: usize,
+        row_end: usize,
+        col_start: usize,
+        col_end: usize,
+    ) -> BuiltinResult<Self> {
         let row_end = row_end.min(self.rows);
         let col_end = col_end.min(self.cols);
         if row_start >= row_end || col_start >= col_end {
@@ -366,14 +398,14 @@ impl Matrix {
         }
         let rows = row_end - row_start;
         let cols = col_end - col_start;
-        let mut data = vec![Complex::new(0.0, 0.0); rows * cols];
+        let mut sliced = Self::zeros(rows, cols)?;
         for c in 0..cols {
             for r in 0..rows {
                 let value = self.get(row_start + r, col_start + c);
-                data[c * rows + r] = value;
+                sliced.data[c * rows + r] = value;
             }
         }
-        Self { rows, cols, data }
+        Ok(sliced)
     }
 }
 
@@ -494,13 +526,19 @@ fn complex_tensor_to_matrix(tensor: ComplexTensor, name: &str, arg: &str) -> Bui
     })
 }
 
-fn outer_product(column: &[Complex<f64>], row: &[Complex<f64>], single_output: bool) -> Matrix {
+async fn outer_product(
+    column: &[Complex<f64>],
+    row: &[Complex<f64>],
+    single_output: bool,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
     let rows = column.len();
     let cols = row.len();
-    let mut data = vec![Complex::new(0.0, 0.0); rows.saturating_mul(cols)];
+    let mut matrix = Matrix::zeros(rows, cols)?;
+    let mut work = 0_u64;
     for c in 0..cols {
         for r in 0..rows {
-            data[c * rows + r] = if single_output {
+            matrix.data[c * rows + r] = if single_output {
                 let lhs = Complex::<f32>::new(column[r].re as f32, column[r].im as f32);
                 let rhs = Complex::<f32>::new(row[c].re as f32, row[c].im as f32);
                 let value = lhs * rhs;
@@ -508,19 +546,40 @@ fn outer_product(column: &[Complex<f64>], row: &[Complex<f64>], single_output: b
             } else {
                 column[r] * row[c]
             };
+            work += 1;
+            if work == super::common::SIGNAL_WORK_CHUNK {
+                cooperation.completed(work).await?;
+                work = 0;
+            }
         }
     }
-    Matrix { rows, cols, data }
+    cooperation.completed(work).await?;
+    Ok(matrix)
 }
 
-fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode, single_output: bool) -> Matrix {
+async fn conv2_matrices(
+    a: &Matrix,
+    b: &Matrix,
+    mode: Conv2Mode,
+    single_output: bool,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
     if a.is_empty() || b.is_empty() {
         return empty_result(a, b, mode);
     }
 
-    let rows = a.rows + b.rows - 1;
-    let cols = a.cols + b.cols - 1;
-    let mut full = Matrix::zeros(rows, cols);
+    let rows = a
+        .rows
+        .checked_add(b.rows)
+        .and_then(|n| n.checked_sub(1))
+        .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
+    let cols = a
+        .cols
+        .checked_add(b.cols)
+        .and_then(|n| n.checked_sub(1))
+        .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
+    let mut full = Matrix::zeros(rows, cols)?;
+    let mut work = 0_u64;
     for ac in 0..a.cols {
         for ar in 0..a.rows {
             let aval = a.get(ar, ac);
@@ -540,13 +599,19 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode, single_output: bool) 
                     } else {
                         full.add_assign(out_r, out_c, aval * bval);
                     }
+                    work += 1;
+                    if work == super::common::SIGNAL_WORK_CHUNK {
+                        cooperation.completed(work).await?;
+                        work = 0;
+                    }
                 }
             }
         }
     }
+    cooperation.completed(work).await?;
 
-    match mode {
-        Conv2Mode::Full => full,
+    let result = match mode {
+        Conv2Mode::Full => Ok(full),
         Conv2Mode::Same => {
             if a.is_empty() {
                 return Matrix::zeros(a.rows, a.cols);
@@ -565,10 +630,11 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode, single_output: bool) 
             let col_start = b.cols - 1;
             full.slice(row_start, row_start + rows, col_start, col_start + cols)
         }
-    }
+    };
+    result
 }
 
-fn empty_result(a: &Matrix, _b: &Matrix, mode: Conv2Mode) -> Matrix {
+fn empty_result(a: &Matrix, _b: &Matrix, mode: Conv2Mode) -> BuiltinResult<Matrix> {
     match mode {
         Conv2Mode::Full | Conv2Mode::Valid => Matrix::zeros(0, 0),
         Conv2Mode::Same => Matrix::zeros(a.rows, a.cols),
@@ -1345,6 +1411,26 @@ pub(crate) mod tests {
     }
 
     fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::conv2_builtin(a, b, rest))
+        block_on(super::conv2_builtin(None, a, b, rest))
+    }
+
+    #[test]
+    fn registered_conv2_binding_honors_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(super::conv2_builtin(
+            Some(runtime),
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Vec::new(),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
+        assert!(error.source.is_some(), "preserve execution-service cause");
     }
 }
