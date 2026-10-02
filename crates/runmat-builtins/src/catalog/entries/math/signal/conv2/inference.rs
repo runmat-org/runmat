@@ -83,14 +83,11 @@ fn selector(
         ));
         return None;
     }
-    let Some(literal) = request
+    let literal = request
         .literals
         .literal_args
         .get(index)
-        .and_then(literal_text)
-    else {
-        return None;
-    };
+        .and_then(literal_text)?;
     match ConvolutionMode::decode(&literal) {
         Some(mode) => Some(mode),
         None => {
@@ -171,9 +168,7 @@ fn matrix(
                     [rows] => (*rows, 1),
                     [rows, cols, ..] => (*rows, *cols),
                 };
-                if rows.checked_mul(cols).is_none() {
-                    return None;
-                }
+                rows.checked_mul(cols)?;
                 if vector && rows > 1 && cols > 1 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-CONV2-VECTOR",

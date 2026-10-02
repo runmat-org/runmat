@@ -54,9 +54,7 @@ fn selector(
         ));
         return None;
     }
-    let Some(literal) = request.literals.literal_args.get(2).and_then(literal_text) else {
-        return None;
-    };
+    let literal = request.literals.literal_args.get(2).and_then(literal_text)?;
     match ConvolutionMode::decode(&literal) {
         Some(mode) => Some(mode),
         None => {
