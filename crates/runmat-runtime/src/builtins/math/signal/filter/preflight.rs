@@ -27,7 +27,7 @@ pub(super) fn resident_owners(
         (initial, &FILTER_ERROR_INVALID_INITIAL_STATE),
         (dimension, &FILTER_ERROR_INVALID_DIMENSION),
     ] {
-        if let Some(Value::GpuTensor(handle)) = value {
+        if let Some(value @ Value::GpuTensor(handle)) = value {
             crate::builtins::common::validation::validate_resident_metadata(value).map_err(
                 |source| {
                     let mut error = filter_error_with_source(

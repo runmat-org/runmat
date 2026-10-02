@@ -6,10 +6,9 @@ use runmat_accelerate_api::{
     ProviderPreparedIirCoefficients,
 };
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FILTFILT_ERROR_ARG_COUNT, FILTFILT_ERROR_INTERNAL,
-    FILTFILT_ERROR_INVALID_COEFFICIENTS, FILTFILT_ERROR_INVALID_SIGNAL, FILTFILT_ERROR_PASS_FAILED,
-    FILTFILT_ERROR_PROVIDER_OUTPUT, FILTFILT_INTEGER_INPUT_EXTENSION,
-    FILTFILT_LOGICAL_INPUT_EXTENSION,
+    BuiltinErrorDescriptor, FILTFILT_ERROR_INTERNAL, FILTFILT_ERROR_INVALID_COEFFICIENTS,
+    FILTFILT_ERROR_INVALID_SIGNAL, FILTFILT_ERROR_PASS_FAILED, FILTFILT_ERROR_PROVIDER_OUTPUT,
+    FILTFILT_INTEGER_INPUT_EXTENSION, FILTFILT_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
@@ -145,15 +144,7 @@ fn filtfilt_error_with_message(
 
 #[runtime_builtin(
     name = "filtfilt",
-    category = "math/signal",
-    summary = "Apply zero-phase forward-backward digital filtering.",
-    keywords = "filtfilt,zero phase,filter,IIR,FIR,signal processing,gpu",
-    accel = "custom",
     binding_variant = "default",
-    context = true,
-    descriptor(runmat_builtins::FILTFILT_DESCRIPTOR),
-    extensions(runmat_builtins::FILTFILT_EXTENSIONS),
-    integer_capabilities(runmat_builtins::FILTFILT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::filtfilt"
 )]
 async fn filtfilt_builtin(

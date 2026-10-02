@@ -8,9 +8,9 @@ mod preparation;
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderIirFilterOptions};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FILTER_ERROR_ARG_COUNT, FILTER_ERROR_EMPTY_DENOMINATOR,
-    FILTER_ERROR_EMPTY_NUMERATOR, FILTER_ERROR_GATHER_FAILED, FILTER_ERROR_INTERNAL,
-    FILTER_ERROR_INVALID_COEFFICIENTS, FILTER_ERROR_INVALID_DIMENSION,
+    BuiltinErrorDescriptor, FILTER_ERROR_ARG_COUNT, FILTER_ERROR_DENOMINATOR_A1_ZERO,
+    FILTER_ERROR_EMPTY_DENOMINATOR, FILTER_ERROR_EMPTY_NUMERATOR, FILTER_ERROR_GATHER_FAILED,
+    FILTER_ERROR_INTERNAL, FILTER_ERROR_INVALID_COEFFICIENTS, FILTER_ERROR_INVALID_DIMENSION,
     FILTER_ERROR_INVALID_INITIAL_STATE, FILTER_ERROR_INVALID_SIGNAL,
     FILTER_ERROR_PROVIDER_EXECUTION, FILTER_ERROR_PROVIDER_OUTPUT, FILTER_ERROR_PROVIDER_UPLOAD,
 };
@@ -110,13 +110,7 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
 
 #[runtime_builtin(
     name = "filter",
-    category = "math/signal",
-    summary = "Apply IIR/FIR digital filters.",
-    keywords = "filter,IIR,FIR,difference equation,initial conditions,gpu",
-    accel = "custom",
     binding_variant = "default",
-    descriptor(runmat_builtins::FILTER_DESCRIPTOR),
-    integer_capabilities(runmat_builtins::FILTER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::filter"
 )]
 async fn filter_builtin(

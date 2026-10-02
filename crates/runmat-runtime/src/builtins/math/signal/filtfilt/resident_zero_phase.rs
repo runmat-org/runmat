@@ -47,7 +47,7 @@ async fn prepare_indices(
     reflection_len: usize,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<ProviderIirZeroPhaseIndexPlan> {
-    let preparation_error = |source| {
+    let preparation_error = |source: anyhow::Error| {
         crate::runtime_error::with_provider_execution_source(
             filtfilt_error_with_detail(
                 &FILTFILT_ERROR_INTERNAL,
