@@ -9,6 +9,7 @@ use runmat_builtins::BuiltinExtensionDescriptor;
 mod prepared;
 pub use prepared::{
     prepare_direct_integer_f64_boundary, IntegerBoundaryFailure, PreparedIntegerBoundary,
+    PreparedIntegerPayload,
 };
 
 /// MATLAB stores complex integer arrays, but does not support arithmetic on

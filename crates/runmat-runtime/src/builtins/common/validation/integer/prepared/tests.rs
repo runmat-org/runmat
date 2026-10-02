@@ -16,12 +16,14 @@ use std::task::{Context, Poll};
 struct CountedIntegerOwner {
     inner: runmat_accelerate::simple_provider::InProcessProvider,
     downloads: AtomicUsize,
+    numeric_downloads: AtomicUsize,
     fail_download: bool,
 }
 
 struct AdmissionProbeOwner {
     owner: runmat_accelerate_api::test_support::TestAllocationOwner,
     downloads: AtomicUsize,
+    numeric_downloads: AtomicUsize,
 }
 
 impl AccelProvider for AdmissionProbeOwner {
@@ -43,6 +45,13 @@ impl AccelProvider for AdmissionProbeOwner {
     ) -> runmat_accelerate_api::AccelIntegerDownloadFuture<'a> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { anyhow::bail!("admission should precede transfer") })
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.numeric_downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("native complex download unsupported by fixture") })
     }
 }
 
@@ -74,6 +83,13 @@ impl runmat_accelerate_api::AccelProvider for CountedIntegerOwner {
             return Box::pin(async { anyhow::bail!("injected integer download failure") });
         }
         self.inner.download_integer(handle)
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.numeric_downloads.fetch_add(1, Ordering::SeqCst);
+        self.inner.download_numeric(handle)
     }
 }
 
@@ -220,6 +236,7 @@ fn resident_wide_payload_is_retained_after_one_download_and_source_stays_live() 
     let provider: &'static CountedIntegerOwner = Box::leak(Box::new(CountedIntegerOwner {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
         downloads: AtomicUsize::new(0),
+        numeric_downloads: AtomicUsize::new(0),
         fail_download: false,
     }));
     let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
@@ -236,11 +253,16 @@ fn resident_wide_payload_is_retained_after_one_download_and_source_stays_live() 
     assert!(!prepared.is_exact());
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     assert_eq!(
-        prepared.resident_payload().expect("retained payload").shape,
+        prepared
+            .resident_payload()
+            .expect("retained payload")
+            .real()
+            .expect("real payload")
+            .shape,
         vec![1, 2, 1]
     );
     assert!(matches!(
-        &prepared.resident_payload().expect("retained payload").data,
+        &prepared.resident_payload().expect("retained payload").real().expect("real payload").data,
         HostIntegerDataOwned::U64(values) if values == &vec![1_u64 << 54, (1_u64 << 54) + 1]
     ));
     assert!(std::ptr::eq(prepared.source(), &source));
@@ -256,6 +278,7 @@ fn resident_provider_failure_keeps_original_cause_and_source_lease() {
     let provider: &'static CountedIntegerOwner = Box::leak(Box::new(CountedIntegerOwner {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
         downloads: AtomicUsize::new(0),
+        numeric_downloads: AtomicUsize::new(0),
         fail_download: true,
     }));
     let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
@@ -277,7 +300,44 @@ fn resident_provider_failure_keeps_original_cause_and_source_lease() {
 }
 
 #[test]
-fn unavailable_lease_and_contradictory_storage_fail_before_download() {
+fn native_complex_integer_components_are_scanned_once_without_floating_projection() {
+    use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider: &'static CountedIntegerOwner = Box::leak(Box::new(CountedIntegerOwner {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        downloads: AtomicUsize::new(0),
+        numeric_downloads: AtomicUsize::new(0),
+        fail_download: false,
+    }));
+    let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let raw = [1_i64 << 54, i64::MIN, (1_i64 << 54) + 1, 0];
+    let handle = provider
+        .upload_numeric_raw(&HostNumericTensorView {
+            data: HostNumericDataView::I64(&raw),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        })
+        .expect("native complex upload");
+    let value = Value::GpuTensor(handle.clone());
+    let prepared = futures::executor::block_on(prepare_direct_integer_f64_boundary(&value, None))
+        .expect("native complex exactness");
+    assert!(!prepared.is_exact());
+    let retained = prepared
+        .resident_payload()
+        .and_then(PreparedIntegerPayload::complex)
+        .expect("one typed interleaved payload");
+    assert_eq!(retained.storage, GpuTensorStorage::ComplexInterleaved);
+    assert!(
+        matches!(&retained.data, runmat_accelerate_api::HostNumericDataOwned::I64(values) if values.as_slice() == raw)
+    );
+    assert_eq!(provider.numeric_downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert!(futures::executor::block_on(provider.inner.download_numeric(&handle)).is_ok());
+    handle.release().unwrap();
+}
+
+#[test]
+fn unavailable_lease_fails_before_download_and_complex_provider_error_is_preserved() {
     use runmat_accelerate_api::{
         GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned, NumericElementType,
     };
@@ -285,6 +345,7 @@ fn unavailable_lease_and_contradictory_storage_fail_before_download() {
     let provider: &'static AdmissionProbeOwner = Box::leak(Box::new(AdmissionProbeOwner {
         owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
         downloads: AtomicUsize::new(0),
+        numeric_downloads: AtomicUsize::new(0),
     }));
     let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     for data in [
@@ -320,11 +381,18 @@ fn unavailable_lease_and_contradictory_storage_fail_before_download() {
         )
         .unwrap();
     let complex_value = Value::GpuTensor(complex.handle.clone());
-    assert!(matches!(
-        futures::executor::block_on(prepare_direct_integer_f64_boundary(&complex_value, None)),
-        Err(IntegerBoundaryFailure::Operational(_))
-    ));
+    let error = match futures::executor::block_on(prepare_direct_integer_f64_boundary(
+        &complex_value,
+        None,
+    )) {
+        Err(IntegerBoundaryFailure::Operational(error)) => error,
+        _ => panic!("complex integer representation needs native provider readback"),
+    };
+    assert!(error.source.as_ref().is_some_and(|cause| cause
+        .to_string()
+        .contains("native complex download unsupported by fixture")));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.numeric_downloads.load(Ordering::SeqCst), 1);
 }
 
 #[test]

@@ -6,7 +6,8 @@
 
 use runmat_accelerate_api::{
     handle_integer_type, handle_is_logical, handle_precision, handle_storage, GpuTensorStorage,
-    HostIntegerDataOwned, HostIntegerTensorOwned,
+    HostIntegerDataOwned, HostIntegerTensorOwned, HostNumericDataOwned, HostNumericTensorOwned,
+    NumericElementType,
 };
 use runmat_value::{IntegerStorage, Value};
 
@@ -56,7 +57,13 @@ impl IntegerBoundaryFailure {
 pub struct PreparedIntegerBoundary<'a> {
     source: &'a Value,
     exact: bool,
-    resident_payload: Option<HostIntegerTensorOwned>,
+    resident_payload: Option<PreparedIntegerPayload>,
+}
+
+/// One authenticated readback, in its native physical representation.
+pub enum PreparedIntegerPayload {
+    Real(HostIntegerTensorOwned),
+    Complex(HostNumericTensorOwned),
 }
 
 impl<'a> PreparedIntegerBoundary<'a> {
@@ -68,12 +75,28 @@ impl<'a> PreparedIntegerBoundary<'a> {
         self.exact
     }
 
-    pub fn resident_payload(&self) -> Option<&HostIntegerTensorOwned> {
+    pub fn resident_payload(&self) -> Option<&PreparedIntegerPayload> {
         self.resident_payload.as_ref()
     }
 
-    pub fn into_resident_payload(self) -> Option<HostIntegerTensorOwned> {
+    pub fn into_resident_payload(self) -> Option<PreparedIntegerPayload> {
         self.resident_payload
+    }
+}
+
+impl PreparedIntegerPayload {
+    pub fn real(&self) -> Option<&HostIntegerTensorOwned> {
+        match self {
+            Self::Real(value) => Some(value),
+            Self::Complex(_) => None,
+        }
+    }
+
+    pub fn complex(&self) -> Option<&HostNumericTensorOwned> {
+        match self {
+            Self::Complex(value) => Some(value),
+            Self::Real(_) => None,
+        }
     }
 }
 
@@ -151,6 +174,30 @@ async fn scan_download(
     Ok(true)
 }
 
+async fn scan_complex_download(
+    data: &HostNumericDataOwned,
+    cooperation: &mut Option<&mut CpuCooperationBudget>,
+) -> Result<bool, IntegerBoundaryFailure> {
+    let len = data.len();
+    for start in (0..len).step_by(SCAN_CHUNK) {
+        let end = start.saturating_add(SCAN_CHUNK).min(len);
+        let exact = match data {
+            HostNumericDataOwned::I64(values) => values[start..end]
+                .iter()
+                .all(|&value| integer_is_exact_f64(&runmat_value::IntValue::I64(value))),
+            HostNumericDataOwned::U64(values) => values[start..end]
+                .iter()
+                .all(|&value| integer_is_exact_f64(&runmat_value::IntValue::U64(value))),
+            _ => true,
+        };
+        checkpoint(cooperation, end - start).await?;
+        if !exact {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Prepare a direct scalar, dense, sparse, complex, or resident integer value.
 /// The same invocation-owned CPU budget is shared with subsequent numerical
 /// work; no budget, scheduler, or timer is created here. An absent budget is
@@ -186,6 +233,19 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
                     resident_payload,
                 });
             };
+            let storage = handle_storage(handle);
+            if handle_is_logical(handle)
+                || handle_precision(handle).is_some()
+                || !gpu_class_metadata_matches(handle, None, Some(expected_type), false)
+            {
+                return Err(IntegerBoundaryFailure::Operational(Box::new(
+                    build_runtime_error(
+                        "integer exactness check: input handle has contradictory integer metadata",
+                    )
+                    .with_gpu_gather_retry(GpuGatherRetry::Never)
+                    .build(),
+                )));
+            }
             // A device namespace alone is not an allocation authority. Check
             // the existing lease and physical view before even a metadata-only
             // exactness receipt is returned for a narrow integer class.
@@ -220,19 +280,6 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
                             .build(),
                         ))
                     })?;
-            if handle_storage(handle) != GpuTensorStorage::Real
-                || handle_is_logical(handle)
-                || handle_precision(handle).is_some()
-                || !gpu_class_metadata_matches(handle, None, Some(expected_type), false)
-            {
-                return Err(IntegerBoundaryFailure::Operational(Box::new(
-                    build_runtime_error(
-                        "integer exactness check: input handle has contradictory integer metadata",
-                    )
-                    .with_gpu_gather_retry(GpuGatherRetry::Never)
-                    .build(),
-                )));
-            }
             if expected_type.element_size() <= 4 {
                 true
             } else {
@@ -246,43 +293,73 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
                     ))
                 })?;
                 let _residency = ResidencyRestoreGuard::new(handle);
-                let gathered = provider
-                    .download_integer(handle)
-                    .await
-                    .map_err(|source_error| {
+                if storage == GpuTensorStorage::ComplexInterleaved {
+                    let gathered = provider.download_numeric(handle).await.map_err(|source_error| {
                         let mut error = build_runtime_error(format!(
-                        "integer exactness check: owner-preserving download failed: {source_error}"
-                    ))
+                            "integer exactness check: owner-preserving native complex download failed: {source_error}"
+                        ))
                         .with_gpu_gather_retry(GpuGatherRetry::Never)
                         .build();
                         error.source = Some(source_error.into_boxed_dyn_error());
                         IntegerBoundaryFailure::Operational(Box::new(error))
                     })?;
-                let actual_len = match &gathered.data {
-                    HostIntegerDataOwned::I8(values) => values.len(),
-                    HostIntegerDataOwned::I16(values) => values.len(),
-                    HostIntegerDataOwned::I32(values) => values.len(),
-                    HostIntegerDataOwned::I64(values) => values.len(),
-                    HostIntegerDataOwned::U8(values) => values.len(),
-                    HostIntegerDataOwned::U16(values) => values.len(),
-                    HostIntegerDataOwned::U32(values) => values.len(),
-                    HostIntegerDataOwned::U64(values) => values.len(),
-                };
-                if gathered.shape != handle.shape()
-                    || gathered.data.element_type() != expected_type
-                    || expected_len != actual_len
-                {
-                    return Err(IntegerBoundaryFailure::Operational(Box::new(
+                    let expected_elements = expected_len.checked_mul(2);
+                    if gathered.shape != handle.shape()
+                        || gathered.storage != GpuTensorStorage::ComplexInterleaved
+                        || gathered.data.element_type() != NumericElementType::from(expected_type)
+                        || expected_elements != Some(gathered.data.len())
+                    {
+                        return Err(IntegerBoundaryFailure::Operational(Box::new(
+                            build_runtime_error(
+                                "integer exactness check: provider returned contradictory native complex payload metadata",
+                            )
+                            .with_gpu_gather_retry(GpuGatherRetry::Never)
+                            .build(),
+                        )));
+                    }
+                    let exact = scan_complex_download(&gathered.data, &mut cooperation).await?;
+                    resident_payload = Some(PreparedIntegerPayload::Complex(gathered));
+                    exact
+                } else {
+                    let gathered =
+                        provider
+                            .download_integer(handle)
+                            .await
+                            .map_err(|source_error| {
+                                let mut error = build_runtime_error(format!(
+                        "integer exactness check: owner-preserving download failed: {source_error}"
+                    ))
+                                .with_gpu_gather_retry(GpuGatherRetry::Never)
+                                .build();
+                                error.source = Some(source_error.into_boxed_dyn_error());
+                                IntegerBoundaryFailure::Operational(Box::new(error))
+                            })?;
+                    let actual_len = match &gathered.data {
+                        HostIntegerDataOwned::I8(values) => values.len(),
+                        HostIntegerDataOwned::I16(values) => values.len(),
+                        HostIntegerDataOwned::I32(values) => values.len(),
+                        HostIntegerDataOwned::I64(values) => values.len(),
+                        HostIntegerDataOwned::U8(values) => values.len(),
+                        HostIntegerDataOwned::U16(values) => values.len(),
+                        HostIntegerDataOwned::U32(values) => values.len(),
+                        HostIntegerDataOwned::U64(values) => values.len(),
+                    };
+                    if gathered.shape != handle.shape()
+                        || gathered.data.element_type() != expected_type
+                        || expected_len != actual_len
+                    {
+                        return Err(IntegerBoundaryFailure::Operational(Box::new(
                         build_runtime_error(
                             "integer exactness check: provider returned contradictory integer payload metadata",
                         )
                         .with_gpu_gather_retry(GpuGatherRetry::Never)
                         .build(),
                     )));
+                    }
+                    let exact = scan_download(&gathered.data, &mut cooperation).await?;
+                    resident_payload = Some(PreparedIntegerPayload::Real(gathered));
+                    exact
                 }
-                let exact = scan_download(&gathered.data, &mut cooperation).await?;
-                resident_payload = Some(gathered);
-                exact
             }
         }
         Value::Cell(_)
