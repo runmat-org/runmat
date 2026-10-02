@@ -509,8 +509,11 @@ fn scatterhist_renders_three_axes_with_histograms() {
         PlotElement::Bar(bar) => Some(bar),
         _ => None,
     }) {
-        assert_eq!(bar.values().expect("host histogram values").len(), 2);
-        assert_eq!(bar.histogram_bin_edges().expect("histogram edges").len(), 3);
+        assert_eq!(bar.values().expect("host histogram values"), &[2.0, 2.0]);
+        assert_eq!(
+            bar.histogram_bin_edges().expect("histogram edges"),
+            &[0.0, 0.5, 1.0]
+        );
     }
     let axes = figure.plot_axes_indices();
     assert_eq!(axes, &[1, 3, 0]);
@@ -546,21 +549,42 @@ fn scatterhist_documented_group_overlay_has_two_series_and_both_marginal_layers(
     let figure = clone_figure(current_figure_handle()).unwrap();
     assert_eq!(figure.axes_grid(), (2, 2));
     assert_eq!(figure.plot_axes_indices(), &[1, 3, 0]);
+    let scatter = figure
+        .plots()
+        .filter_map(|plot| match plot {
+            PlotElement::Scatter(scatter) => Some(scatter),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scatter.len(), 2);
+    assert_eq!(scatter[0].label.as_deref(), Some("a"));
+    assert_eq!(scatter[1].label.as_deref(), Some("b"));
     assert_eq!(
-        figure
-            .plots()
-            .filter(|plot| matches!(plot, PlotElement::Scatter(_)))
-            .count(),
-        2
+        scatter[0].host_xy_f64().unwrap(),
+        Some((vec![0.0, 0.8], vec![0.0, 0.9]))
+    );
+    assert_eq!(
+        scatter[1].host_xy_f64().unwrap(),
+        Some((vec![0.2, 1.0], vec![0.1, 1.0]))
     );
     // Each of two groups has a density line and a stair-count line on both marginals.
-    assert_eq!(
-        figure
-            .plots()
-            .filter(|plot| matches!(plot, PlotElement::Line(_)))
-            .count(),
-        8
-    );
+    let lines = figure
+        .plots()
+        .filter_map(|plot| match plot {
+            PlotElement::Line(line) => Some(line),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 8);
+    for (index, line) in lines.iter().enumerate() {
+        let group = (index % 4) / 2;
+        assert_eq!(line.label, scatter[group].label);
+        assert_eq!(line.color, scatter[group].color);
+        let (x, y) = line.host_xy_f64().unwrap().expect("host marginal line");
+        assert_eq!(x.len(), y.len());
+        assert!(x.len() >= 2);
+        assert!(x.iter().chain(y.iter()).all(|value| value.is_finite()));
+    }
     assert!(figure.axes_metadata(1).unwrap().legend_enabled);
 }
 
