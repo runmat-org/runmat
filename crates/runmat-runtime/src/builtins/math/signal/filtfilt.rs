@@ -145,6 +145,7 @@ fn filtfilt_error_with_message(
 #[runtime_builtin(
     name = "filtfilt",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::filtfilt"
 )]
 async fn filtfilt_builtin(

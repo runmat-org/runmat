@@ -111,6 +111,7 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
 #[runtime_builtin(
     name = "filter",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::filter"
 )]
 async fn filter_builtin(
