@@ -2,14 +2,9 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, SINC_ERROR_GATHER_FAILED, SINC_ERROR_INTERNAL,
+    SINC_ERROR_INVALID_INPUT, SINC_ERROR_MALFORMED_COMPLEX_BUFFER, SINC_ERROR_PROVIDER_FAILED,
+    SINC_NONFLOATING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
@@ -21,111 +16,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinc";
-
-const SINC_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sinc-nonfloating-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sinc with integer or logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SincNonfloatingInputExtension"),
-};
-
-pub const SINC_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SINC_NONFLOATING_INPUT_EXTENSION];
-
-const SINC_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer input is outside the documented single/double domain; every nonzero integer maps exactly to zero and integer zero maps exactly to one.",
-    }];
-pub const SINC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sinc(integer_X)",
-        inputs: &SINC_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat mode uses the exact integer identity sinc(0)=1 and sinc(n)=0 for nonzero integers, so full-width values do not require binary64 representability.",
-    }];
-
-const SINC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise normalized sinc output.",
-}];
-
-const SINC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input values.",
-}];
-
-const SINC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = sinc(X)",
-    inputs: &SINC_INPUTS,
-    outputs: &SINC_OUTPUT,
-}];
-
-const SINC_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.INVALID_INPUT",
-    identifier: Some("RunMat:sinc:InvalidInput"),
-    when: "Input cannot be interpreted as numeric/complex data.",
-    message: "sinc: expected numeric input",
-};
-
-const SINC_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.PROVIDER_FAILED",
-    identifier: Some("RunMat:sinc:ProviderFailed"),
-    when: "Provider unary_sinc dispatch fails with a non-unsupported error.",
-    message: "sinc: GPU provider unary_sinc failed",
-};
-
-const SINC_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.GATHER_FAILED",
-    identifier: Some("RunMat:gather:DownloadFailed"),
-    when: "GPU host fallback cannot download source data.",
-    message: "gather: download failed",
-};
-
-const SINC_ERROR_MALFORMED_COMPLEX_BUFFER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.MALFORMED_COMPLEX_BUFFER",
-    identifier: Some("RunMat:sinc:MalformedComplexBuffer"),
-    when: "Complex-interleaved fallback buffer has odd element count.",
-    message: "sinc: malformed complex buffer, odd length",
-};
-
-const SINC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.INTERNAL",
-    identifier: Some("RunMat:sinc:InternalError"),
-    when: "Internal tensor conversion/materialization fails.",
-    message: "sinc: internal error",
-};
-
-const SINC_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    SINC_ERROR_INVALID_INPUT,
-    SINC_ERROR_PROVIDER_FAILED,
-    SINC_ERROR_GATHER_FAILED,
-    SINC_ERROR_MALFORMED_COMPLEX_BUFFER,
-    SINC_ERROR_INTERNAL,
-];
-
-pub const SINC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SINC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SINC_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::sinc")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -195,14 +88,7 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
 
 #[runtime_builtin(
     name = "sinc",
-    category = "math/signal",
-    summary = "Compute the normalized sinc function element-wise.",
-    keywords = "sinc,normalized sinc,signal processing,elementwise",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::signal::sinc::SINC_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::sinc::SINC_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::sinc::SINC_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
@@ -423,7 +309,7 @@ mod tests {
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorView,
     };
-    use runmat_builtins::{builtin_function_by_name, AccelTag, ResolveContext, Type};
+    use runmat_builtins::builtin_function_by_name;
     use runmat_value::{CharArray, IntValue};
 
     fn call(value: Value) -> BuiltinResult<Value> {
@@ -525,48 +411,18 @@ mod tests {
     }
 
     #[test]
-    fn sinc_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
+    fn sinc_catalog_binding_and_provider_route() {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).unwrap();
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
         assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
         );
-    }
-
-    #[test]
-    fn sinc_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
-    }
-
-    #[test]
-    fn sinc_registers_unary_acceleration_tag() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("registered sinc builtin");
-        assert!(
-            builtin
-                .accel_tags
-                .iter()
-                .any(|tag| matches!(tag, AccelTag::Unary)),
-            "sinc must be tagged unary so native auto-promotion uploads host numeric inputs for unary_sinc"
-        );
-    }
-
-    #[test]
-    fn sinc_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("registered sinc builtin");
-        let descriptor = builtin.descriptor.expect("sinc descriptor");
+        assert!(matches!(GPU_SPEC.op_kind, GpuOpKind::Elementwise));
+        assert!(FUSION_SPEC.elementwise.is_some());
+        let descriptor = entry.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = sinc(X)"));
         assert!(descriptor
