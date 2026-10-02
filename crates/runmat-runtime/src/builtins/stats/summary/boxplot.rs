@@ -290,7 +290,7 @@ async fn boxplot_in_runtime(
         .first()
         .and_then(keyword_of)
         .and_then(|name| BoxplotOptionKind::parse(&name));
-    let group = if args.first().is_some() && first_option.is_none() {
+    let group = if !args.is_empty() && first_option.is_none() {
         Some(args.remove(0))
     } else {
         None

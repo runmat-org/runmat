@@ -4004,9 +4004,9 @@ fn line3_property_with_data(
             let (x_data, y_data, z_data) = data.as_ref().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
             })?;
-            st.insert("XData", numeric_plot_data_value(&x_data));
-            st.insert("YData", numeric_plot_data_value(&y_data));
-            st.insert("ZData", numeric_plot_data_value(&z_data));
+            st.insert("XData", numeric_plot_data_value(x_data));
+            st.insert("YData", numeric_plot_data_value(y_data));
+            st.insert("ZData", numeric_plot_data_value(z_data));
             st.insert("Color", Value::String(color_to_short_name(line.color)));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
@@ -4033,19 +4033,19 @@ fn line3_property_with_data(
             let (x, _, _) = data.as_ref().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
             })?;
-            Ok(numeric_plot_data_value(&x))
+            Ok(numeric_plot_data_value(x))
         }
         Some("ydata") => {
             let (_, y, _) = data.as_ref().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
             })?;
-            Ok(numeric_plot_data_value(&y))
+            Ok(numeric_plot_data_value(y))
         }
         Some("zdata") => {
             let (_, _, z) = data.as_ref().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
             })?;
-            Ok(numeric_plot_data_value(&z))
+            Ok(numeric_plot_data_value(z))
         }
         Some("color") => Ok(Value::String(color_to_short_name(line.color))),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
