@@ -71,3 +71,16 @@ fn unknown_and_discarded_outputs_are_conservative() {
     );
     assert!(result.outputs.is_empty());
 }
+
+#[test]
+fn known_sparse_input_is_diagnosed() {
+    let mut value = input(
+        NumericClass::Double,
+        NumericDomain::Real,
+        ShapeFact::from(vec![Some(2), Some(2)]),
+    );
+    value.storage = StorageFact::Sparse;
+    let result = infer(value, 1);
+    assert!(!result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}

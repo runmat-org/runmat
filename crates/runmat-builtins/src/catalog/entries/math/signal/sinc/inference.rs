@@ -30,6 +30,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 }
 
 fn output_for(input: &ValueFact, diagnostics: &mut Vec<InferenceDiagnostic>) -> ValueFact {
+    if matches!(input.storage, StorageFact::Sparse | StorageFact::Opaque) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-SINC-STORAGE",
+            "sinc requires dense input",
+            0,
+        ));
+        return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+    }
     let (class, domain) = match input.kind {
         ValueKindFact::Numeric(NumericFact { class, domain }) => {
             if domain == NumericDomain::Complex && class.integer_class().is_some() {

@@ -84,3 +84,15 @@ fn unknown_time_and_discarded_output_do_not_claim_values() {
     );
     assert!(out.outputs.is_empty());
 }
+
+#[test]
+fn known_sparse_sample_times_are_diagnosed() {
+    let mut value = real(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(2), Some(2)]),
+    );
+    value.storage = StorageFact::Sparse;
+    let result = infer(vec![value], vec![LiteralValue::Unknown], 1);
+    assert!(!result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}

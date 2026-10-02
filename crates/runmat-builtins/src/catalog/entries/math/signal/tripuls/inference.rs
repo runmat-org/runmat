@@ -62,6 +62,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 }
 
 fn sample_output(times: &ValueFact, diagnostics: &mut Vec<InferenceDiagnostic>) -> ValueFact {
+    if matches!(times.storage, StorageFact::Sparse | StorageFact::Opaque) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-TRIPULS-STORAGE",
+            "tripuls requires dense sample times",
+            0,
+        ));
+        return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+    }
     match times.kind {
         ValueKindFact::Numeric(NumericFact {
             domain: NumericDomain::Real,
