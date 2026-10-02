@@ -262,6 +262,89 @@ async fn square_real(
 mod tests {
     use super::*;
 
+    struct CountingControlProvider {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        probe: runmat_accelerate_api::test_support::RetirementProbe,
+        downloads: std::sync::atomic::AtomicUsize,
+        fail_download: bool,
+    }
+
+    impl runmat_accelerate_api::AccelProvider for CountingControlProvider {
+        fn device_id(&self) -> u32 {
+            self.owner.device_id()
+        }
+        fn device_info(&self) -> String {
+            "waveform-control-counting-provider".into()
+        }
+        fn upload(
+            &self,
+            _: &runmat_accelerate_api::HostTensorView<'_>,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("control-only fixture must not upload")
+        }
+        fn download<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.downloads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async move {
+                if self.fail_download {
+                    anyhow::bail!("control download device fault")
+                }
+                let data = self.probe.with_data(handle, |data| match data {
+                    runmat_accelerate_api::HostNumericDataView::F64(data) => Ok(data.to_vec()),
+                    _ => Err(anyhow::anyhow!("expected F64 control")),
+                })??;
+                Ok(runmat_accelerate_api::HostTensorOwned {
+                    data,
+                    shape: handle.shape().to_vec(),
+                    storage: handle.physical().storage(),
+                })
+            })
+        }
+    }
+
+    fn counted_control(fail_download: bool) -> (&'static CountingControlProvider, GpuTensorHandle) {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![25.0]),
+                shape: vec![1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let provider = Box::leak(Box::new(CountingControlProvider {
+            owner,
+            probe: allocation.probe,
+            downloads: std::sync::atomic::AtomicUsize::new(0),
+            fail_download,
+        }));
+        (provider, allocation.handle)
+    }
+
+    #[test]
+    fn resident_duty_downloads_once_and_preserves_operational_failure() {
+        use std::sync::atomic::Ordering;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        for fail in [false, true] {
+            let (provider, control) = counted_control(fail);
+            let borrowed = control.clone();
+            let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let result = call_with_duty(Value::Num(0.0), Value::GpuTensor(control));
+            assert_eq!(provider.downloads.load(Ordering::Relaxed), 1);
+            assert!(borrowed.allocation_lease().validate_live().is_ok());
+            if fail {
+                let error = result.expect_err("operational download failure");
+                assert_eq!(error.identifier(), SQUARE_ERROR_INTERNAL.identifier);
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                assert!(error.source.is_some());
+            } else {
+                assert!(matches!(result.unwrap(), Value::Num(value) if value == 1.0));
+            }
+        }
+    }
+
     #[test]
     fn invalid_host_duty_precedes_resident_sample_access() {
         use runmat_accelerate_api::{
