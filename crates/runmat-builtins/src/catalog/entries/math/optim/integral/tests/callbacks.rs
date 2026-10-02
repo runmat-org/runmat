@@ -108,27 +108,25 @@ fn callback_capability_is_transitive() {
 #[test]
 fn known_invalid_callback_result_never_proves_a_scalar_integral() {
     let real = scalar(NumericClass::Double, NumericDomain::Real);
-    for output in [ValueFact::scalar(ValueKindFact::String)] {
-        let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
-            identity: None,
-            capabilities: CapabilitySet::default(),
-            parameters: vec![real.clone()],
-            parameters_complete: true,
-            outputs: vec![output],
-            outputs_complete: true,
-            variadic_inputs: false,
-            variadic_outputs: false,
-            captures: vec![],
-            captures_complete: true,
-        }));
-        let call = request(vec![callback, real.clone(), real.clone()], vec![], 1);
-        let result = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT"));
-        assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
-    }
+    let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: CapabilitySet::default(),
+        parameters: vec![real.clone()],
+        parameters_complete: true,
+        outputs: vec![ValueFact::scalar(ValueKindFact::String)],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: vec![],
+        captures_complete: true,
+    }));
+    let call = request(vec![callback, real.clone(), real.clone()], vec![], 1);
+    let result = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT"));
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
 }
 
 #[test]
