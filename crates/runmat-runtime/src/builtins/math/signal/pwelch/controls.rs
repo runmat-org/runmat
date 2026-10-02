@@ -54,6 +54,7 @@ pub(super) struct PreparedHostControls {
 /// large window or frequency-vector work.
 pub(super) async fn preflight_host_controls(
     rest: &[Value],
+    complex_input: bool,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PreparedHostControls> {
     let mut prepared = PreparedHostControls::default();
@@ -76,6 +77,9 @@ pub(super) async fn preflight_host_controls(
             role
         };
         if role == ControlRole::Option {
+            if complex_input && matches!(decoded.as_ref(), Some(WelchKeyword::Onesided)) {
+                return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE));
+            }
             if !matches!(
                 decoded,
                 Some(
@@ -321,7 +325,9 @@ pub(super) async fn parse_options(
     let fs = if let Some(value) = rest.get(idx) {
         if is_empty(value) {
             idx += 1;
-            None
+            // An explicit empty Fs selects one cycle per unit time; omission
+            // retains the normalized angular-frequency default.
+            Some(1.0)
         } else if keywords.get(idx).and_then(Option::as_ref).is_some() {
             None
         } else {
@@ -369,6 +375,10 @@ pub(super) async fn parse_options(
             WelchKeyword::Power => scale = SpectrumScale::Power,
             WelchKeyword::Unknown(_) => return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE)),
         }
+    }
+
+    if complex_input && range == FrequencyRange::Onesided {
+        return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE));
     }
 
     Ok(PwelchOptions {

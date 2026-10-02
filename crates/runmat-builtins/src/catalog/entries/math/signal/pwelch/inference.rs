@@ -1,4 +1,4 @@
-use crate::catalog::inference::argument_error;
+use crate::catalog::inference::{argument_error, literal_text};
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;
 
@@ -38,6 +38,34 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     0,
                 ));
             }
+        }
+    }
+    let complex_signal = signal.is_some_and(|fact| {
+        matches!(
+            &fact.kind,
+            ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Complex,
+                ..
+            })
+        )
+    });
+    if complex_signal {
+        if let Some((index, _)) = request
+            .literals
+            .literal_args
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, literal)| {
+                literal_text(literal)
+                    .is_some_and(|text| text.trim().eq_ignore_ascii_case("onesided"))
+            })
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-PWELCH-RANGE",
+                "one-sided Welch spectra require a real signal",
+                index,
+            ));
         }
     }
     for (index, control) in request.arguments.iter().enumerate().skip(1) {

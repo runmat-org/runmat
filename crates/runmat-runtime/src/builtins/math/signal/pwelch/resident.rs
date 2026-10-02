@@ -23,26 +23,12 @@ pub(super) async fn output_gpu(
     let FrequencyGrid::Uniform { nfft } = options.grid else {
         return Ok(None);
     };
-    let window_len = options.window.len();
+    let scaling =
+        normalized_window(&options.window, options.scale, options.fs, cooperation).await?;
+    let window_len = scaling.values.len();
     let step = window_len - options.noverlap;
     let starts = segment_starts(rows, window_len, step, cooperation).await?;
     let segment_count = starts.len();
-    let mut window_energy = 0.0;
-    let mut work = CompletedWork::default();
-    for value in &options.window {
-        window_energy += value * value;
-        if let Some(units) = work.record(1) {
-            cooperation.completed(units).await?;
-        }
-    }
-    work.finish(cooperation).await?;
-    if window_energy <= 0.0 || !window_energy.is_finite() {
-        return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
-    }
-    let denominator = match options.scale {
-        SpectrumScale::Psd => options.fs.unwrap_or(2.0 * std::f64::consts::PI) * window_energy,
-        SpectrumScale::Power => window_energy,
-    };
     let input_len = rows
         .checked_mul(cols)
         .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
@@ -50,6 +36,11 @@ pub(super) async fn output_gpu(
         .checked_mul(cols)
         .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
     let range = gpu_range(options.range);
+    let output_rows = match range {
+        ProviderSpectralRange::Onesided => nfft / 2 + 1,
+        ProviderSpectralRange::Twosided | ProviderSpectralRange::Centered => nfft,
+    };
+    checked_output_elements(output_rows, frame_count)?;
     let provider =
         super::super::resident_output::owner(handle, || pwelch_error(&PWELCH_ERROR_INTERNAL))?;
     let request = ProviderSpectralRequest {
@@ -57,7 +48,7 @@ pub(super) async fn output_gpu(
         input_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        window: &options.window,
+        window: &scaling.values,
         nfft,
         frame_count,
         frame_mode: ProviderSpectralFrameMode::ColumnSliding {
@@ -66,7 +57,7 @@ pub(super) async fn output_gpu(
             frames_per_column: segment_count,
         },
         range,
-        denominator,
+        denominator: scaling.denominator,
     };
     let estimate = match provider.uniform_spectral_estimate(&request).await {
         Ok(estimate) => estimate,

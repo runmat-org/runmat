@@ -30,6 +30,7 @@ struct StageProvider {
     owner: TestAllocationOwner,
     spectral_calls: AtomicUsize,
     mean_calls: AtomicUsize,
+    download_calls: AtomicUsize,
     outputs: Mutex<Vec<RetirementProbe>>,
 }
 
@@ -39,6 +40,7 @@ impl StageProvider {
             owner: TestAllocationOwner::new(),
             spectral_calls: AtomicUsize::new(0),
             mean_calls: AtomicUsize::new(0),
+            download_calls: AtomicUsize::new(0),
             outputs: Mutex::new(Vec::new()),
         }
     }
@@ -64,6 +66,7 @@ impl AccelProvider for StageProvider {
         anyhow::bail!("unexpected upload")
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.download_calls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
     fn uniform_spectral_estimate<'a>(
@@ -94,6 +97,68 @@ impl AccelProvider for StageProvider {
             Ok(self.output(shape, GpuTensorStorage::Real))
         })
     }
+}
+
+#[test]
+fn invalid_signal_carrier_precedes_resident_control_download() {
+    let provider = Box::leak(Box::new(StageProvider::new()));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let resident_window = provider
+        .owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let source = CancellationSource::new();
+    for invalid_signal in [
+        Value::from("invalid signal"),
+        Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 1]).unwrap()),
+        Value::Tensor(runmat_value::Tensor::new(vec![1.0], vec![1, 1, 1]).unwrap()),
+    ] {
+        let mut cooperation = SignalCooperation::with_budget(
+            CpuCooperationBudget::with_test_turn(
+                CpuCooperationPolicy::NeverYield,
+                source.token(),
+                || Box::pin(async { Ok(()) }),
+            ),
+            BUILTIN_NAME,
+        );
+        let error = futures::executor::block_on(evaluate_with_cooperation(
+            invalid_signal,
+            &[Value::GpuTensor(resident_window.handle.clone())],
+            &mut cooperation,
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidSignal"));
+        assert_eq!(provider.download_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(resident_window.probe.retirements(), 0);
+    }
+    let invalid_resident_signal = provider
+        .owner
+        .allocate_zeroed(
+            vec![1, 1, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let error = futures::executor::block_on(evaluate(
+        Value::GpuTensor(invalid_resident_signal.handle.clone()),
+        &[Value::GpuTensor(resident_window.handle.clone())],
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidSignal"));
+    assert_eq!(provider.download_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(invalid_resident_signal.probe.retirements(), 0);
+    assert_eq!(resident_window.probe.retirements(), 0);
+    let error = futures::executor::block_on(evaluate(
+        Value::Complex(1.0, 1.0),
+        &[
+            Value::GpuTensor(resident_window.handle.clone()),
+            Value::from("onesided"),
+        ],
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:InvalidRange"));
+    assert_eq!(provider.download_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(resident_window.probe.retirements(), 0);
 }
 
 fn pending_budget(

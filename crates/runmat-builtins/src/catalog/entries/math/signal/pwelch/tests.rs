@@ -107,10 +107,44 @@ fn known_invalid_control_does_not_prove_result() {
 }
 
 #[test]
+fn complex_onesided_selector_has_no_success_fact() {
+    let input = signal(
+        NumericClass::Double,
+        NumericDomain::Complex,
+        ResidencyFact::Host,
+    );
+    let result = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![
+                input,
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(8.0),
+                LiteralValue::Number(0.0),
+                LiteralValue::Number(8.0),
+                LiteralValue::String("onesided".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-RANGE"));
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
 fn descriptor_and_docs_are_canonical() {
     assert!(crate::validate_builtin_catalog(&[&PWELCH_CATALOG_ENTRY]).is_empty());
     assert_eq!(PWELCH_CATALOG_ENTRY.identity.name, "pwelch");
-    assert_eq!(PWELCH_CATALOG_ENTRY.documentation.examples.len(), 6);
+    assert_eq!(PWELCH_CATALOG_ENTRY.documentation.examples.len(), 8);
     assert_eq!(
         PWELCH_CATALOG_ENTRY.descriptor.signatures[1].outputs.len(),
         2

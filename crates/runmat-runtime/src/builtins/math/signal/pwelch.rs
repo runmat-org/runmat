@@ -23,9 +23,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::signal::common::output_precision::SignalPrecision;
 use crate::builtins::math::signal::common::{
-    gpu_matrix_shape, hamming_coefficient, parse_nonnegative_integer, parse_scalar_f64,
-    symmetric_window_values, value_to_complex_vector, window_allocation_error, SignalCooperation,
-    WindowArgError, SIGNAL_WORK_CHUNK,
+    centered_frequency_offset, centered_shift, gpu_matrix_shape, hamming_coefficient,
+    parse_nonnegative_integer, parse_scalar_f64, symmetric_window_values, value_to_complex_vector,
+    window_allocation_error, SignalCooperation, WindowArgError, SIGNAL_WORK_CHUNK,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -219,7 +219,8 @@ async fn evaluate_with_cooperation(
     for value in rest.iter().take(4) {
         ensure_pwelch_class_boundary(value, &PWELCH_INTEGER_CONTROL_EXTENSION)?;
     }
-    let mut prepared_controls = preflight_host_controls(rest, cooperation).await?;
+    let complex_input = preflight_signal_carrier(&x)?;
+    let mut prepared_controls = preflight_host_controls(rest, complex_input, cooperation).await?;
     // All borrowed operands must be admitted before exactness checks or parsers
     // can download any one of them.
     let resident_inputs = std::iter::once(&x)
@@ -392,6 +393,9 @@ use controls::*;
 
 mod numerical;
 use numerical::*;
+
+mod scaling;
+use scaling::normalized_window;
 
 fn is_empty(value: &Value) -> bool {
     match value {

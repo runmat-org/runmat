@@ -199,8 +199,9 @@ fn pwelch_twosided_and_centered_ranges() {
     )
     .unwrap();
     let (_, f) = output_pair(centered);
-    assert_eq!(f[0], -std::f64::consts::PI);
-    assert_eq!(f[4], 0.0);
+    assert!((f[0] + 3.0 * std::f64::consts::PI / 4.0).abs() < 1e-12);
+    assert_eq!(f[3], 0.0);
+    assert_eq!(f[7], std::f64::consts::PI);
 }
 
 #[test]
@@ -487,7 +488,7 @@ fn pwelch_rejects_nfft_shorter_than_window() {
 }
 
 #[test]
-fn pwelch_power_scale_omits_density_bandwidth() {
+fn pwelch_power_uses_window_equivalent_noise_bandwidth() {
     let x = Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap();
     let window = Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap();
     let psd = call(
@@ -516,7 +517,84 @@ fn pwelch_power_scale_omits_density_bandwidth() {
     .unwrap();
     let (psd, _) = output_pair(psd);
     let (power, _) = output_pair(power);
-    assert!((power[0] / psd[0] - 8.0).abs() < 1e-12);
+    // For a rectangular eight-sample window at Fs=8, ENBW is 1 Hz.
+    assert!((power[0] / psd[0] - 1.0).abs() < 1e-12);
+
+    let signal = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
+    let weighted = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let base = [
+        weighted.clone(),
+        Value::Num(0.0),
+        Value::Num(2.0),
+        Value::Num(1.0),
+    ];
+    let (density, _) = output_pair(call(signal.clone(), &base, Some(2)).unwrap());
+    let (power, _) = output_pair(
+        call(
+            signal,
+            &[
+                weighted,
+                Value::Num(0.0),
+                Value::Num(2.0),
+                Value::Num(1.0),
+                Value::from("power"),
+            ],
+            Some(2),
+        )
+        .unwrap(),
+    );
+    assert!((density[0] - 9.0 / 5.0).abs() < 1e-12);
+    assert!((power[0] - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn explicit_empty_sample_rate_is_one_hertz_but_omitted_is_angular() {
+    let signal = Value::Tensor(Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap());
+    let window = Value::Tensor(Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap());
+    let common = [window.clone(), Value::Num(0.0), Value::Num(8.0)];
+    let (_, angular) = output_pair(call(signal.clone(), &common, Some(2)).unwrap());
+    let (_, hertz) = output_pair(
+        call(
+            signal,
+            &[
+                window,
+                Value::Num(0.0),
+                Value::Num(8.0),
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            ],
+            Some(2),
+        )
+        .unwrap(),
+    );
+    assert!((angular[1] - std::f64::consts::PI / 4.0).abs() < 1e-12);
+    assert!((hertz[1] - 0.125).abs() < 1e-12);
+}
+
+#[test]
+fn finite_tiny_and_huge_windows_preserve_normalized_psd() {
+    for amplitude in [1e-200, 1e200] {
+        let result = call(
+            Value::Num(1.0),
+            &[
+                Value::Tensor(Tensor::new(vec![amplitude], vec![1, 1]).unwrap()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, frequency) = output_pair(result);
+        assert_eq!(frequency, vec![0.0]);
+        assert!((pxx[0] - 1.0).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn spectral_output_geometry_rejects_product_overflow() {
+    let error = checked_output_elements(usize::MAX, 2).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:pwelch:Internal"));
+    assert!(error.message().contains("dimensions overflow"));
 }
 
 #[cfg(feature = "wgpu")]
@@ -585,6 +663,46 @@ fn pwelch_wgpu_keeps_uniform_outputs_resident_and_matches_cpu() {
             "actual={actual} expected={expected}"
         );
     }
+    let tone = runmat_value::ComplexTensor::new(
+        (0..8)
+            .map(|index| {
+                let angle = 2.0 * std::f64::consts::PI * index as f64 / 8.0;
+                (angle.cos(), angle.sin())
+            })
+            .collect(),
+        vec![8, 1],
+    )
+    .unwrap();
+    let controls = [
+        Value::Num(8.0),
+        Value::Num(0.0),
+        Value::Num(8.0),
+        Value::Num(8.0),
+        Value::from("centered"),
+    ];
+    let (host_centered, host_f) =
+        output_pair(call(Value::ComplexTensor(tone.clone()), &controls, Some(2)).unwrap());
+    let resident_tone = gpu_helpers::upload_complex_tensor(provider, &tone).unwrap();
+    let Value::OutputList(resident_centered) =
+        call(Value::GpuTensor(resident_tone), &controls, Some(2)).unwrap()
+    else {
+        panic!("centered Welch must return two outputs");
+    };
+    let resident_power =
+        crate::builtins::common::test_support::gather(resident_centered[0].clone()).unwrap();
+    let resident_f =
+        crate::builtins::common::test_support::gather(resident_centered[1].clone()).unwrap();
+    assert_eq!(resident_f.materialize_f64(), host_f);
+    assert_eq!(host_f[0], -3.0);
+    assert_eq!(host_f[7], 4.0);
+    for (actual, expected) in resident_power
+        .materialize_f64()
+        .iter()
+        .zip(host_centered.iter())
+    {
+        assert!((actual - expected).abs() < 1e-5);
+    }
+    assert!(host_centered[4] > host_centered[3]);
     handle.release().ok();
 }
 

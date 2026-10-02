@@ -6,33 +6,33 @@ pub(super) async fn compute_pwelch(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PwelchEvaluation> {
     cooperation.completed(0).await?;
-    let window_len = options.window.len();
+    let scaling =
+        normalized_window(&options.window, options.scale, options.fs, cooperation).await?;
+    let window_len = scaling.values.len();
     let step = window_len - options.noverlap;
-    let mut scale = 0.0;
-    let mut work = CompletedWork::default();
-    for value in &options.window {
-        scale += value * value;
-        if let Some(units) = work.record(1) {
-            cooperation.completed(units).await?;
-        }
-    }
-    work.finish(cooperation).await?;
-    if scale <= 0.0 || !scale.is_finite() {
-        return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
-    }
-    let density_scale = match options.scale {
-        SpectrumScale::Psd => options.fs.unwrap_or(2.0 * std::f64::consts::PI) * scale,
-        SpectrumScale::Power => scale,
-    };
+    let density_scale = scaling.denominator;
     let mut planner = FftPlanner::<f64>::new();
     let mut fft_plan = match &options.grid {
-        FrequencyGrid::Uniform { nfft } => Some((
-            planner.plan_fft_forward(*nfft),
-            vec![Complex::new(0.0, 0.0); *nfft],
-        )),
+        FrequencyGrid::Uniform { nfft } => {
+            let mut buffer = Vec::new();
+            buffer.try_reserve_exact(*nfft).map_err(|cause| {
+                window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause)
+            })?;
+            buffer.resize(*nfft, Complex::new(0.0, 0.0));
+            Some((planner.plan_fft_forward(*nfft), buffer))
+        }
         FrequencyGrid::Explicit { .. } => None,
     };
-    let mut selected_columns = Vec::new();
+    let rows = match (&options.grid, options.range) {
+        (FrequencyGrid::Uniform { nfft }, FrequencyRange::Onesided) => nfft / 2 + 1,
+        (FrequencyGrid::Uniform { nfft }, _) => *nfft,
+        (FrequencyGrid::Explicit { frequencies }, _) => frequencies.len(),
+    };
+    let cols = columns.len();
+    let elements = checked_output_elements(rows, cols)?;
+    let mut pxx = Vec::new();
+    pxx.try_reserve_exact(elements)
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
     let mut selected_f = Vec::new();
 
     for column in columns {
@@ -41,7 +41,7 @@ pub(super) async fn compute_pwelch(
             (FrequencyGrid::Uniform { nfft }, Some((fft, buffer))) => {
                 let accum = column_uniform_periodogram(
                     column,
-                    &options.window,
+                    &scaling.values,
                     step,
                     density_scale,
                     *nfft,
@@ -55,7 +55,7 @@ pub(super) async fn compute_pwelch(
             (FrequencyGrid::Explicit { frequencies }, None) => {
                 column_explicit_frequency_periodogram(
                     column,
-                    &options.window,
+                    &scaling.values,
                     step,
                     density_scale,
                     frequencies,
@@ -69,19 +69,24 @@ pub(super) async fn compute_pwelch(
         if selected_f.is_empty() {
             selected_f = selected.f;
         }
-        selected_columns.push(selected.pxx);
-    }
-    let rows = selected_f.len();
-    let cols = selected_columns.len();
-    let mut pxx = Vec::with_capacity(rows * cols);
-    for column in selected_columns {
-        cooperation.completed(column.len() as u64).await?;
-        pxx.extend(column);
+        cooperation.completed(selected.pxx.len() as u64).await?;
+        pxx.extend(selected.pxx);
     }
     Ok(PwelchEvaluation {
         pxx,
         f: selected_f,
         columns: cols,
+    })
+}
+
+pub(super) fn checked_output_elements(rows: usize, columns: usize) -> BuiltinResult<usize> {
+    rows.checked_mul(columns).ok_or_else(|| {
+        let mut error = pwelch_error_with_detail(
+            &PWELCH_ERROR_INTERNAL,
+            "spectral output dimensions overflow",
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error
     })
 }
 
@@ -96,7 +101,11 @@ pub(super) async fn column_uniform_periodogram(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let starts = segment_starts(column.len(), window.len(), step, cooperation).await?;
-    let mut accum = vec![0.0; nfft];
+    let mut accum = Vec::new();
+    accum
+        .try_reserve_exact(nfft)
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
+    accum.resize(nfft, 0.0);
     let mut work = CompletedWork::default();
     for &start in &starts {
         cooperation.completed(0).await?;
@@ -147,7 +156,10 @@ pub(super) async fn column_explicit_frequency_periodogram(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PwelchEvaluation> {
     let starts = segment_starts(column.len(), window.len(), step, cooperation).await?;
-    let mut pxx = vec![0.0; frequencies.len()];
+    let mut pxx = Vec::new();
+    pxx.try_reserve_exact(frequencies.len())
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
+    pxx.resize(frequencies.len(), 0.0);
     let fs_scale = fs.map(|fs| 2.0 * std::f64::consts::PI / fs);
     let mut work = CompletedWork::default();
     for &start in &starts {
@@ -214,10 +226,10 @@ pub(super) async fn select_range(
             })
         }
         FrequencyRange::Centered => {
-            let shift = nfft.div_ceil(2);
+            let shift = centered_shift(nfft);
             power.rotate_left(shift);
             cooperation.completed(nfft as u64).await?;
-            let offset = nfft / 2;
+            let offset = centered_frequency_offset(nfft);
             let mut f = Vec::with_capacity(nfft);
             for idx in 0..nfft {
                 f.push(freq_scale * (idx as f64 - offset as f64) / nfft as f64);
@@ -288,7 +300,14 @@ pub(super) async fn segment_starts(
     if signal_len <= window_len {
         return Ok(vec![0]);
     }
+    let count = (signal_len - window_len)
+        .checked_div(step)
+        .and_then(|count| count.checked_add(1))
+        .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
     let mut starts = Vec::new();
+    starts
+        .try_reserve_exact(count)
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
     let mut start = 0usize;
     let mut work = CompletedWork::default();
     let last_start = signal_len - window_len;
@@ -316,7 +335,7 @@ pub(super) async fn default_window(
     let section_len = if input_len <= 1 {
         1
     } else {
-        ((2 * input_len) / 9).clamp(1, DEFAULT_NFFT_MIN)
+        ((input_len / 9) * 2 + ((input_len % 9) * 2) / 9).clamp(1, DEFAULT_NFFT_MIN)
     };
     symmetric_window_values(section_len, hamming_coefficient, cooperation)
         .await

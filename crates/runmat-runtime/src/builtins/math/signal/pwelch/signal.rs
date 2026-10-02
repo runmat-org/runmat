@@ -1,5 +1,33 @@
 use super::*;
 
+/// Reject a definitely invalid signal before any resident control can be read.
+/// Numeric contents are intentionally not constrained here.
+pub(super) fn preflight_signal_carrier(value: &Value) -> BuiltinResult<bool> {
+    let shape = match value {
+        Value::GpuTensor(handle) => {
+            gpu_matrix_shape(BUILTIN_NAME, "x", handle).map_err(|error| {
+                pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, error.message())
+            })?;
+            return Ok(runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
+        }
+        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,
+        _ => return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL)),
+    };
+    if let Some(shape) = shape {
+        if shape.len() > 2 || shape.iter().any(|extent| *extent == 0) {
+            return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
+        }
+    }
+    Ok(matches!(
+        value,
+        Value::Complex(_, _) | Value::ComplexTensor(_)
+    ))
+}
+
 pub(super) async fn value_to_signal_columns(
     value: Value,
     cooperation: &mut SignalCooperation,
