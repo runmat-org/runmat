@@ -505,8 +505,63 @@ fn scatterhist_renders_three_axes_with_histograms() {
         .filter(|plot| matches!(plot, PlotElement::Bar(_)))
         .count();
     assert_eq!(bars, 2);
+    for bar in figure.plots().filter_map(|plot| match plot {
+        PlotElement::Bar(bar) => Some(bar),
+        _ => None,
+    }) {
+        assert_eq!(bar.values().expect("host histogram values").len(), 2);
+        assert_eq!(bar.histogram_bin_edges().expect("histogram edges").len(), 3);
+    }
     let axes = figure.plot_axes_indices();
     assert_eq!(axes, &[1, 3, 0]);
+}
+
+#[test]
+fn scatterhist_documented_group_overlay_has_two_series_and_both_marginal_layers() {
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    reset_hold_state_for_run();
+
+    let groups = StringArray::new(
+        vec!["a".into(), "b".into(), "a".into(), "b".into()],
+        vec![4, 1],
+    )
+    .unwrap();
+    let handles = futures::executor::block_on(scatterhist_builtin(vec![
+        vec_tensor(&[0.0, 0.2, 0.8, 1.0]),
+        vec_tensor(&[0.0, 0.1, 0.9, 1.0]),
+        Value::String("Group".into()),
+        Value::StringArray(groups),
+        Value::String("Kernel".into()),
+        Value::String("overlay".into()),
+        Value::String("Legend".into()),
+        Value::String("on".into()),
+    ]))
+    .unwrap();
+    let Value::Tensor(handles) = handles else {
+        panic!("expected axes handle tensor");
+    };
+    assert_eq!(handles.shape, vec![3, 1]);
+
+    let figure = clone_figure(current_figure_handle()).unwrap();
+    assert_eq!(figure.axes_grid(), (2, 2));
+    assert_eq!(figure.plot_axes_indices(), &[1, 3, 0]);
+    assert_eq!(
+        figure
+            .plots()
+            .filter(|plot| matches!(plot, PlotElement::Scatter(_)))
+            .count(),
+        2
+    );
+    // Each of two groups has a density line and a stair-count line on both marginals.
+    assert_eq!(
+        figure
+            .plots()
+            .filter(|plot| matches!(plot, PlotElement::Line(_)))
+            .count(),
+        8
+    );
+    assert!(figure.axes_metadata(1).unwrap().legend_enabled);
 }
 
 #[test]

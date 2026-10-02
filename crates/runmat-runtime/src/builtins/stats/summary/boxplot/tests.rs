@@ -1118,6 +1118,26 @@ fn renders_handle_vector_and_tick_labels() {
 }
 
 #[test]
+fn documented_horizontal_whisker_length_keeps_the_extreme_as_an_outlier() {
+    let options = BoxplotOptions::parse(vec![
+        Value::from("Orientation"),
+        Value::from("horizontal"),
+        Value::from("Whisker"),
+        Value::Num(1.0),
+    ])
+    .unwrap();
+    let boxes = build_box_stats(
+        tensor(vec![1.0, 2.0, 3.0, 100.0], vec![4, 1]),
+        None,
+        &options,
+    )
+    .unwrap();
+    assert_eq!(boxes.len(), 1);
+    assert_eq!(boxes[0].upper_whisker, 3.0);
+    assert_eq!(boxes[0].outliers, vec![100.0]);
+}
+
+#[test]
 fn appearance_options_change_typed_plot_plans_and_interval_geometry() {
     let options = BoxplotOptions::parse(vec![
         Value::from("BoxStyle"),

@@ -97,7 +97,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>0);" },
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>0); assert(isequal(get(gca,'XTick'),[1 2]));" },
         },
         BuiltinExample {
             id: "boxplot-grouped", title: "Plot grouped data with labels",
@@ -107,7 +107,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>0);" },
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>0); assert(isequal(get(gca,'XTickLabel'),{'First','Second'}));" },
         },
         BuiltinExample {
             id: "boxplot-horizontal", title: "Use horizontal orientation and a custom whisker length",
@@ -117,7 +117,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>0);" },
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "xt = get(gca,'XLim'); yt = get(gca,'YTick'); assert(numel(h)>0); assert(xt(2)>=100); assert(numel(yt)==1 && yt(1)==1);" },
         },
         BuiltinExample {
             id: "boxplot-filled-comparison-interval", title: "Draw a filled box and median comparison markers",
@@ -137,7 +137,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::BrowserGraphics,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>0);" },
+            verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(numel(h)>0); assert(numel(get(gca,'XTick'))==4); assert(numel(get(gca,'XTickLabel'))==4);" },
         },
     ],
     example_exemption: None,
