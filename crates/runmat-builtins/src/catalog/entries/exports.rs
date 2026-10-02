@@ -12,6 +12,7 @@ pub use super::datetime::*;
 pub use super::deep_learning::*;
 pub use super::finance::*;
 pub use super::graph::*;
+pub use super::image::*;
 pub use super::introspection::*;
 pub use super::io::*;
 pub use super::logical::*;

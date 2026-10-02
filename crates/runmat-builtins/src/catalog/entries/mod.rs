@@ -14,6 +14,7 @@ mod datetime;
 mod deep_learning;
 mod finance;
 mod graph;
+mod image;
 mod introspection;
 pub(in crate::catalog) mod io;
 mod logical;
@@ -44,6 +45,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     deep_learning::extend_entries(values);
     finance::extend_entries(values);
     graph::extend_entries(values);
+    image::extend_entries(values);
     introspection::extend_entries(values);
     io::extend_entries(values);
     logical::extend_entries(values);
