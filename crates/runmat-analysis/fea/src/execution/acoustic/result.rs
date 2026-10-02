@@ -47,6 +47,7 @@ struct ResultData {
     mean_impedance_loss_w: f64,
     power_relative_error: f64,
     source_evidence: Vec<SpatialProjectionEvidence>,
+    uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
 }
 impl TryFrom<ResultData> for AcousticHarmonicSolverResult {
     type Error = AnalysisExecutionError;
@@ -95,6 +96,7 @@ impl AcousticHarmonicSolverResult {
             mean_impedance_loss_w: response.mean_impedance_loss_w,
             power_relative_error: response.power_relative_error,
             source_evidence: response.source_evidence,
+            uniqueness: response.uniqueness,
         };
         let result = Self::try_from(data)?;
         result.validate_for(workload, mesh)?;
@@ -121,6 +123,28 @@ impl AcousticHarmonicSolverResult {
             d.solver.preconditioner,
         )
         .map_err(invalid)?;
+        match (d.solver.uniqueness, d.uniqueness) {
+            (None, None) => {}
+            (Some(policy), Some(record)) => {
+                record.validate().map_err(invalid)?;
+                if record.policy() != policy
+                    || record.dimension()
+                        > d.ordered_node_ids
+                            .len()
+                            .checked_mul(2)
+                            .ok_or_else(|| invalid("acoustic diagnostic dimension overflow"))?
+                {
+                    return Err(invalid(
+                        "acoustic uniqueness diagnostic policy or dimension mismatch",
+                    ));
+                }
+            }
+            _ => {
+                return Err(invalid(
+                    "acoustic uniqueness diagnostic missing or unrequested",
+                ))
+            }
+        }
         if d.formulation.family() != PhysicsFamily::Acoustic
             || d.formulation.procedure() != AnalysisProcedure::HarmonicResponse
             || d.iterations as usize > d.solver.maximum_iterations
@@ -239,6 +263,10 @@ impl AcousticHarmonicSolverResult {
     }
     pub fn source_evidence(&self) -> &[SpatialProjectionEvidence] {
         &self.data.source_evidence
+    }
+    /// Validated producer claim, not an independently replayed cold proof.
+    pub const fn uniqueness(&self) -> Option<crate::solve::uniqueness::SparseUniquenessRecord> {
+        self.data.uniqueness
     }
     pub fn intensity_w_per_m2(&self) -> &[[f64; 3]] {
         &self.data.intensity_w_per_m2

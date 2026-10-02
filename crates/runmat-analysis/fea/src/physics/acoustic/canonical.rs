@@ -12,6 +12,8 @@ mod boundary;
 mod periodic;
 mod recovery;
 mod response;
+mod uniqueness;
+pub(crate) use uniqueness::uniqueness_admission;
 #[cfg(test)]
 mod tests;
 
@@ -33,15 +35,27 @@ pub use response::CanonicalAcousticResponse;
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcousticHarmonicPolicy {
+    /// None explicitly requests only physical closure in the experimental CPU
+    /// library. Authored study planning always requests source-independent proof.
+    #[serde(deserialize_with = "deserialize_uniqueness")]
+    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessPolicy>,
     pub preconditioner: crate::contracts::SolverPreconditioner,
     pub relative_tolerance: f64,
     pub restart: usize,
     pub maximum_iterations: usize,
 }
 
+fn deserialize_uniqueness<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::solve::uniqueness::SparseUniquenessPolicy>, D::Error> {
+    // An explicit null is an experimental request, not a missing-field default.
+    serde::Deserialize::deserialize(deserializer)
+}
+
 impl Default for AcousticHarmonicPolicy {
     fn default() -> Self {
         Self {
+            uniqueness: None,
             preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
             relative_tolerance: 1e-9,
             restart: 64,
@@ -52,6 +66,11 @@ impl Default for AcousticHarmonicPolicy {
 
 impl AcousticHarmonicPolicy {
     pub fn validate(self, frequency: Frequency) -> Result<(), AcousticHarmonicError> {
+        if let Some(policy) = self.uniqueness {
+            policy
+                .validate()
+                .map_err(|error| AcousticHarmonicError::InvalidInput(error.to_string()))?;
+        }
         let frequency_hz = frequency.hertz;
         let omega = std::f64::consts::TAU * frequency_hz;
         if !frequency_hz.is_finite()
@@ -104,6 +123,16 @@ pub enum AcousticHarmonicError {
     },
     #[error("canonical acoustic solve was cancelled")]
     Cancelled,
+    #[error("canonical acoustic uniqueness admission or diagnostic failed: {0}")]
+    Uniqueness(crate::solve::uniqueness::SparseUniquenessError),
+    #[error("canonical acoustic uniqueness is indeterminate for original operator {operator_identity:?}: {reason:?}, completed_columns={completed_columns}, iterations={iterations}, defect_upper={defect_infinity_upper:?}; this is not a singularity diagnosis")]
+    UniquenessIndeterminate {
+        operator_identity: runmat_execution::Digest,
+        reason: crate::solve::uniqueness::SparseUniquenessUncertainty,
+        completed_columns: usize,
+        iterations: u64,
+        defect_infinity_upper: Option<f64>,
+    },
 }
 
 /// Solve one explicitly authored acoustic harmonic step on its sealed canonical mesh.
@@ -129,6 +158,8 @@ pub fn solve_canonical_harmonic(
         ));
     }
     let step = validate_input(model, step_id, frequency, policy)?;
+    // Count-only component ceiling precedes projection, assembly and diagnostics.
+    let uniqueness = uniqueness_admission(mesh, policy.uniqueness)?;
     let frequency_hz = frequency.hertz;
     let omega = std::f64::consts::TAU * frequency_hz;
     let projection = AnalysisProjection::derive(mesh)
@@ -152,7 +183,7 @@ pub fn solve_canonical_harmonic(
         sample,
     )?;
     let assembly = assembly.with_periodic_constraints(mesh, model, step, &excitations)?;
-    response::solve(assembly, frequency_hz, policy, power_tolerance)
+    response::solve_admitted(assembly, frequency_hz, policy, power_tolerance, uniqueness)
 }
 
 pub(crate) fn validate_input<'a>(

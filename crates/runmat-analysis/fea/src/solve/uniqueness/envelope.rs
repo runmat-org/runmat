@@ -4,7 +4,8 @@ use crate::{
     solve::krylov::GmresWorkEnvelope,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SparseUniquenessEnvelope {
     pub scalar_operations: u64,
     pub resident_bytes: u64,
@@ -41,6 +42,7 @@ impl SparseUniquenessEnvelope {
         maximum_row_entries: usize,
         policy: SparseUniquenessPolicy,
     ) -> Result<Self, Error> {
+        policy.validate()?;
         if dimension == 0
             || maximum_row_entries > dimension
             || !policy.candidate_relative_tolerance.is_finite()

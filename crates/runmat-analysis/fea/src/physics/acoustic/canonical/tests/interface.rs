@@ -285,6 +285,7 @@ fn two_fluid_interface_pressure_mean_velocity_and_power_refine() {
                         "acoustic",
                         Frequency::new(FREQUENCY),
                         AcousticHarmonicPolicy {
+                            uniqueness: None,
                             preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
                             relative_tolerance: 1e-11,
                             restart: 128,

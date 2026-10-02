@@ -22,6 +22,7 @@ fn sparse_reduction_and_physical_warm_starts_match_independent_phased_solution()
                 crate::contracts::SolverPreconditioner::Ilu0,
             ] {
                 let policy = AcousticHarmonicPolicy {
+                    uniqueness: None,
                     preconditioner,
                     relative_tolerance: 1e-12,
                     restart: 8,
@@ -153,6 +154,7 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
                 crate::contracts::SolverPreconditioner::Ilu0,
             ] {
                 let policy = AcousticHarmonicPolicy {
+                    uniqueness: None,
                     preconditioner,
                     relative_tolerance: 1e-12,
                     restart: 4,
@@ -402,6 +404,7 @@ fn free_phased_helmholtz_pressure_matches_independent_complex_dense_lifting() {
             } = solve(
                 &assembly,
                 AcousticHarmonicPolicy {
+                    uniqueness: None,
                     preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
                     relative_tolerance: 1e-12,
                     restart: 8,

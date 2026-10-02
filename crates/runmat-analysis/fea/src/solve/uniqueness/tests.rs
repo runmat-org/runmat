@@ -1,5 +1,6 @@
 use super::*;
 use crate::algebra::{MatrixProperties, OperatorRole, RealSparseAssembler};
+mod record;
 
 fn matrix(scale: f64, singular: bool) -> RealSparseMatrix {
     let values = if singular {

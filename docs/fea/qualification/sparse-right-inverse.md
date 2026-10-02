@@ -2,8 +2,9 @@
 
 The shared algebra `RightInverseCheck` is a sufficient nonsingularity check for
 any nonempty square real CSR operator, including the real block representation
-of a complex Helmholtz operator. It is not yet wired into authored acoustic
-accuracy/restart or release admission and does not close Stage 8.
+of a complex Helmholtz operator. Authored acoustic planning now requests its
+shared candidate provider; this does not close independent accuracy, restart,
+measured-resource or release qualification, nor Stage 8.
 
 For a candidate matrix B, let E=I−AB. If ||E||∞<1, the convergent Neumann series
 gives (AB)⁻¹=Σ Eᵏ. Thus AB and the square A are invertible. The candidate need not
@@ -51,8 +52,11 @@ produces a certificate.
 The shared count-only/actual-operator envelope covers all candidate columns,
 factor setup, repeated operator/triangular application, Krylov dots/updates, proof,
 coexisting factor/vector/identity storage. It excludes the original borrowed CSR.
-Admission occurs before factorization. This is a component demand, not yet a
-governed whole-task reservation, measured usage or an acoustic execution receipt.
+Admission occurs before factorization. Acoustic task planning adds the complete
+component demand to coexisting original operators, physical factor/workspaces,
+result/receipt/profile construction and transport reservations. Native workers
+rederive the whole plan from authoritative workload/mesh before execution. This
+is requested-heap/work admission, not measured resource usage or wall-time prediction.
 
 On original canonical matched ducts (Tet4/Tet10, cells1/2/4), ILU-only candidates
 have outward defects2.30–5.84 and cannot prove uniqueness. A test candidate policy
@@ -74,5 +78,34 @@ Neither candidate method establishes uniqueness there. Floating representation
 may move an exact mathematical pole, so the diagnostic stays indeterminate rather
 than claiming exact floating-matrix rank from a small null-vector residual.
 
-Authored result/accuracy/receipt/publication, full task admission, cold diagnostic
-transport and independent continuum cavity/conditioning evidence remain required.
+## Governed acoustic diagnostic gate and cold semantics
+
+`AcousticStudyPlanningPolicy` requires explicit candidate controls, independent
+of physical residual/power targets. The bounded default is candidate tolerance1e-6,
+restart64 and128 iterations per column. It is only a construction policy: acceptance
+still requires the outward defect below1. The experimental direct library can
+explicitly request no diagnostic; missing controls are not silently defaulted when
+decoding its numerical policy. These unrequested results establish physical closure
+only and acquire no uniqueness or production qualification.
+
+The original affine-reduced real CSR is certified once before physical-RHS acceptance
+and reused by every power-refinement correction. Any indeterminate outcome rejects
+the requested solve with original operator digest, reason, completed columns and
+diagnostic iterations. Cancellation stays cancellation; no failed factor is labeled
+singular. A fully prescribed pressure has an explicit zero-free-unknown diagnostic,
+not an absent record. Success never substitutes for original residual/power gates.
+
+Results retain operator/candidate identities, dimension, outward bound, proof controls
+and diagnostic iterations; the exact numerical receipt retains the same claim.
+Canonical result identity and publication source digests include these bytes. Cold
+imports validate required evidence shape/control consistency and exact original
+workload/mesh/result/receipt provenance without assembly or physical-field re-solving.
+This is **producer-claim lineage validation**, not independent mathematical replay:
+candidate columns were discarded, and hashes cannot re-prove the inequality.
+`SparseUniquenessRecord` is deliberately distinct from serialize-only
+`RightInverseCertificate`; there is no conversion from decoded claim to trusted proof.
+A well-shaped fabricated digest changes result identity and fails against the retained
+original receipt. Independent cold algebra revalidation still requires an explicitly
+admitted retained witness or candidate replay. General conditioning, continuum field
+accuracy, source-independent cavity/resonance envelopes, measured usage and release
+qualification remain open.

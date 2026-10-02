@@ -5,14 +5,37 @@ use thiserror::Error;
 
 mod envelope;
 pub use envelope::SparseUniquenessEnvelope;
+mod record;
+pub use record::SparseUniquenessRecord;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SparseUniquenessPolicy {
     pub candidate_relative_tolerance: f64,
     pub restart: usize,
     pub maximum_iterations_per_column: usize,
 }
 impl SparseUniquenessPolicy {
+    pub const fn bounded() -> Self {
+        Self {
+            candidate_relative_tolerance: 1.0e-6,
+            restart: 64,
+            maximum_iterations_per_column: 128,
+        }
+    }
+
+    pub fn validate(self) -> Result<(), SparseUniquenessError> {
+        if !self.candidate_relative_tolerance.is_finite()
+            || !(0.0..1.0).contains(&self.candidate_relative_tolerance)
+            || self.candidate_relative_tolerance == 0.0
+            || self.restart == 0
+            || self.maximum_iterations_per_column == 0
+        {
+            return Err(SparseUniquenessError::Invalid);
+        }
+        Ok(())
+    }
+
     fn krylov(self) -> GmresPolicy {
         GmresPolicy {
             relative_tolerance: self.candidate_relative_tolerance,
@@ -43,7 +66,7 @@ pub enum SparseUniquenessVerdict {
     },
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum SparseUniquenessError {
     #[error("invalid sparse uniqueness shape or candidate policy")]
     Invalid,

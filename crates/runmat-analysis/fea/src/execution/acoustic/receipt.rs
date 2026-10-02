@@ -18,6 +18,7 @@ pub struct AcousticNumericalReceipt {
     pub power_relative_error: f64,
     pub solver_relative_tolerance: f64,
     pub power_balance_relative_tolerance: f64,
+    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -68,6 +69,7 @@ impl AcousticNumericalReceiptArtifact {
             power_relative_error: result.power_relative_error(),
             solver_relative_tolerance: workload.solver.relative_tolerance,
             power_balance_relative_tolerance: workload.power_balance_relative_tolerance,
+            uniqueness: result.uniqueness(),
         };
         let source_workload = workload.identity()?;
         let source_result = result.source_result_identity()?;
@@ -95,6 +97,9 @@ impl AcousticNumericalReceiptArtifact {
     }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let r = self.receipt;
+        if let Some(record) = r.uniqueness {
+            record.validate().map_err(invalid)?;
+        }
         if self.schema_version != 1
             || !r.frequency_hz.is_finite()
             || r.frequency_hz <= 0.0

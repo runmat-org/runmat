@@ -27,20 +27,35 @@ pub struct CanonicalAcousticResponse {
     pub mean_impedance_loss_w: f64,
     pub power_relative_error: f64,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
+    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
 }
 
+#[cfg(test)]
 pub(super) fn solve(
     assembly: AcousticAssembly,
     frequency_hz: f64,
     policy: AcousticHarmonicPolicy,
     power_tolerance: f64,
 ) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
-    let (solution, power) = refinement::solve(&assembly, policy, power_tolerance)?;
+    // Assembly-level tests that request proof must supply its complete admission.
+    solve_admitted(assembly, frequency_hz, policy, power_tolerance, None)
+}
+
+pub(super) fn solve_admitted(
+    assembly: AcousticAssembly,
+    frequency_hz: f64,
+    policy: AcousticHarmonicPolicy,
+    power_tolerance: f64,
+    uniqueness: Option<crate::solve::uniqueness::SparseUniquenessEnvelope>,
+) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
+    let (solution, power) =
+        refinement::solve_admitted(&assembly, policy, power_tolerance, uniqueness)?;
     let reduced::ReducedSolution {
         real,
         imaginary,
         iterations,
         relative_residual,
+        uniqueness,
         ..
     } = solution;
     let power::PowerClosure {
@@ -90,5 +105,6 @@ pub(super) fn solve(
         mean_impedance_loss_w,
         power_relative_error,
         source_evidence: assembly.source_evidence,
+        uniqueness,
     })
 }

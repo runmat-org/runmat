@@ -1,17 +1,27 @@
 //! Residual and power acceptance share one finite authored Krylov budget.
 use super::{power, reduced, AcousticAssembly, AcousticHarmonicError, AcousticHarmonicPolicy};
 
+#[cfg(test)]
 pub(super) fn solve(
     assembly: &AcousticAssembly,
     policy: AcousticHarmonicPolicy,
     power_tolerance: f64,
+) -> Result<(reduced::ReducedSolution, power::PowerClosure), AcousticHarmonicError> {
+    solve_admitted(assembly, policy, power_tolerance, None)
+}
+
+pub(super) fn solve_admitted(
+    assembly: &AcousticAssembly,
+    policy: AcousticHarmonicPolicy,
+    power_tolerance: f64,
+    uniqueness: Option<crate::solve::uniqueness::SparseUniquenessEnvelope>,
 ) -> Result<(reduced::ReducedSolution, power::PowerClosure), AcousticHarmonicError> {
     if !power_tolerance.is_finite() || power_tolerance <= 0.0 || power_tolerance >= 1.0 {
         return Err(AcousticHarmonicError::InvalidInput(
             "power closure tolerance".into(),
         ));
     }
-    let prepared = reduced::PreparedReduced::new(assembly, policy)?;
+    let prepared = reduced::PreparedReduced::new_admitted(assembly, policy, uniqueness)?;
     let mut initial = None;
     let mut tolerance = policy.relative_tolerance;
     let mut iterations = 0_u32;

@@ -80,6 +80,17 @@ fn original_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs() {
         crate::solve::uniqueness::SparseUniquenessVerdict::Indeterminate { .. }
     ));
     let frequency = assembly.omega / std::f64::consts::TAU;
+    let required = AcousticHarmonicPolicy {
+        uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
+        ..policy
+    };
+    let admission =
+        crate::physics::acoustic::canonical_uniqueness_admission(&mesh, required.uniqueness)
+            .unwrap();
+    assert!(matches!(
+        super::super::PreparedReduced::new_admitted(&assembly, required, admission),
+        Err(super::super::AcousticHarmonicError::UniquenessIndeterminate { .. })
+    ));
     let response = super::super::super::solve(assembly, frequency, policy, 1e-8).unwrap();
     assert_eq!(response.relative_residual, 0.0);
     assert_eq!(response.power_relative_error, 0.0);
@@ -87,6 +98,82 @@ fn original_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs() {
         .pressure_pa
         .iter()
         .all(|p| p.real == 0.0 && p.imaginary == 0.0));
+}
+
+#[test]
+fn original_phase_operator_proof_is_reused_and_underadmission_rejects() {
+    let assembly = super::assembly(0.731, 1.0);
+    let policy = AcousticHarmonicPolicy {
+        uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
+        ..Default::default()
+    };
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let admission =
+        crate::physics::acoustic::canonical_uniqueness_admission(&mesh, policy.uniqueness)
+            .unwrap()
+            .unwrap();
+    let prepared =
+        super::super::PreparedReduced::new_admitted(&assembly, policy, Some(admission)).unwrap();
+    let record = prepared.uniqueness.unwrap();
+    assert_eq!(
+        record.operator_identity(),
+        prepared.operator.numerical_identity().unwrap()
+    );
+    assert_eq!(record.dimension(), 4);
+    assert!(record.defect_infinity_upper().unwrap() < 1.0);
+    let solved = prepared.solve(&assembly, policy, None).unwrap();
+    let warm = prepared
+        .solve(&assembly, policy, Some(&solved.coordinates))
+        .unwrap();
+    assert_eq!(solved.uniqueness, warm.uniqueness);
+    assert_eq!(warm.iterations, 0);
+    assert!(matches!(
+        super::super::PreparedReduced::new_admitted(
+            &assembly,
+            policy,
+            Some(crate::solve::uniqueness::SparseUniquenessEnvelope {
+                resident_bytes: 0,
+                ..admission
+            })
+        ),
+        Err(super::super::AcousticHarmonicError::Uniqueness(
+            crate::solve::uniqueness::SparseUniquenessError::Admission
+        ))
+    ));
+}
+
+#[test]
+fn fully_prescribed_original_pressure_has_explicit_zero_free_diagnostic() {
+    let mut assembly = super::assembly(0.0, 1.0);
+    assembly.prescribed = vec![
+        Some(crate::excitation::ProjectionScalar {
+            real: 0.0,
+            imaginary: 0.0
+        });
+        4
+    ];
+    assembly.reduction = None;
+    let policy = AcousticHarmonicPolicy {
+        uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
+        ..Default::default()
+    };
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let admission =
+        crate::physics::acoustic::canonical_uniqueness_admission(&mesh, policy.uniqueness).unwrap();
+    let prepared =
+        super::super::PreparedReduced::new_admitted(&assembly, policy, admission).unwrap();
+    let record = prepared.uniqueness.unwrap();
+    assert_eq!(record.dimension(), 0);
+    assert_eq!(record.iterations(), 0);
+    assert_eq!(record.defect_infinity_upper(), None);
+    assert_eq!(
+        record.operator_identity(),
+        prepared.operator.numerical_identity().unwrap()
+    );
+    assert_eq!(
+        prepared.solve(&assembly, policy, None).unwrap().uniqueness,
+        Some(record)
+    );
 }
 
 #[test]

@@ -84,7 +84,12 @@ fn task_with_constraint_name(
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
         formulation_requirement: FormulationRequirement::Experimental,
-        solver: AcousticHarmonicPolicy::default(),
+        solver: AcousticHarmonicPolicy {
+            uniqueness: Some(
+                runmat_analysis_fea::solve::uniqueness::SparseUniquenessPolicy::bounded(),
+            ),
+            ..Default::default()
+        },
         power_balance_relative_tolerance: 1e-8,
     };
     let mesh = canonical_tetrahedron_solver_mesh(order);
@@ -333,44 +338,64 @@ fn acoustic_task_submission_requires_the_exact_resource_allocation() {
 
 #[test]
 fn native_acoustic_rejects_valid_but_substituted_resource_plan() {
-    let (_, _, mut task) = task(ElementOrder::Tet4, 1024);
-    let mut input = task.resource_plan.input.clone();
-    input.worker.fixed_memory_bytes.0 += 1;
-    let substituted = runmat_analysis_fea::planning::resource::build_resource_plan(input).unwrap();
-    task.inputs[2] = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ResourcePlan,
-        substituted.identity.digest(),
-        &substituted.canonical_bytes().unwrap(),
-        1024,
-        ObjectNamespace::InputValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    task.host.workload.execution_plan = ExecutionPlanIdentity::new(
-        NumericalPlanIdentity::from_acoustic_workload(
-            AcousticHarmonicWorkload::from_canonical_bytes(&task.inputs[0].payload())
-                .unwrap()
-                .identity()
-                .unwrap(),
-            task.inputs[1].manifest.logical_identity,
+    for substitution in 0..3 {
+        let (_, _, mut task) = task(ElementOrder::Tet4, 1024);
+        let mut input = task.resource_plan.input.clone();
+        match substitution {
+            0 => input.worker.fixed_memory_bytes.0 += 1,
+            1 | 2 => {
+                let runmat_analysis_fea::planning::resource::FeaResourceDemand::AcousticHarmonic(
+                    demand,
+                ) = &mut input.demand
+                else {
+                    panic!("acoustic demand")
+                };
+                let proof = demand.uniqueness.as_mut().unwrap();
+                if substitution == 1 {
+                    proof.resident_bytes -= 1;
+                } else {
+                    proof.scalar_operations -= 1;
+                }
+            }
+            _ => unreachable!(),
+        }
+        let substituted =
+            runmat_analysis_fea::planning::resource::build_resource_plan(input).unwrap();
+        task.inputs[2] = prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            substituted.identity.digest(),
+            &substituted.canonical_bytes().unwrap(),
+            1024,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
         )
-        .unwrap(),
-        substituted.identity.digest(),
-    )
-    .unwrap();
-    let error = NativeAnalysisKernel
-        .execute(AnalysisKernelInvocation {
-            kind: AnalysisWorkKind::SolveAcousticHarmonic,
-            host: &task.host,
-            inputs: &task.inputs,
-            output_policy: AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default())
-                .unwrap(),
-        })
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("authoritative inputs"),
-        "{error}"
-    );
+        .unwrap();
+        task.host.workload.execution_plan = ExecutionPlanIdentity::new(
+            NumericalPlanIdentity::from_acoustic_workload(
+                AcousticHarmonicWorkload::from_canonical_bytes(&task.inputs[0].payload())
+                    .unwrap()
+                    .identity()
+                    .unwrap(),
+                task.inputs[1].manifest.logical_identity,
+            )
+            .unwrap(),
+            substituted.identity.digest(),
+        )
+        .unwrap();
+        let error = NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::SolveAcousticHarmonic,
+                host: &task.host,
+                inputs: &task.inputs,
+                output_policy: AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default())
+                    .unwrap(),
+            })
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("authoritative inputs"),
+            "{error}"
+        );
+    }
 }
 
 #[test]

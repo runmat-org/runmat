@@ -34,10 +34,11 @@ const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 // Only the fixed result keys, producer/fixed-width identity/digest values, six vector headers,
 // frequency/solver/tolerance/residual/power/iteration scalars and contract prefix. Even counting
-// every key at 64 bytes and every summary scalar at 9 bytes this fits 4096 bytes. The formulation
+// every key at 64 bytes and every summary scalar at 9 bytes, including uniqueness
+// controls, operator/candidate digests and claim, fits 8192 bytes. The formulation
 // realization is independently profiled below (its vectors are not covered by this constant).
 // Authored strings are separately profiled using their declaration and shared evidence wire.
-const CLOSED_RESULT_SCHEMA_BYTES: u64 = 4096;
+const CLOSED_RESULT_SCHEMA_BYTES: u64 = 8192;
 
 fn invalid(error: impl std::fmt::Display) -> ResourcePlanningError {
     ResourcePlanningError::Invalid(error.to_string())
@@ -163,6 +164,9 @@ pub fn build_acoustic_resource_plan(
     prepared: PreparedAcousticResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let payload_bound = acoustic_harmonic_result_payload_bytes_upper_bound(workload, mesh)?;
+    let uniqueness =
+        crate::physics::acoustic::canonical_uniqueness_admission(mesh, workload.solver.uniqueness)
+            .map_err(invalid)?;
     let state_profiles = workload
         .state_publication_profiles_encoding_profile(Digest::from_bytes(
             *mesh.canonical_digest.bytes(),
@@ -287,6 +291,7 @@ pub fn build_acoustic_resource_plan(
         phase_constraints,
         metadata,
         evidence.materialization_resident_bytes_estimate,
+        uniqueness.map_or(0, |envelope| envelope.resident_bytes),
     ]
     .into_iter()
     .try_fold(0u64, add)?;
@@ -305,6 +310,7 @@ pub fn build_acoustic_resource_plan(
             recovery_row_support_upper_bound: Count(recovery_row_support),
             preconditioner: workload.solver.preconditioner,
             sparse_solve_reservation_bytes: ByteCount(sparse_solve),
+            uniqueness,
             numerical_reservation_bytes: ByteCount(reservation),
             inputs: prepared.inputs,
             result_output: prepared.result_output,

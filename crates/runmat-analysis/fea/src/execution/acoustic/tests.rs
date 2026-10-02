@@ -49,12 +49,15 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
         frequency: Frequency::new(0.2),
         formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy {
+            uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
             relative_tolerance: 1e-10,
             ..Default::default()
         },
         power_balance_relative_tolerance: 1e-8,
     }
 }
+
+mod uniqueness;
 
 #[test]
 fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage() {

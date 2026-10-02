@@ -18,13 +18,23 @@ pub(super) struct PreparedReduced {
     residual_reference: f64,
     preconditioner: Option<SparseRightIlu>,
     size: usize,
+    uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
 }
 
 impl PreparedReduced {
     /// Prepared once per unchanged numerical operator, reused by power refinement.
+    #[cfg(test)]
     pub(super) fn new(
         assembly: &AcousticAssembly,
         policy: AcousticHarmonicPolicy,
+    ) -> Result<Self, AcousticHarmonicError> {
+        Self::new_admitted(assembly, policy, None)
+    }
+
+    pub(super) fn new_admitted(
+        assembly: &AcousticAssembly,
+        policy: AcousticHarmonicPolicy,
+        admitted: Option<crate::solve::uniqueness::SparseUniquenessEnvelope>,
     ) -> Result<Self, AcousticHarmonicError> {
         check_cancelled()?;
         let reduction = match &assembly.reduction {
@@ -44,6 +54,9 @@ impl PreparedReduced {
         let operator = reduction
             .reduce_sparse_operator(&full_operator)
             .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
+        // Source-independent, once per unchanged original reduced operator,
+        // before physical RHS acceptance or physical preconditioner construction.
+        let uniqueness = super::super::uniqueness::certify(&operator, policy.uniqueness, admitted)?;
         let (mut lifting, lifting_imaginary) = assembly.apply(
             &reduction.offset[..assembly.projection.nodes.len()],
             &reduction.offset[assembly.projection.nodes.len()..],
@@ -103,6 +116,7 @@ impl PreparedReduced {
             residual_reference,
             preconditioner,
             size: assembly.projection.nodes.len(),
+            uniqueness,
         })
     }
 
@@ -223,6 +237,7 @@ impl PreparedReduced {
             coordinates: solution,
             iterations,
             relative_residual,
+            uniqueness: self.uniqueness,
         })
     }
 
@@ -282,4 +297,5 @@ pub(super) struct ReducedSolution {
     pub coordinates: Vec<f64>,
     pub iterations: u32,
     pub relative_residual: f64,
+    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
 }

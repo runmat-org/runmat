@@ -60,6 +60,7 @@ fn workload() -> AcousticHarmonicWorkload {
         frequency: Frequency::new(0.2),
         formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy {
+            uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
             relative_tolerance: 1e-10,
             ..Default::default()
         },
@@ -216,6 +217,46 @@ fn acoustic_prepared_byte_facts_and_production_fail_closed() {
     }
     workload.formulation_requirement = FormulationRequirement::Production;
     assert!(acoustic_harmonic_result_payload_bytes_upper_bound(&workload, &mesh).is_err());
+}
+
+#[test]
+fn uniqueness_reservation_is_additive_identity_bound_and_missing_budget_rejects() {
+    let mesh = slab_mesh(1);
+    let workload = workload();
+    let planned = build_acoustic_resource_plan(&workload, &mesh, facts(&workload, &mesh)).unwrap();
+    let expected =
+        crate::physics::acoustic::canonical_uniqueness_admission(&mesh, workload.solver.uniqueness)
+            .unwrap()
+            .unwrap();
+    let FeaResourceDemand::AcousticHarmonic(demand) = &planned.input.demand else {
+        panic!("acoustic demand")
+    };
+    assert_eq!(demand.uniqueness, Some(expected));
+    assert!(expected.scalar_operations > 0);
+    let mut closure_only = workload.clone();
+    closure_only.solver.uniqueness = None;
+    let plain =
+        build_acoustic_resource_plan(&closure_only, &mesh, facts(&closure_only, &mesh)).unwrap();
+    let FeaResourceDemand::AcousticHarmonic(plain_demand) = &plain.input.demand else {
+        panic!("acoustic demand")
+    };
+    assert_eq!(
+        demand.numerical_reservation_bytes.0 - plain_demand.numerical_reservation_bytes.0,
+        expected.resident_bytes
+    );
+    assert_ne!(planned.identity, plain.identity);
+    let mut bad = planned.input.clone();
+    let FeaResourceDemand::AcousticHarmonic(demand) = &mut bad.demand else {
+        panic!("acoustic demand")
+    };
+    demand.uniqueness.as_mut().unwrap().scalar_operations = 0;
+    assert!(build_resource_plan(bad).is_err());
+    let mut bad = planned.input.clone();
+    let FeaResourceDemand::AcousticHarmonic(demand) = &mut bad.demand else {
+        panic!("acoustic demand")
+    };
+    demand.numerical_reservation_bytes.0 = demand.sparse_solve_reservation_bytes.0;
+    assert!(build_resource_plan(bad).is_err());
 }
 
 #[test]

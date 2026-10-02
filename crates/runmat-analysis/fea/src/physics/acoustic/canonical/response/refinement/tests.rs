@@ -65,6 +65,7 @@ fn loose_linear_stop_does_not_authorize_power_and_refinement_matches_complex_div
     for amplitude in [1., 1e-12] {
         let assembly = assembly(amplitude);
         let policy = AcousticHarmonicPolicy {
+            uniqueness: None,
             preconditioner: crate::contracts::SolverPreconditioner::None,
             relative_tolerance: 0.99,
             restart: 8,
@@ -97,6 +98,7 @@ fn power_refinement_cannot_reset_or_enlarge_the_authored_iteration_budget() {
     let error = solve(
         &assembly(1.),
         AcousticHarmonicPolicy {
+            uniqueness: None,
             preconditioner: crate::contracts::SolverPreconditioner::None,
             relative_tolerance: 0.99,
             restart: 8,
