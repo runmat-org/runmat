@@ -57,8 +57,12 @@ impl GroupIndex {
             .await
             .map_err(GroupIndexBuildError::Service)?;
         loop {
-            match builder.step().map_err(GroupIndexBuildError::Invalid)? {
-                BuildProgress::Work(units) => budget
+            let mut units = 0;
+            match builder
+                .step(Some(&mut units))
+                .map_err(GroupIndexBuildError::Invalid)?
+            {
+                BuildProgress::Work => budget
                     .checkpoint(units)
                     .await
                     .map_err(GroupIndexBuildError::Service)?,
@@ -69,10 +73,7 @@ impl GroupIndex {
 
     fn build_from_builder(mut builder: GroupIndexBuilder) -> Result<Self, String> {
         loop {
-            match builder.step()? {
-                #[cfg(any(feature = "plot-core", test))]
-                BuildProgress::Work(_) => {}
-                #[cfg(not(any(feature = "plot-core", test)))]
+            match builder.step(None)? {
                 BuildProgress::Work => {}
                 BuildProgress::Complete(index) => return Ok(index),
             }

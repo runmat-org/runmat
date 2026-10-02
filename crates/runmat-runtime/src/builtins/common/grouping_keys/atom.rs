@@ -15,7 +15,6 @@ pub(crate) enum KeyAtom {
 
 /// Approximate the work of visiting and copying one typed group key. This is
 /// scheduling work, not a memory reservation or a bound on map comparisons.
-#[cfg(any(feature = "plot-core", test))]
 pub(crate) fn group_key_work_units(key: &[KeyAtom]) -> u64 {
     key.iter().fold(1u64, |units, atom| {
         let component = match atom {
