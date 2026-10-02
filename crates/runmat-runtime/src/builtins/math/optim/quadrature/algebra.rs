@@ -13,7 +13,13 @@ const COMPONENT_CHUNK: usize = 4096;
 pub(crate) enum QuadratureArithmeticError {
     Resource(TryReserveError),
     InconsistentComponents,
-    Execution(RuntimeError),
+    Execution(Box<RuntimeError>),
+}
+
+impl QuadratureArithmeticError {
+    fn execution(source: RuntimeError) -> Self {
+        Self::Execution(Box::new(source))
+    }
 }
 
 pub(crate) trait AdaptiveEstimate: Clone {
@@ -139,13 +145,13 @@ impl ArrayEstimate {
                 evaluator
                     .charge(COMPONENT_CHUNK as u64)
                     .await
-                    .map_err(QuadratureArithmeticError::Execution)?;
+                    .map_err(QuadratureArithmeticError::execution)?;
             }
         }
         evaluator
             .charge((self.0.len() % COMPONENT_CHUNK) as u64)
             .await
-            .map_err(QuadratureArithmeticError::Execution)?;
+            .map_err(QuadratureArithmeticError::execution)?;
         Ok(Self(Arc::new(values)))
     }
 
@@ -164,13 +170,13 @@ impl ArrayEstimate {
                 evaluator
                     .charge(COMPONENT_CHUNK as u64)
                     .await
-                    .map_err(QuadratureArithmeticError::Execution)?;
+                    .map_err(QuadratureArithmeticError::execution)?;
             }
         }
         evaluator
             .charge((self.0.len() % COMPONENT_CHUNK) as u64)
             .await
-            .map_err(QuadratureArithmeticError::Execution)?;
+            .map_err(QuadratureArithmeticError::execution)?;
         Ok(Self(Arc::new(values)))
     }
 }
@@ -230,13 +236,13 @@ impl AdaptiveEstimate for ArrayEstimate {
                 evaluator
                     .charge(COMPONENT_CHUNK as u64)
                     .await
-                    .map_err(QuadratureArithmeticError::Execution)?;
+                    .map_err(QuadratureArithmeticError::execution)?;
             }
         }
         evaluator
             .charge((self.0.len() % COMPONENT_CHUNK) as u64)
             .await
-            .map_err(QuadratureArithmeticError::Execution)?;
+            .map_err(QuadratureArithmeticError::execution)?;
         Ok(true)
     }
 }
@@ -267,13 +273,13 @@ impl QuadratureSample for Arc<Vec<f64>> {
                 evaluator
                     .charge(COMPONENT_CHUNK as u64)
                     .await
-                    .map_err(QuadratureArithmeticError::Execution)?;
+                    .map_err(QuadratureArithmeticError::execution)?;
             }
         }
         evaluator
             .charge((fa.len() % COMPONENT_CHUNK) as u64)
             .await
-            .map_err(QuadratureArithmeticError::Execution)?;
+            .map_err(QuadratureArithmeticError::execution)?;
         Ok(ArrayEstimate(Arc::new(components)))
     }
 }

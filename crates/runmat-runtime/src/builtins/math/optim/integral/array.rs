@@ -293,9 +293,7 @@ fn finish(shape: Vec<usize>, values: Vec<f64>) -> BuiltinResult<Value> {
     } else {
         Tensor::new(values, shape)
             .map(Value::Tensor)
-            .map_err(|error| {
-                integral_error_with_detail(&INTEGRAL_ERROR_INVALID_INPUT, error.to_string())
-            })
+            .map_err(|error| integral_error_with_detail(&INTEGRAL_ERROR_INVALID_INPUT, &error))
     }
 }
 

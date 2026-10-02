@@ -57,7 +57,7 @@ fn integral_map_error(
         err
     } else {
         let mut mapped = integral_error_with_detail(fallback, err.message());
-        mapped.span = err.span.clone();
+        mapped.span = err.span;
         mapped.context = err.context.clone();
         mapped.context.builtin = Some(NAME.to_string());
         mapped.gpu_gather_retry = err.gpu_gather_retry;
@@ -80,7 +80,7 @@ fn quadrature_arithmetic_error(error: QuadratureArithmeticError) -> RuntimeError
             &INTEGRAL_ERROR_INVALID_INPUT,
             "array-valued callback changed its output size",
         ),
-        QuadratureArithmeticError::Execution(source) => source,
+        QuadratureArithmeticError::Execution(source) => *source,
     }
 }
 
@@ -492,7 +492,7 @@ async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
 }
 
 fn scalar_bound_host(label: &str, value: &Value) -> BuiltinResult<f64> {
-    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(&value) {
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
         return Err(integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_INPUT,
             format!("{label} must be exactly representable as double"),

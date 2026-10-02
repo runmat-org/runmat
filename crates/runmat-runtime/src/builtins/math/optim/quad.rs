@@ -53,7 +53,7 @@ fn quad_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) 
         err
     } else {
         let mut mapped = quad_error_with_detail(fallback, err.message());
-        mapped.span = err.span.clone();
+        mapped.span = err.span;
         mapped.context = err.context.clone();
         mapped.context.builtin = Some(NAME.to_string());
         mapped.gpu_gather_retry = err.gpu_gather_retry;
@@ -76,7 +76,7 @@ fn quad_arithmetic_error(error: QuadratureArithmeticError) -> RuntimeError {
             &QUAD_ERROR_INVALID_INPUT,
             "callback changed its output size",
         ),
-        QuadratureArithmeticError::Execution(source) => source,
+        QuadratureArithmeticError::Execution(source) => *source,
     }
 }
 
@@ -503,7 +503,7 @@ async fn parse_optional_trace(value: Value) -> BuiltinResult<bool> {
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.len() == 0,
+        Value::Tensor(tensor) => tensor.is_empty(),
         Value::LogicalArray(LogicalArray { data, .. }) => data.is_empty(),
         _ => false,
     }
