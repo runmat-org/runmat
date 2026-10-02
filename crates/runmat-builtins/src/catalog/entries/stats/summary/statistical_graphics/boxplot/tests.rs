@@ -63,6 +63,39 @@ fn known_valid_matrix_proves_row_vector_double_handle_class() {
 }
 
 #[test]
+fn ungrouped_vector_and_matrix_admit_one_factor_controls() {
+    let name = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    for shape in [vec![Some(2), Some(1)], vec![Some(2), Some(2)]] {
+        let result = call(
+            vec![
+                real(shape),
+                name.clone(),
+                real(vec![Some(1), Some(1)]),
+                name.clone(),
+                real(vec![Some(1), Some(1)]),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("FactorSeparator".into()),
+                LiteralValue::Number(1.0),
+                LiteralValue::String("FactorGap".into()),
+                LiteralValue::Number(10.0),
+            ],
+            1,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(
+            result.outputs[0].numeric().unwrap().class,
+            NumericClass::Double
+        );
+    }
+}
+
+#[test]
 fn invalid_data_and_group_lengths_do_not_prove_handles() {
     let invalid_rank = call(vec![real(vec![Some(2), Some(2), Some(2)])], vec![], 1);
     assert!(!invalid_rank.diagnostics.is_empty());

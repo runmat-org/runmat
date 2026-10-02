@@ -580,6 +580,35 @@ fn later_factor_control_override_owns_count_validation() {
 }
 
 #[test]
+fn ungrouped_vector_and_matrix_have_one_synthetic_factor() {
+    assert_eq!(admission::known_factor_count(None), Some(1));
+    for (data, shape) in [
+        (vec![1.0, 2.0], vec![2, 1]),
+        (vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]),
+    ] {
+        let options = BoxplotOptions {
+            factor_separator: FactorSeparator::Factors(vec![1]),
+            factor_gap: FactorGap::Percentages(vec![10.0]),
+            ..Default::default()
+        };
+        let plan = BoxplotOptionPlan::admit(
+            vec![
+                Value::from("FactorSeparator"),
+                Value::Num(1.0),
+                Value::from("FactorGap"),
+                Value::Num(10.0),
+            ],
+            None,
+        )
+        .unwrap();
+        plan.preflight_known_factor_count(admission::known_factor_count(None))
+            .expect("ungrouped data contributes one synthetic factor");
+        let layout = groups::build_box_layout(tensor(data, shape), None, &options).unwrap();
+        assert!(layout.boxes.iter().all(|stats| stats.group_key.len() == 1));
+    }
+}
+
+#[test]
 fn scalar_text_options_reject_containers_but_factor_direction_accepts_text_vector() {
     let cell = Value::Cell(CellArray::new(vec![Value::String("outline".into())], 1, 1).unwrap());
     assert!(BoxplotOptions::parse(vec![Value::from("BoxStyle"), cell]).is_err());

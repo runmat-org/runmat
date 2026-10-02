@@ -322,7 +322,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             {
                 None
             } else {
-                Some(usize::from(second_is_group))
+                Some(1)
             };
             if second_is_group && bad_group(&args[1], first) {
                 diagnostics.push(InferenceDiagnostic::error(
