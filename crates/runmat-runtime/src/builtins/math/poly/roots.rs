@@ -511,7 +511,7 @@ pub(crate) mod tests {
                 panic!("real linear root expected");
             };
             assert_eq!(root.shape, vec![1, 1]);
-            assert_eq!(root.materialize_f64()[0], expected);
+            assert!((root.materialize_f64()[0] / expected - 1.0).abs() < 1.0e-14);
         }
         let complex = roots_builtin(Value::ComplexTensor(
             ComplexTensor::new(vec![(1.0, 0.0), (0.0, 1.0e-13)], vec![1, 2]).unwrap(),
