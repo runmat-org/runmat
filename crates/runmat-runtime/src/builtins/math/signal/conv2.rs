@@ -707,10 +707,16 @@ async fn matrix_to_value(
     }
     let storage = if single_output {
         ComplexStorage::F32(
-            map_matrix_data(matrix.data, cooperation, |c| (c.re as f32, c.im as f32)).await?,
+            map_matrix_data(matrix.data, cooperation, |c| (c.re as f32, c.im as f32))
+                .await?
+                .into(),
         )
     } else {
-        ComplexStorage::F64(map_matrix_data(matrix.data, cooperation, |c| (c.re, c.im)).await?)
+        ComplexStorage::F64(
+            map_matrix_data(matrix.data, cooperation, |c| (c.re, c.im))
+                .await?
+                .into(),
+        )
     };
     let tensor = ComplexTensor::from_complex_storage(storage, vec![rows, cols])
         .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
