@@ -247,6 +247,51 @@ fn known_invalid_control_does_not_prove_result() {
 }
 
 #[test]
+fn typed_selector_tail_rejects_known_numeric_after_keyword() {
+    let result = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![
+                signal(
+                    NumericClass::Double,
+                    NumericDomain::Real,
+                    ResidencyFact::Host,
+                ),
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("maxhold".into()),
+                LiteralValue::Number(2.0),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PWELCH-RANGE"));
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn selector_identity_and_order_are_shared_with_runtime() {
+    assert_eq!(PwelchKeyword::decode(" MaxHold "), PwelchKeyword::MaxHold);
+    assert_eq!(PwelchKeyword::decode("Parent"), PwelchKeyword::Parent);
+    let mut cursor = PwelchControlCursor::default();
+    assert_eq!(cursor.next(None), PwelchControlRole::Window);
+    assert_eq!(
+        cursor.next(Some(&PwelchKeyword::MaxHold)),
+        PwelchControlRole::Option
+    );
+    assert_eq!(cursor.next(None), PwelchControlRole::Option);
+}
+
+#[test]
 fn complex_onesided_selector_has_no_success_fact() {
     let input = signal(
         NumericClass::Double,

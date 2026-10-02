@@ -1,6 +1,11 @@
+use super::{PwelchControlCursor, PwelchControlRole, PwelchKeyword};
 use crate::catalog::inference::{argument_error, literal_text};
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;
+
+fn known_keyword(literal: &LiteralValue) -> Option<PwelchKeyword> {
+    literal_text(literal).map(|text| PwelchKeyword::decode(&text))
+}
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -56,10 +61,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             .iter()
             .enumerate()
             .skip(1)
-            .find(|(_, literal)| {
-                literal_text(literal)
-                    .is_some_and(|text| text.trim().eq_ignore_ascii_case("onesided"))
-            })
+            .find(|(_, literal)| known_keyword(literal) == Some(PwelchKeyword::Onesided))
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-PWELCH-RANGE",
@@ -70,7 +72,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let mut parent_seen = false;
     for (index, literal) in request.literals.literal_args.iter().enumerate().skip(1) {
-        if !literal_text(literal).is_some_and(|text| text.eq_ignore_ascii_case("parent")) {
+        if known_keyword(literal) != Some(PwelchKeyword::Parent) {
             continue;
         }
         if parent_seen || index + 1 >= request.arguments.len() {
@@ -109,17 +111,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let mut positional_count = 0usize;
     let mut unknown_parent_name = false;
+    let mut cursor = PwelchControlCursor::default();
     let mut index = 1usize;
     while index < request.arguments.len() {
         let literal = request
             .literals
             .literal_args
             .get(index)
-            .and_then(literal_text);
-        if literal
-            .as_deref()
-            .is_some_and(|text| text.eq_ignore_ascii_case("parent"))
-        {
+            .and_then(known_keyword);
+        if literal == Some(PwelchKeyword::Parent) {
             index += if index + 1 < request.arguments.len() {
                 2
             } else {
@@ -134,6 +134,32 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             )
         {
             unknown_parent_name = true;
+        }
+        let role = cursor.next(literal.as_ref());
+        if !unknown_parent_name
+            && role == PwelchControlRole::Window
+            && matches!(literal.as_ref(), Some(PwelchKeyword::Unknown(_)))
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-PWELCH-WINDOW",
+                "pwelch window position does not accept this option",
+                index,
+            ));
+        }
+        if !unknown_parent_name
+            && role == PwelchControlRole::Option
+            && (matches!(literal.as_ref(), Some(PwelchKeyword::Unknown(_)))
+                || (literal.is_none()
+                    && matches!(
+                        request.arguments[index].kind,
+                        ValueKindFact::Numeric(_) | ValueKindFact::Logical
+                    )))
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-PWELCH-RANGE",
+                "pwelch selector tail requires a range, scale, or trace keyword",
+                index,
+            ));
         }
         positional_count += 1;
         index += 1;
@@ -223,8 +249,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 .literals
                 .literal_args
                 .get(index)
-                .and_then(literal_text)
-                .is_none_or(|name| name.eq_ignore_ascii_case("parent")),
+                .and_then(known_keyword)
+                .is_none_or(|name| name == PwelchKeyword::Parent),
             _ => false,
         });
     if request

@@ -46,19 +46,37 @@ pub(super) fn preflight_signal_carrier(value: &Value) -> BuiltinResult<bool> {
 
 pub(super) async fn value_to_signal_columns(
     value: Value,
+    prepared_integer: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<SignalColumns> {
     cooperation.completed(0).await?;
     match value {
         Value::GpuTensor(handle) => {
-            let provider = super::super::resident_output::owner(&handle, || {
-                pwelch_error(&PWELCH_ERROR_INTERNAL)
-            })?;
-            let value =
-                crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
-                    provider, &handle,
-                )
-                .await?;
+            let value = match prepared_integer {
+                Some(crate::builtins::common::validation::PreparedIntegerPayload::Real(
+                    gathered,
+                )) => Value::Tensor(
+                    Tensor::new_integer(
+                        crate::builtins::common::gpu_helpers::integer_storage_from_owned(
+                            gathered.data,
+                        ),
+                        gathered.shape,
+                    )
+                    .map_err(|cause| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, cause))?,
+                ),
+                Some(crate::builtins::common::validation::PreparedIntegerPayload::Complex(_)) => {
+                    return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
+                }
+                None => {
+                    let provider = super::super::resident_output::owner(&handle, || {
+                        pwelch_error(&PWELCH_ERROR_INTERNAL)
+                    })?;
+                    crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+                        provider, &handle,
+                    )
+                    .await?
+                }
+            };
             cooperation.completed(0).await?;
             match value {
                 Value::Tensor(tensor) => tensor_to_signal_columns(tensor, cooperation).await,
