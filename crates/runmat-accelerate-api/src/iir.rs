@@ -54,6 +54,9 @@ pub struct ProviderIirZeroPhaseRequest<'a> {
     pub input: &'a GpuTensorHandle,
     pub coefficients: &'a ProviderPreparedIirCoefficients,
     pub indices: &'a ProviderIirZeroPhaseIndexPlan,
+    /// Every caller-owned resident operand retained across provider stages.
+    /// These are alias exclusions, not a source of numerical coefficients.
+    pub borrowed: &'a [&'a GpuTensorHandle],
     pub initial_state: &'a [f64],
     pub axis: usize,
     pub reflection_len: usize,
@@ -85,9 +88,23 @@ impl ProviderIirZeroPhaseRequest<'_> {
     pub fn feasibility_query(&self) -> anyhow::Result<ProviderFeasibilityQuery> {
         let numerator = self.coefficients.numerator();
         let denominator = self.coefficients.denominator();
-        for handle in [self.input, numerator, denominator] {
+        for handle in [self.input, numerator, denominator]
+            .into_iter()
+            .chain(self.borrowed.iter().copied())
+        {
             handle.allocation_lease().validate_live()?;
+            handle.view().validate(handle.physical())?;
         }
+        let input_owner = provider_for_handle(self.input)
+            .ok_or_else(|| anyhow::anyhow!("iir_zero_phase: input allocation has no owner"))?;
+        anyhow::ensure!(
+            [numerator, denominator].into_iter().all(|handle| {
+                handle.device_id() == self.input.device_id()
+                    && provider_for_handle(handle)
+                        .is_some_and(|owner| same_provider_instance(input_owner, owner))
+            }),
+            "iir_zero_phase: prepared coefficients have a different device owner"
+        );
         anyhow::ensure!(
             numerator.shape().len() == 2
                 && numerator.shape()[1] == 1

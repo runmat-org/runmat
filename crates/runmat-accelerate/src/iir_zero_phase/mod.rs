@@ -53,25 +53,37 @@ fn check_owner(provider: &dyn AccelProvider, handle: &GpuTensorHandle) -> anyhow
 fn prepared_state(
     request: &ProviderIirZeroPhaseRequest<'_>,
     precision: ProviderPrecision,
-) -> anyhow::Result<Option<Vec<f32>>> {
-    ensure!(
-        request.initial_state.iter().all(|value| value.is_finite()),
-        "iir_zero_phase: nonfinite initial state"
-    );
-    if precision == ProviderPrecision::F64 {
-        return Ok(None);
+) -> ProviderExecutionResult<Option<Vec<f32>>> {
+    check_cancel(request)?;
+    let mut single = if precision == ProviderPrecision::F32 {
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(request.initial_state.len())
+            .map_err(ProviderExecutionError::from_source)?;
+        Some(values)
+    } else {
+        None
+    };
+    for chunk in request.initial_state.chunks(4096) {
+        for &value in chunk {
+            if !value.is_finite() {
+                return Err(ProviderExecutionError::from(anyhow!(
+                    "iir_zero_phase: nonfinite initial state"
+                )));
+            }
+            if let Some(single) = single.as_mut() {
+                let narrowed = value as f32;
+                if !narrowed.is_finite() {
+                    return Err(ProviderExecutionError::from(anyhow!(
+                        "iir_zero_phase: initial state exceeds single range"
+                    )));
+                }
+                single.push(narrowed);
+            }
+        }
+        check_cancel(request)?;
     }
-    let mut single = Vec::new();
-    single.try_reserve_exact(request.initial_state.len())?;
-    for &value in request.initial_state {
-        let narrowed = value as f32;
-        ensure!(
-            narrowed.is_finite(),
-            "iir_zero_phase: initial state exceeds single range"
-        );
-        single.push(narrowed);
-    }
-    Ok(Some(single))
+    Ok(single)
 }
 
 pub(crate) async fn execute(
@@ -115,8 +127,7 @@ pub(crate) async fn execute(
         )));
     }
     let indices = request.indices;
-    let single_state =
-        prepared_state(request, provider.precision()).map_err(ProviderExecutionError::from)?;
+    let single_state = prepared_state(request, provider.precision())?;
     let mut stages = Stages::new(
         provider,
         [
@@ -124,6 +135,7 @@ pub(crate) async fn execute(
             request.coefficients.numerator(),
             request.coefficients.denominator(),
         ],
+        request.borrowed,
     )?;
     check_cancel(request)?;
     // From the first primitive call onward, even an Unsupported cause is an
@@ -147,7 +159,10 @@ fn ensure_distinct(request: &ProviderIirZeroPhaseRequest<'_>) -> anyhow::Result<
     ensure!(
         !request.input.shares_allocation_with(b)
             && !request.input.shares_allocation_with(a)
-            && !b.shares_allocation_with(a),
+            && !b.shares_allocation_with(a)
+            && request.borrowed.iter().all(|borrowed| {
+                !b.shares_allocation_with(borrowed) && !a.shares_allocation_with(borrowed)
+            }),
         "iir_zero_phase: coefficients and signal must have distinct allocations"
     );
     Ok(())

@@ -3,8 +3,8 @@ use num_complex::Complex;
 use runmat_accelerate_api::{
     handle_integer_type, handle_is_logical, handle_precision, handle_storage,
     provider_iir_zero_phase_query, GpuTensorHandle, GpuTensorStorage, ProviderIirZeroPhaseFault,
-    ProviderIirZeroPhaseIndexBuilder, ProviderIirZeroPhaseRequest, ProviderPrecision,
-    ProviderPreparedIirCoefficients,
+    ProviderIirZeroPhaseIndexBuilder, ProviderIirZeroPhaseIndexPlan, ProviderIirZeroPhaseRequest,
+    ProviderPrecision, ProviderPreparedIirCoefficients,
 };
 use runmat_execution::cancellation::CancellationSource;
 use runmat_value::{NumericDType, Value};
@@ -38,6 +38,32 @@ async fn real_coefficients(
         cooperation.completed(chunk.len() as u64).await?;
     }
     Ok(real)
+}
+
+async fn prepare_indices(
+    shape: [usize; 2],
+    coefficient_len: usize,
+    axis: usize,
+    reflection_len: usize,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<ProviderIirZeroPhaseIndexPlan> {
+    let preparation_error = |source| {
+        crate::runtime_error::with_provider_execution_source(
+            filtfilt_error_with_detail(
+                &FILTFILT_ERROR_INTERNAL,
+                "resident reflection index preparation failed",
+            ),
+            source.into(),
+        )
+    };
+    cooperation.completed(0).await?;
+    let mut builder =
+        ProviderIirZeroPhaseIndexBuilder::new(shape, coefficient_len, axis, reflection_len)
+            .map_err(preparation_error)?;
+    while let Some(work) = builder.advance_chunk() {
+        cooperation.completed(work as u64).await?;
+    }
+    builder.finish().map_err(preparation_error)
 }
 
 /// Query the complete resident geometry before coefficient or signal
@@ -153,30 +179,7 @@ pub(super) async fn try_execute(
     let shape: [usize; 2] = input.shape().try_into().map_err(|_| {
         filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, "resident vector rank mismatch")
     })?;
-    let mut index_builder =
-        ProviderIirZeroPhaseIndexBuilder::new(shape, coeffs.order, axis, reflection_len).map_err(
-            |source| {
-                crate::runtime_error::with_provider_execution_source(
-                    filtfilt_error_with_detail(
-                        &FILTFILT_ERROR_INTERNAL,
-                        "resident reflection index preparation failed",
-                    ),
-                    source.into(),
-                )
-            },
-        )?;
-    while let Some(work) = index_builder.advance_chunk() {
-        cooperation.completed(work as u64).await?;
-    }
-    let indices = index_builder.finish().map_err(|source| {
-        crate::runtime_error::with_provider_execution_source(
-            filtfilt_error_with_detail(
-                &FILTFILT_ERROR_INTERNAL,
-                "resident reflection index preparation failed",
-            ),
-            source.into(),
-        )
-    })?;
+    let indices = prepare_indices(shape, coeffs.order, axis, reflection_len, cooperation).await?;
     let mut protected = Vec::new();
     protected
         .try_reserve_exact(borrowed.len().saturating_add(1))
@@ -215,6 +218,7 @@ pub(super) async fn try_execute(
         input,
         coefficients: &prepared,
         indices: &indices,
+        borrowed,
         initial_state: &zi,
         axis,
         reflection_len,
@@ -264,4 +268,49 @@ pub(super) async fn try_execute(
     )?;
     cooperation.completed(0).await?;
     Ok(Some(Value::GpuTensor(output)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::cell::Cell;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+    use std::task::{Context, Poll, Waker};
+
+    struct PendingTurn(Rc<Cell<usize>>);
+    impl Drop for PendingTurn {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    #[test]
+    fn dropped_pending_index_preparation_retains_no_unfinished_work() {
+        let cancelled = CancellationSource::new();
+        let dropped = Rc::new(Cell::new(0));
+        let dropped_for_turn = dropped.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            cancelled.token(),
+            move || {
+                let marker = PendingTurn(dropped_for_turn.clone());
+                Box::pin(async move {
+                    std::future::pending::<()>().await;
+                    drop(marker);
+                    Ok(())
+                })
+            },
+        );
+        let mut cooperation = SignalCooperation::with_budget(budget, BUILTIN_NAME);
+        let mut future = Box::pin(prepare_indices([5000, 1], 2, 0, 3, &mut cooperation));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+        assert_eq!(dropped.get(), 0);
+        drop(future);
+        assert_eq!(dropped.get(), 1);
+    }
 }

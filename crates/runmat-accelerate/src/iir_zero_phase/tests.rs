@@ -33,6 +33,7 @@ fn impulse(provider: &'static InProcessProvider, shape: [usize; 2], axis: usize)
         input: &input,
         coefficients: &coefficients,
         indices: &indices,
+        borrowed: &[],
         initial_state: &[0.5],
         axis,
         reflection_len: 3,
@@ -92,6 +93,7 @@ fn pre_cancelled_zero_phase_request_does_not_publish_output() {
         input: &input,
         coefficients: &coefficients,
         indices: &indices,
+        borrowed: &[],
         initial_state: &[0.0],
         axis: 0,
         reflection_len: 3,
@@ -120,12 +122,20 @@ fn rejected_borrowed_stage_alias_does_not_retire_the_caller_operand() {
     let input = source();
     let numerator = source();
     let denominator = source();
-    let mut stages = Stages::new(provider, [&input, &numerator, &denominator]).unwrap();
-    let rejection = stages.admit(input.clone(), &[2, 1], StageClass::Real);
+    let caller_coefficient = source();
+    let borrowed = [&caller_coefficient];
+    let mut stages = Stages::new(provider, [&input, &numerator, &denominator], &borrowed).unwrap();
+    let rejection = stages.admit(caller_coefficient.clone(), &[2, 1], StageClass::Real);
     assert!(rejection.is_err());
     assert!(input.allocation_lease().validate_live().is_ok());
+    assert!(caller_coefficient
+        .allocation_lease()
+        .validate_live()
+        .is_ok());
     assert_eq!(
-        block_on(provider.download(&input)).unwrap().data,
+        block_on(provider.download(&caller_coefficient))
+            .unwrap()
+            .data,
         vec![1.0, 2.0]
     );
 }
@@ -156,6 +166,7 @@ fn mismatched_sealed_plan_rejects_before_provider_work() {
         input: &input,
         coefficients: &coefficients,
         indices: &wrong_axis,
+        borrowed: &[],
         initial_state: &[0.0],
         axis: 0,
         reflection_len: 3,
@@ -194,6 +205,7 @@ fn identity_case(data: &[f64; 8]) -> ProviderExecutionResult<Vec<f64>> {
         input: &input,
         coefficients: &coefficients,
         indices: &indices,
+        borrowed: &[],
         initial_state: &[0.0],
         axis: 0,
         reflection_len: 3,

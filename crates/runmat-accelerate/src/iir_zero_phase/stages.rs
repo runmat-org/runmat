@@ -41,7 +41,7 @@ impl Error for StageRejected {
 
 pub(super) struct Stages<'a> {
     provider: &'a dyn AccelProvider,
-    protected: [&'a GpuTensorHandle; 3],
+    protected: Vec<&'a GpuTensorHandle>,
     handles: Vec<GpuTensorHandle>,
     cleanup: Vec<GpuHandleReleaseError>,
 }
@@ -50,7 +50,19 @@ impl<'a> Stages<'a> {
     pub fn new(
         provider: &'a dyn AccelProvider,
         protected: [&'a GpuTensorHandle; 3],
+        borrowed: &'a [&'a GpuTensorHandle],
     ) -> ProviderExecutionResult<Self> {
+        let protected_len = borrowed.len().checked_add(protected.len()).ok_or_else(|| {
+            ProviderExecutionError::from(anyhow::anyhow!(
+                "iir_zero_phase: borrowed operand count overflow"
+            ))
+        })?;
+        let mut protected_handles = Vec::new();
+        protected_handles
+            .try_reserve_exact(protected_len)
+            .map_err(ProviderExecutionError::from_source)?;
+        protected_handles.extend(protected);
+        protected_handles.extend_from_slice(borrowed);
         let mut handles = Vec::new();
         handles
             .try_reserve_exact(MAX_STAGES)
@@ -61,7 +73,7 @@ impl<'a> Stages<'a> {
             .map_err(ProviderExecutionError::from_source)?;
         Ok(Self {
             provider,
-            protected,
+            protected: protected_handles,
             handles,
             cleanup,
         })
