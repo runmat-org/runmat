@@ -20,7 +20,7 @@ pub async fn export_figure_scene_with_policy(
     let Some(figure) = clone_figure(handle) else {
         return Ok(None);
     };
-    let scene = runmat_plot::event::FigureScene::capture_for_export(&figure, policy)
+    let scene = runmat_plot::event::FigureScene::capture_for_export_with_cause(&figure, policy)
         .await
         .map_err(|err| {
             crate::replay_error_with_source(

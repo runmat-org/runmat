@@ -151,14 +151,12 @@ pub enum SceneExportErrorKind {
 pub struct SceneExportError {
     pub kind: SceneExportErrorKind,
     pub message: String,
-    source: Option<crate::plots::PlotDataExportError>,
 }
 
 impl SceneExportError {
     fn budget_exceeded(used: usize, added: usize, max: usize) -> Self {
         Self {
             kind: SceneExportErrorKind::BudgetExceeded,
-            source: None,
             message: format!(
                 "figure scene export exceeds budget: {} + {} bytes > {} bytes",
                 used, added, max
@@ -170,7 +168,6 @@ impl SceneExportError {
         Self {
             kind: SceneExportErrorKind::UnexportableGpuData,
             message: message.into(),
-            source: None,
         }
     }
 
@@ -178,7 +175,6 @@ impl SceneExportError {
         Self {
             kind: SceneExportErrorKind::Serialization,
             message: message.into(),
-            source: None,
         }
     }
 
@@ -186,15 +182,6 @@ impl SceneExportError {
         Self {
             kind: SceneExportErrorKind::Readback,
             message: message.into(),
-            source: None,
-        }
-    }
-
-    fn readback_typed(source: crate::plots::PlotDataExportError) -> Self {
-        Self {
-            kind: SceneExportErrorKind::Readback,
-            message: source.to_string(),
-            source: Some(source),
         }
     }
 }
@@ -205,7 +192,40 @@ impl fmt::Display for SceneExportError {
     }
 }
 
-impl Error for SceneExportError {
+impl Error for SceneExportError {}
+
+/// An export failure with the public category/message and an inspectable plot-data cause.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneExportFailure {
+    pub error: SceneExportError,
+    source: Option<crate::plots::PlotDataExportError>,
+}
+
+impl SceneExportFailure {
+    fn readback_typed(source: crate::plots::PlotDataExportError) -> Self {
+        Self {
+            error: SceneExportError::readback(source.to_string()),
+            source: Some(source),
+        }
+    }
+}
+
+impl From<SceneExportError> for SceneExportFailure {
+    fn from(error: SceneExportError) -> Self {
+        Self {
+            error,
+            source: None,
+        }
+    }
+}
+
+impl fmt::Display for SceneExportFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.error, f)
+    }
+}
+
+impl Error for SceneExportFailure {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.source
             .as_ref()
@@ -671,6 +691,16 @@ impl FigureScene {
         figure: &Figure,
         policy: SceneExportPolicy,
     ) -> Result<Self, SceneExportError> {
+        Self::capture_for_export_with_cause(figure, policy)
+            .await
+            .map_err(|failure| failure.error)
+    }
+
+    /// Capture an export with the original plot-data failure attached for callers that need it.
+    pub async fn capture_for_export_with_cause(
+        figure: &Figure,
+        policy: SceneExportPolicy,
+    ) -> Result<Self, SceneExportFailure> {
         let snapshot = FigureSnapshot::capture(figure);
         let mut budget = SceneExportBudget::new(policy);
         let mut plots = Vec::new();
@@ -1976,13 +2006,13 @@ impl ScenePlot {
     async fn from_plot_for_export(
         plot: &PlotElement,
         axes_index: u32,
-    ) -> Result<Self, SceneExportError> {
+    ) -> Result<Self, SceneExportFailure> {
         let scene_plot = match plot {
             PlotElement::Line(line) => {
                 let (x_data, y_data) = line
                     .export_numeric_xy_data_typed()
                     .await
-                    .map_err(SceneExportError::readback_typed)?
+                    .map_err(SceneExportFailure::readback_typed)?
                     .ok_or_else(|| {
                         SceneExportError::unexportable("line plot has no exportable scene data")
                     })?;
@@ -1991,7 +2021,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "line plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Line {
                     x,
@@ -2011,7 +2042,7 @@ impl ScenePlot {
                 let (x_data, y_data) = scatter
                     .export_numeric_xy_data_typed()
                     .await
-                    .map_err(SceneExportError::readback_typed)?
+                    .map_err(SceneExportFailure::readback_typed)?
                     .ok_or_else(|| {
                         SceneExportError::unexportable("scatter plot has no exportable scene data")
                     })?;
@@ -2020,7 +2051,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "scatter plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Scatter {
                     x,
@@ -2043,7 +2075,8 @@ impl ScenePlot {
                 if values.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "bar chart has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Bar {
                     labels: bar.labels.clone(),
@@ -2075,7 +2108,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "errorbar plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::ErrorBar {
                     x,
@@ -2107,7 +2141,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "stairs plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Stairs {
                     x,
@@ -2129,7 +2164,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "stem plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Stem {
                     x,
@@ -2163,7 +2199,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "area plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Area {
                     x,
@@ -2184,7 +2221,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() && u.is_empty() && v.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "quiver plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 let source = quiver.source_data();
                 Self::Quiver {
@@ -2217,7 +2255,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() && z.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "surface plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 let color_grid = surface
                     .export_scene_color_grid()
@@ -2268,7 +2307,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() && z.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "plot3 line has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Line3 {
                     x,
@@ -2303,7 +2343,8 @@ impl ScenePlot {
                 if points.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "scatter3 plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 let colors = scatter3
                     .export_scene_colors(points.len())
@@ -2330,7 +2371,8 @@ impl ScenePlot {
                 if vertices.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "contour plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Contour {
                     vertices: vertices.into_iter().map(Into::into).collect(),
@@ -2352,7 +2394,8 @@ impl ScenePlot {
                 if vertices.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "filled contour plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::ContourFill {
                     vertices: vertices.into_iter().map(Into::into).collect(),
@@ -3906,9 +3949,9 @@ mod tests {
         let cause = crate::plots::PlotDataExportError::Readback(PlotReadbackError::Access(
             runmat_accelerate_api::WgpuAccessError::WrongDevice,
         ));
-        let error = SceneExportError::readback_typed(cause.clone());
-        assert_eq!(error.kind, SceneExportErrorKind::Readback);
-        assert_eq!(error.message, cause.to_string());
+        let error = SceneExportFailure::readback_typed(cause.clone());
+        assert_eq!(error.error.kind, SceneExportErrorKind::Readback);
+        assert_eq!(error.error.message, cause.to_string());
         assert_eq!(
             error
                 .source()
@@ -3920,6 +3963,17 @@ mod tests {
             .and_then(Error::source)
             .and_then(|source| source.downcast_ref::<PlotReadbackError>())
             .is_some());
+    }
+
+    #[test]
+    fn public_scene_export_error_remains_a_two_field_value() {
+        let error = SceneExportError {
+            kind: SceneExportErrorKind::Readback,
+            message: "device readback failed".into(),
+        };
+        let failure = SceneExportFailure::from(error.clone());
+        assert_eq!(failure.error, error);
+        assert!(failure.source().is_none());
     }
 
     #[test]
