@@ -1,18 +1,25 @@
-use crate::analysis::AnalysisStudySpec;
 #[cfg(feature = "plot-core")]
-use crate::analysis::{analysis_results_by_run_id_op, AnalysisResultsQuery};
-use crate::builtins::fea::contracts::descriptors::{ERROR_INPUT, ERROR_OPERATION};
-use crate::builtins::fea::contracts::identities::{FEA_FIELD_CLASS, FEA_STUDY_CLASS, PLOT_NAME};
+use crate::analysis::{analysis_results_by_run_id_op, AnalysisResultsQuery, AnalysisStudySpec};
+#[cfg(feature = "plot-core")]
+use crate::builtins::fea::contracts::descriptors::ERROR_INPUT;
+use crate::builtins::fea::contracts::descriptors::ERROR_OPERATION;
+use crate::builtins::fea::contracts::identities::PLOT_NAME;
+#[cfg(feature = "plot-core")]
+use crate::builtins::fea::contracts::identities::{FEA_FIELD_CLASS, FEA_STUDY_CLASS};
 use crate::builtins::fea::errors::builtin_error;
 #[cfg(feature = "plot-core")]
 use crate::builtins::fea::errors::operation_error;
+#[cfg(feature = "plot-core")]
 use crate::builtins::fea::geometry::scalar_string;
+#[cfg(feature = "plot-core")]
 use crate::builtins::fea::results::field::field_id_matches;
 #[cfg(feature = "plot-core")]
 use crate::builtins::fea::results::field::find_field;
+#[cfg(feature = "plot-core")]
 use crate::builtins::fea::results::query::{
     run_id_context_from_value, run_id_from_value, study_context_from_value,
 };
+#[cfg(feature = "plot-core")]
 use crate::builtins::fea::value_decode::bool_from_value;
 #[cfg(feature = "plot-core")]
 use crate::operations::OperationContext;
@@ -70,6 +77,7 @@ pub(in crate::builtins::fea) fn reject_requested_device_field(
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) struct FeaPlotRequest {
     pub(in crate::builtins::fea) study: AnalysisStudySpec,
     pub(in crate::builtins::fea) run_id: String,
@@ -77,6 +85,7 @@ pub(in crate::builtins::fea) struct FeaPlotRequest {
     pub(in crate::builtins::fea) options: FeaPlotOptions,
 }
 
+#[cfg(feature = "plot-core")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::builtins::fea) struct FeaPlotOptions {
     pub(in crate::builtins::fea) field_id: Option<String>,
@@ -85,6 +94,7 @@ pub(in crate::builtins::fea) struct FeaPlotOptions {
     pub(in crate::builtins::fea) apply_deformation_overlay: bool,
 }
 
+#[cfg(feature = "plot-core")]
 impl Default for FeaPlotOptions {
     fn default() -> Self {
         Self {
@@ -96,6 +106,7 @@ impl Default for FeaPlotOptions {
     }
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn plot_request_from_args(
     args: &[Value],
 ) -> BuiltinResult<FeaPlotRequest> {
@@ -150,6 +161,7 @@ pub(in crate::builtins::fea) fn plot_request_from_args(
     }
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn split_plot_options(
     args: &[Value],
 ) -> BuiltinResult<(&[Value], FeaPlotOptions)> {
@@ -178,6 +190,7 @@ pub(in crate::builtins::fea) fn split_plot_options(
     Ok((&args[..end], options))
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn is_plot_option_name(value: &Value) -> bool {
     scalar_string(value, PLOT_NAME, &ERROR_INPUT)
         .map(|name| {
@@ -189,6 +202,7 @@ pub(in crate::builtins::fea) fn is_plot_option_name(value: &Value) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn plot_mesh_option_shows_solver_edges(
     value: &Value,
 ) -> BuiltinResult<bool> {
@@ -206,6 +220,7 @@ pub(in crate::builtins::fea) fn plot_mesh_option_shows_solver_edges(
     }
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn plot_overlay_option_mesh_source(
     value: &Value,
 ) -> BuiltinResult<crate::analysis::AnalysisFigureMeshSource> {
@@ -226,10 +241,12 @@ pub(in crate::builtins::fea) fn plot_overlay_option_mesh_source(
     }
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn is_fea_study(value: &Value) -> bool {
     matches!(value, Value::Object(object) if object.class_name == FEA_STUDY_CLASS)
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn plot_request_from_context_value(
     value: &Value,
     options: FeaPlotOptions,

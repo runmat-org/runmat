@@ -25,6 +25,7 @@ use super::integer_serialization::{
 };
 use super::options_json::{canonical_field_name, json_deserialize, value_to_json};
 use super::output::{one_base_failure_entries, public_sweep_error};
+#[cfg(feature = "plot-core")]
 use super::plot::{plot_request_from_args, select_generated_figure};
 use super::results::constructors::create_field_object_from_args;
 use super::results::field::{field_to_object, field_values_value};

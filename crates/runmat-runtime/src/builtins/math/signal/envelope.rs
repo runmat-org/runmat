@@ -343,6 +343,19 @@ async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(envelope_error(&ENVELOPE_ERROR_TOO_MANY_OUTPUTS));
     }
+    #[cfg(not(feature = "plot-core"))]
+    if crate::output_count::current_output_count() == Some(0)
+        || (crate::output_context::requested_output_count() == Some(0)
+            && crate::output_count::current_output_count().is_none())
+    {
+        if let Value::GpuTensor(handle) = &x {
+            super::resident_output::owner(handle, || envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
+        } else {
+            let input = value_to_signal_input(x).await?;
+            let _ = evaluate(input, &options)?;
+        }
+        return Err(crate::plotting_hooks::unavailable_presentation());
+    }
     let source = if let Value::GpuTensor(handle) = &x {
         super::resident_output::owner(handle, || envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
         Some(handle.clone())
@@ -995,6 +1008,7 @@ fn spline_interpolate(points: &[(usize, f64)], query: &[f64]) -> BuiltinResult<V
     }
 }
 
+#[cfg(feature = "plot-core")]
 async fn render_envelope_plot(eval: &EnvelopeEvaluation) -> BuiltinResult<()> {
     let mut args = Vec::new();
     let x = if eval.input.vector {
@@ -1041,6 +1055,12 @@ async fn render_envelope_plot(eval: &EnvelopeEvaluation) -> BuiltinResult<()> {
     Ok(())
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn render_envelope_plot(_eval: &EnvelopeEvaluation) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn column_value(values: &[f64]) -> BuiltinResult<Value> {
     Tensor::new(values.to_vec(), vec![values.len(), 1])
         .map(Value::Tensor)
@@ -1276,6 +1296,7 @@ mod tests {
             .all(|value| *value >= 2.0));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn output_count_zero_returns_empty_output_list() {
         crate::builtins::plotting::tests::ensure_plot_test_env();
@@ -1284,6 +1305,25 @@ mod tests {
         assert_eq!(out, Value::OutputList(Vec::new()));
     }
 
+    #[cfg(not(feature = "plot-core"))]
+    #[test]
+    fn output_count_zero_preserves_host_validation_before_typed_missing_presentation() {
+        let invalid = call(Value::from("not a signal"), Vec::new(), Some(0))
+            .expect_err("known invalid host input");
+        assert_eq!(
+            invalid.identifier(),
+            ENVELOPE_ERROR_INVALID_SIGNAL.identifier
+        );
+        let unavailable = call(col(vec![1.0, 0.0, -1.0, 0.0]), Vec::new(), Some(0))
+            .expect_err("presentation needs plot-core");
+        assert!(unavailable
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+            .is_some());
+    }
+
+    #[cfg(feature = "plot-core")]
     #[test]
     fn matrix_statement_form_plots_each_channel_without_length_mismatch() {
         crate::builtins::plotting::tests::ensure_plot_test_env();
