@@ -15,6 +15,8 @@ pub use class_declarations::{
 };
 pub use legacy_index::with_builtin_functions_by_exact_name;
 pub mod catalog;
+#[doc(hidden)]
+pub mod fea_contract;
 pub use self::catalog::*;
 mod catalog_fingerprint;
 pub use catalog_fingerprint::{builtin_catalog_fingerprint, BUILTIN_CATALOG_SCHEMA};
