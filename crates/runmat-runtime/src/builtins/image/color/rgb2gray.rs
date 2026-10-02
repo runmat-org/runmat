@@ -1,13 +1,13 @@
 //! MATLAB-compatible `rgb2gray` conversion.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinErrorDescriptor,
+    BuiltinPreparationFormId, RgbConversion, RGB2GRAY_DESCRIPTOR, RGB2GRAY_ERROR_INTERNAL,
+    RGB2GRAY_ERROR_INVALID_INPUT, RGB2GRAY_ERROR_TOO_MANY_INPUTS, RGB2GRAY_ERROR_TOO_MANY_OUTPUTS,
 };
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinIntegerInputAvailability, BuiltinIntegerOverflowRule, RGB2GRAY_INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, NumericScalar, NumericStorage, Tensor, Value};
@@ -17,105 +17,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::image::color::common;
-use crate::builtins::image::color::type_resolvers::rgb2gray_type;
+use crate::builtins::image::color::rgb_input;
+use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rgb2gray";
-
-const RGB2GRAY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "I",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Grayscale image converted from RGB input.",
-}];
-
-const RGB2GRAY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "RGB",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "RGB truecolor image or double colormap.",
-}];
-
-const RGB2GRAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "I = rgb2gray(RGB)",
-    inputs: &RGB2GRAY_INPUTS,
-    outputs: &RGB2GRAY_OUTPUT,
-}];
-
-const RGB2GRAY_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RGB2GRAY.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:rgb2gray:TooManyInputs"),
-    when: "More than one input argument is supplied.",
-    message: "rgb2gray: too many input arguments",
-};
-
-const RGB2GRAY_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RGB2GRAY.INVALID_INPUT",
-    identifier: Some("RunMat:rgb2gray:InvalidInput"),
-    when: "Input cannot be interpreted as an MxNx3 RGB image or an Nx3 double colormap.",
-    message: "rgb2gray: invalid input",
-};
-
-const RGB2GRAY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RGB2GRAY.INTERNAL",
-    identifier: Some("RunMat:rgb2gray:Internal"),
-    when: "Grayscale output tensor construction fails internally.",
-    message: "rgb2gray: internal conversion failure",
-};
-
-const RGB2GRAY_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    RGB2GRAY_ERROR_TOO_MANY_INPUTS,
-    RGB2GRAY_ERROR_INVALID_INPUT,
-    RGB2GRAY_ERROR_INTERNAL,
-];
-
-pub const RGB2GRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RGB2GRAY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RGB2GRAY_ERRORS,
-};
-
-const RGB2GRAY_DOCUMENTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "RGB",
-        classes: &common::DOCUMENTED_IMAGE_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "uint8 and uint16 truecolor images are documented and produce grayscale output in the same native integer class.",
-    }];
-const RGB2GRAY_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "RGB",
-        classes: &common::REJECTED_IMAGE_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Signed integer and uint32/uint64 RGB images are outside the documented surface and reject before resident download.",
-    }];
-pub const RGB2GRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "I = rgb2gray(integer_RGB)",
-        inputs: &RGB2GRAY_DOCUMENTED_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat reads authoritative uint8/uint16 samples, applies the documented luminance coefficients, and returns the same integer image class using the public integer-conversion rule of nearest rounding with ties away from zero and saturation; resident output is restored through the input owner.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "rgb2gray(unsupported_integer_RGB)",
-        inputs: &RGB2GRAY_REJECTED_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Unsupported integer classes reject consistently on host and from resident dtype metadata.",
-    },
-];
 
 fn rgb2gray_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rgb2gray_error_with_message(error.message, error)
@@ -139,7 +45,11 @@ fn rgb2gray_map_error(
     if err.identifier().is_some() {
         err
     } else {
-        rgb2gray_error_with_message(err.message().to_string(), fallback)
+        build_runtime_error(err.message().to_string())
+            .with_builtin(NAME)
+            .with_identifier(fallback.identifier.expect("closed RGB conversion error"))
+            .with_source(err)
+            .build()
     }
 }
 
@@ -172,30 +82,62 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "rgb2gray",
-    category = "image/color",
-    summary = "Convert RGB image data to grayscale using luminance weighting.",
-    keywords = "rgb2gray,rgb,gray,grayscale,luminance,image",
-    accel = "sink",
-    type_resolver(rgb2gray_type),
-    descriptor(crate::builtins::image::color::rgb2gray::RGB2GRAY_DESCRIPTOR),
-    integer_capabilities(crate::builtins::image::color::rgb2gray::RGB2GRAY_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::image::color::rgb2gray"
 )]
 async fn rgb2gray_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(rgb2gray_error(&RGB2GRAY_ERROR_TOO_MANY_INPUTS));
     }
+    crate::output_count::validate_fixed_outputs(
+        &RGB2GRAY_DESCRIPTOR,
+        &RGB2GRAY_ERROR_TOO_MANY_OUTPUTS,
+        NAME,
+    )?;
+    let admitted = rgb_input::admitted(&rgb, NAME, RgbConversion::Gray, |err| {
+        rgb2gray_map_error(err, &RGB2GRAY_ERROR_INVALID_INPUT)
+    })?;
     let resident_sources = match &rgb {
-        Value::GpuTensor(handle) => {
-            validate_resident_rgb(handle)?;
-            vec![handle.clone()]
-        }
+        Value::GpuTensor(handle) => vec![handle.clone()],
         _ => Vec::new(),
     };
+    if !admitted {
+        return rgb2gray_execute(rgb, resident_sources).await;
+    }
+    execute_current_invocation(
+        BuiltinPreparationAdmission {
+            binding: BuiltinBindingIdentity {
+                builtin: BuiltinCatalogIdentity { name: NAME },
+                variant: "default",
+            },
+            form: BuiltinPreparationFormId(0),
+            signature: 0,
+            input_count: 1,
+            requested_outputs: crate::output_count::current_output_count(),
+        },
+        vec![rgb],
+        |mut operands| async move {
+            rgb2gray_execute(
+                operands.pop().expect("one admitted RGB operand"),
+                resident_sources,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+async fn rgb2gray_execute(
+    rgb: Value,
+    resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
     let resident_guard = common::protect_resident_inputs(&resident_sources);
-    let tensor = common::gather_tensor(NAME, rgb)
-        .await
-        .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INVALID_INPUT))?;
+    let tensor = match rgb {
+        Value::Tensor(tensor) => tensor,
+        other => common::gather_tensor(NAME, other)
+            .await
+            .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INVALID_INPUT))?,
+    };
     resident_guard.restore();
     let out = rgb2gray_tensor(&tensor)
         .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INTERNAL))?;
@@ -206,62 +148,13 @@ async fn rgb2gray_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     )
 }
 
-fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<()> {
-    let dtype = common::resident_numeric_dtype(handle, NAME)
-        .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INVALID_INPUT))?;
-    let supported = if handle.shape().len() == 3 && handle.shape().get(2) == Some(&3) {
-        matches!(
-            dtype,
-            NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
-        )
-    } else if handle.shape().len() == 2 && handle.shape().get(1) == Some(&3) {
-        dtype == NumericDType::F64
-    } else {
-        false
-    };
-    if !supported {
-        return Err(rgb2gray_error_with_message(
-            format!(
-                "rgb2gray: unsupported resident class {} or shape {:?}",
-                dtype.class_name(),
-                handle.shape()
-            ),
-            &RGB2GRAY_ERROR_INVALID_INPUT,
-        ));
-    }
-    Ok(())
-}
-
 fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
     const RED: f64 = 0.298_936_021_293_775;
     const GREEN: f64 = 0.587_043_074_451_121;
     const BLUE: f64 = 0.114_020_904_255_103;
 
     let dtype = rgb.numeric_dtype();
-    let layout = common::color_layout(rgb, NAME)?;
-    let supported = match layout {
-        common::ColorLayout::Truecolor { .. } => matches!(
-            dtype,
-            NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
-        ),
-        common::ColorLayout::Colormap { .. } => dtype == NumericDType::F64,
-    };
-    if !supported {
-        return Err(rgb2gray_map_error(
-            common::builtin_error(
-                NAME,
-                format!(
-                    "rgb2gray: unsupported {} class {}",
-                    match layout {
-                        common::ColorLayout::Truecolor { .. } => "truecolor",
-                        common::ColorLayout::Colormap { .. } => "colormap",
-                    },
-                    dtype.class_name()
-                ),
-            ),
-            &RGB2GRAY_ERROR_INVALID_INPUT,
-        ));
-    }
+    let layout = rgb_input::host_layout(rgb, NAME, RgbConversion::Gray)?;
 
     let pixels = layout.pixels();
     if rgb.len() != pixels * 3 {

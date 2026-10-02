@@ -6,16 +6,24 @@ mod gray2rgb;
 mod im2double;
 mod im2uint16;
 mod im2uint8;
+mod rgb2gray;
+mod rgb2hsv;
+mod rgb_input;
 
 pub use self::conversion::ImageIndexMode;
 pub use self::gray2rgb::*;
 pub use self::im2double::*;
 pub use self::im2uint16::*;
 pub use self::im2uint8::*;
+pub use self::rgb2gray::*;
+pub use self::rgb2hsv::*;
+pub use self::rgb_input::RgbConversion;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(gray2rgb::ENTRIES.iter().copied());
     values.extend(im2double::ENTRIES.iter().copied());
     values.extend(im2uint16::ENTRIES.iter().copied());
     values.extend(im2uint8::ENTRIES.iter().copied());
+    values.extend(rgb2gray::ENTRIES.iter().copied());
+    values.extend(rgb2hsv::ENTRIES.iter().copied());
 }

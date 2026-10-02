@@ -1,10 +1,12 @@
 //! `gray2rgb` compatibility helper for replicating grayscale images into RGB.
 
+#[cfg(test)]
+use runmat_builtins::GRAY2RGB_INTEGER_CAPABILITIES;
 use runmat_builtins::{
     BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinErrorDescriptor,
     BuiltinPreparationFormId, GRAY2RGB_DESCRIPTOR, GRAY2RGB_ERROR_INTERNAL,
     GRAY2RGB_ERROR_INVALID_INPUT, GRAY2RGB_ERROR_TOO_MANY_INPUTS, GRAY2RGB_ERROR_TOO_MANY_OUTPUTS,
-    GRAY2RGB_EXTENSIONS, GRAY2RGB_INTEGER_CAPABILITIES,
+    GRAY2RGB_EXTENSIONS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Value};
@@ -41,7 +43,15 @@ fn gray2rgb_map_error(
     if err.identifier().is_some() {
         err
     } else {
-        gray2rgb_error_with_message(err.message().to_string(), fallback)
+        build_runtime_error(err.message().to_string())
+            .with_builtin(NAME)
+            .with_identifier(
+                fallback
+                    .identifier
+                    .expect("closed grayscale conversion error"),
+            )
+            .with_source(err)
+            .build()
     }
 }
 
