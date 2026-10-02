@@ -3,6 +3,7 @@
 use runmat_builtins::{
     BuiltinErrorDescriptor, IMHIST_ERROR_INTERNAL, IMHIST_ERROR_INVALID_ARGUMENT,
     IMHIST_ERROR_PLOT_FAILED, IMHIST_ERROR_TOO_MANY_OUTPUTS, IMHIST_ERROR_UNSUPPORTED_IMAGE,
+    IMHIST_INTEGER_TOLERANCE as INTEGER_TOL, IMHIST_MAX_BINS as MAX_BINS,
     IMHIST_TYPED_BIN_COUNT_EXTENSION,
 };
 #[cfg(test)]
@@ -25,10 +26,8 @@ use runmat_plot::plots::BarChart;
 const NAME: &str = "imhist";
 const DEFAULT_GRAYSCALE_BINS: usize = 256;
 const LOGICAL_BINS: usize = 2;
-const MAX_BINS: usize = 1_000_000;
 #[cfg(feature = "plot-core")]
 const MAX_PLOT_BINS: usize = 4096;
-const INTEGER_TOL: f64 = 1.0e-9;
 
 fn imhist_error_with_message(
     error: &'static BuiltinErrorDescriptor,

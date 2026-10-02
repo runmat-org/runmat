@@ -119,7 +119,6 @@ pub(super) fn validate_bin_count(bins: usize) -> BuiltinResult<()> {
     Ok(())
 }
 
-#[derive(Clone)]
 pub(super) fn scalar_number(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),

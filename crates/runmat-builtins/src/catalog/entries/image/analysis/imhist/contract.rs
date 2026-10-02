@@ -1,5 +1,9 @@
 use crate::*;
 
+/// Runtime and catalog share the same supported histogram count policy.
+pub const IMHIST_MAX_BINS: usize = 1_000_000;
+pub const IMHIST_INTEGER_TOLERANCE: f64 = 1.0e-9;
+
 const IMHIST_OUTPUT_COUNTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "counts",
     ty: BuiltinParamType::NumericArray,

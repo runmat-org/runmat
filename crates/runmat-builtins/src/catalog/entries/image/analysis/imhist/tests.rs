@@ -175,3 +175,55 @@ fn invalid_classes_control_and_output_count_do_not_claim_results() {
         .iter()
         .any(|signature| signature.label == "imhist(I)" && signature.outputs.is_empty()));
 }
+
+#[test]
+fn partial_colormap_shape_is_not_rejected_as_a_bad_control() {
+    let image = numeric(NumericClass::Double, ShapeFact::Scalar);
+    for shape in [
+        ShapeFact::from(vec![Some(2), None]),
+        ShapeFact::from(vec![None, None]),
+        ShapeFact::Ranked { rank: 2 },
+    ] {
+        let inferred = inference::infer(
+            &request(
+                vec![image.clone(), numeric(NumericClass::Double, shape)],
+                vec![LiteralValue::Unknown; 2],
+                1,
+            ),
+            &IMHIST_CATALOG_ENTRY,
+        );
+        assert!(inferred.diagnostics.is_empty());
+        assert_eq!(
+            inferred.outputs[0].shape,
+            ShapeFact::from(vec![None, Some(1)])
+        );
+    }
+}
+
+#[test]
+fn catalog_bin_rounding_matches_runtime_tolerance() {
+    let image = numeric(NumericClass::Double, ShapeFact::Scalar);
+    let control = numeric(NumericClass::Double, ShapeFact::Scalar);
+    for (literal, accepted) in [(3.0 + 5.0e-10, true), (3.0 + 2.0e-9, false)] {
+        let inferred = inference::infer(
+            &request(
+                vec![image.clone(), control.clone()],
+                vec![LiteralValue::Unknown, LiteralValue::Number(literal)],
+                1,
+            ),
+            &IMHIST_CATALOG_ENTRY,
+        );
+        if accepted {
+            assert!(inferred.diagnostics.is_empty());
+            assert_eq!(
+                inferred.outputs[0].shape,
+                ShapeFact::from(vec![Some(3), Some(1)])
+            );
+        } else {
+            assert!(inferred
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "RM-CATALOG-IMHIST-BIN-VALUE"));
+        }
+    }
+}

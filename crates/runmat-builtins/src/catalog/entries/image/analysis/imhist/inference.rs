@@ -1,8 +1,7 @@
+use super::{IMHIST_INTEGER_TOLERANCE, IMHIST_MAX_BINS};
 use crate::catalog::inference::argument_error;
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;
-
-const MAX_BINS: usize = 1_000_000;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -60,19 +59,23 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     .shape
                     .known_dims()
                     .and_then(|dims| dims.first().copied().flatten())
-            } else if control.shape.is_definitely_nonscalar() {
+            } else if control.shape.is_definitely_nonscalar() && !could_be_colormap_shape(control) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-IMHIST-CONTROL",
                     "second argument must be a positive scalar bin count or Nx3 colormap",
                     1,
                 ));
                 None
+            } else if could_be_colormap_shape(control) {
+                // A partially known Nx3 map is possible; neither its mode nor
+                // its row count is proven until the runtime value is available.
+                None
             } else {
                 infer_bin_count(control, request, &mut diagnostics)
             }
         }
     };
-    if bins.is_some_and(|count| count == 0 || count > MAX_BINS) {
+    if bins.is_some_and(|count| count == 0 || count > IMHIST_MAX_BINS) {
         diagnostics.push(argument_error(
             "RM-CATALOG-IMHIST-BINS",
             "histogram bin count must be in 1..=1000000",
@@ -167,6 +170,15 @@ fn is_known_colormap_shape(value: &ValueFact) -> bool {
         .is_some_and(|dims| dims.len() == 2 && dims.get(1) == Some(&Some(3)))
 }
 
+fn could_be_colormap_shape(value: &ValueFact) -> bool {
+    value.shape.known_dims().is_none_or(|dims| {
+        dims.len() == 2
+            && dims
+                .get(1)
+                .is_some_and(|cols| cols.is_none_or(|count| *count == 3))
+    })
+}
+
 fn infer_bin_count(
     control: &ValueFact,
     request: &CallRequest,
@@ -188,7 +200,12 @@ fn infer_bin_count(
         ));
     }
     if let Some(value) = request.literals.numeric_at(1) {
-        if !value.is_finite() || value < 1.0 || value.fract() != 0.0 || value > MAX_BINS as f64 {
+        let rounded = value.round();
+        if !value.is_finite()
+            || value < 1.0
+            || (rounded - value).abs() > IMHIST_INTEGER_TOLERANCE
+            || rounded > IMHIST_MAX_BINS as f64
+        {
             diagnostics.push(argument_error(
                 "RM-CATALOG-IMHIST-BIN-VALUE",
                 "bin count must be a positive integral scalar within the supported range",
@@ -196,7 +213,7 @@ fn infer_bin_count(
             ));
             return None;
         }
-        return Some(value as usize);
+        return Some(rounded as usize);
     }
     None
 }
