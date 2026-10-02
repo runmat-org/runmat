@@ -152,6 +152,7 @@ mod tests {
                     preparation_route: None,
                     matmul: None,
                     sum: None,
+                    convolution: None,
                     elements: Some(4),
                     flops: Some(8),
                     scalar_work_units: None,

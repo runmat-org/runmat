@@ -49,7 +49,7 @@ fn complex_integration_is_supported_but_real_only_polynomial_hooks_are_not() {
             &points,
             1,
             None,
-            runmat_accelerate_api::ProviderPolyfitBasis::Original,
+            runmat_accelerate_api::ProviderPolyfitOutputs::Coefficients,
         ))
         .unwrap_err()
     ));
