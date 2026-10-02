@@ -1,4 +1,4 @@
-use super::{contracts, documentation, inference};
+use super::{documentation, inference};
 use crate::*;
 use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequirement};
 
