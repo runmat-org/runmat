@@ -6,6 +6,7 @@
 
 mod capability;
 mod host_document;
+pub(crate) mod host_presentation;
 #[cfg(test)]
 pub(crate) mod document_test_support;
 mod runtime;

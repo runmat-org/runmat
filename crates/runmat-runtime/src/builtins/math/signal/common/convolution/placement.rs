@@ -6,8 +6,8 @@
 pub(crate) mod tests;
 
 use runmat_accelerate_api::observation::{
-    ProviderObservationFailure, ProviderObservationStatus, ProviderObservationSupport,
-    ProviderOperationReceipt, ProviderOperationRecorder,
+    ProviderObservationFailure, ProviderObservationSupport, ProviderOperationReceipt,
+    ProviderOperationRecorder,
 };
 use runmat_accelerate_api::{
     same_provider_instance, GpuTensorHandle, ProviderConvolutionForm,
@@ -19,15 +19,16 @@ use runmat_accelerate_api::{
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
     CandidateOutputPresentation, CandidateOutputResidency, CandidatePreparationState,
-    CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementFeedback,
-    PlacementResourceSnapshot, PlacementSignature, ResourceBoundUnavailable, ResourceByteBound,
-    WholeWorkCandidate, WholeWorkConstraint, WholeWorkPlacementRequest,
+    CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementResourceSnapshot,
+    PlacementSignature, ResourceBoundUnavailable, ResourceByteBound, WholeWorkCandidate,
+    WholeWorkConstraint, WholeWorkPlacementRequest,
 };
-use runmat_time::duration_ns_saturating;
 use runmat_types::ConvolutionMode;
 use runmat_value::Value;
 
-use crate::context::{RuntimeContext, RuntimePlacementFeedbackSource, RuntimeWholeWorkSelection};
+use crate::context::{
+    host_presentation::HostPresentationReceipt, RuntimeContext, RuntimeWholeWorkSelection,
+};
 use crate::BuiltinResult;
 
 /// The receipt is tied to the actual borrowed pair, not a serialized shape.
@@ -212,63 +213,46 @@ impl SelectedConvolution {
     }
 
     pub(crate) fn finish_hook(mut self, outcome: &BuiltinResult<Option<runmat_value::Value>>) {
-        if let Some(mut receipt) = self.receipt.take() {
-            if self.runtime.is_cancelled()
-                || outcome
-                    .as_ref()
-                    .err()
-                    .is_some_and(|error| error.identifier() == Some("RunMat:Cancelled"))
+        if let Some(receipt) = self.receipt.take() {
+            let published = if outcome
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.identifier() == Some("RunMat:Cancelled"))
             {
-                receipt.fail(ProviderObservationFailure::Cancelled);
+                Err(ProviderObservationFailure::Cancelled)
             } else if outcome.is_err() {
-                receipt.fail(ProviderObservationFailure::ProviderFailed);
-            } else if receipt.publish().is_err() {
-                receipt.fail(ProviderObservationFailure::PublicationFailed);
-            }
-            self.deliver(receipt);
+                Err(ProviderObservationFailure::ProviderFailed)
+            } else {
+                Ok(true)
+            };
+            HostPresentationReceipt::new(self.runtime, self.selected, receipt).finish(published);
         }
     }
 
     pub(crate) fn finish_value(mut self, outcome: &BuiltinResult<runmat_value::Value>) {
-        if let Some(mut receipt) = self.receipt.take() {
-            if self.runtime.is_cancelled()
-                || outcome
-                    .as_ref()
-                    .err()
-                    .is_some_and(|error| error.identifier() == Some("RunMat:Cancelled"))
-            {
-                receipt.fail(ProviderObservationFailure::Cancelled);
-            } else if outcome.is_err() {
-                receipt.fail(ProviderObservationFailure::ProviderFailed);
-            } else if !outcome
-                .as_ref()
-                .is_ok_and(|value| self.published_matches(value, 0))
-            {
-                receipt.fail(ProviderObservationFailure::SharedRuntimeFallback);
-            } else if receipt.publish().is_err() {
-                receipt.fail(ProviderObservationFailure::PublicationFailed);
-            }
-            self.deliver(receipt);
+        if let Some(receipt) = self.receipt.take() {
+            let published = match outcome {
+                Err(error) if error.identifier() == Some("RunMat:Cancelled") => {
+                    Err(ProviderObservationFailure::Cancelled)
+                }
+                Err(_) => Err(ProviderObservationFailure::ProviderFailed),
+                Ok(value) => Ok(self.published_matches(value, 0)),
+            };
+            HostPresentationReceipt::new(self.runtime, self.selected, receipt).finish(published);
         }
     }
 
     /// Multi-output host routes use the same one-shot receipt and feedback
     /// owner; each requested output must actually be restored to the owner.
     pub(crate) fn finish_outputs(mut self, values: &[&Value], expected: usize) {
-        if let Some(mut receipt) = self.receipt.take() {
-            if self.runtime.is_cancelled() {
-                receipt.fail(ProviderObservationFailure::Cancelled);
-            } else if values.len() != expected
-                || !values
+        if let Some(receipt) = self.receipt.take() {
+            let published = values.len() == expected
+                && values
                     .iter()
                     .enumerate()
-                    .all(|(index, value)| self.published_matches(value, index))
-            {
-                receipt.fail(ProviderObservationFailure::SharedRuntimeFallback);
-            } else if receipt.publish().is_err() {
-                receipt.fail(ProviderObservationFailure::PublicationFailed);
-            }
-            self.deliver(receipt);
+                    .all(|(index, value)| self.published_matches(value, index));
+            HostPresentationReceipt::new(self.runtime, self.selected, receipt)
+                .finish(Ok(published));
         }
     }
 
@@ -331,70 +315,6 @@ impl SelectedConvolution {
             }
             && runmat_accelerate_api::handle_storage(handle)
                 == runmat_accelerate_api::GpuTensorStorage::Real
-    }
-
-    fn deliver(&self, receipt: ProviderOperationReceipt) {
-        let mut deferred = DeferredConvolutionFeedback {
-            receipt,
-            signature: self.selected.decision.signature.clone(),
-            selected: self.selected.decision.selected.clone(),
-            cancellation: self.runtime.cancellation(),
-            terminal_without_feedback: false,
-        };
-        if let Some(service) = self.runtime.service_ports().placement() {
-            if let Some(ready) = deferred.take_ready() {
-                let _ = service.observe(ready);
-            } else if !deferred.terminal_without_feedback()
-                && service.defer_feedback(Box::new(deferred)).is_err()
-            {
-                tracing::debug!(target: "runmat_placement", "convolution completion receipt could not be retained");
-            }
-        }
-    }
-}
-
-struct DeferredConvolutionFeedback {
-    receipt: ProviderOperationReceipt,
-    signature: PlacementSignature,
-    selected: runmat_execution::SelectedExecutionCandidate,
-    cancellation: runmat_execution::cancellation::CancellationToken,
-    terminal_without_feedback: bool,
-}
-
-impl RuntimePlacementFeedbackSource for DeferredConvolutionFeedback {
-    fn signature(&self) -> &PlacementSignature {
-        &self.signature
-    }
-
-    fn take_ready(&mut self) -> Option<PlacementFeedback> {
-        if self.cancellation.is_cancelled() {
-            self.receipt.fail(ProviderObservationFailure::Cancelled);
-        }
-        let observation = self.receipt.take_completed()?;
-        let (elapsed, succeeded) = match observation.status {
-            ProviderObservationStatus::Completed { total_elapsed, .. } => {
-                (duration_ns_saturating(total_elapsed), true)
-            }
-            ProviderObservationStatus::Failed(ProviderObservationFailure::ProviderFailed) => {
-                (0, false)
-            }
-            ProviderObservationStatus::Failed(_) => {
-                self.terminal_without_feedback = true;
-                return None;
-            }
-            ProviderObservationStatus::Pending => return None,
-        };
-        Some(PlacementFeedback {
-            signature: self.signature.clone(),
-            candidate: self.selected.candidate.clone(),
-            kind: self.selected.kind,
-            total_elapsed_ns: elapsed,
-            succeeded,
-        })
-    }
-
-    fn terminal_without_feedback(&self) -> bool {
-        self.terminal_without_feedback
     }
 }
 
