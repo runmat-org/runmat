@@ -4,6 +4,19 @@ use runmat_types::{
     ValueFact, ValueKindFact,
 };
 
+fn request(arguments: Vec<ValueFact>, count: usize) -> CallRequest {
+    use runmat_types::{LiteralContext, OutputSelection, RequestedOutputCount};
+    CallRequest {
+        literals: LiteralContext::default(),
+        arguments,
+        outputs: OutputSelection::new(match count {
+            0 => RequestedOutputCount::Zero,
+            1 => RequestedOutputCount::One,
+            count => RequestedOutputCount::Exactly(count),
+        }),
+    }
+}
+
 fn real(class: NumericClass, shape: ShapeFact) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
@@ -21,7 +34,7 @@ fn known_single_image_and_colormap_facts_preserve_shape_and_class() {
         ShapeFact::from(vec![Some(2), Some(4), Some(3)]),
         ShapeFact::from(vec![Some(4), Some(3)]),
     ] {
-        let request = CallRequest::new(vec![real(NumericClass::Single, shape.clone())], 1);
+        let request = request(vec![real(NumericClass::Single, shape.clone())], 1);
         let inferred = infer(&request, &HSV2RGB_CATALOG_ENTRY);
         assert!(
             inferred.diagnostics.is_empty(),
@@ -46,7 +59,7 @@ fn logical_truecolor_is_double_and_logical_colormap_rejects() {
         ShapeFact::from(vec![Some(1), Some(2), Some(3)]),
         StorageFact::Dense,
     );
-    let inferred = infer(&CallRequest::new(vec![image], 1), &HSV2RGB_CATALOG_ENTRY);
+    let inferred = infer(&request(vec![image], 1), &HSV2RGB_CATALOG_ENTRY);
     assert!(
         inferred.diagnostics.is_empty(),
         "{:?}",
@@ -64,7 +77,7 @@ fn logical_truecolor_is_double_and_logical_colormap_rejects() {
         ShapeFact::from(vec![Some(2), Some(3)]),
         StorageFact::Dense,
     );
-    let invalid = infer(&CallRequest::new(vec![map], 1), &HSV2RGB_CATALOG_ENTRY);
+    let invalid = infer(&request(vec![map], 1), &HSV2RGB_CATALOG_ENTRY);
     assert!(invalid
         .diagnostics
         .iter()
@@ -74,7 +87,7 @@ fn logical_truecolor_is_double_and_logical_colormap_rejects() {
 #[test]
 fn unknown_and_partial_geometry_do_not_invent_dimensions() {
     let unknown = infer(
-        &CallRequest::new(
+        &request(
             vec![ValueFact::unknown(
                 runmat_types::DynamicReason::RuntimeValue,
             )],
@@ -91,7 +104,7 @@ fn unknown_and_partial_geometry_do_not_invent_dimensions() {
         ],
     };
     let inferred = infer(
-        &CallRequest::new(vec![real(NumericClass::Double, partial.clone())], 1),
+        &request(vec![real(NumericClass::Double, partial.clone())], 1),
         &HSV2RGB_CATALOG_ENTRY,
     );
     assert!(
@@ -107,7 +120,7 @@ fn unknown_kind_does_not_raise_class_error_but_known_complex_does() {
     let shape = ShapeFact::from(vec![Some(2), Some(2), Some(3)]);
     let mut unknown = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
     unknown.shape = shape.clone();
-    let inferred = infer(&CallRequest::new(vec![unknown], 1), &HSV2RGB_CATALOG_ENTRY);
+    let inferred = infer(&request(vec![unknown], 1), &HSV2RGB_CATALOG_ENTRY);
     assert!(!inferred
         .diagnostics
         .iter()
@@ -120,7 +133,7 @@ fn unknown_kind_does_not_raise_class_error_but_known_complex_does() {
         shape,
         StorageFact::Dense,
     );
-    let invalid = infer(&CallRequest::new(vec![complex], 1), &HSV2RGB_CATALOG_ENTRY);
+    let invalid = infer(&request(vec![complex], 1), &HSV2RGB_CATALOG_ENTRY);
     assert!(invalid
         .diagnostics
         .iter()
@@ -130,7 +143,7 @@ fn unknown_kind_does_not_raise_class_error_but_known_complex_does() {
 #[test]
 fn invalid_known_classes_and_shapes_report_diagnostics() {
     let invalid = infer(
-        &CallRequest::new(
+        &request(
             vec![real(
                 NumericClass::UInt8,
                 ShapeFact::from(vec![Some(0), Some(2), Some(3)]),

@@ -4,6 +4,19 @@ use runmat_types::{
     ValueFact, ValueKindFact,
 };
 
+fn request(arguments: Vec<ValueFact>, count: usize) -> CallRequest {
+    use runmat_types::{LiteralContext, OutputSelection, RequestedOutputCount};
+    CallRequest {
+        literals: LiteralContext::default(),
+        arguments,
+        outputs: OutputSelection::new(match count {
+            0 => RequestedOutputCount::Zero,
+            1 => RequestedOutputCount::One,
+            count => RequestedOutputCount::Exactly(count),
+        }),
+    }
+}
+
 fn real(class: NumericClass, shape: ShapeFact) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
@@ -31,7 +44,7 @@ fn matrix_indices_append_rgb_channel_with_double_class() {
         NumericClass::UInt16,
     ] {
         let result = infer(
-            &CallRequest::new(
+            &request(
                 vec![real(class, ShapeFact::from(vec![Some(2), Some(5)])), map()],
                 1,
             ),
@@ -55,7 +68,7 @@ fn matrix_indices_append_rgb_channel_with_double_class() {
 #[test]
 fn unknown_index_dimensions_do_not_fabricate_image_extent() {
     let result = infer(
-        &CallRequest::new(
+        &request(
             vec![
                 real(NumericClass::Double, ShapeFact::Ranked { rank: 2 }),
                 map(),
@@ -69,7 +82,7 @@ fn unknown_index_dimensions_do_not_fabricate_image_extent() {
         ShapeFact::from(vec![None, None, Some(3)])
     );
     let unknown = infer(
-        &CallRequest::new(
+        &request(
             vec![ValueFact::unknown(DynamicReason::RuntimeValue), map()],
             1,
         ),
@@ -81,7 +94,7 @@ fn unknown_index_dimensions_do_not_fabricate_image_extent() {
 #[test]
 fn invalid_classes_and_colormap_geometry_are_diagnosed() {
     let result = infer(
-        &CallRequest::new(
+        &request(
             vec![
                 real(NumericClass::Int16, ShapeFact::from(vec![Some(1), Some(1)])),
                 real(
@@ -108,7 +121,7 @@ fn invalid_classes_and_colormap_geometry_are_diagnosed() {
 #[test]
 fn empty_index_image_remains_empty_rgb_array() {
     let result = infer(
-        &CallRequest::new(
+        &request(
             vec![
                 real(NumericClass::UInt8, ShapeFact::from(vec![Some(0), Some(2)])),
                 map(),
