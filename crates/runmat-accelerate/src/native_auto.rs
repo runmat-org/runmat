@@ -1299,6 +1299,7 @@ impl NativeAutoOffload {
             preparation: CandidatePreparationState::Ready,
             cost: cpu_cost,
             output_residency: CandidateOutputResidency::Host,
+            presentation: runmat_execution::CandidateOutputPresentation::Direct,
             guards: Vec::new(),
         };
         let provider_kind = match family {

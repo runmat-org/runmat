@@ -120,6 +120,7 @@ pub(in crate::builtins::deep_learning) fn select<'h, 'n>(
             execution_location: CandidateExecutionLocation::Host,
             preparation: CandidatePreparationState::Ready,
             output_residency: CandidateOutputResidency::Host,
+            presentation: runmat_execution::CandidateOutputPresentation::Direct,
             route_facts: Digest::sha256(b"runmat.network.forward.host.v1"),
             cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
             resources: unknown_demand(1_000, 0),
@@ -190,6 +191,7 @@ pub(in crate::builtins::deep_learning) fn select<'h, 'n>(
                 } else {
                     CandidateOutputResidency::Host
                 },
+                presentation: runmat_execution::CandidateOutputPresentation::Direct,
                 route_facts,
                 cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
                 resources: unknown_demand(0, 1),

@@ -226,6 +226,7 @@ mod tests {
                 // Execution and resulting residency are intentionally
                 // independent: provider work may materialize a host result.
                 output_residency: CandidateOutputResidency::Host,
+                presentation: super::CandidateOutputPresentation::Direct,
                 guards: Vec::new(),
             },
             resources: CandidateResourceDemand {

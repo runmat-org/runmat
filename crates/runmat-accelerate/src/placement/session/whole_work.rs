@@ -67,6 +67,7 @@ impl PlacementSession {
             if let Err(reason) = single_candidate_resources_admitted(
                 candidate.execution_location,
                 candidate.output_residency,
+                candidate.presentation,
                 candidate.kind,
                 demand,
                 candidate.transactional_results,
@@ -228,6 +229,7 @@ impl PlacementSession {
                         preparation: item.candidate.preparation,
                         cost,
                         output_residency: item.candidate.output_residency,
+                        presentation: item.candidate.presentation,
                         guards: Vec::new(),
                     },
                     resources: item.candidate.resources,

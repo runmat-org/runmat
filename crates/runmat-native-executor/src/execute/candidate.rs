@@ -65,6 +65,7 @@ impl NativeExecutor {
                 source,
             },
             output_residency: CandidateOutputResidency::Host,
+            presentation: runmat_execution::CandidateOutputPresentation::Direct,
             guards,
         })
     }

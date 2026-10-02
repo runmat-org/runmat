@@ -45,6 +45,7 @@ fn candidate(kind: ExecutionCandidateKind) -> WholeWorkCandidate {
         } else {
             CandidateOutputResidency::Host
         },
+        presentation: runmat_execution::CandidateOutputPresentation::Direct,
         route_facts: Digest::sha256(if provider { b"gpu" } else { b"cpu" }),
         cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
         resources: CandidateResourceDemand {
@@ -55,6 +56,20 @@ fn candidate(kind: ExecutionCandidateKind) -> WholeWorkCandidate {
         },
         transactional_results: true,
     }
+}
+
+fn host_with_provider_presentation() -> WholeWorkCandidate {
+    let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
+    host.output_residency = CandidateOutputResidency::Provider { device_id: 7 };
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
+        device_id: 7,
+        transfer_bytes: Some(16),
+        host_scratch_bytes: 0.into(),
+        provider_scratch_bytes: 8.into(),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+    };
+    host
 }
 
 fn request(candidates: Vec<WholeWorkCandidate>) -> WholeWorkPlacementRequest {
@@ -238,6 +253,136 @@ fn explicit_provider_can_execute_without_invented_host_cost() {
         WholeWorkDecisionKind::ProviderRequired
     );
     assert_eq!(selected.decision.predicted_total_ns, None);
+}
+
+#[test]
+fn admitted_host_upload_is_a_distinct_complete_route() {
+    let session = PlacementSession::default();
+    let host_upload = host_with_provider_presentation();
+    let direct_host = candidate(ExecutionCandidateKind::SharedRuntime);
+    assert_ne!(
+        host_upload.selected("network"),
+        direct_host.selected("network")
+    );
+    let selection = session
+        .select_whole_work(request(vec![host_upload.clone()]))
+        .expect("both execution and presentation resources are admitted");
+    assert_eq!(
+        selection.decision.selected.kind,
+        ExecutionCandidateKind::SharedRuntime
+    );
+    assert_eq!(selection.decision.selected, host_upload.selected("network"));
+    drop(selection);
+
+    let mut alternate_stage = host_upload;
+    alternate_stage.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
+        device_id: 7,
+        transfer_bytes: Some(32),
+        host_scratch_bytes: 0.into(),
+        provider_scratch_bytes: 8.into(),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+    };
+    assert_ne!(
+        alternate_stage.selected("network"),
+        direct_host.selected("network")
+    );
+    assert_ne!(
+        alternate_stage.selected("network"),
+        host_with_provider_presentation().selected("network")
+    );
+}
+
+#[test]
+fn host_upload_requires_both_host_and_target_provider_resources() {
+    let session = PlacementSession::default();
+    let host_upload = host_with_provider_presentation();
+    let mut cases = Vec::new();
+    let mut no_host_cpu = request(vec![host_upload.clone()]);
+    no_host_cpu.resources.cpu_millicores_available = 999;
+    cases.push(no_host_cpu);
+    let mut no_host_staging_memory = request(vec![host_upload.clone()]);
+    no_host_staging_memory.resources.memory_available_bytes = Some(23);
+    cases.push(no_host_staging_memory);
+    let mut host_scratch = host_upload.clone();
+    host_scratch.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
+        device_id: 7,
+        transfer_bytes: Some(16),
+        host_scratch_bytes: 1.into(),
+        provider_scratch_bytes: 8.into(),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+    };
+    let mut no_host_upload_scratch = request(vec![host_scratch]);
+    no_host_upload_scratch.resources.memory_available_bytes = Some(24);
+    cases.push(no_host_upload_scratch);
+    let mut no_provider_output_memory = request(vec![host_upload.clone()]);
+    no_provider_output_memory.resources.providers[0].capacity_bytes = Some(23);
+    no_provider_output_memory.resources.providers[0].scratch_available_bytes = Some(23);
+    cases.push(no_provider_output_memory);
+    let mut no_provider_scratch = request(vec![host_upload.clone()]);
+    no_provider_scratch.resources.providers[0].scratch_available_bytes = Some(7);
+    cases.push(no_provider_scratch);
+    let mut no_provider_queue = request(vec![host_upload.clone()]);
+    no_provider_queue.resources.providers[0].queue_depth = Some(1);
+    cases.push(no_provider_queue);
+    let mut lost_provider = request(vec![host_upload]);
+    lost_provider.resources.providers[0].lost = true;
+    cases.push(lost_provider);
+    for rejected in cases {
+        assert_eq!(
+            session
+                .select_whole_work(rejected)
+                .err()
+                .expect("rejected route")
+                .code,
+            "RunMat:Placement:NoLegalCandidate"
+        );
+    }
+}
+
+#[test]
+fn provider_required_does_not_admit_a_host_upload_route() {
+    let session = PlacementSession::default();
+    let mut only_host_upload = request(vec![host_with_provider_presentation()]);
+    only_host_upload.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    assert_eq!(
+        session
+            .select_whole_work(only_host_upload)
+            .err()
+            .expect("explicit provider required")
+            .code,
+        "RunMat:Placement:InvalidRequest"
+    );
+}
+
+#[test]
+fn host_upload_needs_resource_evidence_and_transactional_publication() {
+    let session = PlacementSession::default();
+    let mut host = host_with_provider_presentation();
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
+        device_id: 7,
+        transfer_bytes: None,
+        host_scratch_bytes: 0.into(),
+        provider_scratch_bytes: ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        ),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+    };
+    let error = session
+        .select_whole_work(request(vec![host.clone()]))
+        .err()
+        .expect("unknown scratch cannot satisfy a known provider budget");
+    assert_eq!(error.code, "RunMat:Placement:InsufficientResourceEvidence");
+
+    host.presentation = host_with_provider_presentation().presentation;
+    host.transactional_results = false;
+    let error = session
+        .select_whole_work(request(vec![host]))
+        .err()
+        .expect("upload publication must be staged when required");
+    assert_eq!(error.code, "RunMat:Placement:NoLegalCandidate");
 }
 
 #[test]

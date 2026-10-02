@@ -191,6 +191,7 @@ fn candidate(
             source: EstimateSource::Compiler,
         },
         output_residency: CandidateOutputResidency::Host,
+        presentation: runmat_execution::CandidateOutputPresentation::Direct,
         guards: Vec::new(),
     }
 }

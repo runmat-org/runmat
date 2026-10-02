@@ -1,7 +1,7 @@
 use runmat_types::{RegionGuardId, RegionId};
 use serde::{Deserialize, Serialize};
 
-use super::ExecutionCostEstimate;
+use super::{ExecutionCostEstimate, ResourceByteBound};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -56,6 +56,66 @@ pub enum CandidateOutputResidency {
     Unknown,
 }
 
+/// A complete route may compute on the host and then publish through an
+/// admitted provider upload. This is a real presentation stage, not a change
+/// to the computation location or a guessed transfer cost.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CandidateOutputPresentation {
+    Direct,
+    ProviderUpload {
+        device_id: u32,
+        /// Bytes moved by the presentation stage, if physically established.
+        /// Unknown is not a zero-cost observation or a memory bound.
+        transfer_bytes: Option<u64>,
+        /// Temporary host storage beyond the host-produced output itself.
+        host_scratch_bytes: ResourceByteBound,
+        provider_scratch_bytes: ResourceByteBound,
+        queue_slots: u32,
+        preparation: CandidatePreparationState,
+    },
+}
+
+impl Default for CandidateOutputPresentation {
+    fn default() -> Self {
+        Self::Direct
+    }
+}
+
+impl CandidateOutputPresentation {
+    pub fn validate_for(
+        self,
+        execution: CandidateExecutionLocation,
+        output: CandidateOutputResidency,
+    ) -> Result<(), &'static str> {
+        match (self, execution, output) {
+            (Self::Direct, CandidateExecutionLocation::Host, CandidateOutputResidency::Provider { .. }
+                | CandidateOutputResidency::Mirrored { .. }) => {
+                Err("host execution needs an admitted provider presentation stage")
+            }
+            (
+                Self::ProviderUpload {
+                    device_id: upload,
+                    queue_slots,
+                    preparation,
+                    ..
+                },
+                CandidateExecutionLocation::Host,
+                CandidateOutputResidency::Provider { device_id: output }
+                | CandidateOutputResidency::Mirrored { device_id: output },
+            ) if upload == output && queue_slots > 0
+                && !matches!(
+                    preparation,
+                    CandidatePreparationState::Preparing | CandidatePreparationState::Unknown
+                ) => Ok(()),
+            (Self::ProviderUpload { .. }, _, _) => {
+                Err("provider upload presentation needs a ready stage, queue slot, and matching host route and output device")
+            }
+            (Self::Direct, _, _) => Ok(()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionCandidateDescriptor {
@@ -66,6 +126,8 @@ pub struct ExecutionCandidateDescriptor {
     pub preparation: CandidatePreparationState,
     pub cost: ExecutionCostEstimate,
     pub output_residency: CandidateOutputResidency,
+    #[serde(default)]
+    pub presentation: CandidateOutputPresentation,
     pub guards: Vec<RegionGuardId>,
 }
 
@@ -88,6 +150,8 @@ impl ExecutionCandidateDescriptor {
         {
             return Err("candidate kind and execution location are inconsistent");
         }
+        self.presentation
+            .validate_for(self.execution_location, self.output_residency)?;
         if self.guards.windows(2).any(|pair| pair[0] >= pair[1]) {
             return Err("candidate guards must be sorted and unique");
         }

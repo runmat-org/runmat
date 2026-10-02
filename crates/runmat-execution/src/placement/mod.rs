@@ -6,8 +6,8 @@ mod resource;
 mod whole_work;
 
 pub use candidate::{
-    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
-    ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    CandidateExecutionLocation, CandidateOutputPresentation, CandidateOutputResidency,
+    CandidatePreparationState, ExecutionCandidateDescriptor, ExecutionCandidateKind,
 };
 pub use cost::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateObservationEvidence,

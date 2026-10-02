@@ -93,6 +93,7 @@ mod tests {
             } else {
                 CandidateOutputResidency::Host
             },
+            presentation: runmat_execution::CandidateOutputPresentation::Direct,
             guards: Vec::new(),
         }
     }

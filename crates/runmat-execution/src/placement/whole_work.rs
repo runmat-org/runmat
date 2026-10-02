@@ -4,9 +4,9 @@
 use std::collections::BTreeSet;
 
 use super::{
-    CandidateCostEvidence, CandidateExecutionLocation, CandidateOutputResidency,
-    CandidatePreparationState, CandidateResourceDemand, ExecutionCandidateKind,
-    PlacementGraphLimits, PlacementResourceSnapshot, PlacementSignature,
+    CandidateCostEvidence, CandidateExecutionLocation, CandidateOutputPresentation,
+    CandidateOutputResidency, CandidatePreparationState, CandidateResourceDemand,
+    ExecutionCandidateKind, PlacementGraphLimits, PlacementResourceSnapshot, PlacementSignature,
     SelectedExecutionCandidate,
 };
 use crate::Digest;
@@ -27,6 +27,7 @@ pub struct WholeWorkCandidate {
     pub execution_location: CandidateExecutionLocation,
     pub preparation: CandidatePreparationState,
     pub output_residency: CandidateOutputResidency,
+    pub presentation: CandidateOutputPresentation,
     pub route_facts: Digest,
     pub cost: CandidateCostEvidence,
     /// Complete-route resource demand. Unknown byte dimensions remain typed;
@@ -39,7 +40,7 @@ impl WholeWorkCandidate {
     /// Opaque placement identity derived only from typed route facts. Neither
     /// user layer labels nor unstable allocation IDs are consulted by policy.
     pub fn selected(&self, node: &str) -> SelectedExecutionCandidate {
-        let mut encoded = b"runmat.whole-work.candidate.v1\0".to_vec();
+        let mut encoded = b"runmat.whole-work.candidate.v2\0".to_vec();
         encoded.push(match self.kind {
             ExecutionCandidateKind::SharedRuntime => 0,
             ExecutionCandidateKind::GenericNativeCpu => 1,
@@ -77,6 +78,10 @@ impl WholeWorkCandidate {
             }
             CandidateOutputResidency::Unknown => encoded.push(3),
         }
+        let stage = serde_json::to_vec(&self.presentation)
+            .expect("typed presentation stage must serialize");
+        encoded.extend_from_slice(&(stage.len() as u64).to_le_bytes());
+        encoded.extend_from_slice(&stage);
         encoded.extend_from_slice(self.route_facts.bytes());
         SelectedExecutionCandidate {
             node: node.to_owned(),
@@ -94,6 +99,8 @@ impl WholeWorkCandidate {
         {
             return Err("whole-work candidate kind and location disagree");
         }
+        self.presentation
+            .validate_for(self.execution_location, self.output_residency)?;
         match (self.execution_location, self.output_residency) {
             (
                 CandidateExecutionLocation::Provider {
@@ -103,13 +110,6 @@ impl WholeWorkCandidate {
                 | CandidateOutputResidency::Mirrored { device_id: output },
             ) if execution != output => {
                 return Err("whole-work output resides on a foreign device");
-            }
-            (
-                CandidateExecutionLocation::Host,
-                CandidateOutputResidency::Provider { .. }
-                | CandidateOutputResidency::Mirrored { .. },
-            ) => {
-                return Err("host whole-work route cannot present an unprepared provider output");
             }
             _ => {}
         }
@@ -243,6 +243,7 @@ mod tests {
             } else {
                 CandidateOutputResidency::Host
             },
+            presentation: CandidateOutputPresentation::Direct,
             route_facts: Digest::sha256(route),
             cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
             resources: CandidateResourceDemand::default(),
@@ -301,6 +302,35 @@ mod tests {
         assert!(provider.validate().is_err());
         let mut host = candidate(ExecutionCandidateKind::SharedRuntime, b"host");
         host.output_residency = CandidateOutputResidency::Provider { device_id: 7 };
+        assert!(host.validate().is_err());
+        host.presentation = CandidateOutputPresentation::ProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_scratch_bytes: 0.into(),
+            provider_scratch_bytes: 0.into(),
+            queue_slots: 1,
+            preparation: CandidatePreparationState::Ready,
+        };
+        assert!(host.validate().is_ok());
+        let direct = candidate(ExecutionCandidateKind::SharedRuntime, b"host");
+        assert_ne!(host.selected("work"), direct.selected("work"));
+        host.presentation = CandidateOutputPresentation::ProviderUpload {
+            device_id: 8,
+            transfer_bytes: Some(16),
+            host_scratch_bytes: 0.into(),
+            provider_scratch_bytes: 0.into(),
+            queue_slots: 1,
+            preparation: CandidatePreparationState::Ready,
+        };
+        assert!(host.validate().is_err());
+        host.presentation = CandidateOutputPresentation::ProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_scratch_bytes: 0.into(),
+            provider_scratch_bytes: 0.into(),
+            queue_slots: 1,
+            preparation: CandidatePreparationState::Unknown,
+        };
         assert!(host.validate().is_err());
     }
 

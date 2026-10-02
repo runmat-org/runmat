@@ -154,6 +154,7 @@ fn placement_derives_route_only_from_admitted_program_not_legacy_workload() {
                     preparation: CandidatePreparationState::Ready,
                     cost: cpu_cost,
                     output_residency: CandidateOutputResidency::Host,
+                    presentation: runmat_execution::CandidateOutputPresentation::Direct,
                     guards: vec![],
                 },
                 provider_fallback: cpu_cost,

@@ -242,6 +242,7 @@ pub(crate) fn plan_local(
         output_residency: CandidateOutputResidency::Provider {
             device_id: provider.device_id(),
         },
+        presentation: runmat_execution::CandidateOutputPresentation::Direct,
         guards: cpu.guards.clone(),
     };
     let cpu_cost = cpu.cost;

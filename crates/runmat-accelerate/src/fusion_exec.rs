@@ -328,6 +328,7 @@ fn select_fusion_provider_with_contract(
         preparation: CandidatePreparationState::Ready,
         cost: cpu_cost,
         output_residency: CandidateOutputResidency::Host,
+        presentation: runmat_execution::CandidateOutputPresentation::Direct,
         guards: Vec::new(),
     };
     let provider_fallback = ExecutionCostEstimate {

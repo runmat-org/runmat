@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use runmat_execution::{
-    CandidateExecutionLocation, CandidateOutputResidency, CandidateResourceDemand,
-    ExecutionCandidateKind, PlacementGraphCandidate, PlacementPlanRequest,
+    CandidateExecutionLocation, CandidateOutputPresentation, CandidateOutputResidency,
+    CandidateResourceDemand, ExecutionCandidateKind, PlacementGraphCandidate, PlacementPlanRequest,
     PlacementResourceSnapshot, SelectedExecutionCandidate,
 };
 
@@ -262,6 +262,7 @@ fn candidate_total_ns(
             CandidateResourceFacts {
                 location: candidate.descriptor.execution_location,
                 output_residency: candidate.descriptor.output_residency,
+                presentation: candidate.descriptor.presentation,
                 kind: candidate.descriptor.kind,
                 demand: candidate.resources,
                 transactional_results: candidate.transactional_results,
@@ -283,6 +284,7 @@ fn candidate_total_ns(
 pub(super) fn single_candidate_resources_admitted(
     location: CandidateExecutionLocation,
     output_residency: CandidateOutputResidency,
+    presentation: CandidateOutputPresentation,
     kind: ExecutionCandidateKind,
     demand: CandidateResourceDemand,
     transactional_results: bool,
@@ -293,6 +295,7 @@ pub(super) fn single_candidate_resources_admitted(
         CandidateResourceFacts {
             location,
             output_residency,
+            presentation,
             kind,
             demand,
             transactional_results,
@@ -310,6 +313,7 @@ pub(super) fn single_candidate_resources_admitted(
 struct CandidateResourceFacts {
     location: CandidateExecutionLocation,
     output_residency: CandidateOutputResidency,
+    presentation: CandidateOutputPresentation,
     kind: ExecutionCandidateKind,
     demand: CandidateResourceDemand,
     transactional_results: bool,
@@ -329,6 +333,7 @@ fn candidate_resource_adjustment_ns(
     let CandidateResourceFacts {
         location,
         output_residency,
+        presentation,
         kind,
         demand,
         transactional_results,
@@ -373,8 +378,53 @@ fn candidate_resource_adjustment_ns(
             provider_demands.insert(device_id, scratch);
         }
     }
-    if kind.is_provider() && require_transactional_results && !transactional_results {
+    if (kind.is_provider()
+        || matches!(
+            presentation,
+            CandidateOutputPresentation::ProviderUpload { .. }
+        ))
+        && require_transactional_results
+        && !transactional_results
+    {
         return Err(ResourceAdmissionError::TransactionalResultsRequired);
+    }
+    if let CandidateOutputPresentation::ProviderUpload {
+        device_id,
+        host_scratch_bytes,
+        provider_scratch_bytes,
+        queue_slots,
+        ..
+    } = presentation
+    {
+        let provider = resources
+            .provider(device_id)
+            .ok_or(ResourceAdmissionError::UnavailableProvider)?;
+        if provider.lost
+            || provider
+                .queue_depth
+                .zip(provider.queue_limit)
+                .is_some_and(|(depth, limit)| queue_slots > limit.saturating_sub(depth))
+        {
+            return Err(ResourceAdmissionError::OverBudget);
+        }
+        let scratch = ResourceAccount::default()
+            .add(provider_scratch_bytes)
+            .ok_or(ResourceAdmissionError::Overflow)?;
+        scratch.within(
+            provider.scratch_available_bytes,
+            ResourceBudgetKind::ProviderScratch(device_id),
+        )?;
+        provider_demands.insert(device_id, scratch);
+        host_peak = host_peak
+            .add(host_scratch_bytes)
+            .ok_or(ResourceAdmissionError::Overflow)?;
+        // The host-produced value remains live while its provider presentation
+        // is uploaded. The provider's retained output is accounted below.
+        if matches!(output_residency, CandidateOutputResidency::Provider { .. }) {
+            host_peak = host_peak
+                .add(demand.retained_bytes)
+                .ok_or(ResourceAdmissionError::Overflow)?;
+        }
     }
     match output_residency {
         CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {
