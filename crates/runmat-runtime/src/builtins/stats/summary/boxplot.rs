@@ -23,9 +23,11 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const NAME: &str = "boxplot";
 mod admission;
 mod appearance;
+mod factor_layout;
 mod plan;
 use crate::builtins::common::grouping_keys::KeyAtom;
 use appearance::{BoxStyle, LabelOrientation, LabelVerbosity, MedianStyle, NotchStyle};
+use factor_layout::{FactorDirection, FactorGap, FactorSeparator};
 use plan::BoxplotOptionPlan;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,6 +68,12 @@ struct BoxplotOptions {
     label_orientation_explicit: bool,
     label_verbosity: LabelVerbosity,
     label_verbosity_explicit: bool,
+    factor_direction: Vec<FactorDirection>,
+    full_factors: bool,
+    factor_gap: FactorGap,
+    factor_gap_explicit: bool,
+    factor_separator: FactorSeparator,
+    factor_separator_explicit: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -125,6 +133,12 @@ impl Default for BoxplotOptions {
             label_orientation_explicit: false,
             label_verbosity: LabelVerbosity::All,
             label_verbosity_explicit: false,
+            factor_direction: vec![FactorDirection::Data],
+            full_factors: false,
+            factor_gap: FactorGap::None,
+            factor_gap_explicit: false,
+            factor_separator: FactorSeparator::None,
+            factor_separator_explicit: false,
         }
     }
 }
@@ -264,10 +278,11 @@ pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let x = inputs.remove(0);
     let group = inputs.pop();
     let options = option_plan.evaluate().await?;
-    let boxes = build_box_stats(x, group, &options)?;
+    let layout = groups::build_box_layout(x, group, &options)?;
 
+    let prepared = plot::prepare_box_layout(&layout, &options)?;
     apply_axes_target(axes_target, NAME).map_err(map_plot_error)?;
-    let handles = render_boxplot(&boxes, &options)?;
+    let handles = plot::publish_boxplot(prepared, &options)?;
     let value = handles_value(handles)?;
 
     match crate::output_count::current_output_count() {
@@ -297,7 +312,9 @@ async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
 }
 
 mod plot;
-use plot::{handles_value, render_boxplot};
+use plot::handles_value;
+#[cfg(test)]
+use plot::render_boxplot;
 
 fn finite_data_lim(lo: f64, hi: f64) -> Option<(f64, f64)> {
     if lo == f64::NEG_INFINITY && hi == f64::INFINITY {
@@ -339,6 +356,7 @@ fn compression_offset(lo: f64, hi: f64, idx: usize, count: usize) -> f64 {
 mod options;
 
 mod groups;
+#[cfg(test)]
 use groups::build_box_stats;
 mod statistics;
 

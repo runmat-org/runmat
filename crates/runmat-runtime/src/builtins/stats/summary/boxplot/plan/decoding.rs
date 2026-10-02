@@ -134,28 +134,14 @@ pub(super) fn decode_option(kind: BoxplotOptionKind, value: Value) -> BuiltinRes
         }
         ColorGroup => DecodedOption::ColorGroup(value),
         FactorDirection => {
-            validate_choice_vector(&value, "FactorDirection", &["data", "list"])?;
-            DecodedOption::Validated(kind)
+            DecodedOption::FactorDirection(super::super::factor_layout::parse_directions(&value)?)
         }
         FullFactors => {
-            parse_on_off(&value, "FullFactors")?;
-            DecodedOption::Validated(kind)
+            DecodedOption::FullFactors(super::super::factor_layout::parse_full_factors(&value)?)
         }
-        FactorGap => {
-            let values = numeric_vector(&value, "FactorGap")?;
-            if values
-                .iter()
-                .any(|value| !value.is_finite() || *value < 0.0)
-            {
-                return Err(invalid(
-                    "boxplot: FactorGap must contain nonnegative finite values",
-                ));
-            }
-            DecodedOption::Validated(kind)
-        }
+        FactorGap => DecodedOption::FactorGap(super::super::factor_layout::parse_gap(&value)?),
         FactorSeparator => {
-            validate_factor_separator(&value)?;
-            DecodedOption::Validated(kind)
+            DecodedOption::FactorSeparator(super::super::factor_layout::parse_separator(&value)?)
         }
     };
     Ok(decoded)

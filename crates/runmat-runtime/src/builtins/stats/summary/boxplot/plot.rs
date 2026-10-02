@@ -1,14 +1,63 @@
 //! Graphics plans and publication for boxplot output.
 use super::*;
 
+pub(super) struct PreparedBoxplot {
+    pub(super) plans: Vec<PlotPlan>,
+    pub(super) labels: Vec<String>,
+    limits: AxisLimits,
+}
+
+pub(super) fn prepare_box_layout(
+    layout: &factor_layout::BoxLayout,
+    options: &BoxplotOptions,
+) -> BuiltinResult<PreparedBoxplot> {
+    let mut plans = build_plot_plans(&layout.boxes, options)?;
+    let labels = super::appearance::slot_tick_labels(
+        &layout.slots,
+        options.label_verbosity,
+        options.labels.is_some(),
+    );
+    let limits = axis_limits_for_layout(layout, options)?;
+    add_factor_separators(&mut plans, &layout.separators, limits, options.orientation)?;
+    Ok(PreparedBoxplot {
+        plans,
+        labels,
+        limits,
+    })
+}
+
+#[cfg(test)]
 pub(super) fn render_boxplot(
     boxes: &[BoxStats],
     options: &BoxplotOptions,
 ) -> BuiltinResult<Vec<f64>> {
-    let plans = build_plot_plans(boxes, options)?;
-    let labels =
-        super::appearance::tick_labels(boxes, options.label_verbosity, options.labels.is_some());
-    let limits = axis_limits(boxes, options)?;
+    let slots = boxes
+        .iter()
+        .enumerate()
+        .map(|(index, stats)| factor_layout::FactorSlot {
+            key: stats.group_key.clone(),
+            label: stats.label.clone(),
+            position: stats.position,
+            box_index: Some(index),
+        })
+        .collect();
+    let layout = factor_layout::BoxLayout {
+        boxes: boxes.to_vec(),
+        slots,
+        separators: Vec::new(),
+    };
+    publish_boxplot(prepare_box_layout(&layout, options)?, options)
+}
+
+pub(super) fn publish_boxplot(
+    prepared: PreparedBoxplot,
+    options: &BoxplotOptions,
+) -> BuiltinResult<Vec<f64>> {
+    let PreparedBoxplot {
+        plans,
+        labels,
+        limits,
+    } = prepared;
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let mut plans = Some(plans);
     let handles_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -92,6 +141,74 @@ pub(super) fn render_boxplot(
 }
 
 pub(super) type AxisLimits = (Option<(f64, f64)>, Option<(f64, f64)>);
+
+fn axis_limits_for_layout(
+    layout: &factor_layout::BoxLayout,
+    options: &BoxplotOptions,
+) -> BuiltinResult<AxisLimits> {
+    let limits = axis_limits(&layout.boxes, options)?;
+    let widths = widths_for(layout.slots.len(), options);
+    let min_pos = layout
+        .slots
+        .iter()
+        .zip(&widths)
+        .map(|(slot, width)| slot.position - width)
+        .fold(f64::INFINITY, f64::min);
+    let max_pos = layout
+        .slots
+        .iter()
+        .zip(&widths)
+        .map(|(slot, width)| slot.position + width)
+        .fold(f64::NEG_INFINITY, f64::max);
+    if !min_pos.is_finite() || !max_pos.is_finite() || min_pos >= max_pos {
+        return Err(invalid("boxplot: factor slot limits are not representable"));
+    }
+    let category = Some((
+        min_pos.min(0.5),
+        max_pos.max(layout.slots.len() as f64 + 0.5),
+    ));
+    Ok(match options.orientation {
+        Orientation::Vertical => (category, limits.1),
+        Orientation::Horizontal => (limits.0, category),
+    })
+}
+
+fn add_factor_separators(
+    plans: &mut Vec<PlotPlan>,
+    positions: &[f64],
+    limits: AxisLimits,
+    orientation: Orientation,
+) -> BuiltinResult<()> {
+    let data = match orientation {
+        Orientation::Vertical => limits.1,
+        Orientation::Horizontal => limits.0,
+    }
+    .ok_or_else(|| invalid("boxplot: data limits are unavailable"))?;
+    for &position in positions {
+        if !(position as f32).is_finite()
+            || !(data.0 as f32).is_finite()
+            || !(data.1 as f32).is_finite()
+        {
+            return Err(invalid(
+                "boxplot: factor separator geometry is not representable",
+            ));
+        }
+        let (x, y) = match orientation {
+            Orientation::Vertical => (vec![position, position], vec![data.0, data.1]),
+            Orientation::Horizontal => (vec![data.0, data.1], vec![position, position]),
+        };
+        let line = LinePlot::new(x, y)
+            .map_err(|err| internal(format!("boxplot: {err}")))?
+            .with_style(
+                Vec4::new(0.65, 0.65, 0.65, 1.0),
+                1.0,
+                runmat_plot::plots::LineStyle::Solid,
+            )
+            .with_label("factor separator");
+        plans.push(PlotPlan::Line(line));
+    }
+    Ok(())
+}
 
 pub(super) fn axis_limits(
     boxes: &[BoxStats],
@@ -347,18 +464,6 @@ pub(super) fn handles_value(handles: Vec<f64>) -> BuiltinResult<Value> {
     Tensor::new(handles, vec![1, len])
         .map(Value::Tensor)
         .map_err(|err| internal(format!("boxplot: {err}")))
-}
-
-pub(super) fn positions_for(count: usize, options: &BoxplotOptions) -> BuiltinResult<Vec<f64>> {
-    if let Some(positions) = &options.positions {
-        if positions.len() != count {
-            return Err(invalid(
-                "boxplot: Positions length must match the number of plotted boxes",
-            ));
-        }
-        return Ok(positions.clone());
-    }
-    Ok((1..=count).map(|idx| idx as f64).collect())
 }
 
 pub(super) fn widths_for(count: usize, options: &BoxplotOptions) -> Vec<f64> {

@@ -69,54 +69,6 @@ pub(super) fn text_vector(value: &Value, label: &str) -> BuiltinResult<Vec<Strin
     }
 }
 
-pub(super) fn parse_on_off(value: &Value, label: &str) -> BuiltinResult<()> {
-    match text_scalar(value, label)?.as_str() {
-        "on" | "off" => Ok(()),
-        _ => Err(invalid(format!("boxplot: {label} must be 'on' or 'off'"))),
-    }
-}
-
-pub(super) fn validate_choice_vector(
-    value: &Value,
-    label: &str,
-    choices: &[&str],
-) -> BuiltinResult<()> {
-    let values = text_vector(value, label)?;
-    if values.is_empty() {
-        return Err(invalid(format!("boxplot: {label} must not be empty")));
-    }
-    for value in values {
-        let value = value.to_ascii_lowercase();
-        if !choices.iter().any(|choice| value == *choice) {
-            return Err(invalid(format!(
-                "boxplot: {label} must be one of {}",
-                choices.join(", ")
-            )));
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn validate_factor_separator(value: &Value) -> BuiltinResult<()> {
-    if let Some(text) = keyword_of(value) {
-        if text == "auto" {
-            return Ok(());
-        }
-        return Err(invalid(
-            "boxplot: FactorSeparator must be numeric or 'auto'",
-        ));
-    }
-    let values = numeric_vector(value, "FactorSeparator")?;
-    if values.iter().any(|value| {
-        !value.is_finite() || *value < 1.0 || (*value - value.round()).abs() > f64::EPSILON
-    }) {
-        return Err(invalid(
-            "boxplot: FactorSeparator must contain positive integer indices",
-        ));
-    }
-    Ok(())
-}
-
 pub(super) fn parse_symbol(text: &str) -> BuiltinResult<(Option<MarkerStyle>, Option<Vec4>)> {
     let trimmed = text.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {

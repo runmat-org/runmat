@@ -43,6 +43,7 @@ impl LabelVerbosity {
     }
 }
 
+#[cfg(test)]
 pub(super) fn tick_labels(
     boxes: &[super::BoxStats],
     verbosity: LabelVerbosity,
@@ -52,38 +53,70 @@ pub(super) fn tick_labels(
         .iter()
         .enumerate()
         .map(|(index, stats)| {
-            if custom_labels || verbosity == LabelVerbosity::All || stats.group_key.is_empty() {
-                return stats.label.clone();
-            }
             let previous = index
                 .checked_sub(1)
-                .and_then(|previous| boxes.get(previous));
-            let parts = stats
-                .group_key
-                .iter()
-                .enumerate()
-                .map(|(factor, key)| {
-                    let show = previous.is_none_or(|previous| match verbosity {
-                        LabelVerbosity::All => true,
-                        LabelVerbosity::Minor => previous.group_key.get(factor) != Some(key),
-                        LabelVerbosity::MajorMinor => {
-                            previous.group_key.get(..=factor) != Some(&stats.group_key[..=factor])
-                        }
-                    });
-                    if show {
-                        key.label()
-                    } else {
-                        String::new()
-                    }
-                })
-                .collect::<Vec<_>>();
-            if parts.iter().all(String::is_empty) {
-                String::new()
-            } else {
-                parts.join(",")
-            }
+                .and_then(|previous| boxes.get(previous))
+                .map(|previous| previous.group_key.as_slice());
+            tick_label(
+                &stats.label,
+                &stats.group_key,
+                previous,
+                verbosity,
+                custom_labels,
+            )
         })
         .collect()
+}
+
+pub(super) fn slot_tick_labels(
+    slots: &[super::factor_layout::FactorSlot],
+    verbosity: LabelVerbosity,
+    custom_labels: bool,
+) -> Vec<String> {
+    slots
+        .iter()
+        .enumerate()
+        .map(|(index, slot)| {
+            let previous = index
+                .checked_sub(1)
+                .and_then(|previous| slots.get(previous))
+                .map(|previous| previous.key.as_slice());
+            tick_label(&slot.label, &slot.key, previous, verbosity, custom_labels)
+        })
+        .collect()
+}
+
+fn tick_label(
+    label: &str,
+    key: &[crate::builtins::common::grouping_keys::KeyAtom],
+    previous: Option<&[crate::builtins::common::grouping_keys::KeyAtom]>,
+    verbosity: LabelVerbosity,
+    custom_labels: bool,
+) -> String {
+    if custom_labels || verbosity == LabelVerbosity::All || key.is_empty() {
+        return label.to_string();
+    }
+    let parts = key
+        .iter()
+        .enumerate()
+        .map(|(factor, value)| {
+            let show = previous.is_none_or(|previous| match verbosity {
+                LabelVerbosity::All => true,
+                LabelVerbosity::Minor => previous.get(factor) != Some(value),
+                LabelVerbosity::MajorMinor => previous.get(..=factor) != Some(&key[..=factor]),
+            });
+            if show {
+                value.label()
+            } else {
+                String::new()
+            }
+        })
+        .collect::<Vec<_>>();
+    if parts.iter().all(String::is_empty) {
+        String::new()
+    } else {
+        parts.join(",")
+    }
 }
 
 impl LabelOrientation {

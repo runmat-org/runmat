@@ -199,6 +199,221 @@ fn label_verbosity_uses_factor_identity_and_respects_custom_labels() {
 }
 
 #[test]
+fn full_factors_reserves_empty_slots_without_inventing_box_statistics() {
+    let first =
+        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap());
+    let second =
+        Value::StringArray(StringArray::new(vec!["one".into(), "two".into()], vec![2, 1]).unwrap());
+    let factors = Value::Cell(CellArray::new(vec![first, second], 1, 2).unwrap());
+    let options = BoxplotOptions {
+        full_factors: true,
+        ..Default::default()
+    };
+    let layout = groups::build_box_layout(
+        tensor(vec![10.0, 20.0], vec![2, 1]),
+        Some(factors.clone()),
+        &options,
+    )
+    .unwrap();
+    assert_eq!(layout.boxes.len(), 2);
+    assert_eq!(layout.slots.len(), 4);
+    assert_eq!(
+        layout
+            .slots
+            .iter()
+            .map(|slot| slot.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a,one", "a,two", "b,one", "b,two"]
+    );
+    assert_eq!(
+        layout
+            .slots
+            .iter()
+            .map(|slot| slot.box_index)
+            .collect::<Vec<_>>(),
+        vec![Some(0), None, None, Some(1)]
+    );
+    assert_eq!(layout.boxes[0].position, 1.0);
+    assert_eq!(layout.boxes[1].position, 4.0);
+    assert_eq!(layout.boxes[0].median, 10.0);
+    assert_eq!(layout.boxes[1].median, 20.0);
+    let prepared = plot::prepare_box_layout(&layout, &options).expect("effect-free geometry");
+    assert_eq!(prepared.labels.len(), 4);
+    let observed = groups::build_box_layout(
+        tensor(vec![10.0, 20.0], vec![2, 1]),
+        Some(factors),
+        &BoxplotOptions::default(),
+    )
+    .unwrap();
+    let observed_plans = plot::prepare_box_layout(&observed, &BoxplotOptions::default()).unwrap();
+    assert_eq!(prepared.plans.len(), observed_plans.plans.len());
+}
+
+#[test]
+fn factor_gap_separator_and_direction_change_prepared_geometry() {
+    let first = Value::StringArray(
+        StringArray::new(vec!["a".into(), "a".into(), "b".into()], vec![3, 1]).unwrap(),
+    );
+    let second = Value::StringArray(
+        StringArray::new(vec!["one".into(), "two".into(), "one".into()], vec![3, 1]).unwrap(),
+    );
+    let factors = Value::Cell(CellArray::new(vec![first, second], 1, 2).unwrap());
+    let options = BoxplotOptions {
+        factor_gap: FactorGap::Percentages(vec![3.0, 1.0]),
+        factor_separator: FactorSeparator::Factors(vec![1]),
+        ..Default::default()
+    };
+    let layout = groups::build_box_layout(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(factors.clone()),
+        &options,
+    )
+    .unwrap();
+    assert_eq!(layout.slots.len(), 3);
+    assert!((layout.slots[1].position - 2.03125).abs() < 1.0e-12);
+    assert!((layout.slots[2].position - 3.125).abs() < 1.0e-12);
+    assert_eq!(layout.separators.len(), 1);
+    assert!((layout.separators[0] - 2.578125).abs() < 1.0e-12);
+
+    let horizontal = BoxplotOptions {
+        orientation: Orientation::Horizontal,
+        factor_direction: vec![FactorDirection::List],
+        ..Default::default()
+    };
+    let reversed = groups::build_box_layout(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(factors),
+        &horizontal,
+    )
+    .unwrap();
+    assert_eq!(
+        reversed
+            .slots
+            .iter()
+            .map(|slot| slot.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["b,one", "a,two", "a,one"]
+    );
+}
+
+#[test]
+fn factor_gap_is_a_percentage_of_final_width_and_rejects_unrepresentable_width() {
+    let groups = Value::StringArray(
+        StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap(),
+    );
+    let options = BoxplotOptions {
+        factor_gap: FactorGap::Percentages(vec![10.0]),
+        ..Default::default()
+    };
+    let layout = groups::build_box_layout(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(groups.clone()),
+        &options,
+    )
+    .unwrap();
+    // Two ten-percent gaps consume 20% of the final category width:
+    // W = three unit slots / (1 - 0.20) = 3.75.
+    assert_eq!(layout.slots[0].position, 1.0);
+    assert_eq!(layout.slots[1].position, 2.375);
+    assert_eq!(layout.slots[2].position, 3.75);
+
+    let explicit_positions = BoxplotOptions {
+        positions: Some(vec![10.0, 20.0, 30.0]),
+        ..options.clone()
+    };
+    let layout = groups::build_box_layout(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(groups.clone()),
+        &explicit_positions,
+    )
+    .unwrap();
+    assert_eq!(
+        layout
+            .slots
+            .iter()
+            .map(|slot| slot.position)
+            .collect::<Vec<_>>(),
+        vec![10.0, 20.0, 30.0],
+        "explicit Positions own category coordinates"
+    );
+
+    let excessive = BoxplotOptions {
+        factor_gap: FactorGap::Percentages(vec![50.0]),
+        ..Default::default()
+    };
+    let error = groups::build_box_layout(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(groups),
+        &excessive,
+    )
+    .expect_err("two 50% gaps leave no finite width for the slots");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+
+    let singleton = groups::build_box_layout(
+        tensor(vec![1.0], vec![1, 1]),
+        Some(Value::StringArray(
+            StringArray::new(vec!["a".into()], vec![1, 1]).unwrap(),
+        )),
+        &BoxplotOptions {
+            factor_gap: FactorGap::Percentages(vec![99.0]),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(singleton.slots[0].position, 1.0);
+}
+
+#[test]
+fn factor_controls_decode_once_and_validate_against_factor_count() {
+    let options = BoxplotOptions::parse(vec![
+        Value::from("FactorDirection"),
+        Value::from("auto"),
+        Value::from("FullFactors"),
+        Value::from("on"),
+        Value::from("FactorGap"),
+        Value::from("auto"),
+        Value::from("FactorSeparator"),
+        Value::from("auto"),
+    ])
+    .unwrap();
+    assert_eq!(options.factor_direction, vec![FactorDirection::Auto]);
+    assert!(options.full_factors);
+    assert_eq!(options.factor_gap, FactorGap::Auto);
+    assert_eq!(options.factor_separator, FactorSeparator::Auto);
+
+    let invalid = BoxplotOptions {
+        factor_separator: FactorSeparator::Factors(vec![2]),
+        ..Default::default()
+    };
+    let error = groups::build_box_layout(tensor(vec![1.0, 2.0], vec![2, 1]), None, &invalid)
+        .expect_err("second factor does not exist");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+
+    let wide = BoxplotOptions::parse(vec![
+        Value::from("FactorSeparator"),
+        Value::Int(IntValue::U64(u64::MAX)),
+    ]);
+    if usize::BITS == 64 {
+        assert_eq!(
+            wide.unwrap().factor_separator,
+            FactorSeparator::Factors(vec![usize::MAX]),
+            "wide integer selector must retain its exact native value"
+        );
+    } else {
+        assert!(
+            wide.is_err(),
+            "out-of-platform integer selector rejects exactly"
+        );
+    }
+}
+
+#[test]
 fn extensions_are_independently_mode_gated() {
     let data = || tensor(vec![1.0, 2.0], vec![2, 1]);
     let integer_data = || int_tensor(IntegerStorage::I16(vec![1, 2]), vec![2, 1]);

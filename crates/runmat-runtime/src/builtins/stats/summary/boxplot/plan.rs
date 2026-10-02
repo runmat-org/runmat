@@ -34,7 +34,10 @@ enum DecodedOption {
     DataLim(Option<(f64, f64)>),
     ExtremeMode(ExtremeMode),
     ColorGroup(Value),
-    Validated(BoxplotOptionKind),
+    FactorDirection(Vec<FactorDirection>),
+    FullFactors(bool),
+    FactorGap(FactorGap),
+    FactorSeparator(FactorSeparator),
 }
 
 impl BoxplotOptionPlan {
@@ -153,6 +156,12 @@ impl DecodedOption {
                     if !options.label_verbosity_explicit {
                         options.label_verbosity = LabelVerbosity::MajorMinor;
                     }
+                    if !options.factor_gap_explicit {
+                        options.factor_gap = FactorGap::Auto;
+                    }
+                    if !options.factor_separator_explicit {
+                        options.factor_separator = FactorSeparator::Auto;
+                    }
                     options.widths = vec![0.25];
                     options.outlier_marker = Some(MarkerStyle::Circle);
                     options.outlier_color = None;
@@ -170,6 +179,12 @@ impl DecodedOption {
                     }
                     if !options.label_verbosity_explicit {
                         options.label_verbosity = LabelVerbosity::All;
+                    }
+                    if !options.factor_gap_explicit {
+                        options.factor_gap = FactorGap::None;
+                    }
+                    if !options.factor_separator_explicit {
+                        options.factor_separator = FactorSeparator::None;
                     }
                     if options.outlier_marker == Some(MarkerStyle::Circle) {
                         options.outlier_marker = Some(MarkerStyle::Plus);
@@ -199,8 +214,15 @@ impl DecodedOption {
             Self::DataLim(value) => options.data_lim = value,
             Self::ExtremeMode(value) => options.extreme_mode = value,
             Self::ColorGroup(value) => options.color_group = Some(value),
-            Self::Validated(kind) => {
-                let _ = kind;
+            Self::FactorDirection(value) => options.factor_direction = value,
+            Self::FullFactors(value) => options.full_factors = value,
+            Self::FactorGap(value) => {
+                options.factor_gap = value;
+                options.factor_gap_explicit = true;
+            }
+            Self::FactorSeparator(value) => {
+                options.factor_separator = value;
+                options.factor_separator_explicit = true;
             }
         }
     }

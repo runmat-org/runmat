@@ -1,5 +1,5 @@
 //! Group identity, sample grouping, and box statistics.
-use super::plot::{color_for, positions_for, widths_for};
+use super::plot::color_for;
 use super::statistics::stats_for_values;
 use super::*;
 pub(super) mod labels;
@@ -26,11 +26,20 @@ pub(super) fn validate_known_host_group(
     }
 }
 
+#[cfg(test)]
 pub(super) fn build_box_stats(
     x: Value,
     group: Option<Value>,
     options: &BoxplotOptions,
 ) -> BuiltinResult<Vec<BoxStats>> {
+    build_box_layout(x, group, options).map(|layout| layout.boxes)
+}
+
+pub(super) fn build_box_layout(
+    x: Value,
+    group: Option<Value>,
+    options: &BoxplotOptions,
+) -> BuiltinResult<super::factor_layout::BoxLayout> {
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("{NAME}: {err}")))?;
     if tensor.shape.len() > 2 {
@@ -54,31 +63,18 @@ pub(super) fn build_box_stats(
         ));
     }
     apply_group_order(&mut groups, options)?;
-    if let Some(labels) = &options.labels {
-        if labels.len() != groups.len() {
-            return Err(invalid(
-                "boxplot: Labels length must match the number of plotted boxes",
-            ));
-        }
-    }
-    let positions = positions_for(groups.len(), options)?;
-    let widths = widths_for(groups.len(), options);
-    groups
+    let boxes = groups
         .into_iter()
         .enumerate()
         .map(|(idx, (label, values))| {
-            let display = options
-                .labels
-                .as_ref()
-                .map_or_else(|| group_label_text(&label), |labels| labels[idx].clone());
+            let display = group_label_text(&label);
             let mut stats = stats_for_values(display, values, options.whisker)?;
             stats.group_key = label;
-            stats.position = positions[idx];
-            stats.width = widths[idx];
             stats.color = color_for(idx, &options.box_colors);
             Ok(stats)
         })
-        .collect()
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    super::factor_layout::prepare_layout(boxes, options)
 }
 
 fn ungrouped_series(tensor: &Tensor) -> Vec<(GroupLabel, Vec<f64>)> {
