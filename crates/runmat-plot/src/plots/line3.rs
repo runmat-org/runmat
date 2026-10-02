@@ -7,8 +7,8 @@ use crate::geometry::stroke3d::{
     create_line_vertices_dashed, tessellate_polyline_tube, StrokeCap3D, StrokeStyle3D,
 };
 use crate::gpu::line3::{Line3GpuInputs, Line3GpuParams};
-use crate::gpu::util::readback_scalar_buffer_f64;
-use crate::plots::NumericPlotData;
+use crate::gpu::util::readback_scalar_buffer_f64_typed;
+use crate::plots::{NumericPlotData, PlotDataExportError};
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_value::NumericStorage;
@@ -153,28 +153,53 @@ impl Line3Plot {
     pub async fn export_numeric_xyz_data(
         &self,
     ) -> Result<Option<(NumericPlotData, NumericPlotData, NumericPlotData)>, String> {
+        self.export_numeric_xyz_data_typed()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_numeric_xyz_data_typed(
+        &self,
+    ) -> Result<Option<(NumericPlotData, NumericPlotData, NumericPlotData)>, PlotDataExportError>
+    {
         match (&self.source_x, &self.source_y, &self.source_z) {
             (Some(x), Some(y), Some(z)) if x.len() == y.len() && x.len() == z.len() => {
                 return Ok(Some((x.clone(), y.clone(), z.clone())));
             }
             (None, None, None) => {}
-            _ => return Err("plot3 line has incomplete CPU data".to_string()),
+            _ => {
+                return Err(PlotDataExportError::SourceUnavailable(
+                    "plot3 line has incomplete CPU data",
+                ))
+            }
         }
 
         if let Some(inputs) = &self.gpu_line_inputs {
-            let context = shared_wgpu_context().ok_or_else(|| {
-                "plot3 line has GPU source data but no shared WGPU context is installed".to_string()
-            })?;
+            let context = shared_wgpu_context().ok_or(PlotDataExportError::SourceUnavailable(
+                "plot3 line has GPU source data but no shared WGPU context is installed",
+            ))?;
             let len = inputs.len as usize;
-            let x =
-                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
-                    .await?;
-            let y =
-                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
-                    .await?;
-            let z =
-                readback_scalar_buffer_f64(&context.access, &inputs.z_buffer, len, inputs.scalar)
-                    .await?;
+            let x = readback_scalar_buffer_f64_typed(
+                &context.access,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64_typed(
+                &context.access,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let z = readback_scalar_buffer_f64_typed(
+                &context.access,
+                &inputs.z_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
             let shape = vec![1, len];
             let wrap = |values: Vec<f64>| match inputs.scalar {
                 crate::gpu::ScalarType::F64 => {
@@ -185,13 +210,17 @@ impl Line3Plot {
                     shape.clone(),
                 ),
             };
-            return Ok(Some((wrap(x)?, wrap(y)?, wrap(z)?)));
+            return Ok(Some((
+                wrap(x).map_err(PlotDataExportError::InvalidSourceLayout)?,
+                wrap(y).map_err(PlotDataExportError::InvalidSourceLayout)?,
+                wrap(z).map_err(PlotDataExportError::InvalidSourceLayout)?,
+            )));
         }
 
         if self.gpu_vertices.is_some() {
-            return Err(
-                "plot3 line has GPU render vertices but no exportable source data".to_string(),
-            );
+            return Err(PlotDataExportError::SourceUnavailable(
+                "plot3 line has GPU render vertices but no exportable source data",
+            ));
         }
 
         Ok(None)

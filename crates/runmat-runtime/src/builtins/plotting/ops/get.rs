@@ -9,7 +9,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::properties::{get_properties, resolve_plot_handle};
+use super::properties::{get_properties_async, resolve_plot_handle};
 use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -129,7 +129,22 @@ fn map_get_error(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    get_error_with_detail(&GET_ERROR_INVALID_ARGUMENT, err.message)
+    let span = err.span;
+    let retry = err.gpu_gather_retry();
+    let mut builder = build_runtime_error(format!(
+        "{}: {}",
+        GET_ERROR_INVALID_ARGUMENT.message, err.message
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_gpu_gather_retry(retry)
+    .with_source(err);
+    if let Some(identifier) = GET_ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    if let Some(span) = span {
+        builder = builder.with_span(span);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -143,7 +158,7 @@ fn map_get_error(err: RuntimeError) -> RuntimeError {
     integer_capabilities(crate::builtins::plotting::get::GET_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::get"
 )]
-pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn get_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(get_error_with_detail(
             &GET_ERROR_INVALID_ARGUMENT,
@@ -190,7 +205,14 @@ pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return Ok(value);
     }
     let handle = resolve_plot_handle(&handle_arg, BUILTIN_NAME).map_err(map_get_error)?;
-    get_properties(handle, property.as_deref(), BUILTIN_NAME).map_err(map_get_error)
+    get_properties_async(handle, property.as_deref(), BUILTIN_NAME)
+        .await
+        .map_err(map_get_error)
+}
+
+#[cfg(test)]
+pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    futures::executor::block_on(get_builtin_async(args))
 }
 
 fn is_typed_integer_handle_alias(value: &Value) -> bool {

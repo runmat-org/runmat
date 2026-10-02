@@ -4,6 +4,10 @@ use runmat_plot::plots::{
 use runmat_value::{CellArray, CharArray, NumericScalar, StringArray, StructValue, Tensor, Value};
 use std::borrow::Cow;
 
+#[path = "properties/async_readback.rs"]
+mod async_readback;
+pub use async_readback::{get_properties_async, set_properties_async};
+
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
@@ -3024,6 +3028,17 @@ fn get_line_property(
         ));
     };
     let (x_data, y_data) = line_xy_data_for_properties(&line, builtin)?;
+    line_property_with_data(line_handle, property, builtin, line, x_data, y_data)
+}
+
+fn line_property_with_data(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    line: runmat_plot::plots::LinePlot,
+    x_data: NumericPlotData,
+    y_data: NumericPlotData,
+) -> BuiltinResult<Value> {
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
@@ -3350,6 +3365,17 @@ fn get_scatter_property(
         ));
     };
     let (x_data, y_data) = scatter_xy_data_for_properties(&scatter, builtin)?;
+    scatter_property_with_data(scatter_handle, property, builtin, scatter, x_data, y_data)
+}
+
+fn scatter_property_with_data(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    scatter: runmat_plot::plots::ScatterPlot,
+    x_data: NumericPlotData,
+    y_data: NumericPlotData,
+) -> BuiltinResult<Value> {
     let x_render = x_data.materialize_f64();
     let y_render = y_data.materialize_f64();
     match property.map(canonical_property_name).as_deref() {
@@ -3894,10 +3920,34 @@ fn get_line3_property(
             format!("{builtin}: invalid plot3 handle"),
         ));
     };
+    let data = if line3_property_needs_data(property) {
+        Some(line_xyz_data_for_properties(&line, builtin)?)
+    } else {
+        None
+    };
+    line3_property_with_data(line_handle, property, builtin, line, data)
+}
+
+fn line3_property_needs_data(property: Option<&str>) -> bool {
+    matches!(
+        property.map(canonical_property_name).as_deref(),
+        None | Some("xdata" | "ydata" | "zdata")
+    )
+}
+
+fn line3_property_with_data(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    line: runmat_plot::plots::Line3Plot,
+    data: Option<(NumericPlotData, NumericPlotData, NumericPlotData)>,
+) -> BuiltinResult<Value> {
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
-            let (x_data, y_data, z_data) = line_xyz_data_for_properties(&line, builtin)?;
+            let (x_data, y_data, z_data) = data.as_ref().ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
+            })?;
             st.insert("XData", numeric_plot_data_value(&x_data));
             st.insert("YData", numeric_plot_data_value(&y_data));
             st.insert("ZData", numeric_plot_data_value(&z_data));
@@ -3924,15 +3974,21 @@ fn get_line3_property(
         )),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => {
-            let (x, _, _) = line_xyz_data_for_properties(&line, builtin)?;
+            let (x, _, _) = data.as_ref().ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
+            })?;
             Ok(numeric_plot_data_value(&x))
         }
         Some("ydata") => {
-            let (_, y, _) = line_xyz_data_for_properties(&line, builtin)?;
+            let (_, y, _) = data.as_ref().ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
+            })?;
             Ok(numeric_plot_data_value(&y))
         }
         Some("zdata") => {
-            let (_, _, z) = line_xyz_data_for_properties(&line, builtin)?;
+            let (_, _, z) = data.as_ref().ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
+            })?;
             Ok(numeric_plot_data_value(&z))
         }
         Some("color") => Ok(Value::String(color_to_short_name(line.color))),
@@ -5495,6 +5551,35 @@ fn apply_line_property(
     apply_line_properties(line_handle, &[(key.to_string(), value)], builtin)
 }
 
+#[derive(Clone, Copy)]
+struct PlotUpdateGuard {
+    child_handle: f64,
+    revision: u64,
+}
+
+type PlotXY = (NumericPlotData, NumericPlotData);
+type PlotXYZ = (NumericPlotData, NumericPlotData, NumericPlotData);
+
+fn update_property_plot(
+    figure: FigureHandle,
+    plot_index: usize,
+    guard: Option<PlotUpdateGuard>,
+    builtin: &'static str,
+    updater: impl FnOnce(&mut runmat_plot::plots::figure::PlotElement),
+) -> BuiltinResult<()> {
+    let result = match guard {
+        Some(guard) => super::state::update_plot_element_if_current(
+            guard.child_handle,
+            figure,
+            plot_index,
+            guard.revision,
+            updater,
+        ),
+        None => super::state::update_plot_element(figure, plot_index, updater),
+    };
+    result.map_err(|err| map_figure_error(builtin, err))
+}
+
 fn apply_line_properties(
     line_handle: &super::state::SimplePlotHandleState,
     pairs: &[(String, &Value)],
@@ -5509,6 +5594,16 @@ fn apply_line_properties(
     };
 
     let (current_x, current_y) = line_xy_data_for_properties(&current_line, builtin)?;
+    apply_line_properties_with_data(line_handle, pairs, builtin, (current_x, current_y), None)
+}
+
+fn apply_line_properties_with_data(
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    (current_x, current_y): PlotXY,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
     let mut x_update = None;
     let mut y_update = None;
     let mut style_pairs = Vec::new();
@@ -5535,17 +5630,22 @@ fn apply_line_properties(
         }
     }
 
-    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
-            if update_data {
-                let _ = line.update_numeric_data(next_x.clone(), next_y.clone());
+    update_property_plot(
+        line_handle.figure,
+        line_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
+                if update_data {
+                    let _ = line.update_numeric_data(next_x.clone(), next_y.clone());
+                }
+                for (key, value) in &style_pairs {
+                    apply_line_plot_properties(line, key, value, builtin);
+                }
             }
-            for (key, value) in &style_pairs {
-                apply_line_plot_properties(line, key, value, builtin);
-            }
-        }
-    })
-    .map_err(|err| map_figure_error(builtin, err))?;
+        },
+    )?;
     Ok(())
 }
 
@@ -5776,6 +5876,24 @@ fn apply_scatter_properties(
     };
 
     let (current_x, current_y) = scatter_xy_data_for_properties(&current_scatter, builtin)?;
+    apply_scatter_properties_with_data(
+        scatter_handle,
+        pairs,
+        builtin,
+        current_scatter,
+        (current_x, current_y),
+        None,
+    )
+}
+
+fn apply_scatter_properties_with_data(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    current_scatter: runmat_plot::plots::ScatterPlot,
+    (current_x, current_y): PlotXY,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
     let current_x_render = current_x.materialize_f64();
     let current_y_render = current_y.materialize_f64();
 
@@ -5834,55 +5952,60 @@ fn apply_scatter_properties(
         ));
     }
 
-    super::state::update_plot_element(scatter_handle.figure, scatter_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
-            if let Some((x, y)) = cartesian_update.as_ref() {
-                let _ = scatter.update_numeric_data(x.clone(), y.clone());
-            }
-            if let Some((theta, r)) = polar_update.as_ref() {
-                replace_polar_scatter_data_unchecked(scatter, theta.clone(), r.clone());
-            }
-            for (key, value) in &style_pairs {
-                match *key {
-                    "marker" => {
-                        if let Some(s) = value_as_string(value) {
-                            scatter.marker_style =
-                                scatter_marker_from_name(&s, scatter.marker_style);
+    update_property_plot(
+        scatter_handle.figure,
+        scatter_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
+                if let Some((x, y)) = cartesian_update.as_ref() {
+                    let _ = scatter.update_numeric_data(x.clone(), y.clone());
+                }
+                if let Some((theta, r)) = polar_update.as_ref() {
+                    replace_polar_scatter_data_unchecked(scatter, theta.clone(), r.clone());
+                }
+                for (key, value) in &style_pairs {
+                    match *key {
+                        "marker" => {
+                            if let Some(s) = value_as_string(value) {
+                                scatter.marker_style =
+                                    scatter_marker_from_name(&s, scatter.marker_style);
+                            }
                         }
-                    }
-                    "sizedata" => {
-                        if let Some(v) = value_as_f64(value) {
-                            scatter.marker_size = marker_area_points2_to_diameter_px(v);
+                        "sizedata" => {
+                            if let Some(v) = value_as_f64(value) {
+                                scatter.marker_size = marker_area_points2_to_diameter_px(v);
+                            }
                         }
-                    }
-                    "markerfacecolor" => {
-                        if let Ok(c) =
-                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                        {
-                            scatter.set_face_color(c);
+                        "markerfacecolor" => {
+                            if let Ok(c) =
+                                parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                            {
+                                scatter.set_face_color(c);
+                            }
                         }
-                    }
-                    "markeredgecolor" => {
-                        if let Ok(c) =
-                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                        {
-                            scatter.set_edge_color(c);
+                        "markeredgecolor" => {
+                            if let Ok(c) =
+                                parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                            {
+                                scatter.set_edge_color(c);
+                            }
                         }
-                    }
-                    "linewidth" => {
-                        if let Some(v) = value_as_f64(value) {
-                            scatter.set_edge_thickness(v as f32);
+                        "linewidth" => {
+                            if let Some(v) = value_as_f64(value) {
+                                scatter.set_edge_thickness(v as f32);
+                            }
                         }
+                        "displayname" => {
+                            scatter.label = value_as_string(value).map(|s| s.to_string());
+                        }
+                        _ => {}
                     }
-                    "displayname" => {
-                        scatter.label = value_as_string(value).map(|s| s.to_string());
-                    }
-                    _ => {}
                 }
             }
-        }
-    })
-    .map_err(|err| map_figure_error(builtin, err))?;
+        },
+    )?;
     Ok(())
 }
 
@@ -6644,6 +6767,22 @@ fn apply_line3_properties(
     };
 
     let (current_x, current_y, current_z) = line_xyz_data_for_properties(&current_line, builtin)?;
+    apply_line3_properties_with_data(
+        line_handle,
+        pairs,
+        builtin,
+        (current_x, current_y, current_z),
+        None,
+    )
+}
+
+fn apply_line3_properties_with_data(
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    (current_x, current_y, current_z): PlotXYZ,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
     let mut x_update = None;
     let mut y_update = None;
     let mut z_update = None;
@@ -6670,49 +6809,55 @@ fn apply_line3_properties(
         ));
     }
 
-    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
-            if update_data {
-                let _ = line.update_numeric_data(next_x.clone(), next_y.clone(), next_z.clone());
-            }
-            for (key, value) in &style_pairs {
-                match *key {
-                    "color" => {
-                        if let Ok(c) =
-                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                        {
-                            line.color = c;
+    update_property_plot(
+        line_handle.figure,
+        line_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
+                if update_data {
+                    let _ =
+                        line.update_numeric_data(next_x.clone(), next_y.clone(), next_z.clone());
+                }
+                for (key, value) in &style_pairs {
+                    match *key {
+                        "color" => {
+                            if let Ok(c) =
+                                parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                            {
+                                line.color = c;
+                            }
                         }
-                    }
-                    "linewidth" => {
-                        if let Some(v) = value_as_f64(value) {
-                            line.line_width = v as f32;
+                        "linewidth" => {
+                            if let Some(v) = value_as_f64(value) {
+                                line.line_width = v as f32;
+                            }
                         }
-                    }
-                    "linestyle" => {
-                        if let Some(s) = value_as_string(value) {
-                            line.line_style = parse_line_style_name_for_props(&s);
+                        "linestyle" => {
+                            if let Some(s) = value_as_string(value) {
+                                line.line_style = parse_line_style_name_for_props(&s);
+                            }
                         }
-                    }
-                    "displayname" => {
-                        line.label = value_as_string(value).map(|s| s.to_string());
-                    }
-                    "visible" => {
-                        if let Some(v) = value_as_bool(value) {
-                            line.set_visible(v);
-                        } else if let Some(s) = value_as_string(value) {
-                            line.set_visible(!matches!(
-                                s.trim().to_ascii_lowercase().as_str(),
-                                "off" | "false"
-                            ));
+                        "displayname" => {
+                            line.label = value_as_string(value).map(|s| s.to_string());
                         }
+                        "visible" => {
+                            if let Some(v) = value_as_bool(value) {
+                                line.set_visible(v);
+                            } else if let Some(s) = value_as_string(value) {
+                                line.set_visible(!matches!(
+                                    s.trim().to_ascii_lowercase().as_str(),
+                                    "off" | "false"
+                                ));
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
-        }
-    })
-    .map_err(|err| map_figure_error(builtin, err))?;
+        },
+    )?;
     Ok(())
 }
 
@@ -6922,15 +7067,10 @@ fn line_xy_data_for_properties(
     if let (Some(x), Some(y)) = line.source_data() {
         return Ok((x.clone(), y.clone()));
     }
-    futures::executor::block_on(line.export_numeric_xy_data_typed())
-        .map_err(|err| {
-            plotting_error_with_source(
-                builtin,
-                format!("{builtin}: unable to read line source data: {err}"),
-                err,
-            )
-        })?
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: line has no source data")))
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: line source data requires async property access"),
+    ))
 }
 
 fn line_xyz_data_for_properties(
@@ -6940,14 +7080,10 @@ fn line_xyz_data_for_properties(
     if let (Some(x), Some(y), Some(z)) = line.source_data() {
         return Ok((x.clone(), y.clone(), z.clone()));
     }
-    futures::executor::block_on(line.export_numeric_xyz_data())
-        .map_err(|err| {
-            plotting_error(
-                builtin,
-                format!("{builtin}: unable to read plot3 source data: {err}"),
-            )
-        })?
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: plot3 has no source data")))
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: plot3 source data requires async property access"),
+    ))
 }
 
 fn scatter_xy_data_for_properties(
@@ -6957,15 +7093,10 @@ fn scatter_xy_data_for_properties(
     if let (Some(x), Some(y)) = scatter.source_data() {
         return Ok((x.clone(), y.clone()));
     }
-    futures::executor::block_on(scatter.export_numeric_xy_data_typed())
-        .map_err(|err| {
-            plotting_error_with_source(
-                builtin,
-                format!("{builtin}: unable to read scatter source data: {err}"),
-                err,
-            )
-        })?
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: scatter has no source data")))
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: scatter source data requires async property access"),
+    ))
 }
 
 fn numeric_plot_data_value(data: &NumericPlotData) -> Value {

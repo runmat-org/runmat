@@ -12,7 +12,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
-use super::properties::{get_properties, map_figure_error, resolve_plot_handle, PlotHandle};
+use super::properties::{get_properties_async, map_figure_error, resolve_plot_handle, PlotHandle};
 use super::state::{self, FigureHandle, PlotObjectKind};
 use super::style::{parse_color_value, LineStyleParseOptions};
 use crate::builtins::common::tensor as tensor_utils;
@@ -152,13 +152,18 @@ pub const FINDOBJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] 
     descriptor(crate::builtins::plotting::findobj::FINDOBJ_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::findobj"
 )]
-pub fn findobj_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn findobj_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let request = FindRequest::parse(args)?;
     let mut matches = Vec::new();
     for root in request.roots {
-        collect_matches(root, 0, request.max_depth, &request.expr, &mut matches)?;
+        collect_matches(root, request.max_depth, &request.expr, &mut matches).await?;
     }
     Ok(handle_array(matches))
+}
+
+#[cfg(test)]
+pub fn findobj_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    futures::executor::block_on(findobj_builtin_async(args))
 }
 
 #[derive(Clone)]
@@ -297,24 +302,37 @@ enum Expr {
 }
 
 impl Expr {
-    fn matches(&self, handle: f64) -> bool {
-        match self {
-            Expr::True => true,
-            Expr::HasProperty(prop) => property_value(handle, prop).is_some(),
-            Expr::Equals(prop, expected) => property_value(handle, prop)
-                .is_some_and(|actual| values_match(prop, &actual, expected)),
-            Expr::Regex(prop, regexes) => property_value(handle, prop)
-                .map(value_texts)
-                .is_some_and(|texts| {
-                    texts
-                        .iter()
-                        .any(|text| regexes.iter().any(|regex| regex.is_match(text)))
-                }),
-            Expr::Not(expr) => !expr.matches(handle),
-            Expr::And(left, right) => left.matches(handle) && right.matches(handle),
-            Expr::Or(left, right) => left.matches(handle) || right.matches(handle),
-            Expr::Xor(left, right) => left.matches(handle) ^ right.matches(handle),
-        }
+    fn matches<'a>(
+        &'a self,
+        handle: f64,
+    ) -> futures::future::LocalBoxFuture<'a, crate::BuiltinResult<bool>> {
+        Box::pin(async move {
+            Ok(match self {
+                Expr::True => true,
+                Expr::HasProperty(prop) => property_value_async(handle, prop).await?.is_some(),
+                Expr::Equals(prop, expected) => property_value_async(handle, prop)
+                    .await?
+                    .is_some_and(|actual| values_match(prop, &actual, expected)),
+                Expr::Regex(prop, regexes) => property_value_async(handle, prop)
+                    .await?
+                    .map(value_texts)
+                    .is_some_and(|texts| {
+                        texts
+                            .iter()
+                            .any(|text| regexes.iter().any(|regex| regex.is_match(text)))
+                    }),
+                Expr::Not(expr) => !expr.matches(handle).await?,
+                Expr::And(left, right) => {
+                    left.matches(handle).await? && right.matches(handle).await?
+                }
+                Expr::Or(left, right) => {
+                    left.matches(handle).await? || right.matches(handle).await?
+                }
+                Expr::Xor(left, right) => {
+                    left.matches(handle).await? ^ right.matches(handle).await?
+                }
+            })
+        })
     }
 }
 
@@ -425,21 +443,23 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
         .collect()
 }
 
-fn collect_matches(
-    handle: f64,
-    depth: usize,
+async fn collect_matches(
+    root: f64,
     max_depth: Option<usize>,
     expr: &Expr,
     out: &mut Vec<f64>,
 ) -> crate::BuiltinResult<()> {
-    if expr.matches(handle) {
-        out.push(handle);
-    }
-    if max_depth.is_some_and(|max| depth >= max) {
-        return Ok(());
-    }
-    for child in child_handles(handle)? {
-        collect_matches(child, depth.saturating_add(1), max_depth, expr, out)?;
+    let mut stack = vec![(root, 0usize)];
+    while let Some((handle, depth)) = stack.pop() {
+        if expr.matches(handle).await? {
+            out.push(handle);
+        }
+        if max_depth.is_some_and(|max| depth >= max) {
+            continue;
+        }
+        for child in child_handles(handle)?.into_iter().rev() {
+            stack.push((child, depth.saturating_add(1)));
+        }
     }
     Ok(())
 }
@@ -537,9 +557,21 @@ fn axes_children(figure: FigureHandle, axes_index: usize) -> crate::BuiltinResul
     Ok(children)
 }
 
+async fn property_value_async(handle: f64, property: &str) -> crate::BuiltinResult<Option<Value>> {
+    let Ok(resolved) = resolve_plot_handle(&Value::Num(handle), BUILTIN_NAME) else {
+        return Ok(None);
+    };
+    match get_properties_async(resolved, Some(property), BUILTIN_NAME).await {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.source.is_none() => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
 fn property_value(handle: f64, property: &str) -> Option<Value> {
-    let resolved = resolve_plot_handle(&Value::Num(handle), BUILTIN_NAME).ok()?;
-    get_properties(resolved, Some(property), BUILTIN_NAME).ok()
+    futures::executor::block_on(property_value_async(handle, property))
+        .expect("property lookup should not fail operationally")
 }
 
 fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {

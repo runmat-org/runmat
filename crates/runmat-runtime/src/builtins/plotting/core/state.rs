@@ -1346,6 +1346,8 @@ pub enum FigureError {
     InvalidAxesHandle,
     #[error("invalid plot object handle")]
     InvalidPlotObjectHandle,
+    #[error("plot changed while reading its GPU data")]
+    StalePlotSnapshot,
     #[error("failed to render figure snapshot: {source}")]
     RenderFailure {
         #[source]
@@ -4257,6 +4259,37 @@ pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, F
         .ok_or(FigureError::InvalidPlotObjectHandle)
 }
 
+/// A plot and its mutation revision captured under one registry guard.
+/// The cloned plot owns its GPU source leases while a caller awaits readback.
+pub fn plot_child_element_snapshot(
+    handle: f64,
+) -> Result<(PlotChildHandleState, PlotElement, u64), FigureError> {
+    if !handle.is_finite() || handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let reg = registry();
+    let child = reg
+        .plot_children
+        .get(&(handle.round() as u64))
+        .ok_or(FigureError::InvalidPlotObjectHandle)?
+        .clone();
+    let (figure_handle, _) = child.figure_axes();
+    let index = child
+        .plot_index()
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    let state = reg
+        .figures
+        .get(&figure_handle)
+        .ok_or(FigureError::InvalidHandle(figure_handle.as_u32()))?;
+    let plot = state
+        .figure
+        .plots()
+        .nth(index)
+        .cloned()
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    Ok((child, plot, state.revision))
+}
+
 pub fn validate_plot_child_copy_source(source_handle: f64) -> Result<(), FigureError> {
     if !source_handle.is_finite() || source_handle <= 0.0 {
         return Err(FigureError::InvalidPlotObjectHandle);
@@ -4515,6 +4548,7 @@ pub fn update_errorbar_plot(
     match plot {
         runmat_plot::plots::figure::PlotElement::ErrorBar(errorbar) => {
             updater(errorbar);
+            state.revision = state.revision.wrapping_add(1);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),
@@ -4537,6 +4571,7 @@ pub fn update_histogram_plot_data(
         runmat_plot::plots::figure::PlotElement::Bar(bar) => {
             bar.set_data(labels, values)
                 .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+            state.revision = state.revision.wrapping_add(1);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),
@@ -4557,6 +4592,7 @@ pub fn update_stem_plot(
     match plot {
         runmat_plot::plots::figure::PlotElement::Stem(stem) => {
             updater(stem);
+            state.revision = state.revision.wrapping_add(1);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),
@@ -4577,6 +4613,7 @@ pub fn update_quiver_plot(
     match plot {
         runmat_plot::plots::figure::PlotElement::Quiver(quiver) => {
             updater(quiver);
+            state.revision = state.revision.wrapping_add(1);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),
@@ -4597,6 +4634,7 @@ pub fn update_image_plot(
     match plot {
         runmat_plot::plots::figure::PlotElement::Surface(surface) if surface.image_mode => {
             updater(surface);
+            state.revision = state.revision.wrapping_add(1);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),
@@ -4617,6 +4655,7 @@ pub fn update_area_plot(
     match plot {
         runmat_plot::plots::figure::PlotElement::Area(area) => {
             updater(area);
+            state.revision = state.revision.wrapping_add(1);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),
@@ -4635,6 +4674,44 @@ pub fn update_plot_element(
         .get_plot_mut(plot_index)
         .ok_or(FigureError::InvalidPlotObjectHandle)?;
     updater(plot);
+    state.revision = state.revision.wrapping_add(1);
+    Ok(())
+}
+
+/// Commit a property update only against the figure snapshot that supplied its
+/// readback data. The child identity and revision are checked under the same
+/// registry lock as the update; no registry guard crosses an async readback.
+pub fn update_plot_element_if_current(
+    child_handle: f64,
+    figure_handle: FigureHandle,
+    plot_index: usize,
+    revision: u64,
+    updater: impl FnOnce(&mut runmat_plot::plots::figure::PlotElement),
+) -> Result<(), FigureError> {
+    if !child_handle.is_finite() || child_handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let mut reg = registry();
+    let child = reg
+        .plot_children
+        .get(&(child_handle.round() as u64))
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    if child.figure_axes().0 != figure_handle || child.plot_index() != Some(plot_index) {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let state = reg
+        .figures
+        .get_mut(&figure_handle)
+        .ok_or(FigureError::InvalidHandle(figure_handle.as_u32()))?;
+    if state.revision != revision {
+        return Err(FigureError::StalePlotSnapshot);
+    }
+    let plot = state
+        .figure
+        .get_plot_mut(plot_index)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    updater(plot);
+    state.revision = state.revision.wrapping_add(1);
     Ok(())
 }
 
