@@ -125,6 +125,7 @@ mod tests {
     use super::*;
     use futures::task::noop_waker;
     use std::future::Future;
+    use std::rc::Rc;
     use std::task::{Context, Poll};
     use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -140,5 +141,21 @@ mod tests {
             .is_pending());
         assert!(!turn.as_ref().get_ref().state.borrow().ready);
         assert!(matches!(turn.await, Ok(())));
+    }
+
+    #[wasm_bindgen_test]
+    fn abandoning_a_posted_turn_releases_its_callback_state() {
+        let mut turn = Box::pin(BrowserTaskTurn::new().expect("browser MessageChannel"));
+        let state = Rc::downgrade(&turn.as_ref().get_ref().state);
+        let waker = noop_waker();
+        assert!(turn
+            .as_mut()
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending());
+        drop(turn);
+        assert!(
+            state.upgrade().is_none(),
+            "drop must release the pending callback"
+        );
     }
 }
