@@ -51,7 +51,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isgraphics(h)); assert(isequal(get(h,'YData'),[3 3.5])); assert(strcmp(get(h,'LineStyle'),'--')); assert(strcmp(get(h,'DisplayName'),'reference'));" },
         },
         BuiltinExample { id: "refline-explicit-xlim", title: "Use the specified x-axis span",
-            program: "xlim([-1 3]); h = refline(2,1); get(h,'YData')",
+            program: "plot([0 1],[0 1]); xlim([-1 3]); h = refline(2,1); get(h,'YData')",
             display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
