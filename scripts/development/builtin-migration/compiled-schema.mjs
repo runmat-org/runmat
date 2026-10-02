@@ -102,7 +102,15 @@ function binding(value) { exact(value, ["variant", "availability"], "binding dec
 function extension(value) {
   exact(value, ["id", "mode", "description", "error_identifier"], "extension");
   nonempty(value.id, "extension id");
-  enumValue(value.mode, ["RunMatOnly", "ProfileDependentBehavior"], "extension mode");
+  if (typeof value.mode === "string") {
+    enumValue(value.mode, ["RunMatOnly", "ProfileDependentBehavior"], "extension mode");
+  } else {
+    exact(value.mode, ["AvailableSince"], "extension mode");
+    exact(value.mode.AvailableSince, ["year", "half"], "extension release");
+    integer(value.mode.AvailableSince.year, "extension release year");
+    if (value.mode.AvailableSince.year < 1 || value.mode.AvailableSince.year > 65535) throw new Error("extension release year must fit u16 and be positive");
+    enumValue(value.mode.AvailableSince.half, ["A", "B"], "extension release half");
+  }
   nonempty(value.description, "extension description");
   optionalText(value.error_identifier, "extension error identifier");
   if (value.mode === "ProfileDependentBehavior") {

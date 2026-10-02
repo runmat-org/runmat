@@ -11,6 +11,13 @@ test("extension schema distinguishes rejected forms and profile-dependent behavi
     ["RunMatOnly", "RunMat:Fixture", false],
     ["ProfileDependentBehavior", null, true],
     ["ProfileDependentBehavior", "RunMat:compatibility:Fixture", false],
+    [{ AvailableSince: { year: 2026, half: "B" } }, "RunMat:compatibility:Fixture", true],
+    [{ AvailableSince: { year: 2026, half: "B" } }, null, false],
+    [{ AvailableSince: { year: 0, half: "B" } }, "RunMat:compatibility:Fixture", false],
+    [{ AvailableSince: { year: 2026, half: "C" } }, "RunMat:compatibility:Fixture", false],
+    [{ AvailableSince: { year: 2026, half: "B", inferred: true } }, "RunMat:compatibility:Fixture", false],
+    [{ AvailableSince: { year: 2026 } }, "RunMat:compatibility:Fixture", false],
+    [{ AvailableSince: { year: 2026, half: "B" }, RunMatOnly: {} }, "RunMat:compatibility:Fixture", false],
     ["Unknown", null, false],
   ]) {
     fixture.extensions = [{ id: "fixture", mode, description: "Fixture", error_identifier }];
