@@ -99,7 +99,7 @@ fn controls(
             .get(index)
             .and_then(literal_text)
         {
-            if let Some(option) = IntegralOptionName::parse(text) {
+            if let Some(option) = IntegralOptionName::parse(&text) {
                 let literal = request.literals.literal_args.get(index + 1);
                 let value = request.arguments.get(index + 1);
                 known_option(
