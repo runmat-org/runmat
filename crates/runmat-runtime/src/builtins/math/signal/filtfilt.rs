@@ -28,8 +28,11 @@ use crate::builtins::math::signal::common::{
 use crate::builtins::math::signal::resident_output::{self, OutputContext};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+#[path = "filtfilt/initial_state.rs"]
+mod initial_state;
+use initial_state::lfilter_zi;
+
 const BUILTIN_NAME: &str = "filtfilt";
-const EPS: f64 = 1.0e-12;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filtfilt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -342,6 +345,15 @@ impl NormalizedCoefficients {
                 "coefficient vectors cannot be empty",
             ));
         }
+        if b.iter()
+            .chain(a)
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(filtfilt_error_with_detail(
+                &FILTFILT_ERROR_INVALID_COEFFICIENTS,
+                "coefficient values must be finite",
+            ));
+        }
         let a0 = a[0];
         if a0 == Complex::new(0.0, 0.0) {
             return Err(filtfilt_error_with_detail(
@@ -358,6 +370,16 @@ impl NormalizedCoefficients {
         a_norm[0] = Complex::new(1.0, 0.0);
         for (idx, coeff) in a.iter().enumerate().skip(1) {
             a_norm[idx] = divide_by_leading_coefficient(*coeff, a0);
+        }
+        if b_norm
+            .iter()
+            .chain(&a_norm)
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(filtfilt_error_with_detail(
+                &FILTFILT_ERROR_INVALID_COEFFICIENTS,
+                "normalized coefficients exceed the floating-point range",
+            ));
         }
         Ok(Self {
             b: b_norm,
@@ -496,81 +518,6 @@ fn direct_form_filter(
         }
     }
     output
-}
-
-fn lfilter_zi(coeffs: &NormalizedCoefficients) -> BuiltinResult<Vec<Complex<f64>>> {
-    let n = coeffs.state_len;
-    if n == 0 {
-        return Ok(Vec::new());
-    }
-    let mut matrix = vec![vec![Complex::new(0.0, 0.0); n]; n];
-    for (row, row_values) in matrix.iter_mut().enumerate() {
-        for (col, value) in row_values.iter_mut().enumerate() {
-            if row == col {
-                *value += Complex::new(1.0, 0.0);
-            }
-            let a_t = if col == 0 {
-                -coeffs.a[row + 1]
-            } else if row + 1 == col {
-                Complex::new(1.0, 0.0)
-            } else {
-                Complex::new(0.0, 0.0)
-            };
-            *value -= a_t;
-        }
-    }
-    let rhs = (0..n)
-        .map(|idx| coeffs.b[idx + 1] - coeffs.a[idx + 1] * coeffs.b[0])
-        .collect::<Vec<_>>();
-    solve_linear(matrix, rhs)
-}
-
-fn solve_linear(
-    mut matrix: Vec<Vec<Complex<f64>>>,
-    mut rhs: Vec<Complex<f64>>,
-) -> BuiltinResult<Vec<Complex<f64>>> {
-    let n = rhs.len();
-    for pivot_idx in 0..n {
-        let mut pivot_row = pivot_idx;
-        let mut pivot_norm = matrix[pivot_idx][pivot_idx].norm();
-        for (row, values) in matrix.iter().enumerate().skip(pivot_idx + 1) {
-            let norm = values[pivot_idx].norm();
-            if norm > pivot_norm {
-                pivot_norm = norm;
-                pivot_row = row;
-            }
-        }
-        if pivot_norm <= EPS {
-            return Err(filtfilt_error_with_detail(
-                &FILTFILT_ERROR_INVALID_COEFFICIENTS,
-                "filter initial-state system is singular",
-            ));
-        }
-        if pivot_row != pivot_idx {
-            matrix.swap(pivot_row, pivot_idx);
-            rhs.swap(pivot_row, pivot_idx);
-        }
-        let pivot = matrix[pivot_idx][pivot_idx];
-        let pivot_row_values = matrix[pivot_idx].clone();
-        let pivot_rhs = rhs[pivot_idx];
-        for row in pivot_idx + 1..n {
-            let factor = matrix[row][pivot_idx] / pivot;
-            for (col, pivot_value) in pivot_row_values.iter().enumerate().skip(pivot_idx) {
-                matrix[row][col] -= factor * *pivot_value;
-            }
-            rhs[row] -= factor * pivot_rhs;
-        }
-    }
-
-    let mut out = vec![Complex::new(0.0, 0.0); n];
-    for row in (0..n).rev() {
-        let mut acc = rhs[row];
-        for (col, value) in matrix[row].iter().enumerate().skip(row + 1) {
-            acc -= *value * out[col];
-        }
-        out[row] = acc / matrix[row][row];
-    }
-    Ok(out)
 }
 
 async fn try_filtfilt_gpu(
