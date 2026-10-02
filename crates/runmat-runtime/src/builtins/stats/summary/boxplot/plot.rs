@@ -63,9 +63,7 @@ pub(super) fn publish_boxplot(
         limits,
     } = prepared;
     let figure_handle = crate::builtins::plotting::current_figure_handle();
-    let mut plans = Some(plans);
-    let handles_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-    let handles_slot = std::rc::Rc::clone(&handles_out);
+    let mut recorded = Vec::with_capacity(plans.len());
     let opts = PlotRenderOptions {
         title: "",
         x_label: "",
@@ -73,11 +71,11 @@ pub(super) fn publish_boxplot(
         grid: true,
         axis_equal: false,
     };
-    let render_result = render_active_plot(NAME, opts, move |figure, axes| {
+    let render_result = render_active_plot(NAME, opts, |figure, axes| {
         match options.orientation {
             Orientation::Vertical => {
-                figure.set_axes_ticks(axes, Some(ticks.clone()), None);
-                figure.set_axes_tick_labels(axes, Some(labels.clone()), None);
+                figure.set_axes_ticks(axes, Some(ticks), None);
+                figure.set_axes_tick_labels(axes, Some(labels), None);
                 figure.set_axes_tick_label_rotations(
                     axes,
                     Some(options.label_orientation.angle(options.orientation)),
@@ -85,14 +83,13 @@ pub(super) fn publish_boxplot(
                 );
             }
             Orientation::Horizontal => {
-                figure.set_axes_ticks(axes, None, Some(ticks.clone()));
-                figure.set_axes_tick_labels(axes, None, Some(labels.clone()));
+                figure.set_axes_ticks(axes, None, Some(ticks));
+                figure.set_axes_tick_labels(axes, None, Some(labels));
                 figure.set_axes_tick_label_rotations(axes, None, Some(0.0));
             }
         }
         figure.set_axes_limits(axes, limits.0, limits.1);
-        let mut recorded = Vec::new();
-        for plan in plans.take().expect("boxplot plans consumed once") {
+        for plan in plans {
             match plan {
                 PlotPlan::Line(plot) => {
                     let plot_index = figure.add_line_plot_on_axes(plot, axes);
@@ -108,12 +105,10 @@ pub(super) fn publish_boxplot(
                 }
             }
         }
-        *handles_slot.borrow_mut() = recorded;
         Ok(())
     });
 
-    let handles = handles_out
-        .borrow()
+    let handles = recorded
         .iter()
         .map(|(kind, axes, plot_index)| match kind {
             HandleKind::Line => crate::builtins::plotting::state::register_line_handle(

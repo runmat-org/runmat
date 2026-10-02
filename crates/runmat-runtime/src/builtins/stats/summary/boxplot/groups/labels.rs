@@ -4,7 +4,7 @@ use crate::builtins::common::grouping_keys::KeyAtom;
 
 pub(super) type GroupLabel = Vec<KeyAtom>;
 
-pub(super) fn group_label_text(label: &[KeyAtom]) -> String {
+pub(in crate::builtins::stats::summary::boxplot) fn group_label_text(label: &[KeyAtom]) -> String {
     label
         .iter()
         .map(KeyAtom::label)

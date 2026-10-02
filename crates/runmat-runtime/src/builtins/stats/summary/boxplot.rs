@@ -13,7 +13,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, MarkerStyle, PatchPlot, ScatterPlot};
-use runmat_value::{CellArray, CharArray, IntValue, NumericScalar, Tensor, Value};
+use runmat_value::{CellArray, CharArray, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::{random_args::keyword_of, tensor};
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};

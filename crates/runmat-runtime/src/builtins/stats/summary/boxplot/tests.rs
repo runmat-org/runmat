@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::plotting::{clone_figure, current_figure_handle};
 use futures::executor::block_on;
-use runmat_value::{IntegerStorage, LogicalArray, StringArray};
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, StringArray};
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).expect("tensor"))
