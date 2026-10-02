@@ -518,6 +518,8 @@ fn fminbnd_descriptor_signatures_cover_core_forms() {
     assert_eq!(
         labels,
         vec![
+            "fminbnd(fun, x1, x2)",
+            "fminbnd(fun, x1, x2, options)",
             "x = fminbnd(fun, x1, x2)",
             "x = fminbnd(fun, x1, x2, options)",
             "[x, fval] = fminbnd(fun, x1, x2)",

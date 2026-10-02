@@ -553,6 +553,8 @@ fn fzero_descriptor_signatures_cover_core_forms() {
     assert_eq!(
         labels,
         vec![
+            "fzero(fun, x0)",
+            "fzero(fun, x0, options)",
             "x = fzero(fun, x0)",
             "x = fzero(fun, x0, options)",
             "[x, fval] = fzero(fun, x0)",
