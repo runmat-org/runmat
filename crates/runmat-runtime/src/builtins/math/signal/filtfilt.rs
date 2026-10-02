@@ -17,8 +17,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::fft::common::ensure_wide_integer_data_exact;
 use crate::builtins::math::signal::common::{
-    complex_vector_to_value_with_dtype, signal_error, value_to_complex_vector, vector_is_row,
-    ComplexVectorInput,
+    complex_vector_to_value_with_dtype, preflight_iir_operands, signal_error,
+    value_to_complex_vector, vector_is_row, ComplexVectorInput, IirAdmissionFault, IirFaultKind,
+    IirForm, IirOperand,
 };
 use crate::builtins::math::signal::filter;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -124,6 +125,8 @@ async fn filtfilt_builtin(b: Value, a: Value, x: Value) -> BuiltinResult<Value> 
 
 pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
     ensure_filtfilt_extensions([&b, &a, &x])?;
+    preflight_iir_operands(IirForm::ZeroPhase, &b, &a, &x, None)
+        .map_err(filtfilt_preflight_error)?;
     let b = gather_wide_integer_for_exactness(b).await?;
     let a = gather_wide_integer_for_exactness(a).await?;
     let x = gather_wide_integer_for_exactness(x).await?;
@@ -183,6 +186,22 @@ pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
         output_dtype,
     )
     .map_err(|err| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, err.message()))
+}
+
+fn filtfilt_preflight_error(fault: IirAdmissionFault) -> RuntimeError {
+    let descriptor = match fault.operand {
+        IirOperand::Numerator | IirOperand::Denominator => &FILTFILT_ERROR_INVALID_COEFFICIENTS,
+        IirOperand::Signal | IirOperand::InitialState => &FILTFILT_ERROR_INVALID_SIGNAL,
+    };
+    let detail = match fault.kind {
+        IirFaultKind::Empty => "input vector cannot be empty",
+        IirFaultKind::NonVector => "input must be a vector",
+        IirFaultKind::LeadingDenominatorZero => "denominator coefficient a(1) must be non-zero",
+        IirFaultKind::SignalTooShort => "signal length must be greater than reflection length",
+        IirFaultKind::GeometryOverflow => "input geometry exceeds the supported range",
+        IirFaultKind::UnsupportedClass => "input must be numeric or logical",
+    };
+    filtfilt_error_with_detail(descriptor, detail)
 }
 
 async fn gather_wide_integer_for_exactness(value: Value) -> BuiltinResult<Value> {
@@ -588,9 +607,9 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        handle_precision, provider_for_handle, AccelDownloadFuture, AccelProvider,
-        AccelProviderFuture, GpuTensorHandle, HostTensorView, ProviderIirFilterOptions,
-        ProviderIirFilterResult, ProviderPrecision,
+        handle_precision, provider_for_handle, AccelDownloadFuture, AccelNumericDownloadFuture,
+        AccelProvider, AccelProviderFuture, GpuTensorHandle, HostTensorView,
+        ProviderIirFilterOptions, ProviderIirFilterResult, ProviderPrecision,
     };
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::ComplexTensor;
@@ -847,6 +866,7 @@ mod tests {
     struct OperationalFailureProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider,
         calls: std::sync::atomic::AtomicUsize,
+        downloads: std::sync::atomic::AtomicUsize,
     }
 
     impl AccelProvider for OperationalFailureProvider {
@@ -854,7 +874,17 @@ mod tests {
             self.inner.upload(host)
         }
         fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.downloads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.inner.download(handle)
+        }
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> AccelNumericDownloadFuture<'a> {
+            self.downloads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.download_numeric(handle)
         }
         fn device_info(&self) -> String {
             "filtfilt-operational-failure".into()
@@ -881,6 +911,7 @@ mod tests {
             Box::leak(Box::new(OperationalFailureProvider {
                 inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
                 calls: std::sync::atomic::AtomicUsize::new(0),
+                downloads: std::sync::atomic::AtomicUsize::new(0),
             }));
         let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let x = provider
@@ -896,6 +927,41 @@ mod tests {
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert!(std::error::Error::source(&error).is_some());
         assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn host_invalid_denominator_precedes_resident_numerator_readback() {
+        let _lock = test_support::accel_test_lock();
+        let provider: &'static OperationalFailureProvider =
+            Box::leak(Box::new(OperationalFailureProvider {
+                inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                downloads: std::sync::atomic::AtomicUsize::new(0),
+            }));
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let b = provider
+            .upload(&HostTensorView {
+                data: &[0.5, 0.5],
+                shape: &[1, 2],
+            })
+            .expect("resident coefficients");
+        let empty_a = Tensor::new(Vec::new(), vec![0, 1]).expect("empty denominator");
+        let error = call(
+            Value::GpuTensor(b.clone()),
+            Value::Tensor(empty_a),
+            Value::Num(1.0),
+        )
+        .expect_err("known-invalid denominator");
+        assert_eq!(
+            error.identifier(),
+            FILTFILT_ERROR_INVALID_COEFFICIENTS.identifier
+        );
+        assert_eq!(
+            provider.downloads.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        b.release().expect("release original resident coefficients");
     }
 
     #[test]

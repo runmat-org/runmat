@@ -1,4 +1,7 @@
 use super::*;
+use crate::builtins::math::signal::common::{
+    preflight_iir_operands, IirAdmissionFault, IirFaultKind, IirForm, IirOperand,
+};
 
 pub(super) fn operands(
     numerator: &Value,
@@ -6,93 +9,20 @@ pub(super) fn operands(
     signal: &Value,
     initial: Option<&Value>,
 ) -> BuiltinResult<()> {
-    coefficient(CoefficientRole::Numerator, numerator)?;
-    coefficient(CoefficientRole::Denominator, denominator)?;
-    signal_kind(signal)?;
-    if let Some(initial) = initial {
-        initial_kind(initial)?;
-    }
-    Ok(())
+    preflight_iir_operands(IirForm::Causal, numerator, denominator, signal, initial)
+        .map_err(own_error)
 }
 
-fn coefficient(role: CoefficientRole, value: &Value) -> BuiltinResult<()> {
-    let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::LogicalArray(logical) => Some(logical.shape.as_slice()),
-        Value::GpuTensor(handle) => Some(handle.shape()),
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,
-        other => {
-            return Err(filter_error_with_detail(
-                &FILTER_ERROR_INVALID_COEFFICIENTS,
-                format!("{} coefficients: unsupported {other:?}", role.label()),
-            ))
-        }
+fn own_error(fault: IirAdmissionFault) -> RuntimeError {
+    let descriptor = match (fault.operand, fault.kind) {
+        (IirOperand::Numerator, IirFaultKind::Empty) => &FILTER_ERROR_EMPTY_NUMERATOR,
+        (IirOperand::Denominator, IirFaultKind::Empty) => &FILTER_ERROR_EMPTY_DENOMINATOR,
+        (_, IirFaultKind::LeadingDenominatorZero) => &FILTER_ERROR_DENOMINATOR_A1_ZERO,
+        (IirOperand::Numerator | IirOperand::Denominator, _) => &FILTER_ERROR_INVALID_COEFFICIENTS,
+        (IirOperand::Signal, _) => &FILTER_ERROR_INVALID_SIGNAL,
+        (IirOperand::InitialState, _) => &FILTER_ERROR_INVALID_INITIAL_STATE,
     };
-    if let Some(shape) = shape {
-        ensure_vector_shape(role, shape)?;
-        if shape.contains(&0) {
-            return Err(filter_error(role.empty_error()));
-        }
-    }
-    if matches!(role, CoefficientRole::Denominator) && leading_coefficient_is_zero(value) {
-        return Err(filter_error(&FILTER_ERROR_DENOMINATOR_A1_ZERO));
-    }
-    Ok(())
-}
-
-fn leading_coefficient_is_zero(value: &Value) -> bool {
-    match value {
-        Value::Num(value) => *value == 0.0,
-        Value::Int(value) => value.is_zero(),
-        Value::Bool(value) => !*value,
-        Value::Complex(re, im) => *re == 0.0 && *im == 0.0,
-        Value::Tensor(tensor) => tensor
-            .numeric_value_at(0)
-            .is_some_and(|value| value.is_zero()),
-        Value::ComplexTensor(tensor) => tensor
-            .numeric_value_at(0)
-            .is_some_and(|(re, im)| re.is_zero() && im.is_zero()),
-        Value::LogicalArray(logical) => logical.data.first() == Some(&false),
-        Value::GpuTensor(_) => false,
-        _ => false,
-    }
-}
-
-fn signal_kind(value: &Value) -> BuiltinResult<()> {
-    if matches!(
-        value,
-        Value::Tensor(_)
-            | Value::ComplexTensor(_)
-            | Value::LogicalArray(_)
-            | Value::GpuTensor(_)
-            | Value::Num(_)
-            | Value::Int(_)
-            | Value::Bool(_)
-            | Value::Complex(_, _)
-    ) {
-        Ok(())
-    } else {
-        Err(filter_error(&FILTER_ERROR_INVALID_SIGNAL))
-    }
-}
-
-fn initial_kind(value: &Value) -> BuiltinResult<()> {
-    if matches!(
-        value,
-        Value::Tensor(_)
-            | Value::ComplexTensor(_)
-            | Value::LogicalArray(_)
-            | Value::GpuTensor(_)
-            | Value::Num(_)
-            | Value::Int(_)
-            | Value::Bool(_)
-            | Value::Complex(_, _)
-    ) {
-        Ok(())
-    } else {
-        Err(filter_error(&FILTER_ERROR_INVALID_INITIAL_STATE))
-    }
+    filter_error_with_detail(descriptor, format!("{:?}: {:?}", fault.operand, fault.kind))
 }
 
 #[cfg(test)]

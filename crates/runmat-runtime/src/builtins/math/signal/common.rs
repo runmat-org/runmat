@@ -10,6 +10,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 pub(super) mod output_precision;
 pub(crate) mod convolution;
 mod cooperation;
+mod iir_boundary;
 mod window_generation;
 mod waveform_map;
 mod waveform_boundary;
@@ -19,6 +20,8 @@ mod waveform_sample;
 pub(crate) mod waveform_restore_fixture;
 pub(crate) mod window_provider;
 pub(crate) use cooperation::{SignalCooperation, SIGNAL_WORK_CHUNK};
+pub(crate) use iir_boundary::preflight as preflight_iir_operands;
+pub(crate) use iir_boundary::{IirAdmissionFault, IirFaultKind, IirForm, IirOperand};
 pub(crate) use waveform_boundary::{
     admit_resident_waveform_operand, prepared_real_integer_tensor, waveform_input_tensor,
 };
