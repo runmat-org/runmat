@@ -18,6 +18,7 @@ mod geometry;
 mod metric;
 mod optimizer;
 mod options;
+mod workspace;
 #[cfg(test)]
 mod tests;
 
@@ -229,14 +230,21 @@ async fn ensure_exact_tsne_integer_value(
     role: &str,
     cooperation: &mut cooperation::TsneCooperation,
 ) -> BuiltinResult<()> {
-    let mut pending = vec![value];
-    while let Some(value) = pending.pop() {
-        match value {
-            Value::Int(integer) => {
+    enum Frame<'a> {
+        Value(&'a Value),
+        Elements(&'a [Value], usize),
+        Fields(&'a runmat_value::StructValue, usize),
+    }
+    let mut pending = Vec::new();
+    pending.try_reserve(1).map_err(integer_stack_error)?;
+    pending.push(Frame::Value(value));
+    while let Some(frame) = pending.pop() {
+        match frame {
+            Frame::Value(Value::Int(integer)) => {
                 ensure_exact_integer(integer, role)?;
                 cooperation.completed(1).await?;
             }
-            Value::Tensor(tensor) => {
+            Frame::Value(Value::Tensor(tensor)) => {
                 if let Some(storage) = tensor.integer_storage() {
                     for index in 0..storage.len() {
                         let integer = storage
@@ -247,10 +255,33 @@ async fn ensure_exact_tsne_integer_value(
                     }
                 }
             }
-            Value::Cell(cell) => push_reversed(&mut pending, cell.data.iter().rev())?,
-            Value::Struct(value) => push_reversed(&mut pending, value.fields.values().rev())?,
-            Value::OutputList(values) => push_reversed(&mut pending, values.iter().rev())?,
-            _ => {}
+            Frame::Value(Value::Cell(cell)) => {
+                pending.try_reserve(1).map_err(integer_stack_error)?;
+                pending.push(Frame::Elements(&cell.data, 0));
+            }
+            Frame::Value(Value::Struct(value)) => {
+                pending.try_reserve(1).map_err(integer_stack_error)?;
+                pending.push(Frame::Fields(value, 0));
+            }
+            Frame::Value(Value::OutputList(values)) => {
+                pending.try_reserve(1).map_err(integer_stack_error)?;
+                pending.push(Frame::Elements(values, 0));
+            }
+            Frame::Elements(values, index) if index < values.len() => {
+                pending.try_reserve(2).map_err(integer_stack_error)?;
+                pending.push(Frame::Elements(values, index + 1));
+                pending.push(Frame::Value(&values[index]));
+            }
+            Frame::Fields(value, index) if index < value.fields.len() => {
+                let (_, field) = value
+                    .fields
+                    .get_index(index)
+                    .expect("field index is within the structure");
+                pending.try_reserve(2).map_err(integer_stack_error)?;
+                pending.push(Frame::Fields(value, index + 1));
+                pending.push(Frame::Value(field));
+            }
+            Frame::Value(_) | Frame::Elements(_, _) | Frame::Fields(_, _) => {}
         }
         cooperation.completed(1).await?;
     }
@@ -267,20 +298,11 @@ fn ensure_exact_integer(integer: &runmat_value::IntValue, role: &str) -> Builtin
     }
 }
 
-fn push_reversed<'a>(
-    pending: &mut Vec<&'a Value>,
-    values: impl Iterator<Item = &'a Value>,
-) -> BuiltinResult<()> {
-    for value in values {
-        pending.try_reserve(1).map_err(|source| {
-            build_runtime_error("tsne: integer validation stack exceeds available memory")
-                .with_builtin(NAME)
-                .with_source(source)
-                .build()
-        })?;
-        pending.push(value);
-    }
-    Ok(())
+fn integer_stack_error(source: std::collections::TryReserveError) -> crate::RuntimeError {
+    build_runtime_error("tsne: integer validation stack exceeds available memory")
+        .with_builtin(NAME)
+        .with_source(source)
+        .build()
 }
 
 async fn ensure_exact_tsne_floating_options(

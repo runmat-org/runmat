@@ -291,7 +291,7 @@ async fn inverse_covariance(
         return Ok(DMatrix::identity(0, 0));
     }
     let p = rows[0].len();
-    let mut cov: DMatrix<f64> = DMatrix::zeros(p, p);
+    let mut cov: DMatrix<f64> = super::workspace::zero_matrix(p, p, cooperation).await?;
     let mut means = Vec::new();
     means
         .try_reserve_exact(p)

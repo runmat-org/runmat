@@ -368,13 +368,50 @@ fn tsne_gates_integer_roles_and_explicit_residency_before_gather() {
 #[test]
 fn tsne_rejects_lossy_integer_floating_boundaries() {
     let wide = poisoned_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]);
-    let error = ensure_exact_tsne_integer_value(&wide, "observation data")
-        .expect_err("lossy integer must reject");
+    let error = futures::executor::block_on(ensure_exact_tsne_integer_value(
+        &wide,
+        "observation data",
+        &mut cooperation::TsneCooperation::new(None),
+    ))
+    .expect_err("lossy integer must reject");
     assert!(error.message().contains("exactly representable"));
 
     let exact_wide = poisoned_int_tensor(IntegerStorage::U64(vec![1_u64 << 54]), vec![1, 1]);
-    ensure_exact_tsne_integer_value(&exact_wide, "observation data")
-        .expect("aligned wide integer remains exactly representable");
+    futures::executor::block_on(ensure_exact_tsne_integer_value(
+        &exact_wide,
+        "observation data",
+        &mut cooperation::TsneCooperation::new(None),
+    ))
+    .expect("aligned wide integer remains exactly representable");
+}
+
+#[test]
+fn nested_integer_boundary_checks_large_aggregates_incrementally() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+
+    let values = Value::OutputList(vec![Value::Num(1.0); 4_096]);
+    let source = Rc::new(CancellationSource::new());
+    let cancel = source.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            cancel.cancel(CancellationReason::User);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let error = futures::executor::block_on(ensure_exact_tsne_integer_value(
+        &values,
+        "InitialY",
+        &mut cooperation::TsneCooperation::with_budget(budget),
+    ))
+    .err()
+    .expect("the first cooperative turn must cancel aggregate inspection");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
 }
 
 #[tokio::test]

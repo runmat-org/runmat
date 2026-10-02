@@ -124,7 +124,7 @@ pub(super) async fn apply_pca_if_requested(
             cooperation.completed(1).await?;
         }
     }
-    let mut cov: DMatrix<f64> = DMatrix::zeros(p, p);
+    let mut cov: DMatrix<f64> = super::workspace::zero_matrix(p, p, cooperation).await?;
     let denom = n.saturating_sub(1).max(1) as f64;
     for row in &centered {
         for a in 0..p {
@@ -154,7 +154,7 @@ pub(super) async fn apply_pca_if_requested(
             right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal)
         })
         .await?;
-    let mut projected = vec![vec![0.0; k]; n];
+    let mut projected = super::workspace::zero_rows(n, k, cooperation).await?;
     for (new_col, (eig_col, _)) in order.into_iter().take(k).enumerate() {
         for row in 0..n {
             let mut value = 0.0;
