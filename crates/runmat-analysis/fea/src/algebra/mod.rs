@@ -5,6 +5,7 @@ mod nullspace;
 mod operator;
 mod pattern;
 mod reference;
+mod right_inverse;
 
 pub use coercivity::{CoercivityCertificate, CoercivityError, PreparedSolverAdmissibility};
 pub(crate) use coercivity::{CoercivitySymbolicPlan, CoercivityWorkEnvelope};
@@ -34,4 +35,8 @@ pub use reference::{
     axpy_scoped, direction_update_scoped, dot_scoped, normalized_copy_scoped, residual,
     scale_scoped, spmv, spmv_scoped, subtract_into_scoped, vector_sub_scoped, ScopedSpmvError,
     SpmvWorkError,
+};
+pub use right_inverse::{
+    RightInverseCertificate, RightInverseCheck, RightInverseError, RightInverseVerdict,
+    RightInverseWorkEnvelope,
 };
