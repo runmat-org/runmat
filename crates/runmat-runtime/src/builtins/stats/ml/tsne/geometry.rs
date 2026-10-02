@@ -5,15 +5,25 @@ use nalgebra::{DMatrix, SymmetricEigen};
 use runmat_value::Tensor;
 use std::cmp::Ordering;
 
-pub(super) fn prepare_data(x: &Tensor) -> BuiltinResult<PreparedData> {
-    let values = tensor::tensor_values_f64_cow(x);
+pub(super) async fn prepare_data_cooperative(
+    x: &Tensor,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<PreparedData> {
     let mut rows = Vec::new();
     let mut good_rows = Vec::new();
+    rows.try_reserve_exact(x.rows)
+        .map_err(|_| invalid("tsne: observations exceed available memory"))?;
+    good_rows
+        .try_reserve_exact(x.rows)
+        .map_err(|_| invalid("tsne: row indices exceed available memory"))?;
     for row in 0..x.rows {
-        let mut out = Vec::with_capacity(x.cols);
+        let mut out = Vec::new();
+        out.try_reserve_exact(x.cols)
+            .map_err(|_| invalid("tsne: features exceed available memory"))?;
         let mut complete = true;
         for col in 0..x.cols {
-            let value = matrix_value(values.as_ref(), x.rows, row, col);
+            let value = tensor::tensor_value_f64(x, row + col * x.rows);
+            cooperation.completed(1).await?;
             if value.is_infinite() {
                 return Err(invalid("tsne: X must not contain Inf values"));
             }
@@ -27,6 +37,7 @@ pub(super) fn prepare_data(x: &Tensor) -> BuiltinResult<PreparedData> {
             good_rows.push(row);
             rows.push(out);
         }
+        cooperation.completed(1).await?;
     }
     Ok(PreparedData {
         rows,

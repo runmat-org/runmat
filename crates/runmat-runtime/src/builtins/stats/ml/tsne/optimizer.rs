@@ -1,6 +1,6 @@
 use super::geometry::{
-    apply_pca_if_requested, guard_dense_feature_work, matrix_value, needs_pca, prepare_data,
-    standardize_rows,
+    apply_pca_if_requested, guard_dense_feature_work, matrix_value, needs_pca,
+    prepare_data_cooperative, standardize_rows,
 };
 use super::metric::pairwise_squared_distances;
 use super::{
@@ -11,11 +11,15 @@ use crate::builtins::common::{random, tensor};
 use crate::BuiltinResult;
 use runmat_value::Tensor;
 
-pub(super) fn compute_tsne(x: Tensor, options: Options) -> BuiltinResult<EmbeddingResult> {
+pub(super) async fn compute_tsne_cooperative(
+    x: Tensor,
+    options: Options,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<EmbeddingResult> {
     if x.shape.len() > 2 {
         return Err(invalid("tsne: X must be a 2-D numeric matrix"));
     }
-    let prepared = prepare_data(&x)?;
+    let prepared = prepare_data_cooperative(&x, cooperation).await?;
     if prepared.rows.is_empty() {
         return Err(invalid(
             "tsne: at least one complete observation is required",
@@ -51,9 +55,9 @@ pub(super) fn compute_tsne(x: Tensor, options: Options) -> BuiltinResult<Embeddi
     }
     rows = apply_pca_if_requested(rows, options.num_pca_components)?;
     let distances = pairwise_squared_distances(&rows, options.distance)?;
-    let probabilities = joint_probabilities(&distances, options.perplexity)?;
-    let mut embedding = initial_embedding(&options, &prepared)?;
-    center_embedding(&mut embedding, options.num_dimensions);
+    let probabilities = joint_probabilities(&distances, options.perplexity, cooperation).await?;
+    let mut embedding = initial_embedding(&options, &prepared, cooperation).await?;
+    center_embedding(&mut embedding, options.num_dimensions, cooperation).await?;
     let mut velocity = vec![0.0; embedding.len()];
     let mut gains = vec![1.0_f64; embedding.len()];
     let iterations = options.max_iter.max(1);
@@ -64,7 +68,9 @@ pub(super) fn compute_tsne(x: Tensor, options: Options) -> BuiltinResult<Embeddi
             options.num_dimensions,
             &probabilities,
             exaggeration,
-        );
+            cooperation,
+        )
+        .await?;
         let momentum = if iter < 250 { 0.5 } else { 0.8 };
         for idx in 0..embedding.len() {
             gains[idx] = if (gradient[idx] > 0.0) != (velocity[idx] > 0.0) {
@@ -75,13 +81,21 @@ pub(super) fn compute_tsne(x: Tensor, options: Options) -> BuiltinResult<Embeddi
             velocity[idx] =
                 momentum * velocity[idx] - options.learn_rate * gains[idx] * gradient[idx];
             embedding[idx] += velocity[idx];
+            cooperation.completed(1).await?;
         }
-        center_embedding(&mut embedding, options.num_dimensions);
+        center_embedding(&mut embedding, options.num_dimensions, cooperation).await?;
         if grad_norm < options.tol_fun {
             break;
         }
     }
-    let (_, loss, _) = gradient_and_loss(&embedding, options.num_dimensions, &probabilities, 1.0);
+    let (_, loss, _) = gradient_and_loss(
+        &embedding,
+        options.num_dimensions,
+        &probabilities,
+        1.0,
+        cooperation,
+    )
+    .await?;
     let output = Tensor::new(embedding, vec![prepared.rows.len(), options.num_dimensions])
         .map_err(|err| internal(format!("tsne: {err}")))?;
     Ok(EmbeddingResult {
@@ -99,7 +113,11 @@ fn single_row_embedding(rows: usize, dims: usize) -> BuiltinResult<EmbeddingResu
     })
 }
 
-fn joint_probabilities(distances: &[f64], perplexity: f64) -> BuiltinResult<Vec<f64>> {
+async fn joint_probabilities(
+    distances: &[f64],
+    perplexity: f64,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<Vec<f64>> {
     let n = integer_sqrt(distances.len())
         .ok_or_else(|| internal("tsne: distance matrix has invalid shape"))?;
     let effective_perplexity = perplexity.min((n - 1) as f64).max(1.0);
@@ -120,10 +138,12 @@ fn joint_probabilities(distances: &[f64], perplexity: f64) -> BuiltinResult<Vec<
                     row_prob[j] = value;
                     sum += value;
                 }
+                cooperation.completed(1).await?;
             }
             if sum <= 0.0 || !sum.is_finite() {
                 for (j, prob) in row_prob.iter_mut().enumerate() {
                     *prob = if i == j { 0.0 } else { 1.0 / (n - 1) as f64 };
+                    cooperation.completed(1).await?;
                 }
                 break;
             }
@@ -133,6 +153,7 @@ fn joint_probabilities(distances: &[f64], perplexity: f64) -> BuiltinResult<Vec<
                 if *prob > 0.0 {
                     entropy -= *prob * prob.ln();
                 }
+                cooperation.completed(1).await?;
             }
             let diff = entropy - target_entropy;
             if diff.abs() < 1.0e-5 {
@@ -156,6 +177,7 @@ fn joint_probabilities(distances: &[f64], perplexity: f64) -> BuiltinResult<Vec<
         }
         for j in 0..n {
             conditional[i + j * n] = row_prob[j];
+            cooperation.completed(1).await?;
         }
     }
     let mut joint = vec![0.0; n * n];
@@ -166,18 +188,28 @@ fn joint_probabilities(distances: &[f64], perplexity: f64) -> BuiltinResult<Vec<
                     / (2.0 * n as f64))
                     .max(MIN_PROB);
             }
+            cooperation.completed(1).await?;
         }
     }
-    let sum = joint.iter().sum::<f64>();
+    let mut sum = 0.0;
+    for value in &joint {
+        sum += value;
+        cooperation.completed(1).await?;
+    }
     if sum > 0.0 {
         for value in &mut joint {
             *value /= sum;
+            cooperation.completed(1).await?;
         }
     }
     Ok(joint)
 }
 
-fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResult<Vec<f64>> {
+async fn initial_embedding(
+    options: &Options,
+    prepared: &PreparedData,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<Vec<f64>> {
     let rows = prepared.rows.len();
     let dims = options.num_dimensions;
     if let Some(initial) = &options.initial_y {
@@ -197,6 +229,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
                     data.push(value);
+                    cooperation.completed(1).await?;
                 }
             }
         } else if initial.rows == rows {
@@ -207,6 +240,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
                     data.push(value);
+                    cooperation.completed(1).await?;
                 }
             }
         } else {
@@ -217,15 +251,24 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
         return Ok(data);
     }
     let normals = random::generate_normal(rows * dims, NAME)?;
-    Ok(normals.into_iter().map(|value| value * 1.0e-4).collect())
+    let mut scaled = Vec::new();
+    scaled
+        .try_reserve_exact(normals.len())
+        .map_err(|_| invalid("tsne: embedding exceeds available memory"))?;
+    for value in normals {
+        scaled.push(value * 1.0e-4);
+        cooperation.completed(1).await?;
+    }
+    Ok(scaled)
 }
 
-fn gradient_and_loss(
+async fn gradient_and_loss(
     embedding: &[f64],
     dims: usize,
     probabilities: &[f64],
     exaggeration: f64,
-) -> (Vec<f64>, f64, f64) {
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<(Vec<f64>, f64, f64)> {
     let n = integer_sqrt(probabilities.len()).unwrap_or(0);
     let mut q_num = vec![0.0; n * n];
     let mut sum_q = 0.0;
@@ -235,11 +278,13 @@ fn gradient_and_loss(
             for dim in 0..dims {
                 let diff = embedding[i + dim * n] - embedding[j + dim * n];
                 dist += diff * diff;
+                cooperation.completed(1).await?;
             }
             let value = 1.0 / (1.0 + dist);
             q_num[i + j * n] = value;
             q_num[j + i * n] = value;
             sum_q += 2.0 * value;
+            cooperation.completed(1).await?;
         }
     }
     let sum_q = sum_q.max(MIN_PROB);
@@ -256,26 +301,39 @@ fn gradient_and_loss(
             let coeff = 4.0 * (exaggeration * p - q) * q_num[i + j * n];
             for dim in 0..dims {
                 gradient[i + dim * n] += coeff * (embedding[i + dim * n] - embedding[j + dim * n]);
+                cooperation.completed(1).await?;
             }
+            cooperation.completed(1).await?;
         }
     }
-    let grad_norm = gradient
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>()
-        .sqrt();
-    (gradient, loss, grad_norm)
+    let mut grad_square_sum = 0.0;
+    for value in &gradient {
+        grad_square_sum += value * value;
+        cooperation.completed(1).await?;
+    }
+    Ok((gradient, loss, grad_square_sum.sqrt()))
 }
 
-fn center_embedding(embedding: &mut [f64], dims: usize) {
+async fn center_embedding(
+    embedding: &mut [f64],
+    dims: usize,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<()> {
     let rows = embedding.len() / dims.max(1);
     for dim in 0..dims {
         let start = dim * rows;
-        let mean = embedding[start..start + rows].iter().sum::<f64>() / rows.max(1) as f64;
+        let mut sum = 0.0;
+        for value in &embedding[start..start + rows] {
+            sum += value;
+            cooperation.completed(1).await?;
+        }
+        let mean = sum / rows.max(1) as f64;
         for row in 0..rows {
             embedding[start + row] -= mean;
+            cooperation.completed(1).await?;
         }
     }
+    Ok(())
 }
 
 fn integer_sqrt(value: usize) -> Option<usize> {

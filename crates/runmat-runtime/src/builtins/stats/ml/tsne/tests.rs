@@ -8,6 +8,49 @@ use runmat_accelerate_api::{
 use runmat_value::{IntegerStorage, StructValue};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[test]
+fn observation_materialization_yields_and_cancels_before_solver() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::cell::Cell;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+
+    let observations = Tensor::new(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0], vec![3, 2]).unwrap();
+    let expected = futures::executor::block_on(geometry::prepare_data_cooperative(
+        &observations,
+        &mut cooperation::TsneCooperation::new(None),
+    ))
+    .unwrap();
+    let source = Rc::new(CancellationSource::new());
+    let turns = Rc::new(Cell::new(0));
+    let cancel_on_turn = source.clone();
+    let counted = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            if counted.get() == 4 {
+                cancel_on_turn.cancel(CancellationReason::User);
+            }
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let error = futures::executor::block_on(geometry::prepare_data_cooperative(
+        &observations,
+        &mut cooperation::TsneCooperation::with_budget(budget),
+    ))
+    .expect_err("cancelled observation materialization must not reach the solver");
+    assert_eq!(
+        expected.rows,
+        vec![vec![0.0, 3.0], vec![1.0, 4.0], vec![2.0, 5.0]]
+    );
+    assert_eq!(turns.get(), 4);
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}
+
 struct RejectingDownloadProvider {
     owner: TestAllocationOwner,
     downloads: AtomicUsize,

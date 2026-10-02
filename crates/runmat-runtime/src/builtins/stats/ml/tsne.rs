@@ -13,6 +13,7 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 mod admission;
+mod cooperation;
 mod geometry;
 mod metric;
 mod optimizer;
@@ -24,7 +25,7 @@ use admission::{
     admit_options, materialize_options, option_headers, AdmittedOption, AdmittedStatsetField,
     OptionHeader,
 };
-use optimizer::compute_tsne;
+use optimizer::compute_tsne_cooperative;
 #[cfg(test)]
 use options::is_empty_numeric;
 use options::parse_options;
@@ -126,9 +127,29 @@ struct EmbeddingResult {
 #[runtime_builtin(
     name = "tsne",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::tsne"
 )]
-pub(crate) async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn tsne_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    tsne_in_runtime(runtime.as_ref(), x, rest).await
+}
+
+#[cfg(test)]
+async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    tsne_in_runtime(None, x, rest).await
+}
+
+async fn tsne_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    x: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = cooperation::TsneCooperation::new(runtime);
+    cooperation.completed(0).await?;
     preflight_observations(&x)?;
     let headers = option_headers(rest)?;
     ensure_tsne_extensions(&x, &headers)?;
@@ -142,7 +163,8 @@ pub(crate) async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Va
     let options = parse_options(admitted)?;
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("tsne: {err}")))?;
-    let result = compute_tsne(tensor, options)?;
+    let result = compute_tsne_cooperative(tensor, options, &mut cooperation).await?;
+    cooperation.completed(0).await?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![Value::Tensor(result.embedding)])),
