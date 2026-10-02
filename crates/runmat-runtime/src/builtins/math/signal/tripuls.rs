@@ -49,7 +49,9 @@ fn tripuls_error_with_source(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    let mut failure = builder.build();
+    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    failure
 }
 
 pub(crate) fn tripuls_scalar(t: f64, width: f64, skew: f64) -> f64 {

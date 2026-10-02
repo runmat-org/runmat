@@ -57,7 +57,9 @@ fn square_error_with_source(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    let mut failure = builder.build();
+    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    failure
 }
 
 /// Element-wise scalar square wave.
