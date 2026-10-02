@@ -11,6 +11,7 @@ pub(crate) mod test_support;
 
 mod coefficients;
 pub(crate) use coefficients::materialize_host_coefficients;
+pub(crate) mod placement;
 mod selector;
 pub(crate) use selector::{convolution_selector_text, ConvolutionSelectorText};
 

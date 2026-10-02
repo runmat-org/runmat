@@ -104,39 +104,48 @@ async fn conv_builtin(
     let single_output = value_uses_single(&a) || value_uses_single(&b);
     let complex_output = value_is_complex(&a) || value_is_complex(&b);
     let resident_inputs = resident_inputs([&a, &b]);
-    if let Some(device_value) = try_conv_gpu(&a, &b, mode, single_output)? {
+    let (device_value, placement) = try_conv_gpu(runtime.as_ref(), &a, &b, mode, single_output)?;
+    if let Some(device_value) = device_value {
         return Ok(device_value);
     }
-    let lhs = normalize_input(a, &mut cooperation).await?;
-    let rhs = normalize_input(b, &mut cooperation).await?;
-    if matches!(lhs.hint, OrientationHint::General) || matches!(rhs.hint, OrientationHint::General)
-    {
-        return Err(conv_error_with_detail(
-            &CONV_ERROR_INVALID_INPUT,
-            "inputs must be vectors",
-        ));
-    }
-    let orientation = output_orientation(&lhs, &rhs, mode);
+    let result = async move {
+        let lhs = normalize_input(a, &mut cooperation).await?;
+        let rhs = normalize_input(b, &mut cooperation).await?;
+        if matches!(lhs.hint, OrientationHint::General)
+            || matches!(rhs.hint, OrientationHint::General)
+        {
+            return Err(conv_error_with_detail(
+                &CONV_ERROR_INVALID_INPUT,
+                "inputs must be vectors",
+            ));
+        }
+        let orientation = output_orientation(&lhs, &rhs, mode);
 
-    if lhs.len == 0 || rhs.len == 0 {
-        let data = if matches!(mode, ConvMode::Valid) && rhs.len == 0 {
-            let mut zeros = Vec::new();
-            zeros
-                .try_reserve_exact(lhs.len)
-                .map_err(conv_allocation_error)?;
-            zeros.resize(lhs.len, Complex::new(0.0, 0.0));
-            zeros
-        } else {
-            Vec::new()
-        };
-        let output = convert_output(data, orientation, single_output, complex_output)?;
-        return restore_to_owner(output, &resident_inputs);
-    }
+        if lhs.len == 0 || rhs.len == 0 {
+            let data = if matches!(mode, ConvMode::Valid) && rhs.len == 0 {
+                let mut zeros = Vec::new();
+                zeros
+                    .try_reserve_exact(lhs.len)
+                    .map_err(conv_allocation_error)?;
+                zeros.resize(lhs.len, Complex::new(0.0, 0.0));
+                zeros
+            } else {
+                Vec::new()
+            };
+            let output = convert_output(data, orientation, single_output, complex_output)?;
+            return restore_to_owner(output, &resident_inputs);
+        }
 
-    let full = convolve(&lhs.data, &rhs.data, single_output, &mut cooperation).await?;
-    let shaped = apply_mode(full, mode, lhs.len, rhs.len);
-    let output = convert_output(shaped, orientation, single_output, complex_output)?;
-    restore_to_owner(output, &resident_inputs)
+        let full = convolve(&lhs.data, &rhs.data, single_output, &mut cooperation).await?;
+        let shaped = apply_mode(full, mode, lhs.len, rhs.len);
+        let output = convert_output(shaped, orientation, single_output, complex_output)?;
+        restore_to_owner(output, &resident_inputs)
+    }
+    .await;
+    if let Some(placement) = placement {
+        placement.finish_value(&result);
+    }
+    result
 }
 
 fn admit_conv_operand(value: &Value) -> BuiltinResult<()> {
@@ -242,14 +251,18 @@ fn parse_mode(args: &[Value]) -> BuiltinResult<ConvMode> {
 }
 
 fn try_conv_gpu(
+    runtime: Option<&crate::context::RuntimeContext>,
     a: &Value,
     b: &Value,
     mode: ConvMode,
     single_output: bool,
-) -> BuiltinResult<Option<Value>> {
+) -> BuiltinResult<(
+    Option<Value>,
+    Option<super::common::convolution::placement::SelectedConvolution>,
+)> {
     let (lhs_handle, rhs_handle) = match (a, b) {
         (Value::GpuTensor(lhs), Value::GpuTensor(rhs)) => (lhs, rhs),
-        _ => return Ok(None),
+        _ => return Ok((None, None)),
     };
     if runmat_accelerate_api::handle_integer_type(lhs_handle).is_some()
         || runmat_accelerate_api::handle_integer_type(rhs_handle).is_some()
@@ -258,27 +271,27 @@ fn try_conv_gpu(
         || value_is_complex(a)
         || value_is_complex(b)
     {
-        return Ok(None);
+        return Ok((None, None));
     }
     if lhs_handle.device_id() != rhs_handle.device_id() {
-        return Ok(None);
+        return Ok((None, None));
     }
     let provider = match runmat_accelerate_api::provider_for_handle(lhs_handle) {
         Some(p) => p,
-        None => return Ok(None),
+        None => return Ok((None, None)),
     };
     let Some(rhs_provider) = runmat_accelerate_api::provider_for_handle(rhs_handle) else {
-        return Ok(None);
+        return Ok((None, None));
     };
     if !runmat_accelerate_api::same_provider_instance(provider, rhs_provider) {
-        return Ok(None);
+        return Ok((None, None));
     }
 
     let lhs_meta = conv_meta_from_shape(lhs_handle.shape());
     let rhs_meta = conv_meta_from_shape(rhs_handle.shape());
 
     if lhs_meta.len == 0 || rhs_meta.len == 0 {
-        return Ok(None);
+        return Ok((None, None));
     }
 
     let supported = |meta: &ConvInputMeta| {
@@ -289,11 +302,11 @@ fn try_conv_gpu(
     };
 
     if !supported(&lhs_meta) || !supported(&rhs_meta) {
-        return Ok(None);
+        return Ok((None, None));
     }
 
     if matches!(mode, ConvMode::Valid) && lhs_meta.len < rhs_meta.len {
-        return Ok(None);
+        return Ok((None, None));
     }
 
     let orientation = if matches!(mode, ConvMode::Full) {
@@ -357,7 +370,39 @@ fn try_conv_gpu(
         logical: false,
         alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
-    match provider.conv1d(lhs_handle, rhs_handle, options) {
+    if !matches!(
+        runmat_accelerate_api::ProviderConvolutionInputBackings::from_full_live_handles([
+            lhs_handle, rhs_handle,
+        ]),
+        Ok(Some(_))
+    ) {
+        return Ok((None, None));
+    }
+    let output_bytes = u64::try_from(output_len)
+        .ok()
+        .and_then(|len| len.checked_mul(if single_output { 4 } else { 8 }));
+    let placement = super::common::convolution::placement::select_pair(
+        runtime,
+        BUILTIN_NAME,
+        [lhs_handle, rhs_handle],
+        mode,
+        runmat_accelerate_api::ProviderConvolutionForm::Vector {
+            orientation: provider_orientation,
+        },
+        output_bytes,
+    )?;
+    if placement
+        .as_ref()
+        .is_some_and(|selected| !selected.provider_route())
+    {
+        return Ok((None, placement));
+    }
+    if let Some(selected) = placement.as_ref() {
+        if !selected.revalidate([lhs_handle, rhs_handle])? {
+            return Err(conv_error(&CONV_ERROR_INVALID_INPUT));
+        }
+    }
+    let result = match provider.conv1d(lhs_handle, rhs_handle, options) {
         Ok(handle) => super::common::convolution::admit_binary_output(
             handle,
             lhs_handle,
@@ -367,7 +412,9 @@ fn try_conv_gpu(
             || conv_error(&CONV_ERROR_BUILD_OUTPUT),
         )
         .map(Some),
-        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => Ok(None),
+        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) && placement.is_none() => {
+            Ok(None)
+        }
         Err(err) => {
             let mut failure = crate::runtime_error::with_provider_execution_source(
                 conv_error(&CONV_ERROR_BUILD_OUTPUT),
@@ -376,7 +423,11 @@ fn try_conv_gpu(
             failure.gpu_gather_retry = GpuGatherRetry::Never;
             Err(failure)
         }
+    };
+    if let Some(placement) = placement {
+        placement.finish_hook(&result);
     }
+    result.map(|value| (value, None))
 }
 
 async fn normalize_input(

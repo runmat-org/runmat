@@ -139,29 +139,40 @@ async fn conv2_builtin(
 
     match extras.len() {
         0 => {
-            if let Some(device_value) = try_conv2_gpu(&a, &b, mode, single_output)? {
+            let (device_value, placement) =
+                try_conv2_gpu(runtime.as_ref(), &a, &b, mode, single_output)?;
+            if let Some(device_value) = device_value {
                 return Ok(device_value);
             }
-            let left = convert_matrix(a, "A", &mut cooperation).await?;
-            let right = convert_matrix(b, "B", &mut cooperation).await?;
-            if mode == Conv2Mode::Full
-                && !left.is_empty()
-                && !right.is_empty()
-                && left.cols == 1
-                && right.rows == 1
-            {
+            let result = async move {
+                let left = convert_matrix(a, "A", &mut cooperation).await?;
+                let right = convert_matrix(b, "B", &mut cooperation).await?;
+                if mode == Conv2Mode::Full
+                    && !left.is_empty()
+                    && !right.is_empty()
+                    && left.cols == 1
+                    && right.rows == 1
+                {
+                    let result =
+                        outer_product(&left.data, &right.data, single_output, &mut cooperation)
+                            .await?;
+                    let output =
+                        matrix_to_value(result, single_output, complex_output, &mut cooperation)
+                            .await?;
+                    return restore_to_owner(output, &resident_inputs);
+                }
                 let result =
-                    outer_product(&left.data, &right.data, single_output, &mut cooperation).await?;
+                    conv2_matrices(&left, &right, mode, single_output, &mut cooperation).await?;
                 let output =
                     matrix_to_value(result, single_output, complex_output, &mut cooperation)
                         .await?;
-                return restore_to_owner(output, &resident_inputs);
+                restore_to_owner(output, &resident_inputs)
             }
-            let result =
-                conv2_matrices(&left, &right, mode, single_output, &mut cooperation).await?;
-            let output =
-                matrix_to_value(result, single_output, complex_output, &mut cooperation).await?;
-            restore_to_owner(output, &resident_inputs)
+            .await;
+            if let Some(placement) = placement {
+                placement.finish_value(&result);
+            }
+            result
         }
         1 => {
             let signal = convert_matrix(extras.remove(0), "A", &mut cooperation).await?;
@@ -238,14 +249,18 @@ fn value_is_complex(value: &Value) -> bool {
 }
 
 fn try_conv2_gpu(
+    runtime: Option<&crate::context::RuntimeContext>,
     a: &Value,
     b: &Value,
     mode: Conv2Mode,
     single_output: bool,
-) -> BuiltinResult<Option<Value>> {
+) -> BuiltinResult<(
+    Option<Value>,
+    Option<super::common::convolution::placement::SelectedConvolution>,
+)> {
     let (lhs, rhs) = match (a, b) {
         (Value::GpuTensor(lhs), Value::GpuTensor(rhs)) => (lhs, rhs),
-        _ => return Ok(None),
+        _ => return Ok((None, None)),
     };
     if runmat_accelerate_api::handle_integer_type(lhs).is_some()
         || runmat_accelerate_api::handle_integer_type(rhs).is_some()
@@ -254,35 +269,35 @@ fn try_conv2_gpu(
         || value_is_complex(a)
         || value_is_complex(b)
     {
-        return Ok(None);
+        return Ok((None, None));
     }
     if lhs.device_id() != rhs.device_id() {
-        return Ok(None);
+        return Ok((None, None));
     }
     let provider = match runmat_accelerate_api::provider_for_handle(lhs) {
         Some(p) => p,
-        None => return Ok(None),
+        None => return Ok((None, None)),
     };
     let Some(rhs_provider) = runmat_accelerate_api::provider_for_handle(rhs) else {
-        return Ok(None);
+        return Ok((None, None));
     };
     if !runmat_accelerate_api::same_provider_instance(provider, rhs_provider) {
-        return Ok(None);
+        return Ok((None, None));
     }
 
     let lhs_dims = match conv2_dimensions(lhs.shape()) {
         Some(dims) => dims,
-        None => return Ok(None),
+        None => return Ok((None, None)),
     };
     let rhs_dims = match conv2_dimensions(rhs.shape()) {
         Some(dims) => dims,
-        None => return Ok(None),
+        None => return Ok((None, None)),
     };
 
     // Keep the explicit full-mode vector kernel path on the host so it can
     // return an outer-product kernel that matches MATLAB's separable identity.
     if mode == Conv2Mode::Full && lhs_dims.1 == 1 && rhs_dims.0 == 1 {
-        return Ok(None);
+        return Ok((None, None));
     }
 
     let empty = lhs_dims.0 == 0 || lhs_dims.1 == 0 || rhs_dims.0 == 0 || rhs_dims.1 == 0;
@@ -311,7 +326,7 @@ fn try_conv2_gpu(
         )),
     })();
     let Some((rows, cols)) = shape else {
-        return Ok(None);
+        return Ok((None, None));
     };
     rows.checked_mul(cols)
         .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
@@ -323,7 +338,37 @@ fn try_conv2_gpu(
         logical: false,
         alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
-    match provider.conv2d(lhs, rhs, provider_mode) {
+    if !matches!(
+        runmat_accelerate_api::ProviderConvolutionInputBackings::from_full_live_handles([lhs, rhs]),
+        Ok(Some(_))
+    ) {
+        return Ok((None, None));
+    }
+    let output_bytes = u64::try_from(rows)
+        .ok()
+        .zip(u64::try_from(cols).ok())
+        .and_then(|(rows, cols)| rows.checked_mul(cols))
+        .and_then(|elements| elements.checked_mul(if single_output { 4 } else { 8 }));
+    let placement = super::common::convolution::placement::select_pair(
+        runtime,
+        BUILTIN_NAME,
+        [lhs, rhs],
+        mode,
+        runmat_accelerate_api::ProviderConvolutionForm::Matrix,
+        output_bytes,
+    )?;
+    if placement
+        .as_ref()
+        .is_some_and(|selected| !selected.provider_route())
+    {
+        return Ok((None, placement));
+    }
+    if let Some(selected) = placement.as_ref() {
+        if !selected.revalidate([lhs, rhs])? {
+            return Err(conv2_error(&CONV2_ERROR_INVALID_INPUT));
+        }
+    }
+    let result = match provider.conv2d(lhs, rhs, provider_mode) {
         Ok(handle) => super::common::convolution::admit_binary_output(
             handle,
             lhs,
@@ -333,7 +378,9 @@ fn try_conv2_gpu(
             || conv2_error(&CONV2_ERROR_BUILD_OUTPUT),
         )
         .map(Some),
-        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => Ok(None),
+        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) && placement.is_none() => {
+            Ok(None)
+        }
         Err(err) => {
             let mut failure = crate::runtime_error::with_provider_execution_source(
                 conv2_error(&CONV2_ERROR_BUILD_OUTPUT),
@@ -342,7 +389,11 @@ fn try_conv2_gpu(
             failure.gpu_gather_retry = GpuGatherRetry::Never;
             Err(failure)
         }
+    };
+    if let Some(placement) = placement {
+        placement.finish_hook(&result);
     }
+    result.map(|value| (value, None))
 }
 
 fn conv2_dimensions(shape: &[usize]) -> Option<(usize, usize)> {
