@@ -1,6 +1,8 @@
 //! Column equilibration for the polynomial least-squares QR basis.
 
-use super::{finite_solver_range_error, Complex64, PolyfitKernelError, PolyfitKernelResult};
+use super::{
+    solver::finite_solver_range_error, Complex64, PolyfitKernelError, PolyfitKernelResult,
+};
 
 /// Factor each original weighted Vandermonde column into a finite scale and
 /// dimensionless working column. The published coefficients and, when asked
