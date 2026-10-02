@@ -1,3 +1,4 @@
+use super::options::text_vector;
 use super::*;
 use crate::builtins::plotting::{clone_figure, current_figure_handle};
 use futures::executor::block_on;
@@ -1029,21 +1030,6 @@ fn reads_typed_integer_data_groups_and_options_exactly() {
 }
 
 #[test]
-fn scalar_group_label_reads_typed_integer_storage_without_double_mirror() {
-    let tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).unwrap();
-
-    let Some(label) = scalar_group_label(&Value::Tensor(tensor)).unwrap() else {
-        panic!("expected exact integer label");
-    };
-    assert!(matches!(
-        label.as_slice(),
-        [crate::builtins::common::grouping_keys::KeyAtom::Integer(
-            IntValue::U16(42)
-        )]
-    ));
-}
-
-#[test]
 fn option_parser_accepts_documented_extreme_and_label_values() {
     let options = BoxplotOptions::parse(vec![
         Value::CharArray(CharArray::new_row("DataLim")),
@@ -1064,32 +1050,6 @@ fn option_parser_accepts_documented_extreme_and_label_values() {
     assert_eq!(options.extreme_mode, ExtremeMode::Compress);
     assert_eq!(options.jitter, 0.0);
     assert_eq!(options.outlier_marker, Some(MarkerStyle::Square));
-}
-
-#[test]
-fn jitter_zero_keeps_outliers_centered_and_datalim_clips() {
-    let options = BoxplotOptions {
-        data_lim: Some((0.0, 10.0)),
-        jitter: 0.0,
-        ..Default::default()
-    };
-    let stats = BoxStats {
-        label: "A".to_string(),
-        group_key: Vec::new(),
-        position: 3.0,
-        width: 0.5,
-        color: Vec4::ONE,
-        q1: 1.0,
-        median: 2.0,
-        q3: 3.0,
-        lower_whisker: 1.0,
-        upper_whisker: 3.0,
-        outliers: vec![-5.0, 12.0],
-        observation_count: 4,
-    };
-    let (x, y) = outlier_points(&stats, &options);
-    assert_eq!(x, vec![3.0, 3.0]);
-    assert_eq!(y, vec![0.0, 10.0]);
 }
 
 #[test]

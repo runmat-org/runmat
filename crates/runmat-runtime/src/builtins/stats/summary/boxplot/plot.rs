@@ -1,6 +1,9 @@
 //! Graphics plans and publication for boxplot output.
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) struct PreparedBoxplot {
     pub(super) plans: Vec<PlotPlan>,
     pub(super) labels: Vec<String>,

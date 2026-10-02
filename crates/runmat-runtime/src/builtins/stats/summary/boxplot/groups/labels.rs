@@ -2,6 +2,9 @@
 use super::super::*;
 use crate::builtins::common::grouping_keys::KeyAtom;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) type GroupLabel = Vec<KeyAtom>;
 
 pub(in crate::builtins::stats::summary::boxplot) fn group_label_text(label: &[KeyAtom]) -> String {
