@@ -5,6 +5,7 @@
 /// input, or an invalid factor; each caller owns its policy for that case.
 /// Apply the factor before rescaling so a finite bandwidth need not overflow
 /// in an intermediate standard deviation.
+#[cfg(any(feature = "plot-core", test))]
 pub(crate) fn finite_sample_std_scaled(values: &[f64], factor: f64) -> Option<f64> {
     if values.len() < 2
         || !factor.is_finite()

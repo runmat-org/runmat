@@ -37,6 +37,7 @@ fn numeric_ecdf_remains_available_without_presentation() {
         .as_deref()
         .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
         .is_some());
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let logical = Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![2, 1]).unwrap());
     let error = block_on(ecdf_builtin(vec![logical]))
         .expect_err("valid logical statement still requires presentation");

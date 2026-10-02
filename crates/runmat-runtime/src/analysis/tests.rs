@@ -72,10 +72,9 @@ use runmat_geometry_core::{
     MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
-use runmat_meshing_core::fixtures::{
-    nested_tetrahedron_shell_geometry, split_material_through_hole_plate_geometry,
-    through_hole_plate_geometry,
-};
+#[cfg(feature = "plot-core")]
+use runmat_meshing_core::fixtures::split_material_through_hole_plate_geometry;
+use runmat_meshing_core::fixtures::{nested_tetrahedron_shell_geometry, through_hole_plate_geometry};
 use runmat_meshing_core::{
     contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
     AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
@@ -676,6 +675,7 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
     }
 }
 
+#[cfg(feature = "plot-core")]
 fn split_material_through_hole_study_geometry() -> GeometryAsset {
     let mut geometry = split_material_through_hole_plate_geometry();
     add_through_hole_study_boundary_regions(&mut geometry);

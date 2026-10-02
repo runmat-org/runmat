@@ -368,7 +368,9 @@ struct RootLocus {
     gains: Vec<f64>,
     roots: Vec<Complex64>,
     branches: usize,
+    #[cfg(feature = "plot-core")]
     poles: Vec<Complex64>,
+    #[cfg(feature = "plot-core")]
     zeros: Vec<Complex64>,
 }
 
@@ -410,7 +412,9 @@ impl RootLocus {
         ensure_supported_model(model)?;
         let gains = gains.unwrap_or_else(|| default_gains(model));
         let branches = characteristic_branch_count(model);
+        #[cfg(feature = "plot-core")]
         let poles = polynomial_roots(&model.denominator, BUILTIN_NAME)?;
+        #[cfg(feature = "plot-core")]
         let zeros = if max_norm(&model.numerator) <= EPS {
             Vec::new()
         } else {
@@ -433,7 +437,9 @@ impl RootLocus {
             gains,
             roots,
             branches,
+            #[cfg(feature = "plot-core")]
             poles,
+            #[cfg(feature = "plot-core")]
             zeros,
         })
     }
@@ -480,6 +486,7 @@ impl RootLocus {
             })
     }
 
+    #[cfg(feature = "plot-core")]
     fn root(&self, branch: usize, gain_index: usize) -> Complex64 {
         self.roots[branch + gain_index * self.branches]
     }

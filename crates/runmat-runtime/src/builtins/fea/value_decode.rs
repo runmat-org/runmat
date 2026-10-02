@@ -52,6 +52,7 @@ pub(in crate::builtins::fea) fn exact_bool_from_value(
     }
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn bool_from_value(
     builtin: &'static str,
     value: &Value,
