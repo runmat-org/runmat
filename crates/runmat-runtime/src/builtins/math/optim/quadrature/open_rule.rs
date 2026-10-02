@@ -257,7 +257,7 @@ fn interior_nodes(a: f64, b: f64) -> Option<([f64; 15], f64)> {
     } else {
         b * 0.5 - a * 0.5
     };
-    if !(a < center && center < b) || !(half.is_finite() && half > 0.0) {
+    if !(a < center && center < b && half.is_finite() && half > 0.0) {
         return None;
     }
     let mut coordinates = [center; 15];
