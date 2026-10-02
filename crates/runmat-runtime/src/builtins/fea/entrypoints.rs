@@ -52,11 +52,7 @@ pub async fn fea_load_builtin(path: String) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.study",
-    category = "fea",
-    summary = "Create a typed FEA study from geometry, model data, and run settings.",
-    keywords = "fea,study,geometry,run",
-    descriptor(crate::builtins::fea::FEA_STUDY_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -81,11 +77,7 @@ pub async fn fea_author_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "fea.sweep",
-    category = "fea",
-    summary = "Create a FEA study sweep from study objects.",
-    keywords = "fea,sweep,study,run",
-    descriptor(crate::builtins::fea::FEA_SWEEP_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_sweep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -139,11 +131,7 @@ pub async fn fea_load_case_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.step",
-    category = "fea",
-    summary = "Create a typed FEA analysis step.",
-    keywords = "fea,step,static,modal,transient",
-    descriptor(crate::builtins::fea::FEA_STEP_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_step_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -170,11 +158,7 @@ pub async fn fea_interface_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.runOptions",
-    category = "fea",
-    summary = "Create typed FEA run options for a solver.",
-    keywords = "fea,run,options,solver,quality",
-    descriptor(crate::builtins::fea::FEA_RUN_OPTIONS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_RUN_OPTIONS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_run_options_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

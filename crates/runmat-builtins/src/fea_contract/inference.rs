@@ -12,6 +12,10 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeaConstructorKind {
+    Study,
+    Sweep,
+    Step,
+    RunOptions,
     Model,
     Material,
     MaterialAssignment,
@@ -25,14 +29,18 @@ pub enum FeaConstructorKind {
 impl FeaConstructorKind {
     const fn positional(self) -> usize {
         match self {
-            Self::Model | Self::MaterialAssignment => 2,
+            Self::Study | Self::Sweep | Self::Step | Self::Model | Self::MaterialAssignment => 2,
             Self::BoundaryCondition | Self::LoadCase | Self::Interface => 3,
-            Self::Material | Self::Domain | Self::LoadDocument => 1,
+            Self::RunOptions | Self::Material | Self::Domain | Self::LoadDocument => 1,
         }
     }
 
     const fn class(self) -> Option<StaticClassIdentity> {
         Some(StaticClassIdentity::new(match self {
+            Self::Study => "fea.Study",
+            Self::Sweep => "fea.Sweep",
+            Self::Step => "fea.Step",
+            Self::RunOptions => "fea.RunOptions",
             Self::Model => "fea.Model",
             Self::Material => "fea.Material",
             Self::MaterialAssignment => "fea.MaterialAssignment",
@@ -69,11 +77,27 @@ fn host_text(fact: &ValueFact) -> bool {
     }
 }
 
-fn object_result(kind: FeaConstructorKind) -> ValueFact {
+fn possible_host_study(fact: &ValueFact) -> bool {
+    !matches!(fact.residency, ResidencyFact::Device { .. })
+        && match &fact.kind {
+            ValueKindFact::Unknown => true,
+            ValueKindFact::Object(object) => object
+                .runtime_class
+                .as_ref()
+                .is_none_or(|class| class.is(StaticClassIdentity::new("fea.Study"))),
+            _ => false,
+        }
+}
+
+fn object_result(kind: FeaConstructorKind, dynamic_document: bool) -> ValueFact {
     let mut fact = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: kind.class().map(StaticClassIdentity::owned),
+            runtime_class: if dynamic_document {
+                None
+            } else {
+                kind.class().map(StaticClassIdentity::owned)
+            },
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),
@@ -81,7 +105,7 @@ fn object_result(kind: FeaConstructorKind) -> ValueFact {
         ShapeFact::Scalar,
         StorageFact::Opaque,
     );
-    if kind.is_document_load() {
+    if dynamic_document {
         // The document may contain a Study or Sweep; path shape cannot tell.
         fact.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
     }
@@ -94,9 +118,12 @@ pub fn infer_constructor(
     kind: FeaConstructorKind,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
-    let positional = kind.positional();
-    let arity_valid = if kind.is_document_load() {
+    let path_study = kind == FeaConstructorKind::Study && request.arguments.len() == 1;
+    let positional = if path_study { 1 } else { kind.positional() };
+    let arity_valid = if kind.is_document_load() || path_study {
         request.arguments.len() == 1
+    } else if kind == FeaConstructorKind::Step {
+        request.arguments.len() == 2
     } else {
         request.arguments.len() >= positional && (request.arguments.len() - positional) % 2 == 0
     };
@@ -108,7 +135,10 @@ pub fn infer_constructor(
         ));
     }
     for index in 0..request.arguments.len().min(positional) {
-        if kind == FeaConstructorKind::Model && index == 1 {
+        if matches!(kind, FeaConstructorKind::Model | FeaConstructorKind::Study)
+            && index == 1
+            && !path_study
+        {
             let input = &request.arguments[index];
             let valid = match &input.kind {
                 ValueKindFact::Unknown => true,
@@ -125,6 +155,23 @@ pub fn infer_constructor(
                     index,
                 ));
             }
+        } else if kind == FeaConstructorKind::Sweep && index == 1 {
+            let input = &request.arguments[index];
+            let valid = match &input.kind {
+                ValueKindFact::Cell(cell) => {
+                    possible_host_study(&cell.element)
+                        && cell.elements.iter().all(possible_host_study)
+                        && !matches!(input.residency, ResidencyFact::Device { .. })
+                }
+                _ => possible_host_study(input),
+            };
+            if !valid {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FEA-STUDIES",
+                    "fea.sweep requires a host fea.Study or cell of studies",
+                    index,
+                ));
+            }
         } else if !host_text(&request.arguments[index]) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-FEA-TEXT",
@@ -133,7 +180,7 @@ pub fn infer_constructor(
             ));
         }
     }
-    if !kind.is_document_load() {
+    if !kind.is_document_load() && !path_study && kind != FeaConstructorKind::Step {
         let mut all_option_names_known = true;
         let mut has_profile = false;
         for index in (positional..request.arguments.len()).step_by(2) {
@@ -160,18 +207,37 @@ pub fn infer_constructor(
                         index + 1,
                     ));
                 }
+                if kind == FeaConstructorKind::Sweep
+                    && request.literals.literal_string_at(index).as_deref() == Some("failfast")
+                    && (!matches!(value.kind, ValueKindFact::Logical | ValueKindFact::Unknown)
+                        || matches!(value.shape.element_count(), Some(count) if count != 1))
+                {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FEA-FAILFAST",
+                        "fea.sweep FailFast must be a host logical scalar",
+                        index + 1,
+                    ));
+                }
             }
         }
-        if kind == FeaConstructorKind::Model && all_option_names_known && !has_profile {
+        if matches!(kind, FeaConstructorKind::Model | FeaConstructorKind::Study)
+            && all_option_names_known
+            && !has_profile
+        {
             diagnostics.push(argument_error(
                 "RM-CATALOG-FEA-PROFILE",
-                "fea.model requires a Profile option",
+                "FEA model and study constructors require a Profile option",
                 positional,
             ));
         }
     }
     // Literal facts here do not certify nested typed component payloads or geometry.
-    finish_fixed(entry, request, object_result(kind), diagnostics)
+    finish_fixed(
+        entry,
+        request,
+        object_result(kind, kind.is_document_load() || path_study),
+        diagnostics,
+    )
 }
 
 #[cfg(test)]
@@ -183,7 +249,9 @@ mod tests {
         integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     };
     use crate::{BuiltinCatalogProvenance, BuiltinDocumentation};
-    use runmat_types::{LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount};
+    use runmat_types::{
+        CellFact, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
+    };
 
     fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
         CallRequest {
@@ -289,5 +357,93 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "RM-CATALOG-FEA-TEXT"));
+
+        // fea.study(path) currently delegates to the same loader and may
+        // return a sweep. The path spelling cannot prove Study class.
+        let path_form = infer_constructor(
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::String)],
+                vec![LiteralValue::Unknown],
+            ),
+            &entry(),
+            FeaConstructorKind::Study,
+        );
+        assert!(matches!(
+            path_form.outputs[0].certainty,
+            CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+        ));
+        assert!(
+            matches!(&path_form.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.is_none())
+        );
+    }
+
+    #[test]
+    fn study_constructor_requires_profile_and_step_has_exact_arity() {
+        let text = ValueFact::scalar(ValueKindFact::String);
+        let geometry = object_result(FeaConstructorKind::Model, false);
+        let mut geometry = geometry;
+        if let ValueKindFact::Object(object) = &mut geometry.kind {
+            object.runtime_class = Some(StaticClassIdentity::new("geometry.Asset").owned());
+        }
+        let study = infer_constructor(
+            &request(vec![text.clone(), geometry], vec![LiteralValue::Unknown; 2]),
+            &entry(),
+            FeaConstructorKind::Study,
+        );
+        assert!(study
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-PROFILE"));
+        let step = infer_constructor(
+            &request(
+                vec![text.clone(), text.clone(), text],
+                vec![LiteralValue::Unknown; 3],
+            ),
+            &entry(),
+            FeaConstructorKind::Step,
+        );
+        assert!(step
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-ARITY"));
+    }
+
+    #[test]
+    fn sweep_rejects_known_non_study_cell_and_numeric_failfast() {
+        let text = ValueFact::scalar(ValueKindFact::String);
+        let number = ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::Double,
+            domain: runmat_types::NumericDomain::Real,
+        }));
+        let studies = ValueFact::proven(
+            ValueKindFact::Cell(CellFact {
+                element: Box::new(number.clone()),
+                elements: vec![number.clone()],
+                elements_complete: true,
+            }),
+            ShapeFact::from(vec![Some(1), Some(1)]),
+            StorageFact::Dense,
+        );
+        let result = infer_constructor(
+            &request(
+                vec![text.clone(), studies, text, number],
+                vec![
+                    LiteralValue::Unknown,
+                    LiteralValue::Unknown,
+                    LiteralValue::String("FailFast".into()),
+                    LiteralValue::Unknown,
+                ],
+            ),
+            &entry(),
+            FeaConstructorKind::Sweep,
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-STUDIES"));
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-FAILFAST"));
     }
 }

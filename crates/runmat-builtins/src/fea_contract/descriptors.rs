@@ -20,7 +20,7 @@ pub const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
 }];
 pub const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "study = fea.study(path)",
+        label: "document = fea.study(path)",
         inputs: &IN_PATH,
         outputs: &OUT_ANY,
     },
