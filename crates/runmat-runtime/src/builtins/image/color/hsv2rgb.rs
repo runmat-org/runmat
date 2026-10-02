@@ -115,28 +115,8 @@ fn admit_hsv(hsv: &Value) -> BuiltinResult<bool> {
                 ));
             }
             if runmat_accelerate_api::handle_is_logical(handle) {
-                let owner =
-                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-                        hsv2rgb_error_with_message(
-                            "hsv2rgb: no acceleration provider owns the logical input handle",
-                            &HSV2RGB_ERROR_INVALID_INPUT,
-                        )
-                    })?;
-                if owner.device_id() != handle.device_id() {
-                    return Err(hsv2rgb_error_with_message(
-                        "hsv2rgb: logical input handle device does not match its owner",
-                        &HSV2RGB_ERROR_INVALID_INPUT,
-                    ));
-                }
-                handle.allocation_lease().validate_live().map_err(|error| {
-                    crate::runtime_error::with_provider_execution_source(
-                        hsv2rgb_error_with_message(
-                            format!("hsv2rgb: invalid logical resident allocation: {error}"),
-                            &HSV2RGB_ERROR_INVALID_INPUT,
-                        ),
-                        runmat_accelerate_api::ProviderExecutionError::from_source(error),
-                    )
-                })?;
+                super::resident_owner::validate_live(handle, NAME)
+                    .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
                 let shape = handle.shape();
                 if shape.len() != 3 || shape[2] != 3 || shape[0] == 0 || shape[1] == 0 {
                     return Err(hsv2rgb_error_with_message(
