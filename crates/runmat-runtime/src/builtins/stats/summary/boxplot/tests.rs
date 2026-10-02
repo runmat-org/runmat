@@ -414,6 +414,40 @@ fn factor_controls_decode_once_and_validate_against_factor_count() {
 }
 
 #[test]
+fn scalar_text_options_reject_containers_but_factor_direction_accepts_text_vector() {
+    let cell = Value::Cell(CellArray::new(vec![Value::String("outline".into())], 1, 1).unwrap());
+    assert!(BoxplotOptions::parse(vec![Value::from("BoxStyle"), cell]).is_err());
+    assert!(BoxplotOptions::parse(vec![
+        Value::from("MedianStyle"),
+        Value::StringArray(
+            StringArray::new(vec!["line".into(), "target".into()], vec![1, 2]).unwrap(),
+        ),
+    ])
+    .is_err());
+    assert!(BoxplotOptions::parse(vec![
+        Value::from("FullFactors"),
+        Value::CharArray(CharArray::new(vec!['o', 'n', 'o', 'f', 'f', ' '], 2, 3).unwrap()),
+    ])
+    .is_err());
+    let directions = BoxplotOptions::parse(vec![
+        Value::from("FactorDirection"),
+        Value::Cell(
+            CellArray::new(
+                vec![Value::String("data".into()), Value::String("list".into())],
+                1,
+                2,
+            )
+            .unwrap(),
+        ),
+    ])
+    .expect("FactorDirection uses a vector-text grammar");
+    assert_eq!(
+        directions.factor_direction,
+        vec![FactorDirection::Data, FactorDirection::List]
+    );
+}
+
+#[test]
 fn extensions_are_independently_mode_gated() {
     let data = || tensor(vec![1.0, 2.0], vec![2, 1]);
     let integer_data = || int_tensor(IntegerStorage::I16(vec![1, 2]), vec![2, 1]);

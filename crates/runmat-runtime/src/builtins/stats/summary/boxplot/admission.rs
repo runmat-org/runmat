@@ -40,6 +40,18 @@ fn validate_known_group(
     if matches!(group, Value::Cell(_) | Value::Object(_)) && !value_contains_gpu(group)? {
         return super::groups::validate_known_host_group(group, x_shape, x_count);
     }
+    if matches!(group, Value::Cell(_)) {
+        let matches_elements = could_match_group_length(group, x_count);
+        let matches_rows = x_shape.is_some_and(|shape| {
+            shape.len() == 2
+                && shape[0] > 1
+                && shape[1] > 1
+                && could_match_group_length(group, shape[0])
+        });
+        if !matches_elements && !matches_rows {
+            return Err(invalid("boxplot: grouping variable length must match X"));
+        }
+    }
     let count = match group {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Some(1),
         Value::Tensor(tensor) => Some(tensor.len()),
@@ -77,6 +89,52 @@ fn validate_known_group(
         }
     }
     Ok(())
+}
+
+/// A resident leaf keeps its known class and shape through materialization.
+/// A cell is either one scalar label per row or a list of grouping vectors;
+/// reject only when neither role can match the sample geometry.
+fn could_match_group_length(value: &Value, expected: usize) -> bool {
+    match value {
+        Value::Cell(cell) => {
+            (cell.data.len() == expected && cell.data.iter().all(could_be_scalar_label))
+                || cell
+                    .data
+                    .iter()
+                    .all(|element| could_match_group_length(element, expected))
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => expected == 1,
+        Value::Tensor(tensor) => tensor.len() == expected,
+        Value::LogicalArray(array) => array.len() == expected,
+        Value::StringArray(array) => array.data.len() == expected,
+        Value::CharArray(array) => array.rows == expected,
+        Value::GpuTensor(handle) => {
+            handle
+                .shape()
+                .iter()
+                .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+                == Some(expected)
+        }
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => true,
+        _ => false,
+    }
+}
+
+fn could_be_scalar_label(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
+        Value::Tensor(tensor) => tensor.len() == 1,
+        Value::StringArray(array) => array.data.len() == 1,
+        Value::CharArray(array) => array.rows == 1,
+        Value::GpuTensor(handle) => {
+            handle
+                .shape()
+                .iter()
+                .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+                == Some(1)
+        }
+        _ => false,
+    }
 }
 
 fn validate_group_leaf_classes(group: &Value) -> BuiltinResult<()> {

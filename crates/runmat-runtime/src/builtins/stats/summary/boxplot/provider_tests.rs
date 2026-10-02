@@ -79,6 +79,10 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
         .owner
         .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
+    let short_group = provider
+        .owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
     let calls = [
         vec![
             Value::GpuTensor(resident.handle.clone()),
@@ -162,6 +166,12 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
             ),
         ],
         vec![
+            Value::GpuTensor(resident.handle.clone()),
+            Value::Cell(
+                CellArray::new(vec![Value::GpuTensor(short_group.handle.clone())], 1, 1).unwrap(),
+            ),
+        ],
+        vec![
             sample(),
             Value::String("ColorGroup".into()),
             Value::Cell(
@@ -183,9 +193,39 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
         resident.handle.allocation_lease().validate_live().unwrap();
         option.handle.allocation_lease().validate_live().unwrap();
+        short_group
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
         assert_eq!(resident.probe.retirements(), 0);
         assert_eq!(option.probe.retirements(), 0);
+        assert_eq!(short_group.probe.retirements(), 0);
     }
+
+    let scalar_labels = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::GpuTensor(option.handle.clone()),
+                Value::String("b".into()),
+                Value::String("c".into()),
+                Value::String("d".into()),
+            ],
+            4,
+            1,
+        )
+        .unwrap(),
+    );
+    admission::admit_host_visible(&sample(), Some(&scalar_labels))
+        .expect("a resident scalar among four scalar labels remains admissible");
+    let row_factor =
+        Value::Cell(CellArray::new(vec![Value::GpuTensor(resident.handle.clone())], 1, 1).unwrap());
+    admission::admit_host_visible(
+        &Value::Tensor(Tensor::new(vec![1.0; 8], vec![4, 2]).unwrap()),
+        Some(&row_factor),
+    )
+    .expect("a four-row factor can group a four-by-two matrix");
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }
 
 #[test]

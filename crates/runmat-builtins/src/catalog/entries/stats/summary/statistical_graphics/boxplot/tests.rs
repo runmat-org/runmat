@@ -1,6 +1,6 @@
 use super::*;
 use runmat_types::{
-    CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+    CallRequest, CellFact, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
     OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
@@ -109,6 +109,76 @@ fn typed_option_name_and_invalid_host_value_are_diagnosed() {
     );
     assert!(!result.diagnostics.is_empty());
     assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
+fn scalar_text_options_reject_known_cell_or_multielement_text_facts() {
+    let name = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let cell = ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::unknown(
+                runmat_types::DynamicReason::RuntimeValue,
+            )),
+            elements: Vec::new(),
+            elements_complete: false,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Dense,
+    );
+    for (option, value) in [
+        ("BoxStyle", cell.clone()),
+        (
+            "MedianStyle",
+            ValueFact::proven(
+                ValueKindFact::String,
+                ShapeFact::from(vec![Some(1), Some(2)]),
+                StorageFact::Dense,
+            ),
+        ),
+        (
+            "FullFactors",
+            ValueFact::proven(
+                ValueKindFact::Character,
+                ShapeFact::from(vec![Some(2), Some(3)]),
+                StorageFact::Dense,
+            ),
+        ),
+    ] {
+        let result = call(
+            vec![real(vec![Some(4), Some(1)]), name.clone(), value],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String(option.into()),
+                LiteralValue::Unknown,
+            ],
+            1,
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "OPTION"));
+        assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+    }
+
+    let factor_direction = call(
+        vec![real(vec![Some(4), Some(1)]), name, cell],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("FactorDirection".into()),
+            LiteralValue::Unknown,
+        ],
+        1,
+    );
+    assert!(factor_direction.diagnostics.is_empty());
+    assert_eq!(
+        factor_direction.outputs[0].numeric().unwrap().class,
+        NumericClass::Double,
+        "FactorDirection has a distinct text-vector grammar"
+    );
 }
 
 #[test]

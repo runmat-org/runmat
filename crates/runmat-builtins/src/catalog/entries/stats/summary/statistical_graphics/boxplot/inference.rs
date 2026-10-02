@@ -115,7 +115,8 @@ fn known_bad_option(kind: BoxplotOptionKind, value: &ValueFact, numeric: Option<
                 })
         }
         Orientation | PlotStyle | BoxStyle | MedianStyle | ExtremeMode | LabelOrientation
-        | LabelVerbosity | Symbol | Notch | FullFactors | FactorDirection => !matches!(
+        | LabelVerbosity | Symbol | Notch | FullFactors => known_bad_scalar_text(value),
+        FactorDirection => !matches!(
             value.kind,
             ValueKindFact::Character
                 | ValueKindFact::String
@@ -123,6 +124,15 @@ fn known_bad_option(kind: BoxplotOptionKind, value: &ValueFact, numeric: Option<
                 | ValueKindFact::Unknown
         ),
         _ => false,
+    }
+}
+
+fn known_bad_scalar_text(value: &ValueFact) -> bool {
+    match value.kind {
+        ValueKindFact::String => value.shape.element_count().is_some_and(|count| count != 1),
+        ValueKindFact::Character => first_known_extent(&value.shape).is_some_and(|rows| rows != 1),
+        ValueKindFact::Unknown => false,
+        _ => true,
     }
 }
 
