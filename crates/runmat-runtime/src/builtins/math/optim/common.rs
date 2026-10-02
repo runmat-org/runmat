@@ -1,8 +1,14 @@
 use runmat_builtins::BuiltinExtensionDescriptor;
+use runmat_builtins::OptimSolver;
 use runmat_value::{CharArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
+
+mod scalar_cooperation;
+pub(crate) use scalar_cooperation::ScalarCooperation;
+mod scalar_options;
+pub(crate) use scalar_options::ScalarOptionFields;
 
 pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -17,23 +23,30 @@ pub(crate) async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinRe
     crate::call_feval_async_with_outputs(callback, &args, 1).await
 }
 
-pub(crate) async fn call_scalar_function(name: &str, handle: &Value, x: f64) -> BuiltinResult<f64> {
-    call_scalar_function_with_precision(name, handle, x, false).await
+pub(crate) async fn call_scalar_function(
+    name: &str,
+    solver: OptimSolver,
+    handle: &Value,
+    x: f64,
+) -> BuiltinResult<f64> {
+    call_scalar_function_with_precision(name, solver, handle, x, false).await
 }
 
 pub(crate) async fn call_scalar_function_with_precision(
     name: &str,
+    solver: OptimSolver,
     handle: &Value,
     x: f64,
     single: bool,
 ) -> BuiltinResult<f64> {
-    call_scalar_function_with_precision_info(name, handle, x, single)
+    call_scalar_function_with_precision_info(name, solver, handle, x, single)
         .await
         .map(|(value, _)| value)
 }
 
 pub(crate) async fn call_scalar_function_with_precision_info(
     name: &str,
+    solver: OptimSolver,
     handle: &Value,
     x: f64,
     single: bool,
@@ -57,28 +70,33 @@ pub(crate) async fn call_scalar_function_with_precision_info(
         }
         _ => false,
     };
-    let value = match name {
-        "fminbnd" => {
+    let value = match solver {
+        OptimSolver::Fminbnd => {
             prepare_floating_value(
                 name,
                 value,
-                &super::fminbnd::FMINBND_CALLBACK_NUMERIC_EXTENSION,
-                &super::fminbnd::FMINBND_RESIDENT_EXTENSION,
+                &runmat_builtins::FMINBND_CALLBACK_NUMERIC_EXTENSION,
+                &runmat_builtins::FMINBND_RESIDENT_EXTENSION,
                 "objective value",
             )
             .await?
         }
-        "fzero" => {
+        OptimSolver::Fzero => {
             prepare_floating_value(
                 name,
                 value,
-                &super::fzero::FZERO_CALLBACK_NUMERIC_EXTENSION,
-                &super::fzero::FZERO_RESIDENT_EXTENSION,
+                &runmat_builtins::FZERO_CALLBACK_NUMERIC_EXTENSION,
+                &runmat_builtins::FZERO_RESIDENT_EXTENSION,
                 "function value",
             )
             .await?
         }
-        _ => crate::dispatcher::gather_if_needed_async(&value).await?,
+        _ => {
+            return Err(optim_error(
+                name,
+                "unsupported scalar solver callback identity",
+            ))
+        }
     };
     value_to_scalar(name, value).map(|value| (value, output_single))
 }
@@ -94,6 +112,109 @@ pub(crate) fn is_logical_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum ScalarOperandGeometry {
+    Scalar,
+    ScalarOrPair,
+}
+
+impl ScalarOperandGeometry {
+    fn accepts(self, count: usize) -> bool {
+        match self {
+            Self::Scalar => count == 1,
+            Self::ScalarOrPair => count == 1 || count == 2,
+        }
+    }
+}
+
+/// Checks host-visible operand facts before the first provider operation. It
+/// deliberately does not inspect resident numerical payloads.
+pub(crate) fn preflight_scalar_operand(
+    solver: OptimSolver,
+    value: &Value,
+    geometry: ScalarOperandGeometry,
+    role: &str,
+    numeric_extension: &BuiltinExtensionDescriptor,
+    resident_extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    let name = solver.name();
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(resident_extension, name)?;
+    }
+    if is_typed_integer_value(value) || is_logical_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(numeric_extension, name)?;
+    }
+    let invalid = |detail: &str| {
+        build_runtime_error(format!("{name}: {role} {detail}"))
+            .with_builtin(name)
+            .with_gpu_gather_retry(GpuGatherRetry::Never)
+            .build()
+    };
+    match value {
+        Value::Num(number) if geometry.accepts(1) && number.is_finite() => Ok(()),
+        Value::Int(_) if geometry.accepts(1) => {
+            if crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+                Ok(())
+            } else {
+                Err(invalid("must be exactly representable as double"))
+            }
+        }
+        Value::Bool(_) if geometry.accepts(1) => Ok(()),
+        Value::LogicalArray(array) if geometry.accepts(array.data.len()) => Ok(()),
+        Value::Tensor(tensor) if geometry.accepts(tensor.len()) => {
+            if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+                Err(invalid("must be exactly representable as double"))
+            } else if (0..tensor.len())
+                .all(|index| tensor::tensor_value_f64(tensor, index).is_finite())
+            {
+                Ok(())
+            } else {
+                Err(invalid("must be finite"))
+            }
+        }
+        Value::GpuTensor(handle) => {
+            let count = handle
+                .shape()
+                .iter()
+                .try_fold(1_usize, |total, axis| total.checked_mul(*axis));
+            if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+                || !count.is_some_and(|count| geometry.accepts(count))
+            {
+                return Err(invalid(
+                    "must be a real scalar or admitted two-element interval",
+                ));
+            }
+            handle.allocation_lease().validate_live().map_err(|error| {
+                build_runtime_error(format!(
+                    "{name}: {role} has an invalid resident lease: {error}"
+                ))
+                .with_builtin(name)
+                .with_source(error)
+                .with_gpu_gather_retry(GpuGatherRetry::Never)
+                .build()
+            })?;
+            if crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none() {
+                return Err(invalid("has no owning provider"));
+            }
+            let element =
+                crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(handle)
+                    .map_err(|error| invalid(&format!("has invalid physical metadata: {error}")))?;
+            if !crate::builtins::common::gpu_helpers::numeric_descriptor_matches(
+                handle,
+                element,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            ) {
+                return Err(invalid("has inconsistent physical metadata"));
+            }
+            Ok(())
+        }
+        _ => Err(invalid(
+            "must be a finite real scalar or admitted two-element interval",
+        )),
+    }
+}
+
 pub(crate) async fn prepare_floating_value(
     name: &str,
     value: Value,
@@ -107,14 +228,13 @@ pub(crate) async fn prepare_floating_value(
     if is_typed_integer_value(&value) || is_logical_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(numeric_extension, name)?;
     }
-    if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value).await?
-    {
+    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(&value) {
         return Err(optim_error(
             name,
             format!("{name}: integer {role} must be exactly representable as double"),
         ));
     }
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
     Ok(value)
 }
 
@@ -364,7 +484,16 @@ pub(crate) fn option_f64(
     let Some(options) = options else {
         return Ok(default);
     };
-    let Some(value) = lookup_option(options, field) else {
+    option_f64_value(builtin, lookup_option(options, field), field, default)
+}
+
+pub(crate) fn option_f64_value(
+    builtin: &str,
+    value: Option<&Value>,
+    field: &str,
+    default: f64,
+) -> BuiltinResult<f64> {
+    let Some(value) = value else {
         return Ok(default);
     };
     let parsed = match value {
@@ -399,7 +528,16 @@ pub(crate) fn option_usize(
     let Some(options) = options else {
         return Ok(default);
     };
-    let Some(raw) = lookup_option(options, field) else {
+    option_usize_value(builtin, lookup_option(options, field), field, default)
+}
+
+pub(crate) fn option_usize_value(
+    builtin: &str,
+    raw: Option<&Value>,
+    field: &str,
+    default: usize,
+) -> BuiltinResult<usize> {
+    let Some(raw) = raw else {
         return Ok(default);
     };
     if let Some(integer) = tensor::scalar_integer_value(raw) {
@@ -410,7 +548,7 @@ pub(crate) fn option_usize(
             )
         });
     }
-    let value = option_f64(builtin, Some(options), field, default as f64)?;
+    let value = option_f64_value(builtin, Some(raw), field, default as f64)?;
     if value < 0.0 {
         return Err(optim_error(
             builtin,
@@ -440,7 +578,15 @@ pub(crate) fn option_string(
     let Some(options) = options else {
         return Ok(default.to_string());
     };
-    let Some(value) = lookup_option(options, field) else {
+    option_string_value(lookup_option(options, field), field, default)
+}
+
+pub(crate) fn option_string_value(
+    value: Option<&Value>,
+    field: &str,
+    default: &str,
+) -> BuiltinResult<String> {
+    let Some(value) = value else {
         return Ok(default.to_string());
     };
     match value {
@@ -489,13 +635,31 @@ pub(crate) struct InitialGuess {
 mod tests {
     use super::{
         canonicalize_callback_handle, initial_guess, initial_guess_with_extensions, option_usize,
-        prepare_floating_value, value_to_real_vector, value_to_scalar,
+        prepare_floating_value, value_to_real_vector, value_to_scalar, ScalarOptionFields,
     };
     use futures::executor::block_on;
+    use runmat_builtins::OptimOptionField;
     use runmat_value::{
         CharArray, Closure, IntegerStorage, StringArray, StructValue, Tensor, Value,
     };
     use std::sync::Arc;
+
+    #[test]
+    fn scalar_option_fields_decode_public_aliases_to_one_typed_control_plan() {
+        let mut options = StructValue::new();
+        options.insert("StepTolerance", Value::Num(0.125));
+        options.insert("MAXITER", Value::Num(17.0));
+        options.insert("Display", Value::String("iter".to_string()));
+        let admitted = ScalarOptionFields::from_struct(Some(&options));
+        assert!(matches!(admitted.get(OptimOptionField::TolX), Some(Value::Num(v)) if *v == 0.125));
+        assert!(
+            matches!(admitted.get(OptimOptionField::MaxIter), Some(Value::Num(v)) if *v == 17.0)
+        );
+        assert!(
+            matches!(admitted.get(OptimOptionField::Display), Some(Value::String(v)) if v == "iter")
+        );
+        assert!(admitted.get(OptimOptionField::Algorithm).is_none());
+    }
 
     #[test]
     fn value_to_scalar_reads_typed_integer_storage_exactly() {
@@ -566,10 +730,10 @@ mod tests {
     #[test]
     fn optimizer_integer_metadata_covers_every_runmat_only_role() {
         let capability_sets: [&[runmat_builtins::BuiltinIntegerCapabilityDescriptor]; 4] = [
-            &super::super::fminbnd::FMINBND_INTEGER_CAPABILITIES,
+            &runmat_builtins::FMINBND_INTEGER_CAPABILITIES,
             &super::super::fminunc::FMINUNC_INTEGER_CAPABILITIES,
             &super::super::fsolve::FSOLVE_INTEGER_CAPABILITIES,
-            &super::super::fzero::FZERO_INTEGER_CAPABILITIES,
+            &runmat_builtins::FZERO_INTEGER_CAPABILITIES,
         ];
         assert_eq!(
             capability_sets.map(|capabilities| capabilities.len()),

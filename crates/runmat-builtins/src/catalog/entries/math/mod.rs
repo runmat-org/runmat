@@ -36,13 +36,14 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(discrete::ENTRIES.iter().copied());
     elementwise::extend_entries(values);
     values.extend(integer_division::ENTRIES.iter().copied());
+    interpolation::extend_entries(values);
     linalg::extend_entries(values);
+    ode::extend_entries(values);
+    values.extend(optim::ENTRIES.iter().copied());
+    poly::extend_entries(values);
     reduction::extend_entries(values);
     values.extend(rounding::ENTRIES.iter().copied());
     signal::extend_entries(values);
     symbolic::extend_entries(values);
     trigonometry::extend_entries(values);
-    interpolation::extend_entries(values);
-    ode::extend_entries(values);
-    poly::extend_entries(values);
 }
