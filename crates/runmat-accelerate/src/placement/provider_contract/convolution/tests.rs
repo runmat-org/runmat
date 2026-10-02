@@ -370,6 +370,62 @@ fn in_process_convolution_receipt_completes_only_after_hook_publication() {
     ));
 }
 
+#[test]
+fn in_process_host_upload_receipt_requires_the_actual_restore_hook() {
+    use runmat_accelerate_api::observation::{
+        with_provider_observation, ProviderObservationFailure, ProviderObservationStatus,
+        ProviderObservationSupport,
+    };
+    let provider = crate::simple_provider::InProcessProvider::new();
+    let output = ProviderRepresentation {
+        element_type: ProviderElementType::F64,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: vec![1, 3],
+        residency: ProviderResidency::Device,
+    };
+    let request = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new("transfer.upload"),
+        family: ProviderOperationFamily::Upload,
+        inputs: vec![ProviderRepresentation {
+            residency: ProviderResidency::Host,
+            ..output.clone()
+        }],
+        outputs: vec![output],
+        workload: ProviderWorkload::default(),
+    };
+    let ProviderObservationSupport::Observed(mut unproven) =
+        provider.begin_operation_observation(&request)
+    else {
+        panic!("in-process upload should be observable");
+    };
+    unproven.require_provider_execution(provider.device_id(), request.operation.clone());
+    assert_eq!(
+        unproven.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+
+    let ProviderObservationSupport::Observed(mut receipt) =
+        provider.begin_operation_observation(&request)
+    else {
+        panic!("in-process upload should be observable");
+    };
+    receipt.require_provider_execution(provider.device_id(), request.operation.clone());
+    let result = with_provider_observation(Some(receipt.recorder()), || {
+        provider.upload_numeric_raw(&runmat_accelerate_api::HostNumericTensorView {
+            data: runmat_accelerate_api::HostNumericDataView::F64(&[1.0, 2.0, 3.0]),
+            shape: &[1, 3],
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        })
+    });
+    assert!(result.is_ok());
+    receipt.publish().unwrap();
+    assert!(matches!(
+        receipt.status(),
+        ProviderObservationStatus::Completed { submissions: 0, .. }
+    ));
+}
+
 #[cfg(feature = "wgpu")]
 #[test]
 fn only_the_admitted_wgpu_vector_route_claims_completion_fences() {
