@@ -1085,16 +1085,11 @@ impl WgpuProvider {
                 shapes_compatible(&state_shape, &zi_entry.shape),
                 "iir_filter: initial conditions are not compatible with the requested dimension"
             );
-            let zi_dim = if dim_idx < zi_entry.shape.len() {
-                zi_entry.shape[dim_idx]
-            } else {
-                1
-            };
+            let zi_dim = zi_entry.shape.first().copied().unwrap_or(1);
             ensure!(
                 zi_dim == state_len,
-                "iir_filter: initial conditions must have {} states along dimension {}",
-                state_len,
-                dim + 1
+                "iir_filter: initial conditions must have {} states along the leading state dimension",
+                state_len
             );
             if state_total == 0 {
                 ensure!(
@@ -3663,6 +3658,80 @@ mod tests {
             b.release().unwrap();
         }) else {
             eprintln!("WGPU adapter unavailable: nonleading IIR hardware witness not executed");
+            return;
+        };
+    }
+
+    #[test]
+    fn iir_filter_third_axis_uses_order_first_state_geometry() {
+        let Some(()) = with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 0.0],
+                    shape: &[1, 2],
+                })
+                .expect("numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 0.0],
+                    shape: &[1, 2],
+                })
+                .expect("denominator");
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[
+                        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0,
+                        15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
+                    ],
+                    shape: &[2, 3, 4],
+                })
+                .expect("three-dimensional signal");
+            let zi = provider
+                .upload(&HostTensorView {
+                    data: &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+                    shape: &[1, 2, 3],
+                })
+                .expect("third-axis initial state");
+            provider.reset_telemetry();
+            let result = pollster::block_on(provider.iir_filter(
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                    numerator: &b,
+                    denominator: &a,
+                },
+                &x,
+                ProviderIirFilterOptions {
+                    dim: 2,
+                    zi: Some(zi.clone()),
+                },
+            ))
+            .expect("resident third-axis filter");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            let final_state = result.final_state.expect("final state");
+            assert_eq!(final_state.shape(), &[1, 2, 3]);
+            let actual = pollster::block_on(provider.download(&result.output)).unwrap();
+            let state = pollster::block_on(provider.download(&final_state)).unwrap();
+            let expected = [
+                11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0,
+                15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
+            ];
+            assert_eq!(actual.shape, vec![2, 3, 4]);
+            assert!(actual
+                .data
+                .iter()
+                .zip(expected)
+                .all(|(got, want)| (got - want).abs() < 1.0e-5));
+            assert_eq!(state.shape, vec![1, 2, 3]);
+            assert_eq!(state.data.len(), 6);
+            assert!(state.data.iter().all(|value| value.abs() < 1.0e-5));
+            assert!(x.allocation_lease().validate_live().is_ok());
+            result.output.release().unwrap();
+            final_state.release().unwrap();
+            zi.release().unwrap();
+            x.release().unwrap();
+            a.release().unwrap();
+            b.release().unwrap();
+        }) else {
+            eprintln!("WGPU adapter unavailable: third-axis IIR hardware witness not executed");
             return;
         };
     }

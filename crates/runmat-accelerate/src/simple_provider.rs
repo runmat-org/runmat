@@ -7182,16 +7182,11 @@ impl AccelProvider for InProcessProvider {
                     shapes_compatible(&state_shape, shape),
                     "iir_filter: initial conditions are not compatible with the signal shape"
                 );
-                let zi_dim = if dim_idx < shape.len() {
-                    shape[dim_idx]
-                } else {
-                    1
-                };
+                let zi_dim = shape.first().copied().unwrap_or(1);
                 ensure!(
                     zi_dim == state_len,
-                    "iir_filter: initial conditions must have {} states along dimension {}",
-                    state_len,
-                    dim + 1
+                    "iir_filter: initial conditions must have {} states along the leading state dimension",
+                    state_len
                 );
             }
 

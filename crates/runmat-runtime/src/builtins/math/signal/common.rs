@@ -21,7 +21,9 @@ pub(crate) mod waveform_restore_fixture;
 pub(crate) mod window_provider;
 pub(crate) use cooperation::{SignalCooperation, SIGNAL_WORK_CHUNK};
 pub(crate) use iir_boundary::preflight as preflight_iir_operands;
-pub(crate) use iir_boundary::{IirAdmissionFault, IirFaultKind, IirForm, IirOperand};
+pub(crate) use iir_boundary::{
+    IirAdmissionFault, IirAdmittedGeometry, IirFaultKind, IirForm, IirOperand,
+};
 pub(crate) use waveform_boundary::{
     admit_resident_waveform_operand, prepared_real_integer_tensor, waveform_input_tensor,
 };

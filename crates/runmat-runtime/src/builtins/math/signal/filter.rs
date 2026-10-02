@@ -3,8 +3,6 @@ mod provider_output;
 mod preflight;
 mod host;
 
-use std::cmp::max;
-
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderIirFilterOptions};
 use runmat_builtins::{
@@ -199,6 +197,7 @@ async fn evaluate_with_runtime(
         return Ok(eval);
     }
     args.signal.materialize().await?;
+    args.initial.materialize().await?;
     host::filter_host(&args, &mut cooperation).await
 }
 
@@ -250,22 +249,12 @@ impl FilterArgs {
             other => other,
         };
 
-        preflight::operands(&b, &a, &x, zi_value.as_ref())?;
+        let admitted = preflight::operands(&b, &a, &x, zi_value.as_ref())?;
         let host_dim = match dim_value.as_ref() {
             Some(Value::GpuTensor(_)) | None => None,
             Some(value) => Some(parse_dimension_arg(value).await?),
         };
         preflight::resident_owners(&b, &a, &x, zi_value.as_ref(), dim_value.as_ref())?;
-
-        let coeffs_b = CoeffInput::from_value(CoefficientRole::Numerator, b).await?;
-        let coeffs_a = CoeffInput::from_value(CoefficientRole::Denominator, a).await?;
-
-        if coeffs_a.len == 0 {
-            return Err(filter_error(&FILTER_ERROR_EMPTY_DENOMINATOR));
-        }
-        if coeffs_b.len == 0 {
-            return Err(filter_error(&FILTER_ERROR_EMPTY_NUMERATOR));
-        }
 
         let signal = SignalInput::from_value(x)?;
 
@@ -284,7 +273,7 @@ impl FilterArgs {
             shape_ext.extend(std::iter::repeat_n(1, dim - shape_ext.len()));
         }
 
-        let order = max(coeffs_b.len, coeffs_a.len);
+        let order = admitted.coefficient_len;
         let state_len = order.saturating_sub(1);
 
         let state_shape =
@@ -311,11 +300,20 @@ impl FilterArgs {
         let expected_states = state_len.saturating_mul(channel_count);
 
         let initial = if let Some(zi_val) = zi_value {
-            InitialState::from_value(zi_val, state_len, &state_shape, expected_states, "filter")
-                .await?
+            InitialState::from_value(zi_val, state_len, &state_shape, expected_states, "filter")?
         } else {
             InitialState::empty(state_shape.clone())
         };
+
+        let coeffs_b = CoeffInput::from_value(CoefficientRole::Numerator, b).await?;
+        let coeffs_a = CoeffInput::from_value(CoefficientRole::Denominator, a).await?;
+
+        if coeffs_a.len == 0 {
+            return Err(filter_error(&FILTER_ERROR_EMPTY_DENOMINATOR));
+        }
+        if coeffs_b.len == 0 {
+            return Err(filter_error(&FILTER_ERROR_EMPTY_NUMERATOR));
+        }
 
         let is_complex =
             coeffs_b.is_complex || coeffs_a.is_complex || signal.is_complex || initial.is_complex;
@@ -630,7 +628,43 @@ impl InitialState {
         }
     }
 
-    async fn from_value(
+    async fn materialize(&mut self) -> BuiltinResult<()> {
+        let Some(handle) = &self.gpu_handle else {
+            return Ok(());
+        };
+        if !self.column_major.is_empty() || self.shape.contains(&0) {
+            return Ok(());
+        }
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+            .await
+            .map_err(|source| {
+                let mut error = filter_error_with_source(
+                    &FILTER_ERROR_GATHER_FAILED,
+                    "initial-state gather failed",
+                    source,
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
+            })?;
+        let expected_states = self
+            .shape
+            .iter()
+            .copied()
+            .try_fold(1usize, |count, extent| count.checked_mul(extent))
+            .ok_or_else(|| filter_error(&FILTER_ERROR_INVALID_INITIAL_STATE))?;
+        let decoded = Self::from_value(
+            gathered,
+            self.shape[0],
+            &self.shape,
+            expected_states,
+            BUILTIN_NAME,
+        )?;
+        self.column_major = decoded.column_major;
+        self.is_complex = decoded.is_complex;
+        Ok(())
+    }
+
+    fn from_value(
         value: Value,
         state_len: usize,
         expected_shape: &[usize],
@@ -643,17 +677,7 @@ impl InitialState {
                     return Ok(Self::empty(expected_shape.to_vec()))
                 }
                 Value::GpuTensor(handle) => {
-                    let tensor =
-                        gpu_helpers::gather_tensor_async(&handle)
-                            .await
-                            .map_err(|flow| {
-                                filter_error_with_source(
-                                    &FILTER_ERROR_GATHER_FAILED,
-                                    "initial-state gather failed",
-                                    map_control_flow_with_builtin(flow, BUILTIN_NAME),
-                                )
-                            })?;
-                    if !tensor.is_empty() {
+                    if handle.shape().iter().all(|&extent| extent != 0) {
                         return Err(filter_error_with_detail(
                             &FILTER_ERROR_INVALID_INITIAL_STATE,
                             format!(
@@ -665,7 +689,8 @@ impl InitialState {
                         provided: true,
                         column_major: Vec::new(),
                         shape: expected_shape.to_vec(),
-                        is_complex: false,
+                        is_complex: runmat_accelerate_api::handle_storage(&handle)
+                            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
                         gpu_handle: Some(handle),
                     });
                 }
@@ -708,23 +733,12 @@ impl InitialState {
 
         let (column_major, shape, is_complex, gpu_handle) = match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(|flow| {
-                        filter_error_with_source(
-                            &FILTER_ERROR_GATHER_FAILED,
-                            "initial-state gather failed",
-                            map_control_flow_with_builtin(flow, BUILTIN_NAME),
-                        )
-                    })?;
-                let shape = tensor.shape.clone();
+                let shape = handle.shape().to_vec();
                 (
-                    tensor::tensor_into_values_f64(tensor)
-                        .iter()
-                        .map(|&re| Complex::new(re, 0.0))
-                        .collect::<Vec<_>>(),
+                    Vec::new(),
                     shape,
-                    false,
+                    runmat_accelerate_api::handle_storage(&handle)
+                        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
                     Some(handle),
                 )
             }
@@ -785,13 +799,21 @@ impl InitialState {
             }
         };
 
-        if column_major.len() != expected_states {
+        let actual_states = if gpu_handle.is_some() {
+            shape
+                .iter()
+                .copied()
+                .try_fold(1usize, |count, extent| count.checked_mul(extent))
+                .ok_or_else(|| filter_error(&FILTER_ERROR_INVALID_INITIAL_STATE))?
+        } else {
+            column_major.len()
+        };
+        if actual_states != expected_states {
             return Err(filter_error_with_detail(
                 &FILTER_ERROR_INVALID_INITIAL_STATE,
                 format!(
                     "{name}: initial conditions have {} elements but {} were expected",
-                    column_major.len(),
-                    expected_states
+                    actual_states, expected_states
                 ),
             ));
         }
@@ -865,10 +887,19 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         None => return Ok(None),
         Some(_) => return Ok(None),
     };
-    let provider = match runmat_accelerate_api::provider_for_handle(&signal_handle) {
+    let provider = match gpu_helpers::exact_provider_for_handle(&signal_handle) {
         Some(provider) => provider,
         None => return Ok(None),
     };
+    if args.initial.provided {
+        if let Some(handle) = &args.initial.gpu_handle {
+            if !gpu_helpers::exact_provider_for_handle(handle)
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+            {
+                return Ok(None);
+            }
+        }
+    }
 
     let b_real = match to_real_vec(&args.coeffs_b.data) {
         Some(vec) => vec,
@@ -900,11 +931,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
     let (zi_handle_opt, _zi_temp) = if args.state_len == 0 || !args.initial.provided {
         (None, None)
     } else if let Some(handle) = &args.initial.gpu_handle {
-        if !runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        {
-            return Ok(None);
-        }
         (Some(handle.clone()), None)
     } else {
         let zi_real = match to_real_vec(&args.initial.column_major) {
@@ -1526,6 +1552,56 @@ pub(crate) mod tests {
         assert_eq!(
             block_on(provider.download(&final_state)).unwrap().data,
             vec![0.0; 3]
+        );
+        assert!(signal.allocation_lease().validate_live().is_ok());
+    }
+
+    #[test]
+    fn resident_filter_third_axis_uses_order_first_state_geometry() {
+        let _lock = test_support::accel_test_lock();
+        let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let signal = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[
+                    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0,
+                    15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
+                ],
+                shape: &[2, 3, 4],
+            })
+            .expect("resident three-dimensional signal");
+        provider.reset_telemetry();
+        let (output, final_state) = evaluate(
+            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+            Value::GpuTensor(signal.clone()),
+            &[
+                Value::Tensor(
+                    Tensor::new(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![1, 2, 3]).unwrap(),
+                ),
+                Value::Num(3.0),
+            ],
+        )
+        .expect("resident third-axis filter")
+        .into_pair();
+        let (Value::GpuTensor(output), Value::GpuTensor(final_state)) = (output, final_state)
+        else {
+            panic!("supported third-axis filter must retain output and state on device")
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(final_state.shape(), &[1, 2, 3]);
+        assert_eq!(
+            block_on(provider.download(&output)).unwrap().data,
+            vec![
+                11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0,
+                15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
+            ]
+        );
+        assert_eq!(
+            block_on(provider.download(&final_state)).unwrap().data,
+            vec![0.0; 6]
         );
         assert!(signal.allocation_lease().validate_live().is_ok());
     }
