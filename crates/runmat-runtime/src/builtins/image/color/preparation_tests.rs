@@ -175,7 +175,50 @@ fn color_forms_are_typed_gather_and_valid_calls_observe_once() {
         block_on(dispatcher::call_builtin_async(name, &[valid(name)])).unwrap();
         assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
         events.borrow_mut().clear();
+        block_on(dispatcher::call_builtin_async_with_outputs(
+            name,
+            &[valid(name)],
+            0,
+        ))
+        .unwrap();
+        assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+        events.borrow_mut().clear();
     }
+}
+
+#[test]
+fn extension_gate_and_empty_rgb_inputs_precede_service() {
+    let events = Events::default();
+    let _context = enter(&events, false);
+    {
+        let _disabled = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(dispatcher::call_builtin_async(
+            "gray2rgb",
+            &[valid("gray2rgb")],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:Gray2rgbCallExtension")
+        );
+        assert!(events.borrow().is_empty());
+    }
+    for name in ["rgb2gray", "rgb2hsv"] {
+        let empty = Value::Tensor(Tensor::new(vec![], vec![0, 1, 3]).unwrap());
+        let error = block_on(dispatcher::call_builtin_async(name, &[empty])).unwrap_err();
+        let expected = format!("RunMat:{name}:InvalidInput");
+        assert_eq!(error.identifier(), Some(expected.as_str()));
+        assert!(events.borrow().is_empty());
+    }
+    let _enabled = crate::compatibility::push_runmat_extensions_enabled(true);
+    let empty_gray = Value::Tensor(Tensor::new(vec![], vec![0, 2]).unwrap());
+    let output = block_on(dispatcher::call_builtin_async("gray2rgb", &[empty_gray])).unwrap();
+    let Value::Tensor(output) = output else {
+        panic!("empty RGB remains a tensor");
+    };
+    assert_eq!(output.shape, vec![0, 2, 3]);
+    assert!(output.is_empty());
+    assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
 }
 
 #[test]
