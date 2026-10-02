@@ -4,7 +4,10 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod normal;
+mod reservation;
 mod uniform;
+pub(crate) use normal::{generate_normal, generate_normal_cooperative};
 pub(crate) use uniform::{generate_uniform, generate_uniform_cooperative};
 
 pub(crate) const DEFAULT_RNG_SEED: u64 = 0x9e3779b97f4a7c15;
@@ -670,20 +673,6 @@ pub(crate) fn generate_uniform_scaled(
         (0..len)
             .map(|_| a + (b - a) * next_uniform_state(&mut state.state))
             .collect()
-    })
-}
-
-pub(crate) fn generate_normal(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        let mut out = Vec::with_capacity(len);
-        while out.len() < len {
-            let (z0, z1) = next_normal_pair(&mut state.state);
-            out.push(z0);
-            if out.len() < len {
-                out.push(z1);
-            }
-        }
-        out
     })
 }
 
