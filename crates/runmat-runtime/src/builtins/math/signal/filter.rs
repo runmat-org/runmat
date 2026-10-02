@@ -177,10 +177,11 @@ pub async fn evaluate(
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
-    let args = FilterArgs::parse(b, a, x, rest).await?;
+    let mut args = FilterArgs::parse(b, a, x, rest).await?;
     if let Some(eval) = try_filter_gpu(&args).await? {
         return Ok(eval);
     }
+    args.signal.materialize().await?;
     filter_host(&args)
 }
 
@@ -249,7 +250,7 @@ impl FilterArgs {
             return Err(filter_error(&FILTER_ERROR_EMPTY_NUMERATOR));
         }
 
-        let signal = SignalInput::from_value(x).await?;
+        let signal = SignalInput::from_value(x)?;
 
         let dim = if let Some(dim_val) = dim_value {
             match host_dim {
@@ -439,40 +440,32 @@ impl CoeffInput {
 }
 
 struct SignalInput {
-    data: Vec<Complex<f64>>,
+    payload: SignalPayload,
     shape: Vec<usize>,
     is_complex: bool,
-    gpu_handle: Option<GpuTensorHandle>,
     output_single: bool,
 }
 
+enum SignalPayload {
+    Host(Vec<Complex<f64>>),
+    Resident(GpuTensorHandle),
+}
+
 impl SignalInput {
-    async fn from_value(value: Value) -> BuiltinResult<Self> {
+    fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
                 let output_single = runmat_accelerate_api::handle_integer_type(&handle).is_none()
                     && !runmat_accelerate_api::handle_is_logical(&handle)
                     && runmat_accelerate_api::handle_precision(&handle)
                         == Some(runmat_accelerate_api::ProviderPrecision::F32);
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(|flow| {
-                        filter_error_with_source(
-                            &FILTER_ERROR_GATHER_FAILED,
-                            "signal gather failed",
-                            map_control_flow_with_builtin(flow, BUILTIN_NAME),
-                        )
-                    })?;
-                let shape = tensor.shape.clone();
-                let data = tensor::tensor_into_values_f64(tensor)
-                    .into_iter()
-                    .map(|re| Complex::new(re, 0.0))
-                    .collect();
+                let shape = handle.shape().to_vec();
+                let is_complex = runmat_accelerate_api::handle_storage(&handle)
+                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
                 Ok(Self {
-                    data,
+                    payload: SignalPayload::Resident(handle),
                     shape,
-                    is_complex: false,
-                    gpu_handle: Some(handle),
+                    is_complex,
                     output_single,
                 })
             }
@@ -484,10 +477,9 @@ impl SignalInput {
                     .map(|re| Complex::new(re, 0.0))
                     .collect();
                 Ok(Self {
-                    data,
+                    payload: SignalPayload::Host(data),
                     shape,
                     is_complex: false,
-                    gpu_handle: None,
                     output_single,
                 })
             }
@@ -500,10 +492,9 @@ impl SignalInput {
                     .map(|(re, im)| Complex::new(re, im))
                     .collect();
                 Ok(Self {
-                    data,
+                    payload: SignalPayload::Host(data),
                     shape,
                     is_complex: true,
-                    gpu_handle: None,
                     output_single,
                 })
             }
@@ -520,39 +511,34 @@ impl SignalInput {
                     .map(|re| Complex::new(re, 0.0))
                     .collect();
                 Ok(Self {
-                    data,
+                    payload: SignalPayload::Host(data),
                     shape,
                     is_complex: false,
-                    gpu_handle: None,
                     output_single: false,
                 })
             }
             Value::Num(n) => Ok(Self {
-                data: vec![Complex::new(n, 0.0)],
+                payload: SignalPayload::Host(vec![Complex::new(n, 0.0)]),
                 shape: vec![1, 1],
                 is_complex: false,
-                gpu_handle: None,
                 output_single: false,
             }),
             Value::Int(i) => Ok(Self {
-                data: vec![Complex::new(i.to_f64(), 0.0)],
+                payload: SignalPayload::Host(vec![Complex::new(i.to_f64(), 0.0)]),
                 shape: vec![1, 1],
                 is_complex: false,
-                gpu_handle: None,
                 output_single: false,
             }),
             Value::Bool(b) => Ok(Self {
-                data: vec![Complex::new(if b { 1.0 } else { 0.0 }, 0.0)],
+                payload: SignalPayload::Host(vec![Complex::new(if b { 1.0 } else { 0.0 }, 0.0)]),
                 shape: vec![1, 1],
                 is_complex: false,
-                gpu_handle: None,
                 output_single: false,
             }),
             Value::Complex(re, im) => Ok(Self {
-                data: vec![Complex::new(re, im)],
+                payload: SignalPayload::Host(vec![Complex::new(re, im)]),
                 shape: vec![1, 1],
                 is_complex: true,
-                gpu_handle: None,
                 output_single: false,
             }),
             other => Err(filter_error_with_detail(
@@ -560,6 +546,44 @@ impl SignalInput {
                 format!("received {other:?}"),
             )),
         }
+    }
+
+    fn resident(&self) -> Option<&GpuTensorHandle> {
+        match &self.payload {
+            SignalPayload::Resident(handle) => Some(handle),
+            SignalPayload::Host(_) => None,
+        }
+    }
+
+    fn host_data(&self) -> BuiltinResult<&[Complex<f64>]> {
+        match &self.payload {
+            SignalPayload::Host(data) => Ok(data),
+            SignalPayload::Resident(_) => Err(filter_error(&FILTER_ERROR_INTERNAL)),
+        }
+    }
+
+    async fn materialize(&mut self) -> BuiltinResult<()> {
+        let SignalPayload::Resident(handle) = &self.payload else {
+            return Ok(());
+        };
+        let value = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+            .await
+            .map_err(|flow| {
+                filter_error_with_source(
+                    &FILTER_ERROR_GATHER_FAILED,
+                    "signal gather failed",
+                    map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                )
+            })?;
+        let materialized = Self::from_value(value)?;
+        if materialized.shape != self.shape
+            || materialized.is_complex != self.is_complex
+            || !matches!(materialized.payload, SignalPayload::Host(_))
+        {
+            return Err(filter_error(&FILTER_ERROR_INVALID_SIGNAL));
+        }
+        self.payload = materialized.payload;
+        Ok(())
     }
 }
 
@@ -814,7 +838,7 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         return Ok(None);
     }
 
-    let signal_handle = match &args.signal.gpu_handle {
+    let signal_handle = match args.signal.resident() {
         Some(handle)
             if runmat_accelerate_api::handle_integer_type(handle).is_none()
                 && !runmat_accelerate_api::handle_is_logical(handle) =>
@@ -946,6 +970,7 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
 }
 
 fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
+    let signal_data = args.signal.host_data()?;
     let mut b_norm = args.coeffs_b.data.clone();
     let mut a_norm = args.coeffs_a.data.clone();
 
@@ -998,11 +1023,11 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
         vec![Complex::new(0.0, 0.0); expected_states]
     };
 
-    let mut output = vec![Complex::new(0.0, 0.0); args.signal.data.len()];
+    let mut output = vec![Complex::new(0.0, 0.0); signal_data.len()];
 
     if args.state_len == 0 {
         let gain = b_norm[0];
-        for (dst, &src) in output.iter_mut().zip(args.signal.data.iter()) {
+        for (dst, &src) in output.iter_mut().zip(signal_data.iter()) {
             *dst = gain * src;
         }
     } else if args.channel_count == 0 || args.shape_ext[args.dim_idx] == 0 {
@@ -1030,10 +1055,10 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
                         .checked_add(l)
                         .and_then(|v| v.checked_add(step.saturating_mul(args.leading)))
                         .ok_or_else(|| runtime_error_for("filter: signal index overflow"))?;
-                    if idx >= args.signal.data.len() {
+                    if idx >= signal_data.len() {
                         break;
                     }
-                    let x_n = args.signal.data[idx];
+                    let x_n = signal_data[idx];
                     let y = b_norm[0] * x_n + states[state_base];
                     output[idx] = y;
                     for i in 1..args.order {
@@ -1643,6 +1668,40 @@ pub(crate) mod tests {
 
             approx_eq_slice(&gathered.materialize_f64(), &cpu_data);
         });
+    }
+
+    #[test]
+    fn resident_filter_does_not_download_the_signal_before_provider_execution() {
+        let _lock = test_support::accel_test_lock();
+        let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let signal = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[4, 1],
+            })
+            .expect("resident signal");
+        provider.reset_telemetry();
+        let result = evaluate(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::GpuTensor(signal.clone()),
+            &[],
+        )
+        .expect("identity filter");
+        let (output, _) = result.into_pair();
+        let Value::GpuTensor(output) = output else {
+            panic!("supported filter route must retain the resident output")
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(!output.shares_allocation_with(&signal));
+        assert_eq!(
+            block_on(provider.download(&output)).unwrap().data,
+            vec![1.0, 2.0, 3.0, 4.0]
+        );
+        assert!(signal.allocation_lease().validate_live().is_ok());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
