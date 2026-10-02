@@ -7,199 +7,23 @@
 //! in between (e.g. `xmax = 0.5` for a triangle wave) interpolates between
 //! the two via a piecewise-linear ramp.
 
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SAWTOOTH_ERROR_ARG_COUNT, SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED,
+    SAWTOOTH_ERROR_INTERNAL, SAWTOOTH_ERROR_INVALID_INPUT, SAWTOOTH_ERROR_XMAX_INVALID,
+    SAWTOOTH_ERROR_XMAX_RANGE, SAWTOOTH_GPU_INPUT_EXTENSION, SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sawtooth";
 const TWO_PI: f64 = 2.0 * PI;
-
-const SAWTOOTH_NONDOUBLE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sawtooth-nondouble-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sawtooth with a non-double numeric argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SawtoothNondoubleInputExtension"),
-};
-
-const SAWTOOTH_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sawtooth-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interactive sawtooth gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SawtoothGpuInputExtension"),
-};
-
-pub const SAWTOOTH_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
-    SAWTOOTH_GPU_INPUT_EXTENSION,
-];
-
-const SAWTOOTH_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "t",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer sample times are outside the documented double input domain and are admitted only when every value is exactly representable as binary64.",
-    }];
-const SAWTOOTH_INTEGER_T_XMAX_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "t",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer sample times cross the checked binary64 waveform boundary only in RunMat mode.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "xmax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The typed peak-position control is checked exactly before conversion and must remain in the documented interval from zero through one.",
-    },
-];
-pub const SAWTOOTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sawtooth(integer_t)",
-        inputs: &SAWTOOTH_INTEGER_T_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The RunMat-only form returns double waveform samples and automatic residency may gather through the exact owner.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sawtooth(integer_t, integer_xmax)",
-        inputs: &SAWTOOTH_INTEGER_T_XMAX_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Each independently typed argument is compatibility-gated and proved binary64-exact before evaluation or provider access.",
-    },
-];
-
-const SAWTOOTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sawtooth output sampled at t.",
-}];
-
-const SAWTOOTH_SIG_DEFAULT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "t",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sample times.",
-}];
-
-const SAWTOOTH_SIG_XMAX_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times.",
-    },
-    BuiltinParamDescriptor {
-        name: "xmax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Peak position fraction in [0, 1].",
-    },
-];
-
-const SAWTOOTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = sawtooth(t)",
-        inputs: &SAWTOOTH_SIG_DEFAULT_INPUTS,
-        outputs: &SAWTOOTH_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = sawtooth(t, xmax)",
-        inputs: &SAWTOOTH_SIG_XMAX_INPUTS,
-        outputs: &SAWTOOTH_OUTPUT,
-    },
-];
-
-const SAWTOOTH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.INVALID_INPUT",
-    identifier: Some("RunMat:sawtooth:InvalidInput"),
-    when: "Primary input is not numeric-real tensor/scalar compatible.",
-    message: "sawtooth: expected numeric input",
-};
-
-const SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:sawtooth:ComplexUnsupported"),
-    when: "Primary input includes complex values.",
-    message: "sawtooth: input must be real; complex values are not supported",
-};
-
-const SAWTOOTH_ERROR_XMAX_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.XMAX_INVALID",
-    identifier: Some("RunMat:sawtooth:XmaxInvalid"),
-    when: "xmax argument is not a real numeric scalar.",
-    message: "sawtooth: xmax must be a real numeric scalar in [0, 1]",
-};
-
-const SAWTOOTH_ERROR_XMAX_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.XMAX_RANGE",
-    identifier: Some("RunMat:sawtooth:XmaxOutOfRange"),
-    when: "xmax argument lies outside [0, 1] or is non-finite.",
-    message: "sawtooth: xmax must be a finite scalar in [0, 1]",
-};
-
-const SAWTOOTH_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.ARG_COUNT",
-    identifier: Some("RunMat:sawtooth:ArgCount"),
-    when: "More than one optional argument is provided.",
-    message: "sawtooth: expected 1 or 2 arguments",
-};
-
-const SAWTOOTH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.INTERNAL",
-    identifier: Some("RunMat:sawtooth:InternalError"),
-    when: "Internal tensor construction or GPU gather fails.",
-    message: "sawtooth: internal error",
-};
-
-const SAWTOOTH_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    SAWTOOTH_ERROR_INVALID_INPUT,
-    SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED,
-    SAWTOOTH_ERROR_XMAX_INVALID,
-    SAWTOOTH_ERROR_XMAX_RANGE,
-    SAWTOOTH_ERROR_ARG_COUNT,
-    SAWTOOTH_ERROR_INTERNAL,
-];
-
-pub const SAWTOOTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SAWTOOTH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SAWTOOTH_ERRORS,
-};
 
 fn sawtooth_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     sawtooth_error_with_message(error.message, error)
@@ -268,20 +92,14 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
 
 #[runtime_builtin(
     name = "sawtooth",
-    category = "math/signal",
-    summary = "Generate periodic sawtooth waveforms with an optional peak-position control.",
-    keywords = "sawtooth,waveform,signal processing,triangle,periodic",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::signal::sawtooth::SAWTOOTH_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::sawtooth::SAWTOOTH_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::sawtooth::SAWTOOTH_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::sawtooth"
 )]
 async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
-    if matches!(&t, Value::GpuTensor(_))
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
-            .any(|value| matches!(value, Value::GpuTensor(_)))
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SAWTOOTH_GPU_INPUT_EXTENSION,
@@ -395,7 +213,7 @@ fn sawtooth_tensor(tensor: Tensor, xmax: f64) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntValue, LogicalArray};
 
     fn call(t: Value) -> BuiltinResult<Value> {
@@ -429,25 +247,16 @@ mod tests {
     }
 
     #[test]
-    fn sawtooth_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
     fn sawtooth_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("sawtooth builtin");
-        let descriptor = builtin.descriptor.expect("sawtooth descriptor");
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).unwrap();
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
+        let descriptor = entry.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = sawtooth(t)"));
         assert!(labels.contains(&"Y = sawtooth(t, xmax)"));
@@ -670,13 +479,29 @@ mod tests {
             )
             .expect("admit owned fixture")
             .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("publish provenance view");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(Value::GpuTensor(handle))
-            .expect_err("MATLAB mode rejects interactive gpuArray input before gather");
+            .expect_err("MATLAB mode rejects explicit interactive gpuArray input before gather");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:SawtoothGpuInputExtension")
         );
+    }
+
+    #[test]
+    fn sawtooth_automatic_residency_can_materialize_in_matlab_mode() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, std::f64::consts::PI], vec![1, 2]).unwrap();
+            let automatic = gpu_helpers::upload_tensor(provider, &input).unwrap();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let result = call(Value::GpuTensor(automatic)).expect("automatic host materialization");
+            assert_eq!(expect_tensor(result).materialize_f64(), vec![-1.0, 0.0]);
+        });
     }
 
     #[test]
