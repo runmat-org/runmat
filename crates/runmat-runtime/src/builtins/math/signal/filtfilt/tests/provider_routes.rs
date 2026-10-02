@@ -180,7 +180,7 @@ impl AccelProvider for OperationalFailureProvider {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Box::pin(async {
             Err(
-                runmat_accelerate_api::ProviderExecutionError::from_source(anyhow::anyhow!(
+                runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
                     "device failed during zero-phase pass"
                 ))
                 .after_effect(),

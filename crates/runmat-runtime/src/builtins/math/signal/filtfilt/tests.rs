@@ -5,8 +5,7 @@ use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     handle_precision, provider_for_handle, AccelDownloadFuture, AccelNumericDownloadFuture,
-    AccelProvider, AccelProviderFuture, GpuTensorHandle, HostTensorView, ProviderIirFilterOptions,
-    ProviderIirFilterResult, ProviderPrecision,
+    AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision,
 };
 use runmat_builtins::builtin_function_by_name;
 use runmat_value::{ComplexTensor, Tensor};
