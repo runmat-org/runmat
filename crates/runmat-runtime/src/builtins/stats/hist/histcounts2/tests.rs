@@ -683,6 +683,7 @@ fn histcounts2_gpu_roundtrip() {
 #[test]
 #[cfg(feature = "wgpu")]
 fn histcounts2_wgpu_roundtrip() {
+    use runmat_accelerate_api::AccelProvider;
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
