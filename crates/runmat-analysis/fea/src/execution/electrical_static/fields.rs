@@ -225,6 +225,7 @@ pub(in crate::execution) fn native_electrical_entity_counts(
     result: &ElectricalStaticSolverResult,
 ) -> RecoveredFieldEntityCounts {
     RecoveredFieldEntityCounts {
+        oriented_faces: 0,
         nodes: result.response().ordered_node_ids.len(),
         volume_elements: result.response().ordered_element_ids.len(),
         volume_integration_points: 0,

@@ -6,7 +6,7 @@
   "crates/runmat-runtime/src/analysis/storage.rs": 1816,
   "crates/runmat-analysis/fea/src/fixtures.rs": 1647,
   "crates/runmat-runtime/src/analysis/operations/query.rs": 1639,
-  "crates/runmat-analysis/fea/src/results/observation/contract.rs": 1280,
+  "crates/runmat-analysis/fea/src/results/observation/contract.rs": 1159,
   "crates/runmat-analysis/fea/src/results/observation/distributed.rs": 1160,
   "crates/runmat-analysis/fea/src/solve/nonlinear/mod.rs": 1219,
   "crates/runmat-analysis/fea/src/execution/transient_segment.rs": 1125,

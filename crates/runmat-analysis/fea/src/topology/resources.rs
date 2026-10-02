@@ -14,6 +14,58 @@ const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 
 impl AnalysisProjection {
+    /// Checked ordered identity-set scratch, shared with native field validation.
+    pub fn identity_set_resident_bytes_estimate(
+        count: usize,
+    ) -> Result<u64, AnalysisProjectionError> {
+        index::<runmat_meshing_core::StableDigest>(count)
+    }
+    /// Analytic requested-heap bound for an owned clone, including the actual
+    /// private lookup inventories and nested provenance/connectivity payloads.
+    /// This is not allocator bookkeeping or measured RSS.
+    pub fn clone_resident_bytes_estimate(&self) -> Result<u64, AnalysisProjectionError> {
+        let mut total = size_of::<Self>() as u64;
+        add(&mut total, vector::<ProjectedNode>(self.nodes.len())?)?;
+        add(&mut total, vector::<ProjectedElement>(self.elements.len())?)?;
+        add(
+            &mut total,
+            vector::<ProjectedBoundaryFace>(self.boundary_faces.len())?,
+        )?;
+        add(&mut total, vector::<Vec<usize>>(self.node_neighbors.len())?)?;
+        add(&mut total, index::<(u64, usize)>(self.node_by_id.len())?)?;
+        add(&mut total, index::<(u64, usize)>(self.element_by_id.len())?)?;
+        for neighbors in &self.node_neighbors {
+            add(&mut total, vector::<usize>(neighbors.len())?)?;
+        }
+        for element in &self.elements {
+            add(&mut total, vector::<usize>(element.node_indices.len())?)?;
+            add(
+                &mut total,
+                serialized_materialization_resident_bytes_estimate(
+                    &element.region_id,
+                    PROFILE_LIMITS,
+                )
+                .map_err(resource)?,
+            )?;
+        }
+        for face in &self.boundary_faces {
+            add(&mut total, vector::<usize>(face.node_indices.len())?)?;
+            add(
+                &mut total,
+                vector::<usize>(face.adjacent_element_indices.len())?,
+            )?;
+            add(
+                &mut total,
+                serialized_materialization_resident_bytes_estimate(
+                    &face.provenance,
+                    PROFILE_LIMITS,
+                )
+                .map_err(resource)?,
+            )?;
+        }
+        Ok(total)
+    }
+
     /// Additional requested-heap estimate for `derive`, excluding the borrowed mesh, allocator
     /// bookkeeping and RSS. Counts malformed raw connectivity without trusting canonical limits.
     /// No validation, geometric projection, or canonical encoding is performed by this method.

@@ -6,6 +6,8 @@ mod compilation;
 mod electrical_planning;
 mod electrical_product;
 mod fluid_material;
+mod fluid_planning;
+mod fluid_product;
 mod identity;
 mod magnetic_planning;
 mod magnetic_product;
@@ -36,6 +38,11 @@ pub use electrical_product::{
     ElectricalStudyProductInput,
 };
 pub use fluid_material::{derive_canonical_fluid_material, FluidMaterialCompilationError};
+pub use fluid_planning::{plan_fluid_study, FluidStudyPlanningError, FluidStudyPlanningPolicy};
+pub use fluid_product::{
+    build_fluid_study_product, plan_fluid_study_product, FluidStudyProduct, FluidStudyProductError,
+    FluidStudyProductInput,
+};
 pub use identity::{
     structural_study_source_digest, StructuralStudyMaterialBinding,
     StructuralStudySourceIdentityError,

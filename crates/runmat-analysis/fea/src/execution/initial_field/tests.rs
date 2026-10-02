@@ -65,6 +65,7 @@ fn source_artifact(
         crate::execution::FieldRecoverySource::SolverResult(source),
         Digest::sha256("topology"),
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: 4,
             volume_elements: 1,
             volume_integration_points: 4,

@@ -27,7 +27,7 @@ pub struct FluidSteadySolverResult {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FluidResultData {
+pub(super) struct FluidResultData<T = CanonicalFluidResult> {
     schema_version: u16,
     source_workload: AnalysisWorkloadIdentity,
     producer: StepIdentity,
@@ -41,13 +41,13 @@ struct FluidResultData {
     /// Source preparation estimate, independently rederived before owned expansion.
     preparation_resident_bytes: u64,
     numerical_plan: NumericalPlanIdentity,
-    original: CanonicalFluidResult,
+    original: T,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FluidResultWire {
-    data: FluidResultData,
+pub(super) struct FluidResultWire<T = CanonicalFluidResult> {
+    pub(super) data: FluidResultData<T>,
 }
 
 impl FluidSteadySolverResult {
@@ -59,28 +59,14 @@ impl FluidSteadySolverResult {
         let problem = source.problem(workload)?;
         problem.recover(&original).map_err(invalid)?;
         let reservation = problem.reservation();
-        let source_workload = workload.identity()?;
-        let numerical_plan = plan_identity(
-            source_workload,
-            source,
-            &reservation,
-            original.numerical_input_identity,
-        )?;
         Ok(Self {
-            data: FluidResultData {
-                schema_version: 1,
-                source_workload,
-                producer: workload.producer_identity()?,
-                mesh_digest: source.source.mesh_digest,
-                projection_digest: source.source.projection_digest,
-                geometry_digest: source.topology.geometry_digest,
-                properties: source.property_identity.clone(),
-                property_audit_digest: source.property_audit_digest,
+            data: source_data(
+                workload,
+                source,
                 reservation,
-                preparation_resident_bytes: source.preparation_resident_bytes,
-                numerical_plan,
+                original.numerical_input_identity,
                 original,
-            },
+            )?,
         })
     }
 
@@ -144,7 +130,7 @@ impl FluidSteadySolverResult {
             .checked_add(problem.reservation().resident_bytes_upper_bound)
             .and_then(|v| v.checked_add(decode_bytes))
             .ok_or_else(|| invalid("steady fluid cold materialization byte estimate overflow"))?;
-        if coexisting > workload.policy.maximum_resident_bytes || coexisting > isize::MAX as u64 {
+        if coexisting > workload.resident_ceiling()? || coexisting > isize::MAX as u64 {
             return Err(AnalysisExecutionError::Limit(
                 "steady fluid result residency",
             ));
@@ -209,6 +195,32 @@ impl FluidSteadySolverResult {
         problem.recover(&d.original).map_err(invalid)?;
         Ok(())
     }
+}
+
+/// One metadata authority for actual retained results and streaming resource profiles.
+pub(super) fn source_data<T>(
+    workload: &FluidSteadyWorkload,
+    source: &PreparedFluidSource,
+    reservation: CanonicalFluidReservation,
+    numerical_input: Digest,
+    original: T,
+) -> AnalysisExecutionResult<FluidResultData<T>> {
+    let source_workload = workload.identity()?;
+    let numerical_plan = plan_identity(source_workload, source, &reservation, numerical_input)?;
+    Ok(FluidResultData {
+        schema_version: 1,
+        source_workload,
+        producer: workload.producer_identity()?,
+        mesh_digest: source.source.mesh_digest,
+        projection_digest: source.source.projection_digest,
+        geometry_digest: source.topology.geometry_digest,
+        properties: source.property_identity.clone(),
+        property_audit_digest: source.property_audit_digest,
+        reservation,
+        preparation_resident_bytes: source.preparation_resident_bytes,
+        numerical_plan,
+        original,
+    })
 }
 
 fn plan_identity(

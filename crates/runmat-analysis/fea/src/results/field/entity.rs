@@ -10,6 +10,8 @@ pub enum RecoveredFieldEntityDomain {
     VolumeElements,
     VolumeIntegrationPoints,
     OrientedEdges,
+    /// All canonical owner-oriented volume faces, including internal faces.
+    OrientedFaces,
     BeamElements,
     ShellElements,
     Connectors,
@@ -21,7 +23,11 @@ impl RecoveredFieldEntityDomain {
         match self {
             Self::Nodes => matches!(location, FieldLocation::Node),
             Self::OrientedEdges => matches!(location, FieldLocation::Edge),
-            Self::VolumeElements | Self::BeamElements | Self::ShellElements => {
+            Self::OrientedFaces => matches!(location, FieldLocation::Face),
+            Self::VolumeElements => {
+                matches!(location, FieldLocation::Element | FieldLocation::Cell)
+            }
+            Self::BeamElements | Self::ShellElements => {
                 matches!(location, FieldLocation::Element)
             }
             Self::VolumeIntegrationPoints => matches!(location, FieldLocation::IntegrationPoint),
@@ -38,6 +44,7 @@ pub struct RecoveredFieldEntityCounts {
     pub volume_elements: usize,
     pub volume_integration_points: usize,
     pub oriented_edges: usize,
+    pub oriented_faces: usize,
     pub beam_elements: usize,
     pub shell_elements: usize,
     pub connectors: usize,
@@ -51,6 +58,7 @@ impl RecoveredFieldEntityCounts {
             RecoveredFieldEntityDomain::VolumeElements => self.volume_elements,
             RecoveredFieldEntityDomain::VolumeIntegrationPoints => self.volume_integration_points,
             RecoveredFieldEntityDomain::OrientedEdges => self.oriented_edges,
+            RecoveredFieldEntityDomain::OrientedFaces => self.oriented_faces,
             RecoveredFieldEntityDomain::BeamElements => self.beam_elements,
             RecoveredFieldEntityDomain::ShellElements => self.shell_elements,
             RecoveredFieldEntityDomain::Connectors => self.connectors,

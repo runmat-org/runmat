@@ -3,6 +3,7 @@
 mod catalog;
 mod contract;
 mod entity;
+mod finite_volume;
 mod partition;
 mod partition_set;
 mod sampling;
@@ -18,6 +19,7 @@ pub use contract::{
     RecoveredFieldSelection, RecoveredFieldSelectionIdentity,
 };
 pub use entity::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain};
+pub use finite_volume::{FiniteVolumeFieldTopology, NativeOrientedFace};
 pub use partition::{RecoveredFieldPartition, RecoveredFieldPartitionIdentity};
 pub use partition_set::{
     canonical_field_partition_descriptors, canonical_field_partitions, reconstruct_recovered_field,

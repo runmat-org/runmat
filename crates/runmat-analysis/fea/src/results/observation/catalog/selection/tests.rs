@@ -43,6 +43,7 @@ fn structural_selection_preserves_catalog_order_and_all_required_samples() {
         request.source,
         topology.discretization_digest(),
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: projection.elements.len() * 4,

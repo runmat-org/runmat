@@ -46,6 +46,7 @@ fn solved_temperature_binding(
         FieldRecoverySource::SolverResult(source),
         producer.topology_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: mesh.topology.nodes.len(),
             volume_elements: mesh.topology.volume_elements.len(),
             volume_integration_points: 0,

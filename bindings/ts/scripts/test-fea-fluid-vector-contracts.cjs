@@ -23,6 +23,7 @@ vm.runInNewContext(generator, {
 });
 const generated = fs.readFileSync(generatedPath, "utf8");
 assert.equal(generated, emitted, "generated FEA contracts differ from their generator");
+assert.match(generated, /"volume_flow_rate"/, "native oriented-face volume flux quantity is absent");
 const semanticPath = path.resolve(__dirname, "../src/generated/fea-semantic-contracts.ts");
 const assessmentGuardsPath = path.resolve(__dirname, "../src/generated/fea-assessment-guards.ts");
 let semanticEmitted;
@@ -45,6 +46,7 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "generate-fea-semantic-c
 });
 const semantic = fs.readFileSync(semanticPath, "utf8");
 assert.equal(semantic, semanticEmitted, "authored semantic contracts differ from Rust-derived generator");
+assert.match(semantic, /"volume_flow_rate"/, "authored volume flux quantity is absent");
 if (assessmentGuardsEmitted !== undefined) {
   assert.equal(fs.readFileSync(assessmentGuardsPath, "utf8"), assessmentGuardsEmitted,
     "assessment guards differ from Rust-derived generator");

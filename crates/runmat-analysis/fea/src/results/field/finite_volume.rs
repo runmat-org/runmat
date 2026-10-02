@@ -1,0 +1,170 @@
+//! Exact native cell/all-face storage authority, independent of the fluid equations.
+use super::{RecoveredFieldEntityCounts, RecoveredFieldError};
+use crate::{
+    execution::FieldTopologyIdentity,
+    topology::{AnalysisProjection, FiniteVolumeTopology},
+};
+use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_execution::Digest;
+use runmat_meshing_core::StableDigest;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+
+#[cfg(test)]
+mod tests;
+
+const PREFIX: &[u8] = b"runmat-finite-volume-field-layout/v1\0";
+const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeOrientedFace {
+    pub identity: StableDigest,
+    pub corner_identities: [StableDigest; 3],
+    /// Positive flux leaves this exact original cell.
+    pub owner: StableDigest,
+    pub neighbor: Option<StableDigest>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FiniteVolumeFieldTopology {
+    mesh_digest: StableDigest,
+    projection_digest: Digest,
+    geometry_digest: Digest,
+    node_identities: Vec<StableDigest>,
+    cell_identities: Vec<StableDigest>,
+    oriented_faces: Vec<NativeOrientedFace>,
+}
+
+fn invalid(e: impl std::fmt::Display) -> RecoveredFieldError {
+    RecoveredFieldError::InvalidArtifact(e.to_string())
+}
+
+fn face_identity(
+    corners: [StableDigest; 3],
+    owner: StableDigest,
+    neighbor: Option<StableDigest>,
+) -> Result<StableDigest, RecoveredFieldError> {
+    let bytes = encode_contract(
+        PREFIX,
+        "owner-oriented-face",
+        &(corners, owner, neighbor),
+        LIMITS,
+    )
+    .map_err(invalid)?;
+    Ok(StableDigest::from_bytes(*Digest::sha256(bytes).bytes()))
+}
+
+impl FiniteVolumeFieldTopology {
+    pub fn derive(
+        projection: &AnalysisProjection,
+        topology: &FiniteVolumeTopology,
+    ) -> Result<Self, RecoveredFieldError> {
+        topology.validate_for(projection).map_err(invalid)?;
+        let mut faces = Vec::with_capacity(topology.faces.len());
+        for face in &topology.faces {
+            let owner = topology.cells[face.owner].element_identity;
+            let neighbor = face.neighbor.map(|i| topology.cells[i].element_identity);
+            faces.push(NativeOrientedFace {
+                identity: face_identity(face.corner_identities, owner, neighbor)?,
+                corner_identities: face.corner_identities,
+                owner,
+                neighbor,
+            });
+        }
+        let value = Self {
+            mesh_digest: topology.mesh_digest,
+            projection_digest: topology.projection_digest,
+            geometry_digest: topology.geometry_digest,
+            node_identities: projection.nodes.iter().map(|n| n.stable_identity).collect(),
+            cell_identities: topology.cells.iter().map(|c| c.element_identity).collect(),
+            oriented_faces: faces,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    pub fn identity(&self) -> FieldTopologyIdentity {
+        FieldTopologyIdentity::FiniteVolumeMesh {
+            mesh_digest: self.mesh_digest,
+            geometry_digest: self.geometry_digest,
+        }
+    }
+    pub fn entity_counts(&self) -> RecoveredFieldEntityCounts {
+        RecoveredFieldEntityCounts {
+            nodes: self.node_identities.len(),
+            volume_elements: self.cell_identities.len(),
+            oriented_faces: self.oriented_faces.len(),
+            volume_integration_points: 0,
+            oriented_edges: 0,
+            beam_elements: 0,
+            shell_elements: 0,
+            connectors: 0,
+            constraint_groups: 0,
+        }
+    }
+    pub fn cell_identities(&self) -> &[StableDigest] {
+        &self.cell_identities
+    }
+    pub fn oriented_faces(&self) -> &[NativeOrientedFace] {
+        &self.oriented_faces
+    }
+
+    /// Internal wire integrity is not original-source admission.
+    pub fn validate(&self) -> Result<(), RecoveredFieldError> {
+        let unique = |ids: &[StableDigest]| {
+            !ids.is_empty()
+                && !ids.contains(&StableDigest::ZERO)
+                && ids.iter().collect::<BTreeSet<_>>().len() == ids.len()
+        };
+        if !self.identity().has_valid_identity()
+            || self.projection_digest == Digest::from_bytes([0; 32])
+            || self.projection_digest == Digest::sha256([])
+            || !unique(&self.node_identities)
+            || !unique(&self.cell_identities)
+            || self.oriented_faces.is_empty()
+        {
+            return Err(invalid("invalid native finite-volume layout"));
+        }
+        let nodes: BTreeSet<_> = self.node_identities.iter().copied().collect();
+        let cells: BTreeSet<_> = self.cell_identities.iter().copied().collect();
+        let mut seen = BTreeSet::new();
+        for face in &self.oriented_faces {
+            if !seen.insert(face.identity)
+                || !face.corner_identities.windows(2).all(|w| w[0] < w[1])
+                || face.corner_identities.iter().any(|n| !nodes.contains(n))
+                || !cells.contains(&face.owner)
+                || face
+                    .neighbor
+                    .is_some_and(|n| n == face.owner || !cells.contains(&n))
+                || face.identity
+                    != face_identity(face.corner_identities, face.owner, face.neighbor)?
+            {
+                return Err(invalid("invalid exact owner-oriented face inventory"));
+            }
+        }
+        self.entity_counts().validate()
+    }
+    pub fn validate_for(
+        &self,
+        projection: &AnalysisProjection,
+        topology: &FiniteVolumeTopology,
+    ) -> Result<(), RecoveredFieldError> {
+        self.validate()?;
+        if self != &Self::derive(projection, topology)? {
+            return Err(RecoveredFieldError::ArtifactTopologyMismatch);
+        }
+        Ok(())
+    }
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecoveredFieldError> {
+        self.validate()?;
+        encode_contract(PREFIX, "finite-volume-field-layout", self, LIMITS).map_err(invalid)
+    }
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, RecoveredFieldError> {
+        let value: Self = decode_contract(PREFIX, "finite-volume-field-layout", bytes, LIMITS)
+            .map_err(invalid)?;
+        value.validate()?;
+        Ok(value)
+    }
+}

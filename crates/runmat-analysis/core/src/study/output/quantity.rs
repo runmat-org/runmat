@@ -57,6 +57,8 @@ pub enum ObservationQuantity {
     FluidVelocity,
     Vorticity,
     MassFlowRate,
+    /// Signed owner-oriented volume transport, m³/s; not mass flow or velocity.
+    VolumeFlowRate,
     WallShearStress,
     ModalFrequency,
     ModalParticipation,
@@ -139,6 +141,7 @@ impl ObservationQuantity {
             Self::SoundPressureLevel => D::DIMENSIONLESS,
             Self::Vorticity | Self::ModalFrequency => D::FREQUENCY,
             Self::MassFlowRate => D::MASS.divide(D::TIME).expect("static dimension"),
+            Self::VolumeFlowRate => D::VOLUME.divide(D::TIME).expect("static dimension"),
         }
     }
 
@@ -193,6 +196,7 @@ impl ObservationQuantity {
             "fluid_velocity" => Self::FluidVelocity,
             "vorticity" => Self::Vorticity,
             "mass_flow_rate" => Self::MassFlowRate,
+            "volume_flow_rate" => Self::VolumeFlowRate,
             "wall_shear_stress" => Self::WallShearStress,
             "modal_frequency" => Self::ModalFrequency,
             "modal_participation" => Self::ModalParticipation,

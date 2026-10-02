@@ -70,6 +70,7 @@ fn structural_selection_binds_producer_through_recovery_request() {
         request.source,
         topology.discretization_digest(),
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: 1,
             volume_elements: 0,
             volume_integration_points: 0,

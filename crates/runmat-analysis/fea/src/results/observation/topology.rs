@@ -38,6 +38,9 @@ pub(crate) struct ObservationTopology {
     pub volume_elements: Vec<ObservationElement>,
     pub volume_integration_points: Vec<ObservationElement>,
     pub oriented_edges: Vec<ObservationElement>,
+    pub oriented_faces: Vec<ObservationElement>,
+    pub finite_volume: Option<crate::results::field::FiniteVolumeFieldTopology>,
+    pub face_boundary_sources: Vec<Option<usize>>,
     pub beam_elements: Vec<ObservationElement>,
     pub shell_elements: Vec<ObservationElement>,
     pub solid_projection: Option<AnalysisProjection>,
@@ -51,6 +54,9 @@ mod sampled;
 mod tests;
 
 impl ObservationTopology {
+    pub(super) fn set_finite_volume_digest(&mut self, digest: Digest) {
+        self.topology_digest = digest;
+    }
     pub fn from_projection(projection: &AnalysisProjection) -> Self {
         let node_selectors = projection
             .nodes
@@ -83,6 +89,9 @@ impl ObservationTopology {
                 .collect(),
             volume_integration_points,
             oriented_edges: Vec::new(),
+            oriented_faces: Vec::new(),
+            finite_volume: None,
+            face_boundary_sources: Vec::new(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             solid_projection: Some(projection.clone()),
@@ -94,6 +103,7 @@ impl ObservationTopology {
 
     pub(crate) fn entity_counts(&self) -> RecoveredFieldEntityCounts {
         RecoveredFieldEntityCounts {
+            oriented_faces: self.oriented_faces.len(),
             nodes: self.nodes.len(),
             volume_elements: self.volume_elements.len(),
             volume_integration_points: self.volume_integration_points.len(),
@@ -205,6 +215,9 @@ impl ObservationTopology {
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             oriented_edges: Vec::new(),
+            oriented_faces: Vec::new(),
+            finite_volume: None,
+            face_boundary_sources: Vec::new(),
             sampling: None,
             integration_points_by_parent: projection
                 .as_ref()
@@ -325,6 +338,12 @@ impl ObservationTopology {
             }
             RecoveredFieldEntityDomain::OrientedEdges => Err(ObservationError::Unsupported(
                 "oriented edges require sampled volume topology",
+            )),
+            RecoveredFieldEntityDomain::OrientedFaces if self.finite_volume.is_some() => {
+                Ok(&self.oriented_faces)
+            }
+            RecoveredFieldEntityDomain::OrientedFaces => Err(ObservationError::Unsupported(
+                "owner-oriented faces require canonical finite-volume topology",
             )),
         }
     }

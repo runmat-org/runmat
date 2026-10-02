@@ -31,7 +31,7 @@ pub struct FluidSteadyWorkload {
     pub geometry_policy: FiniteVolumeProjectionPolicy,
 }
 
-pub(super) struct PreparedFluidSource {
+pub(crate) struct PreparedFluidSource {
     pub source: AnalysisProjection,
     pub topology: FiniteVolumeTopology,
     pub material: CfdDomain,
@@ -42,12 +42,45 @@ pub(super) struct PreparedFluidSource {
 }
 
 impl FluidSteadyWorkload {
+    pub(crate) fn resident_ceiling(&self) -> AnalysisExecutionResult<u64> {
+        let [step] = self.model.sequence.steps.as_slice() else {
+            return Err(invalid(
+                "steady fluid requires exactly one resource-owning step",
+            ));
+        };
+        if step.step_id != self.step_id {
+            return Err(invalid("steady fluid resource step differs from producer"));
+        }
+        Ok(self
+            .policy
+            .maximum_resident_bytes
+            .min(step.accuracy.resources.maximum_resident_bytes))
+    }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         validate_model(&self.model).map_err(invalid)?;
         let [step] = self.model.sequence.steps.as_slice() else {
             return Err(invalid("steady fluid requires exactly one authored step"));
         };
         let p = self.policy;
+        crate::results::observation::validate_sampled_requests(step).map_err(invalid)?;
+        let definitions = super::fields::fluid_native_field_definition_inventory()?;
+        if step
+            .observations
+            .iter()
+            .filter_map(|request| request.spec())
+            .any(|spec| {
+                !definitions.iter().any(|definition| {
+                    definition.quantity() == spec.quantity
+                        && definition.location() == spec.source_location
+                        && definition.value_shape() == &spec.value_shape
+                }) || spec.frame != CoordinateFrame::Global
+                    || spec.sign_convention != runmat_analysis_core::SignConvention::Native
+            })
+        {
+            return Err(invalid(
+                "fluid observations require original native cell U/p or owner-oriented face q",
+            ));
+        }
         if self
             .model
             .excitation_cases
@@ -80,7 +113,6 @@ impl FluidSteadyWorkload {
                     || output.completeness != StateCompleteness::Complete
                     || output.persistence != StatePersistence::UntilDependentsComplete
             })
-            || !step.observations.is_empty()
             || !self.model.sequence.dependencies.is_empty()
             || !self.model.sequence.transitions.is_empty()
             || !self.model.sequence.branches.is_empty()
@@ -175,12 +207,13 @@ impl FluidSteadyWorkload {
         FluidSteadySolverResult::from_original(self, &source, original)
     }
 
-    pub(super) fn prepare(
+    pub(crate) fn prepare(
         &self,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<PreparedFluidSource> {
         // Count/profile only over borrowed inputs before validation/projection/compiler expansion.
         // These are requested-heap estimates, not allocator/RSS or scheduler accounting.
+        let ceiling = self.resident_ceiling()?;
         if mesh
             .topology
             .volume_elements
@@ -208,13 +241,9 @@ impl FluidSteadyWorkload {
             add_bytes(metadata, metadata)?,
         )?;
         let preliminary = add_bytes(base, numerical.resident_bytes_upper_bound)?;
-        require_bytes(preliminary, self.policy.maximum_resident_bytes)?;
-        let prepared = PreparedProperties::prepare(
-            &self.model,
-            Some(mesh),
-            self.policy.maximum_resident_bytes - preliminary,
-        )
-        .map_err(invalid)?;
+        require_bytes(preliminary, ceiling)?;
+        let prepared = PreparedProperties::prepare(&self.model, Some(mesh), ceiling - preliminary)
+            .map_err(invalid)?;
         // Material source authentication independently recompiles: both maps can coexist.
         let preparation_resident_bytes = add_bytes(
             base,
@@ -228,7 +257,7 @@ impl FluidSteadyWorkload {
                 preparation_resident_bytes,
                 numerical.resident_bytes_upper_bound,
             )?,
-            self.policy.maximum_resident_bytes,
+            ceiling,
         )?;
         self.validate()?;
         let source = AnalysisProjection::derive(mesh).map_err(invalid)?;
@@ -280,7 +309,7 @@ impl PreparedFluidSource {
                 self.preparation_resident_bytes,
                 problem.reservation().resident_bytes_upper_bound,
             )?,
-            workload.policy.maximum_resident_bytes,
+            workload.resident_ceiling()?,
         )?;
         Ok(problem)
     }

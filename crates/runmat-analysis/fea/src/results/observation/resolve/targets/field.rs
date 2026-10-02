@@ -20,7 +20,11 @@ pub(super) fn resolve_field_target(
                     topology,
                     maximum,
                 ),
-                FieldLocation::Element | FieldLocation::IntegrationPoint | FieldLocation::Edge => {
+                FieldLocation::Element
+                | FieldLocation::Cell
+                | FieldLocation::Face
+                | FieldLocation::IntegrationPoint
+                | FieldLocation::Edge => {
                     let elements = topology.elements(field_domain)?;
                     elements_target(
                         selected_indices(0..elements.len(), maximum)?,
@@ -65,11 +69,51 @@ pub(super) fn resolve_field_target(
                     )?;
                     nodes_target(indices, topology, maximum)
                 }
+                (EntityDimension::Face, ExpectedTopology::BoundaryFace, FieldLocation::Face) => {
+                    if field_domain != RecoveredFieldEntityDomain::OrientedFaces
+                        || topology.finite_volume.is_none()
+                    {
+                        return Err(target_error(
+                            spec,
+                            "face fields require exact all-face topology",
+                        ));
+                    }
+                    let projection = solid_projection(topology, spec)?;
+                    validate_exact_coverage(
+                        region,
+                        projection
+                            .boundary_faces
+                            .iter()
+                            .flat_map(|f| f.provenance.iter()),
+                    )?;
+                    let faces = matching_faces(region, projection)
+                        .collect::<std::collections::BTreeSet<_>>();
+                    enforce_cardinality(region.cardinality, faces.len(), spec)?;
+                    let indices = topology
+                        .face_boundary_sources
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, source)| source.filter(|s| faces.contains(s)).map(|_| i));
+                    elements_target(
+                        selected_indices(indices, maximum)?,
+                        field_domain,
+                        topology,
+                        maximum,
+                    )
+                }
                 (
                     EntityDimension::Volume,
-                    ExpectedTopology::MeshElement,
-                    FieldLocation::Element,
+                    ExpectedTopology::MeshElement | ExpectedTopology::Cell,
+                    FieldLocation::Element | FieldLocation::Cell,
                 ) => {
+                    if region.expected_topology == ExpectedTopology::Cell
+                        && topology.finite_volume.is_none()
+                    {
+                        return Err(target_error(
+                            spec,
+                            "Cell selection requires exact finite-volume topology",
+                        ));
+                    }
                     let indices = matching_elements(region, field_domain, topology)?;
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;
                     elements_target(

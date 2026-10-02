@@ -13,6 +13,7 @@ fn generic_entity_contract_has_no_old_domain_or_count_decoding() {
         );
     }
     let counts = RecoveredFieldEntityCounts {
+        oriented_faces: 0,
         nodes: 4,
         volume_elements: 1,
         volume_integration_points: 4,

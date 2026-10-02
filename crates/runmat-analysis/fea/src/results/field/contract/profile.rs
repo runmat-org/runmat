@@ -22,6 +22,7 @@ impl RecoveredFieldArtifactManifest {
             source: request.source,
             topology_digest: request.topology.discretization_digest(),
             entity_counts: RecoveredFieldEntityCounts {
+                oriented_faces: 0,
                 nodes: 0,
                 volume_elements: 0,
                 volume_integration_points: 0,

@@ -3,6 +3,11 @@
 mod accuracy;
 mod acoustic;
 mod electrical_static;
+mod fluid;
+pub use fluid::{
+    derive_fluid_steady_resource_projection, validate_fluid_steady_prepared_facts,
+    FluidSteadyResourceProjection,
+};
 mod magnetic_recovery;
 mod magnetic_static;
 mod maxwell_harmonic;

@@ -129,6 +129,10 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
 fn original_zero_flow_cold_fields_and_traction_evidence_roundtrip_without_resolve() {
     let (workload, mesh) = authored();
     let result = workload.execute(&mesh).unwrap();
+    assert_eq!(
+        workload.result_encoding_profile(&mesh).unwrap(),
+        runmat_canonical_codec::profile_serialized(&result, LIMITS).unwrap()
+    );
     assert!(result
         .original()
         .velocity_m_per_s
@@ -214,6 +218,26 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
         assert!((u[0] - 1.0).abs() < 1e-6 && u[1].abs() < 1e-6 && u[2].abs() < 1e-6);
     }
     let source = workload.prepare(&mesh).unwrap();
+    let request = result.native_field_request(&workload, &mesh).unwrap();
+    let native = result
+        .recover_native_fields(&workload, &mesh, &request)
+        .unwrap();
+    for (field, expected) in native.fields().iter().zip([
+        result
+            .original()
+            .velocity_m_per_s
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>(),
+        result.original().pressure_pa.clone(),
+        result.original().face_volume_flux_m3_per_s.clone(),
+    ]) {
+        assert_eq!(
+            field.storage().values,
+            AnalysisFieldValues::HostF64(expected)
+        );
+    }
     for (q, face) in result
         .original()
         .face_volume_flux_m3_per_s
@@ -234,6 +258,161 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     assert_eq!(
         reopened.recover_original(&workload, &mesh).unwrap(),
         result.original().residual
+    );
+}
+
+#[test]
+fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observations() {
+    use crate::results::{
+        field::{FiniteVolumeFieldTopology, RecoveredFieldCatalog, RecoveredFieldEntityDomain},
+        observation::{
+            evaluate_finite_volume_observations, resolve_finite_volume_observation_plan,
+            ObservationEntity, ObservationLimits,
+        },
+    };
+    let (mut workload, mesh) = authored();
+    for (id, quantity, location) in [
+        ("u", ObservationQuantity::FluidVelocity, FieldLocation::Cell),
+        ("p", ObservationQuantity::FluidPressure, FieldLocation::Cell),
+        (
+            "q",
+            ObservationQuantity::VolumeFlowRate,
+            FieldLocation::Face,
+        ),
+    ] {
+        workload.model.sequence.steps[0]
+            .observations
+            .push(ObservationRequest::Field(ObservationSpec {
+                observation_id: ObservationId(id.into()),
+                quantity,
+                value_shape: quantity.canonical_value_shape(),
+                target: ObservationTarget::WholeModel,
+                source_location: location,
+                output_location: location,
+                recovery: RecoveryPolicy::Native,
+                component: ObservationComponent::All,
+                frame: CoordinateFrame::Global,
+                sign_convention: SignConvention::Native,
+                complex_representation: ComplexRepresentation::Real,
+                sampling: SamplingPolicy::Final,
+                reduction: None,
+                storage: ObservationStoragePolicy {
+                    precision: SignalPrecision::Real64,
+                    compression: CompressionPolicy::Lossless,
+                    retention: RetentionPolicy::Canonical,
+                    partial_access: PartialAccessPolicy::ManifestAndChunks,
+                },
+                purpose: ObservationPurpose::Publication,
+                cost: ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+                    operation_count: 100_000,
+                    peak_resident_bytes: 1_000_000,
+                    stored_bytes: 1_000_000,
+                    transfer_bytes: 1_000_000,
+                    collective_count: 0,
+                }),
+            }));
+    }
+    let authored_observations = workload.model.sequence.steps[0].observations.clone();
+    let result = workload.execute(&mesh).unwrap();
+    assert_eq!(
+        workload.model.sequence.steps[0].observations,
+        authored_observations
+    );
+    let source = workload.prepare(&mesh).unwrap();
+    let layout = result.native_field_topology(&workload, &mesh).unwrap();
+    assert_eq!(layout.oriented_faces().len(), source.topology.faces.len());
+    assert!(layout.oriented_faces().iter().any(|f| f.neighbor.is_some()));
+    let bytes = layout.canonical_bytes().unwrap();
+    let cold = FiniteVolumeFieldTopology::from_canonical_bytes(&bytes).unwrap();
+    cold.validate_for(&source.source, &source.topology).unwrap();
+    let request = result.native_field_request(&workload, &mesh).unwrap();
+    let artifact = result
+        .recover_native_fields(&workload, &mesh, &request)
+        .unwrap();
+    assert_eq!(
+        artifact.fields()[0].storage().shape,
+        vec![source.topology.cells.len(), 3]
+    );
+    assert_eq!(
+        artifact.fields()[2].definition().entity_domain(),
+        RecoveredFieldEntityDomain::OrientedFaces
+    );
+    assert_eq!(
+        artifact.fields()[2].storage().shape,
+        vec![source.topology.faces.len()]
+    );
+    let catalog = RecoveredFieldCatalog::new_for_topology(
+        layout.identity().discretization_digest(),
+        layout.entity_counts(),
+        artifact.into_fields(),
+    )
+    .unwrap();
+    let definitions = fluid_native_field_definition_inventory().unwrap();
+    let plan = resolve_finite_volume_observation_plan(
+        &workload.model.sequence.steps[0],
+        &layout,
+        &source.source,
+        &source.topology,
+        &definitions,
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observed = evaluate_finite_volume_observations(
+        &plan,
+        &layout,
+        &source.source,
+        &source.topology,
+        &catalog,
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(observed[0].location, FieldLocation::Cell);
+    assert_eq!(observed[2].entities.len(), source.topology.faces.len());
+    assert!(observed[2]
+        .entities
+        .iter()
+        .all(|e| matches!(e, ObservationEntity::OrientedFace(_))));
+    let mut substituted = source.topology.clone();
+    substituted.faces[0].owner_area_vector_m2[0] += 0.25;
+    assert!(cold.validate_for(&source.source, &substituted).is_err());
+    let mut wrong = request.clone();
+    wrong.plan.requirements[2].cost.output_entity_count -= 1;
+    assert!(result
+        .recover_native_fields(&workload, &mesh, &wrong)
+        .is_err());
+}
+
+#[test]
+fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expansion() {
+    let (mut workload, mesh) = authored();
+    let projection =
+        crate::planning::resource::derive_fluid_steady_resource_projection(&workload, &mesh)
+            .unwrap();
+    let result = workload.execute(&mesh).unwrap();
+    assert_eq!(
+        workload.result_encoding_profile(&mesh).unwrap(),
+        runmat_canonical_codec::profile_serialized(&result, LIMITS).unwrap()
+    );
+    assert!(
+        projection.phase_resident_bytes_upper_bound.0
+            > projection.numerical.resident_bytes_upper_bound
+    );
+    let mut caller_limited = workload.clone();
+    caller_limited.policy.maximum_resident_bytes =
+        projection.phase_resident_bytes_upper_bound.0 - 1;
+    assert!(caller_limited.prepare(&mesh).is_ok());
+    assert!(
+        crate::planning::resource::derive_fluid_steady_resource_projection(&caller_limited, &mesh)
+            .is_err()
+    );
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1;
+    assert!(workload.prepare(&mesh).is_err());
+    assert!(
+        crate::planning::resource::derive_fluid_steady_resource_projection(&workload, &mesh)
+            .is_err()
     );
 }
 

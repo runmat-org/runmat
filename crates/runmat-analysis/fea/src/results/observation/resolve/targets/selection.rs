@@ -100,11 +100,68 @@ pub(super) fn matching_elements<'a>(
     } else {
         None
     };
-    let count = projection.map_or(elements.len(), |projection| projection.elements.len());
+    let source_indices =
+        if let (Some(layout), Some(projection)) = (&topology.finite_volume, projection) {
+            validate_exact_coverage(target, projection.elements.iter().map(|e| &e.region_id))?;
+            let by_identity = projection
+                .elements
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (e.stable_identity, i))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            let indices = layout
+                .cell_identities()
+                .iter()
+                .map(|identity| {
+                    by_identity
+                        .get(identity)
+                        .copied()
+                        .ok_or(ObservationError::Identity(
+                            "native cell identity absent from source projection",
+                        ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Some(std::sync::Arc::new(indices))
+        } else {
+            None
+        };
+    let count = elements.len();
     Ok((0..count).filter(move |&index| match projection {
-        Some(projection) => target.matches_persistent_entity(&projection.elements[index].region_id),
+        Some(projection) => {
+            let source_index = source_indices
+                .as_ref()
+                .map_or(index, |indices| indices[index]);
+            target.matches_persistent_entity(&projection.elements[source_index].region_id)
+        }
         None => elements[index].region_id == target.region_id,
     }))
+}
+
+/// Exact native selections may not silently degrade to a surviving subset.
+pub(super) fn validate_exact_coverage<'a>(
+    target: &runmat_analysis_core::RegionTarget,
+    original: impl Iterator<Item = &'a runmat_meshing_core::PersistentEntityId>,
+) -> Result<(), ObservationError> {
+    target
+        .validate_resolution()
+        .map_err(|e| ObservationError::Invalid(e.to_string()))?;
+    if target.resolved_entities().is_empty() {
+        return Err(ObservationError::Invalid(
+            "native observation requires exact resolved entities".into(),
+        ));
+    }
+    let mut covered = vec![false; target.resolved_entities().len()];
+    for entity in original {
+        if let Ok(i) = target.resolved_entities().binary_search(entity) {
+            covered[i] = true;
+        }
+    }
+    if covered.into_iter().any(|seen| !seen) {
+        return Err(ObservationError::Identity(
+            "native observation target contains an absent original entity",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn matching_faces<'a>(

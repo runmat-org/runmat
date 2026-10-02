@@ -1886,6 +1886,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         field_prepared.request.source,
         field_prepared.request.topology.discretization_digest(),
         runmat_analysis_fea::results::field::RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: projection.elements.len() * 4,

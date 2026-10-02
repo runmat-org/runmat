@@ -345,6 +345,7 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
     let catalog = RecoveredFieldCatalog::new_for_topology(
         plan.topology_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: mesh.topology.nodes.len(),
             volume_elements: mesh.topology.volume_elements.len(),
             volume_integration_points: mesh.topology.volume_elements.len() * 4,
@@ -468,6 +469,7 @@ fn connector_observation_binds_exact_identity_and_partition_source() {
     let catalog = RecoveredFieldCatalog::new_for_topology(
         plan.topology_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: mesh.topology.nodes.len(),
             volume_elements: mesh.topology.volume_elements.len(),
             volume_integration_points: mesh.topology.volume_elements.len() * 4,
@@ -2026,6 +2028,7 @@ fn observation_assembly_requires_the_exact_subset_scheduled_at_one_frequency() {
         FieldRecoverySource::SolverResult(source_result),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: projection.elements.len() * 4,
@@ -2406,6 +2409,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
     let fields = RecoveredFieldCatalog::new_for_topology(
         plan.topology_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: node_count,
             volume_elements: 0,
             volume_integration_points: 0,
@@ -2446,6 +2450,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         numerical_source,
         plan.topology_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: node_count,
             volume_elements: 0,
             volume_integration_points: 0,

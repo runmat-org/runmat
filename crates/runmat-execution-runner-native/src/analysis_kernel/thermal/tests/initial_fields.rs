@@ -92,6 +92,7 @@ fn native_thermal_worker_consumes_source_bound_cold_initial_field() {
             FieldRecoverySource::SolverResult(source),
             producer.topology_digest,
             RecoveredFieldEntityCounts {
+                oriented_faces: 0,
                 nodes: producer.ordered_node_ids.len(),
                 volume_elements: producer.ordered_element_ids.len(),
                 volume_integration_points: 0,

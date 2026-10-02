@@ -153,6 +153,7 @@ fn fixture_with_policy(
         numerical_source,
         plan.topology_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: 0,

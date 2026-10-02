@@ -128,6 +128,7 @@ fn structural_catalog_binds_recovery_request_and_selected_field_inventory() {
         source,
         topology.discretization_digest(),
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: 1,
             volume_elements: 0,
             volume_integration_points: 0,

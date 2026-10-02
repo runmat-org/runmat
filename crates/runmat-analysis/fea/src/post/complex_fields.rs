@@ -72,6 +72,7 @@ pub fn complex_structural_field_layout(
     cardinality: ComplexStructuralFieldCardinality,
 ) -> Result<ComplexStructuralFieldLayout, ComplexStructuralFieldRecoveryError> {
     let entity_counts = RecoveredFieldEntityCounts {
+        oriented_faces: 0,
         nodes: cardinality.nodes,
         volume_elements: cardinality.volume_elements,
         volume_integration_points: cardinality.volume_elements.saturating_mul(4),

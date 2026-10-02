@@ -37,6 +37,8 @@ pub(super) fn validate_supported_spec(
         spec.source_location,
         FieldLocation::Node
             | FieldLocation::Element
+            | FieldLocation::Cell
+            | FieldLocation::Face
             | FieldLocation::IntegrationPoint
             | FieldLocation::Connector
             | FieldLocation::Constraint

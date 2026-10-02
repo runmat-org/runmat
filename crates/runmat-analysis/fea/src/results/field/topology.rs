@@ -61,6 +61,7 @@ impl StructuralRecoveredFieldTopology {
             })
             .unwrap_or_default();
         let entity_counts = RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes,
             volume_elements: mesh
                 .map(|mesh| mesh.topology.volume_elements.len())

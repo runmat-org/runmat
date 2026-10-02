@@ -123,6 +123,16 @@ fn verify_for_topology(
     Ok(())
 }
 
+pub(crate) fn verify_finite_volume_observation_plan_for_topology(
+    step: &ProcedureStep,
+    topology: &ObservationTopology,
+    fields: &[RecoveredFieldDefinition],
+    plan: &ResolvedObservationPlan,
+) -> Result<(), ObservationError> {
+    verify_authored_observations(step, plan)?;
+    verify_for_topology(step, topology, None, None, fields, plan)
+}
+
 fn verification_limits(
     expected: &ResolvedObservation,
 ) -> Result<ObservationLimits, ObservationError> {

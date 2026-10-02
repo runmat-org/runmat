@@ -208,6 +208,7 @@ fn is_fluid(quantity: ObservationQuantity) -> bool {
             | ObservationQuantity::FluidVelocity
             | ObservationQuantity::Vorticity
             | ObservationQuantity::MassFlowRate
+            | ObservationQuantity::VolumeFlowRate
             | ObservationQuantity::WallShearStress
             | ObservationQuantity::HeatRate
     )

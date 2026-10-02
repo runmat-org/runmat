@@ -73,7 +73,7 @@ policies. `FluidSteadySolverResult` retains original U/p/q, traction/residual
 evidence, source/property/mesh/producer identities and rederived local reservations.
 Cold import authenticates the expected payload digest before decode, admits original
 source preparation and decoded heap, then checks the original equations without
-solving again or replacing any field. The six portable tests include zero flow and
+solving again or replacing any field. The eight portable tests include zero flow and
 independent nonzero rigid translation U=(1,0,0), p=0, q=S_x on every original face.
 The latter verifies velocity and face flux against the analytic solution before
 byte-exact cold roundtrip and solve-free original-equation recovery. It is not
@@ -88,7 +88,25 @@ component outlet admission uses shared labels and a single face pass; the focuse
 kernel suite is 13 tests, including these authority/resource regressions. Requested
 heap estimates are not measured RSS or scheduler-attempt usage reconciliation.
 
-Native task scheduling, shared state publication, observations/accuracy/usage,
+The shared native-field slice represents U/p at original cells and q at
+every owner-oriented face, including internal faces. It adds a distinct source-bound
+finite-volume topology identity, not an exterior-only or nodal surrogate. Native
+recovery copies the retained original fields unchanged, without a second solve.
+Authored steady compilation preserves observation intent and exact Cell material
+ownership; native final field/extrema requests are the bounded supported subset.
+The streaming wire profile and source-authenticated resource projection are
+requested-heap admission facts, not a shared scheduler plan or usage receipt.
+Observation selection binds canonical cell order and complete exact source targets;
+the source-authenticated verifier independently re-resolves original authored
+coverage. Topology copies and metadata identity encoding are admitted before
+allocation against explicit observation limits. Regression evidence covers wrong
+cell ordering, partial targets, omitted/swapped plans, reversed owner orientation,
+self-consistent reordered cold layouts and tiny caps. Focused fluid tests pass
+23/23 and shared field/observation/accuracy results tests pass 140/140. These are
+local field/observation and authored-intent evidence, not completed native lifecycle
+integration, measured RSS, process-separated restart or production qualification.
+
+Native task scheduling, shared state publication, governed observations/accuracy/usage,
 full authored runtime cutover, spatial/generated inputs, numerical restart,
 transient flow, distributed/GPU execution, conservative CHT/FSI and release
 qualification remain open. The old reduced production channel fallback has not

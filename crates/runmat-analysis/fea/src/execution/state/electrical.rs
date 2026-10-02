@@ -71,6 +71,7 @@ impl CanonicalElectricalStaticStatePayload {
             || self.fields.recovery_request != self.recovery_request.identity()
             || self.fields.entity_counts
                 != (crate::results::field::RecoveredFieldEntityCounts {
+                    oriented_faces: 0,
                     nodes: self.ordered_node_ids.len(),
                     volume_elements: self.ordered_element_ids.len(),
                     volume_integration_points: 0,

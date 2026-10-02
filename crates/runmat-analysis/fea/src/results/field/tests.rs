@@ -302,6 +302,7 @@ fn recovered_field_artifact_binds_source_topology_and_content() {
         crate::execution::FieldRecoverySource::SolverResult(source_result()),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: projection.elements.len() * 4,
@@ -344,6 +345,7 @@ fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_conte
         crate::execution::FieldRecoverySource::SolverResult(source_result()),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: projection.elements.len() * 4,
@@ -436,6 +438,7 @@ fn field_storage_partitions_are_canonical_complete_and_reconstruct_exactly() {
         crate::execution::FieldRecoverySource::SolverResult(source_result()),
         Digest::sha256("large-topology"),
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: entity_count,
             volume_elements: 1,
             volume_integration_points: 4,

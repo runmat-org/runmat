@@ -10,6 +10,7 @@ pub enum ObservationEntity {
     Element(StableDigest),
     IntegrationPoint(StableDigest),
     OrientedEdge(StableDigest),
+    OrientedFace(StableDigest),
     Connector(StableDigest),
     Point {
         identity: StableDigest,
@@ -28,6 +29,7 @@ pub(super) const fn observation_element_entity(
             ObservationEntity::IntegrationPoint(identity)
         }
         RecoveredFieldEntityDomain::OrientedEdges => ObservationEntity::OrientedEdge(identity),
+        RecoveredFieldEntityDomain::OrientedFaces => ObservationEntity::OrientedFace(identity),
         _ => ObservationEntity::Element(identity),
     }
 }

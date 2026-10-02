@@ -108,6 +108,10 @@ pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, F
         Q::Vorticity => (PhysicalDimension::FREQUENCY, 3),
         Q::ModalFrequency => (PhysicalDimension::FREQUENCY, 1),
         Q::MassFlowRate => (PhysicalDimension::MASS.divide(PhysicalDimension::TIME)?, 1),
+        Q::VolumeFlowRate => (
+            PhysicalDimension::VOLUME.divide(PhysicalDimension::TIME)?,
+            1,
+        ),
     };
     let scalar = FeaType::Quantity(dimension);
     Some((
@@ -126,6 +130,21 @@ pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, F
 #[cfg(test)]
 mod quantity_tests {
     use super::*;
+
+    #[test]
+    fn volume_flow_is_scalar_volume_per_time_not_mass_flow() {
+        let (_, volume) = field_reference_type("volume_flow_rate").unwrap();
+        let (_, mass) = field_reference_type("mass_flow_rate").unwrap();
+        assert_eq!(
+            volume,
+            FeaType::Quantity(
+                PhysicalDimension::VOLUME
+                    .divide(PhysicalDimension::TIME)
+                    .unwrap()
+            )
+        );
+        assert_ne!(volume, mass);
+    }
 
     #[test]
     fn electromagnetic_density_references_use_domain_dimensions_and_shapes() {

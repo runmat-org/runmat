@@ -122,6 +122,7 @@ fn portable_partition_event_requires_the_exact_completed_result() {
         FieldRecoverySource::SolverResult(source_result),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: projection.nodes.len(),
             volume_elements: projection.elements.len(),
             volume_integration_points: projection.elements.len() * 4,

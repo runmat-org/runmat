@@ -86,6 +86,9 @@ impl ObservationTopology {
                 .collect(),
             volume_integration_points,
             oriented_edges,
+            oriented_faces: Vec::new(),
+            finite_volume: None,
+            face_boundary_sources: Vec::new(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             node_selectors: projection

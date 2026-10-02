@@ -59,7 +59,7 @@ pub fn resolve_sampled_observation_plan(
     )
 }
 
-fn validate_plan(plan: &ResolvedObservationPlan) -> Result<(), ObservationError> {
+pub(super) fn validate_plan(plan: &ResolvedObservationPlan) -> Result<(), ObservationError> {
     plan.validate_identity()?;
     for observation in &plan.observations {
         validate_spec(&observation.spec)?;

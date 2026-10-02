@@ -42,7 +42,9 @@ mod field;
 mod field_plan;
 mod field_topology;
 mod fluid;
-pub use fluid::{FluidSteadySolverResult, FluidSteadyWorkload};
+pub use fluid::{
+    fluid_native_field_definition_inventory, FluidSteadySolverResult, FluidSteadyWorkload,
+};
 mod frequency_assembly;
 mod frequency_balance;
 mod frequency_entry;

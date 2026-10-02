@@ -1,6 +1,9 @@
 //! Portable original steady-fluid authority. Not a scheduler plan or publication gate.
 //! Cold validation evaluates original retained fields; it never invokes the solver.
+mod fields;
+mod profile;
 mod result;
+pub use fields::fluid_native_field_definition_inventory;
 #[cfg(test)]
 mod tests;
 mod workload;

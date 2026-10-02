@@ -134,6 +134,7 @@ impl SampledVolumeFieldTopology {
     }
     pub fn entity_counts(&self) -> RecoveredFieldEntityCounts {
         RecoveredFieldEntityCounts {
+            oriented_faces: 0,
             nodes: self.data.node_identities.len(),
             volume_elements: self.data.element_identities.len(),
             volume_integration_points: self.data.integration_samples.len(),
