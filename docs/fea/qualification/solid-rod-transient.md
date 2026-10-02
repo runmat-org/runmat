@@ -93,6 +93,10 @@ spatial results reveal first-order acceleration behavior, but do not yet establi
 whether all observed errors follow the expected initial-field regularity envelope.
 No qualified replacement initial-state envelope is claimed.
 No tolerances, mesh refinements or proof limits have been relaxed after failures.
+The separately documented [affine forced transient](structural-affine-transient.md)
+isolates temporal integration, reaction/momentum balance, and cold histories using
+a spatially exact manufactured field. Its passing checks do not close these
+free-decay spatial or initial-field qualification failures.
 The separate damped-modal Tet4 coercivity-proof blocker is neither retried nor
 bypassed by this direct transient case.
 

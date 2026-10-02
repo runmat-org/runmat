@@ -3,6 +3,9 @@
 //! u=x*q(t), b=rho*x*(q''+alpha*q'), t(1)=E*(q+beta*q').
 use super::*;
 
+mod cold;
+mod history;
+
 const OMEGA: f64 = std::f64::consts::TAU;
 
 fn waveform<Q>(amplitude: SignalValue<Q>, cosine: f64, sine: f64) -> SignalRepresentation<Q> {
@@ -122,7 +125,12 @@ fn reference(time: f64, damped: bool) -> ([f64; 3], [f64; 4]) {
 }
 
 fn errors(mesh: &SolverMeshArtifact, damped: bool, intervals: usize) -> [f64; 7] {
-    let result = crate::run_transient_with_options(
+    let result = run_forced(mesh, damped, intervals);
+    errors_from_result(mesh, damped, &result)
+}
+
+fn run_forced(mesh: &SolverMeshArtifact, damped: bool, intervals: usize) -> FeaTransientRunResult {
+    crate::run_transient_with_options(
         &forced_model(mesh, damped),
         ComputeBackend::Cpu,
         TransientSolveOptions {
@@ -135,7 +143,14 @@ fn errors(mesh: &SolverMeshArtifact, damped: bool, intervals: usize) -> [f64; 7]
             ..TransientSolveOptions::default()
         },
     )
-    .unwrap();
+    .unwrap()
+}
+
+fn errors_from_result(
+    mesh: &SolverMeshArtifact,
+    damped: bool,
+    result: &FeaTransientRunResult,
+) -> [f64; 7] {
     let mut sum = [0.0; 7];
     let energy_scale = 0.5 * YOUNGS * AMPLITUDE.powi(2);
     for (sample, &time) in result.time_points_s.iter().enumerate() {
