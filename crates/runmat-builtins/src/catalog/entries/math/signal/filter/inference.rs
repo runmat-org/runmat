@@ -38,20 +38,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
 
     let output = output_fact(request, &mut diagnostics);
-    let named = [output.clone(), final_state_fact(request, &output)];
-    let count = request.outputs.requested.known_count().unwrap_or(1);
-    let mut outputs = Vec::with_capacity(count);
-    for slot in 0..count {
-        outputs.push(match slot {
-            0 | 1 if diagnostics.is_empty() => named[slot].clone(),
-            0 | 1 => ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
-            _ => ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            })),
-        });
-    }
-    let mut contract = CallContract::fixed(outputs);
+    let mut contract =
+        CallContract::fixed(vec![output.clone(), final_state_fact(request, &output)]);
+    // The runtime may pad surplus language outputs, but they are not numerical
+    // results of the filter and do not have a proven class or shape here.
+    contract.maximum_outputs = None;
+    contract.variadic_output = Some(Box::new(ValueFact::unknown(
+        DynamicReason::UnsupportedRepresentation,
+    )));
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
     let mut result = infer_call(&contract, request);

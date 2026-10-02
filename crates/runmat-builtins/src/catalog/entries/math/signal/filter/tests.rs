@@ -81,14 +81,32 @@ fn known_invalid_inputs_do_not_receive_proven_output_facts() {
 }
 
 #[test]
-fn discarded_output_and_surplus_padding_follow_binding_contract() {
+fn discarded_output_and_surplus_padding_do_not_invent_numeric_facts() {
     let coeff = numeric(NumericClass::Double, NumericDomain::Real, ShapeFact::Scalar);
     let empty = infer(vec![coeff.clone(), coeff.clone(), coeff.clone()], 0);
     assert!(empty.outputs.is_empty());
     let surplus = infer(vec![coeff.clone(), coeff.clone(), coeff], 3);
     assert_eq!(surplus.outputs.len(), 3);
-    assert_eq!(
-        surplus.outputs[2].numeric().unwrap().class,
-        NumericClass::Double
+    assert_eq!(surplus.outputs[2].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn complex_double_singleton_is_a_scalar_but_single_is_a_tensor() {
+    let coeff = numeric(NumericClass::Double, NumericDomain::Real, ShapeFact::Scalar);
+    let complex_double = numeric(
+        NumericClass::Double,
+        NumericDomain::Complex,
+        ShapeFact::Scalar,
     );
+    let result = infer(vec![coeff.clone(), coeff.clone(), complex_double], 1);
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].storage, StorageFact::Scalar);
+    let complex_single = numeric(
+        NumericClass::Single,
+        NumericDomain::Complex,
+        ShapeFact::Scalar,
+    );
+    let result = infer(vec![coeff.clone(), coeff, complex_single], 1);
+    assert!(result.diagnostics.is_empty());
+    assert_ne!(result.outputs[0].storage, StorageFact::Scalar);
 }

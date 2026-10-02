@@ -43,19 +43,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
 
     let output = output_fact(request, &diagnostics);
-    let count = request.outputs.requested.known_count().unwrap_or(1);
-    let mut outputs = Vec::with_capacity(count);
-    for slot in 0..count {
-        outputs.push(if slot == 0 {
-            output.clone()
-        } else {
-            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            }))
-        });
-    }
-    let mut contract = CallContract::fixed(outputs);
+    let mut contract = CallContract::fixed(vec![output]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
     let mut result = infer_call(&contract, request);
@@ -94,7 +82,10 @@ fn output_fact(request: &CallRequest, diagnostics: &[InferenceDiagnostic]) -> Va
     } else {
         NumericDomain::Real
     };
-    let storage = if class == NumericClass::Double && signal.shape.element_count() == Some(1) {
+    let storage = if class == NumericClass::Double
+        && domain == NumericDomain::Real
+        && signal.shape.element_count() == Some(1)
+    {
         StorageFact::Scalar
     } else if signal.shape.element_count().is_some() {
         StorageFact::Dense
