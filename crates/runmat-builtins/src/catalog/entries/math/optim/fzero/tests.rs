@@ -26,6 +26,7 @@ fn bracket_and_scalar_precision_facts_follow_initial_input() {
     for output in &single.outputs[..3] {
         assert_eq!(output.numeric().unwrap().class, NumericClass::Single);
         assert_eq!(output.shape, ShapeFact::Scalar);
+        assert_eq!(output.storage, StorageFact::Dense);
     }
     assert!(matches!(single.outputs[3].kind, ValueKindFact::Struct(_)));
     let double = inference::infer(&request(NumericClass::Double, 1, 1), &FZERO_CATALOG_ENTRY);
@@ -77,6 +78,20 @@ fn callback_capabilities_and_known_text_geometry_are_preserved() {
     let inference = inference::infer(&known, &FZERO_CATALOG_ENTRY);
     assert!(inference.diagnostics.is_empty());
     assert!(inference
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
+
+    let mut unknown_initial = known.clone();
+    unknown_initial.arguments[1] = ValueFact::unknown(DynamicReason::RuntimeValue);
+    let ValueKindFact::Callable(callable) = &mut unknown_initial.arguments[0].kind else {
+        unreachable!("known callable fixture");
+    };
+    callable.parameters[0] = super::super::scalar_facts::host_scalar(NumericClass::Single);
+    let unknown = inference::infer(&unknown_initial, &FZERO_CATALOG_ENTRY);
+    assert!(unknown.diagnostics.is_empty());
+    assert!(matches!(unknown.outputs[0].kind, ValueKindFact::Unknown));
+    assert!(unknown
         .capabilities
         .0
         .contains(&CapabilityRequirement::Filesystem));
