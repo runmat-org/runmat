@@ -262,6 +262,17 @@ fn unavailable_ecdf_statement_form_does_not_download_resident_inputs() {
     .expect_err("known invalid host control must precede missing presentation");
     assert_eq!(invalid.identifier(), Some("RunMat:ecdf:InvalidArgument"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    let invalid_sample = block_on(ecdf_builtin(vec![
+        Value::from("not numeric"),
+        Value::from("Frequency"),
+        Value::GpuTensor(allocation.handle.clone()),
+    ]))
+    .expect_err("known invalid host sample must precede missing presentation");
+    assert_eq!(
+        invalid_sample.identifier(),
+        Some("RunMat:ecdf:InvalidArgument")
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     let error = block_on(ecdf_builtin(vec![Value::GpuTensor(
         allocation.handle.clone(),
     )]))

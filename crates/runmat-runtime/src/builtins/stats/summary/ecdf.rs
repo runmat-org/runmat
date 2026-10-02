@@ -285,7 +285,13 @@ fn preflight_ecdf_sample(value: &Value) -> BuiltinResult<()> {
             }
             handle.shape()
         }
-        _ => return Ok(()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => return Ok(()),
+        _ => {
+            return Err(invalid_argument(
+                ECDF_OWNER,
+                "ecdf: expected real numeric sample data",
+            ));
+        }
     };
     let rows = shape.first().copied().unwrap_or(1);
     let cols = shape.get(1).copied().unwrap_or(1);
