@@ -19,7 +19,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Create a quantile-quantile plot against a normal distribution or another sample.",
     description: "`qqplot(x)` plots sorted sample quantiles against standard-normal theoretical quantiles. `qqplot(x,y)` compares the quantiles of two samples. `qqplot(x,[],pvec)` and `qqplot(x,y,pvec)` evaluate quantiles at explicit percentage values in [0,100]. Matrix inputs create one series per column, omitting NaN and Inf observations.",
     keywords: &["qqplot", "quantile", "normal", "probability", "statistics", "plotting"],
-    related: &["cdfplot", "ecdf", "normplot"],
+    related: &["cdfplot", "ecdf"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Samples and returned handles",
