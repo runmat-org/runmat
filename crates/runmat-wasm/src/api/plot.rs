@@ -623,6 +623,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
         FigureError::InvalidPlotObjectHandle => "InvalidPlotObjectHandle",
+        FigureError::StalePlotSnapshot => "StalePlotSnapshot",
         FigureError::RenderFailure { source } => {
             let details = source.to_string();
             let _ = Reflect::set(
@@ -644,6 +645,30 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
         &JsValue::from_str(&message),
     );
     JsValue::from(payload)
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod error_tests {
+    use super::*;
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn stale_plot_snapshot_preserves_public_error() {
+        let error = figure_error_to_js(FigureError::StalePlotSnapshot);
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("code"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("StalePlotSnapshot")
+        );
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("message"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("plot changed while reading its GPU data")
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -126,7 +126,7 @@ mod tests {
     use futures::task::noop_waker;
     use std::future::Future;
     use std::rc::Rc;
-    use std::task::{Context, Poll};
+    use std::task::Context;
     use wasm_bindgen_test::wasm_bindgen_test;
 
     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
