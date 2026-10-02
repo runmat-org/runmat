@@ -548,7 +548,8 @@ fn scatterhist_documented_group_overlay_has_two_series_and_both_marginal_layers(
 
     let figure = clone_figure(current_figure_handle()).unwrap();
     assert_eq!(figure.axes_grid(), (2, 2));
-    assert_eq!(figure.plot_axes_indices(), &[1, 3, 0]);
+    // Two scatter series, then four overlay lines on each marginal axis.
+    assert_eq!(figure.plot_axes_indices(), &[1, 1, 3, 3, 3, 3, 0, 0, 0, 0]);
     let scatter = figure
         .plots()
         .filter_map(|plot| match plot {
