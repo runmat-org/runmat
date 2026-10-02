@@ -1,3 +1,4 @@
+use super::elementwise::IndexedFusionOperand;
 use super::*;
 use crate::backend::wgpu::params::{
     MovingWindowParamsF32, MovingWindowParamsF64, PackedF32, PackedU32,
@@ -477,12 +478,12 @@ impl WgpuProvider {
         ) {
             return Err(anyhow!("signal_envelope: invalid request").into());
         }
-        // Direct-indexing RMS/FIR kernels consume logical column-major order.
+        // All envelope kernels directly index logical column-major words,
+        // including analytic centering and the final complex bounds. A lazy
+        // transpose is an addressing view, not a reordered allocation.
         // Existing reshape materializes transpose through the bit-preserving
         // permutation owner, without mutating the borrowed source view.
-        let materialized = if runmat_accelerate_api::handle_is_transposed(request.input)
-            && !matches!(request.method, ProviderEnvelopeMethod::Analytic)
-        {
+        let materialized = if runmat_accelerate_api::handle_is_transposed(request.input) {
             Some(self.reshape_exec(request.input, request.input.shape())?)
         } else {
             None
@@ -666,12 +667,25 @@ impl WgpuProvider {
             self.precision,
         );
         let inputs = [request.input.clone(), analytic.clone()];
-        let mut outputs = match self.fused_elementwise_multi_with_telemetry_exec(
+        let operands = [
+            IndexedFusionOperand {
+                shape: request.input.shape(),
+                lanes: real_len,
+                storage: GpuTensorStorage::Real,
+            },
+            IndexedFusionOperand {
+                shape: &channel_shape,
+                lanes: complex_len,
+                storage: GpuTensorStorage::ComplexInterleaved,
+            },
+        ];
+        let mut outputs = match self.fused_indexed_multi_with_telemetry_exec(
             &bounds_shader,
             &inputs,
             request.output_shape,
             real_len,
             &[self.provider_precision_exec().into(); 2],
+            &operands,
         ) {
             Ok(outputs) => outputs,
             Err(err) => {
@@ -711,12 +725,25 @@ impl WgpuProvider {
             self.precision,
         );
         let inputs = [request.input.clone(), kernel.clone()];
-        let mut outputs = match self.fused_elementwise_multi_with_telemetry_exec(
+        let operands = [
+            IndexedFusionOperand {
+                shape: request.input.shape(),
+                lanes: real_len,
+                storage: GpuTensorStorage::Real,
+            },
+            IndexedFusionOperand {
+                shape: &kernel_shape,
+                lanes: filter_len,
+                storage: GpuTensorStorage::Real,
+            },
+        ];
+        let mut outputs = match self.fused_indexed_multi_with_telemetry_exec(
             &shader,
             &inputs,
             request.output_shape,
             real_len,
             &[self.provider_precision_exec().into(); 2],
+            &operands,
         ) {
             Ok(outputs) => outputs,
             Err(err) => {
@@ -747,12 +774,18 @@ impl WgpuProvider {
             window_len,
             self.precision,
         );
-        let mut outputs = self.fused_elementwise_multi_with_telemetry_exec(
+        let operands = [IndexedFusionOperand {
+            shape: request.input.shape(),
+            lanes: real_len,
+            storage: GpuTensorStorage::Real,
+        }];
+        let mut outputs = self.fused_indexed_multi_with_telemetry_exec(
             &shader,
             std::slice::from_ref(request.input),
             request.output_shape,
             real_len,
             &[self.provider_precision_exec().into(); 2],
+            &operands,
         )?;
         ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
         let lower = outputs.pop().expect("lower output");
@@ -3407,6 +3440,86 @@ mod tests {
         for value in upper {
             assert!((value - 1.25).abs() < 1.0e-10);
         }
+    }
+
+    #[test]
+    fn signal_envelope_indexed_operands_preserve_row_vector_output_shape() {
+        let values = [1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0];
+        for method in [
+            ProviderEnvelopeMethod::Analytic,
+            ProviderEnvelopeMethod::AnalyticFir { filter_len: 5 },
+            ProviderEnvelopeMethod::Rms { window_len: 3 },
+        ] {
+            let column = run_envelope(method, &values, &[8, 1]);
+            let row = run_envelope(method, &values, &[1, 8]);
+            if row.is_empty() || column.is_empty() {
+                continue;
+            }
+            assert_eq!(row.len(), column.len());
+            for (actual, expected) in row.iter().zip(column.iter()) {
+                assert!((actual - expected).abs() < 1.0e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn signal_envelope_direct_indexing_materializes_lazy_transpose() {
+        let Some(()) = with_wgpu_provider(|provider| {
+            let base = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0],
+                    shape: &[2, 4],
+                })
+                .expect("base upload");
+            let lazy = provider.transpose(&base).expect("lazy transpose");
+            let contiguous = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                    shape: &[4, 2],
+                })
+                .expect("contiguous upload");
+            for method in [
+                ProviderEnvelopeMethod::Analytic,
+                ProviderEnvelopeMethod::AnalyticFir { filter_len: 5 },
+                ProviderEnvelopeMethod::Rms { window_len: 3 },
+            ] {
+                let invoke = |input| {
+                    pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
+                        input,
+                        channel_len: 4,
+                        channel_count: 2,
+                        output_shape: &[4, 2],
+                        method,
+                    }))
+                    .expect("indexed envelope")
+                };
+                let observed = invoke(&lazy);
+                let expected = invoke(&contiguous);
+                for (actual, reference) in [
+                    (&observed.upper, &expected.upper),
+                    (&observed.lower, &expected.lower),
+                ] {
+                    let actual =
+                        pollster::block_on(provider.download(actual)).expect("download lazy");
+                    let reference = pollster::block_on(provider.download(reference))
+                        .expect("download contiguous");
+                    assert_eq!(actual.shape, reference.shape);
+                    for (actual, reference) in actual.data.iter().zip(reference.data.iter()) {
+                        assert!((actual - reference).abs() < 1.0e-5);
+                    }
+                }
+                observed.upper.release().unwrap();
+                observed.lower.release().unwrap();
+                expected.upper.release().unwrap();
+                expected.lower.release().unwrap();
+            }
+            assert!(lazy.allocation_lease().validate_live().is_ok());
+            drop(lazy);
+            base.release().unwrap();
+            contiguous.release().unwrap();
+        }) else {
+            return;
+        };
     }
 
     #[test]

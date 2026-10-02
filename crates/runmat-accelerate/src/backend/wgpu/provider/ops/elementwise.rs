@@ -33,6 +33,21 @@ pub(super) struct FusedElementwiseRepresentation {
     pub(super) logical_output: bool,
 }
 
+/// ABI for a shader that indexes its operands by domain coordinates rather
+/// than the fused broadcast coordinates. Each role supplies an exact allocation
+/// shape, physical lane count, and storage class; lazy views must first be
+/// materialized into the indexing order expected by the shader.
+pub(super) struct IndexedFusionOperand<'a> {
+    pub(super) shape: &'a [usize],
+    pub(super) lanes: usize,
+    pub(super) storage: GpuTensorStorage,
+}
+
+enum MultiFusionLayout<'a> {
+    Broadcast,
+    Indexed(&'a [IndexedFusionOperand<'a>]),
+}
+
 impl WgpuProvider {
     fn integer_comparison_exec(
         &self,
@@ -2148,6 +2163,44 @@ impl WgpuProvider {
         len: usize,
         output_classes: &[runmat_accelerate_api::ProviderElementType],
     ) -> Result<Vec<GpuTensorHandle>> {
+        self.fused_elementwise_multi_layout_exec(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            output_classes,
+            MultiFusionLayout::Broadcast,
+        )
+    }
+
+    pub(super) fn fused_indexed_multi_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        output_classes: &[runmat_accelerate_api::ProviderElementType],
+        operands: &[IndexedFusionOperand<'_>],
+    ) -> Result<Vec<GpuTensorHandle>> {
+        self.fused_elementwise_multi_layout_exec(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            output_classes,
+            MultiFusionLayout::Indexed(operands),
+        )
+    }
+
+    fn fused_elementwise_multi_layout_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        output_classes: &[runmat_accelerate_api::ProviderElementType],
+        layout: MultiFusionLayout<'_>,
+    ) -> Result<Vec<GpuTensorHandle>> {
         runmat_accelerate_api::validate_fused_output_classes(
             self.provider_precision_exec(),
             output_classes,
@@ -2187,13 +2240,52 @@ impl WgpuProvider {
             .iter()
             .map(|h| self.get_entry(h))
             .collect::<Result<Vec<_>>>()?;
-        let layouts = inputs
-            .iter()
-            .zip(&entries)
-            .map(|(handle, entry)| {
-                super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let layouts = match layout {
+            MultiFusionLayout::Broadcast => inputs
+                .iter()
+                .zip(&entries)
+                .map(|(handle, entry)| {
+                    super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
+                })
+                .collect::<Result<Vec<_>>>()?,
+            MultiFusionLayout::Indexed(operands) => {
+                ensure!(
+                    operands.len() == inputs.len(),
+                    "indexed fusion operand count mismatch"
+                );
+                ensure!(
+                    output_shape.len() <= crate::backend::wgpu::params::BCAST_MAX_RANK
+                        && output_shape
+                            .iter()
+                            .all(|&extent| u32::try_from(extent).is_ok()),
+                    "indexed fusion output dimensions exceed GPU index limits"
+                );
+                ensure!(
+                    output_shape
+                        .iter()
+                        .try_fold(1usize, |size, &extent| size.checked_mul(extent))
+                        == Some(len),
+                    "indexed fusion output shape mismatch"
+                );
+                for ((handle, entry), operand) in inputs.iter().zip(&entries).zip(operands) {
+                    ensure!(
+                        handle.shape() == entry.shape
+                            && entry.shape == operand.shape
+                            && entry.len == operand.lanes
+                            && entry.storage == operand.storage
+                            && runmat_accelerate_api::handle_storage(handle) == operand.storage,
+                        "indexed fusion operand representation mismatch"
+                    );
+                    ensure!(
+                        !runmat_accelerate_api::handle_is_transposed(handle),
+                        "indexed fusion requires contiguous input"
+                    );
+                }
+                // Indexed shaders consume only the common Params prefix. The
+                // broadcast table is intentionally unused for this ABI.
+                vec![(Vec::new(), Vec::new()); inputs.len()]
+            }
+        };
         let (output_buffers, bind_group_layout, pipeline) =
             self.with_emission(|emission, pending| -> Result<_> {
                 let output_buffers: Vec<_> = (0..num_outputs)
