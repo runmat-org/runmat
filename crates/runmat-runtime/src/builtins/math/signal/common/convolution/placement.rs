@@ -1,6 +1,10 @@
 //! Whole-call placement for the two live-handle convolution hooks. Public
 //! parsing and semantic admission remain with the identity owners.
 
+#[cfg(test)]
+#[path = "placement/tests.rs"]
+pub(crate) mod tests;
+
 use runmat_accelerate_api::observation::{
     ProviderObservationFailure, ProviderObservationStatus, ProviderObservationSupport,
     ProviderOperationReceipt, ProviderOperationRecorder,

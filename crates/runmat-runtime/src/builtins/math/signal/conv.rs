@@ -1,5 +1,9 @@
 //! MATLAB-compatible `conv` builtin with GPU-aware semantics for RunMat.
 
+#[cfg(test)]
+#[path = "conv/placement_tests.rs"]
+mod placement_tests;
+
 use num_complex::Complex;
 use runmat_accelerate_api::{ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation};
 use runmat_builtins::{
