@@ -26,8 +26,6 @@ use runmat_builtins::{
     FILTER_ERROR_PROVIDER_EXECUTION, FILTER_ERROR_PROVIDER_OUTPUT, FILTER_ERROR_PROVIDER_UPLOAD,
 };
 use runmat_macros::runtime_builtin;
-#[cfg(test)]
-use runmat_value::ComplexTensor;
 use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};

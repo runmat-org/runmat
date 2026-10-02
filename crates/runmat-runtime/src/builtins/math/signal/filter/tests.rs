@@ -1,10 +1,8 @@
 //! Filter descriptor and shared test helpers.
 use super::*;
-use crate::builtins::common::test_support;
 use futures::executor::block_on;
-use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::builtin_function_by_name;
-use runmat_value::{IntValue, IntegerStorage, Tensor};
+use runmat_value::{IntegerStorage, Tensor};
 
 fn error_message(error: RuntimeError) -> String {
     error.message().to_string()

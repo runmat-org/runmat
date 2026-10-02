@@ -1,4 +1,6 @@
 use super::*;
+use crate::builtins::common::test_support;
+use runmat_accelerate_api::AccelProvider;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
