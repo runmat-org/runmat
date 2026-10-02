@@ -23,7 +23,9 @@ fn adjusted_error(
     if !resasc.is_zero() && !error.is_zero() {
         let ratio = error.multiply_f64(200.0).divide(resasc);
         let scale = if ratio.abs_le(ScaledEstimate::from_f64(1.0)) {
-            ratio.to_f64().unwrap_or(0.0).powf(1.5)
+            // This branch proves a bounded ratio; underflow to zero is the
+            // limiting adjustment, while the independent roundoff floor stays.
+            ratio.trace_f64().powf(1.5)
         } else {
             1.0
         };
