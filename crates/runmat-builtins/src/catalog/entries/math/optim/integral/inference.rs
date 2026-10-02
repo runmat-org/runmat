@@ -43,11 +43,12 @@ fn scalar_bound(
 fn controls(
     request: &CallRequest,
     diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
-) -> Option<IntegralCallbackMode> {
+) -> (Option<IntegralCallbackMode>, Option<bool>) {
     let rest = request.arguments.len().saturating_sub(3);
     let mut known_abs_tol = Some(IntegralOptionName::DEFAULT_ABS_TOL);
     let mut known_rel_tol = Some(IntegralOptionName::DEFAULT_REL_TOL);
     let mut known_callback_mode = Some(IntegralCallbackMode::Vectorized);
+    let mut known_array_valued = Some(false);
     if rest == 1 {
         let option = &request.arguments[3];
         if !matches!(
@@ -61,7 +62,7 @@ fn controls(
                 3,
             ));
         }
-        return None;
+        return (None, None);
     }
     if !rest.is_multiple_of(2) {
         diagnostics.push(argument_error(
@@ -110,6 +111,7 @@ fn controls(
                     &mut known_abs_tol,
                     &mut known_rel_tol,
                     &mut known_callback_mode,
+                    &mut known_array_valued,
                 );
             } else {
                 diagnostics.push(argument_error(
@@ -123,6 +125,7 @@ fn controls(
             known_abs_tol = None;
             known_rel_tol = None;
             known_callback_mode = None;
+            known_array_valued = None;
         }
     }
     if known_abs_tol == Some(0.0) && known_rel_tol == Some(0.0) {
@@ -141,7 +144,7 @@ fn controls(
             3,
         ));
     }
-    known_callback_mode
+    (known_callback_mode, known_array_valued)
 }
 
 fn known_option(
@@ -153,6 +156,7 @@ fn known_option(
     known_abs_tol: &mut Option<f64>,
     known_rel_tol: &mut Option<f64>,
     known_callback_mode: &mut Option<IntegralCallbackMode>,
+    known_array_valued: &mut Option<bool>,
 ) {
     let numeric = literal.and_then(|literal| match literal {
         LiteralValue::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
@@ -192,9 +196,8 @@ fn known_option(
                 Some(LiteralValue::Bool(flag)) => Some(*flag),
                 _ => numeric.map(|number| number != 0.0),
             };
-            flag == Some(true)
-                || numeric.is_some_and(|number| number != 0.0 && number != 1.0)
-                || known_bad_kind
+            *known_array_valued = flag;
+            numeric.is_some_and(|number| number != 0.0 && number != 1.0) || known_bad_kind
         }
         IntegralOptionName::Vectorized => {
             let valid = numeric.is_none_or(|number| number == 0.0 || number == 1.0);
@@ -236,8 +239,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     scalar_facts::callback(request, &mut diagnostics);
     scalar_bound(request, 1, &mut diagnostics);
     scalar_bound(request, 2, &mut diagnostics);
-    let callback_mode = controls(request, &mut diagnostics);
-    let callback_argument = match callback_mode {
+    let (callback_mode, array_valued) = controls(request, &mut diagnostics);
+    let effective_mode = if array_valued == Some(true) {
+        Some(IntegralCallbackMode::Scalar)
+    } else if array_valued == Some(false) {
+        callback_mode
+    } else {
+        None
+    };
+    let callback_argument = match effective_mode {
         Some(IntegralCallbackMode::Vectorized) => ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,
@@ -261,23 +271,65 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     };
     let callback = scalar_facts::callback_invocation(request, callback_argument);
     if let Some(callback) = &callback {
-        match callback_mode {
-            Some(IntegralCallbackMode::Vectorized) => scalar_facts::real_row_batch_callback_result(
+        match (array_valued, effective_mode) {
+            (Some(true), _) => {
+                if let Some(result) = callback.outputs.first() {
+                    let real = matches!(
+                        result.kind,
+                        ValueKindFact::Numeric(NumericFact {
+                            domain: NumericDomain::Real,
+                            ..
+                        }) | ValueKindFact::Logical
+                            | ValueKindFact::Unknown
+                    );
+                    if !real || result.storage == StorageFact::Sparse {
+                        diagnostics.push(argument_error(
+                            "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
+                            "array-valued callback must return a real numeric array",
+                            0,
+                        ));
+                    }
+                }
+            }
+            (_, Some(IntegralCallbackMode::Vectorized)) => {
+                scalar_facts::real_row_batch_callback_result(
+                    callback,
+                    &mut diagnostics,
+                    "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
+                )
+            }
+            (_, Some(IntegralCallbackMode::Scalar)) => scalar_facts::real_scalar_callback_result(
                 callback,
                 &mut diagnostics,
                 "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
             ),
-            Some(IntegralCallbackMode::Scalar) => scalar_facts::real_scalar_callback_result(
-                callback,
-                &mut diagnostics,
-                "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
-            ),
-            None => {}
+            (_, None) => {}
         }
         diagnostics.extend(callback.diagnostics.iter().cloned());
     }
     let value = if diagnostics.is_empty() {
-        scalar_facts::host_scalar(NumericClass::Double)
+        if array_valued == Some(true) {
+            callback
+                .as_ref()
+                .and_then(|result| result.outputs.first())
+                .map_or_else(
+                    || ValueFact::unknown(DynamicReason::RuntimeValue),
+                    |result| {
+                        ValueFact::proven(
+                            ValueKindFact::Numeric(NumericFact {
+                                class: NumericClass::Double,
+                                domain: NumericDomain::Real,
+                            }),
+                            result.shape.clone(),
+                            StorageFact::Dense,
+                        )
+                    },
+                )
+        } else if array_valued == Some(false) {
+            scalar_facts::host_scalar(NumericClass::Double)
+        } else {
+            ValueFact::unknown(DynamicReason::RuntimeValue)
+        }
     } else {
         ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
     };

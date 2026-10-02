@@ -55,10 +55,10 @@ const PAIRS: [BuiltinParamDescriptor; 5] = [
 ];
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "q",
-    ty: BuiltinParamType::NumericScalar,
+    ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Numerical integral estimate.",
+    description: "Double scalar estimate, or a double array with the callback's shape when ArrayValued is true.",
 }];
 const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {

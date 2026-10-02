@@ -3,17 +3,23 @@
 
 use crate::{BuiltinResult, RuntimeError};
 
-use super::{simpson, ScaledEstimate};
+use super::algebra::{AdaptiveEstimate, QuadratureSample};
+use super::{ArrayEstimate, QuadratureArithmeticError, ScaledEstimate};
 
 pub(crate) trait QuadratureEvaluator {
+    type Sample: QuadratureSample;
+
     async fn checkpoint(&mut self) -> BuiltinResult<()>;
-    async fn evaluate(&mut self, x: f64) -> BuiltinResult<f64>;
-    async fn evaluate_many<const N: usize>(&mut self, points: [f64; N]) -> BuiltinResult<[f64; N]> {
-        let mut values = [0.0; N];
+    async fn evaluate(&mut self, x: f64) -> BuiltinResult<Self::Sample>;
+    async fn evaluate_many<const N: usize>(
+        &mut self,
+        points: [f64; N],
+    ) -> BuiltinResult<[Self::Sample; N]> {
+        let mut values: [Option<Self::Sample>; N] = std::array::from_fn(|_| None);
         for (index, point) in points.into_iter().enumerate() {
-            values[index] = self.evaluate(point).await?;
+            values[index] = Some(self.evaluate(point).await?);
         }
-        Ok(values)
+        Ok(values.map(|value| value.expect("every evaluated sample fills one slot")))
     }
     fn midpoint(&self, a: f64, b: f64) -> f64;
     fn tolerances(&self) -> (f64, f64);
@@ -22,7 +28,16 @@ pub(crate) trait QuadratureEvaluator {
     fn evaluation_limit_error(&self) -> RuntimeError;
     fn convergence_error(&self) -> RuntimeError;
     fn nonrepresentable_error(&self) -> RuntimeError;
-    fn refined(&mut self, _evals: usize, _a: f64, _b: f64, _estimate: f64, _error: f64) {}
+    fn arithmetic_error(&self, error: QuadratureArithmeticError) -> RuntimeError;
+    fn refined(
+        &mut self,
+        _evals: usize,
+        _a: f64,
+        _b: f64,
+        _estimate: &<Self::Sample as QuadratureSample>::Estimate,
+        _error: &<Self::Sample as QuadratureSample>::Estimate,
+    ) {
+    }
 }
 
 #[derive(Debug)]
@@ -31,31 +46,52 @@ pub(crate) struct AdaptiveSimpsonResult {
     pub(crate) evaluations: usize,
 }
 
-#[derive(Clone, Copy)]
-struct Interval {
+struct Interval<S: QuadratureSample> {
     a: f64,
     b: f64,
-    fa: f64,
-    fm: f64,
-    fb: f64,
-    whole: ScaledEstimate,
-    tol: ScaledEstimate,
+    fa: S,
+    fm: S,
+    fb: S,
+    whole: S::Estimate,
+    tol: S::Estimate,
     depth: usize,
 }
 
-pub(crate) async fn integrate<E: QuadratureEvaluator>(
+pub(crate) async fn integrate<E: QuadratureEvaluator<Sample = f64>>(
     evaluator: &mut E,
     a: f64,
     b: f64,
 ) -> BuiltinResult<AdaptiveSimpsonResult> {
+    let (q, evaluations) = integrate_domain(evaluator, a, b).await?;
+    let q = q
+        .to_f64()
+        .ok_or_else(|| evaluator.nonrepresentable_error())?;
+    Ok(AdaptiveSimpsonResult { q, evaluations })
+}
+
+pub(crate) async fn integrate_array<E: QuadratureEvaluator<Sample = Vec<f64>>>(
+    evaluator: &mut E,
+    a: f64,
+    b: f64,
+) -> BuiltinResult<ArrayEstimate> {
+    integrate_domain(evaluator, a, b).await.map(|(q, _)| q)
+}
+
+async fn integrate_domain<E: QuadratureEvaluator>(
+    evaluator: &mut E,
+    a: f64,
+    b: f64,
+) -> BuiltinResult<(<E::Sample as QuadratureSample>::Estimate, usize)> {
     evaluator.checkpoint().await?;
     let m = evaluator.midpoint(a, b);
     let [fa, fm, fb] = evaluator.evaluate_many([a, m, b]).await?;
-    let whole = simpson(a, b, fa, fm, fb);
+    let whole = E::Sample::simpson(a, b, &fa, &fm, &fb)
+        .map_err(|error| evaluator.arithmetic_error(error))?;
     let mut evaluations = 3_usize;
     let (absolute_tolerance, relative_tolerance) = evaluator.tolerances();
-    let tol = ScaledEstimate::from_f64(absolute_tolerance)
-        .max(whole.abs().multiply_f64(relative_tolerance));
+    let tol = whole
+        .tolerance(absolute_tolerance, relative_tolerance)
+        .map_err(|error| evaluator.arithmetic_error(error))?;
     let depth = evaluator.max_depth();
     let q = adapt(
         evaluator,
@@ -72,17 +108,14 @@ pub(crate) async fn integrate<E: QuadratureEvaluator>(
         &mut evaluations,
     )
     .await?;
-    let q = q
-        .to_f64()
-        .ok_or_else(|| evaluator.nonrepresentable_error())?;
-    Ok(AdaptiveSimpsonResult { q, evaluations })
+    Ok((q, evaluations))
 }
 
 async fn adapt<E: QuadratureEvaluator>(
     evaluator: &mut E,
-    state: Interval,
+    state: Interval<E::Sample>,
     evaluations: &mut usize,
-) -> BuiltinResult<ScaledEstimate> {
+) -> BuiltinResult<<E::Sample as QuadratureSample>::Estimate> {
     evaluator.checkpoint().await?;
     if (*evaluations)
         .checked_add(2)
@@ -97,24 +130,37 @@ async fn adapt<E: QuadratureEvaluator>(
     let [fd, fe] = evaluator.evaluate_many([d, e]).await?;
     *evaluations += 2;
 
-    let left = simpson(state.a, c, state.fa, fd, state.fm);
-    let right = simpson(c, state.b, state.fm, fe, state.fb);
-    let refined = left.add(right);
-    let error = refined.subtract(state.whole);
-    evaluator.refined(
-        *evaluations,
-        state.a,
-        state.b,
-        refined.trace_f64(),
-        error.trace_f64(),
-    );
-    if error.abs_le(state.tol.multiply_f64(15.0)) {
-        return Ok(refined.add(error.multiply_f64(1.0 / 15.0)));
+    let left = E::Sample::simpson(state.a, c, &state.fa, &fd, &state.fm)
+        .map_err(|error| evaluator.arithmetic_error(error))?;
+    let right = E::Sample::simpson(c, state.b, &state.fm, &fe, &state.fb)
+        .map_err(|error| evaluator.arithmetic_error(error))?;
+    let refined = left
+        .add(&right)
+        .map_err(|error| evaluator.arithmetic_error(error))?;
+    let error = refined
+        .subtract(&state.whole)
+        .map_err(|error| evaluator.arithmetic_error(error))?;
+    evaluator.refined(*evaluations, state.a, state.b, &refined, &error);
+    let accepted_error = state
+        .tol
+        .multiply_f64(15.0)
+        .map_err(|error| evaluator.arithmetic_error(error))?;
+    if error.abs_le(&accepted_error) {
+        let correction = error
+            .multiply_f64(1.0 / 15.0)
+            .map_err(|error| evaluator.arithmetic_error(error))?;
+        return refined
+            .add(&correction)
+            .map_err(|error| evaluator.arithmetic_error(error));
     }
     if state.depth == 0 {
         return Err(evaluator.convergence_error());
     }
 
+    let child_tolerance = state
+        .tol
+        .multiply_f64(0.5)
+        .map_err(|error| evaluator.arithmetic_error(error))?;
     let left_value = Box::pin(adapt(
         evaluator,
         Interval {
@@ -122,9 +168,9 @@ async fn adapt<E: QuadratureEvaluator>(
             b: c,
             fa: state.fa,
             fm: fd,
-            fb: state.fm,
+            fb: state.fm.clone(),
             whole: left,
-            tol: state.tol.multiply_f64(0.5),
+            tol: child_tolerance.clone(),
             depth: state.depth - 1,
         },
         evaluations,
@@ -139,13 +185,15 @@ async fn adapt<E: QuadratureEvaluator>(
             fm: fe,
             fb: state.fb,
             whole: right,
-            tol: state.tol.multiply_f64(0.5),
+            tol: child_tolerance,
             depth: state.depth - 1,
         },
         evaluations,
     ))
     .await?;
-    Ok(left_value.add(right_value))
+    left_value
+        .add(&right_value)
+        .map_err(|error| evaluator.arithmetic_error(error))
 }
 
 #[cfg(test)]
@@ -159,6 +207,8 @@ mod tests {
     }
 
     impl QuadratureEvaluator for Polynomial {
+        type Sample = f64;
+
         async fn checkpoint(&mut self) -> BuiltinResult<()> {
             Ok(())
         }
@@ -196,7 +246,18 @@ mod tests {
             crate::build_runtime_error("nonrepresentable estimate").build()
         }
 
-        fn refined(&mut self, _evals: usize, _a: f64, _b: f64, _estimate: f64, _error: f64) {
+        fn arithmetic_error(&self, error: QuadratureArithmeticError) -> RuntimeError {
+            crate::build_runtime_error(format!("estimate error: {error:?}")).build()
+        }
+
+        fn refined(
+            &mut self,
+            _evals: usize,
+            _a: f64,
+            _b: f64,
+            _estimate: &ScaledEstimate,
+            _error: &ScaledEstimate,
+        ) {
             self.trace_rows += 1;
         }
     }

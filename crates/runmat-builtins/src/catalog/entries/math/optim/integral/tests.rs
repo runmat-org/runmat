@@ -208,6 +208,62 @@ fn callback_shape_facts_follow_typed_vectorized_selector() {
 }
 
 #[test]
+fn array_valued_callback_proves_its_fixed_output_shape() {
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    let array = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)],
+        },
+        StorageFact::Dense,
+    );
+    let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: CapabilitySet::default(),
+        parameters: vec![real.clone()],
+        parameters_complete: true,
+        outputs: vec![array],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: vec![],
+        captures_complete: true,
+    }));
+    let call = request(
+        vec![
+            callback,
+            real.clone(),
+            real,
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("ArrayValued".into()),
+            LiteralValue::Bool(true),
+        ],
+        1,
+    );
+    let result = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
 fn option_identity_is_typed_at_the_public_boundary() {
     for (spelling, identity) in [
         ("AbsTol", IntegralOptionName::AbsTol),
@@ -229,11 +285,7 @@ fn known_invalid_controls_do_not_prove_success_and_last_override_is_respected() 
     let text = ValueFact::scalar(ValueKindFact::String);
     for (name, value, fact) in [
         ("MaxFunEvals", LiteralValue::Number(4.0), real.clone()),
-        (
-            "ArrayValued",
-            LiteralValue::Bool(true),
-            ValueFact::scalar(ValueKindFact::Logical),
-        ),
+        ("ArrayValued", LiteralValue::Number(2.0), real.clone()),
     ] {
         let call = request(
             vec![

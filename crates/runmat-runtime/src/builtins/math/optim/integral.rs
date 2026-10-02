@@ -21,10 +21,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
-    integrate, AdaptiveSimpsonResult, QuadratureCooperation, QuadratureEvaluator,
-    QuadratureIdentity,
+    integrate, AdaptiveSimpsonResult, QuadratureArithmeticError, QuadratureCooperation,
+    QuadratureEvaluator, QuadratureIdentity,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+mod array;
 
 const NAME: &str = "integral";
 const DEFAULT_MAX_FUN_EVALS: usize = 10_000;
@@ -61,6 +63,23 @@ fn integral_map_error(
         mapped.gpu_gather_retry = err.gpu_gather_retry;
         mapped.source = Some(Box::new(err));
         mapped
+    }
+}
+
+fn quadrature_arithmetic_error(error: QuadratureArithmeticError) -> RuntimeError {
+    match error {
+        QuadratureArithmeticError::Resource(source) => {
+            build_runtime_error("integral: could not reserve array-valued quadrature workspace")
+                .with_identifier("RunMat:Internal")
+                .with_builtin(NAME)
+                .with_source(source)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        }
+        QuadratureArithmeticError::InconsistentComponents => integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "array-valued callback changed its output size",
+        ),
     }
 }
 
@@ -150,14 +169,20 @@ async fn integral_in_runtime(
     let b = scalar_bound("upper bound", b)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
+    let sign = if b < a { -1.0 } else { 1.0 };
+    let lo = a.min(b);
+    let hi = a.max(b);
+    if options.array_valued {
+        let result =
+            array::integrate_array_valued(&function, lo, hi, sign, &options, &mut cooperation)
+                .await?;
+        cooperation.completed(0).await?;
+        return Ok(result);
+    }
     if a == b {
         cooperation.completed(0).await?;
         return Ok(Value::Num(0.0));
     }
-
-    let sign = if b < a { -1.0 } else { 1.0 };
-    let lo = a.min(b);
-    let hi = a.max(b);
     let result = {
         let mut evaluator = IntegralEvaluator {
             function: &function,
@@ -300,6 +325,7 @@ struct IntegralOptions {
     rel_tol: f64,
     max_fun_evals: usize,
     callback_mode: IntegralCallbackMode,
+    array_valued: bool,
 }
 
 impl IntegralOptions {
@@ -309,6 +335,7 @@ impl IntegralOptions {
             rel_tol: IntegralOptionName::DEFAULT_REL_TOL,
             max_fun_evals: DEFAULT_MAX_FUN_EVALS,
             callback_mode: IntegralCallbackMode::Vectorized,
+            array_valued: false,
         }
     }
 
@@ -392,12 +419,7 @@ impl IntegralOptions {
                 self.max_fun_evals = parsed;
             }
             IntegralOptionName::ArrayValued => {
-                if bool_option("ArrayValued", value)? {
-                    return Err(integral_error_with_detail(
-                        &INTEGRAL_ERROR_INVALID_ARGUMENT,
-                        "ArrayValued true is not supported yet",
-                    ));
-                }
+                self.array_valued = bool_option("ArrayValued", value)?;
             }
             IntegralOptionName::Vectorized => {
                 self.callback_mode =
@@ -611,6 +633,8 @@ struct IntegralEvaluator<'a> {
 }
 
 impl QuadratureEvaluator for IntegralEvaluator<'_> {
+    type Sample = f64;
+
     async fn checkpoint(&mut self) -> BuiltinResult<()> {
         self.cooperation.completed(0).await
     }
@@ -669,6 +693,10 @@ impl QuadratureEvaluator for IntegralEvaluator<'_> {
             &INTEGRAL_ERROR_INVALID_INPUT,
             "quadrature estimate is not representable as a finite double",
         )
+    }
+
+    fn arithmetic_error(&self, error: QuadratureArithmeticError) -> RuntimeError {
+        quadrature_arithmetic_error(error)
     }
 }
 
@@ -871,6 +899,40 @@ mod tests {
     async fn vector_helper(_x: Value) -> crate::BuiltinResult<Value> {
         Ok(Value::Tensor(
             Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+        ))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_array_polynomial",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn array_polynomial_helper(x: Value) -> crate::BuiltinResult<Value> {
+        let Value::Num(x) = x else {
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_INPUT,
+                "array callback did not receive scalar sample",
+            ));
+        };
+        Ok(Value::Tensor(
+            Tensor::new(vec![x, x * x, 2.0 * x], vec![1, 3]).expect("fixed shape"),
+        ))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_array_changing_shape",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn array_changing_shape_helper(x: Value) -> crate::BuiltinResult<Value> {
+        let Value::Num(x) = x else {
+            unreachable!("array callback receives scalar")
+        };
+        let values = if x == 0.0 { vec![1.0] } else { vec![1.0, 2.0] };
+        Ok(Value::Tensor(
+            Tensor::new(values.clone(), vec![1, values.len()]).expect("shape"),
         ))
     }
 
@@ -1081,6 +1143,53 @@ mod tests {
     fn rejects_vector_valued_integrand_for_initial_scope() {
         let err = run(Value::FunctionHandle("__integral_vector".into()), 0.0, 1.0).unwrap_err();
         assert!(err.message().contains("one real value"));
+    }
+
+    #[test]
+    fn array_valued_callback_preserves_shape_and_component_integrals() {
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_array_polynomial".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("ArrayValued"), Value::Bool(true)],
+        ))
+        .expect("array integral");
+        let Value::Tensor(result) = result else {
+            panic!("expected array output")
+        };
+        assert_eq!(result.shape, vec![1, 3]);
+        for (index, expected) in [0.5, 1.0 / 3.0, 1.0].into_iter().enumerate() {
+            assert!((tensor::tensor_value_f64(&result, index) - expected).abs() < 1.0e-7);
+        }
+    }
+
+    #[test]
+    fn array_valued_equal_bounds_retains_output_geometry() {
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_array_polynomial".into()),
+            Value::Num(2.0),
+            Value::Num(2.0),
+            vec![Value::from("ArrayValued"), Value::Bool(true)],
+        ))
+        .expect("zero-width array integral");
+        let Value::Tensor(result) = result else {
+            panic!("expected array output")
+        };
+        assert_eq!(result.shape, vec![1, 3]);
+        assert!((0..3).all(|index| tensor::tensor_value_f64(&result, index) == 0.0));
+    }
+
+    #[test]
+    fn array_valued_callback_rejects_shape_changes() {
+        let error = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_array_changing_shape".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("ArrayValued"), Value::Bool(true)],
+        ))
+        .expect_err("fixed callback shape");
+        assert_eq!(error.identifier(), INTEGRAL_ERROR_INVALID_INPUT.identifier);
+        assert!(error.message().contains("changed its output size"));
     }
 
     #[test]

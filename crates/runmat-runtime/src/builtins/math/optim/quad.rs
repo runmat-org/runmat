@@ -21,8 +21,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, value_to_scalar};
 use crate::builtins::math::optim::quadrature::{
-    integrate, midpoint, AdaptiveSimpsonResult, QuadratureCooperation, QuadratureEvaluator,
-    QuadratureIdentity,
+    integrate, midpoint, AdaptiveSimpsonResult, QuadratureArithmeticError, QuadratureCooperation,
+    QuadratureEvaluator, QuadratureIdentity, ScaledEstimate,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -59,6 +59,23 @@ fn quad_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) 
         mapped.gpu_gather_retry = err.gpu_gather_retry;
         mapped.source = Some(Box::new(err));
         mapped
+    }
+}
+
+fn quad_arithmetic_error(error: QuadratureArithmeticError) -> RuntimeError {
+    match error {
+        QuadratureArithmeticError::Resource(source) => {
+            build_runtime_error("quad: could not reserve quadrature workspace")
+                .with_identifier("RunMat:Internal")
+                .with_builtin(NAME)
+                .with_source(source)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        }
+        QuadratureArithmeticError::InconsistentComponents => quad_error_with_detail(
+            &QUAD_ERROR_INVALID_INPUT,
+            "callback changed its output size",
+        ),
     }
 }
 
@@ -562,6 +579,8 @@ impl<'a> QuadEvaluator<'a> {
 }
 
 impl QuadratureEvaluator for QuadEvaluator<'_> {
+    type Sample = f64;
+
     async fn checkpoint(&mut self) -> BuiltinResult<()> {
         self.cooperation.completed(0).await
     }
@@ -607,9 +626,20 @@ impl QuadratureEvaluator for QuadEvaluator<'_> {
         )
     }
 
-    fn refined(&mut self, evals: usize, a: f64, b: f64, estimate: f64, error: f64) {
+    fn arithmetic_error(&self, error: QuadratureArithmeticError) -> RuntimeError {
+        quad_arithmetic_error(error)
+    }
+
+    fn refined(
+        &mut self,
+        evals: usize,
+        a: f64,
+        b: f64,
+        estimate: &ScaledEstimate,
+        error: &ScaledEstimate,
+    ) {
         if let Some(trace) = self.trace.as_mut() {
-            trace.record(evals, a, b, estimate, error);
+            trace.record(evals, a, b, estimate.trace_f64(), error.trace_f64());
         }
     }
 }
