@@ -156,17 +156,15 @@ async fn assert_pending_drop_and_stale(
 }
 
 #[wasm_bindgen_test::wasm_bindgen_test(async)]
-async fn browser_scatter_and_line3_resident_property_lifecycle() {
+async fn browser_scatter_resident_property_lifecycle() {
     use runmat_plot::core::{BoundingBox, GpuVertexBuffer};
 
     let _guard = lock_plot_registry();
     ensure_plot_test_env();
     crate::builtins::plotting::reset_plot_state();
+    let scatter = host_scatter();
     let (x, access) = install_browser_source(&[1.25, -3.5]).await;
     let y = browser_buffer(&access, &[4.75, -2.0]);
-    let z = browser_buffer(&access, &[6.5, 0.5]);
-
-    let scatter = host_scatter();
     let (child, _, _) = plot_child_element_snapshot(scatter).expect("scatter snapshot");
     let PlotChildHandleState::Scatter(state) = child else {
         panic!("expected scatter child");
@@ -219,8 +217,19 @@ async fn browser_scatter_and_line3_resident_property_lifecycle() {
         panic!("resident scatter Y must be a tensor");
     };
     assert_eq!(y_data.materialize_f64(), vec![4.75, -2.0]);
+}
 
+#[wasm_bindgen_test::wasm_bindgen_test(async)]
+async fn browser_line3_resident_property_lifecycle() {
+    use runmat_plot::core::BoundingBox;
+
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    crate::builtins::plotting::reset_plot_state();
     let line3 = host_line3();
+    let (x, access) = install_browser_source(&[1.25, -3.5]).await;
+    let y = browser_buffer(&access, &[4.75, -2.0]);
+    let z = browser_buffer(&access, &[6.5, 0.5]);
     let (child, _, _) = plot_child_element_snapshot(line3).expect("Line3 snapshot");
     let PlotChildHandleState::Line3(state) = child else {
         panic!("expected Line3 child");
