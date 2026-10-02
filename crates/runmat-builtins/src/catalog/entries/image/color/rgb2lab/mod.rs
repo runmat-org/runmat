@@ -33,7 +33,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.is_empty()
         || request.arguments.len() > 5
-        || (request.arguments.len() - 1) % 2 != 0
+        || !(request.arguments.len() - 1).is_multiple_of(2)
     {
         diagnostics.push(crate::catalog::inference::argument_error(
             "RM-CATALOG-RGB2LAB-ARITY",
