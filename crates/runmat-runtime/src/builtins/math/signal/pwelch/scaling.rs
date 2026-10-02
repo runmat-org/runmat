@@ -44,15 +44,25 @@ pub(super) async fn normalized_window(
         }
     }
     work.finish(cooperation).await?;
-    let denominator = match scale {
-        SpectrumScale::Psd => fs.unwrap_or(2.0 * std::f64::consts::PI) * energy,
-        SpectrumScale::Power => sum * sum,
+    // Put the normalization before the FFT. A single post-FFT denominator
+    // would overflow for finite Fs*energy, or square an overflowing spectrum
+    // even when the final PSD is representable. The provider and host then
+    // evaluate the same pre-scaled frame with a unit denominator.
+    let divisor = match scale {
+        SpectrumScale::Psd => energy.sqrt() * fs.unwrap_or(2.0 * std::f64::consts::PI).sqrt(),
+        SpectrumScale::Power => sum.abs(),
     };
-    if !denominator.is_finite() || denominator <= 0.0 {
+    if !divisor.is_finite() || divisor <= 0.0 {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+    }
+    for chunk in values.chunks_mut(SIGNAL_WORK_CHUNK as usize) {
+        for value in chunk.iter_mut() {
+            *value /= divisor;
+        }
+        cooperation.completed(chunk.len() as u64).await?;
     }
     Ok(NormalizedWindow {
         values,
-        denominator,
+        denominator: 1.0,
     })
 }

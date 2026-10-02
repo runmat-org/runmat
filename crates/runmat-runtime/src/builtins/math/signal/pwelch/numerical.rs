@@ -193,11 +193,17 @@ pub(super) async fn column_explicit_frequency_periodogram(
         }
     }
     work.finish(cooperation).await?;
-    Ok(PwelchEvaluation {
-        pxx,
-        f: frequencies.to_vec(),
-        columns: 1,
-    })
+    let mut f = reserved_f64(frequencies.len())?;
+    f.extend_from_slice(frequencies);
+    Ok(PwelchEvaluation { pxx, f, columns: 1 })
+}
+
+fn reserved_f64(len: usize) -> BuiltinResult<Vec<f64>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
+    Ok(values)
 }
 
 pub(super) async fn select_range(
@@ -207,18 +213,10 @@ pub(super) async fn select_range(
     range: FrequencyRange,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PwelchEvaluation> {
-    let freq_scale = fs.unwrap_or(2.0 * std::f64::consts::PI);
     let mut work = CompletedWork::default();
     match range {
         FrequencyRange::Twosided => {
-            let mut f = Vec::with_capacity(nfft);
-            for idx in 0..nfft {
-                f.push(freq_scale * idx as f64 / nfft as f64);
-                if let Some(units) = work.record(1) {
-                    cooperation.completed(units).await?;
-                }
-            }
-            work.finish(cooperation).await?;
+            let f = frequency_vector(nfft, fs, range, cooperation).await?;
             Ok(PwelchEvaluation {
                 pxx: power,
                 f,
@@ -229,15 +227,7 @@ pub(super) async fn select_range(
             let shift = centered_shift(nfft);
             power.rotate_left(shift);
             cooperation.completed(nfft as u64).await?;
-            let offset = centered_frequency_offset(nfft);
-            let mut f = Vec::with_capacity(nfft);
-            for idx in 0..nfft {
-                f.push(freq_scale * (idx as f64 - offset as f64) / nfft as f64);
-                if let Some(units) = work.record(1) {
-                    cooperation.completed(units).await?;
-                }
-            }
-            work.finish(cooperation).await?;
+            let f = frequency_vector(nfft, fs, range, cooperation).await?;
             Ok(PwelchEvaluation {
                 pxx: power,
                 f,
@@ -247,7 +237,8 @@ pub(super) async fn select_range(
         FrequencyRange::Onesided => {
             let len = nfft / 2 + 1;
             let even = nfft.is_multiple_of(2);
-            let mut pxx = power[..len].to_vec();
+            let mut pxx = reserved_f64(len)?;
+            pxx.extend_from_slice(&power[..len]);
             for (idx, value) in pxx.iter_mut().enumerate() {
                 let is_dc = idx == 0;
                 let is_nyquist = even && idx == len - 1;
@@ -258,14 +249,8 @@ pub(super) async fn select_range(
                     cooperation.completed(units).await?;
                 }
             }
-            let mut f = Vec::with_capacity(len);
-            for idx in 0..len {
-                f.push(freq_scale * idx as f64 / nfft as f64);
-                if let Some(units) = work.record(1) {
-                    cooperation.completed(units).await?;
-                }
-            }
             work.finish(cooperation).await?;
+            let f = frequency_vector(nfft, fs, range, cooperation).await?;
             Ok(PwelchEvaluation { pxx, f, columns: 1 })
         }
     }
@@ -277,9 +262,26 @@ pub(super) async fn frequency_vector(
     range: FrequencyRange,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Vec<f64>> {
-    Ok(select_range(vec![0.0; nfft], nfft, fs, range, cooperation)
-        .await?
-        .f)
+    let len = match range {
+        FrequencyRange::Onesided => nfft / 2 + 1,
+        FrequencyRange::Twosided | FrequencyRange::Centered => nfft,
+    };
+    let mut f = reserved_f64(len)?;
+    let freq_scale = fs.unwrap_or(2.0 * std::f64::consts::PI);
+    let offset = if range == FrequencyRange::Centered {
+        centered_frequency_offset(nfft) as f64
+    } else {
+        0.0
+    };
+    let mut work = CompletedWork::default();
+    for idx in 0..len {
+        f.push(freq_scale * ((idx as f64 - offset) / nfft as f64));
+        if let Some(units) = work.record(1) {
+            cooperation.completed(units).await?;
+        }
+    }
+    work.finish(cooperation).await?;
+    Ok(f)
 }
 
 pub(super) fn gpu_range(range: FrequencyRange) -> ProviderSpectralRange {

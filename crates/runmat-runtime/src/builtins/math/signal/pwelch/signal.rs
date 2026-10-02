@@ -1,5 +1,21 @@
 use super::*;
 
+fn reserved_values(len: usize) -> BuiltinResult<Vec<Complex<f64>>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
+    Ok(values)
+}
+
+fn reserved_columns(len: usize) -> BuiltinResult<Vec<Vec<Complex<f64>>>> {
+    let mut columns = Vec::new();
+    columns
+        .try_reserve_exact(len)
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
+    Ok(columns)
+}
+
 /// Reject a definitely invalid signal before any resident control can be read.
 /// Numeric contents are intentionally not constrained here.
 pub(super) fn preflight_signal_carrier(value: &Value) -> BuiltinResult<bool> {
@@ -129,7 +145,7 @@ pub(super) async fn tensor_to_signal_columns(
     let mut work = CompletedWork::default();
     if rows == 1 || cols == 1 {
         let len = tensor_utils::tensor_element_len(&tensor);
-        let mut values = Vec::with_capacity(len);
+        let mut values = reserved_values(len)?;
         for index in 0..len {
             values.push(Complex::new(
                 tensor_utils::tensor_value_f64(&tensor, index),
@@ -148,9 +164,9 @@ pub(super) async fn tensor_to_signal_columns(
             output_precision,
         });
     }
-    let mut columns = Vec::with_capacity(cols);
+    let mut columns = reserved_columns(cols)?;
     for col in 0..cols {
-        let mut column = Vec::with_capacity(rows);
+        let mut column = reserved_values(rows)?;
         for row in 0..rows {
             column.push(Complex::new(
                 tensor_utils::tensor_value_f64(&tensor, row + col * rows),
@@ -189,7 +205,7 @@ pub(super) async fn complex_tensor_to_signal_columns(
     let mut work = CompletedWork::default();
     if rows == 1 || cols == 1 {
         let len = rows.max(cols);
-        let mut values = Vec::with_capacity(len);
+        let mut values = reserved_values(len)?;
         for index in 0..len {
             let (re, im) = tensor
                 .numeric_value_at(index)
@@ -208,9 +224,9 @@ pub(super) async fn complex_tensor_to_signal_columns(
             output_precision,
         });
     }
-    let mut columns = Vec::with_capacity(cols);
+    let mut columns = reserved_columns(cols)?;
     for col in 0..cols {
-        let mut column = Vec::with_capacity(rows);
+        let mut column = reserved_values(rows)?;
         for row in 0..rows {
             let (re, im) = tensor
                 .numeric_value_at(row + col * rows)

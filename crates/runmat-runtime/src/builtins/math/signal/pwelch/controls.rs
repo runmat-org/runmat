@@ -298,11 +298,11 @@ pub(super) async fn parse_options(
         if is_empty(value) {
             idx += 1;
             FrequencyGrid::Uniform {
-                nfft: DEFAULT_NFFT_MIN.max(window_len),
+                nfft: default_nfft(window_len)?,
             }
         } else if keywords.get(idx).and_then(Option::as_ref).is_some() {
             FrequencyGrid::Uniform {
-                nfft: DEFAULT_NFFT_MIN.max(window_len),
+                nfft: default_nfft(window_len)?,
             }
         } else {
             idx += 1;
@@ -313,7 +313,7 @@ pub(super) async fn parse_options(
         }
     } else {
         FrequencyGrid::Uniform {
-            nfft: DEFAULT_NFFT_MIN.max(window_len),
+            nfft: default_nfft(window_len)?,
         }
     };
     if let FrequencyGrid::Uniform { nfft } = &grid {
@@ -391,6 +391,14 @@ pub(super) async fn parse_options(
     })
 }
 
+fn default_nfft(window_len: usize) -> BuiltinResult<usize> {
+    window_len
+        .checked_next_power_of_two()
+        .map(|power_of_two| DEFAULT_NFFT_MIN.max(power_of_two))
+        .filter(|nfft| *nfft <= MAX_NFFT)
+        .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INVALID_NFFT))
+}
+
 pub(super) async fn parse_frequency_grid(
     value: &Value,
     window_len: usize,
@@ -421,7 +429,10 @@ pub(super) async fn parse_frequency_grid(
     if vector.data.is_empty() || vector.data.len() > MAX_NFFT {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
     }
-    let mut frequencies = Vec::with_capacity(vector.data.len());
+    let mut frequencies = Vec::new();
+    frequencies
+        .try_reserve_exact(vector.data.len())
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
     let mut work = CompletedWork::default();
     for value in vector.data {
         if let Some(units) = work.record(1) {
@@ -497,7 +508,9 @@ pub(super) async fn parse_window(
     if vector.data.is_empty() || vector.data.len() > MAX_NFFT {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }
-    let mut out = Vec::with_capacity(vector.data.len());
+    let mut out = Vec::new();
+    out.try_reserve_exact(vector.data.len())
+        .map_err(|cause| window_allocation_error(BUILTIN_NAME, &PWELCH_ERROR_INTERNAL, cause))?;
     let mut work = CompletedWork::default();
     for value in vector.data {
         if let Some(units) = work.record(1) {

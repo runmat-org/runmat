@@ -26,6 +26,11 @@ pub(super) async fn output_gpu(
     let scaling =
         normalized_window(&options.window, options.scale, options.fs, cooperation).await?;
     let window_len = scaling.values.len();
+    // ColumnSliding requires an in-bounds frame. The host reference route
+    // retains the admitted zero-padded short-signal behavior.
+    if rows < window_len {
+        return Ok(None);
+    }
     let step = window_len - options.noverlap;
     let starts = segment_starts(rows, window_len, step, cooperation).await?;
     let segment_count = starts.len();

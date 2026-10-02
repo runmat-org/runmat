@@ -588,6 +588,45 @@ fn finite_tiny_and_huge_windows_preserve_normalized_psd() {
         assert_eq!(frequency, vec![0.0]);
         assert!((pxx[0] - 1.0).abs() < 1e-12);
     }
+    let scaled = call(
+        Value::Num(1e200),
+        &[
+            Value::Num(1.0),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Value::Num(1e200),
+        ],
+        Some(2),
+    )
+    .unwrap();
+    let (scaled_psd, _) = output_pair(scaled);
+    assert!((scaled_psd[0] / 1e200 - 1.0).abs() < 1e-12);
+
+    let extreme_fs = call(
+        Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+        &[
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(0.0),
+            Value::Num(2.0),
+            Value::Num(f64::MAX),
+            Value::from("twosided"),
+        ],
+        Some(2),
+    )
+    .unwrap();
+    let (extreme_psd, _) = output_pair(extreme_fs);
+    let expected = 2.0 / f64::MAX;
+    assert!(extreme_psd[0] > 0.0);
+    assert!((extreme_psd[0] / expected - 1.0).abs() < 1e-12);
+    let extreme_frequency = futures::executor::block_on(frequency_vector(
+        4,
+        Some(f64::MAX),
+        FrequencyRange::Twosided,
+        &mut SignalCooperation::new(None, BUILTIN_NAME),
+    ))
+    .unwrap();
+    assert!(extreme_frequency.iter().all(|value| value.is_finite()));
+    assert_eq!(extreme_frequency[2], f64::MAX / 2.0);
 }
 
 #[test]
@@ -703,6 +742,24 @@ fn pwelch_wgpu_keeps_uniform_outputs_resident_and_matches_cpu() {
         assert!((actual - expected).abs() < 1e-5);
     }
     assert!(host_centered[4] > host_centered[3]);
+    let extreme_input = Tensor::new(vec![1e200], vec![1, 1]).unwrap();
+    let extreme_handle = gpu_helpers::upload_tensor(provider, &extreme_input).unwrap();
+    let extreme = call(
+        Value::GpuTensor(extreme_handle),
+        &[
+            Value::Num(1.0),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Value::Num(1e200),
+        ],
+        Some(1),
+    )
+    .unwrap();
+    let Value::OutputList(extreme) = extreme else {
+        panic!("one requested output must retain its output list");
+    };
+    let extreme = crate::builtins::common::test_support::gather(extreme[0].clone()).unwrap();
+    assert!((extreme.materialize_f64()[0] / 1e200 - 1.0).abs() < 1e-5);
     handle.release().ok();
 }
 
@@ -719,6 +776,14 @@ fn default_window_uses_eight_overlapped_sections() {
         block_on(default_window(1, &mut cooperation)).unwrap().len(),
         1
     );
+}
+
+#[test]
+fn default_fft_grid_rounds_window_length_to_next_power_of_two() {
+    let signal = Value::Tensor(Tensor::new(vec![1.0; 300], vec![1, 300]).unwrap());
+    let (_, frequencies) = output_pair(call(signal, &[Value::Num(300.0)], Some(2)).unwrap());
+    assert_eq!(frequencies.len(), 257);
+    assert!((frequencies[1] - 2.0 * std::f64::consts::PI / 512.0).abs() < 1e-12);
 }
 
 #[test]
