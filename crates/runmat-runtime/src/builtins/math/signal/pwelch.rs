@@ -157,6 +157,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest.iter().take(4) {
         ensure_pwelch_class_boundary(value, &PWELCH_INTEGER_CONTROL_EXTENSION)?;
     }
+    let mut prepared_controls = preflight_host_controls(rest).await?;
     // All borrowed operands must be admitted before exactness checks or parsers
     // can download any one of them.
     let resident_inputs = std::iter::once(&x)
@@ -177,7 +178,13 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         .map(|handle| runmat_accelerate_api::ResidencyRestoreGuard::new(handle))
         .collect::<Vec<_>>();
     ensure_pwelch_integer_boundary(&x, "signal", &PWELCH_ERROR_INVALID_SIGNAL).await?;
-    for (index, value) in rest.iter().take(4).enumerate() {
+    let materialized_controls = materialize_resident_controls(rest).await?;
+    let controls = rest
+        .iter()
+        .zip(&materialized_controls)
+        .map(|(original, materialized)| materialized.as_ref().unwrap_or(original))
+        .collect::<Vec<_>>();
+    for (index, value) in controls.iter().take(4).enumerate() {
         let (role, error) = match index {
             0 => ("window", &PWELCH_ERROR_INVALID_WINDOW),
             1 => ("overlap", &PWELCH_ERROR_INVALID_OVERLAP),
@@ -211,7 +218,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err.message()))?;
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-        let options = parse_options(rest, rows, complex_input).await?;
+        let options = parse_options(&controls, rows, complex_input, &mut prepared_controls).await?;
         if let Some(value) = output_gpu(handle, rows, cols, &options, &protected).await? {
             return Ok(value);
         }
@@ -227,7 +234,15 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     }
     let options = match parsed {
         Some(options) => options,
-        None => parse_options(rest, input.rows, input.is_complex).await?,
+        None => {
+            parse_options(
+                &controls,
+                input.rows,
+                input.is_complex,
+                &mut prepared_controls,
+            )
+            .await?
+        }
     };
     let eval = compute_pwelch(&input.columns, &options)?;
     let output = output_eval(eval, input.output_precision)?;

@@ -397,6 +397,47 @@ fn pwelch_automatic_integer_residency_restores_floating_outputs_to_exact_owner()
 }
 
 #[test]
+fn resident_scalar_controls_are_decoded_as_structural_values_once() {
+    test_support::with_test_provider(|provider| {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x = Tensor::new(vec![1.0; 16], vec![1, 16]).unwrap();
+        let window = Tensor::new_integer(IntegerStorage::U16(vec![8]), vec![1, 1]).unwrap();
+        let overlap = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+        let nfft = Tensor::new_integer(IntegerStorage::U16(vec![16]), vec![1, 1]).unwrap();
+        let fs = Tensor::new(vec![100.0], vec![1, 1]).unwrap();
+        let resident = [window, overlap, nfft, fs]
+            .iter()
+            .map(|tensor| gpu_helpers::upload_tensor(provider, tensor).expect("upload control"))
+            .map(Value::GpuTensor)
+            .collect::<Vec<_>>();
+        let output = call(Value::Tensor(x), &resident, Some(2)).expect("Welch controls");
+        let (pxx, f) = output_pair(output);
+        assert_eq!(pxx.len(), 9);
+        assert_eq!(f.len(), 9);
+        assert!((f[1] - 6.25).abs() < 1e-12);
+    });
+}
+
+#[test]
+fn known_invalid_host_control_precedes_resident_control_access() {
+    test_support::with_test_provider(|provider| {
+        let window = Tensor::new_integer(IntegerStorage::U16(vec![8]), vec![1, 1]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &window).expect("upload control");
+        let x = Tensor::new(vec![1.0; 16], vec![1, 16]).unwrap();
+        let error = call(
+            Value::Tensor(x),
+            &[Value::GpuTensor(handle), Value::Num(-1.0)],
+            Some(1),
+        )
+        .expect_err("invalid host overlap");
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some("RunMat:pwelch:InvalidOverlap")
+        );
+    });
+}
+
+#[test]
 fn pwelch_accepts_explicit_frequency_vector() {
     let x = Tensor::new(vec![1.0; 4], vec![1, 4]).unwrap();
     let window = Tensor::new(vec![1.0; 4], vec![1, 4]).unwrap();

@@ -10,6 +10,126 @@ enum WelchKeyword {
     Unknown(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlRole {
+    Window,
+    Overlap,
+    Grid,
+    SampleRate,
+    Option,
+}
+
+#[derive(Default)]
+pub(super) struct PreparedHostControls {
+    window: Option<Vec<f64>>,
+    overlap: Option<usize>,
+    grid: Option<FrequencyGrid>,
+    sample_rate: Option<f64>,
+}
+
+/// Validate every host-visible control before a resident operand is read.
+/// Parsed host payloads are retained, so the execution parser never repeats
+/// large window or frequency-vector work.
+pub(super) async fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<PreparedHostControls> {
+    let mut prepared = PreparedHostControls::default();
+    let mut next_positional = ControlRole::Window;
+    let mut options_started = false;
+    for (index, value) in rest.iter().enumerate() {
+        let decoded = keyword(value);
+        let role = if options_started || (decoded.is_some() && index > 0) {
+            options_started = true;
+            ControlRole::Option
+        } else {
+            let role = next_positional;
+            next_positional = match role {
+                ControlRole::Window => ControlRole::Overlap,
+                ControlRole::Overlap => ControlRole::Grid,
+                ControlRole::Grid => ControlRole::SampleRate,
+                ControlRole::SampleRate | ControlRole::Option => ControlRole::Option,
+            };
+            role
+        };
+        if role == ControlRole::Option {
+            if !matches!(
+                decoded,
+                Some(
+                    WelchKeyword::Onesided
+                        | WelchKeyword::Twosided
+                        | WelchKeyword::Centered
+                        | WelchKeyword::Psd
+                        | WelchKeyword::Power
+                )
+            ) {
+                return Err(pwelch_error(&PWELCH_ERROR_INVALID_RANGE));
+            }
+            continue;
+        }
+        if matches!(value, Value::GpuTensor(_)) || is_empty(value) {
+            continue;
+        }
+        match role {
+            ControlRole::Window => {
+                // A text value in the first position has its owning window error.
+                if let Some(option) = decoded {
+                    return Err(pwelch_error_with_detail(
+                        &PWELCH_ERROR_INVALID_WINDOW,
+                        format!(
+                            "unexpected option '{}' before window arguments",
+                            keyword_label(&option)
+                        ),
+                    ));
+                }
+                prepared.window = Some(parse_window(value.clone()).await?);
+            }
+            ControlRole::Overlap => {
+                prepared.overlap = Some(
+                    parse_nonnegative_integer(BUILTIN_NAME, "noverlap", value).map_err(
+                        |error| {
+                            pwelch_error_with_detail(&PWELCH_ERROR_INVALID_OVERLAP, error.message())
+                        },
+                    )?,
+                );
+            }
+            ControlRole::Grid => {
+                prepared.grid = Some(parse_frequency_grid(value.clone(), 0).await?);
+            }
+            ControlRole::SampleRate => {
+                let rate = parse_scalar_f64(BUILTIN_NAME, "fs", value).map_err(|error| {
+                    pwelch_error_with_detail(&PWELCH_ERROR_INVALID_FS, error.message())
+                })?;
+                if rate <= 0.0 {
+                    return Err(pwelch_error(&PWELCH_ERROR_INVALID_FS));
+                }
+                prepared.sample_rate = Some(rate);
+            }
+            ControlRole::Option => unreachable!("handled above"),
+        }
+    }
+    Ok(prepared)
+}
+
+pub(super) async fn materialize_resident_controls(
+    rest: &[Value],
+) -> BuiltinResult<Vec<Option<Value>>> {
+    let mut materialized = Vec::with_capacity(rest.len());
+    for value in rest {
+        if let Value::GpuTensor(handle) = value {
+            let provider = super::super::resident_output::owner(handle, || {
+                pwelch_error(&PWELCH_ERROR_INTERNAL)
+            })?;
+            let host =
+                crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+                    provider, handle,
+                )
+                .await?;
+            materialized.push(Some(host));
+        } else {
+            materialized.push(None);
+        }
+    }
+    Ok(materialized)
+}
+
 fn keyword(value: &Value) -> Option<WelchKeyword> {
     let text = match value {
         Value::String(text) => text,
@@ -47,11 +167,12 @@ fn keyword_label(keyword: &WelchKeyword) -> &str {
 }
 
 pub(super) async fn parse_options(
-    rest: &[Value],
+    rest: &[&Value],
     input_len: usize,
     complex_input: bool,
+    prepared: &mut PreparedHostControls,
 ) -> BuiltinResult<PwelchOptions> {
-    let keywords = rest.iter().map(keyword).collect::<Vec<_>>();
+    let keywords = rest.iter().map(|value| keyword(value)).collect::<Vec<_>>();
     let mut idx = 0usize;
     let window = if let Some(value) = rest.get(idx) {
         if is_empty(value) {
@@ -67,7 +188,10 @@ pub(super) async fn parse_options(
             ));
         } else {
             idx += 1;
-            parse_window(value.clone()).await?
+            match prepared.window.take() {
+                Some(window) => window,
+                None => parse_window((*value).clone()).await?,
+            }
         }
     } else {
         default_window(input_len)
@@ -82,10 +206,11 @@ pub(super) async fn parse_options(
             window_len / 2
         } else {
             idx += 1;
-            let parsed =
+            let parsed = prepared.overlap.take().map(Ok).unwrap_or_else(|| {
                 parse_nonnegative_integer(BUILTIN_NAME, "noverlap", value).map_err(|err| {
                     pwelch_error_with_detail(&PWELCH_ERROR_INVALID_OVERLAP, err.message())
-                })?;
+                })
+            })?;
             if parsed >= window_len {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_OVERLAP));
             }
@@ -107,7 +232,10 @@ pub(super) async fn parse_options(
             }
         } else {
             idx += 1;
-            parse_frequency_grid(value.clone(), window_len).await?
+            match prepared.grid.take() {
+                Some(grid) => grid,
+                None => parse_frequency_grid((*value).clone(), window_len).await?,
+            }
         }
     } else {
         FrequencyGrid::Uniform {
@@ -128,8 +256,11 @@ pub(super) async fn parse_options(
             None
         } else {
             idx += 1;
-            let parsed = parse_scalar_f64(BUILTIN_NAME, "fs", value)
-                .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_FS, err.message()))?;
+            let parsed = prepared.sample_rate.take().map(Ok).unwrap_or_else(|| {
+                parse_scalar_f64(BUILTIN_NAME, "fs", value).map_err(|err| {
+                    pwelch_error_with_detail(&PWELCH_ERROR_INVALID_FS, err.message())
+                })
+            })?;
             if parsed <= 0.0 {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_FS));
             }
