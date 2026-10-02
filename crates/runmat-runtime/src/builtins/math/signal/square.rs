@@ -15,10 +15,13 @@ use runmat_builtins::{
     SQUARE_ERROR_INVALID_INPUT, SQUARE_GPU_INPUT_EXTENSION, SQUARE_NONFLOATING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::signal::common::{
+    map_real_waveform, WaveformOutputMode, WindowCooperation,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "square";
@@ -85,9 +88,29 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
 #[runtime_builtin(
     name = "square",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::square"
 )]
+async fn square_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    t: Value,
+    varargin: Vec<Value>,
+) -> BuiltinResult<Value> {
+    square_in_runtime(runtime.as_ref(), t, varargin).await
+}
+
+#[cfg(test)]
 async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
+    square_in_runtime(None, t, varargin).await
+}
+
+async fn square_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    t: Value,
+    varargin: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
@@ -125,14 +148,14 @@ async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> 
     }
     let duty = parse_duty(&varargin).await?;
     match t {
-        Value::GpuTensor(handle) => square_gpu(handle, duty).await,
+        Value::GpuTensor(handle) => square_gpu(handle, duty, &mut cooperation).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(square_error(&SQUARE_ERROR_COMPLEX_UNSUPPORTED))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             Err(square_error(&SQUARE_ERROR_INVALID_INPUT))
         }
-        other => square_real(other, duty),
+        other => square_real(other, duty, &mut cooperation).await,
     }
 }
 
@@ -174,43 +197,43 @@ async fn parse_duty(varargin: &[Value]) -> BuiltinResult<f64> {
     }
 }
 
-async fn square_gpu(handle: GpuTensorHandle, duty: f64) -> BuiltinResult<Value> {
+async fn square_gpu(
+    handle: GpuTensorHandle,
+    duty: f64,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|source| {
             square_error_with_source(&SQUARE_ERROR_INTERNAL, "gpu gather failed", source)
         })?;
-    square_tensor(tensor, duty).map(tensor_into_value)
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        |value| square_scalar(value, duty),
+        cooperation,
+    )
+    .await
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SQUARE_ERROR_INTERNAL))
 }
 
-fn square_real(value: Value, duty: f64) -> BuiltinResult<Value> {
+async fn square_real(
+    value: Value,
+    duty: f64,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
         .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INVALID_INPUT, err))?;
-    square_tensor(tensor, duty).map(tensor_into_value)
-}
-
-fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
-    let storage = tensor
-        .into_numeric_storage()
-        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))?;
-    let storage = match storage {
-        NumericStorage::F32(values) => NumericStorage::F32(
-            values
-                .into_iter()
-                .map(|value| square_scalar(f64::from(value), duty) as f32)
-                .collect(),
-        ),
-        storage => NumericStorage::F64(
-            storage
-                .materialize_f64()
-                .into_iter()
-                .map(|value| square_scalar(value, duty))
-                .collect(),
-        ),
-    };
-    Tensor::from_numeric_storage(storage, shape)
-        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        |sample| square_scalar(sample, duty),
+        cooperation,
+    )
+    .await
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SQUARE_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
@@ -218,7 +241,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::{IntValue, LogicalArray};
+    use runmat_value::{IntValue, LogicalArray, NumericStorage, Tensor};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(square_builtin(t, Vec::new()))

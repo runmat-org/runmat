@@ -7,7 +7,7 @@ use runmat_builtins::{
     SINC_NONFLOATING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -16,6 +16,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::signal::common::{
+    map_real_waveform, WaveformOutputMode, WindowCooperation,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinc";
@@ -89,9 +92,27 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
 #[runtime_builtin(
     name = "sinc",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
+async fn sinc_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    sinc_in_runtime(runtime.as_ref(), value).await
+}
+
+#[cfg(test)]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
+    sinc_in_runtime(None, value).await
+}
+
+async fn sinc_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     if is_supported_nonfloating_input(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SINC_NONFLOATING_INPUT_EXTENSION,
@@ -100,16 +121,16 @@ async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
-        Value::GpuTensor(handle) => sinc_gpu(handle).await,
+        Value::GpuTensor(handle) => sinc_gpu(handle, &mut cooperation).await,
         Value::Complex(re, im) => {
             let (out_re, out_im) = sinc_complex_value(re, im);
             Ok(Value::Complex(out_re, out_im))
         }
-        Value::ComplexTensor(tensor) => sinc_complex_tensor(tensor),
+        Value::ComplexTensor(tensor) => sinc_complex_tensor(tensor, &mut cooperation).await,
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
             Err(sinc_error(&SINC_ERROR_INVALID_INPUT))
         }
-        other => sinc_real(other),
+        other => sinc_real(other, &mut cooperation).await,
     }
 }
 
@@ -128,13 +149,16 @@ fn is_supported_nonfloating_input(value: &Value) -> bool {
     }
 }
 
-async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn sinc_gpu(
+    handle: GpuTensorHandle,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Value> {
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_precision(&handle)
             .is_some_and(|precision| precision != provider.precision())
             || runmat_accelerate_api::handle_integer_type(&handle).is_some()
         {
-            return sinc_gpu_host_fallback(provider, &handle).await;
+            return sinc_gpu_host_fallback(provider, &handle, cooperation).await;
         }
         match provider.unary_sinc(&handle).await {
             Ok(mut out) => {
@@ -157,18 +181,21 @@ async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 return gpu_helpers::resident_gpu_value(out);
             }
             Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => {
-                return sinc_gpu_host_fallback(provider, &handle).await;
+                return sinc_gpu_host_fallback(provider, &handle, cooperation).await;
             }
             Err(err) => return Err(provider_error(err)),
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
+    Ok(tensor::tensor_into_value(
+        sinc_tensor(tensor, cooperation).await?,
+    ))
 }
 
 async fn sinc_gpu_host_fallback(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
+    cooperation: &mut WindowCooperation,
 ) -> BuiltinResult<Value> {
     let host = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
@@ -187,8 +214,11 @@ async fn sinc_gpu_host_fallback(
     let precision =
         runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
     if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-        for value in &mut data {
-            *value = (*value as f32) as f64;
+        for chunk in data.chunks_mut(4096) {
+            for value in chunk.iter_mut() {
+                *value = (*value as f32) as f64;
+            }
+            cooperation.completed(chunk.len() as u64).await?;
         }
     }
 
@@ -197,14 +227,24 @@ async fn sinc_gpu_host_fallback(
         if !chunks.remainder().is_empty() {
             return Err(sinc_error(&SINC_ERROR_MALFORMED_COMPLEX_BUFFER));
         }
-        let complex = chunks.map(|chunk| (chunk[0], chunk[1])).collect::<Vec<_>>();
+        let mut complex = Vec::new();
+        complex.try_reserve_exact(data.len() / 2).map_err(|cause| {
+            crate::builtins::math::signal::common::WaveformMapError::Allocation(cause)
+                .into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL)
+        })?;
+        for chunk in data.chunks(4096) {
+            for pair in chunk.chunks_exact(2) {
+                complex.push((pair[0], pair[1]));
+            }
+            cooperation.completed(chunk.len() as u64).await?;
+        }
         let dtype = match precision {
             runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
             runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
         };
         let tensor = ComplexTensor::from_f64_values_with_dtype(complex, shape, dtype)
             .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
-        let host = sinc_complex_tensor(tensor)?;
+        let host = sinc_complex_tensor(tensor, cooperation).await?;
         return gpu_helpers::restore_class_preserving_value(handle, host, BUILTIN_NAME);
     }
 
@@ -214,63 +254,80 @@ async fn sinc_gpu_host_fallback(
     };
     let tensor = Tensor::new_with_dtype(data, shape, dtype)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
-    let host = tensor::tensor_into_value(sinc_tensor(tensor)?);
+    let host = tensor::tensor_into_value(sinc_tensor(tensor, cooperation).await?);
     gpu_helpers::restore_class_preserving_value(handle, host, BUILTIN_NAME)
 }
 
-fn sinc_real(value: Value) -> BuiltinResult<Value> {
+async fn sinc_real(value: Value, cooperation: &mut WindowCooperation) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, &e))?;
-    Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
+    Ok(tensor::tensor_into_value(
+        sinc_tensor(tensor, cooperation).await?,
+    ))
 }
 
-fn sinc_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
-    let storage = tensor
-        .into_numeric_storage()
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
-    let storage = match storage {
-        NumericStorage::F32(values) => NumericStorage::F32(
-            values
-                .into_iter()
-                .map(|value| sinc_real_value(f64::from(value)) as f32)
-                .collect(),
-        ),
-        storage => NumericStorage::F64(
-            storage
-                .materialize_f64()
-                .into_iter()
-                .map(sinc_real_value)
-                .collect(),
-        ),
-    };
-    Tensor::from_numeric_storage(storage, shape)
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))
+async fn sinc_tensor(tensor: Tensor, cooperation: &mut WindowCooperation) -> BuiltinResult<Tensor> {
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        sinc_real_value,
+        cooperation,
+    )
+    .await
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL))
 }
 
-fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
+async fn sinc_complex_tensor(
+    tensor: ComplexTensor,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Value> {
+    cooperation.completed(0).await?;
     let shape = tensor.shape.clone();
     let storage = match tensor.into_complex_storage() {
         ComplexStorage::F64(values) => ComplexStorage::F64(
-            values
-                .into_iter()
-                .map(|(re, im)| sinc_complex_value(re, im))
-                .collect(),
+            map_complex_values(
+                values,
+                std::convert::identity,
+                std::convert::identity,
+                cooperation,
+            )
+            .await?,
         ),
         ComplexStorage::F32(values) => ComplexStorage::F32(
-            values
-                .into_iter()
-                .map(|(re, im)| {
-                    let (re, im) = sinc_complex_value(f64::from(re), f64::from(im));
-                    (re as f32, im as f32)
-                })
-                .collect(),
+            map_complex_values(
+                values,
+                |(re, im)| (f64::from(re), f64::from(im)),
+                |(re, im)| (re as f32, im as f32),
+                cooperation,
+            )
+            .await?,
         ),
         ComplexStorage::Integer(_) => return Err(sinc_error(&SINC_ERROR_INVALID_INPUT)),
     };
     let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+async fn map_complex_values<Input: Copy, Output>(
+    values: Vec<Input>,
+    into_double: impl Fn(Input) -> (f64, f64),
+    from_double: impl Fn((f64, f64)) -> Output,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Vec<Output>> {
+    let mut result = Vec::new();
+    result.try_reserve_exact(values.len()).map_err(|cause| {
+        crate::builtins::math::signal::common::WaveformMapError::Allocation(cause)
+            .into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL)
+    })?;
+    for chunk in values.chunks(4096) {
+        for &value in chunk {
+            let (re, im) = into_double(value);
+            result.push(from_double(sinc_complex_value(re, im)));
+        }
+        cooperation.completed(chunk.len() as u64).await?;
+    }
+    Ok(result)
 }
 
 #[inline]
@@ -310,7 +367,7 @@ mod tests {
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorView,
     };
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::{CharArray, IntValue};
+    use runmat_value::{CharArray, IntValue, NumericStorage};
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(sinc_builtin(value))
@@ -780,7 +837,9 @@ mod tests {
             return;
         }
         let tensor = Tensor::new(vec![0.0, 0.5, 1.0, 1.25, 2.0], vec![1, 5]).unwrap();
-        let cpu = sinc_real(Value::Tensor(tensor.clone())).expect("cpu sinc");
+        let mut cooperation = WindowCooperation::new(None, BUILTIN_NAME);
+        let cpu =
+            block_on(sinc_real(Value::Tensor(tensor.clone()), &mut cooperation)).expect("cpu sinc");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
@@ -789,7 +848,7 @@ mod tests {
             .expect("wgpu provider")
             .upload(&view)
             .expect("upload");
-        let gpu = block_on(sinc_gpu(handle)).expect("gpu sinc");
+        let gpu = block_on(sinc_gpu(handle, &mut cooperation)).expect("gpu sinc");
         let gathered = test_support::gather(gpu).expect("gather");
         let expected = test_support::gather(cpu).expect("gather cpu");
         assert_eq!(gathered.shape, expected.shape);
@@ -822,7 +881,8 @@ mod tests {
         let complex =
             ComplexTensor::new(vec![(0.0, 0.0), (0.5, 0.25), (1.0, -0.5)], vec![3, 1]).unwrap();
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
-        let gpu = block_on(sinc_gpu(handle)).expect("gpu sinc");
+        let mut cooperation = WindowCooperation::new(None, BUILTIN_NAME);
+        let gpu = block_on(sinc_gpu(handle, &mut cooperation)).expect("gpu sinc");
         let Value::GpuTensor(out_handle) = gpu else {
             panic!("expected resident gpu output");
         };

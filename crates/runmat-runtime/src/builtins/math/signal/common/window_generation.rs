@@ -29,7 +29,7 @@ impl WindowCooperation {
     }
 
     #[cfg(test)]
-    fn with_budget(budget: CpuCooperationBudget, builtin: &'static str) -> Self {
+    pub(crate) fn with_budget(budget: CpuCooperationBudget, builtin: &'static str) -> Self {
         Self {
             budget: Some(budget),
             namespace: Some("RunMat".into()),

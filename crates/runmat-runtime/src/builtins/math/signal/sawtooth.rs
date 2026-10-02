@@ -16,10 +16,13 @@ use runmat_builtins::{
     SAWTOOTH_ERROR_XMAX_RANGE, SAWTOOTH_GPU_INPUT_EXTENSION, SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericDType, Tensor, Value};
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::signal::common::{
+    map_real_waveform, WaveformOutputMode, WindowCooperation,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sawtooth";
@@ -95,9 +98,29 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
 #[runtime_builtin(
     name = "sawtooth",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::sawtooth"
 )]
+async fn sawtooth_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    t: Value,
+    varargin: Vec<Value>,
+) -> BuiltinResult<Value> {
+    sawtooth_in_runtime(runtime.as_ref(), t, varargin).await
+}
+
+#[cfg(test)]
 async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
+    sawtooth_in_runtime(None, t, varargin).await
+}
+
+async fn sawtooth_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    t: Value,
+    varargin: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
@@ -135,14 +158,14 @@ async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value
     }
     let xmax = parse_xmax(&varargin).await?;
     match t {
-        Value::GpuTensor(handle) => sawtooth_gpu(handle, xmax).await,
+        Value::GpuTensor(handle) => sawtooth_gpu(handle, xmax, &mut cooperation).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(sawtooth_error(&SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             Err(sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT))
         }
-        other => sawtooth_real(other, xmax),
+        other => sawtooth_real(other, xmax, &mut cooperation).await,
     }
 }
 
@@ -183,32 +206,43 @@ async fn parse_xmax(varargin: &[Value]) -> BuiltinResult<f64> {
     }
 }
 
-async fn sawtooth_gpu(handle: GpuTensorHandle, xmax: f64) -> BuiltinResult<Value> {
+async fn sawtooth_gpu(
+    handle: GpuTensorHandle,
+    xmax: f64,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|source| {
             sawtooth_error_with_source(&SAWTOOTH_ERROR_INTERNAL, "gpu gather failed", source)
         })?;
-    sawtooth_tensor(tensor, xmax).map(tensor_into_value)
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::Double,
+        |value| sawtooth_scalar(value, xmax),
+        cooperation,
+    )
+    .await
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SAWTOOTH_ERROR_INTERNAL))
 }
 
-fn sawtooth_real(value: Value, xmax: f64) -> BuiltinResult<Value> {
+async fn sawtooth_real(
+    value: Value,
+    xmax: f64,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
         .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INVALID_INPUT, err))?;
-    sawtooth_tensor(tensor, xmax).map(tensor_into_value)
-}
-
-fn sawtooth_tensor(tensor: Tensor, xmax: f64) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
-    let data = tensor
-        .into_numeric_storage()
-        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))?
-        .materialize_f64()
-        .into_iter()
-        .map(|value| sawtooth_scalar(value, xmax))
-        .collect::<Vec<_>>();
-    Tensor::new(data, shape)
-        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::Double,
+        |sample| sawtooth_scalar(sample, xmax),
+        cooperation,
+    )
+    .await
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SAWTOOTH_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
@@ -216,7 +250,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::{IntValue, LogicalArray};
+    use runmat_value::{IntValue, LogicalArray, Tensor};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(sawtooth_builtin(t, Vec::new()))

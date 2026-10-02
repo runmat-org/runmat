@@ -7,11 +7,13 @@ use runmat_builtins::{
     TRIPULS_GPU_INPUT_EXTENSION, TRIPULS_INTEGER_CONTROL_EXTENSION, TRIPULS_INTEGER_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::NumericStorage;
 use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::signal::common::{
+    map_real_waveform, WaveformOutputMode, WindowCooperation,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tripuls";
@@ -84,32 +86,6 @@ pub(crate) fn tripuls_scalar(t: f64, width: f64, skew: f64) -> f64 {
     }
 }
 
-pub(crate) fn tripuls_tensor(tensor: Tensor, width: f64, skew: f64) -> Result<Tensor, String> {
-    let shape = tensor.shape.clone();
-    match tensor
-        .into_numeric_storage()
-        .map_err(|err| err.to_string())?
-    {
-        NumericStorage::F32(values) => Tensor::from_f32(
-            values
-                .into_iter()
-                .map(|value| tripuls_scalar(f64::from(value), width, skew) as f32)
-                .collect(),
-            shape,
-        )
-        .map_err(|err| err.to_string()),
-        storage => Tensor::new(
-            storage
-                .materialize_f64()
-                .into_iter()
-                .map(|value| tripuls_scalar(value, width, skew))
-                .collect(),
-            shape,
-        )
-        .map_err(|err| err.to_string()),
-    }
-}
-
 pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
     if !width.is_finite() || width <= 0.0 {
         Err(format!("got {width}"))
@@ -129,9 +105,29 @@ pub(crate) fn validate_skew(skew: f64) -> Result<f64, String> {
 #[runtime_builtin(
     name = "tripuls",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::tripuls"
 )]
+async fn tripuls_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    t: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    tripuls_in_runtime(runtime.as_ref(), t, rest).await
+}
+
+#[cfg(test)]
 async fn tripuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    tripuls_in_runtime(None, t, rest).await
+}
+
+async fn tripuls_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    t: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || rest
             .iter()
@@ -160,14 +156,14 @@ async fn tripuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     let (width, skew) = parse_options(&rest).await?;
     match t {
-        Value::GpuTensor(handle) => tripuls_gpu(handle, width, skew).await,
+        Value::GpuTensor(handle) => tripuls_gpu(handle, width, skew, &mut cooperation).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             Err(tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))
         }
-        other => tripuls_real(other, width, skew),
+        other => tripuls_real(other, width, skew, &mut cooperation).await,
     }
 }
 
@@ -205,14 +201,25 @@ async fn parse_options(rest: &[Value]) -> BuiltinResult<(f64, f64)> {
     Ok((width, skew))
 }
 
-async fn tripuls_gpu(handle: GpuTensorHandle, width: f64, skew: f64) -> BuiltinResult<Value> {
+async fn tripuls_gpu(
+    handle: GpuTensorHandle,
+    width: f64,
+    skew: f64,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|source| {
             tripuls_error_with_source(&TRIPULS_ERROR_INTERNAL, "gpu gather failed", source)
         })?;
-    let result = tripuls_tensor(tensor, width, skew)
-        .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INTERNAL, err))?;
+    let result = map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        |value| tripuls_scalar(value, width, skew),
+        cooperation,
+    )
+    .await
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL))?;
     let restored =
         gpu_helpers::restore_class_preserving_value(&handle, Value::Tensor(result), BUILTIN_NAME)?;
     if runmat_accelerate_api::handle_is_explicit(&handle)
@@ -226,12 +233,23 @@ async fn tripuls_gpu(handle: GpuTensorHandle, width: f64, skew: f64) -> BuiltinR
     Ok(restored)
 }
 
-fn tripuls_real(value: Value, width: f64, skew: f64) -> BuiltinResult<Value> {
+async fn tripuls_real(
+    value: Value,
+    width: f64,
+    skew: f64,
+    cooperation: &mut WindowCooperation,
+) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
         .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INVALID_INPUT, err))?;
-    tripuls_tensor(tensor, width, skew)
-        .map(tensor_into_value)
-        .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INTERNAL, err))
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        |sample| tripuls_scalar(sample, width, skew),
+        cooperation,
+    )
+    .await
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
@@ -239,7 +257,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::{CharArray, IntegerStorage};
+    use runmat_value::{CharArray, IntegerStorage, NumericStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(tripuls_builtin(t, rest))

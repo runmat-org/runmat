@@ -11,6 +11,9 @@ use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::signal::common::{
+    map_real_waveform, WaveformOutputMode, WindowCooperation,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "rectpuls";
@@ -65,15 +68,6 @@ pub(crate) fn rectpuls_scalar(t: f64, width: f64) -> f64 {
     }
 }
 
-pub(crate) fn rectpuls_tensor(tensor: Tensor, width: f64) -> Result<Tensor, String> {
-    let shape = tensor.shape.clone();
-    let data = tensor::tensor_into_values_f64(tensor)
-        .into_iter()
-        .map(|value| rectpuls_scalar(value, width))
-        .collect::<Vec<_>>();
-    Tensor::new(data, shape).map_err(|err| err.to_string())
-}
-
 pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
     if !width.is_finite() || width <= 0.0 {
         Err(format!("got {width}"))
@@ -85,15 +79,41 @@ pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
 #[runtime_builtin(
     name = "rectpuls",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::rectpuls"
 )]
+async fn rectpuls_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    t: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    rectpuls_in_runtime(runtime.as_ref(), t, rest).await
+}
+
+#[cfg(test)]
 async fn rectpuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    rectpuls_in_runtime(None, t, rest).await
+}
+
+async fn rectpuls_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    t: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     ensure_rectpuls_extensions(&t, &rest).await?;
     let gpu_source = rectpuls_gpu_source(&t, &rest)?;
     let width = parse_width(&rest).await?;
     let tensor = rectpuls_input_tensor(t).await?;
-    let output = rectpuls_tensor(tensor, width)
-        .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INTERNAL, err))?;
+    let output = map_real_waveform(
+        tensor,
+        WaveformOutputMode::Double,
+        |value| rectpuls_scalar(value, width),
+        &mut cooperation,
+    )
+    .await
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &RECTPULS_ERROR_INTERNAL))?;
     let Some(source) = gpu_source else {
         return Ok(tensor_into_value(output));
     };
