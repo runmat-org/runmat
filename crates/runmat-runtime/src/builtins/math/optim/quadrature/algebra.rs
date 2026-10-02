@@ -23,10 +23,6 @@ impl QuadratureArithmeticError {
 }
 
 pub(crate) trait AdaptiveEstimate: Clone {
-    async fn absolute<E: QuadratureEvaluator>(
-        &self,
-        evaluator: &mut E,
-    ) -> Result<Self, QuadratureArithmeticError>;
     async fn magnitude<E: QuadratureEvaluator>(
         &self,
         evaluator: &mut E,
@@ -93,13 +89,6 @@ pub(crate) trait QuadratureSample: Clone {
 }
 
 impl AdaptiveEstimate for ScaledEstimate {
-    async fn absolute<E: QuadratureEvaluator>(
-        &self,
-        _evaluator: &mut E,
-    ) -> Result<Self, QuadratureArithmeticError> {
-        Ok(self.abs())
-    }
-
     async fn magnitude<E: QuadratureEvaluator>(
         &self,
         _evaluator: &mut E,
@@ -250,13 +239,6 @@ impl ArrayEstimate {
 }
 
 impl AdaptiveEstimate for ArrayEstimate {
-    async fn absolute<E: QuadratureEvaluator>(
-        &self,
-        evaluator: &mut E,
-    ) -> Result<Self, QuadratureArithmeticError> {
-        self.map(evaluator, ScaledEstimate::abs).await
-    }
-
     async fn magnitude<E: QuadratureEvaluator>(
         &self,
         evaluator: &mut E,
