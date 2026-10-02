@@ -14,9 +14,9 @@ pub use self::duration::*;
 pub use self::legacy::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
-    values.extend(business_days::ENTRIES.iter().copied());
+    business_days::extend_entries(values);
     calendar_duration::extend_entries(values);
-    values.extend(construction::ENTRIES.iter().copied());
+    construction::extend_entries(values);
     values.extend(duration::ENTRIES.iter().copied());
-    values.extend(legacy::ENTRIES.iter().copied());
+    legacy::extend_entries(values);
 }
