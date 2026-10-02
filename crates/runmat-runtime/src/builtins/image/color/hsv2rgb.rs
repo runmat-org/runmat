@@ -278,6 +278,7 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
@@ -398,14 +399,24 @@ mod tests {
 
     #[test]
     fn hsv2rgb_rejects_logical_resident_colormap_before_download() {
-        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
-        let handle = owner
-            .allocate_logical(vec![0, 1, 1], vec![1, 3])
-            .expect("admit logical fixture")
-            .handle;
-        let err = block_on(hsv2rgb_builtin(Value::GpuTensor(handle), Vec::new()))
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1],
+                    shape: &[1, 3],
+                })
+                .expect("upload logical fixture");
+            provider.reset_telemetry();
+            let err = block_on(hsv2rgb_builtin(
+                Value::GpuTensor(handle.clone()),
+                Vec::new(),
+            ))
             .expect_err("logical colormap geometry");
-        assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
+            assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
+            assert!(err.message().contains("nonempty MxNx3"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(handle.allocation_lease().validate_live().is_ok());
+        });
     }
 
     #[test]

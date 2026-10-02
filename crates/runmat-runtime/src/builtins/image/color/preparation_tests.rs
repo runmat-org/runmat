@@ -334,20 +334,27 @@ fn extension_gate_and_empty_rgb_inputs_precede_service() {
 
 #[test]
 fn invalid_logical_hsv_resident_geometry_precedes_service() {
-    let events = Events::default();
-    let _context = enter(&events, false);
-    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
-    let handle = owner
-        .allocate_logical(vec![0, 1, 1], vec![1, 3])
-        .unwrap()
-        .handle;
-    let error = block_on(dispatcher::call_builtin_async(
-        "hsv2rgb",
-        &[Value::GpuTensor(handle)],
-    ))
-    .unwrap_err();
-    assert_eq!(error.identifier(), Some("RunMat:hsv2rgb:InvalidInput"));
-    assert!(events.borrow().is_empty());
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let handle = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[0, 1, 1],
+                shape: &[1, 3],
+            })
+            .unwrap();
+        let events = Events::default();
+        let _context = enter(&events, false);
+        provider.reset_telemetry();
+        let error = block_on(dispatcher::call_builtin_async(
+            "hsv2rgb",
+            &[Value::GpuTensor(handle.clone())],
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:hsv2rgb:InvalidInput"));
+        assert!(error.message().contains("nonempty MxNx3"));
+        assert!(events.borrow().is_empty());
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(handle.allocation_lease().validate_live().is_ok());
+    });
 }
 
 #[test]
