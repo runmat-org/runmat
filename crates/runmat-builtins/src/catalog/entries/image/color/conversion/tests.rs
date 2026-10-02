@@ -149,3 +149,99 @@ fn known_invalid_option_class_complex_image_and_extra_output_diagnose() {
     );
     assert!(result.diagnostics.len() >= 2, "{:?}", result.diagnostics);
 }
+
+#[test]
+fn singleton_tensor_output_is_the_scalar_published_by_runtime() {
+    let input = input(
+        NumericClass::UInt16,
+        ShapeFact::from(vec![Some(1), Some(1), Some(1)]),
+    );
+    let result = call(
+        &crate::IM2DOUBLE_CATALOG_ENTRY,
+        ImageOutputClass::Double,
+        input,
+        None,
+        1,
+    );
+    assert_eq!(result.outputs[0].shape, ShapeFact::Scalar);
+    assert_eq!(result.outputs[0].storage, StorageFact::Scalar);
+}
+
+#[test]
+fn known_index_bounds_match_existing_runtime_policy_without_rejecting_fractional_or_negative() {
+    let cases = [
+        (
+            &crate::IM2UINT8_CATALOG_ENTRY,
+            ImageOutputClass::UInt8,
+            NumericClass::Double,
+            256.0,
+            false,
+        ),
+        (
+            &crate::IM2UINT8_CATALOG_ENTRY,
+            ImageOutputClass::UInt8,
+            NumericClass::Double,
+            256.5,
+            true,
+        ),
+        (
+            &crate::IM2UINT8_CATALOG_ENTRY,
+            ImageOutputClass::UInt8,
+            NumericClass::UInt16,
+            255.0,
+            false,
+        ),
+        (
+            &crate::IM2UINT8_CATALOG_ENTRY,
+            ImageOutputClass::UInt8,
+            NumericClass::UInt16,
+            256.0,
+            true,
+        ),
+        (
+            &crate::IM2UINT16_CATALOG_ENTRY,
+            ImageOutputClass::UInt16,
+            NumericClass::Double,
+            65536.0,
+            false,
+        ),
+        (
+            &crate::IM2UINT16_CATALOG_ENTRY,
+            ImageOutputClass::UInt16,
+            NumericClass::Double,
+            f64::INFINITY,
+            true,
+        ),
+        (
+            &crate::IM2UINT16_CATALOG_ENTRY,
+            ImageOutputClass::UInt16,
+            NumericClass::Double,
+            -0.5,
+            false,
+        ),
+        (
+            &crate::IM2UINT8_CATALOG_ENTRY,
+            ImageOutputClass::UInt8,
+            NumericClass::Double,
+            1.5,
+            false,
+        ),
+    ];
+    for (entry, output, class, number, invalid) in cases {
+        let request = CallRequest {
+            arguments: vec![input(class, ShapeFact::Scalar), indexed().0],
+            literals: LiteralContext::new(vec![LiteralValue::Number(number), indexed().1]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result = infer(&request, entry, output);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "RM-CATALOG-IMAGE-CONVERSION-INDEX-BOUND"),
+            invalid,
+            "{class:?} {number:?}: {:?}",
+            result.diagnostics,
+        );
+    }
+}

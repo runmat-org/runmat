@@ -1,8 +1,9 @@
 use crate::catalog::inference::argument_error;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, LiteralValue, NumericClass,
-    NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    infer_call, CallContract, CallInference, CallRequest, LiteralContext, LiteralValue,
+    NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact,
+    ValueKindFact,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -130,11 +131,44 @@ pub(super) fn infer(
                 0,
             ));
         }
+        if mode == Some(ImageIndexMode::Indexed) {
+            if let ValueKindFact::Numeric(NumericFact {
+                class,
+                domain: NumericDomain::Real,
+            }) = input.kind
+            {
+                let maximum = match (output_class, class) {
+                    (ImageOutputClass::UInt8, NumericClass::UInt16) => Some(255.0),
+                    (ImageOutputClass::UInt8, NumericClass::Double) => Some(256.0),
+                    (ImageOutputClass::UInt16, NumericClass::Double) => Some(65536.0),
+                    _ => None,
+                };
+                if maximum.is_some_and(|maximum| {
+                    request
+                        .literals
+                        .literal_args
+                        .first()
+                        .and_then(LiteralContext::numeric_from_literal)
+                        .is_some_and(|value| !(value <= maximum))
+                }) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-IMAGE-CONVERSION-INDEX-BOUND",
+                        "indexed image value exceeds the accepted class range",
+                        0,
+                    ));
+                }
+            }
+        }
     }
-    let shape = request
+    let input_shape = request
         .arguments
         .first()
         .map_or(ShapeFact::Unknown, |input| input.shape.clone());
+    let shape = if input_shape.element_count() == Some(1) {
+        ShapeFact::Scalar
+    } else {
+        input_shape
+    };
     let storage = match shape.element_count() {
         Some(1) => StorageFact::Scalar,
         Some(_) => StorageFact::Dense,

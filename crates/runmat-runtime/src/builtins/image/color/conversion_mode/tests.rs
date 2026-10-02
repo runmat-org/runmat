@@ -10,7 +10,7 @@ use futures::executor::block_on;
 use runmat_builtins::{
     BuiltinOperandPreparation, BuiltinPreparationOperation, BuiltinSinkPreparation,
 };
-use runmat_value::{IntValue, Value};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 use std::{
     cell::RefCell,
     future::Future,
@@ -192,4 +192,59 @@ fn dropping_polled_conversion_call_aborts_prepared_observation_once() {
     assert_eq!(&*events.borrow(), &["prepare"]);
     drop(call);
     assert_eq!(&*events.borrow(), &["prepare", "abort"]);
+}
+
+#[test]
+fn indexed_scalar_value_bounds_skip_preparation_only_for_existing_runtime_errors() {
+    let events = Events::default();
+    let _context = enter(&events);
+    for (name, value) in [
+        ("im2uint8", Value::Num(256.5)),
+        ("im2uint8", Value::Num(f64::NAN)),
+        ("im2uint8", Value::Int(IntValue::U16(256))),
+        ("im2uint16", Value::Num(f64::INFINITY)),
+    ] {
+        assert!(block_on(dispatcher::call_builtin_async(
+            name,
+            &[value, Value::String("indexed".into()),]
+        ))
+        .is_err());
+        assert!(events.borrow().is_empty());
+    }
+    for (name, value) in [
+        ("im2uint8", Value::Num(-0.5)),
+        ("im2uint8", Value::Num(1.5)),
+        ("im2uint16", Value::Num(f64::NEG_INFINITY)),
+    ] {
+        block_on(dispatcher::call_builtin_async(
+            name,
+            &[value, Value::String("indexed".into())],
+        ))
+        .unwrap();
+        assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+        events.borrow_mut().clear();
+    }
+}
+
+#[test]
+fn empty_nd_numeric_images_keep_typed_preparation_and_indexed_range_sensitive_arrays_do_not() {
+    let events = Events::default();
+    let _context = enter(&events);
+    for name in NAMES {
+        let image = Tensor::new_integer(IntegerStorage::U8(vec![]), vec![0, 2, 3]).unwrap();
+        block_on(dispatcher::call_builtin_async(
+            name,
+            &[Value::Tensor(image)],
+        ))
+        .unwrap();
+        assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+        events.borrow_mut().clear();
+    }
+    let bad = Tensor::new(vec![1.0, 257.0], vec![1, 2]).unwrap();
+    assert!(block_on(dispatcher::call_builtin_async(
+        "im2uint8",
+        &[Value::Tensor(bad), Value::String("indexed".into()),]
+    ))
+    .is_err());
+    assert!(events.borrow().is_empty());
 }
