@@ -10,6 +10,7 @@ use std::sync::Mutex;
 enum Mode {
     Valid,
     BadShape,
+    SharedAliasBadShape,
     BadClass,
     ForeignOwner,
     Stale,
@@ -21,6 +22,7 @@ struct WindowProvider {
     other: TestAllocationOwner,
     mode: Mode,
     probes: Mutex<Vec<RetirementProbe>>,
+    borrowed: Mutex<Option<GpuTensorHandle>>,
 }
 
 impl WindowProvider {
@@ -30,6 +32,7 @@ impl WindowProvider {
             other: TestAllocationOwner::new(),
             mode,
             probes: Mutex::new(Vec::new()),
+            borrowed: Mutex::new(None),
         }))
     }
 
@@ -37,7 +40,7 @@ impl WindowProvider {
         if matches!(self.mode, Mode::Operational) {
             anyhow::bail!("device lost while generating window");
         }
-        let shape = if matches!(self.mode, Mode::BadShape) {
+        let shape = if matches!(self.mode, Mode::BadShape | Mode::SharedAliasBadShape) {
             vec![1, len]
         } else {
             vec![len, 1]
@@ -57,6 +60,9 @@ impl WindowProvider {
             allocation.probe.mark_unavailable();
         }
         self.probes.lock().unwrap().push(allocation.probe);
+        if matches!(self.mode, Mode::SharedAliasBadShape) {
+            *self.borrowed.lock().unwrap() = Some(allocation.handle.clone());
+        }
         Ok(allocation.handle)
     }
 }
@@ -154,6 +160,22 @@ fn result_admission_retires_only_rejected_outputs() {
         assert_eq!(probes.len(), 1);
         assert_eq!(probes[0].retirements(), 1);
     }
+    let provider = WindowProvider::new(Mode::SharedAliasBadShape);
+    let _active = ThreadProviderGuard::set(Some(provider));
+    let failure = try_generate(CosineWindow::Hann, options()).unwrap_err();
+    assert_eq!(failure.identifier(), HANN_ERROR_INTERNAL.identifier);
+    let borrowed = provider
+        .borrowed
+        .lock()
+        .unwrap()
+        .take()
+        .expect("borrowed alias");
+    assert!(borrowed.allocation_lease().validate_live().is_ok());
+    let probe = provider.probes.lock().unwrap()[0].clone();
+    assert_eq!(probe.retirements(), 0);
+    drop(borrowed);
+    assert_eq!(probe.retirements(), 1);
+    drop(_active);
     let provider = WindowProvider::new(Mode::Valid);
     let _active = ThreadProviderGuard::set(Some(provider));
     let output = try_generate(CosineWindow::Blackman, options())
@@ -163,6 +185,6 @@ fn result_admission_retires_only_rejected_outputs() {
         panic!("expected resident window")
     };
     assert_eq!(handle.shape(), [4, 1]);
-    assert_eq!(handle.allocation_lease().validate_live().is_ok(), true);
+    assert!(handle.allocation_lease().validate_live().is_ok());
     assert_eq!(provider.probes.lock().unwrap()[0].retirements(), 0);
 }

@@ -96,9 +96,10 @@ fn valid_output(
         )
 }
 
-/// A provider hook must return a fresh result with the requested physical
-/// class. The result handle is the only reference this function may retire;
-/// the provider and any unrelated allocations remain the caller's property.
+/// A provider hook returns an owning result reference with the requested
+/// physical class. This boundary validates metadata and lease liveness; it
+/// cannot prove that the underlying allocation is physically exclusive.
+/// Rejection consumes only the returned reference, leaving other owners live.
 pub(crate) fn try_generate(
     kind: CosineWindow,
     options: WindowOptions,
