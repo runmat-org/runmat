@@ -42,8 +42,10 @@ fn duration(shape: ShapeFact) -> ValueFact {
 
 #[test]
 fn extracted_declarations_keep_all_public_identity_and_extension_exports() {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
     assert_eq!(
-        ENTRIES
+        entries
             .iter()
             .map(|entry| entry.identity.name)
             .collect::<Vec<_>>(),
