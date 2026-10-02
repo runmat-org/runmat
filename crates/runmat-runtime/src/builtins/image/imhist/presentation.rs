@@ -113,8 +113,13 @@ pub(super) fn same_gpu_handle(
 #[cfg(feature = "plot-core")]
 fn render_imhist_plot(counts: &Tensor, locations: &Tensor) -> BuiltinResult<()> {
     let plot_data = plot_display_bins(counts, locations)?;
-    let mut chart = BarChart::new(plot_data.labels, plot_data.counts)
-        .map_err(|err| plot_failed(format!("chart construction failed: {err}")))?;
+    let mut chart = BarChart::new(plot_data.labels, plot_data.counts).map_err(|cause| {
+        let mapped = plot_failed(format!("chart construction failed: {cause}"));
+        crate::builtins::plotting::state::with_render_cause(
+            mapped,
+            build_runtime_error(cause).with_builtin(NAME).build(),
+        )
+    })?;
     chart.set_bar_width(0.95);
     chart.set_color(glam::Vec4::new(0.1, 0.1, 0.1, 0.95));
     let mut chart = Some(chart);

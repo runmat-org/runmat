@@ -275,6 +275,18 @@ fn rejects_more_than_two_outputs() {
 }
 
 #[test]
+fn output_and_arity_rejection_precede_image_materialization() {
+    let wide = Value::Int(IntValue::U64(u64::MAX));
+    let excess = {
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        block_on(imhist_builtin(wide.clone(), vec![])).unwrap_err()
+    };
+    assert_eq!(excess.identifier(), Some("RunMat:imhist:TooManyOutputs"));
+    let arity = block_on(imhist_builtin(wide, vec![Value::Num(2.0), Value::Num(3.0)])).unwrap_err();
+    assert_eq!(arity.identifier(), Some("RunMat:imhist:InvalidArgument"));
+}
+
+#[test]
 fn accepts_n_dimensional_grayscale_input_including_three_plane_shape() {
     let image = tensor(vec![0.0; 12], vec![2, 2, 3], NumericDType::F64);
     let Value::Tensor(counts) = block_on(imhist_builtin(Value::Tensor(image), vec![])).unwrap()
@@ -325,6 +337,19 @@ fn resident_programmatic_outputs_are_deferred_unique_and_owner_preserving() {
             test_support::gather(Value::GpuTensor(source)).expect("source remains readable");
         assert_eq!(gathered_source.numeric_dtype(), NumericDType::U8);
         assert_eq!(gathered_source.materialize_f64(), input.materialize_f64());
+    });
+}
+
+#[test]
+fn unpolled_resident_histogram_future_leaves_caller_lease_live() {
+    test_support::with_test_provider(|provider| {
+        let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+        let pending = imhist_builtin(Value::GpuTensor(source.clone()), vec![]);
+        drop(pending);
+        assert!(source.allocation_lease().validate_live().is_ok());
+        let gathered = test_support::gather(Value::GpuTensor(source)).expect("caller remains live");
+        assert_eq!(gathered.materialize_f64(), input.materialize_f64());
     });
 }
 
