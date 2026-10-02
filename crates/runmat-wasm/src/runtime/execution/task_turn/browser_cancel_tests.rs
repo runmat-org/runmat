@@ -1,0 +1,143 @@
+//! Public browser-execution cancellation after an actual posted CPU task turn.
+
+use super::TEST_POSTED_TURNS;
+use js_sys::{Array, Reflect};
+use serde::Serialize;
+use serde_json::json;
+use std::cell::RefCell;
+use std::future::Future;
+use std::rc::Rc;
+use std::task::Poll;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
+use wasm_bindgen_test::wasm_bindgen_test;
+use web_sys::{MessageChannel, MessageEvent};
+
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+async fn cancel_during_public_execution(name: &str, text: &str, result_name: &str) {
+    let runtime = Rc::new(
+        crate::init_runmat(JsValue::NULL)
+            .await
+            .expect("initialize browser runtime"),
+    );
+    let request = json!({
+        "source": { "kind": "text", "name": name, "text": text },
+        "compatibility": "runmat"
+    })
+    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+    .expect("encode execution request");
+    let turns_before = TEST_POSTED_TURNS.with(std::cell::Cell::get);
+    let mut execution = Box::pin(runtime.execute_request_js(request));
+    futures::future::poll_fn(|context| match execution.as_mut().poll(context) {
+        Poll::Pending => {
+            if TEST_POSTED_TURNS.with(std::cell::Cell::get) > turns_before {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        }
+        Poll::Ready(Ok(payload)) => {
+            let diagnostic = js_sys::JSON::stringify(&payload)
+                .ok()
+                .and_then(|value| value.as_string());
+            panic!("{name} completed before its cooperative turn: {diagnostic:?}");
+        }
+        Poll::Ready(Err(error)) => {
+            panic!("{name} failed before its cooperative turn: {error:?}");
+        }
+    })
+    .await;
+
+    // A separate task on this event loop delivers cancellation while the
+    // public execution future is suspended at its own posted turn.
+    let channel = MessageChannel::new().expect("browser cancellation task channel");
+    let receive = channel.port1();
+    let send = channel.port2();
+    let (canceled_tx, canceled_rx) = futures::channel::oneshot::channel();
+    let canceled_tx = Rc::new(RefCell::new(Some(canceled_tx)));
+    let cancel_runtime = Rc::clone(&runtime);
+    let callback = Closure::wrap(Box::new(move |_event: MessageEvent| {
+        cancel_runtime.cancel_execution();
+        if let Some(sender) = canceled_tx.borrow_mut().take() {
+            let _ = sender.send(());
+        }
+    }) as Box<dyn FnMut(MessageEvent)>);
+    receive.set_onmessage(Some(callback.as_ref().unchecked_ref()));
+    receive.start();
+    send.post_message(&JsValue::UNDEFINED)
+        .expect("queue same-event-loop cancellation task");
+    canceled_rx.await.expect("cancellation task must run");
+    receive.set_onmessage(None);
+    receive.close();
+    send.close();
+    drop(callback);
+
+    let payload = execution
+        .await
+        .expect("execution returns a structured result");
+    let error = Reflect::get(&payload, &JsValue::from_str("error")).expect("execution error field");
+    let identifier = Reflect::get(&error, &JsValue::from_str("identifier"))
+        .expect("structured cancellation identifier");
+    // The VM drops the suspended builtin before repolling it. Its public
+    // cancellation takes precedence over the builtin-local typed cause.
+    assert_eq!(
+        identifier.as_string().as_deref(),
+        Some("RunMat:ExecutionCancelled")
+    );
+    let message = Reflect::get(&error, &JsValue::from_str("message"))
+        .expect("structured cancellation message");
+    assert_eq!(
+        message.as_string().as_deref(),
+        Some("Execution cancelled by user")
+    );
+
+    // The result assignment and subsequent statement must not publish after
+    // the suspended operation is abandoned.
+    let snapshot = runtime.workspace_snapshot().expect("workspace snapshot");
+    let values = Array::from(
+        &Reflect::get(&snapshot, &JsValue::from_str("values")).expect("workspace values"),
+    );
+    for entry in values.iter() {
+        let entry_name = Reflect::get(&entry, &JsValue::from_str("name"))
+            .expect("workspace entry name")
+            .as_string()
+            .expect("workspace name text");
+        assert_ne!(entry_name, result_name, "cancelled result must not publish");
+        assert_ne!(
+            entry_name, "completed",
+            "post-call statement must not replay"
+        );
+    }
+}
+
+#[wasm_bindgen_test(async)]
+async fn same_browser_event_loop_cancel_interrupts_a_running_multinomial_fit() {
+    cancel_during_public_execution(
+        "mnrfit-browser-cancel.m",
+        "X = (1:65536)'; Y = mod(X,2)+1; B = mnrfit(X,Y,'IterationLimit',100000); completed = 1;",
+        "B",
+    )
+    .await;
+}
+
+#[wasm_bindgen_test(async)]
+async fn same_browser_event_loop_cancel_interrupts_running_kmeans() {
+    cancel_during_public_execution(
+        "kmeans-browser-cancel.m",
+        "X = (1:65536)'; idx = kmeans(X,2,'Start',[1;65536],'MaxIter',100000); completed = 1;",
+        "idx",
+    )
+    .await;
+}
+
+#[wasm_bindgen_test(async)]
+async fn same_browser_event_loop_cancel_interrupts_running_tsne() {
+    cancel_during_public_execution(
+        "tsne-browser-cancel.m",
+        "X = [(1:512)', mod((1:512)',7)]; embedding = tsne(X,'NumDimensions',2,'Perplexity',5); completed = 1;",
+        "embedding",
+    )
+    .await;
+}
