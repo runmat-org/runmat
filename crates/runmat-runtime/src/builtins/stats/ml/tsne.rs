@@ -154,12 +154,12 @@ async fn tsne_in_runtime(
     let headers = option_headers(rest)?;
     ensure_tsne_extensions(&x, &headers)?;
     let admitted = admit_options(headers)?;
-    ensure_exact_tsne_integer_value(&x, "observation data")?;
-    ensure_exact_tsne_floating_options(&admitted)?;
+    ensure_exact_tsne_integer_value(&x, "observation data", &mut cooperation).await?;
+    ensure_exact_tsne_floating_options(&admitted, &mut cooperation).await?;
     let x = gather(x).await?;
-    ensure_exact_tsne_integer_value(&x, "observation data")?;
+    ensure_exact_tsne_integer_value(&x, "observation data", &mut cooperation).await?;
     let admitted = materialize_options(admitted).await?;
-    ensure_exact_tsne_floating_options(&admitted)?;
+    ensure_exact_tsne_floating_options(&admitted, &mut cooperation).await?;
     let options = parse_options(admitted)?;
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("tsne: {err}")))?;
@@ -224,73 +224,96 @@ fn ensure_tsne_extensions(x: &Value, rest: &[OptionHeader]) -> BuiltinResult<()>
     Ok(())
 }
 
-fn ensure_exact_tsne_integer_value(value: &Value, role: &str) -> BuiltinResult<()> {
-    let exact = |integer: &runmat_value::IntValue| {
-        if crate::builtins::common::validation::integer_is_exact_f64(integer) {
-            Ok(())
-        } else {
-            Err(invalid(format!(
-                "tsne: integer {role} values must be exactly representable as double"
-            )))
-        }
-    };
-    match value {
-        Value::Int(integer) => exact(integer),
-        Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                for index in 0..storage.len() {
-                    let integer = storage
-                        .value_at(index)
-                        .expect("integer storage index is within its length");
-                    exact(&integer)?;
+async fn ensure_exact_tsne_integer_value(
+    value: &Value,
+    role: &str,
+    cooperation: &mut cooperation::TsneCooperation,
+) -> BuiltinResult<()> {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Int(integer) => {
+                ensure_exact_integer(integer, role)?;
+                cooperation.completed(1).await?;
+            }
+            Value::Tensor(tensor) => {
+                if let Some(storage) = tensor.integer_storage() {
+                    for index in 0..storage.len() {
+                        let integer = storage
+                            .value_at(index)
+                            .expect("integer storage index is within its length");
+                        ensure_exact_integer(&integer, role)?;
+                        cooperation.completed(1).await?;
+                    }
                 }
             }
-            Ok(())
+            Value::Cell(cell) => push_reversed(&mut pending, cell.data.iter().rev())?,
+            Value::Struct(value) => push_reversed(&mut pending, value.fields.values().rev())?,
+            Value::OutputList(values) => push_reversed(&mut pending, values.iter().rev())?,
+            _ => {}
         }
-        Value::Cell(cell) => {
-            for value in &cell.data {
-                ensure_exact_tsne_integer_value(value, role)?;
-            }
-            Ok(())
-        }
-        Value::Struct(value) => {
-            for value in value.fields.values() {
-                ensure_exact_tsne_integer_value(value, role)?;
-            }
-            Ok(())
-        }
-        Value::OutputList(values) => {
-            for value in values {
-                ensure_exact_tsne_integer_value(value, role)?;
-            }
-            Ok(())
-        }
-        _ => Ok(()),
+        cooperation.completed(1).await?;
+    }
+    Ok(())
+}
+
+fn ensure_exact_integer(integer: &runmat_value::IntValue, role: &str) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::integer_is_exact_f64(integer) {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "tsne: integer {role} values must be exactly representable as double"
+        )))
     }
 }
 
-fn ensure_exact_tsne_floating_options(rest: &[AdmittedOption]) -> BuiltinResult<()> {
+fn push_reversed<'a>(
+    pending: &mut Vec<&'a Value>,
+    values: impl Iterator<Item = &'a Value>,
+) -> BuiltinResult<()> {
+    for value in values {
+        pending.try_reserve(1).map_err(|source| {
+            build_runtime_error("tsne: integer validation stack exceeds available memory")
+                .with_builtin(NAME)
+                .with_source(source)
+                .build()
+        })?;
+        pending.push(value);
+    }
+    Ok(())
+}
+
+async fn ensure_exact_tsne_floating_options(
+    rest: &[AdmittedOption],
+    cooperation: &mut cooperation::TsneCooperation,
+) -> BuiltinResult<()> {
     for option in rest {
         match option {
             AdmittedOption::CacheSizeNumeric(value) => {
-                ensure_exact_tsne_integer_value(value, "CacheSize")?
+                ensure_exact_tsne_integer_value(value, "CacheSize", cooperation).await?
             }
             AdmittedOption::Exaggeration(value) => {
-                ensure_exact_tsne_integer_value(value, "Exaggeration")?
+                ensure_exact_tsne_integer_value(value, "Exaggeration", cooperation).await?
             }
-            AdmittedOption::InitialY(value) => ensure_exact_tsne_integer_value(value, "InitialY")?,
+            AdmittedOption::InitialY(value) => {
+                ensure_exact_tsne_integer_value(value, "InitialY", cooperation).await?
+            }
             AdmittedOption::LearnRate(value) => {
-                ensure_exact_tsne_integer_value(value, "LearnRate")?
+                ensure_exact_tsne_integer_value(value, "LearnRate", cooperation).await?
             }
             AdmittedOption::Perplexity(value) => {
-                ensure_exact_tsne_integer_value(value, "Perplexity")?
+                ensure_exact_tsne_integer_value(value, "Perplexity", cooperation).await?
             }
-            AdmittedOption::Theta(value) => ensure_exact_tsne_integer_value(value, "Theta")?,
+            AdmittedOption::Theta(value) => {
+                ensure_exact_tsne_integer_value(value, "Theta", cooperation).await?
+            }
             AdmittedOption::Options(fields) => {
                 for field in fields {
                     if let AdmittedStatsetField::TolFun(value) = field {
-                        ensure_exact_tsne_integer_value(value, "Options.TolFun")?;
+                        ensure_exact_tsne_integer_value(value, "Options.TolFun", cooperation)
+                            .await?;
                     }
+                    cooperation.completed(1).await?;
                 }
             }
             AdmittedOption::OptionsEmptyResident(_) => {}
@@ -303,6 +326,7 @@ fn ensure_exact_tsne_floating_options(rest: &[AdmittedOption]) -> BuiltinResult<
             | AdmittedOption::NumPrint(_)
             | AdmittedOption::Verbose(_) => {}
         }
+        cooperation.completed(1).await?;
     }
     Ok(())
 }
