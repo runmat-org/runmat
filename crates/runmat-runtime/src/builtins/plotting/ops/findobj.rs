@@ -1,13 +1,13 @@
 //! MATLAB-compatible `findobj` builtin over RunMat graphics handles.
 
 use regex::Regex;
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    FINDOBJ_DESCRIPTOR, FINDOBJ_INTEGER_CAPABILITIES,
+};
+use runmat_builtins::{
+    FINDOBJ_ERROR_INVALID_ARGUMENT, FINDOBJ_ERROR_PROPERTY_ACCESS, FINDOBJ_INTEGER_ROOT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
@@ -17,139 +17,13 @@ use super::state::{self, FigureHandle, PlotObjectKind};
 use super::style::{parse_color_value, LineStyleParseOptions};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::handles::numeric_handle_from_integer;
-use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "findobj";
 
-const FINDOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Graphics handles that satisfy the requested hierarchy and property filters.",
-}];
-
-const FINDOBJ_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const FINDOBJ_INPUTS_FILTERS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filters",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Property/value predicates, -property, -regexp, -not, and logical operators.",
-}];
-
-const FINDOBJ_INPUTS_ROOTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "objhandles",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Graphics handle or handle array that restricts the search root.",
-    },
-    BuiltinParamDescriptor {
-        name: "filters",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional depth/flat options and property predicates.",
-    },
-];
-
-const FINDOBJ_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "h = findobj()",
-        inputs: &FINDOBJ_INPUTS_NONE,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = findobj(prop, value, ...)",
-        inputs: &FINDOBJ_INPUTS_FILTERS,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = findobj(objhandles, '-depth', d, filters...)",
-        inputs: &FINDOBJ_INPUTS_ROOTS,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-];
-
-const FINDOBJ_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FINDOBJ.INVALID_ARGUMENT",
-    identifier: Some("RunMat:findobj:InvalidArgument"),
-    when: "Arguments, search roots, depth, operators, property names, or regexp patterns are malformed.",
-    message: "findobj: invalid argument",
-};
-
-const FINDOBJ_ERRORS: [BuiltinErrorDescriptor; 1] = [FINDOBJ_ERROR_INVALID_ARGUMENT];
-
-pub const FINDOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FINDOBJ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FINDOBJ_ERRORS,
-};
-
-pub const FINDOBJ_INTEGER_ROOT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "findobj-integer-root-aliases",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "findobj with typed-integer numeric graphics-handle aliases is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FindobjIntegerRootExtension"),
-};
-
-pub const FINDOBJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FINDOBJ_INTEGER_ROOT_EXTENSION];
-
-const FINDOBJ_INTEGER_ROOT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "objhandles",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode accepts exactly representable nonnegative host integers as aliases for its numeric graphics-handle registry; MATLAB accepts graphics objects.",
-    }];
-const FINDOBJ_INTEGER_DEPTH: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "d",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented nonnegative integer depth is read exactly from any built-in integer scalar; positive double Inf retains its documented unlimited-depth meaning.",
-    }];
-const FINDOBJ_INTEGER_PROPERTY_VALUE: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Property values may use any legal property class; integer values compare from authoritative storage with class-sensitive exact equality.",
-    }];
-const FINDOBJ_RESIDENT_INTEGER: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "resident root, depth, or property value",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Graphics search is host metadata work; resident numeric buffers are not graphics objects or metadata values and are never gathered.",
-    }];
-
-pub const FINDOBJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(integer_objhandles, ...)", inputs: &FINDOBJ_INTEGER_ROOT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "A separately gated RunMat alias validates exact representability before searching the host graphics hierarchy; output follows RunMat's current double handle representation." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(objhandles, '-depth', integer_d, ...)", inputs: &FINDOBJ_INTEGER_DEPTH, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "Depth remains exact through nonnegative platform-bound validation and controls traversal without a floating computation boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(..., prop, integer_value, ...)", inputs: &FINDOBJ_INTEGER_PROPERTY_VALUE, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer scalar and array property values compare class-sensitively from authoritative storage, including values above flintmax; no numeric coercion is performed." },
-    BuiltinIntegerCapabilityDescriptor { form: "findobj(resident_integer, ...)", inputs: &FINDOBJ_RESIDENT_INTEGER, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Host graphics metadata search rejects resident numeric values without provider lookup, transfer, or kernel dispatch." },
-];
-
 #[runtime_builtin(
     name = "findobj",
-    category = "plotting",
-    summary = "Find graphics objects with matching properties.",
-    keywords = "findobj,graphics,handle,property,plotting",
-    suppress_auto_output = true,
-    extensions(crate::builtins::plotting::findobj::FINDOBJ_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::findobj::FINDOBJ_INTEGER_CAPABILITIES),
-    type_resolver(handle_array_type),
-    descriptor(crate::builtins::plotting::findobj::FINDOBJ_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::findobj"
 )]
 pub async fn findobj_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -564,7 +438,24 @@ async fn property_value_async(handle: f64, property: &str) -> crate::BuiltinResu
     match get_properties_async(resolved, Some(property), BUILTIN_NAME).await {
         Ok(value) => Ok(Some(value)),
         Err(error) if error.source.is_none() => Ok(None),
-        Err(error) => Err(error),
+        Err(error) => {
+            let span = error.span;
+            let retry = error.gpu_gather_retry();
+            let mut builder = build_runtime_error(format!(
+                "{}: {}",
+                FINDOBJ_ERROR_PROPERTY_ACCESS.message, error.message
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_gpu_gather_retry(retry)
+            .with_source(error);
+            if let Some(identifier) = FINDOBJ_ERROR_PROPERTY_ACCESS.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            if let Some(span) = span {
+                builder = builder.with_span(span);
+            }
+            Err(builder.build())
+        }
     }
 }
 

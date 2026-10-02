@@ -1,94 +1,13 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+#[cfg(test)]
+use runmat_builtins::SET_DESCRIPTOR;
+use runmat_builtins::{BuiltinErrorDescriptor, SET_ERROR_INTERNAL, SET_ERROR_INVALID_ARGUMENT};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::properties::resolve_plot_handle;
-use crate::builtins::plotting::type_resolvers::set_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "set";
-
-const SET_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Returns \"ok\" when property updates succeed.",
-}];
-
-const SET_INPUTS_HANDLE_PAIRS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "h",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Graphics handle (figure, axes, plot object, text, legend, etc.).",
-    },
-    BuiltinParamDescriptor {
-        name: "pairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs to assign (for example 'LineWidth', 2).",
-    },
-];
-
-const SET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "status = set(h, property, value, ...)",
-    inputs: &SET_INPUTS_HANDLE_PAIRS,
-    outputs: &SET_OUTPUT_STATUS,
-}];
-
-const SET_INTEGER_PROPERTY_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "property value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer availability and conversion are property-specific; accepted graphics properties read the authoritative scalar or array value before their named renderer or structural boundary.",
-    }];
-pub const SET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "set(h, property, integer_value, ...)",
-        inputs: &SET_INTEGER_PROPERTY_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The generic setter delegates class, range, and storage behavior to each property contract; graphics mutation is client-side and does not reinterpret integer values through a universal floating accessor.",
-    }];
-
-const SET_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SET.INVALID_ARGUMENT",
-    identifier: Some("RunMat:set:InvalidArgument"),
-    when: "Handle value is invalid or property/value pairs are missing/malformed/unsupported.",
-    message: "set: invalid argument",
-};
-
-const SET_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SET.INTERNAL",
-    identifier: Some("RunMat:set:Internal"),
-    when: "Internal handle/property mutation fails unexpectedly.",
-    message: "set: internal operation failed",
-};
-
-const SET_ERRORS: [BuiltinErrorDescriptor; 2] = [SET_ERROR_INVALID_ARGUMENT, SET_ERROR_INTERNAL];
-
-pub const SET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SET_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SET_ERRORS,
-};
 
 fn set_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -108,14 +27,16 @@ fn map_set_error(err: RuntimeError) -> RuntimeError {
     }
     let span = err.span;
     let retry = err.gpu_gather_retry();
-    let mut builder = build_runtime_error(format!(
-        "{}: {}",
-        SET_ERROR_INVALID_ARGUMENT.message, err.message
-    ))
-    .with_builtin(BUILTIN_NAME)
-    .with_gpu_gather_retry(retry)
-    .with_source(err);
-    if let Some(identifier) = SET_ERROR_INVALID_ARGUMENT.identifier {
+    let descriptor = if crate::builtins::plotting::error::plot_data_export_failure(&err) {
+        &SET_ERROR_INTERNAL
+    } else {
+        &SET_ERROR_INVALID_ARGUMENT
+    };
+    let mut builder = build_runtime_error(format!("{}: {}", descriptor.message, err.message))
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(retry)
+        .with_source(err);
+    if let Some(identifier) = descriptor.identifier {
         builder = builder.with_identifier(identifier);
     }
     if let Some(span) = span {
@@ -126,17 +47,11 @@ fn map_set_error(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "set",
-    category = "plotting",
-    summary = "Set properties on plotting and graphics handles.",
-    keywords = "set,plotting,handle,property",
-    suppress_auto_output = true,
-    type_resolver(set_type),
-    descriptor(crate::builtins::plotting::set::SET_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::set::SET_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::set"
 )]
 pub async fn set_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<String> {
-    if args.len() < 3 {
+    if args.len() < 3 || args.len().is_multiple_of(2) {
         return Err(set_error_with_detail(
             &SET_ERROR_INVALID_ARGUMENT,
             "expected a plotting handle followed by property/value pairs",
@@ -202,6 +117,19 @@ mod tests {
         let err = set_builtin(vec![Value::Num(1.0)])
             .expect_err("expected missing property/value pairs to fail");
         assert_eq!(err.identifier(), SET_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn set_rejects_unpaired_control_before_mutation() {
+        let _guard = setup();
+        let error = set_builtin(vec![
+            Value::Num(0.0),
+            Value::String("Visible".into()),
+            Value::Bool(false),
+            Value::String("dangling".into()),
+        ])
+        .expect_err("unpaired property must fail");
+        assert_eq!(error.identifier(), SET_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

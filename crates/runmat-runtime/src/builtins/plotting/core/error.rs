@@ -15,6 +15,22 @@ pub(crate) fn plotting_error_with_source(
         .build()
 }
 
+/// A plot-source readback is an operational failure, not an invalid property
+/// selector. The cause may be nested under the owning property error.
+pub(crate) fn plot_data_export_failure(error: &crate::RuntimeError) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(source) = current {
+        if source
+            .downcast_ref::<runmat_plot::plots::PlotDataExportError>()
+            .is_some()
+        {
+            return true;
+        }
+        current = source.source();
+    }
+    false
+}
+
 /// Only platform-originated presentation failures may be ignored after a
 /// figure has been mutated. Neither diagnostic text nor a caller's error
 /// identifier establishes this policy.
@@ -58,6 +74,19 @@ pub(crate) fn with_render_cause(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plot_source_failure_classification_uses_typed_cause() {
+        let spoofed = plotting_error("get", "plot source data unavailable");
+        assert!(!plot_data_export_failure(&spoofed));
+        let typed = plotting_error_with_source(
+            "get",
+            "plot source data unavailable",
+            runmat_plot::plots::PlotDataExportError::SourceUnavailable("source unavailable"),
+        );
+        let nested = plotting_error_with_source("set", "property access failed", typed);
+        assert!(plot_data_export_failure(&nested));
+    }
 
     #[test]
     fn only_typed_presentation_causes_are_ignored_even_when_nested() {
