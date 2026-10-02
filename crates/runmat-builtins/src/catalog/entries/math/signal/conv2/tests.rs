@@ -74,6 +74,47 @@ fn separable_shape_uses_both_kernel_lengths_and_signal_matrix() {
 }
 
 #[test]
+fn separable_numeric_and_logical_scalar_signals_are_not_text_selectors() {
+    let column = numeric(NumericClass::Double, NumericDomain::Real, &[2, 1]);
+    let row = numeric(NumericClass::Double, NumericDomain::Real, &[1, 2]);
+    for signal in [
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+        ValueFact::scalar(ValueKindFact::Logical),
+    ] {
+        let result = inference::infer(
+            &request(
+                vec![column.clone(), row.clone(), signal],
+                vec![LiteralValue::Unknown; 3],
+            ),
+            &CONV2_CATALOG_ENTRY,
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(
+            result.outputs[0].shape,
+            ShapeFact::from(vec![Some(2), Some(2)])
+        );
+    }
+}
+
+#[test]
+fn empty_direct_full_has_canonical_empty_matrix_shape() {
+    let left = numeric(NumericClass::Double, NumericDomain::Real, &[0, 1]);
+    let right = numeric(NumericClass::Double, NumericDomain::Real, &[1, 3]);
+    let result = inference::infer(
+        &request(vec![left, right], vec![LiteralValue::Unknown; 2]),
+        &CONV2_CATALOG_ENTRY,
+    );
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(0), Some(0)])
+    );
+}
+
+#[test]
 fn malformed_selector_or_kernel_geometry_cannot_prove_output() {
     let matrix = numeric(NumericClass::Double, NumericDomain::Real, &[2, 2]);
     let signal = numeric(NumericClass::Double, NumericDomain::Real, &[4, 4]);

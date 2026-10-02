@@ -141,7 +141,12 @@ async fn conv2_builtin(
             }
             let left = convert_matrix(a, "conv2", "A").await?;
             let right = convert_matrix(b, "conv2", "B").await?;
-            if mode == Conv2Mode::Full && left.cols == 1 && right.rows == 1 {
+            if mode == Conv2Mode::Full
+                && !left.is_empty()
+                && !right.is_empty()
+                && left.cols == 1
+                && right.rows == 1
+            {
                 let result =
                     outer_product(&left.data, &right.data, single_output, &mut cooperation).await?;
                 let output = matrix_to_value(result, single_output, complex_output)?;
@@ -410,22 +415,30 @@ impl Matrix {
 }
 
 fn extract_mode(extras: &mut Vec<Value>) -> BuiltinResult<Conv2Mode> {
-    if let Some(mode) = extras
-        .last()
-        .and_then(|last| parse_mode_value(last).transpose())
-        .transpose()?
-    {
-        extras.pop();
-        return Ok(mode);
+    if let Some(last) = extras.last() {
+        if let Some(mode) = parse_mode_value(last)? {
+            extras.pop();
+            return Ok(mode);
+        }
     }
     Ok(Conv2Mode::Full)
 }
 
 fn parse_mode_value(value: &Value) -> BuiltinResult<Option<Conv2Mode>> {
-    let Some(text) = tensor::value_to_string(value) else {
-        return Ok(None);
+    let text = match value {
+        Value::String(text) => text.as_str(),
+        Value::StringArray(array) if array.data.len() == 1 => array.data[0].as_str(),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            return Conv2Mode::decode(&chars.data.iter().collect::<String>())
+                .map(Some)
+                .ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID));
+        }
+        Value::StringArray(_) | Value::CharArray(_) => {
+            return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID));
+        }
+        _ => return Ok(None),
     };
-    let mode = Conv2Mode::decode(&text).ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID))?;
+    let mode = Conv2Mode::decode(text).ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID))?;
     Ok(Some(mode))
 }
 
@@ -1147,6 +1160,44 @@ pub(crate) mod tests {
         let explicit =
             conv2_builtin(kernel, Value::Tensor(signal), vec![Value::from("same")]).unwrap();
         assert_eq!(separable, explicit);
+    }
+
+    #[test]
+    fn conv2_separable_numeric_and_logical_scalar_signal_are_not_shape_text() {
+        let column = tensor_from_rows(2, 1, &[1.0, 2.0]);
+        let row = tensor_from_rows(1, 2, &[1.0, 3.0]);
+        for (signal, expected) in [
+            (Value::Num(2.0), vec![2.0, 4.0, 6.0, 12.0]),
+            (Value::Bool(true), vec![1.0, 2.0, 3.0, 6.0]),
+        ] {
+            let output = conv2_builtin(
+                Value::Tensor(column.clone()),
+                Value::Tensor(row.clone()),
+                vec![signal],
+            )
+            .expect("scalar separable signal");
+            let output = test_support::gather(output).expect("host result");
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.materialize_f64(), expected);
+        }
+        let error = conv2_builtin(
+            Value::Tensor(column),
+            Value::Tensor(row),
+            vec![Value::from("circular")],
+        )
+        .expect_err("malformed text remains a shape error");
+        assert_eq!(error.identifier(), CONV2_ERROR_SHAPE_INVALID.identifier);
+    }
+
+    #[test]
+    fn conv2_empty_direct_full_does_not_take_outer_product_shortcut() {
+        let left = Tensor::new(Vec::new(), vec![0, 1]).expect("empty column");
+        let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).expect("row");
+        let output = conv2_builtin(Value::Tensor(left), Value::Tensor(right), Vec::new())
+            .expect("empty full result");
+        let output = test_support::gather(output).expect("host result");
+        assert_eq!(output.shape, vec![0, 0]);
+        assert!(output.materialize_f64().is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
