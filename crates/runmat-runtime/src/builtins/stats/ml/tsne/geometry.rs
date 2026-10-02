@@ -142,9 +142,9 @@ pub(super) async fn apply_pca_if_requested(
     }
     let eig = SymmetricEigen::new(cov);
     let mut order: Vec<(usize, f64)> = Vec::new();
-    order
-        .try_reserve_exact(p)
-        .map_err(|_| invalid("tsne: PCA ordering exceeds available memory"))?;
+    order.try_reserve_exact(p).map_err(|source| {
+        super::internal_with_source("tsne: PCA ordering exceeds available memory", source)
+    })?;
     for idx in 0..p {
         order.push((idx, eig.eigenvalues[idx]));
         cooperation.completed(1).await?;

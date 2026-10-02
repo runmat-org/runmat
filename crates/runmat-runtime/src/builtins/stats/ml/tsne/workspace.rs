@@ -1,21 +1,8 @@
 //! Checked, cooperatively filled dense workspaces for t-SNE geometry.
 
-use super::{build_runtime_error, cooperation::TsneCooperation, ERROR_INTERNAL, NAME};
+use super::{build_runtime_error, cooperation::TsneCooperation, internal_with_source, NAME};
 use crate::BuiltinResult;
 use nalgebra::DMatrix;
-
-fn allocation_error(
-    message: &'static str,
-    source: std::collections::TryReserveError,
-) -> crate::RuntimeError {
-    let mut builder = build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_source(source);
-    if let Some(identifier) = ERROR_INTERNAL.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
 
 pub(super) async fn zero_matrix(
     rows: usize,
@@ -29,7 +16,7 @@ pub(super) async fn zero_matrix(
     })?;
     let mut values = Vec::new();
     values.try_reserve_exact(count).map_err(|source| {
-        allocation_error("tsne: matrix workspace exceeds available memory", source)
+        internal_with_source("tsne: matrix workspace exceeds available memory", source)
     })?;
     for _ in 0..count {
         values.push(0.0);
@@ -50,7 +37,7 @@ pub(super) async fn zero_rows(
     })?;
     let mut output = Vec::new();
     output.try_reserve_exact(rows).map_err(|source| {
-        allocation_error(
+        internal_with_source(
             "tsne: projected observations exceed available memory",
             source,
         )
@@ -58,7 +45,7 @@ pub(super) async fn zero_rows(
     for _ in 0..rows {
         let mut values = Vec::new();
         values.try_reserve_exact(cols).map_err(|source| {
-            allocation_error("tsne: projected features exceed available memory", source)
+            internal_with_source("tsne: projected features exceed available memory", source)
         })?;
         for _ in 0..cols {
             values.push(0.0);

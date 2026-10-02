@@ -355,9 +355,9 @@ async fn row_ranks(
     cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     let mut ranks = Vec::new();
-    ranks
-        .try_reserve_exact(rows.len())
-        .map_err(|_| invalid("tsne: rank rows exceed available memory"))?;
+    ranks.try_reserve_exact(rows.len()).map_err(|source| {
+        super::internal_with_source("tsne: rank rows exceed available memory", source)
+    })?;
     for row in rows {
         ranks.push(tied_ranks(row, cooperation).await?);
         cooperation.completed(1).await?;
@@ -370,9 +370,9 @@ async fn tied_ranks(
     cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let mut order = Vec::new();
-    order
-        .try_reserve_exact(values.len())
-        .map_err(|_| invalid("tsne: rank ordering exceeds available memory"))?;
+    order.try_reserve_exact(values.len()).map_err(|source| {
+        super::internal_with_source("tsne: rank ordering exceeds available memory", source)
+    })?;
     for (index, value) in values.iter().copied().enumerate() {
         order.push((index, value));
         cooperation.completed(1).await?;
@@ -383,9 +383,9 @@ async fn tied_ranks(
         })
         .await?;
     let mut ranks = Vec::new();
-    ranks
-        .try_reserve_exact(values.len())
-        .map_err(|_| invalid("tsne: ranks exceed available memory"))?;
+    ranks.try_reserve_exact(values.len()).map_err(|source| {
+        super::internal_with_source("tsne: ranks exceed available memory", source)
+    })?;
     for _ in values {
         ranks.push(0.0);
         cooperation.completed(1).await?;

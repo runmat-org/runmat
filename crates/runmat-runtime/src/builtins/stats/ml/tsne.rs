@@ -58,6 +58,19 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     tsne_error(message, &ERROR_INTERNAL)
 }
 
+fn internal_with_source(
+    message: impl Into<String>,
+    source: std::collections::TryReserveError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_source(source);
+    if let Some(identifier) = ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn with_tsne_context(mut error: RuntimeError) -> RuntimeError {
     if error.context.builtin.is_none() {
         error.context = error.context.with_builtin(NAME);
