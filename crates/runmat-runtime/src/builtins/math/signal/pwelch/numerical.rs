@@ -1,12 +1,18 @@
 use super::*;
 
-pub(super) fn compute_pwelch(
+pub(super) async fn compute_pwelch(
     columns: &[Vec<Complex<f64>>],
     options: &PwelchOptions,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PwelchEvaluation> {
+    cooperation.completed(0).await?;
     let window_len = options.window.len();
     let step = window_len - options.noverlap;
-    let scale = options.window.iter().map(|v| v * v).sum::<f64>();
+    let mut scale = 0.0;
+    for value in &options.window {
+        scale += value * value;
+        cooperation.completed(1).await?;
+    }
     if scale <= 0.0 || !scale.is_finite() {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }
@@ -26,6 +32,7 @@ pub(super) fn compute_pwelch(
     let mut selected_f = Vec::new();
 
     for column in columns {
+        cooperation.completed(0).await?;
         let selected = match (&options.grid, &mut fft_plan) {
             (FrequencyGrid::Uniform { nfft }, Some((fft, buffer))) => {
                 let accum = column_uniform_periodogram(
@@ -36,8 +43,10 @@ pub(super) fn compute_pwelch(
                     *nfft,
                     fft,
                     buffer,
-                );
-                select_range(accum, *nfft, options.fs, options.range)
+                    cooperation,
+                )
+                .await?;
+                select_range(accum, *nfft, options.fs, options.range, cooperation).await?
             }
             (FrequencyGrid::Explicit { frequencies }, None) => {
                 column_explicit_frequency_periodogram(
@@ -47,7 +56,9 @@ pub(super) fn compute_pwelch(
                     density_scale,
                     frequencies,
                     options.fs,
+                    cooperation,
                 )
+                .await?
             }
             _ => return Err(pwelch_error(&PWELCH_ERROR_INTERNAL)),
         };
@@ -60,6 +71,7 @@ pub(super) fn compute_pwelch(
     let cols = selected_columns.len();
     let mut pxx = Vec::with_capacity(rows * cols);
     for column in selected_columns {
+        cooperation.completed(column.len() as u64).await?;
         pxx.extend(column);
     }
     Ok(PwelchEvaluation {
@@ -69,7 +81,7 @@ pub(super) fn compute_pwelch(
     })
 }
 
-pub(super) fn column_uniform_periodogram(
+pub(super) async fn column_uniform_periodogram(
     column: &[Complex<f64>],
     window: &[f64],
     step: usize,
@@ -77,42 +89,53 @@ pub(super) fn column_uniform_periodogram(
     nfft: usize,
     fft: &std::sync::Arc<dyn rustfft::Fft<f64>>,
     buffer: &mut [Complex<f64>],
-) -> Vec<f64> {
-    let starts = segment_starts(column.len(), window.len(), step);
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    let starts = segment_starts(column.len(), window.len(), step, cooperation).await?;
     let mut accum = vec![0.0; nfft];
     for &start in &starts {
+        cooperation.completed(0).await?;
         buffer.fill(Complex::new(0.0, 0.0));
+        cooperation.completed(buffer.len() as u64).await?;
         for idx in 0..window.len() {
             let sample = column
                 .get(start + idx)
                 .copied()
                 .unwrap_or_else(|| Complex::new(0.0, 0.0));
             buffer[idx] = sample * window[idx];
+            cooperation.completed(1).await?;
         }
+        // RustFFT is a synchronous leaf; cancellation is checked on both sides.
+        cooperation.completed(0).await?;
         fft.process(buffer);
+        cooperation.completed(buffer.len() as u64).await?;
         for (dst, value) in accum.iter_mut().zip(buffer.iter()) {
             *dst += value.norm_sqr() / density_scale;
+            cooperation.completed(1).await?;
         }
     }
     let segment_count = starts.len() as f64;
     for value in &mut accum {
         *value /= segment_count;
+        cooperation.completed(1).await?;
     }
-    accum
+    Ok(accum)
 }
 
-pub(super) fn column_explicit_frequency_periodogram(
+pub(super) async fn column_explicit_frequency_periodogram(
     column: &[Complex<f64>],
     window: &[f64],
     step: usize,
     density_scale: f64,
     frequencies: &[f64],
     fs: Option<f64>,
-) -> PwelchEvaluation {
-    let starts = segment_starts(column.len(), window.len(), step);
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<PwelchEvaluation> {
+    let starts = segment_starts(column.len(), window.len(), step, cooperation).await?;
     let mut pxx = vec![0.0; frequencies.len()];
     let fs_scale = fs.map(|fs| 2.0 * std::f64::consts::PI / fs);
     for &start in &starts {
+        cooperation.completed(0).await?;
         for (freq_idx, &frequency) in frequencies.iter().enumerate() {
             let omega = fs_scale.map_or(frequency, |scale| frequency * scale);
             let mut sum = Complex::new(0.0, 0.0);
@@ -124,51 +147,60 @@ pub(super) fn column_explicit_frequency_periodogram(
                 let phase = -omega * idx as f64;
                 let twiddle = Complex::new(phase.cos(), phase.sin());
                 sum += sample * window[idx] * twiddle;
+                cooperation.completed(1).await?;
             }
             pxx[freq_idx] += sum.norm_sqr() / density_scale;
+            cooperation.completed(1).await?;
         }
     }
     let segment_count = starts.len() as f64;
     for value in &mut pxx {
         *value /= segment_count;
+        cooperation.completed(1).await?;
     }
-    PwelchEvaluation {
+    Ok(PwelchEvaluation {
         pxx,
         f: frequencies.to_vec(),
         columns: 1,
-    }
+    })
 }
 
-pub(super) fn select_range(
+pub(super) async fn select_range(
     mut power: Vec<f64>,
     nfft: usize,
     fs: Option<f64>,
     range: FrequencyRange,
-) -> PwelchEvaluation {
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<PwelchEvaluation> {
     let freq_scale = fs.unwrap_or(2.0 * std::f64::consts::PI);
     match range {
         FrequencyRange::Twosided => {
-            let f = (0..nfft)
-                .map(|idx| freq_scale * idx as f64 / nfft as f64)
-                .collect();
-            PwelchEvaluation {
+            let mut f = Vec::with_capacity(nfft);
+            for idx in 0..nfft {
+                f.push(freq_scale * idx as f64 / nfft as f64);
+                cooperation.completed(1).await?;
+            }
+            Ok(PwelchEvaluation {
                 pxx: power,
                 f,
                 columns: 1,
-            }
+            })
         }
         FrequencyRange::Centered => {
             let shift = nfft.div_ceil(2);
             power.rotate_left(shift);
+            cooperation.completed(nfft as u64).await?;
             let offset = nfft / 2;
-            let f = (0..nfft)
-                .map(|idx| freq_scale * (idx as f64 - offset as f64) / nfft as f64)
-                .collect();
-            PwelchEvaluation {
+            let mut f = Vec::with_capacity(nfft);
+            for idx in 0..nfft {
+                f.push(freq_scale * (idx as f64 - offset as f64) / nfft as f64);
+                cooperation.completed(1).await?;
+            }
+            Ok(PwelchEvaluation {
                 pxx: power,
                 f,
                 columns: 1,
-            }
+            })
         }
         FrequencyRange::Onesided => {
             let len = nfft / 2 + 1;
@@ -180,17 +212,27 @@ pub(super) fn select_range(
                 if !is_dc && !is_nyquist {
                     *value *= 2.0;
                 }
+                cooperation.completed(1).await?;
             }
-            let f = (0..len)
-                .map(|idx| freq_scale * idx as f64 / nfft as f64)
-                .collect();
-            PwelchEvaluation { pxx, f, columns: 1 }
+            let mut f = Vec::with_capacity(len);
+            for idx in 0..len {
+                f.push(freq_scale * idx as f64 / nfft as f64);
+                cooperation.completed(1).await?;
+            }
+            Ok(PwelchEvaluation { pxx, f, columns: 1 })
         }
     }
 }
 
-pub(super) fn frequency_vector(nfft: usize, fs: Option<f64>, range: FrequencyRange) -> Vec<f64> {
-    select_range(vec![0.0; nfft], nfft, fs, range).f
+pub(super) async fn frequency_vector(
+    nfft: usize,
+    fs: Option<f64>,
+    range: FrequencyRange,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    Ok(select_range(vec![0.0; nfft], nfft, fs, range, cooperation)
+        .await?
+        .f)
 }
 
 pub(super) fn gpu_range(range: FrequencyRange) -> ProviderSpectralRange {
@@ -201,20 +243,27 @@ pub(super) fn gpu_range(range: FrequencyRange) -> ProviderSpectralRange {
     }
 }
 
-pub(super) fn segment_starts(signal_len: usize, window_len: usize, step: usize) -> Vec<usize> {
+pub(super) async fn segment_starts(
+    signal_len: usize,
+    window_len: usize,
+    step: usize,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<usize>> {
+    cooperation.completed(0).await?;
     if signal_len <= window_len {
-        return vec![0];
+        return Ok(vec![0]);
     }
     let mut starts = Vec::new();
     let mut start = 0usize;
     while start + window_len <= signal_len {
         starts.push(start);
         start += step;
+        cooperation.completed(1).await?;
     }
     if starts.is_empty() {
         starts.push(0);
     }
-    starts
+    Ok(starts)
 }
 
 pub(super) fn default_window(input_len: usize) -> Vec<f64> {
@@ -227,13 +276,25 @@ pub(super) fn default_window(input_len: usize) -> Vec<f64> {
 }
 
 pub(super) fn hamming_window(len: usize) -> Vec<f64> {
-    if len == 1 {
-        return vec![1.0];
+    (0..len).map(|idx| hamming_coefficient(idx, len)).collect()
+}
+
+pub(super) async fn cooperative_hamming_window(
+    len: usize,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<f64>> {
+    let mut values = Vec::with_capacity(len);
+    for idx in 0..len {
+        values.push(hamming_coefficient(idx, len));
+        cooperation.completed(1).await?;
     }
-    (0..len)
-        .map(|idx| {
-            let phase = 2.0 * std::f64::consts::PI * idx as f64 / (len - 1) as f64;
-            0.54 - 0.46 * phase.cos()
-        })
-        .collect()
+    Ok(values)
+}
+
+fn hamming_coefficient(idx: usize, len: usize) -> f64 {
+    if len == 1 {
+        return 1.0;
+    }
+    let phase = 2.0 * std::f64::consts::PI * idx as f64 / (len - 1) as f64;
+    0.54 - 0.46 * phase.cos()
 }

@@ -17,15 +17,21 @@ pub(super) async fn output_gpu(
     cols: usize,
     options: &PwelchOptions,
     protected: &[&runmat_accelerate_api::GpuTensorHandle],
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Option<Value>> {
+    cooperation.completed(0).await?;
     let FrequencyGrid::Uniform { nfft } = options.grid else {
         return Ok(None);
     };
     let window_len = options.window.len();
     let step = window_len - options.noverlap;
-    let starts = segment_starts(rows, window_len, step);
+    let starts = segment_starts(rows, window_len, step, cooperation).await?;
     let segment_count = starts.len();
-    let window_energy = options.window.iter().map(|v| v * v).sum::<f64>();
+    let mut window_energy = 0.0;
+    for value in &options.window {
+        window_energy += value * value;
+        cooperation.completed(1).await?;
+    }
     if window_energy <= 0.0 || !window_energy.is_finite() {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }
@@ -71,6 +77,7 @@ pub(super) async fn output_gpu(
             ))
         }
     };
+    cooperation.completed(0).await?;
     let output_error = || {
         pwelch_error_with_detail(
             &PWELCH_ERROR_INTERNAL,
@@ -104,6 +111,7 @@ pub(super) async fn output_gpu(
         Ok(ps_mean) => ps_mean,
         Err(err) => return Err(preparation_failure(err)),
     };
+    cooperation.completed(0).await?;
     contract.shape = vec![estimate.rows, 1, cols];
     let mut protected_mean = vec![&estimate.s];
     if segment_count > 1 {
@@ -135,7 +143,7 @@ pub(super) async fn output_gpu(
         if out_count == 1 {
             return Ok(Some(Value::OutputList(vec![pxx])));
         }
-        let f_values = frequency_vector(nfft, options.fs, options.range);
+        let f_values = frequency_vector(nfft, options.fs, options.range, cooperation).await?;
         let f_shape = [estimate.rows, 1usize];
         let f = SignalPrecision::of_handle(handle)
             .real(f_values, f_shape.to_vec())

@@ -605,3 +605,110 @@ fn pwelch_rejects_invalid_overlap() {
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:pwelch:InvalidOverlap"));
 }
+
+mod cooperation_tests {
+    use super::*;
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use futures::task::noop_waker;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::cell::Cell;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
+
+    struct PendingTurn(Rc<Cell<usize>>);
+    impl Future for PendingTurn {
+        type Output = Result<(), ExecutionServiceError>;
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+    impl Drop for PendingTurn {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    #[test]
+    fn pending_window_generation_drop_and_cancel_never_publish() {
+        for cancel in [false, true] {
+            let source = CancellationSource::new();
+            let dropped = Rc::new(Cell::new(0));
+            let count = dropped.clone();
+            let budget = CpuCooperationBudget::with_test_turn(
+                CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(4).unwrap()),
+                source.token(),
+                move || Box::pin(PendingTurn(count.clone())),
+            );
+            let mut cooperation = SignalCooperation::with_budget(budget, BUILTIN_NAME);
+            let mut future = Box::pin(cooperative_hamming_window(64, &mut cooperation));
+            let waker = noop_waker();
+            let mut context = Context::from_waker(&waker);
+            assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+            if cancel {
+                source.cancel(CancellationReason::User);
+                let Poll::Ready(Err(error)) = future.as_mut().poll(&mut context) else {
+                    panic!("cancelled window generation must not publish a window");
+                };
+                assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+                assert!(matches!(
+                    error
+                        .source
+                        .as_deref()
+                        .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+                    Some(ExecutionServiceError::Cancelled)
+                ));
+            }
+            drop(future);
+            assert_eq!(dropped.get(), 1);
+        }
+    }
+
+    #[test]
+    fn invocation_service_failure_keeps_cause_and_ready_value_matches_direct_call() {
+        let signal = Value::Tensor(Tensor::new(vec![1.0; 16], vec![1, 16]).unwrap());
+        let args = [Value::Num(8.0), Value::Num(4.0), Value::Num(8.0)];
+        let expected = call(signal.clone(), &args, None).unwrap();
+        let source = CancellationSource::new();
+        let ready_budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            || Box::pin(async { Ok(()) }),
+        );
+        let actual = block_on(evaluate_with_cooperation(
+            signal.clone(),
+            &args,
+            &mut SignalCooperation::with_budget(ready_budget, BUILTIN_NAME),
+        ))
+        .unwrap();
+        let (Value::Tensor(expected), Value::Tensor(actual)) = (expected, actual) else {
+            panic!("expected real PSD tensors");
+        };
+        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.materialize_f64(), expected.materialize_f64());
+
+        let failure_budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            || Box::pin(async { Err(ExecutionServiceError::Infrastructure("turn failed".into())) }),
+        );
+        let error = block_on(evaluate_with_cooperation(
+            signal,
+            &args,
+            &mut SignalCooperation::with_budget(failure_budget, BUILTIN_NAME),
+        ))
+        .unwrap_err();
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(matches!(
+            error
+                .source
+                .as_deref()
+                .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+            Some(ExecutionServiceError::Infrastructure(_))
+        ));
+    }
+}

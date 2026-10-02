@@ -1,6 +1,10 @@
 use super::*;
 
-pub(super) async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
+pub(super) async fn value_to_signal_columns(
+    value: Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<SignalColumns> {
+    cooperation.completed(0).await?;
     match value {
         Value::GpuTensor(handle) => {
             let provider = super::super::resident_output::owner(&handle, || {
@@ -11,32 +15,40 @@ pub(super) async fn value_to_signal_columns(value: Value) -> BuiltinResult<Signa
                     provider, &handle,
                 )
                 .await?;
+            cooperation.completed(0).await?;
             match value {
-                Value::Tensor(tensor) => tensor_to_signal_columns(tensor),
-                Value::ComplexTensor(tensor) => complex_tensor_to_signal_columns(tensor),
+                Value::Tensor(tensor) => tensor_to_signal_columns(tensor, cooperation).await,
+                Value::ComplexTensor(tensor) => {
+                    complex_tensor_to_signal_columns(tensor, cooperation).await
+                }
                 Value::LogicalArray(logical) => {
                     let tensor = crate::builtins::common::tensor::logical_to_tensor(&logical)
                         .map_err(|err| {
                             pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err)
                         })?;
-                    tensor_to_signal_columns(tensor)
+                    tensor_to_signal_columns(tensor, cooperation).await
                 }
-                Value::Num(value) => tensor_to_signal_columns(
-                    Tensor::new(vec![value], handle.shape().to_vec())
-                        .map_err(|cause| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, cause))?,
-                ),
+                Value::Num(value) => {
+                    tensor_to_signal_columns(
+                        Tensor::new(vec![value], handle.shape().to_vec()).map_err(|cause| {
+                            pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, cause)
+                        })?,
+                        cooperation,
+                    )
+                    .await
+                }
                 other => Err(pwelch_error_with_detail(
                     &PWELCH_ERROR_INVALID_SIGNAL,
                     format!("unexpected downloaded signal {other:?}"),
                 )),
             }
         }
-        Value::Tensor(tensor) => tensor_to_signal_columns(tensor),
-        Value::ComplexTensor(tensor) => complex_tensor_to_signal_columns(tensor),
+        Value::Tensor(tensor) => tensor_to_signal_columns(tensor, cooperation).await,
+        Value::ComplexTensor(tensor) => complex_tensor_to_signal_columns(tensor, cooperation).await,
         Value::LogicalArray(logical) => {
             let tensor = crate::builtins::common::tensor::logical_to_tensor(&logical)
                 .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err))?;
-            tensor_to_signal_columns(tensor)
+            tensor_to_signal_columns(tensor, cooperation).await
         }
         Value::Num(n) => Ok(SignalColumns {
             columns: vec![vec![Complex::new(n, 0.0)]],
@@ -73,7 +85,10 @@ pub(super) async fn value_to_signal_columns(value: Value) -> BuiltinResult<Signa
     }
 }
 
-pub(super) fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
+pub(super) async fn tensor_to_signal_columns(
+    tensor: Tensor,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<SignalColumns> {
     if tensor.shape.len() > 2 {
         return Err(pwelch_error_with_detail(
             &PWELCH_ERROR_INVALID_SIGNAL,
@@ -84,12 +99,17 @@ pub(super) fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalCo
     let cols = tensor.cols();
     let output_precision = SignalPrecision::from_numeric_dtype(tensor.numeric_dtype());
     if rows == 1 || cols == 1 {
-        let values = tensor_utils::tensor_into_values_f64(tensor);
+        let len = tensor_utils::tensor_element_len(&tensor);
+        let mut values = Vec::with_capacity(len);
+        for index in 0..len {
+            values.push(Complex::new(
+                tensor_utils::tensor_value_f64(&tensor, index),
+                0.0,
+            ));
+            cooperation.completed(1).await?;
+        }
         return Ok(SignalColumns {
-            columns: vec![values
-                .into_iter()
-                .map(|value| Complex::new(value, 0.0))
-                .collect()],
+            columns: vec![values],
             rows: rows.max(cols),
             cols: 1,
             is_complex: false,
@@ -104,6 +124,7 @@ pub(super) fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalCo
                 tensor_utils::tensor_value_f64(&tensor, row + col * rows),
                 0.0,
             ));
+            cooperation.completed(1).await?;
         }
         columns.push(column);
     }
@@ -116,8 +137,9 @@ pub(super) fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalCo
     })
 }
 
-pub(super) fn complex_tensor_to_signal_columns(
+pub(super) async fn complex_tensor_to_signal_columns(
     tensor: runmat_value::ComplexTensor,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<SignalColumns> {
     if tensor.shape.len() > 2 {
         return Err(pwelch_error_with_detail(
@@ -129,13 +151,18 @@ pub(super) fn complex_tensor_to_signal_columns(
     let cols = tensor.cols;
     let output_precision = SignalPrecision::from_numeric_dtype(tensor.numeric_dtype());
     let is_complex = true;
-    let values = tensor.materialize_f64();
     if rows == 1 || cols == 1 {
+        let len = rows.max(cols);
+        let mut values = Vec::with_capacity(len);
+        for index in 0..len {
+            let (re, im) = tensor
+                .numeric_value_at(index)
+                .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+            values.push(Complex::new(scalar_f64(re), scalar_f64(im)));
+            cooperation.completed(1).await?;
+        }
         return Ok(SignalColumns {
-            columns: vec![values
-                .into_iter()
-                .map(|(re, im)| Complex::new(re, im))
-                .collect()],
+            columns: vec![values],
             rows: rows.max(cols),
             cols: 1,
             is_complex,
@@ -146,8 +173,11 @@ pub(super) fn complex_tensor_to_signal_columns(
     for col in 0..cols {
         let mut column = Vec::with_capacity(rows);
         for row in 0..rows {
-            let (re, im) = values[row + col * rows];
-            column.push(Complex::new(re, im));
+            let (re, im) = tensor
+                .numeric_value_at(row + col * rows)
+                .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+            column.push(Complex::new(scalar_f64(re), scalar_f64(im)));
+            cooperation.completed(1).await?;
         }
         columns.push(column);
     }
@@ -158,4 +188,15 @@ pub(super) fn complex_tensor_to_signal_columns(
         is_complex,
         output_precision,
     })
+}
+
+fn scalar_f64(value: runmat_value::NumericScalar) -> f64 {
+    match value {
+        runmat_value::NumericScalar::F64(value) => value,
+        runmat_value::NumericScalar::F32(value) => f64::from(value),
+        value => value
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .to_f64(),
+    }
 }

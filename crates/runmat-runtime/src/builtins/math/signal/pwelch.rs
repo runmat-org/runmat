@@ -24,6 +24,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::signal::common::output_precision::SignalPrecision;
 use crate::builtins::math::signal::common::{
     gpu_matrix_shape, parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector,
+    SignalCooperation,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -139,13 +140,36 @@ fn pwelch_error_with_message(
 #[runtime_builtin(
     name = "pwelch",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::pwelch"
 )]
-async fn pwelch_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(x, &rest).await
+async fn pwelch_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    evaluate_in_runtime(runtime.as_ref(), x, &rest).await
 }
 
 pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
+    evaluate_in_runtime(None, x, rest).await
+}
+
+async fn evaluate_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    x: Value,
+    rest: &[Value],
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    evaluate_with_cooperation(x, rest, &mut cooperation).await
+}
+
+async fn evaluate_with_cooperation(
+    x: Value,
+    rest: &[Value],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    cooperation.completed(0).await?;
     if rest.len() > 7 {
         return Err(pwelch_error(&PWELCH_ERROR_ARG_COUNT));
     }
@@ -157,7 +181,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest.iter().take(4) {
         ensure_pwelch_class_boundary(value, &PWELCH_INTEGER_CONTROL_EXTENSION)?;
     }
-    let mut prepared_controls = preflight_host_controls(rest).await?;
+    let mut prepared_controls = preflight_host_controls(rest, cooperation).await?;
     // All borrowed operands must be admitted before exactness checks or parsers
     // can download any one of them.
     let resident_inputs = std::iter::once(&x)
@@ -177,8 +201,11 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         .iter()
         .map(|handle| runmat_accelerate_api::ResidencyRestoreGuard::new(handle))
         .collect::<Vec<_>>();
+    cooperation.completed(0).await?;
     ensure_pwelch_integer_boundary(&x, "signal", &PWELCH_ERROR_INVALID_SIGNAL).await?;
-    let materialized_controls = materialize_resident_controls(rest).await?;
+    cooperation.completed(0).await?;
+    let materialized_controls =
+        materialize_resident_controls(rest, &mut prepared_controls, cooperation).await?;
     let controls = rest
         .iter()
         .zip(&materialized_controls)
@@ -209,8 +236,17 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err.message()))?;
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-        let options = parse_options(&controls, rows, complex_input, &mut prepared_controls).await?;
-        if let Some(value) = output_gpu(handle, rows, cols, &options, &protected).await? {
+        let options = parse_options(
+            &controls,
+            rows,
+            complex_input,
+            &mut prepared_controls,
+            cooperation,
+        )
+        .await?;
+        if let Some(value) =
+            output_gpu(handle, rows, cols, &options, &protected, cooperation).await?
+        {
             return Ok(value);
         }
         Some(options)
@@ -219,7 +255,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     };
     drop(_preflight_guards);
     drop(resident_inputs);
-    let input = value_to_signal_columns(x).await?;
+    let input = value_to_signal_columns(x, cooperation).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
     }
@@ -231,11 +267,12 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
                 input.rows,
                 input.is_complex,
                 &mut prepared_controls,
+                cooperation,
             )
             .await?
         }
     };
-    let eval = compute_pwelch(&input.columns, &options)?;
+    let eval = compute_pwelch(&input.columns, &options, cooperation).await?;
     let output = output_eval(eval, input.output_precision)?;
     match source_handle.as_ref() {
         Some(source) => super::resident_output::restore(source, output, BUILTIN_NAME, &protected),
