@@ -9,6 +9,35 @@ use runmat_value::{IntegerStorage, StructValue};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
+fn registered_tsne_preserves_pre_entry_cancellation_cause() {
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::rc::Rc;
+
+    let source = CancellationSource::new();
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        source.token(),
+    );
+    source.cancel(CancellationReason::User);
+    let error = futures::executor::block_on(tsne_builtin_registered(
+        Some(runtime),
+        tensor(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]),
+        Vec::new(),
+    ))
+    .expect_err("cancelled invocation must not prepare observations");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
+    assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+}
+
+#[test]
 fn observation_materialization_yields_and_cancels_before_solver() {
     use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
     use runmat_execution::cancellation::CancellationSource;

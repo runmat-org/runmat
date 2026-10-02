@@ -25,6 +25,14 @@ fn registered_kmeans_observes_its_invocation_cancellation_before_materialization
     ))
     .expect_err("cancelled invocation must not prepare observations");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
+    assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
 }
 
 #[test]
