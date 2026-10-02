@@ -14,7 +14,7 @@ fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>, outputs: usiz
 }
 
 #[test]
-fn finite_scalar_bounds_prove_host_double_result() {
+fn unknown_callback_does_not_prove_real_or_complex_result() {
     let call = request(
         vec![
             ValueFact::unknown(DynamicReason::RuntimeValue),
@@ -26,12 +26,7 @@ fn finite_scalar_bounds_prove_host_double_result() {
     );
     let inferred = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
     assert!(inferred.diagnostics.is_empty());
-    assert_eq!(
-        inferred.outputs[0].numeric().unwrap().class,
-        NumericClass::Double
-    );
-    assert_eq!(inferred.outputs[0].shape, ShapeFact::Scalar);
-    assert_eq!(inferred.outputs[0].residency, ResidencyFact::Host);
+    assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Unknown));
 }
 
 #[test]
@@ -54,20 +49,19 @@ fn infinite_real_bound_is_admitted_but_nan_bound_is_diagnostic() {
     };
     let improper = inference::infer(&call(f64::INFINITY), &INTEGRAL_CATALOG_ENTRY);
     assert!(improper.diagnostics.is_empty());
-    assert_eq!(
-        improper.outputs[0].numeric().unwrap().class,
-        NumericClass::Double
-    );
+    assert!(matches!(improper.outputs[0].kind, ValueKindFact::Unknown));
     let invalid = inference::infer(&call(f64::NAN), &INTEGRAL_CATALOG_ENTRY);
-    assert!(invalid
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-BOUND"));
+    assert!(
+        invalid
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-BOUND")
+    );
     assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
 }
 
 #[test]
-fn invalid_complex_bound_and_incomplete_option_pairs_do_not_prove_success() {
+fn complex_bound_and_incomplete_option_pairs_do_not_prove_success() {
     let mut call = request(
         vec![
             ValueFact::unknown(DynamicReason::RuntimeValue),
@@ -92,10 +86,7 @@ fn invalid_complex_bound_and_incomplete_option_pairs_do_not_prove_success() {
     call.literals.literal_args.push(LiteralValue::Unknown);
     let valid = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
     assert!(valid.diagnostics.is_empty());
-    assert_eq!(
-        valid.outputs[0].numeric().unwrap().class,
-        NumericClass::Double
-    );
+    assert!(matches!(valid.outputs[0].kind, ValueKindFact::Unknown));
 }
 
 #[test]
@@ -122,17 +113,16 @@ fn interval_count_is_a_positive_structural_control_not_an_evaluation_alias() {
         )
     };
     let invalid = inference::infer(&call(0), &INTEGRAL_CATALOG_ENTRY);
-    assert!(invalid
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE"));
+    assert!(
+        invalid
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE")
+    );
     assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
     let valid = inference::infer(&call(1), &INTEGRAL_CATALOG_ENTRY);
     assert!(valid.diagnostics.is_empty());
-    assert_eq!(
-        valid.outputs[0].numeric().unwrap().class,
-        NumericClass::Double
-    );
+    assert!(matches!(valid.outputs[0].kind, ValueKindFact::Unknown));
 }
 
 #[test]
@@ -180,24 +170,18 @@ fn callback_capability_is_transitive() {
     }));
     let inferred = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
     assert!(inferred.diagnostics.is_empty());
-    assert!(inferred
-        .capabilities
-        .0
-        .contains(&CapabilityRequirement::Filesystem));
+    assert!(
+        inferred
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Filesystem)
+    );
 }
 
 #[test]
 fn known_invalid_callback_result_never_proves_a_scalar_integral() {
     let real = scalar(NumericClass::Double, NumericDomain::Real);
-    let mut vector = real.clone();
-    vector.shape = ShapeFact::Shaped {
-        dims: vec![DimensionFact::Known(1), DimensionFact::Known(2)],
-    };
-    for output in [
-        ValueFact::scalar(ValueKindFact::String),
-        scalar(NumericClass::Double, NumericDomain::Complex),
-        vector,
-    ] {
+    for output in [ValueFact::scalar(ValueKindFact::String)] {
         let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
             identity: None,
             capabilities: CapabilitySet::default(),
@@ -212,12 +196,58 @@ fn known_invalid_callback_result_never_proves_a_scalar_integral() {
         }));
         let call = request(vec![callback, real.clone(), real.clone()], vec![], 1);
         let result = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT"));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT")
+        );
         assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
     }
+}
+
+#[test]
+fn known_complex_scalar_callback_infers_complex_double() {
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: CapabilitySet::default(),
+        parameters: vec![real.clone()],
+        parameters_complete: true,
+        outputs: vec![scalar(NumericClass::Single, NumericDomain::Complex)],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: vec![],
+        captures_complete: true,
+    }));
+    let call = request(
+        vec![
+            callback,
+            real.clone(),
+            real,
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("Vectorized".into()),
+            LiteralValue::Bool(false),
+        ],
+        1,
+    );
+    let result = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().domain,
+        NumericDomain::Complex
+    );
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
 }
 
 #[test]
@@ -422,10 +452,12 @@ fn known_invalid_controls_do_not_prove_success_and_last_override_is_respected() 
             1,
         );
         let inferred = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
-        assert!(inferred
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE"));
+        assert!(
+            inferred
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE")
+        );
         assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Unknown));
     }
 
@@ -451,10 +483,12 @@ fn known_invalid_controls_do_not_prove_success_and_last_override_is_respected() 
         1,
     );
     let invalid = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
-    assert!(invalid
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-TOLERANCES"));
+    assert!(
+        invalid
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-TOLERANCES")
+    );
     assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
 
     call.arguments.extend([text.clone(), real]);
@@ -464,8 +498,5 @@ fn known_invalid_controls_do_not_prove_success_and_last_override_is_respected() 
     ]);
     let overridden = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
     assert!(overridden.diagnostics.is_empty());
-    assert_eq!(
-        overridden.outputs[0].numeric().unwrap().class,
-        NumericClass::Double
-    );
+    assert!(matches!(overridden.outputs[0].kind, ValueKindFact::Unknown));
 }

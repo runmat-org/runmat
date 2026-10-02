@@ -58,7 +58,7 @@ const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Double scalar estimate, or a double array with the callback's shape when ArrayValued is true.",
+    description: "Real or complex double scalar estimate, or a double array with the callback's shape when ArrayValued is true.",
 }];
 const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
@@ -133,8 +133,7 @@ pub const INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION: BuiltinExtensionDescriptor 
     BuiltinExtensionDescriptor {
         id: "integral-logical-numeric-option",
         mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "integral with logical tolerance or evaluation-count options is a RunMat extension",
+        description: "integral with logical tolerance or evaluation-count options is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:IntegralLogicalNumericOptionExtension"),
     };
 pub const INTEGRAL_RENAMED_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
@@ -171,18 +170,22 @@ const INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntege
 }];
 pub const INTEGRAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
-        form: "q = integral(fun, integer_xmin, integer_xmax, ...)", inputs: &INTEGER_BOUND_INPUTS,
+        form: "q = integral(fun, integer_xmin, integer_xmax, ...)",
+        inputs: &INTEGER_BOUND_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
         output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
         notes: "RunMat-only integer bounds are classified before resident access and converted after exactness validation.",
     },
     BuiltinIntegerCapabilityDescriptor {
-        form: "q = integral(fun, xmin, xmax, integer_option)", inputs: &INTEGER_OPTION_INPUTS,
+        form: "q = integral(fun, xmin, xmax, integer_option)",
+        inputs: &INTEGER_OPTION_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
         output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "RunMat-only typed-integer controls are gated independently from bounds and retain exact count parsing.",
     },

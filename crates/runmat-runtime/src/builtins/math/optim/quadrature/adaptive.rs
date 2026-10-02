@@ -5,12 +5,13 @@ use crate::{BuiltinResult, RuntimeError};
 #[cfg(test)]
 use std::sync::Arc;
 
+use super::QuadratureArithmeticError;
+use super::ScaledEstimate;
 #[cfg(test)]
 use super::algebra::ArrayEstimate;
 use super::algebra::{AdaptiveEstimate, QuadratureSample};
 use super::open_algebra::OpenSample;
-use super::QuadratureArithmeticError;
-use super::ScaledEstimate;
+use super::open_rule::OpenDomain;
 
 pub(crate) trait QuadratureEvaluator {
     type Sample: OpenSample;
@@ -29,6 +30,13 @@ pub(crate) trait QuadratureEvaluator {
             values[index] = Some(self.evaluate(point).await?);
         }
         Ok(values.map(|value| value.expect("every evaluated sample fills one slot")))
+    }
+    async fn evaluate_open_many<const N: usize>(
+        &mut self,
+        _domain: OpenDomain,
+        points: [f64; N],
+    ) -> BuiltinResult<[Self::Sample; N]> {
+        self.evaluate_many(points).await
     }
     fn midpoint(&self, a: f64, b: f64) -> f64;
     fn tolerances(&self) -> (f64, f64);

@@ -4,16 +4,16 @@ use runmat_value::{Tensor, Value};
 use std::sync::Arc;
 
 use super::{
-    integral_error_with_detail, integral_map_error, quadrature_arithmetic_error, IntegralOptions,
-    MAX_DEPTH, NAME,
+    IntegralOptions, MAX_DEPTH, NAME, integral_error_with_detail, integral_map_error,
+    quadrature_arithmetic_error,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
-    integrate_open, OpenSegment, QuadratureArithmeticError, QuadratureCooperation,
-    QuadratureEvaluator, ScaledEstimate,
+    OpenSegment, QuadratureArithmeticError, QuadratureCooperation, QuadratureEvaluator,
+    ScaledEstimate, integrate_open,
 };
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{BuiltinResult, RuntimeError, build_runtime_error};
 use runmat_builtins::INTEGRAL_ERROR_INVALID_INPUT;
 
 const ELEMENT_CHUNK: usize = 4096;
@@ -81,7 +81,7 @@ impl ArrayEvaluator<'_> {
                     format!(
                         "array-valued callback must return a real numeric array, got {other:?}"
                     ),
-                ))
+                ));
             }
         };
         if let Some(expected) = &self.shape {
@@ -106,7 +106,7 @@ fn nonfinite_error() -> RuntimeError {
 }
 
 fn admit_callback_value(value: &Value, expected: Option<&[usize]>) -> BuiltinResult<()> {
-    use runmat_accelerate_api::{handle_storage, GpuTensorStorage};
+    use runmat_accelerate_api::{GpuTensorStorage, handle_storage};
     let shape: &[usize] = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => &[1, 1],
         Value::Tensor(tensor) => &tensor.shape,
@@ -314,8 +314,8 @@ mod tests {
     use crate::builtins::math::optim::quadrature::QuadratureIdentity;
     use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
     use futures::task::noop_waker;
-    use runmat_execution::cancellation::CancellationSource;
     use runmat_execution::CancellationReason;
+    use runmat_execution::cancellation::CancellationSource;
     use std::cell::Cell;
     use std::future::Future;
     use std::num::NonZeroU64;

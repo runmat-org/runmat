@@ -1,10 +1,10 @@
 //! Typed option values and one ordered admission authority for `integral`.
 
 use super::{
-    integral_error_with_detail, IntegralCallbackMode, IntegralOptionName, DEFAULT_MAX_FUN_EVALS,
+    DEFAULT_MAX_FUN_EVALS, IntegralCallbackMode, IntegralOptionName, integral_error_with_detail,
 };
-use crate::builtins::common::tensor;
 use crate::BuiltinResult;
+use crate::builtins::common::tensor;
 use num_complex::Complex;
 use runmat_builtins::INTEGRAL_ERROR_INVALID_ARGUMENT;
 use runmat_value::{LogicalArray, Value};
@@ -218,7 +218,7 @@ async fn materialize_waypoint(
     cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<Value> {
     use crate::builtins::common::validation::{
-        value_has_native_integer_class, PreparedIntegerPayload,
+        PreparedIntegerPayload, value_has_native_integer_class,
     };
     if value_has_native_integer_class(value) {
         let prepared = cooperation.prepare_integer_boundary(value).await?;
@@ -286,7 +286,7 @@ fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {
             return Err(integral_error_with_detail(
                 &INTEGRAL_ERROR_INVALID_ARGUMENT,
                 format!("option {name} must be numeric, got {other:?}"),
-            ))
+            ));
         }
     };
     if parsed.is_finite() {

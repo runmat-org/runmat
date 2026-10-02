@@ -5,10 +5,11 @@
 
 use super::adaptive::QuadratureEvaluator;
 use super::algebra::AdaptiveEstimate;
-use super::geometry::{midpoint, ScaledEstimate};
-use super::mesh::{integrate_partition, MeshRule};
+use super::geometry::{ScaledEstimate, midpoint};
+use super::mesh::{MeshRule, integrate_partition};
 use super::open_algebra::{OpenRuleInputs, OpenSample};
 use crate::BuiltinResult;
+use num_complex::Complex;
 
 // Positive half of the Kronrod abscissae on [-1, 1]. Even positions are the
 // embedded seven-point Gauss rule; zero is evaluated once.
@@ -46,8 +47,16 @@ const GAUSS: [f64; 8] = [
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum OpenDomain {
     Finite,
-    RightInfinite { bound: f64 },
-    LeftInfinite { bound: f64 },
+    RightInfinite {
+        bound: f64,
+    },
+    LeftInfinite {
+        bound: f64,
+    },
+    Contour {
+        start: Complex<f64>,
+        end: Complex<f64>,
+    },
 }
 
 impl OpenDomain {
@@ -57,7 +66,7 @@ impl OpenDomain {
         evaluator: &E,
     ) -> BuiltinResult<(f64, ScaledEstimate)> {
         match self {
-            Self::Finite => Ok((coordinate, ScaledEstimate::from_f64(1.0))),
+            Self::Finite | Self::Contour { .. } => Ok((coordinate, ScaledEstimate::from_f64(1.0))),
             Self::RightInfinite { bound } | Self::LeftInfinite { bound } => {
                 if !(0.0 < coordinate && coordinate < 1.0) {
                     return Err(evaluator.convergence_error());
@@ -67,7 +76,7 @@ impl OpenDomain {
                 let argument = match self {
                     Self::RightInfinite { .. } => bound + distance,
                     Self::LeftInfinite { .. } => bound - distance,
-                    Self::Finite => unreachable!("handled above"),
+                    Self::Finite | Self::Contour { .. } => unreachable!("handled above"),
                 };
                 if !argument.is_finite() || !inverse.is_finite() {
                     return Err(evaluator.nonrepresentable_error());
@@ -201,7 +210,7 @@ pub(crate) async fn evaluate_interval<E: QuadratureEvaluator>(
         points[index] = point;
         jacobians[index] = jacobian;
     }
-    let samples = evaluator.evaluate_many(points).await?;
+    let samples = evaluator.evaluate_open_many(domain, points).await?;
     let half_width = ScaledEstimate::from_f64(half);
     let width = half_width.multiply_f64(2.0);
     let mut base_weights = [ScaledEstimate::from_f64(0.0); 15];
@@ -277,9 +286,9 @@ fn interior_nodes(a: f64, b: f64) -> Option<([f64; 15], f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RuntimeError;
     use crate::build_runtime_error;
     use crate::builtins::math::optim::quadrature::QuadratureArithmeticError;
-    use crate::RuntimeError;
     use futures::task::noop_waker;
     use std::cell::Cell;
     use std::future::Future;
@@ -552,10 +561,12 @@ mod tests {
                 1.0,
             ));
             let waker = noop_waker();
-            assert!(invocation
-                .as_mut()
-                .poll(&mut Context::from_waker(&waker))
-                .is_pending());
+            assert!(
+                invocation
+                    .as_mut()
+                    .poll(&mut Context::from_waker(&waker))
+                    .is_pending()
+            );
             assert_eq!(charged.get(), pending_at);
             assert!(!dropped.get());
             drop(invocation);

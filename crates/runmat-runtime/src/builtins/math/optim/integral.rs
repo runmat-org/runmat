@@ -6,11 +6,11 @@ use runmat_builtins::{
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, INTEGRAL_DESCRIPTOR,
 };
 use runmat_builtins::{
-    BuiltinErrorDescriptor, IntegralCallbackMode, IntegralOptionName,
-    INTEGRAL_ERROR_INVALID_ARGUMENT, INTEGRAL_ERROR_INVALID_INPUT, INTEGRAL_ERROR_TOO_MANY_OUTPUTS,
-    INTEGRAL_INTEGER_BOUND_EXTENSION, INTEGRAL_INTEGER_OPTION_EXTENSION,
-    INTEGRAL_LOGICAL_BOUND_EXTENSION, INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
-    INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
+    BuiltinErrorDescriptor, INTEGRAL_ERROR_INVALID_ARGUMENT, INTEGRAL_ERROR_INVALID_INPUT,
+    INTEGRAL_ERROR_TOO_MANY_OUTPUTS, INTEGRAL_INTEGER_BOUND_EXTENSION,
+    INTEGRAL_INTEGER_OPTION_EXTENSION, INTEGRAL_LOGICAL_BOUND_EXTENSION,
+    INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION, INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
+    IntegralCallbackMode, IntegralOptionName,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Tensor, Value};
@@ -24,9 +24,10 @@ use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
     QuadratureArithmeticError, QuadratureCooperation, QuadratureEvaluator, QuadratureIdentity,
 };
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{BuiltinResult, RuntimeError, build_runtime_error};
 
 mod array;
+mod contour;
 mod options;
 mod path;
 mod waypoints;
@@ -178,13 +179,41 @@ async fn integral_with_cooperation(
         preflight_integral_bound(label, value)?;
     }
     let waypoint_receipts = IntegralOptions::preflight_host(&admitted_options, cooperation).await?;
-    let prepared_path =
+    let complex_path = contour::has_complex_class(&a)
+        || contour::has_complex_class(&b)
+        || admitted_options
+            .iter()
+            .rev()
+            .find(|(name, _)| *name == IntegralOptionName::Waypoints)
+            .is_some_and(|(_, value)| contour::has_complex_class(value));
+    let prepared_path = if complex_path {
+        None
+    } else {
         path::preflight_host_path(&a, &b, &admitted_options, &waypoint_receipts, cooperation)
-            .await?;
+            .await?
+    };
     authenticate_integral_residents(&a, &b, &admitted_options)?;
     let options = IntegralOptions::parse(&admitted_options, waypoint_receipts, cooperation)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_ARGUMENT))?;
+    if complex_path {
+        let lower = contour::scalar_bound("lower bound", &a).await?;
+        let upper = contour::scalar_bound("upper bound", &b).await?;
+        let segments =
+            contour::ordered_segments(lower, upper, &options.waypoints, cooperation).await?;
+        let result = contour::integrate_contour(
+            &function,
+            &options,
+            &segments,
+            1.0,
+            false,
+            lower,
+            cooperation,
+        )
+        .await?;
+        cooperation.completed(0).await?;
+        return Ok(result);
+    }
     let a = scalar_bound("lower bound", a)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
@@ -209,6 +238,20 @@ async fn integral_with_cooperation(
     let sign = if b < a { -1.0 } else { 1.0 };
     let lo = a.min(b);
     let hi = a.max(b);
+    if a.is_finite() && b.is_finite() {
+        let result = contour::integrate_contour(
+            &function,
+            &options,
+            &segments,
+            sign,
+            true,
+            num_complex::Complex::new(a, 0.0),
+            cooperation,
+        )
+        .await?;
+        cooperation.completed(0).await?;
+        return Ok(result);
+    }
     if options.array_valued {
         let result = array::integrate_array_valued(
             &function,
@@ -278,13 +321,18 @@ fn preflight_integral_option_extensions(
 
 fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
     if let Value::GpuTensor(handle) = value {
-        use runmat_accelerate_api::{handle_storage, GpuTensorStorage};
+        use runmat_accelerate_api::{GpuTensorStorage, handle_storage};
         let scalar = handle
             .shape()
             .iter()
             .try_fold(1_usize, |count, axis| count.checked_mul(*axis))
             == Some(1);
-        if !scalar || handle_storage(handle) != GpuTensorStorage::Real {
+        if !scalar
+            || !matches!(
+                handle_storage(handle),
+                GpuTensorStorage::Real | GpuTensorStorage::Complex
+            )
+        {
             return Err(integral_error_with_detail(
                 &INTEGRAL_ERROR_INVALID_INPUT,
                 format!("{label} must be a real scalar"),
@@ -292,7 +340,7 @@ fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
         }
         return Ok(());
     }
-    scalar_bound_host(label, value).map(|_| ())
+    contour::scalar_bound_host(label, value).map(|_| ())
 }
 
 fn authenticate_integral_residents(
@@ -424,7 +472,7 @@ fn scalar_bound_host(label: &str, value: &Value) -> BuiltinResult<f64> {
             return Err(integral_error_with_detail(
                 &INTEGRAL_ERROR_INVALID_INPUT,
                 format!("{label} must be a real scalar, got {other:?}"),
-            ))
+            ));
         }
     };
     if !parsed.is_nan() {
@@ -592,7 +640,7 @@ async fn call_integrand_batch<const N: usize>(
             return Err(integral_error_with_detail(
                 &INTEGRAL_ERROR_INVALID_INPUT,
                 "vectorized function must return one real value for each row-vector sample",
-            ))
+            ));
         }
     }
     if result.iter().any(|value| !value.is_finite()) {
@@ -708,6 +756,43 @@ mod tests {
     async fn counted_one_helper(x: Value) -> crate::BuiltinResult<Value> {
         COUNTED_CALLBACKS.with(|count| count.set(count.get() + 1));
         mapped_helper(x, |_| 1.0).await
+    }
+
+    #[runtime_builtin(
+        name = "__integral_complex_one",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn complex_one_helper(x: Value) -> crate::BuiltinResult<Value> {
+        COUNTED_CALLBACKS.with(|count| count.set(count.get() + 1));
+        let (len, shape) = match x {
+            Value::Tensor(samples) => (samples.len(), samples.shape),
+            Value::ComplexTensor(samples) => (samples.len(), samples.shape),
+            _ => return Ok(Value::Complex(1.0, 1.0)),
+        };
+        let values = vec![(1.0, 1.0); len];
+        let tensor = runmat_value::ComplexTensor::from_complex_storage(
+            runmat_value::ComplexStorage::F64(values.into()),
+            shape,
+        )
+        .expect("fixed callback geometry");
+        Ok(Value::ComplexTensor(tensor))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_complex_array",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn complex_array_helper(_x: Value) -> crate::BuiltinResult<Value> {
+        let tensor = runmat_value::ComplexTensor::from_complex_storage(
+            runmat_value::ComplexStorage::F64(vec![(1.0, 1.0), (2.0, -1.0)].into()),
+            vec![1, 2],
+        )
+        .expect("fixed callback geometry");
+        Ok(Value::ComplexTensor(tensor))
     }
 
     #[runtime_builtin(
@@ -1015,6 +1100,53 @@ mod tests {
     }
 
     #[test]
+    fn finite_real_bounds_integrate_complex_callback_once_per_vector_batch() {
+        COUNTED_CALLBACKS.with(|count| count.set(0));
+        let result = run(
+            Value::FunctionHandle("__integral_complex_one".into()),
+            0.0,
+            1.0,
+        )
+        .expect("complex callback on real interval");
+        assert!(
+            matches!(result, Value::Complex(real, imaginary) if (real - 1.0).abs() < 1.0e-10 && (imaginary - 1.0).abs() < 1.0e-10)
+        );
+        assert_eq!(COUNTED_CALLBACKS.with(|count| count.get()), 1);
+    }
+
+    #[test]
+    fn ordered_complex_contour_and_array_values_share_one_mesh() {
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_complex_one".into()),
+            Value::Complex(0.0, 0.0),
+            Value::Complex(0.0, 1.0),
+            vec![Value::from("Waypoints"), Value::Complex(1.0, 1.0)],
+        ))
+        .expect("ordered complex contour");
+        assert!(
+            matches!(result, Value::Complex(real, imaginary) if (real + 1.0).abs() < 1.0e-9 && (imaginary - 1.0).abs() < 1.0e-9)
+        );
+
+        let array = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_complex_array".into()),
+            Value::Complex(0.0, 0.0),
+            Value::Complex(0.0, 1.0),
+            vec![Value::from("ArrayValued"), Value::Bool(true)],
+        ))
+        .expect("complex array contour");
+        let Value::ComplexTensor(array) = array else {
+            panic!("expected complex tensor")
+        };
+        assert_eq!(array.shape, vec![1, 2]);
+        assert!(
+            matches!(array.numeric_value_at(0), Some((runmat_value::NumericScalar::F64(real), runmat_value::NumericScalar::F64(imaginary))) if (real + 1.0).abs() < 1.0e-9 && (imaginary - 1.0).abs() < 1.0e-9)
+        );
+        assert!(
+            matches!(array.numeric_value_at(1), Some((runmat_value::NumericScalar::F64(real), runmat_value::NumericScalar::F64(imaginary))) if (real - 1.0).abs() < 1.0e-9 && (imaginary - 2.0).abs() < 1.0e-9)
+        );
+    }
+
+    #[test]
     fn vectorized_default_batches_samples_and_scalar_option_honors_current_pin() {
         let default_error = run(
             Value::FunctionHandle("__integral_scalar_only".into()),
@@ -1120,7 +1252,7 @@ mod tests {
     #[test]
     fn rejects_vector_valued_integrand_for_initial_scope() {
         let err = run(Value::FunctionHandle("__integral_vector".into()), 0.0, 1.0).unwrap_err();
-        assert!(err.message().contains("one real value"));
+        assert!(err.message().contains("one value"));
     }
 
     #[test]
@@ -1318,7 +1450,7 @@ mod tests {
     #[test]
     fn rejects_nonfinite_integrand_values() {
         let err = run(Value::FunctionHandle("__integral_nan".into()), 0.0, 1.0).unwrap_err();
-        assert!(err.message().contains("finite real numbers"));
+        assert!(err.message().contains("finite values"));
     }
 
     #[test]
@@ -1374,9 +1506,10 @@ mod tests {
             vec![Value::from("MaxIntervalCount"), Value::Num(0.0)],
         ))
         .expect_err("zero is not a positive interval count");
-        assert!(zero
-            .message()
-            .contains("MaxIntervalCount must be a positive"));
+        assert!(
+            zero.message()
+                .contains("MaxIntervalCount must be a positive")
+        );
 
         let split_mesh = block_on(integral_builtin(
             Value::FunctionHandle("sin".into()),
@@ -1392,9 +1525,11 @@ mod tests {
             ],
         ))
         .expect_err("two initial intervals exceed a one-interval cap");
-        assert!(split_mesh
-            .message()
-            .contains("MaxIntervalCount adaptive subintervals"));
+        assert!(
+            split_mesh
+                .message()
+                .contains("MaxIntervalCount adaptive subintervals")
+        );
 
         let zero_width = block_on(integral_builtin(
             Value::FunctionHandle("__integral_nan".into()),
@@ -1442,9 +1577,11 @@ mod tests {
             ],
         ))
         .expect_err("oscillatory sine requires refinement beyond one interval");
-        assert!(scalar_sine
-            .message()
-            .contains("MaxIntervalCount adaptive subintervals"));
+        assert!(
+            scalar_sine
+                .message()
+                .contains("MaxIntervalCount adaptive subintervals")
+        );
 
         let array_polynomial = block_on(integral_builtin(
             Value::FunctionHandle("__integral_array_polynomial".into()),
@@ -1480,9 +1617,11 @@ mod tests {
             ],
         ))
         .expect_err("array components require further refinement");
-        assert!(array_sine
-            .message()
-            .contains("MaxIntervalCount adaptive subintervals"));
+        assert!(
+            array_sine
+                .message()
+                .contains("MaxIntervalCount adaptive subintervals")
+        );
     }
 
     #[test]
@@ -1495,9 +1634,11 @@ mod tests {
             vec![Value::from("MaxFunEvals"), Value::Num(5.0)],
         ))
         .expect_err("the selected rule requires fifteen sample evaluations");
-        assert!(insufficient
-            .message()
-            .contains("exceeded maximum function evaluations"));
+        assert!(
+            insufficient
+                .message()
+                .contains("exceeded maximum function evaluations")
+        );
         COUNTED_CALLBACKS.with(|count| assert_eq!(count.get(), 0));
 
         let enough = block_on(integral_builtin(
@@ -1684,9 +1825,9 @@ mod tests {
     #[test]
     fn resident_options_are_authenticated_before_the_first_bound_download() {
         use runmat_accelerate_api::{
-            test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
-            AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
-            HostNumericTensorOwned, HostTensorView, ThreadProviderGuard,
+            AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
+            GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned, HostTensorView,
+            ThreadProviderGuard, test_support::TestAllocationOwner,
         };
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1918,8 +2059,8 @@ mod tests {
 
     #[test]
     fn registered_invocation_observes_preexisting_cancellation_before_callback() {
-        use runmat_execution::cancellation::CancellationSource;
         use runmat_execution::CancellationReason;
+        use runmat_execution::cancellation::CancellationSource;
         use std::rc::Rc;
 
         let source = CancellationSource::new();
@@ -1945,8 +2086,8 @@ mod tests {
     fn active_array_integral_turn_cancels_or_drops_without_publication() {
         use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
         use futures::task::noop_waker;
-        use runmat_execution::cancellation::CancellationSource;
         use runmat_execution::CancellationReason;
+        use runmat_execution::cancellation::CancellationSource;
         use std::cell::Cell;
         use std::future::Future;
         use std::num::NonZeroU64;

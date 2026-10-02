@@ -8,13 +8,13 @@ use std::sync::Arc;
 
 use super::adaptive::QuadratureEvaluator;
 use super::algebra::{
-    ArrayEstimate, EmbeddedRuleInputs, QuadratureArithmeticError, COMPONENT_CHUNK,
+    ArrayEstimate, COMPONENT_CHUNK, EmbeddedRuleInputs, QuadratureArithmeticError,
 };
 use super::geometry::ScaledEstimate;
 
 const ROUNDOFF_FACTOR: f64 = 50.0 * f64::EPSILON;
 
-fn adjusted_error(
+pub(super) fn adjusted_error(
     raw: ScaledEstimate,
     resabs: ScaledEstimate,
     resasc: ScaledEstimate,

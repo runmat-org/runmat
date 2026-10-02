@@ -1,11 +1,11 @@
 use super::super::scalar_facts;
 use super::{IntegralCallbackMode, IntegralOptionName};
-use crate::catalog::inference::{argument_error, literal_text};
 use crate::BuiltinCatalogEntry;
+use crate::catalog::inference::{argument_error, literal_text};
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DynamicReason, LiteralContext,
-    LiteralValue, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact,
-    ValueKindFact,
+    CallContract, CallInference, CallRequest, DynamicReason, LiteralContext, LiteralValue,
+    NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    infer_call,
 };
 
 fn scalar_bound(
@@ -18,11 +18,7 @@ fn scalar_bound(
     };
     let admissible = matches!(
         fact.kind,
-        ValueKindFact::Numeric(NumericFact {
-            domain: NumericDomain::Real,
-            ..
-        }) | ValueKindFact::Logical
-            | ValueKindFact::Unknown
+        ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
     ) && fact.storage != StorageFact::Sparse
         && fact.shape.element_count().is_none_or(|count| count == 1);
     let admitted_literal = request
@@ -34,7 +30,7 @@ fn scalar_bound(
     if !admissible || !admitted_literal {
         diagnostics.push(argument_error(
             "RM-CATALOG-INTEGRAL-BOUND",
-            "integral requires real scalar bounds that are not NaN",
+            "integral requires numeric scalar bounds that are not NaN",
             index,
         ));
     }
@@ -266,6 +262,34 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     scalar_facts::callback(request, &mut diagnostics);
     scalar_bound(request, 1, &mut diagnostics);
     scalar_bound(request, 2, &mut diagnostics);
+    let complex_path = request.arguments.get(1..3).is_some_and(|bounds| {
+        bounds.iter().any(|bound| {
+            matches!(
+                bound.kind,
+                ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Complex,
+                    ..
+                })
+            )
+        })
+    }) || (3..request.arguments.len()).step_by(2).any(|index| {
+        request
+            .literals
+            .literal_args
+            .get(index)
+            .and_then(literal_text)
+            .and_then(|name| IntegralOptionName::parse(&name))
+            == Some(IntegralOptionName::Waypoints)
+            && request.arguments.get(index + 1).is_some_and(|value| {
+                matches!(
+                    value.kind,
+                    ValueKindFact::Numeric(NumericFact {
+                        domain: NumericDomain::Complex,
+                        ..
+                    })
+                )
+            })
+    });
     let (callback_mode, array_valued) = controls(request, &mut diagnostics);
     let effective_mode = if array_valued == Some(true) {
         Some(IntegralCallbackMode::Scalar)
@@ -278,7 +302,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         Some(IntegralCallbackMode::Vectorized) => ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,
-                domain: NumericDomain::Real,
+                domain: if complex_path {
+                    NumericDomain::Complex
+                } else {
+                    NumericDomain::Real
+                },
             }),
             ShapeFact::Shaped {
                 dims: vec![
@@ -291,7 +319,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         Some(IntegralCallbackMode::Scalar) => {
             ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,
-                domain: NumericDomain::Real,
+                domain: if complex_path {
+                    NumericDomain::Complex
+                } else {
+                    NumericDomain::Real
+                },
             }))
         }
         None => ValueFact::unknown(DynamicReason::RuntimeValue),
@@ -301,35 +333,54 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         match (array_valued, effective_mode) {
             (Some(true), _) => {
                 if let Some(result) = callback.outputs.first() {
-                    let real = matches!(
+                    let numeric = matches!(
                         result.kind,
-                        ValueKindFact::Numeric(NumericFact {
-                            domain: NumericDomain::Real,
-                            ..
-                        }) | ValueKindFact::Logical
-                            | ValueKindFact::Unknown
+                        ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
                     );
-                    if !real || result.storage == StorageFact::Sparse {
+                    if !numeric || result.storage == StorageFact::Sparse {
                         diagnostics.push(argument_error(
                             "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
-                            "array-valued callback must return a real numeric array",
+                            "array-valued callback must return a numeric array",
                             0,
                         ));
                     }
                 }
             }
             (_, Some(IntegralCallbackMode::Vectorized)) => {
-                scalar_facts::real_row_batch_callback_result(
-                    callback,
-                    &mut diagnostics,
-                    "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
-                )
+                if let Some(result) = callback.outputs.first() {
+                    let numeric = matches!(
+                        result.kind,
+                        ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
+                    );
+                    let row = matches!(&result.shape, ShapeFact::Shaped { dims } if matches!(dims.first(), Some(runmat_types::DimensionFact::Known(1))) && dims.len() == 2);
+                    if !numeric
+                        || result.storage == StorageFact::Sparse
+                        || (!row && !matches!(result.kind, ValueKindFact::Unknown))
+                    {
+                        diagnostics.push(argument_error(
+                            "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
+                            "vectorized callback must return a numeric row vector",
+                            0,
+                        ));
+                    }
+                }
             }
-            (_, Some(IntegralCallbackMode::Scalar)) => scalar_facts::real_scalar_callback_result(
-                callback,
-                &mut diagnostics,
-                "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
-            ),
+            (_, Some(IntegralCallbackMode::Scalar)) => {
+                if let Some(result) = callback.outputs.first() {
+                    if !matches!(
+                        result.kind,
+                        ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
+                    ) || result.storage == StorageFact::Sparse
+                        || result.shape.element_count().is_some_and(|count| count != 1)
+                    {
+                        diagnostics.push(argument_error(
+                            "RM-CATALOG-INTEGRAL-CALLBACK-RESULT",
+                            "scalar callback must return one numeric value",
+                            0,
+                        ));
+                    }
+                }
+            }
             (_, None) => {}
         }
         diagnostics.extend(callback.diagnostics.iter().cloned());
@@ -342,10 +393,23 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 .map_or_else(
                     || ValueFact::unknown(DynamicReason::RuntimeValue),
                     |result| {
+                        let domain = match result.kind {
+                            ValueKindFact::Numeric(NumericFact {
+                                domain: NumericDomain::Complex,
+                                ..
+                            }) => NumericDomain::Complex,
+                            ValueKindFact::Numeric(_) | ValueKindFact::Logical if complex_path => {
+                                NumericDomain::Complex
+                            }
+                            ValueKindFact::Numeric(_) | ValueKindFact::Logical => {
+                                NumericDomain::Real
+                            }
+                            _ => return ValueFact::unknown(DynamicReason::UnresolvedCallable),
+                        };
                         ValueFact::proven(
                             ValueKindFact::Numeric(NumericFact {
                                 class: NumericClass::Double,
-                                domain: NumericDomain::Real,
+                                domain,
                             }),
                             result.shape.clone(),
                             StorageFact::Dense,
@@ -353,7 +417,27 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     },
                 )
         } else if array_valued == Some(false) {
-            scalar_facts::host_scalar(NumericClass::Double)
+            let domain = callback
+                .as_ref()
+                .and_then(|call| call.outputs.first())
+                .and_then(|result| match result.kind {
+                    ValueKindFact::Numeric(NumericFact { domain, .. }) => Some(domain),
+                    ValueKindFact::Logical => Some(NumericDomain::Real),
+                    _ => None,
+                });
+            domain.map_or_else(
+                || ValueFact::unknown(DynamicReason::UnresolvedCallable),
+                |domain| {
+                    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                        class: NumericClass::Double,
+                        domain: if complex_path {
+                            NumericDomain::Complex
+                        } else {
+                            domain
+                        },
+                    }))
+                },
+            )
         } else {
             ValueFact::unknown(DynamicReason::RuntimeValue)
         }

@@ -6,7 +6,7 @@ use runmat_value::{NumericScalar, Value};
 
 use super::integral_error_with_detail;
 use crate::builtins::math::optim::quadrature::QuadratureCooperation;
-use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
+use crate::{BuiltinResult, GpuGatherRetry, build_runtime_error};
 
 const WAYPOINT_CHUNK: usize = 4096;
 
@@ -24,7 +24,7 @@ fn vector_shape(shape: &[usize]) -> bool {
         && shape.iter().skip(2).all(|&axis| axis == 1)
 }
 
-fn value_f64(value: NumericScalar) -> f64 {
+pub(super) fn value_f64(value: NumericScalar) -> f64 {
     match value {
         NumericScalar::F64(value) => value,
         NumericScalar::F32(value) => f64::from(value),
@@ -66,7 +66,7 @@ pub(super) fn admit_shape(value: &Value) -> BuiltinResult<()> {
         _ => {
             return Err(invalid(
                 "Waypoints must be a real or complex numeric vector",
-            ))
+            ));
         }
     };
     if vector_shape(shape) {
@@ -149,12 +149,12 @@ pub(super) async fn decode_exact(
             values
         }
         Value::GpuTensor(_) => {
-            return Err(invalid("Waypoints must be materialized by their owner"))
+            return Err(invalid("Waypoints must be materialized by their owner"));
         }
         _ => {
             return Err(invalid(
                 "Waypoints must be a real or complex numeric vector",
-            ))
+            ));
         }
     };
     Ok(values)
