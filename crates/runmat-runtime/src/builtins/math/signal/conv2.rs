@@ -4,9 +4,8 @@ use num_complex::Complex;
 use runmat_accelerate_api::ProviderConvMode;
 use runmat_builtins::{
     BuiltinErrorDescriptor, CONV2_ERROR_ARG_COUNT, CONV2_ERROR_BUILD_COMPLEX_OUTPUT,
-    CONV2_ERROR_BUILD_OUTPUT, CONV2_ERROR_CONVERSION, CONV2_ERROR_GATHER_FAILED,
-    CONV2_ERROR_INVALID_INPUT, CONV2_ERROR_MATRIX_REQUIRED, CONV2_ERROR_SHAPE_INVALID,
-    CONV2_ERROR_VECTOR_REQUIRED,
+    CONV2_ERROR_BUILD_OUTPUT, CONV2_ERROR_GATHER_FAILED, CONV2_ERROR_INVALID_INPUT,
+    CONV2_ERROR_MATRIX_REQUIRED, CONV2_ERROR_SHAPE_INVALID, CONV2_ERROR_VECTOR_REQUIRED,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::ConvolutionMode as Conv2Mode;
@@ -139,8 +138,8 @@ async fn conv2_builtin(
             if let Some(device_value) = try_conv2_gpu(&a, &b, mode, single_output)? {
                 return Ok(device_value);
             }
-            let left = convert_matrix(a, "conv2", "A").await?;
-            let right = convert_matrix(b, "conv2", "B").await?;
+            let left = convert_matrix(a, "A", &mut cooperation).await?;
+            let right = convert_matrix(b, "B", &mut cooperation).await?;
             if mode == Conv2Mode::Full
                 && !left.is_empty()
                 && !right.is_empty()
@@ -158,9 +157,9 @@ async fn conv2_builtin(
             restore_to_owner(output, &resident_inputs)
         }
         1 => {
-            let signal = convert_matrix(extras.remove(0), "conv2", "A").await?;
-            let column = convert_vector(a, "conv2", "H column").await?;
-            let row = convert_vector(b, "conv2", "H row").await?;
+            let signal = convert_matrix(extras.remove(0), "A", &mut cooperation).await?;
+            let column = convert_vector(a, "H column", &mut cooperation).await?;
+            let row = convert_vector(b, "H row", &mut cooperation).await?;
             let kernel = outer_product(&column, &row, single_output, &mut cooperation).await?;
             let result =
                 conv2_matrices(&signal, &kernel, mode, single_output, &mut cooperation).await?;
@@ -421,28 +420,29 @@ fn extract_mode(extras: &mut Vec<Value>) -> BuiltinResult<Conv2Mode> {
             return Ok(mode);
         }
     }
+    if extras.len() == 2 {
+        return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID));
+    }
     Ok(Conv2Mode::Full)
 }
 
 fn parse_mode_value(value: &Value) -> BuiltinResult<Option<Conv2Mode>> {
-    let text = match value {
-        Value::String(text) => text.as_str(),
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].as_str(),
-        Value::CharArray(chars) if chars.rows == 1 => {
-            return Conv2Mode::decode(&chars.data.iter().collect::<String>())
-                .map(Some)
-                .ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID));
+    let text = match super::common::convolution::convolution_selector_text(value) {
+        super::common::convolution::ConvolutionSelectorText::Text(text) => text,
+        super::common::convolution::ConvolutionSelectorText::MalformedText => {
+            return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID))
         }
-        Value::StringArray(_) | Value::CharArray(_) => {
-            return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID));
-        }
-        _ => return Ok(None),
+        super::common::convolution::ConvolutionSelectorText::NotText => return Ok(None),
     };
-    let mode = Conv2Mode::decode(text).ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID))?;
+    let mode = Conv2Mode::decode(&text).ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID))?;
     Ok(Some(mode))
 }
 
-async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Matrix> {
+async fn convert_matrix(
+    value: Value,
+    arg: &str,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
     match value {
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
@@ -455,88 +455,57 @@ async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Ma
                         map_control_flow_with_builtin(flow, BUILTIN_NAME),
                     )
                 })?;
-            convert_host_matrix(gathered, name, arg)
+            convert_host_matrix(gathered, arg, cooperation).await
         }
-        other => convert_host_matrix(other, name, arg),
+        other => convert_host_matrix(other, arg, cooperation).await,
     }
 }
 
-fn convert_host_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Matrix> {
-    match value {
-        Value::Tensor(tensor) => tensor_to_matrix(tensor, name, arg),
-        Value::ComplexTensor(tensor) => complex_tensor_to_matrix(tensor, name, arg),
-        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .map_err(|err| {
-                conv2_error_with_detail(&CONV2_ERROR_CONVERSION, format!("{name}: {err}"))
-            })
-            .and_then(|tensor| tensor_to_matrix(tensor, name, arg)),
-        Value::Num(n) => Ok(Matrix {
-            rows: 1,
-            cols: 1,
-            data: vec![Complex::new(n, 0.0)],
-        }),
-        Value::Int(i) => Ok(Matrix {
-            rows: 1,
-            cols: 1,
-            data: vec![Complex::new(i.to_f64(), 0.0)],
-        }),
-        Value::Bool(b) => Ok(Matrix {
-            rows: 1,
-            cols: 1,
-            data: vec![Complex::new(if b { 1.0 } else { 0.0 }, 0.0)],
-        }),
-        Value::Complex(re, im) => Ok(Matrix {
-            rows: 1,
-            cols: 1,
-            data: vec![Complex::new(re, im)],
-        }),
-        other => Err(conv2_error_with_detail(
-            &CONV2_ERROR_INVALID_INPUT,
-            format!("{name}/{arg}: expected numeric or logical values, got {other:?}"),
-        )),
-    }
+async fn convert_host_matrix(
+    value: Value,
+    arg: &str,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
+    let (rows, cols) = match &value {
+        Value::Tensor(tensor) => super::common::convolution::checked_matrix_dims(&tensor.shape)
+            .ok_or_else(|| conv2_error(&CONV2_ERROR_MATRIX_REQUIRED))?,
+        Value::ComplexTensor(tensor) => {
+            super::common::convolution::checked_matrix_dims(&tensor.shape)
+                .ok_or_else(|| conv2_error(&CONV2_ERROR_MATRIX_REQUIRED))?
+        }
+        Value::LogicalArray(array) => super::common::convolution::checked_matrix_dims(&array.shape)
+            .ok_or_else(|| conv2_error(&CONV2_ERROR_MATRIX_REQUIRED))?,
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => (1, 1),
+        other => {
+            return Err(conv2_error_with_detail(
+                &CONV2_ERROR_INVALID_INPUT,
+                format!("conv2/{arg}: expected numeric or logical values, got {other:?}"),
+            ));
+        }
+    };
+    let data = super::common::convolution::materialize_host_coefficients(
+        &value,
+        cooperation,
+        || conv2_error(&CONV2_ERROR_INVALID_INPUT),
+        conv2_allocation_error,
+    )
+    .await?;
+    Ok(Matrix { rows, cols, data })
 }
 
-async fn convert_vector(value: Value, name: &str, arg: &str) -> BuiltinResult<Vec<Complex<f64>>> {
-    let matrix = convert_matrix(value, name, arg).await?;
+async fn convert_vector(
+    value: Value,
+    arg: &str,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<Complex<f64>>> {
+    let matrix = convert_matrix(value, arg, cooperation).await?;
     if matrix.rows > 1 && matrix.cols > 1 {
         return Err(conv2_error_with_detail(
             &CONV2_ERROR_VECTOR_REQUIRED,
-            format!("{name}: {arg} got {}x{}", matrix.rows, matrix.cols),
+            format!("conv2: {arg} got {}x{}", matrix.rows, matrix.cols),
         ));
     }
     Ok(matrix.data)
-}
-
-fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
-    if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
-        return Err(conv2_error_with_detail(
-            &CONV2_ERROR_MATRIX_REQUIRED,
-            format!("{name}: {arg} received shape {:?}", tensor.shape),
-        ));
-    }
-    Ok(Matrix {
-        rows: tensor.rows,
-        cols: tensor.cols,
-        data: tensor::tensor_into_values_f64(tensor)
-            .into_iter()
-            .map(|re| Complex::new(re, 0.0))
-            .collect(),
-    })
-}
-
-fn complex_tensor_to_matrix(tensor: ComplexTensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
-    if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
-        return Err(conv2_error_with_detail(
-            &CONV2_ERROR_MATRIX_REQUIRED,
-            format!("{name}: {arg} received shape {:?}", tensor.shape),
-        ));
-    }
-    Ok(Matrix {
-        rows: tensor.rows,
-        cols: tensor.cols,
-        data: tensor::complex_tensor_into_values_complex64(tensor),
-    })
 }
 
 async fn outer_product(
@@ -1186,6 +1155,25 @@ pub(crate) mod tests {
             vec![Value::from("circular")],
         )
         .expect_err("malformed text remains a shape error");
+        assert_eq!(error.identifier(), CONV2_ERROR_SHAPE_INVALID.identifier);
+        for invalid_shape in [Value::Num(7.0), Value::Bool(true)] {
+            let error = conv2_builtin(
+                Value::Tensor(tensor_from_rows(2, 1, &[1.0, 2.0])),
+                Value::Tensor(tensor_from_rows(1, 2, &[1.0, 3.0])),
+                vec![Value::Num(1.0), invalid_shape],
+            )
+            .expect_err("fourth input must be shape text");
+            assert_eq!(error.identifier(), CONV2_ERROR_SHAPE_INVALID.identifier);
+        }
+        let nd_text =
+            runmat_value::CharArray::new_with_shape("same".chars().collect(), vec![1, 4, 1])
+                .expect("N-D character shape");
+        let error = conv2_builtin(
+            Value::Tensor(tensor_from_rows(2, 1, &[1.0, 2.0])),
+            Value::Tensor(tensor_from_rows(1, 2, &[1.0, 3.0])),
+            vec![Value::CharArray(nd_text)],
+        )
+        .expect_err("N-D character selector");
         assert_eq!(error.identifier(), CONV2_ERROR_SHAPE_INVALID.identifier);
     }
 

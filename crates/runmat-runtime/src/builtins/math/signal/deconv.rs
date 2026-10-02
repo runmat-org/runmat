@@ -8,7 +8,7 @@ use runmat_builtins::{
     DECONV_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexStorage, ComplexTensor, LogicalArray, NumericDType, Tensor, Value};
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -213,8 +213,8 @@ async fn evaluate_requested(
             }
         }
     }
-    let num_input = convert_value(numerator).await?;
-    let den_input = convert_value(denominator).await?;
+    let num_input = convert_value(numerator, &mut cooperation).await?;
+    let den_input = convert_value(denominator, &mut cooperation).await?;
 
     let (quotient_raw, remainder_raw) =
         polynomial_division(&num_input.data, &den_input.data, &mut cooperation).await?;
@@ -383,7 +383,10 @@ enum Orientation {
     Column,
 }
 
-async fn convert_value(value: Value) -> BuiltinResult<PolyInput> {
+async fn convert_value(
+    value: Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<PolyInput> {
     match value {
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
@@ -400,80 +403,46 @@ async fn convert_value(value: Value) -> BuiltinResult<PolyInput> {
                 &gathered,
                 BUILTIN_NAME,
             )?;
-            convert_host_value(gathered)
+            convert_host_value(gathered, cooperation).await
         }
-        host => convert_host_value(host),
+        host => convert_host_value(host, cooperation).await,
     }
 }
 
-fn convert_host_value(value: Value) -> BuiltinResult<PolyInput> {
-    match value {
-        Value::Tensor(tensor) => convert_tensor(tensor),
-        Value::ComplexTensor(tensor) => convert_complex_tensor(tensor),
-        Value::LogicalArray(logical) => convert_logical_array(logical),
-        Value::Num(n) => Ok(PolyInput {
-            data: vec![Complex::new(n, 0.0)],
-            hint: OrientationHint::Scalar,
-        }),
-        Value::Int(int_val) => {
-            let num = int_val.to_f64();
-            Ok(PolyInput {
-                data: vec![Complex::new(num, 0.0)],
-                hint: OrientationHint::Scalar,
-            })
+async fn convert_host_value(
+    value: Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<PolyInput> {
+    let hint = match &value {
+        Value::Tensor(tensor) => classify_orientation(tensor.rows, tensor.cols, tensor.len()),
+        Value::ComplexTensor(tensor) => {
+            classify_orientation(tensor.rows, tensor.cols, tensor.len())
         }
-        Value::Bool(flag) => Ok(PolyInput {
-            data: vec![Complex::new(if flag { 1.0 } else { 0.0 }, 0.0)],
-            hint: OrientationHint::Scalar,
-        }),
-        Value::Complex(re, im) => Ok(PolyInput {
-            data: vec![Complex::new(re, im)],
-            hint: OrientationHint::Scalar,
-        }),
+        Value::LogicalArray(array) => classify_orientation(
+            array.shape.first().copied().unwrap_or(0),
+            array.shape.get(1).copied().unwrap_or(0),
+            array.data.len(),
+        ),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
+            OrientationHint::Scalar
+        }
         Value::GpuTensor(_) => Err(deconv_error_with_detail(
             &DECONV_ERROR_GATHER_FAILED,
             "provider returned a resident handle instead of host coefficients",
-        )),
+        ))?,
         other => Err(deconv_error_with_detail(
             &DECONV_ERROR_INVALID_INPUT,
             format!("{other:?}"),
-        )),
-    }
-}
-
-fn convert_tensor(tensor: Tensor) -> BuiltinResult<PolyInput> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let data = tensor::tensor_into_values_f64(tensor);
-    let len = data.len();
-    let hint = classify_orientation(rows, cols, len);
+        ))?,
+    };
     ensure_vector(hint)?;
-    let data = data.into_iter().map(|re| Complex::new(re, 0.0)).collect();
-    Ok(PolyInput { data, hint })
-}
-
-fn convert_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<PolyInput> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let data = tensor::complex_tensor_into_values_complex64(tensor);
-    let len = data.len();
-    let hint = classify_orientation(rows, cols, len);
-    ensure_vector(hint)?;
-    Ok(PolyInput { data, hint })
-}
-
-fn convert_logical_array(array: LogicalArray) -> BuiltinResult<PolyInput> {
-    let hint = classify_orientation(
-        array.shape.first().copied().unwrap_or(0),
-        array.shape.get(1).copied().unwrap_or(0),
-        array.data.len(),
-    );
-    ensure_vector(hint)?;
-    let data = array
-        .data
-        .into_iter()
-        .map(|bit| Complex::new(if bit != 0 { 1.0 } else { 0.0 }, 0.0))
-        .collect();
+    let data = super::common::convolution::materialize_host_coefficients(
+        &value,
+        cooperation,
+        || deconv_error(&DECONV_ERROR_INVALID_INPUT),
+        deconv_allocation_error,
+    )
+    .await?;
     Ok(PolyInput { data, hint })
 }
 
@@ -773,7 +742,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()

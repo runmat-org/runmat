@@ -100,6 +100,35 @@ fn separable_numeric_and_logical_scalar_signals_are_not_text_selectors() {
 }
 
 #[test]
+fn fourth_input_and_nd_character_selector_cannot_prove_shape() {
+    let column = numeric(NumericClass::Double, NumericDomain::Real, &[2, 1]);
+    let row = numeric(NumericClass::Double, NumericDomain::Real, &[1, 2]);
+    let signal = numeric(NumericClass::Double, NumericDomain::Real, &[1, 1]);
+    for selector in [
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+        ValueFact::scalar(ValueKindFact::Logical),
+        ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(1), Some(4), Some(1)]),
+            StorageFact::Dense,
+        ),
+    ] {
+        let result = inference::infer(
+            &request(
+                vec![column.clone(), row.clone(), signal.clone(), selector],
+                vec![LiteralValue::Unknown; 4],
+            ),
+            &CONV2_CATALOG_ENTRY,
+        );
+        assert!(!result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+}
+
+#[test]
 fn empty_direct_full_has_canonical_empty_matrix_shape() {
     let left = numeric(NumericClass::Double, NumericDomain::Real, &[0, 1]);
     let right = numeric(NumericClass::Double, NumericDomain::Real, &[1, 3]);

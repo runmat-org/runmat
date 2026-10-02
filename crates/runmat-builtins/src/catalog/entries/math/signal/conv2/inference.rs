@@ -105,7 +105,7 @@ fn selector(
 }
 
 fn character_is_known_multirow(shape: &ShapeFact) -> bool {
-    matches!(shape, ShapeFact::Shaped { dims } if matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1))
+    matches!(shape, ShapeFact::Shaped { dims } if dims.len() > 2 || matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1))
 }
 
 #[derive(Clone, Copy)]

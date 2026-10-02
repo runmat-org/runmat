@@ -4,8 +4,8 @@ use num_complex::Complex;
 use runmat_accelerate_api::{ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation};
 use runmat_builtins::{
     BuiltinErrorDescriptor, CONV_ERROR_ARG_COUNT, CONV_ERROR_BUILD_COMPLEX_OUTPUT,
-    CONV_ERROR_BUILD_OUTPUT, CONV_ERROR_CONVERSION, CONV_ERROR_GATHER_FAILED,
-    CONV_ERROR_INVALID_INPUT, CONV_ERROR_SHAPE_INVALID,
+    CONV_ERROR_BUILD_OUTPUT, CONV_ERROR_GATHER_FAILED, CONV_ERROR_INVALID_INPUT,
+    CONV_ERROR_SHAPE_INVALID,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::ConvolutionMode as ConvMode;
@@ -107,8 +107,8 @@ async fn conv_builtin(
     if let Some(device_value) = try_conv_gpu(&a, &b, mode, single_output)? {
         return Ok(device_value);
     }
-    let lhs = normalize_input(a).await?;
-    let rhs = normalize_input(b).await?;
+    let lhs = normalize_input(a, &mut cooperation).await?;
+    let rhs = normalize_input(b, &mut cooperation).await?;
     if matches!(lhs.hint, OrientationHint::General) || matches!(rhs.hint, OrientationHint::General)
     {
         return Err(conv_error_with_detail(
@@ -230,7 +230,9 @@ fn parse_mode(args: &[Value]) -> BuiltinResult<ConvMode> {
     match args.len() {
         0 => Ok(ConvMode::Full),
         1 => {
-            let Some(text) = tensor::value_to_string(&args[0]) else {
+            let super::common::convolution::ConvolutionSelectorText::Text(text) =
+                super::common::convolution::convolution_selector_text(&args[0])
+            else {
                 return Err(conv_error(&CONV_ERROR_SHAPE_INVALID));
             };
             ConvMode::decode(&text).ok_or_else(|| conv_error(&CONV_ERROR_SHAPE_INVALID))
@@ -377,7 +379,10 @@ fn try_conv_gpu(
     }
 }
 
-async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
+async fn normalize_input(
+    value: Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<ConvInput> {
     match value {
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
@@ -390,62 +395,49 @@ async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
                         map_control_flow_with_builtin(flow, BUILTIN_NAME),
                     )
                 })?;
-            normalize_host_input(gathered)
+            normalize_host_input(gathered, cooperation).await
         }
-        other => normalize_host_input(other),
+        other => normalize_host_input(other, cooperation).await,
     }
 }
 
-fn normalize_host_input(value: Value) -> BuiltinResult<ConvInput> {
-    match value {
-        Value::Tensor(tensor) => convert_tensor(tensor),
-        Value::ComplexTensor(tensor) => convert_complex_tensor(tensor),
-        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .map_err(|err| conv_error_with_detail(&CONV_ERROR_CONVERSION, err))
-            .and_then(convert_tensor),
-        Value::Num(n) => Ok(ConvInput {
-            data: vec![Complex::new(n, 0.0)],
-            len: 1,
-            hint: OrientationHint::Scalar,
-        }),
-        Value::Int(i) => Ok(ConvInput {
-            data: vec![Complex::new(i.to_f64(), 0.0)],
-            len: 1,
-            hint: OrientationHint::Scalar,
-        }),
-        Value::Bool(b) => Ok(ConvInput {
-            data: vec![Complex::new(if b { 1.0 } else { 0.0 }, 0.0)],
-            len: 1,
-            hint: OrientationHint::Scalar,
-        }),
-        Value::Complex(re, im) => Ok(ConvInput {
-            data: vec![Complex::new(re, im)],
-            len: 1,
-            hint: OrientationHint::Scalar,
-        }),
-        other => Err(conv_error_with_detail(
-            &CONV_ERROR_INVALID_INPUT,
-            format!("{other:?}; expected numeric or logical values"),
-        )),
-    }
-}
-
-fn convert_tensor(tensor: Tensor) -> BuiltinResult<ConvInput> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let data = tensor::tensor_into_values_f64(tensor);
-    let len = data.len();
-    let hint = classify_orientation(rows, cols, len);
-    let data = data.into_iter().map(|re| Complex::new(re, 0.0)).collect();
-    Ok(ConvInput { data, len, hint })
-}
-
-fn convert_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<ConvInput> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let data = tensor::complex_tensor_into_values_complex64(tensor);
-    let len = data.len();
-    let hint = classify_orientation(rows, cols, len);
+async fn normalize_host_input(
+    value: Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<ConvInput> {
+    let (len, hint) = match &value {
+        Value::Tensor(tensor) => (
+            tensor.len(),
+            classify_orientation(tensor.rows, tensor.cols, tensor.len()),
+        ),
+        Value::ComplexTensor(tensor) => (
+            tensor.len(),
+            classify_orientation(tensor.rows, tensor.cols, tensor.len()),
+        ),
+        Value::LogicalArray(array) => {
+            let (rows, cols) = shape_rows_cols(&array.shape);
+            (
+                array.data.len(),
+                classify_orientation(rows, cols, array.data.len()),
+            )
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
+            (1, OrientationHint::Scalar)
+        }
+        other => {
+            return Err(conv_error_with_detail(
+                &CONV_ERROR_INVALID_INPUT,
+                format!("{other:?}; expected numeric or logical values"),
+            ));
+        }
+    };
+    let data = super::common::convolution::materialize_host_coefficients(
+        &value,
+        cooperation,
+        || conv_error(&CONV_ERROR_INVALID_INPUT),
+        conv_allocation_error,
+    )
+    .await?;
     Ok(ConvInput { data, len, hint })
 }
 

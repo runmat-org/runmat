@@ -9,6 +9,11 @@ use crate::{BuiltinResult, GpuGatherRetry, RuntimeError};
 #[cfg(test)]
 pub(crate) mod test_support;
 
+mod coefficients;
+pub(crate) use coefficients::materialize_host_coefficients;
+mod selector;
+pub(crate) use selector::{convolution_selector_text, ConvolutionSelectorText};
+
 fn terminal(mut error: RuntimeError) -> RuntimeError {
     error.gpu_gather_retry = GpuGatherRetry::Never;
     error
