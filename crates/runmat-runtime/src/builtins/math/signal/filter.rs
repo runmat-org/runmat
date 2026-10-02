@@ -1,26 +1,30 @@
 //! MATLAB-compatible `filter` builtin with GPU-aware semantics for RunMat.
 mod provider_output;
 mod preflight;
+mod host;
 
 use std::cmp::max;
 
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderIirFilterOptions};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FILTER_ERROR_ARG_COUNT, FILTER_ERROR_DENOMINATOR_A1_ZERO,
-    FILTER_ERROR_EMPTY_DENOMINATOR, FILTER_ERROR_EMPTY_NUMERATOR, FILTER_ERROR_GATHER_FAILED,
-    FILTER_ERROR_INTERNAL, FILTER_ERROR_INVALID_COEFFICIENTS, FILTER_ERROR_INVALID_DIMENSION,
+    BuiltinErrorDescriptor, FILTER_ERROR_ARG_COUNT, FILTER_ERROR_EMPTY_DENOMINATOR,
+    FILTER_ERROR_EMPTY_NUMERATOR, FILTER_ERROR_GATHER_FAILED, FILTER_ERROR_INTERNAL,
+    FILTER_ERROR_INVALID_COEFFICIENTS, FILTER_ERROR_INVALID_DIMENSION,
     FILTER_ERROR_INVALID_INITIAL_STATE, FILTER_ERROR_INVALID_SIGNAL,
     FILTER_ERROR_PROVIDER_EXECUTION, FILTER_ERROR_PROVIDER_OUTPUT, FILTER_ERROR_PROVIDER_UPLOAD,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
+#[cfg(test)]
+use runmat_value::ComplexTensor;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::signal::common::SignalCooperation;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filter")]
@@ -142,12 +146,13 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     builtin_path = "crate::builtins::math::signal::filter"
 )]
 async fn filter_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     b: Value,
     a: Value,
     x: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(b, a, x, &rest).await?;
+    let eval = evaluate_with_runtime(runtime.as_ref(), b, a, x, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -171,6 +176,18 @@ pub async fn evaluate(
     x: Value,
     rest: &[Value],
 ) -> BuiltinResult<FilterEvaluation> {
+    evaluate_with_runtime(None, b, a, x, rest).await
+}
+
+async fn evaluate_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    b: Value,
+    a: Value,
+    x: Value,
+    rest: &[Value],
+) -> BuiltinResult<FilterEvaluation> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
@@ -182,7 +199,7 @@ pub async fn evaluate(
         return Ok(eval);
     }
     args.signal.materialize().await?;
-    filter_host(&args)
+    host::filter_host(&args, &mut cooperation).await
 }
 
 #[derive(Debug, Clone)]
@@ -967,202 +984,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         output: output_value,
         final_state: final_state_value,
     }))
-}
-
-fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
-    let signal_data = args.signal.host_data()?;
-    let mut b_norm = args.coeffs_b.data.clone();
-    let mut a_norm = args.coeffs_a.data.clone();
-
-    let a0 = a_norm[0];
-    if a0 == Complex::new(0.0, 0.0) {
-        return Err(filter_error(&FILTER_ERROR_DENOMINATOR_A1_ZERO));
-    }
-
-    for coeff in &mut b_norm {
-        *coeff /= a0;
-    }
-    for (idx, coeff) in a_norm.iter_mut().enumerate() {
-        if idx == 0 {
-            *coeff = Complex::new(1.0, 0.0);
-        } else if idx < args.coeffs_a.len {
-            *coeff /= a0;
-        } else {
-            *coeff = Complex::new(0.0, 0.0);
-        }
-    }
-    if b_norm.len() < args.order {
-        b_norm.resize(args.order, Complex::new(0.0, 0.0));
-    }
-    if a_norm.len() < args.order {
-        a_norm.resize(args.order, Complex::new(0.0, 0.0));
-    }
-
-    let expected_states = args.state_len.saturating_mul(args.channel_count);
-
-    let mut states = if args.state_len == 0 {
-        Vec::<Complex<f64>>::new()
-    } else if args.initial.provided {
-        if args.initial.column_major.len() != expected_states {
-            return Err(filter_error_with_detail(
-                &FILTER_ERROR_INVALID_INITIAL_STATE,
-                format!(
-                    "initial conditions have {} elements but {} were expected",
-                    args.initial.column_major.len(),
-                    expected_states
-                ),
-            ));
-        }
-        args.initial.column_major.clone()
-    } else {
-        vec![Complex::new(0.0, 0.0); expected_states]
-    };
-
-    let mut output = vec![Complex::new(0.0, 0.0); signal_data.len()];
-
-    if args.state_len == 0 {
-        let gain = b_norm[0];
-        for (dst, &src) in output.iter_mut().zip(signal_data.iter()) {
-            *dst = gain * src;
-        }
-    } else if args.channel_count == 0 || args.shape_ext[args.dim_idx] == 0 {
-        // nothing to do, states already contain initial values.
-    } else {
-        let dim_len = args.shape_ext[args.dim_idx];
-        for t in 0..args.trailing {
-            let base = t
-                .checked_mul(dim_len)
-                .and_then(|v| v.checked_mul(args.leading))
-                .ok_or_else(|| runtime_error_for("filter: index overflow during evaluation"))?;
-            for l in 0..args.leading {
-                let channel_idx = t
-                    .checked_mul(args.leading)
-                    .and_then(|v| v.checked_add(l))
-                    .ok_or_else(|| runtime_error_for("filter: index overflow during evaluation"))?;
-                if channel_idx >= args.channel_count {
-                    continue;
-                }
-                let state_base = channel_idx
-                    .checked_mul(args.state_len)
-                    .ok_or_else(|| runtime_error_for("filter: state index overflow"))?;
-                for step in 0..dim_len {
-                    let idx = base
-                        .checked_add(l)
-                        .and_then(|v| v.checked_add(step.saturating_mul(args.leading)))
-                        .ok_or_else(|| runtime_error_for("filter: signal index overflow"))?;
-                    if idx >= signal_data.len() {
-                        break;
-                    }
-                    let x_n = signal_data[idx];
-                    let y = b_norm[0] * x_n + states[state_base];
-                    output[idx] = y;
-                    for i in 1..args.order {
-                        let next_state = if i < args.state_len {
-                            states[state_base + i]
-                        } else {
-                            Complex::new(0.0, 0.0)
-                        };
-                        let new_state = b_norm[i] * x_n + next_state - a_norm[i] * y;
-                        states[state_base + i - 1] = new_state;
-                    }
-                }
-            }
-        }
-    }
-
-    let final_states_column = if args.state_len == 0 {
-        Vec::<Complex<f64>>::new()
-    } else {
-        states
-    };
-
-    let output_value = if args.is_complex {
-        let data: Vec<(f64, f64)> = output.iter().map(|c| (c.re, c.im)).collect();
-        if data.len() == 1 {
-            if args.signal.output_single {
-                let tensor =
-                    ComplexTensor::from_f32(vec![(data[0].0 as f32, data[0].1 as f32)], vec![1, 1])
-                        .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
-                Value::ComplexTensor(tensor)
-            } else {
-                Value::Complex(data[0].0, data[0].1)
-            }
-        } else {
-            let tensor = if args.signal.output_single {
-                ComplexTensor::from_f32(
-                    data.into_iter()
-                        .map(|(re, im)| (re as f32, im as f32))
-                        .collect(),
-                    args.signal.shape.clone(),
-                )
-            } else {
-                ComplexTensor::new(data, args.signal.shape.clone())
-            }
-            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
-            Value::ComplexTensor(tensor)
-        }
-    } else {
-        let data: Vec<f64> = output.iter().map(|c| c.re).collect();
-        let tensor = if args.signal.output_single {
-            Tensor::from_f32(
-                data.into_iter().map(|value| value as f32).collect(),
-                args.signal.shape.clone(),
-            )
-        } else {
-            Tensor::new(data, args.signal.shape.clone())
-        }
-        .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
-        tensor::tensor_into_value(tensor)
-    };
-
-    let final_state_value = if args.state_len == 0 {
-        let zeros = vec![0.0; tensor::element_count(&args.state_shape)];
-        let tensor = if args.signal.output_single {
-            Tensor::from_f32(
-                zeros.into_iter().map(|value| value as f32).collect(),
-                args.state_shape.clone(),
-            )
-        } else {
-            Tensor::new(zeros, args.state_shape.clone())
-        }
-        .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
-        tensor::tensor_into_value(tensor)
-    } else if args.is_complex || args.initial.is_complex {
-        let data: Vec<(f64, f64)> = final_states_column.iter().map(|c| (c.re, c.im)).collect();
-        if data.len() == 1 && !args.signal.output_single {
-            Value::Complex(data[0].0, data[0].1)
-        } else {
-            let tensor = if args.signal.output_single {
-                ComplexTensor::from_f32(
-                    data.into_iter()
-                        .map(|(re, im)| (re as f32, im as f32))
-                        .collect(),
-                    args.state_shape.clone(),
-                )
-            } else {
-                ComplexTensor::new(data, args.state_shape.clone())
-            }
-            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
-            Value::ComplexTensor(tensor)
-        }
-    } else {
-        let data: Vec<f64> = final_states_column.iter().map(|c| c.re).collect();
-        let tensor = if args.signal.output_single {
-            Tensor::from_f32(
-                data.into_iter().map(|value| value as f32).collect(),
-                args.state_shape.clone(),
-            )
-        } else {
-            Tensor::new(data, args.state_shape.clone())
-        }
-        .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
-        tensor::tensor_into_value(tensor)
-    };
-
-    Ok(FilterEvaluation {
-        output: output_value,
-        final_state: final_state_value,
-    })
 }
 
 fn ensure_vector_shape(role: CoefficientRole, shape: &[usize]) -> BuiltinResult<()> {
