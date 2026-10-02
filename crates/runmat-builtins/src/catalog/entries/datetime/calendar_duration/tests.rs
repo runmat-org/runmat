@@ -1,7 +1,9 @@
 use super::*;
+use crate::REQUIRED_DEFAULT_BINDING;
 use runmat_types::{
-    DimensionFact, DynamicReason, LiteralContext, NumericClass, NumericDomain, NumericFact,
-    ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact, ValueFact, ValueKindFact,
+    CallRequest, DimensionFact, DynamicReason, LiteralContext, NumericClass, NumericDomain,
+    NumericFact, ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact, ValueFact,
+    ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -36,6 +38,38 @@ fn duration(shape: ShapeFact) -> ValueFact {
         shape,
         runmat_types::StorageFact::Opaque,
     )
+}
+
+#[test]
+fn extracted_declarations_keep_all_public_identity_and_extension_exports() {
+    assert_eq!(
+        ENTRIES
+            .iter()
+            .map(|entry| entry.identity.name)
+            .collect::<Vec<_>>(),
+        [
+            "caldays",
+            "calendarDuration",
+            "calmonths",
+            "calquarters",
+            "calweeks",
+            "calyears",
+            "iscalendarduration",
+        ]
+    );
+    assert_eq!(CALENDAR_DURATION_EXTENSIONS.len(), 3);
+    assert_eq!(
+        CALENDAR_UNIT_EXTENSIONS,
+        [CALENDAR_DURATION_GPU_INPUT_EXTENSION]
+    );
+    assert_eq!(
+        CALENDARDURATION_CATALOG_ENTRY.bindings,
+        REQUIRED_DEFAULT_BINDING.as_slice()
+    );
+    assert_eq!(
+        ISCALENDARDURATION_CATALOG_ENTRY.bindings,
+        REQUIRED_DEFAULT_BINDING.as_slice()
+    );
 }
 
 #[test]
