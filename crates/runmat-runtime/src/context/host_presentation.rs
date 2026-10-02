@@ -2,7 +2,10 @@
 //! provider operation. Typed query, resource, and output admission stay with
 //! the caller; this owner never chooses or replays an execution route.
 
-use super::{RuntimeContext, RuntimePlacementFeedbackSource, RuntimeWholeWorkSelection};
+use super::{
+    RuntimeContext, RuntimePlacementFeedbackSource, RuntimeWholeWorkProbeLease,
+    RuntimeWholeWorkSelection,
+};
 use runmat_accelerate_api::observation::{
     ProviderObservationFailure, ProviderObservationStatus, ProviderOperationReceipt,
     ProviderOperationRecorder,
@@ -12,6 +15,10 @@ use runmat_execution::{
     SelectedExecutionCandidate,
 };
 use runmat_time::duration_ns_saturating;
+
+#[cfg(test)]
+#[path = "host_presentation/tests.rs"]
+mod tests;
 
 /// A borrowed provider recorder must surround the actual upload/restore call.
 /// Dropping this owner before `finish` abandons the sample and releases the
@@ -62,6 +69,9 @@ impl HostPresentationReceipt {
             receipt: self.receipt,
             signature: self.selected.decision.signature.clone(),
             selected: self.selected.decision.selected.clone(),
+            // Exploration remains reserved until completion evidence or a
+            // terminal non-sample; enqueue/publication is not completion.
+            _probe: self.selected.probe.take(),
             cancellation: self.runtime.cancellation(),
             terminal_without_feedback: false,
         };
@@ -81,6 +91,7 @@ struct DeferredPresentationFeedback {
     receipt: ProviderOperationReceipt,
     signature: PlacementSignature,
     selected: SelectedExecutionCandidate,
+    _probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
     cancellation: CancellationToken,
     terminal_without_feedback: bool,
 }

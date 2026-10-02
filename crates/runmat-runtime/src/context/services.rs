@@ -207,7 +207,7 @@ pub trait RuntimePlacementFeedbackSource: Send {
 
 /// A process-local reservation for one exploratory whole-work invocation.
 /// Dropping it releases the reservation without reporting a provider failure.
-pub trait RuntimeWholeWorkProbeLease {}
+pub trait RuntimeWholeWorkProbeLease: Send {}
 
 pub struct RuntimeWholeWorkSelection {
     pub decision: runmat_execution::WholeWorkDecision,
