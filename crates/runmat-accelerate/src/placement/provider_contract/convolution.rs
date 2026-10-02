@@ -252,13 +252,29 @@ fn work(
             );
         }
     }
-    let Some(estimate) = resources::estimate(
+    let backings = route
+        .input_backings
+        .and_then(|receipt| receipt.live_requested_bytes());
+    if backings.is_some_and(|bytes| {
+        query.inputs.iter().enumerate().any(|(index, input)| {
+            input
+                .checked_byte_len()
+                .is_none_or(|logical| bytes[index] < logical)
+        })
+    }) {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "convolution.backing_smaller_than_view",
+        );
+    }
+    let Some((estimate, largest_route_allocation)) = resources::estimate(
         identity,
         route,
         &query.inputs,
         output_elements,
         output_bytes,
         wgpu,
+        backings,
     ) else {
         return reject(
             ProviderRejectionCode::ResourceLimit,
@@ -268,7 +284,10 @@ fn work(
     if provider
         .capability_snapshot()
         .max_allocation_bytes
-        .is_some_and(|limit| estimate.transient_bytes.is_some_and(|peak| peak > limit))
+        .is_some_and(|limit| {
+            largest_route_allocation > limit
+                || estimate.transient_bytes.is_some_and(|peak| peak > limit)
+        })
     {
         return reject(
             ProviderRejectionCode::ResourceLimit,

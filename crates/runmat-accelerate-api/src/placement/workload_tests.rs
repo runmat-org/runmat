@@ -56,6 +56,7 @@ fn convolution_route_round_trips_without_changing_legacy_workloads() {
                 orientation: ProviderConvOrientation::Column,
             },
             mode: runmat_types::ConvolutionMode::Valid,
+            input_backings: None,
         }),
         ..Default::default()
     };

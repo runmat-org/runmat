@@ -18,15 +18,13 @@ pub(super) fn estimate(
     output_elements: u64,
     output_bytes: u64,
     wgpu: bool,
-) -> Option<ProviderResourceEstimate> {
+    backings: Option<[u64; 2]>,
+) -> Option<(ProviderResourceEstimate, u64)> {
     let [signal, kernel] = inputs else {
         return None;
     };
     let signal_elements = signal.checked_element_count()?;
     let kernel_elements = kernel.checked_element_count()?;
-    let signal_bytes = signal.checked_byte_len()?;
-    let kernel_bytes = kernel.checked_byte_len()?;
-    let retained_inputs = signal_bytes.checked_add(kernel_bytes)?;
 
     if wgpu {
         if identity != ConvolutionIdentity::Vector {
@@ -38,22 +36,22 @@ pub(super) fn estimate(
         } else {
             CONV1D_UNIFORM_BYTES
         };
-        // An empty view may refer to a larger resident allocation. Shape-only
-        // facts cannot prove its full backing footprint.
-        let peak = if signal_elements == 0 || kernel_elements == 0 {
-            None
-        } else {
-            Some(
-                retained_inputs
+        let peak = match backings {
+            Some([a, b]) => Some(
+                a.checked_add(b)?
                     .checked_add(physical_output)?
                     .checked_add(uniform)?,
-            )
+            ),
+            None => None,
         };
-        return Some(ProviderResourceEstimate {
-            transient_bytes: peak,
-            output_bytes: Some(physical_output),
-            dispatches: Some(u32::from(output_elements != 0)),
-        });
+        return Some((
+            ProviderResourceEstimate {
+                transient_bytes: peak,
+                output_bytes: Some(physical_output),
+                dispatches: Some(u32::from(output_elements != 0)),
+            },
+            physical_output.max(uniform),
+        ));
     }
 
     let normal_route = signal_elements != 0
@@ -61,7 +59,7 @@ pub(super) fn estimate(
         && !(identity == ConvolutionIdentity::Vector
             && route.mode == ConvolutionMode::Valid
             && signal_elements < kernel_elements);
-    let peak = if normal_route {
+    let (peak, largest_route_allocation) = if normal_route {
         // InProcess clones both registered f64 operands. The full result and
         // shaped result coexist until the latter is moved into its registry.
         let full_elements = match identity {
@@ -76,17 +74,31 @@ pub(super) fn estimate(
                     .checked_mul(ac.checked_add(bc)?.checked_sub(1)?)?
             }
         };
-        retained_inputs
-            .checked_mul(2)?
-            .checked_add(full_elements.checked_mul(8)?)?
-            .checked_add(output_bytes)?
+        let full_bytes = full_elements.checked_mul(8)?;
+        let peak = match backings {
+            Some([a, b]) => Some(
+                a.checked_add(b)?
+                    .checked_mul(2)?
+                    .checked_add(full_bytes)?
+                    .checked_add(output_bytes)?,
+            ),
+            None => None,
+        };
+        (peak, full_bytes.max(output_bytes))
     } else {
         // Empty and short-Valid paths allocate only the published result.
-        retained_inputs.checked_add(output_bytes)?
+        let peak = match backings {
+            Some([a, b]) => Some(a.checked_add(b)?.checked_add(output_bytes)?),
+            None => None,
+        };
+        (peak, output_bytes)
     };
-    Some(ProviderResourceEstimate {
-        transient_bytes: Some(peak),
-        output_bytes: Some(output_bytes),
-        dispatches: Some(0),
-    })
+    Some((
+        ProviderResourceEstimate {
+            transient_bytes: peak,
+            output_bytes: Some(output_bytes),
+            dispatches: Some(0),
+        },
+        largest_route_allocation,
+    ))
 }

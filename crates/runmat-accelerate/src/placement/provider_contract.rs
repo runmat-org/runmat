@@ -216,7 +216,7 @@ fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
 pub(crate) fn in_process_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 12, IN_PROCESS_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 14, IN_PROCESS_OPERATIONS);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);
@@ -237,7 +237,7 @@ pub(crate) fn in_process_capability_snapshot(
 pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 13, WGPU_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 15, WGPU_OPERATIONS);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);

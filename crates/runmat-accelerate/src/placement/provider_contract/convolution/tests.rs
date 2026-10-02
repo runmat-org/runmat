@@ -1,7 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
     AccelDownloadFuture, GpuTensorHandle, HostTensorView, ProviderConvolutionGeometry,
-    ProviderWorkload,
+    ProviderConvolutionInputBackings, ProviderWorkload,
 };
 
 struct GeometryProvider {
@@ -83,7 +83,11 @@ fn query(
         ],
         outputs: vec![],
         workload: ProviderWorkload {
-            convolution: Some(ProviderConvolutionWorkload { form, mode }),
+            convolution: Some(ProviderConvolutionWorkload {
+                form,
+                mode,
+                input_backings: None,
+            }),
             ..Default::default()
         },
     }
@@ -108,12 +112,12 @@ fn exact_vector_mode_and_physical_limits() {
     let full = query(vector(), ConvolutionMode::Full, &[1, 5], &[1, 3]);
     let same = query(vector(), ConvolutionMode::Same, &[1, 5], &[1, 3]);
     let valid = query(vector(), ConvolutionMode::Valid, &[1, 5], &[1, 3]);
-    for (query, bytes, peak) in [(full, 56, 136), (same, 40, 120), (valid, 24, 104)] {
+    for (query, bytes) in [(full, 56), (same, 40), (valid, 24)] {
         let result = validate(&provider, true, &query).expect("recognized convolution");
         assert_eq!(
             result,
             ProviderFeasibility::supported(ProviderResourceEstimate {
-                transient_bytes: Some(peak),
+                transient_bytes: None,
                 output_bytes: Some(bytes),
                 dispatches: Some(1),
             })
@@ -148,7 +152,7 @@ fn matrix_hook_is_in_process_only_and_empty_geometry_is_typed() {
     assert_eq!(
         supported,
         ProviderFeasibility::supported(ProviderResourceEstimate {
-            transient_bytes: Some(304),
+            transient_bytes: None,
             output_bytes: Some(48),
             dispatches: Some(0),
         })
@@ -158,7 +162,7 @@ fn matrix_hook_is_in_process_only_and_empty_geometry_is_typed() {
     assert_eq!(
         result,
         ProviderFeasibility::supported(ProviderResourceEstimate {
-            transient_bytes: Some(56),
+            transient_bytes: None,
             output_bytes: Some(8),
             dispatches: Some(0),
         })
@@ -226,7 +230,32 @@ fn capability_inventory_matches_implemented_hooks() {
 
 #[test]
 fn checked_peak_obeys_a_known_provider_memory_limit() {
-    let request = query(vector(), ConvolutionMode::Full, &[1, 5], &[1, 3]);
+    let source = crate::simple_provider::InProcessProvider::new();
+    let signal = source
+        .upload(&HostTensorView {
+            data: &[1.0; 5],
+            shape: &[1, 5],
+        })
+        .unwrap();
+    let kernel = source
+        .upload(&HostTensorView {
+            data: &[1.0; 3],
+            shape: &[1, 3],
+        })
+        .unwrap();
+    let backing = ProviderConvolutionInputBackings::from_full_live_handles([&signal, &kernel])
+        .unwrap()
+        .expect("full registered input views");
+    assert_eq!(backing.live_requested_bytes(), Some([40, 24]));
+    assert!(backing.matches_live_handles([&signal, &kernel]).unwrap());
+    assert!(!backing.matches_live_handles([&kernel, &signal]).unwrap());
+    let mut request = query(vector(), ConvolutionMode::Full, &[1, 5], &[1, 3]);
+    request
+        .workload
+        .convolution
+        .as_mut()
+        .unwrap()
+        .input_backings = Some(backing);
     let insufficient = GeometryProvider {
         memory_limit: Some(135),
         precision: ProviderPrecision::F64,
@@ -247,6 +276,33 @@ fn checked_peak_obeys_a_known_provider_memory_limit() {
             dispatches: Some(1),
         }))
     );
+    // Transport retains stable byte facts for cache identity but cannot mint
+    // a process-local live receipt.
+    let wire = serde_json::to_vec(&request).unwrap();
+    let decoded: ProviderFeasibilityQuery = serde_json::from_slice(&wire).unwrap();
+    assert_eq!(
+        decoded
+            .workload
+            .convolution
+            .unwrap()
+            .input_backings
+            .unwrap()
+            .live_requested_bytes(),
+        None
+    );
+    let ProviderFeasibility::Supported { estimate } = validate(&exact, true, &decoded).unwrap()
+    else {
+        panic!("untrusted wire claim should remain feasible with unknown peak");
+    };
+    assert_eq!(estimate.transient_bytes, None);
+    let output_too_large = GeometryProvider {
+        memory_limit: Some(55),
+        precision: ProviderPrecision::F64,
+    };
+    assert_eq!(
+        code(validate(&output_too_large, true, &decoded).unwrap()),
+        ProviderRejectionCode::ResourceLimit
+    );
 }
 
 #[test]
@@ -255,13 +311,13 @@ fn in_process_full_crop_and_early_empty_routes_have_distinct_peaks() {
     let vector_full = query(vector(), ConvolutionMode::Full, &[1, 5], &[1, 3]);
     let vector_same = query(vector(), ConvolutionMode::Same, &[1, 5], &[1, 3]);
     let vector_valid = query(vector(), ConvolutionMode::Valid, &[1, 2], &[1, 4]);
-    for (request, expected) in [(vector_full, 240), (vector_same, 224), (vector_valid, 48)] {
+    for request in [vector_full, vector_same, vector_valid] {
         let ProviderFeasibility::Supported { estimate } =
             validate(&provider, false, &request).expect("recognized convolution")
         else {
             panic!("physical route rejected");
         };
-        assert_eq!(estimate.transient_bytes, Some(expected));
+        assert_eq!(estimate.transient_bytes, None);
     }
     let matrix = query(
         ProviderConvolutionForm::Matrix,
@@ -273,8 +329,65 @@ fn in_process_full_crop_and_early_empty_routes_have_distinct_peaks() {
     else {
         panic!("in-process matrix route rejected");
     };
-    // Registered inputs 80, their clones 80, full 96, valid crop 16.
-    assert_eq!(estimate.transient_bytes, Some(272));
+    assert_eq!(estimate.transient_bytes, None);
+    // These are checked physical-route calculations, not proof of borrowed
+    // allocation backing when no live receipt accompanies the query.
+    for (request, output_elements, output_bytes, backings, expected) in [
+        (
+            query(vector(), ConvolutionMode::Full, &[1, 5], &[1, 3]),
+            7,
+            56,
+            [40, 24],
+            240,
+        ),
+        (
+            query(vector(), ConvolutionMode::Same, &[1, 5], &[1, 3]),
+            5,
+            40,
+            [40, 24],
+            224,
+        ),
+        (
+            query(vector(), ConvolutionMode::Valid, &[1, 2], &[1, 4]),
+            0,
+            0,
+            [16, 32],
+            48,
+        ),
+    ] {
+        let result = resources::estimate(
+            ConvolutionIdentity::Vector,
+            request.workload.convolution.unwrap(),
+            &request.inputs,
+            output_elements,
+            output_bytes,
+            false,
+            Some(backings),
+        )
+        .unwrap();
+        assert_eq!(result.0.transient_bytes, Some(expected));
+    }
+    let result = resources::estimate(
+        ConvolutionIdentity::Matrix,
+        matrix.workload.convolution.unwrap(),
+        &matrix.inputs,
+        2,
+        16,
+        false,
+        Some([48, 32]),
+    )
+    .unwrap();
+    assert_eq!(result.0.transient_bytes, Some(272));
+    assert!(resources::estimate(
+        ConvolutionIdentity::Matrix,
+        matrix.workload.convolution.unwrap(),
+        &matrix.inputs,
+        2,
+        16,
+        false,
+        Some([u64::MAX, 32]),
+    )
+    .is_none());
 }
 
 #[test]
@@ -290,7 +403,7 @@ fn f32_shader_uniform_and_empty_view_are_accounted_separately() {
     assert_eq!(
         validate(&provider, true, &full),
         Some(ProviderFeasibility::supported(ProviderResourceEstimate {
-            transient_bytes: Some(76),
+            transient_bytes: None,
             output_bytes: Some(28),
             dispatches: Some(1),
         }))
@@ -307,5 +420,20 @@ fn f32_shader_uniform_and_empty_view_are_accounted_separately() {
             output_bytes: Some(4),
             dispatches: Some(0),
         }))
+    );
+    assert_eq!(
+        resources::estimate(
+            ConvolutionIdentity::Vector,
+            full.workload.convolution.unwrap(),
+            &full.inputs,
+            7,
+            28,
+            true,
+            Some([20, 12]),
+        )
+        .unwrap()
+        .0
+        .transient_bytes,
+        Some(76)
     );
 }

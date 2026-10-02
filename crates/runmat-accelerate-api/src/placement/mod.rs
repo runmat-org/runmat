@@ -8,7 +8,8 @@
 mod capability;
 mod convolution;
 pub use convolution::{
-    ProviderConvolutionForm, ProviderConvolutionGeometry, ProviderConvolutionWorkload,
+    ProviderConvolutionForm, ProviderConvolutionGeometry, ProviderConvolutionInputBackings,
+    ProviderConvolutionWorkload,
 };
 mod cost;
 mod execution_inventory;
