@@ -8,6 +8,7 @@ pub(super) struct NyquistResponse {
     pub(super) re: Vec<f64>,
     pub(super) im: Vec<f64>,
     pub(super) w: Vec<f64>,
+    #[cfg(feature = "plot-core")]
     pub(super) mirror_negative_frequency: bool,
 }
 
@@ -75,6 +76,7 @@ pub(super) fn evaluate(model: &TfModel, w: Vec<f64>) -> BuiltinResult<NyquistRes
         re,
         im,
         w,
+        #[cfg(feature = "plot-core")]
         mirror_negative_frequency: model
             .numerator
             .iter()

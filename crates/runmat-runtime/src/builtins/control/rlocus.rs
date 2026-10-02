@@ -480,6 +480,7 @@ impl RootLocus {
             })
     }
 
+    #[cfg(feature = "plot-core")]
     fn root(&self, branch: usize, gain_index: usize) -> Complex64 {
         self.roots[branch + gain_index * self.branches]
     }
