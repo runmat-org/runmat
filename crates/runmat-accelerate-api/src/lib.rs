@@ -53,8 +53,8 @@ pub use deep_learning::{
     DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
 pub use provider_execution::{
-    is_unsupported_provider_error, ProviderExecutionError, ProviderExecutionFuture,
-    ProviderExecutionResult,
+    is_unsupported_provider_error, ProviderExecutionCompletionError, ProviderExecutionError,
+    ProviderExecutionFuture, ProviderExecutionResult,
 };
 mod placement;
 mod power;

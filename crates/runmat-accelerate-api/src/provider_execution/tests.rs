@@ -33,6 +33,27 @@ fn nested_error_retains_actual_owner_until_final_error_drop() {
 }
 
 #[test]
+fn completion_exposes_original_cause_and_never_authorizes_post_effect_replay() {
+    let owner = Owner::new(());
+    let weak = Owner::downgrade(&owner);
+    let primary = ProviderExecutionError::from_source(RetainedOwner(owner));
+    let completion = ProviderExecutionCompletionError::new(Some(primary), Vec::new());
+    assert!(completion.primary().is_some());
+    assert!(completion.cleanup_errors().is_empty());
+    assert!(completion
+        .source()
+        .unwrap()
+        .source()
+        .unwrap()
+        .is::<RetainedOwner>());
+    let outer = ProviderExecutionError::from_source(completion).after_effect();
+    assert!(!outer.is_unsupported());
+    assert!(weak.upgrade().is_some());
+    drop(outer);
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
 fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
     assert!(
         ProviderExecutionError::from(crate::unsupported_provider_operation(

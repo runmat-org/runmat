@@ -45,6 +45,65 @@ pub type ProviderExecutionResult<T> = Result<T, ProviderExecutionError>;
 pub type ProviderExecutionFuture<'a, T> =
     Pin<Box<dyn Future<Output = ProviderExecutionResult<T>> + 'a>>;
 
+/// A failed operation whose already-created results were also retired. The
+/// original execution cause and every failed-retirement owner remain available
+/// independently; cleanup never changes an after-effect result into fallback.
+#[derive(Debug)]
+pub struct ProviderExecutionCompletionError {
+    primary: Option<Box<ProviderExecutionError>>,
+    cleanup: Vec<crate::allocation::GpuHandleReleaseError>,
+}
+
+impl ProviderExecutionCompletionError {
+    pub fn new(
+        primary: Option<ProviderExecutionError>,
+        cleanup: Vec<crate::allocation::GpuHandleReleaseError>,
+    ) -> Self {
+        Self {
+            primary: primary.map(Box::new),
+            cleanup,
+        }
+    }
+
+    pub fn primary(&self) -> Option<&ProviderExecutionError> {
+        self.primary.as_deref()
+    }
+
+    pub fn cleanup_errors(&self) -> &[crate::allocation::GpuHandleReleaseError] {
+        &self.cleanup
+    }
+}
+
+impl fmt::Display for ProviderExecutionCompletionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "provider execution had {} retirement failure(s)",
+            self.cleanup.len()
+        )?;
+        if let Some(primary) = &self.primary {
+            write!(formatter, "; original execution failure: {primary}")?;
+        }
+        for cleanup in &self.cleanup {
+            write!(formatter, "; {cleanup}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error for ProviderExecutionCompletionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.primary
+            .as_ref()
+            .map(|primary| primary.as_ref() as &(dyn Error + 'static))
+            .or_else(|| {
+                self.cleanup
+                    .first()
+                    .map(|cleanup| cleanup as &(dyn Error + 'static))
+            })
+    }
+}
+
 impl ProviderExecutionError {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_source(error: impl Error + Send + Sync + 'static) -> Self {

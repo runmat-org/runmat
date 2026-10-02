@@ -5,7 +5,8 @@ use std::fmt;
 use runmat_accelerate_api::{
     allocation::GpuHandleReleaseError, handle_integer_type, handle_is_logical, handle_precision,
     handle_storage, provider_for_handle, same_provider_instance, AccelProvider, GpuTensorHandle,
-    GpuTensorLayout, GpuTensorStorage, ProviderExecutionError, ProviderExecutionResult,
+    GpuTensorLayout, GpuTensorStorage, ProviderExecutionCompletionError, ProviderExecutionError,
+    ProviderExecutionResult,
 };
 
 const MAX_STAGES: usize = 24;
@@ -35,42 +36,6 @@ impl Error for StageRejected {
         self.cleanup
             .as_ref()
             .map(|cleanup| cleanup as &(dyn Error + 'static))
-    }
-}
-
-#[derive(Debug)]
-struct StageCompletionFailed {
-    primary: Option<ProviderExecutionError>,
-    cleanup: Vec<GpuHandleReleaseError>,
-}
-
-impl fmt::Display for StageCompletionFailed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "iir_zero_phase: {} stage retirement failure(s)",
-            self.cleanup.len()
-        )?;
-        if let Some(primary) = &self.primary {
-            write!(f, "; original execution failure: {primary}")?;
-        }
-        for cleanup in &self.cleanup {
-            write!(f, "; {cleanup}")?;
-        }
-        Ok(())
-    }
-}
-
-impl Error for StageCompletionFailed {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.primary
-            .as_ref()
-            .map(|primary| primary as &(dyn Error + 'static))
-            .or_else(|| {
-                self.cleanup
-                    .first()
-                    .map(|cleanup| cleanup as &(dyn Error + 'static))
-            })
     }
 }
 
@@ -205,10 +170,12 @@ impl<'a> Stages<'a> {
                 self.cleanup.push(error);
             }
         }
-        Err(ProviderExecutionError::from_source(StageCompletionFailed {
-            primary: result.err(),
-            cleanup: self.cleanup,
-        })
-        .after_effect())
+        Err(
+            ProviderExecutionError::from_source(ProviderExecutionCompletionError::new(
+                result.err(),
+                self.cleanup,
+            ))
+            .after_effect(),
+        )
     }
 }
