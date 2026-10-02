@@ -282,24 +282,12 @@ fn candidate_total_ns(
 /// Resource-only admission shared by numeric graph placement and exploratory
 /// whole-work selection. It never constructs a synthetic cost estimate.
 pub(super) fn single_candidate_resources_admitted(
-    location: CandidateExecutionLocation,
-    output_residency: CandidateOutputResidency,
-    presentation: CandidateOutputPresentation,
-    kind: ExecutionCandidateKind,
-    demand: CandidateResourceDemand,
-    transactional_results: bool,
+    candidate: CandidateResourceFacts,
     resources: &PlacementResourceSnapshot,
     require_transactional_results: bool,
 ) -> Result<(), ResourceAdmissionError> {
     candidate_resource_adjustment_ns(
-        CandidateResourceFacts {
-            location,
-            output_residency,
-            presentation,
-            kind,
-            demand,
-            transactional_results,
-        },
+        candidate,
         ResourceAdmissionContext {
             resources,
             host_retained_bytes: ResourceAccount::default(),
@@ -310,13 +298,13 @@ pub(super) fn single_candidate_resources_admitted(
     .map(|_| ())
 }
 
-struct CandidateResourceFacts {
-    location: CandidateExecutionLocation,
-    output_residency: CandidateOutputResidency,
-    presentation: CandidateOutputPresentation,
-    kind: ExecutionCandidateKind,
-    demand: CandidateResourceDemand,
-    transactional_results: bool,
+pub(super) struct CandidateResourceFacts {
+    pub(super) location: CandidateExecutionLocation,
+    pub(super) output_residency: CandidateOutputResidency,
+    pub(super) presentation: CandidateOutputPresentation,
+    pub(super) kind: ExecutionCandidateKind,
+    pub(super) demand: CandidateResourceDemand,
+    pub(super) transactional_results: bool,
 }
 
 struct ResourceAdmissionContext<'a> {

@@ -15,7 +15,9 @@ use runmat_execution::{
 use runmat_runtime::context::{RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection};
 
 use super::{PlacementPlanError, PlacementSession};
-use crate::placement::partition::{single_candidate_resources_admitted, ResourceAdmissionError};
+use crate::placement::partition::{
+    single_candidate_resources_admitted, CandidateResourceFacts, ResourceAdmissionError,
+};
 
 type ProbeKey = (Digest, String, ExecutionCandidateKind);
 
@@ -65,12 +67,14 @@ impl PlacementSession {
         for candidate in &request.candidates {
             let demand = candidate.resources;
             if let Err(reason) = single_candidate_resources_admitted(
-                candidate.execution_location,
-                candidate.output_residency,
-                candidate.presentation,
-                candidate.kind,
-                demand,
-                candidate.transactional_results,
+                CandidateResourceFacts {
+                    location: candidate.execution_location,
+                    output_residency: candidate.output_residency,
+                    presentation: candidate.presentation,
+                    kind: candidate.kind,
+                    demand,
+                    transactional_results: candidate.transactional_results,
+                },
                 &request.resources,
                 request.require_transactional_results,
             ) {
