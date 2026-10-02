@@ -42,7 +42,7 @@ pub use execution_inventory::{
 };
 pub use feasibility::{
     ProviderFeasibility, ProviderFeasibilityQuery, ProviderOperationIdentity, ProviderRejection,
-    ProviderRejectionCode, ProviderResourceEstimate, ProviderWorkload,
+    ProviderRejectionCode, ProviderResourceEstimate, ProviderTransferOutputBound, ProviderWorkload,
 };
 pub use representation::{
     ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderStorage,

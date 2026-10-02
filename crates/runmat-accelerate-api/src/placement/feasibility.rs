@@ -11,6 +11,36 @@ use super::{
     ProviderResidency, ProviderStorage,
 };
 
+/// Admission bound for a transfer whose exact output shape depends on values
+/// that have not yet been read. This never masquerades as an exact tensor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderTransferOutputBound {
+    pub element_type: ProviderElementType,
+    pub storage: ProviderStorage,
+    pub layout: ProviderLayout,
+    pub residency: ProviderResidency,
+    pub max_elements: u64,
+}
+
+impl ProviderTransferOutputBound {
+    pub fn max_bytes(&self) -> Option<u64> {
+        self.max_elements
+            .max(1)
+            .checked_mul(self.element_type.byte_width())
+    }
+
+    pub fn admits(&self, actual: &ProviderRepresentation) -> bool {
+        self.element_type == actual.element_type
+            && self.storage == actual.storage
+            && self.layout == actual.layout
+            && self.residency == actual.residency
+            && actual
+                .checked_element_count()
+                .is_some_and(|count| count <= self.max_elements)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ProviderOperationIdentity(pub String);
@@ -39,6 +69,11 @@ pub struct ProviderWorkload {
     /// Typed IIR execution route. Its absence cannot establish an IIR hook.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iir: Option<super::ProviderIirWorkload>,
+    /// Maximum per-output transfer payloads when exact result dimensions are
+    /// data-dependent. Only upload queries with empty exact inputs/outputs may
+    /// use this; publication must later validate an exact upload query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer_output_bounds: Option<Vec<ProviderTransferOutputBound>>,
     pub elements: Option<u64>,
     pub flops: Option<u64>,
     /// Total operation-owned scalar work prior, not a FLOP count or a timing.
@@ -148,6 +183,46 @@ impl ProviderFeasibilityQuery {
                 ProviderRejectionCode::UnsupportedOperation,
                 "provider.operation.unsupported",
             );
+        }
+        if let Some(bounds) = &self.workload.transfer_output_bounds {
+            if self.family != ProviderOperationFamily::Upload
+                || !self.inputs.is_empty()
+                || !self.outputs.is_empty()
+                || bounds.is_empty()
+                || self.workload.requested_outputs != u32::try_from(bounds.len()).ok()
+            {
+                return ProviderFeasibility::rejected(
+                    ProviderRejectionCode::InvalidShape,
+                    "provider.transfer.bound_contract",
+                );
+            }
+            let expected = ProviderElementType::from(precision);
+            let mut total = 0_u64;
+            for bound in bounds {
+                if bound.element_type != expected
+                    || bound.storage != ProviderStorage::DenseReal
+                    || bound.layout != ProviderLayout::ColumnMajorContiguous
+                    || bound.residency != ProviderResidency::Device
+                {
+                    return ProviderFeasibility::rejected(
+                        ProviderRejectionCode::UnsupportedElementType,
+                        "provider.transfer.bound_class",
+                    );
+                }
+                let Some(next) = bound.max_bytes().and_then(|bytes| total.checked_add(bytes))
+                else {
+                    return ProviderFeasibility::rejected(
+                        ProviderRejectionCode::ResourceLimit,
+                        "provider.transfer.bound_overflow",
+                    );
+                };
+                total = next;
+            }
+            return ProviderFeasibility::supported(ProviderResourceEstimate {
+                transient_bytes: None,
+                output_bytes: Some(total),
+                dispatches: Some(0),
+            });
         }
         let expected = ProviderElementType::from(precision);
         for representation in self.inputs.iter().chain(&self.outputs) {

@@ -495,7 +495,63 @@ fn dense_feasibility_with_bytes(
         );
     }
 
+    if let Some(bounds) = &query.workload.transfer_output_bounds {
+        if query.operation.0 != "transfer.upload"
+            || query.family != ProviderOperationFamily::Upload
+            || !query.inputs.is_empty()
+            || !query.outputs.is_empty()
+            || bounds.is_empty()
+            || query.workload.requested_outputs != u32::try_from(bounds.len()).ok()
+        {
+            return ProviderFeasibility::rejected(
+                ProviderRejectionCode::InvalidShape,
+                "provider.transfer.bound_contract",
+            );
+        }
+        let mut total = 0_u64;
+        for bound in bounds {
+            if !snapshot.element_types.contains(&bound.element_type)
+                || bound.storage != ProviderStorage::DenseReal
+                || bound.layout != ProviderLayout::ColumnMajorContiguous
+                || bound.residency != ProviderResidency::Device
+            {
+                return ProviderFeasibility::rejected(
+                    ProviderRejectionCode::UnsupportedElementType,
+                    "provider.transfer.bound_class",
+                );
+            }
+            let Some(bytes) = bound.max_bytes() else {
+                return ProviderFeasibility::rejected(
+                    ProviderRejectionCode::ResourceLimit,
+                    "provider.transfer.bound_overflow",
+                );
+            };
+            if snapshot
+                .max_allocation_bytes
+                .is_some_and(|limit| bytes > limit)
+            {
+                return ProviderFeasibility::rejected(
+                    ProviderRejectionCode::ResourceLimit,
+                    "provider.transfer.bound_allocation_limit",
+                );
+            }
+            let Some(next) = total.checked_add(bytes) else {
+                return ProviderFeasibility::rejected(
+                    ProviderRejectionCode::ResourceLimit,
+                    "provider.transfer.bound_overflow",
+                );
+            };
+            total = next;
+        }
+        return ProviderFeasibility::supported(ProviderResourceEstimate {
+            transient_bytes: None,
+            output_bytes: Some(total),
+            dispatches: Some(0),
+        });
+    }
+
     let mut total_bytes = 0_u64;
+    let mut largest_allocation = 0_u64;
     for representation in query.inputs.iter().chain(&query.outputs) {
         if !snapshot
             .element_types
@@ -540,10 +596,11 @@ fn dense_feasibility_with_bytes(
             );
         };
         total_bytes = next_total;
+        largest_allocation = largest_allocation.max(bytes);
     }
     if snapshot
         .max_allocation_bytes
-        .is_some_and(|maximum| total_bytes > maximum)
+        .is_some_and(|maximum| largest_allocation > maximum)
     {
         return ProviderFeasibility::rejected(
             ProviderRejectionCode::ResourceLimit,

@@ -1,6 +1,52 @@
 use super::ProviderWorkload;
 
 #[test]
+fn bounded_upload_keeps_exact_shape_unclaimed_and_checks_late_shape() {
+    use crate::{
+        ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
+        ProviderOperationIdentity, ProviderPrecision, ProviderRepresentation, ProviderResidency,
+        ProviderStorage, ProviderTransferOutputBound,
+    };
+    let bound = ProviderTransferOutputBound {
+        element_type: ProviderElementType::F64,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        residency: ProviderResidency::Device,
+        max_elements: 8,
+    };
+    let query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new("transfer.upload"),
+        family: ProviderOperationFamily::Upload,
+        inputs: vec![],
+        outputs: vec![],
+        workload: ProviderWorkload {
+            transfer_output_bounds: Some(vec![bound.clone()]),
+            requested_outputs: Some(1),
+            ..ProviderWorkload::default()
+        },
+    };
+    let crate::ProviderFeasibility::Supported { estimate } =
+        query.conservative_transfer_feasibility(ProviderPrecision::F64)
+    else {
+        panic!("bounded upload should be feasible");
+    };
+    assert_eq!(estimate.output_bytes, Some(64));
+    let mut actual = ProviderRepresentation {
+        element_type: ProviderElementType::F64,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: vec![1, 7],
+        residency: ProviderResidency::Device,
+    };
+    assert!(bound.admits(&actual));
+    actual.shape = vec![1, 9];
+    assert!(!bound.admits(&actual));
+    let decoded: ProviderFeasibilityQuery =
+        serde_json::from_slice(&serde_json::to_vec(&query).unwrap()).unwrap();
+    assert_eq!(decoded, query);
+}
+
+#[test]
 fn scalar_work_is_optional_in_older_queries_and_round_trips_exactly() {
     let mut workload: ProviderWorkload =
         serde_json::from_str(r#"{"elements":3,"flops":null,"batch":null}"#).unwrap();

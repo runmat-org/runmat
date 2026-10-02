@@ -65,6 +65,7 @@ fn host_with_provider_presentation() -> WholeWorkCandidate {
     host.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
         device_id: 7,
         transfer_bytes: Some(16),
+        host_result_bytes: None,
         host_scratch_bytes: 0.into(),
         provider_scratch_bytes: 8.into(),
         queue_slots: 1,
@@ -319,6 +320,7 @@ fn admitted_host_upload_is_a_distinct_complete_route() {
     alternate_stage.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
         device_id: 7,
         transfer_bytes: Some(32),
+        host_result_bytes: None,
         host_scratch_bytes: 0.into(),
         provider_scratch_bytes: 8.into(),
         queue_slots: 1,
@@ -349,6 +351,7 @@ fn host_upload_requires_both_host_and_target_provider_resources() {
     host_scratch.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
         device_id: 7,
         transfer_bytes: Some(16),
+        host_result_bytes: None,
         host_scratch_bytes: 1.into(),
         provider_scratch_bytes: 8.into(),
         queue_slots: 1,
@@ -383,6 +386,36 @@ fn host_upload_requires_both_host_and_target_provider_resources() {
 }
 
 #[test]
+fn upload_admission_distinguishes_host_payload_from_provider_retention() {
+    let session = PlacementSession::default();
+    let mut host = host_with_provider_presentation();
+    host.resources.scratch_bytes = 0.into();
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
+        device_id: 7,
+        transfer_bytes: Some(16),
+        host_result_bytes: Some(32.into()),
+        host_scratch_bytes: 0.into(),
+        provider_scratch_bytes: 0.into(),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+    };
+    let mut enough = request(vec![host.clone()]);
+    enough.resources.memory_available_bytes = Some(32);
+    enough.resources.providers[0].capacity_bytes = Some(16);
+    enough.resources.providers[0].scratch_available_bytes = Some(16);
+    assert!(session.select_whole_work(enough.clone()).is_ok());
+    enough.resources.memory_available_bytes = Some(31);
+    assert_eq!(
+        session
+            .select_whole_work(enough)
+            .err()
+            .expect("host payload exceeds memory")
+            .code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
 fn provider_required_does_not_admit_a_host_upload_route() {
     let session = PlacementSession::default();
     let mut only_host_upload = request(vec![host_with_provider_presentation()]);
@@ -404,6 +437,7 @@ fn host_upload_needs_resource_evidence_and_transactional_publication() {
     host.presentation = runmat_execution::CandidateOutputPresentation::ProviderUpload {
         device_id: 7,
         transfer_bytes: None,
+        host_result_bytes: None,
         host_scratch_bytes: 0.into(),
         provider_scratch_bytes: ResourceByteBound::Unavailable(
             runmat_execution::ResourceBoundUnavailable::NoScratchBound,

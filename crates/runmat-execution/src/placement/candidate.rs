@@ -68,6 +68,10 @@ pub enum CandidateOutputPresentation {
         /// Bytes moved by the presentation stage, if physically established.
         /// Unknown is not a zero-cost observation or a memory bound.
         transfer_bytes: Option<u64>,
+        /// Host-produced payload live during upload. When absent, legacy
+        /// callers explicitly rely on retained bytes being the same bound.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_result_bytes: Option<ResourceByteBound>,
         /// Temporary host storage beyond the host-produced output itself.
         host_scratch_bytes: ResourceByteBound,
         provider_scratch_bytes: ResourceByteBound,

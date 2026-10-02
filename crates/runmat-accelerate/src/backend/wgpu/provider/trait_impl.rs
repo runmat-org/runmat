@@ -135,14 +135,27 @@ impl AccelProvider for WgpuProvider {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
         }
         if query.operation.0 == "transfer.upload" {
+            let output_count = query
+                .workload
+                .transfer_output_bounds
+                .as_ref()
+                .map_or(query.outputs.len(), Vec::len);
+            let Some(submissions) = u32::try_from(output_count).ok().filter(|count| *count != 0)
+            else {
+                return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
+            };
+            let Some(requested_peak_buffer_bytes) = u64::from(submissions)
+                .checked_mul(crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES)
+            else {
+                return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
+            };
             return if self.query_feasibility(query).is_supported() {
                 runmat_accelerate_api::observation::ProviderObservationCapability::Supported(
                     runmat_accelerate_api::observation::ProviderObservationOverhead {
-                        submissions: 1,
-                        requested_peak_buffer_bytes:
-                            crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
-                        clear_commands: 1,
-                        map_callbacks: 1,
+                        submissions,
+                        requested_peak_buffer_bytes,
+                        clear_commands: submissions,
+                        map_callbacks: submissions,
                     },
                 )
             } else {

@@ -306,6 +306,7 @@ mod tests {
         host.presentation = CandidateOutputPresentation::ProviderUpload {
             device_id: 7,
             transfer_bytes: Some(16),
+            host_result_bytes: None,
             host_scratch_bytes: 0.into(),
             provider_scratch_bytes: 0.into(),
             queue_slots: 1,
@@ -317,6 +318,7 @@ mod tests {
         host.presentation = CandidateOutputPresentation::ProviderUpload {
             device_id: 8,
             transfer_bytes: Some(16),
+            host_result_bytes: None,
             host_scratch_bytes: 0.into(),
             provider_scratch_bytes: 0.into(),
             queue_slots: 1,
@@ -326,6 +328,7 @@ mod tests {
         host.presentation = CandidateOutputPresentation::ProviderUpload {
             device_id: 7,
             transfer_bytes: Some(16),
+            host_result_bytes: None,
             host_scratch_bytes: 0.into(),
             provider_scratch_bytes: 0.into(),
             queue_slots: 1,

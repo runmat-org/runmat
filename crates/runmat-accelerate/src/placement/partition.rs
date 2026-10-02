@@ -397,6 +397,7 @@ fn candidate_resource_adjustment_ns(
     }
     if let CandidateOutputPresentation::ProviderUpload {
         device_id,
+        host_result_bytes,
         host_scratch_bytes,
         provider_scratch_bytes,
         queue_slots,
@@ -429,7 +430,7 @@ fn candidate_resource_adjustment_ns(
         // is uploaded. The provider's retained output is accounted below.
         if matches!(output_residency, CandidateOutputResidency::Provider { .. }) {
             host_peak = host_peak
-                .add(demand.retained_bytes)
+                .add(host_result_bytes.unwrap_or(demand.retained_bytes))
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
     }
