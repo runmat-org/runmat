@@ -1,11 +1,11 @@
 //! One global convergence, interval, evaluation, and cooperation authority for
 //! adaptive rules. A numerical rule owns only its interval construction.
 
-use super::QuadratureArithmeticError;
 use super::adaptive::QuadratureEvaluator;
 use super::algebra::AdaptiveEstimate;
 use super::geometry::ScaledEstimate;
 use super::open_algebra::{OpenResult, OpenSample};
+use super::QuadratureArithmeticError;
 use crate::BuiltinResult;
 
 pub(crate) trait MeshRule<E: QuadratureEvaluator> {

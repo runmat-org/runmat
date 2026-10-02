@@ -6,7 +6,7 @@ use runmat_value::{NumericScalar, Value};
 
 use super::integral_error_with_detail;
 use crate::builtins::math::optim::quadrature::QuadratureCooperation;
-use crate::{BuiltinResult, GpuGatherRetry, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
 
 const WAYPOINT_CHUNK: usize = 4096;
 

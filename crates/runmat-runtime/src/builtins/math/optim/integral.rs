@@ -6,11 +6,11 @@ use runmat_builtins::{
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, INTEGRAL_DESCRIPTOR,
 };
 use runmat_builtins::{
-    BuiltinErrorDescriptor, INTEGRAL_ERROR_INVALID_ARGUMENT, INTEGRAL_ERROR_INVALID_INPUT,
-    INTEGRAL_ERROR_TOO_MANY_OUTPUTS, INTEGRAL_INTEGER_BOUND_EXTENSION,
-    INTEGRAL_INTEGER_OPTION_EXTENSION, INTEGRAL_LOGICAL_BOUND_EXTENSION,
-    INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION, INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
-    IntegralOptionName,
+    BuiltinErrorDescriptor, IntegralOptionName, INTEGRAL_ERROR_INVALID_ARGUMENT,
+    INTEGRAL_ERROR_INVALID_INPUT, INTEGRAL_ERROR_TOO_MANY_OUTPUTS,
+    INTEGRAL_INTEGER_BOUND_EXTENSION, INTEGRAL_INTEGER_OPTION_EXTENSION,
+    INTEGRAL_LOGICAL_BOUND_EXTENSION, INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
+    INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Tensor, Value};
@@ -23,7 +23,7 @@ use crate::builtins::common::tensor;
 use crate::builtins::math::optim::quadrature::{
     QuadratureArithmeticError, QuadratureCooperation, QuadratureIdentity,
 };
-use crate::{BuiltinResult, RuntimeError, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod contour;
 mod options;
@@ -294,7 +294,7 @@ fn preflight_integral_option_extensions(
 
 fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
     if let Value::GpuTensor(handle) = value {
-        use runmat_accelerate_api::{GpuTensorStorage, handle_storage};
+        use runmat_accelerate_api::{handle_storage, GpuTensorStorage};
         let scalar = handle
             .shape()
             .iter()
@@ -1464,10 +1464,9 @@ mod tests {
             vec![Value::from("MaxIntervalCount"), Value::Num(0.0)],
         ))
         .expect_err("zero is not a positive interval count");
-        assert!(
-            zero.message()
-                .contains("MaxIntervalCount must be a positive")
-        );
+        assert!(zero
+            .message()
+            .contains("MaxIntervalCount must be a positive"));
 
         let split_mesh = block_on(integral_builtin(
             Value::FunctionHandle("sin".into()),
@@ -1483,11 +1482,9 @@ mod tests {
             ],
         ))
         .expect_err("two initial intervals exceed a one-interval cap");
-        assert!(
-            split_mesh
-                .message()
-                .contains("MaxIntervalCount adaptive subintervals")
-        );
+        assert!(split_mesh
+            .message()
+            .contains("MaxIntervalCount adaptive subintervals"));
 
         let zero_width = block_on(integral_builtin(
             Value::FunctionHandle("__integral_nan".into()),
@@ -1535,11 +1532,9 @@ mod tests {
             ],
         ))
         .expect_err("oscillatory sine requires refinement beyond one interval");
-        assert!(
-            scalar_sine
-                .message()
-                .contains("MaxIntervalCount adaptive subintervals")
-        );
+        assert!(scalar_sine
+            .message()
+            .contains("MaxIntervalCount adaptive subintervals"));
 
         let array_polynomial = block_on(integral_builtin(
             Value::FunctionHandle("__integral_array_polynomial".into()),
@@ -1575,11 +1570,9 @@ mod tests {
             ],
         ))
         .expect_err("array components require further refinement");
-        assert!(
-            array_sine
-                .message()
-                .contains("MaxIntervalCount adaptive subintervals")
-        );
+        assert!(array_sine
+            .message()
+            .contains("MaxIntervalCount adaptive subintervals"));
     }
 
     #[test]
@@ -1592,11 +1585,9 @@ mod tests {
             vec![Value::from("MaxFunEvals"), Value::Num(5.0)],
         ))
         .expect_err("the selected rule requires fifteen sample evaluations");
-        assert!(
-            insufficient
-                .message()
-                .contains("exceeded maximum function evaluations")
-        );
+        assert!(insufficient
+            .message()
+            .contains("exceeded maximum function evaluations"));
         COUNTED_CALLBACKS.with(|count| assert_eq!(count.get(), 0));
 
         let enough = block_on(integral_builtin(
@@ -1783,9 +1774,9 @@ mod tests {
     #[test]
     fn resident_options_are_authenticated_before_the_first_bound_download() {
         use runmat_accelerate_api::{
-            AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
-            GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned, HostTensorView,
-            ThreadProviderGuard, test_support::TestAllocationOwner,
+            test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
+            AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
+            HostNumericTensorOwned, HostTensorView, ThreadProviderGuard,
         };
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2017,8 +2008,8 @@ mod tests {
 
     #[test]
     fn registered_invocation_observes_preexisting_cancellation_before_callback() {
-        use runmat_execution::CancellationReason;
         use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
         use std::rc::Rc;
 
         let source = CancellationSource::new();
@@ -2044,8 +2035,8 @@ mod tests {
     fn active_array_integral_turn_cancels_or_drops_without_publication() {
         use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
         use futures::task::noop_waker;
-        use runmat_execution::CancellationReason;
         use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
         use std::cell::Cell;
         use std::future::Future;
         use std::num::NonZeroU64;

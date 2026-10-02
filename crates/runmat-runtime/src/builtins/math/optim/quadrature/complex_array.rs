@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::adaptive::QuadratureEvaluator;
-use super::algebra::{ArrayEstimate, COMPONENT_CHUNK, QuadratureArithmeticError};
+use super::algebra::{ArrayEstimate, QuadratureArithmeticError, COMPONENT_CHUNK};
 use super::complex_algebra::ScaledComplex;
 use super::geometry::ScaledEstimate;
 use super::open_algebra::{OpenResult, OpenRuleInputs, OpenSample};

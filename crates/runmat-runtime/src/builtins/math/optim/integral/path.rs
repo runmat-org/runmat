@@ -5,10 +5,10 @@ use num_complex::Complex;
 use runmat_builtins::INTEGRAL_ERROR_INVALID_ARGUMENT;
 use runmat_value::Value;
 
-use super::{IntegralOptionName, integral_error_with_detail, scalar_bound_host};
+use super::{integral_error_with_detail, scalar_bound_host, IntegralOptionName};
 use crate::builtins::common::cooperative_sort::{SortProgress, SortResourceError, StableSortWork};
 use crate::builtins::math::optim::quadrature::{OpenDomain, OpenSegment, QuadratureCooperation};
-use crate::{BuiltinResult, GpuGatherRetry, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
 
 const PATH_CHUNK: usize = 4096;
 
@@ -178,24 +178,20 @@ mod tests {
         assert_eq!((segments[0].a, segments[0].b), (0.0, 0.25));
         assert_eq!((segments[1].a, segments[1].b), (0.25, 0.75));
         assert_eq!((segments[2].a, segments[2].b), (0.75, 1.0));
-        assert!(
-            futures::executor::block_on(real_segments(
-                0.0,
-                1.0,
-                &[Complex::new(2.0, 0.0)],
-                &mut cooperation,
-            ))
-            .is_err()
-        );
-        assert!(
-            futures::executor::block_on(real_segments(
-                0.0,
-                1.0,
-                &[Complex::new(0.5, 1.0)],
-                &mut cooperation,
-            ))
-            .is_err()
-        );
+        assert!(futures::executor::block_on(real_segments(
+            0.0,
+            1.0,
+            &[Complex::new(2.0, 0.0)],
+            &mut cooperation,
+        ))
+        .is_err());
+        assert!(futures::executor::block_on(real_segments(
+            0.0,
+            1.0,
+            &[Complex::new(0.5, 1.0)],
+            &mut cooperation,
+        ))
+        .is_err());
         let normalized = futures::executor::block_on(real_segments(
             0.0,
             1.0,

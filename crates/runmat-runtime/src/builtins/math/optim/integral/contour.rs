@@ -3,20 +3,20 @@
 use std::sync::Arc;
 
 use num_complex::Complex;
-use runmat_builtins::{INTEGRAL_ERROR_INVALID_INPUT, IntegralCallbackMode};
+use runmat_builtins::{IntegralCallbackMode, INTEGRAL_ERROR_INVALID_INPUT};
 use runmat_value::{ComplexStorage, ComplexTensor, Tensor, Value};
 
 use super::{
-    IntegralOptions, MAX_DEPTH, NAME, integral_error_with_detail, integral_map_error,
-    quadrature_arithmetic_error, waypoints,
+    integral_error_with_detail, integral_map_error, quadrature_arithmetic_error, waypoints,
+    IntegralOptions, MAX_DEPTH, NAME,
 };
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
-    OpenDomain, OpenSegment, QuadratureArithmeticError, QuadratureCooperation, QuadratureEvaluator,
-    ScaledComplex, integrate_open,
+    integrate_open, OpenDomain, OpenSegment, QuadratureArithmeticError, QuadratureCooperation,
+    QuadratureEvaluator, ScaledComplex,
 };
-use crate::{BuiltinResult, GpuGatherRetry, RuntimeError, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 mod admission;
 mod publication;
@@ -67,7 +67,7 @@ async fn materialize(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, Value>
 }
 
 fn callback_shape(value: &Value) -> BuiltinResult<&[usize]> {
-    use runmat_accelerate_api::{GpuTensorStorage, handle_storage};
+    use runmat_accelerate_api::{handle_storage, GpuTensorStorage};
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(&[1, 1]),
         Value::Tensor(array) => Ok(&array.shape),

@@ -77,7 +77,11 @@ impl ScaledEstimate {
     }
 
     pub(crate) fn max(self, other: Self) -> Self {
-        if self.abs_le(other) { other } else { self }
+        if self.abs_le(other) {
+            other
+        } else {
+            self
+        }
     }
 
     pub(crate) fn abs_le(self, other: Self) -> bool {
@@ -153,16 +157,12 @@ mod tests {
         assert!(left.to_f64().is_none());
         assert!(right.to_f64().is_none());
         assert_eq!(left.add(right).to_f64(), Some(0.0));
-        assert!(
-            simpson(-f64::MAX, f64::MAX, 1.0, 1.0, 1.0)
-                .to_f64()
-                .is_none()
-        );
+        assert!(simpson(-f64::MAX, f64::MAX, 1.0, 1.0, 1.0)
+            .to_f64()
+            .is_none());
         let tiny = f64::from_bits(1);
-        assert!(
-            simpson(-f64::MAX, f64::MAX, tiny, tiny, tiny)
-                .to_f64()
-                .is_some_and(|value| value > 0.0)
-        );
+        assert!(simpson(-f64::MAX, f64::MAX, tiny, tiny, tiny)
+            .to_f64()
+            .is_some_and(|value| value > 0.0));
     }
 }

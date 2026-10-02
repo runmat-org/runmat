@@ -51,12 +51,10 @@ fn infinite_real_bound_is_admitted_but_nan_bound_is_diagnostic() {
     assert!(improper.diagnostics.is_empty());
     assert!(matches!(improper.outputs[0].kind, ValueKindFact::Unknown));
     let invalid = inference::infer(&call(f64::NAN), &INTEGRAL_CATALOG_ENTRY);
-    assert!(
-        invalid
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-BOUND")
-    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-BOUND"));
     assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
 }
 
@@ -113,12 +111,10 @@ fn interval_count_is_a_positive_structural_control_not_an_evaluation_alias() {
         )
     };
     let invalid = inference::infer(&call(0), &INTEGRAL_CATALOG_ENTRY);
-    assert!(
-        invalid
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE")
-    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE"));
     assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
     let valid = inference::infer(&call(1), &INTEGRAL_CATALOG_ENTRY);
     assert!(valid.diagnostics.is_empty());
@@ -170,12 +166,10 @@ fn callback_capability_is_transitive() {
     }));
     let inferred = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
     assert!(inferred.diagnostics.is_empty());
-    assert!(
-        inferred
-            .capabilities
-            .0
-            .contains(&CapabilityRequirement::Filesystem)
-    );
+    assert!(inferred
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
 }
 
 #[test]
@@ -196,12 +190,10 @@ fn known_invalid_callback_result_never_proves_a_scalar_integral() {
         }));
         let call = request(vec![callback, real.clone(), real.clone()], vec![], 1);
         let result = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT")
-        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-CALLBACK-RESULT"));
         assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
     }
 }
@@ -505,12 +497,10 @@ fn known_invalid_controls_do_not_prove_success_and_last_override_is_respected() 
             1,
         );
         let inferred = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
-        assert!(
-            inferred
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE")
-        );
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-OPTION-VALUE"));
         assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Unknown));
     }
 
@@ -536,12 +526,10 @@ fn known_invalid_controls_do_not_prove_success_and_last_override_is_respected() 
         1,
     );
     let invalid = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
-    assert!(
-        invalid
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-TOLERANCES")
-    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-TOLERANCES"));
     assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
 
     call.arguments.extend([text.clone(), real]);

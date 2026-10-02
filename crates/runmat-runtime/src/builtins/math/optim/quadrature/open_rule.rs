@@ -5,8 +5,8 @@
 
 use super::adaptive::QuadratureEvaluator;
 use super::algebra::AdaptiveEstimate;
-use super::geometry::{ScaledEstimate, midpoint};
-use super::mesh::{MeshRule, integrate_partition};
+use super::geometry::{midpoint, ScaledEstimate};
+use super::mesh::{integrate_partition, MeshRule};
 use super::open_algebra::{OpenRuleInputs, OpenSample};
 use crate::BuiltinResult;
 use num_complex::Complex;
@@ -286,9 +286,9 @@ fn interior_nodes(a: f64, b: f64) -> Option<([f64; 15], f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RuntimeError;
     use crate::build_runtime_error;
     use crate::builtins::math::optim::quadrature::QuadratureArithmeticError;
+    use crate::RuntimeError;
     use futures::task::noop_waker;
     use std::cell::Cell;
     use std::future::Future;
@@ -561,12 +561,10 @@ mod tests {
                 1.0,
             ));
             let waker = noop_waker();
-            assert!(
-                invocation
-                    .as_mut()
-                    .poll(&mut Context::from_waker(&waker))
-                    .is_pending()
-            );
+            assert!(invocation
+                .as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending());
             assert_eq!(charged.get(), pending_at);
             assert!(!dropped.get());
             drop(invocation);

@@ -3,10 +3,10 @@
 use num_complex::Complex;
 use runmat_value::Value;
 
-use super::{COMPONENT_CHUNK, invalid, materialize, resource_error};
-use crate::BuiltinResult;
+use super::{invalid, materialize, resource_error, COMPONENT_CHUNK};
 use crate::builtins::math::optim::integral::waypoints;
 use crate::builtins::math::optim::quadrature::{OpenDomain, OpenSegment, QuadratureCooperation};
+use crate::BuiltinResult;
 
 fn checked_complex(real: f64, imaginary: f64) -> BuiltinResult<Complex<f64>> {
     if real.is_finite() && imaginary.is_finite() {

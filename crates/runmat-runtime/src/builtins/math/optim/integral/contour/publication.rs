@@ -4,9 +4,9 @@ use runmat_value::{
     ComplexElement, ComplexStorage, ComplexTensor, HostComplexBuffer, Tensor, Value,
 };
 
-use super::{COMPONENT_CHUNK, invalid, resource_error};
-use crate::BuiltinResult;
+use super::{invalid, resource_error, COMPONENT_CHUNK};
 use crate::builtins::math::optim::quadrature::{QuadratureCooperation, ScaledComplex};
+use crate::BuiltinResult;
 
 pub(super) async fn zero(
     len: usize,
@@ -121,8 +121,8 @@ mod tests {
     use crate::builtins::math::optim::quadrature::QuadratureIdentity;
     use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
     use futures::task::noop_waker;
-    use runmat_execution::CancellationReason;
     use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
     use std::cell::Cell;
     use std::future::Future;
     use std::num::NonZeroU64;

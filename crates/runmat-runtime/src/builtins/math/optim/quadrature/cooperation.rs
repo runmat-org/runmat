@@ -3,7 +3,7 @@
 use crate::builtins::common::validation::{self, IntegerBoundaryFailure, PreparedIntegerBoundary};
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
-use crate::{BuiltinResult, GpuGatherRetry, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
 use runmat_value::Value;
 
 #[derive(Clone, Copy)]
@@ -101,8 +101,8 @@ mod tests {
     use super::*;
     use crate::execution::CpuCooperationPolicy;
     use futures::task::noop_waker;
-    use runmat_execution::CancellationReason;
     use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
     use std::cell::Cell;
     use std::future::Future;
     use std::num::NonZeroU64;

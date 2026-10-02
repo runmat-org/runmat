@@ -3,10 +3,10 @@
 //! A contour integral can have a complex result while its certified absolute
 //! error remains real. Legacy Simpson samples retain their existing algebra.
 
-use super::QuadratureArithmeticError;
 use super::adaptive::QuadratureEvaluator;
 use super::algebra::{AdaptiveEstimate, EmbeddedRuleInputs, QuadratureSample};
 use super::geometry::ScaledEstimate;
+use super::QuadratureArithmeticError;
 use std::sync::Arc;
 
 pub(crate) trait OpenResult: Clone {

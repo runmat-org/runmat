@@ -5,13 +5,13 @@ use crate::{BuiltinResult, RuntimeError};
 #[cfg(test)]
 use std::sync::Arc;
 
-use super::QuadratureArithmeticError;
-use super::ScaledEstimate;
 #[cfg(test)]
 use super::algebra::ArrayEstimate;
 use super::algebra::{AdaptiveEstimate, QuadratureSample};
 use super::open_algebra::OpenSample;
 use super::open_rule::OpenDomain;
+use super::QuadratureArithmeticError;
+use super::ScaledEstimate;
 
 pub(crate) trait QuadratureEvaluator {
     type Sample: OpenSample;

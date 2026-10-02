@@ -1,11 +1,11 @@
 use super::super::scalar_facts;
 use super::{IntegralCallbackMode, IntegralOptionName};
-use crate::BuiltinCatalogEntry;
 use crate::catalog::inference::{argument_error, literal_text};
+use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    CallContract, CallInference, CallRequest, DynamicReason, LiteralContext, LiteralValue,
-    NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
-    infer_call,
+    infer_call, CallContract, CallInference, CallRequest, DynamicReason, LiteralContext,
+    LiteralValue, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact,
+    ValueKindFact,
 };
 
 fn scalar_bound(

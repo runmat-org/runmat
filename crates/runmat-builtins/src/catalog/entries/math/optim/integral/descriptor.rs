@@ -133,7 +133,8 @@ pub const INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION: BuiltinExtensionDescriptor 
     BuiltinExtensionDescriptor {
         id: "integral-logical-numeric-option",
         mode: BuiltinExtensionMode::RunMatOnly,
-        description: "integral with logical tolerance or evaluation-count options is a RunMat extension",
+        description:
+            "integral with logical tolerance or evaluation-count options is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:IntegralLogicalNumericOptionExtension"),
     };
 pub const INTEGRAL_RENAMED_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =

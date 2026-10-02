@@ -86,12 +86,10 @@ fn large_array_algebra_yields_mid_component_and_abandonment_drops_turn() {
     };
     let mut invocation = Box::pin(integrate_array(&mut evaluator, 0.0, 1.0));
     let waker = noop_waker();
-    assert!(
-        invocation
-            .as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending()
-    );
+    assert!(invocation
+        .as_mut()
+        .poll(&mut Context::from_waker(&waker))
+        .is_pending());
     assert_eq!(charged.get(), 4096);
     assert!(!dropped.get());
     drop(invocation);

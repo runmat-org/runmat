@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::adaptive::QuadratureEvaluator;
 use super::algebra::{
-    ArrayEstimate, COMPONENT_CHUNK, EmbeddedRuleInputs, QuadratureArithmeticError,
+    ArrayEstimate, EmbeddedRuleInputs, QuadratureArithmeticError, COMPONENT_CHUNK,
 };
 use super::geometry::ScaledEstimate;
 

@@ -4,7 +4,7 @@ use std::collections::TryReserveError;
 use std::sync::Arc;
 
 use super::adaptive::QuadratureEvaluator;
-use super::geometry::{ScaledEstimate, simpson};
+use super::geometry::{simpson, ScaledEstimate};
 use crate::RuntimeError;
 
 pub(super) const COMPONENT_CHUNK: usize = 4096;
