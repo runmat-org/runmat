@@ -8,6 +8,7 @@ use runmat_types::ConvolutionMode;
 
 #[cfg(test)]
 mod tests;
+mod resources;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConvolutionIdentity {
@@ -251,18 +252,30 @@ fn work(
             );
         }
     }
-    ProviderFeasibility::supported(ProviderResourceEstimate {
-        // Host implementations clone inputs and materialize full/cropped
-        // temporaries; WGPU uses a pooled output and a uniform buffer. Their
-        // peak live allocation is not proved by output geometry alone.
-        transient_bytes: None,
-        output_bytes: Some(if wgpu {
-            output_bytes.max(expected.byte_width())
-        } else {
-            output_bytes
-        }),
-        dispatches: Some(u32::from(wgpu && output_elements != 0)),
-    })
+    let Some(estimate) = resources::estimate(
+        identity,
+        route,
+        &query.inputs,
+        output_elements,
+        output_bytes,
+        wgpu,
+    ) else {
+        return reject(
+            ProviderRejectionCode::ResourceLimit,
+            "convolution.peak_bytes_overflow",
+        );
+    };
+    if provider
+        .capability_snapshot()
+        .max_allocation_bytes
+        .is_some_and(|limit| estimate.transient_bytes.is_some_and(|peak| peak > limit))
+    {
+        return reject(
+            ProviderRejectionCode::ResourceLimit,
+            "convolution.provider_memory_limit",
+        );
+    }
+    ProviderFeasibility::supported(estimate)
 }
 
 fn output_geometry(
