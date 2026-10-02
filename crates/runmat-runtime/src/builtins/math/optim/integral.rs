@@ -579,7 +579,7 @@ impl QuadratureEvaluator for IntegralEvaluator<'_> {
     }
 
     fn midpoint(&self, a: f64, b: f64) -> f64 {
-        0.5 * (a + b)
+        crate::builtins::math::optim::quadrature::midpoint(a, b)
     }
 
     fn initial_tolerance(&self, whole: f64) -> f64 {
@@ -605,6 +605,13 @@ impl QuadratureEvaluator for IntegralEvaluator<'_> {
         integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_INPUT,
             "adaptive quadrature did not converge",
+        )
+    }
+
+    fn nonrepresentable_error(&self) -> RuntimeError {
+        integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "quadrature estimate is not representable as a finite double",
         )
     }
 }
@@ -695,6 +702,27 @@ mod tests {
     async fn square_helper(x: Value) -> crate::BuiltinResult<Value> {
         let x = scalar_bound("x", x).await?;
         Ok(Value::Num(x * x))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_one",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn one_helper(_x: Value) -> crate::BuiltinResult<Value> {
+        Ok(Value::Num(1.0))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_scaled_identity",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn scaled_identity_helper(x: Value) -> crate::BuiltinResult<Value> {
+        let x = scalar_bound("x", x).await?;
+        Ok(Value::Num(x / 1.0e308))
     }
 
     #[runtime_builtin(
@@ -821,6 +849,35 @@ mod tests {
             Value::Num(value) => assert!((value - (1.0 / 3.0)).abs() < 1.0e-9),
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn finite_extreme_intervals_keep_representable_results() {
+        let constant = run(Value::FunctionHandle("__integral_one".into()), 0.0, 1.0e308)
+            .expect("finite constant integral");
+        assert!(
+            matches!(constant, Value::Num(value) if (value - 1.0e308).abs() / 1.0e308 < 1.0e-12)
+        );
+
+        let symmetric_linear = run(
+            Value::FunctionHandle("__integral_scaled_identity".into()),
+            -1.0e308,
+            1.0e308,
+        )
+        .expect("opposite-sign interval with cancelling integrand");
+        assert!(matches!(symmetric_linear, Value::Num(value) if value == 0.0));
+
+        let nonrepresentable = run(
+            Value::FunctionHandle("__integral_one".into()),
+            -f64::MAX,
+            f64::MAX,
+        )
+        .expect_err("nonrepresentable integral must fail deliberately");
+        assert_eq!(
+            nonrepresentable.identifier(),
+            INTEGRAL_ERROR_INVALID_INPUT.identifier
+        );
+        assert!(nonrepresentable.message().contains("not representable"));
     }
 
     #[test]

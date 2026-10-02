@@ -14,6 +14,7 @@ pub(crate) trait QuadratureEvaluator {
     fn max_depth(&self) -> usize;
     fn evaluation_limit_error(&self) -> RuntimeError;
     fn convergence_error(&self) -> RuntimeError;
+    fn nonrepresentable_error(&self) -> RuntimeError;
     fn refined(&mut self, _evals: usize, _a: f64, _b: f64, _estimate: f64, _error: f64) {}
 }
 
@@ -45,7 +46,7 @@ pub(crate) async fn integrate<E: QuadratureEvaluator>(
     let m = evaluator.midpoint(a, b);
     let fm = evaluator.evaluate(m).await?;
     let fb = evaluator.evaluate(b).await?;
-    let whole = simpson(a, b, fa, fm, fb);
+    let whole = simpson(a, b, fa, fm, fb).map_err(|_| evaluator.nonrepresentable_error())?;
     let mut evaluations = 3_usize;
     let tol = evaluator.initial_tolerance(whole);
     let depth = evaluator.max_depth();
@@ -87,13 +88,23 @@ async fn adapt<E: QuadratureEvaluator>(
     let fe = evaluator.evaluate(e).await?;
     *evaluations += 2;
 
-    let left = simpson(state.a, c, state.fa, fd, state.fm);
-    let right = simpson(c, state.b, state.fm, fe, state.fb);
+    let left = simpson(state.a, c, state.fa, fd, state.fm)
+        .map_err(|_| evaluator.nonrepresentable_error())?;
+    let right = simpson(c, state.b, state.fm, fe, state.fb)
+        .map_err(|_| evaluator.nonrepresentable_error())?;
     let refined = left + right;
+    if !refined.is_finite() {
+        return Err(evaluator.nonrepresentable_error());
+    }
     let error = refined - state.whole;
     evaluator.refined(*evaluations, state.a, state.b, refined, error);
     if error.abs() <= 15.0 * state.tol {
-        return Ok(refined + error / 15.0);
+        let corrected = refined + error / 15.0;
+        return if corrected.is_finite() {
+            Ok(corrected)
+        } else {
+            Err(evaluator.nonrepresentable_error())
+        };
     }
     if state.depth == 0 {
         return Err(evaluator.convergence_error());
@@ -129,7 +140,12 @@ async fn adapt<E: QuadratureEvaluator>(
         evaluations,
     ))
     .await?;
-    Ok(left_value + right_value)
+    let result = left_value + right_value;
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(evaluator.nonrepresentable_error())
+    }
 }
 
 #[cfg(test)]
@@ -174,6 +190,10 @@ mod tests {
 
         fn convergence_error(&self) -> RuntimeError {
             crate::build_runtime_error("did not converge").build()
+        }
+
+        fn nonrepresentable_error(&self) -> RuntimeError {
+            crate::build_runtime_error("nonrepresentable estimate").build()
         }
 
         fn refined(&mut self, _evals: usize, _a: f64, _b: f64, _estimate: f64, _error: f64) {

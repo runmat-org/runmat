@@ -600,6 +600,13 @@ impl QuadratureEvaluator for QuadEvaluator<'_> {
         )
     }
 
+    fn nonrepresentable_error(&self) -> RuntimeError {
+        quad_error_with_detail(
+            &QUAD_ERROR_INVALID_INPUT,
+            "quadrature estimate is not representable as a finite double",
+        )
+    }
+
     fn refined(&mut self, evals: usize, a: f64, b: f64, estimate: f64, error: f64) {
         if let Some(trace) = self.trace.as_mut() {
             trace.record(evals, a, b, estimate, error);
