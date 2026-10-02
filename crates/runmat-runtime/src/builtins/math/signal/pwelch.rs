@@ -184,15 +184,6 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         .zip(&materialized_controls)
         .map(|(original, materialized)| materialized.as_ref().unwrap_or(original))
         .collect::<Vec<_>>();
-    for (index, value) in controls.iter().take(4).enumerate() {
-        let (role, error) = match index {
-            0 => ("window", &PWELCH_ERROR_INVALID_WINDOW),
-            1 => ("overlap", &PWELCH_ERROR_INVALID_OVERLAP),
-            2 => ("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT),
-            _ => ("sample-rate", &PWELCH_ERROR_INVALID_FS),
-        };
-        ensure_pwelch_integer_boundary(value, role, error).await?;
-    }
     let source_handle = match &x {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,

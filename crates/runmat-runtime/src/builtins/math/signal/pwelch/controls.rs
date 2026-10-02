@@ -19,6 +19,28 @@ enum ControlRole {
     Option,
 }
 
+impl ControlRole {
+    fn at_positional_index(index: usize) -> Self {
+        match index {
+            0 => Self::Window,
+            1 => Self::Overlap,
+            2 => Self::Grid,
+            3 => Self::SampleRate,
+            _ => Self::Option,
+        }
+    }
+
+    fn integer_boundary(self) -> Option<(&'static str, &'static BuiltinErrorDescriptor)> {
+        match self {
+            Self::Window => Some(("window", &PWELCH_ERROR_INVALID_WINDOW)),
+            Self::Overlap => Some(("overlap", &PWELCH_ERROR_INVALID_OVERLAP)),
+            Self::Grid => Some(("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT)),
+            Self::SampleRate => Some(("sample-rate", &PWELCH_ERROR_INVALID_FS)),
+            Self::Option => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct PreparedHostControls {
     window: Option<Vec<f64>>,
@@ -67,6 +89,8 @@ pub(super) async fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<Pre
         if matches!(value, Value::GpuTensor(_)) || is_empty(value) {
             continue;
         }
+        let (name, error) = role.integer_boundary().expect("option handled above");
+        ensure_pwelch_integer_boundary(value, name, error).await?;
         match role {
             ControlRole::Window => {
                 // A text value in the first position has its owning window error.
@@ -79,7 +103,7 @@ pub(super) async fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<Pre
                         ),
                     ));
                 }
-                prepared.window = Some(parse_window(value.clone()).await?);
+                prepared.window = Some(parse_window((*value).clone()).await?);
             }
             ControlRole::Overlap => {
                 prepared.overlap = Some(
@@ -91,7 +115,7 @@ pub(super) async fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<Pre
                 );
             }
             ControlRole::Grid => {
-                prepared.grid = Some(parse_frequency_grid(value.clone(), 0).await?);
+                prepared.grid = Some(parse_frequency_grid((*value).clone(), 0).await?);
             }
             ControlRole::SampleRate => {
                 let rate = parse_scalar_f64(BUILTIN_NAME, "fs", value).map_err(|error| {
@@ -112,7 +136,7 @@ pub(super) async fn materialize_resident_controls(
     rest: &[Value],
 ) -> BuiltinResult<Vec<Option<Value>>> {
     let mut materialized = Vec::with_capacity(rest.len());
-    for value in rest {
+    for (index, value) in rest.iter().enumerate() {
         if let Value::GpuTensor(handle) = value {
             let provider = super::super::resident_output::owner(handle, || {
                 pwelch_error(&PWELCH_ERROR_INTERNAL)
@@ -122,6 +146,10 @@ pub(super) async fn materialize_resident_controls(
                     provider, handle,
                 )
                 .await?;
+            if let Some((role, error)) = ControlRole::at_positional_index(index).integer_boundary()
+            {
+                ensure_pwelch_integer_boundary(&host, role, error).await?;
+            }
             materialized.push(Some(host));
         } else {
             materialized.push(None);
@@ -190,7 +218,7 @@ pub(super) async fn parse_options(
             idx += 1;
             match prepared.window.take() {
                 Some(window) => window,
-                None => parse_window((*value).clone()).await?,
+                None => parse_window((**value).clone()).await?,
             }
         }
     } else {
@@ -234,7 +262,7 @@ pub(super) async fn parse_options(
             idx += 1;
             match prepared.grid.take() {
                 Some(grid) => grid,
-                None => parse_frequency_grid((*value).clone(), window_len).await?,
+                None => parse_frequency_grid((**value).clone(), window_len).await?,
             }
         }
     } else {
@@ -314,6 +342,15 @@ pub(super) async fn parse_frequency_grid(
     value: Value,
     window_len: usize,
 ) -> BuiltinResult<FrequencyGrid> {
+    let over_limit = match &value {
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) > MAX_NFFT,
+        Value::ComplexTensor(tensor) => tensor_utils::complex_tensor_element_len(tensor) > MAX_NFFT,
+        Value::LogicalArray(array) => array.data.len() > MAX_NFFT,
+        _ => false,
+    };
+    if over_limit {
+        return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
+    }
     if is_scalar_numeric(&value) {
         let parsed = parse_nonnegative_integer(BUILTIN_NAME, "nfft", &value)
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_NFFT, err.message()))?;
@@ -350,12 +387,24 @@ pub(super) fn is_scalar_numeric(value: &Value) -> bool {
 }
 
 pub(super) async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
+    let over_limit = match &value {
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) > MAX_NFFT,
+        Value::ComplexTensor(tensor) => tensor_utils::complex_tensor_element_len(tensor) > MAX_NFFT,
+        Value::LogicalArray(array) => array.data.len() > MAX_NFFT,
+        _ => false,
+    };
+    if over_limit {
+        return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+    }
     match &value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let len = parse_nonnegative_integer(BUILTIN_NAME, "window", &value).map_err(|err| {
                 pwelch_error_with_detail(&PWELCH_ERROR_INVALID_WINDOW, err.message())
             })?;
             if len == 0 {
+                return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+            }
+            if len > MAX_NFFT {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
             }
             return Ok(hamming_window(len));
@@ -367,6 +416,9 @@ pub(super) async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
             if len == 0 {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
             }
+            if len > MAX_NFFT {
+                return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+            }
             return Ok(hamming_window(len));
         }
         _ => {}
@@ -374,7 +426,7 @@ pub(super) async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
     let vector = value_to_complex_vector(BUILTIN_NAME, "window", value)
         .await
         .map_err(|source| pwelch_control_error(&PWELCH_ERROR_INVALID_WINDOW, source))?;
-    if vector.data.is_empty() {
+    if vector.data.is_empty() || vector.data.len() > MAX_NFFT {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }
     let mut out = Vec::with_capacity(vector.data.len());
