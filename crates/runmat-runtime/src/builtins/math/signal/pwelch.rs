@@ -12,7 +12,6 @@ use runmat_builtins::{
     PWELCH_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::NumericDType;
 use runmat_value::{Tensor, Value};
 use rustfft::FftPlanner;
 

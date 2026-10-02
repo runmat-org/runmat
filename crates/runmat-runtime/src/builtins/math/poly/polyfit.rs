@@ -13,7 +13,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
 
-#[cfg(test)]
 use super::normalization;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor;
