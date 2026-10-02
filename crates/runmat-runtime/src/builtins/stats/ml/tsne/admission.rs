@@ -15,6 +15,16 @@ pub(super) use materialize::materialize_options;
 
 pub(super) type OptionHeader = (TsneOption, Value);
 
+fn reserve_admission<T>(
+    values: &mut Vec<T>,
+    count: usize,
+    message: &'static str,
+) -> BuiltinResult<()> {
+    values
+        .try_reserve_exact(count)
+        .map_err(|source| super::internal_with_source(message, source))
+}
+
 #[derive(Clone)]
 pub(super) enum AdmittedOption {
     Algorithm(Algorithm),
@@ -48,7 +58,12 @@ pub(super) fn option_headers(values: Vec<Value>) -> BuiltinResult<Vec<OptionHead
     if !values.len().is_multiple_of(2) {
         return Err(invalid("tsne: name-value options must be paired"));
     }
-    let mut headers = Vec::with_capacity(values.len() / 2);
+    let mut headers = Vec::new();
+    reserve_admission(
+        &mut headers,
+        values.len() / 2,
+        "tsne: option headers exceed available memory",
+    )?;
     let mut values = values.into_iter();
     while let (Some(name), Some(value)) = (values.next(), values.next()) {
         let name = keyword_of(&name).ok_or_else(|| invalid("tsne: option name must be text"))?;
@@ -60,7 +75,12 @@ pub(super) fn option_headers(values: Vec<Value>) -> BuiltinResult<Vec<OptionHead
 }
 
 pub(super) fn admit_options(headers: Vec<OptionHeader>) -> BuiltinResult<Vec<AdmittedOption>> {
-    let mut admitted = Vec::with_capacity(headers.len());
+    let mut admitted = Vec::new();
+    reserve_admission(
+        &mut admitted,
+        headers.len(),
+        "tsne: admitted options exceed available memory",
+    )?;
     for (option, value) in headers {
         let admitted_option = match option {
             TsneOption::Algorithm => {
@@ -140,6 +160,11 @@ fn validate_host_controls(options: &[AdmittedOption]) -> BuiltinResult<()> {
     // materializes it, but an unrelated malformed host control must not
     // allow that provider call to happen first.
     let mut visible = Vec::new();
+    reserve_admission(
+        &mut visible,
+        options.len(),
+        "tsne: host-visible options exceed available memory",
+    )?;
     for option in options {
         match option {
             AdmittedOption::CacheSizeNumeric(value) if !matches!(value, Value::GpuTensor(_)) => {
@@ -159,20 +184,21 @@ fn validate_host_controls(options: &[AdmittedOption]) -> BuiltinResult<()> {
                 visible.push(option.clone())
             }
             AdmittedOption::Options(fields) => {
-                let visible_fields = fields
-                    .iter()
-                    .filter(|field| match field {
-                        AdmittedStatsetField::MaxIter(value)
-                        | AdmittedStatsetField::TolFun(value) => {
-                            !matches!(value, Value::GpuTensor(_))
-                        }
-                        AdmittedStatsetField::Display | AdmittedStatsetField::EmptyOutputFcn => {
-                            true
-                        }
-                        AdmittedStatsetField::EmptyOutputFcnResident(_) => false,
-                    })
-                    .cloned()
-                    .collect();
+                let mut visible_fields = Vec::new();
+                reserve_admission(
+                    &mut visible_fields,
+                    fields.len(),
+                    "tsne: host-visible statset fields exceed available memory",
+                )?;
+                for field in fields.iter().filter(|field| match field {
+                    AdmittedStatsetField::MaxIter(value) | AdmittedStatsetField::TolFun(value) => {
+                        !matches!(value, Value::GpuTensor(_))
+                    }
+                    AdmittedStatsetField::Display | AdmittedStatsetField::EmptyOutputFcn => true,
+                    AdmittedStatsetField::EmptyOutputFcnResident(_) => false,
+                }) {
+                    visible_fields.push(field.clone());
+                }
                 visible.push(AdmittedOption::Options(visible_fields));
             }
             AdmittedOption::Algorithm(_)
@@ -250,6 +276,11 @@ fn statset_fields(value: Value) -> BuiltinResult<Vec<AdmittedStatsetField>> {
         return Err(invalid("tsne: Options must be a struct"));
     };
     let mut admitted = Vec::new();
+    reserve_admission(
+        &mut admitted,
+        fields.fields.len(),
+        "tsne: statset fields exceed available memory",
+    )?;
     for (name, value) in fields.fields {
         if super::options::is_empty_option_value(&value) {
             continue;
@@ -292,4 +323,27 @@ fn resident_empty_numeric(value: &Value) -> bool {
     matches!(value, Value::GpuTensor(handle)
         if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
             && handle.shape().contains(&0))
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn option_capacity_failure_keeps_original_operational_cause() {
+        let mut headers = Vec::<u8>::new();
+        let error = reserve_admission(
+            &mut headers,
+            usize::MAX,
+            "tsne: option headers exceed available memory",
+        )
+        .expect_err("capacity overflow must reject before allocation");
+        assert_eq!(error.identifier(), Some("RunMat:tsne:Internal"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(error
+            .source()
+            .expect("original reservation failure")
+            .is::<std::collections::TryReserveError>());
+    }
 }

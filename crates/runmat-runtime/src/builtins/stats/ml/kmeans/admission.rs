@@ -336,18 +336,24 @@ impl BorrowedOperands {
         }
     }
 
-    pub(super) fn protect_value(&mut self, value: &Value) {
-        collect_resident_handles(value, &mut self.protected);
+    pub(super) fn protect_value(&mut self, value: &Value) -> BuiltinResult<()> {
+        collect_resident_handles(value, &mut self.protected)
     }
 
-    pub(super) fn record_consumed(&mut self, value: &Value) {
+    pub(super) fn record_consumed(&mut self, value: &Value) -> BuiltinResult<()> {
         // A numerical operand actually materialized for clustering carries its
         // explicit device intent into the result. Merely present metadata,
         // including ignored statset fields, is protected from aliasing but
         // does not determine result placement.
         if let Value::GpuTensor(handle) = value {
+            super::reserve_borrowed(
+                &mut self.intent_sources,
+                1,
+                "kmeans: consumed operands exceed available memory",
+            )?;
             self.intent_sources.push(handle.clone());
         }
+        Ok(())
     }
 
     pub(super) fn protected(&self) -> &[GpuTensorHandle] {
@@ -359,37 +365,54 @@ impl BorrowedOperands {
     }
 }
 
-fn collect_resident_handles(value: &Value, into: &mut Vec<GpuTensorHandle>) {
+fn collect_resident_handles(value: &Value, into: &mut Vec<GpuTensorHandle>) -> BuiltinResult<()> {
     match value {
-        Value::GpuTensor(handle) => into.push(handle.clone()),
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .for_each(|value| collect_resident_handles(value, into)),
-        Value::Struct(value) => value
-            .fields
-            .values()
-            .for_each(|value| collect_resident_handles(value, into)),
-        Value::StructArray(value) => {
-            value.for_each_value(|value| collect_resident_handles(value, into))
+        Value::GpuTensor(handle) => {
+            super::reserve_borrowed(into, 1, "kmeans: borrowed operands exceed available memory")?;
+            into.push(handle.clone());
         }
-        Value::Object(value) => value
-            .properties
-            .values()
-            .for_each(|value| collect_resident_handles(value, into)),
-        Value::ObjectArray(value) => value
-            .data()
-            .iter()
-            .for_each(|value| collect_resident_handles(value, into)),
-        Value::Closure(value) => value
-            .captures
-            .iter()
-            .for_each(|value| collect_resident_handles(value, into)),
-        Value::OutputList(values) => values
-            .iter()
-            .for_each(|value| collect_resident_handles(value, into)),
+        Value::Cell(cell) => {
+            for value in &cell.data {
+                collect_resident_handles(value, into)?;
+            }
+        }
+        Value::Struct(value) => {
+            for value in value.fields.values() {
+                collect_resident_handles(value, into)?;
+            }
+        }
+        Value::StructArray(value) => {
+            let mut result = Ok(());
+            value.for_each_value(|value| {
+                if result.is_ok() {
+                    result = collect_resident_handles(value, into);
+                }
+            });
+            result?;
+        }
+        Value::Object(value) => {
+            for value in value.properties.values() {
+                collect_resident_handles(value, into)?;
+            }
+        }
+        Value::ObjectArray(value) => {
+            for value in value.data() {
+                collect_resident_handles(value, into)?;
+            }
+        }
+        Value::Closure(value) => {
+            for value in &value.captures {
+                collect_resident_handles(value, into)?;
+            }
+        }
+        Value::OutputList(values) => {
+            for value in values {
+                collect_resident_handles(value, into)?;
+            }
+        }
         _ => {}
     }
+    Ok(())
 }
 
 pub(super) async fn numeric_value_is_exact_cooperative(

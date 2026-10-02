@@ -1,13 +1,19 @@
 //! Download only typed controls that need host values for execution.
 
-use super::super::{gather, invalid, options};
-use super::{AdmittedOption, AdmittedStatsetField};
+use super::super::{cooperation::TsneCooperation, gather, invalid, options};
+use super::{reserve_admission, AdmittedOption, AdmittedStatsetField};
 use crate::BuiltinResult;
 
 pub(in crate::builtins::stats::ml::tsne) async fn materialize_options(
     admitted: Vec<AdmittedOption>,
+    cooperation: &mut TsneCooperation,
 ) -> BuiltinResult<Vec<AdmittedOption>> {
-    let mut materialized = Vec::with_capacity(admitted.len());
+    let mut materialized = Vec::new();
+    reserve_admission(
+        &mut materialized,
+        admitted.len(),
+        "tsne: materialized options exceed available memory",
+    )?;
     for option in admitted {
         materialized.push(match option {
             AdmittedOption::CacheSizeNumeric(value) => {
@@ -30,7 +36,12 @@ pub(in crate::builtins::stats::ml::tsne) async fn materialize_options(
             AdmittedOption::Theta(value) => AdmittedOption::Theta(gather(value).await?),
             AdmittedOption::Verbose(value) => AdmittedOption::Verbose(gather(value).await?),
             AdmittedOption::Options(fields) => {
-                let mut values = Vec::with_capacity(fields.len());
+                let mut values = Vec::new();
+                reserve_admission(
+                    &mut values,
+                    fields.len(),
+                    "tsne: materialized statset fields exceed available memory",
+                )?;
                 for field in fields {
                     values.push(match field {
                         AdmittedStatsetField::MaxIter(value) => {
@@ -48,6 +59,7 @@ pub(in crate::builtins::stats::ml::tsne) async fn materialize_options(
                         }
                         other => other,
                     });
+                    cooperation.completed(1).await?;
                 }
                 AdmittedOption::Options(values)
             }
@@ -62,6 +74,7 @@ pub(in crate::builtins::stats::ml::tsne) async fn materialize_options(
             }
             other => other,
         });
+        cooperation.completed(1).await?;
     }
     Ok(materialized)
 }

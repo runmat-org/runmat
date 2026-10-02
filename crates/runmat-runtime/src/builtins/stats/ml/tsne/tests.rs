@@ -87,6 +87,87 @@ fn observation_materialization_yields_and_cancels_before_solver() {
     ));
 }
 
+#[test]
+fn option_materialization_cancellation_does_not_publish_partial_controls() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+
+    let source = Rc::new(CancellationSource::new());
+    let cancel = source.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            cancel.cancel(CancellationReason::User);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let options = vec![
+        admission::AdmittedOption::Perplexity(Value::Num(2.0)),
+        admission::AdmittedOption::LearnRate(Value::Num(100.0)),
+    ];
+    let error = futures::executor::block_on(materialize_options(
+        options,
+        &mut cooperation::TsneCooperation::with_budget(budget),
+    ))
+    .expect_err("a cancelled materialization must not publish a partial option list");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+}
+
+#[test]
+fn dropping_pending_option_materialization_does_not_resume_work() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use futures::task::noop_waker;
+    use runmat_execution::cancellation::CancellationSource;
+    use std::cell::Cell;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
+
+    let source = CancellationSource::new();
+    let turns = Rc::new(Cell::new(0));
+    let observed = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            observed.set(observed.get() + 1);
+            Box::pin(std::future::pending())
+        },
+    );
+    let mut cooperation = cooperation::TsneCooperation::with_budget(budget);
+    let mut future = Box::pin(materialize_options(
+        vec![
+            admission::AdmittedOption::Perplexity(Value::Num(2.0)),
+            admission::AdmittedOption::LearnRate(Value::Num(100.0)),
+        ],
+        &mut cooperation,
+    ));
+    let waker = noop_waker();
+    let mut context = Context::from_waker(&waker);
+    assert!(matches!(
+        Pin::as_mut(&mut future).poll(&mut context),
+        Poll::Pending
+    ));
+    assert_eq!(
+        turns.get(),
+        1,
+        "the first control reached a real cooperation turn"
+    );
+    drop(future);
+    assert_eq!(
+        turns.get(),
+        1,
+        "dropping the pending future cannot resume control work"
+    );
+}
+
 struct RejectingDownloadProvider {
     owner: TestAllocationOwner,
     downloads: AtomicUsize,

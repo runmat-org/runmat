@@ -13,6 +13,25 @@ use std::sync::{
     Mutex,
 };
 
+#[test]
+fn borrowed_handle_capacity_failure_keeps_operational_source() {
+    use std::error::Error;
+
+    let mut handles = Vec::<u8>::new();
+    let error = reserve_borrowed(
+        &mut handles,
+        usize::MAX,
+        "kmeans: borrowed operands exceed available memory",
+    )
+    .expect_err("capacity overflow must reject before allocation");
+    assert_eq!(error.identifier(), Some("RunMat:kmeans:Internal"));
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert!(error
+        .source()
+        .expect("original reservation failure")
+        .is::<std::collections::TryReserveError>());
+}
+
 enum UploadBehavior {
     Alias(GpuTensorHandle),
     FailSecond,
@@ -299,8 +318,12 @@ fn restoration_rejects_alias_to_non_x_borrowed_start() {
     let provider = RestoreProvider::new(UploadBehavior::Alias(start.handle.clone()), owner);
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let mut borrowed = BorrowedOperands::new();
-    borrowed.protect_value(&Value::GpuTensor(start.handle.clone()));
-    borrowed.record_consumed(&Value::GpuTensor(start.handle.clone()));
+    borrowed
+        .protect_value(&Value::GpuTensor(start.handle.clone()))
+        .unwrap();
+    borrowed
+        .record_consumed(&Value::GpuTensor(start.handle.clone()))
+        .unwrap();
     let result = restore_kmeans_value(
         Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
         Some(&source.handle),
@@ -339,7 +362,7 @@ fn ignored_nested_resident_metadata_is_protected_without_inheriting_explicit_int
     statset.insert("IgnoredField", Value::Cell(cell));
     statset.insert("Streams", Value::GpuTensor(empty_stream.handle.clone()));
     let mut borrowed = BorrowedOperands::new();
-    borrowed.protect_value(&Value::Struct(statset));
+    borrowed.protect_value(&Value::Struct(statset)).unwrap();
     let result = restore_kmeans_value(
         Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
         Some(&source.handle),
@@ -396,8 +419,12 @@ fn consumed_explicit_scalar_control_prevents_implicit_host_output_fallback() {
     assert_eq!(fallback, host);
 
     let mut consumed_control = BorrowedOperands::new();
-    consumed_control.protect_value(&Value::GpuTensor(explicit_control.clone()));
-    consumed_control.record_consumed(&Value::GpuTensor(explicit_control));
+    consumed_control
+        .protect_value(&Value::GpuTensor(explicit_control.clone()))
+        .unwrap();
+    consumed_control
+        .record_consumed(&Value::GpuTensor(explicit_control))
+        .unwrap();
     let error = restore_kmeans_value(host, Some(&source.handle), &consumed_control).unwrap_err();
     assert!(error.message().contains("failed to restore GPU result"));
     assert!(std::error::Error::source(&error).is_some());

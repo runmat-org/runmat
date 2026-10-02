@@ -183,7 +183,7 @@ async fn tsne_in_runtime(
     ensure_exact_tsne_floating_options(&admitted, &mut cooperation).await?;
     let x = gather(x).await?;
     ensure_exact_tsne_integer_value(&x, "observation data", &mut cooperation).await?;
-    let admitted = materialize_options(admitted).await?;
+    let admitted = materialize_options(admitted, &mut cooperation).await?;
     ensure_exact_tsne_floating_options(&admitted, &mut cooperation).await?;
     let options = parse_options(admitted)?;
     let tensor =

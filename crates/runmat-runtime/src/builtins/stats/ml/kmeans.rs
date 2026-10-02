@@ -63,6 +63,16 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     kmeans_error(message, &ERROR_INTERNAL)
 }
 
+fn reserve_borrowed<T>(
+    values: &mut Vec<T>,
+    additional: usize,
+    message: &'static str,
+) -> BuiltinResult<()> {
+    values
+        .try_reserve(additional)
+        .map_err(|source| internal_with_source(message, source))
+}
+
 fn internal_with_source(
     message: impl Into<String>,
     source: std::collections::TryReserveError,
@@ -163,10 +173,10 @@ async fn kmeans_in_runtime(
         return Err(invalid("kmeans: too many output arguments; maximum is 4"));
     }
     let mut borrowed = BorrowedOperands::new();
-    borrowed.protect_value(&x);
-    borrowed.protect_value(&k);
+    borrowed.protect_value(&x)?;
+    borrowed.protect_value(&k)?;
     for value in &rest {
-        borrowed.protect_value(value);
+        borrowed.protect_value(value)?;
     }
     let headers = admission::parse_option_headers(rest)?;
     preflight_observations(&x)?;
@@ -178,7 +188,7 @@ async fn kmeans_in_runtime(
     }
     geometry::preflight_effective_start(&x, &k, &options)?;
     let output_source = value_gpu_source(&x);
-    borrowed.record_consumed(&x);
+    borrowed.record_consumed(&x)?;
     let x_was_integer = typed_integer(&x);
     let x = gather(x).await?;
     if x_was_integer && !admission::numeric_value_is_exact_cooperative(&x, &mut cooperation).await?
@@ -187,7 +197,7 @@ async fn kmeans_in_runtime(
             "kmeans: typed-integer observation data must be exactly representable as double",
         ));
     }
-    borrowed.record_consumed(&k);
+    borrowed.record_consumed(&k)?;
     let k = gather(k).await?;
     let mut options = parse_options(options, &mut borrowed, &mut cooperation).await?;
     let data = geometry::prepare_data_cooperative(x, options.distance, &mut cooperation).await?;
@@ -237,8 +247,8 @@ async fn restore_kmeans_value_cooperative(
     };
     match value {
         Value::Tensor(_) => {
-            let protected = borrowed.protected().iter().collect::<Vec<_>>();
-            let intent = borrowed.intent_sources().iter().collect::<Vec<_>>();
+            let protected = borrowed_handle_refs(borrowed.protected())?;
+            let intent = borrowed_handle_refs(borrowed.intent_sources())?;
             let restored = restore_one_kmeans_output(value, source, &protected, &intent)?;
             if let Err(error) = cooperation.completed(0).await {
                 return Err(retire_staged_outputs(vec![restored], error));
@@ -246,10 +256,28 @@ async fn restore_kmeans_value_cooperative(
             Ok(restored)
         }
         Value::OutputList(values) => {
-            let mut restored = Vec::with_capacity(values.len());
+            let mut restored = Vec::new();
+            reserve_borrowed(
+                &mut restored,
+                values.len(),
+                "kmeans: restored outputs exceed available memory",
+            )?;
             for value in values {
-                let mut protected = borrowed.protected().iter().collect::<Vec<_>>();
-                let intent = borrowed.intent_sources().iter().collect::<Vec<_>>();
+                let mut protected = match borrowed_handle_refs(borrowed.protected()) {
+                    Ok(handles) => handles,
+                    Err(error) => return Err(retire_staged_outputs(restored, error)),
+                };
+                if let Err(error) = reserve_borrowed(
+                    &mut protected,
+                    restored.len(),
+                    "kmeans: borrowed output handles exceed available memory",
+                ) {
+                    return Err(retire_staged_outputs(restored, error));
+                }
+                let intent = match borrowed_handle_refs(borrowed.intent_sources()) {
+                    Ok(handles) => handles,
+                    Err(error) => return Err(retire_staged_outputs(restored, error)),
+                };
                 protected.extend(restored.iter().filter_map(|value| match value {
                     Value::GpuTensor(handle) => Some(handle),
                     _ => None,
@@ -266,6 +294,19 @@ async fn restore_kmeans_value_cooperative(
         }
         other => Ok(other),
     }
+}
+
+fn borrowed_handle_refs(
+    handles: &[runmat_accelerate_api::GpuTensorHandle],
+) -> BuiltinResult<Vec<&runmat_accelerate_api::GpuTensorHandle>> {
+    let mut refs = Vec::new();
+    reserve_borrowed(
+        &mut refs,
+        handles.len(),
+        "kmeans: borrowed output handles exceed available memory",
+    )?;
+    refs.extend(handles.iter());
+    Ok(refs)
 }
 
 fn retire_staged_outputs(values: Vec<Value>, mut error: RuntimeError) -> RuntimeError {
