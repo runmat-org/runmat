@@ -858,5 +858,5 @@ async fn gpu_filter_pass(
 }
 
 #[cfg(test)]
-#[path = "filtfilt/tests.rs"]
+#[path = "filtfilt/tests/mod.rs"]
 mod tests;
