@@ -103,6 +103,31 @@ fn unknown_and_partial_geometry_do_not_invent_dimensions() {
 }
 
 #[test]
+fn unknown_kind_does_not_raise_class_error_but_known_complex_does() {
+    let shape = ShapeFact::from(vec![Some(2), Some(2), Some(3)]);
+    let mut unknown = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
+    unknown.shape = shape.clone();
+    let inferred = infer(&CallRequest::new(vec![unknown], 1), &HSV2RGB_CATALOG_ENTRY);
+    assert!(!inferred
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "RM-CATALOG-HSV2RGB-CLASS"));
+    let complex = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        }),
+        shape,
+        StorageFact::Dense,
+    );
+    let invalid = infer(&CallRequest::new(vec![complex], 1), &HSV2RGB_CATALOG_ENTRY);
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "RM-CATALOG-HSV2RGB-CLASS"));
+}
+
+#[test]
 fn invalid_known_classes_and_shapes_report_diagnostics() {
     let invalid = infer(
         &CallRequest::new(

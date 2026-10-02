@@ -115,6 +115,35 @@ fn admit_hsv(hsv: &Value) -> BuiltinResult<bool> {
                 ));
             }
             if runmat_accelerate_api::handle_is_logical(handle) {
+                let owner =
+                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+                        hsv2rgb_error_with_message(
+                            "hsv2rgb: no acceleration provider owns the logical input handle",
+                            &HSV2RGB_ERROR_INVALID_INPUT,
+                        )
+                    })?;
+                if owner.device_id() != handle.device_id() {
+                    return Err(hsv2rgb_error_with_message(
+                        "hsv2rgb: logical input handle device does not match its owner",
+                        &HSV2RGB_ERROR_INVALID_INPUT,
+                    ));
+                }
+                handle.allocation_lease().validate_live().map_err(|error| {
+                    crate::runtime_error::with_provider_execution_source(
+                        hsv2rgb_error_with_message(
+                            format!("hsv2rgb: invalid logical resident allocation: {error}"),
+                            &HSV2RGB_ERROR_INVALID_INPUT,
+                        ),
+                        runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                    )
+                })?;
+                let shape = handle.shape();
+                if shape.len() != 3 || shape[2] != 3 || shape[0] == 0 || shape[1] == 0 {
+                    return Err(hsv2rgb_error_with_message(
+                        "hsv2rgb: logical input is supported only for nonempty MxNx3 HSV images",
+                        &HSV2RGB_ERROR_INVALID_INPUT,
+                    ));
+                }
                 return Ok(false);
             }
             let dtype = common::resident_numeric_dtype(handle, NAME)
@@ -130,7 +159,17 @@ fn admit_hsv(hsv: &Value) -> BuiltinResult<bool> {
             }
             Ok(true)
         }
-        Value::LogicalArray(_) | Value::Bool(_) => Ok(false),
+        Value::LogicalArray(array) => {
+            let shape = &array.shape;
+            if shape.len() != 3 || shape[2] != 3 || shape[0] == 0 || shape[1] == 0 {
+                return Err(hsv2rgb_error_with_message(
+                    "hsv2rgb: logical input is supported only for nonempty MxNx3 HSV images",
+                    &HSV2RGB_ERROR_INVALID_INPUT,
+                ));
+            }
+            Ok(false)
+        }
+        Value::Bool(_) => Ok(false),
         _ => Ok(false),
     }
 }
@@ -354,6 +393,18 @@ mod tests {
             .handle;
         let err = block_on(hsv2rgb_builtin(Value::GpuTensor(handle), Vec::new()))
             .expect_err("unsupported resident integer");
+        assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn hsv2rgb_rejects_logical_resident_colormap_before_download() {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let handle = owner
+            .allocate_logical(vec![0, 1, 1], vec![1, 3])
+            .expect("admit logical fixture")
+            .handle;
+        let err = block_on(hsv2rgb_builtin(Value::GpuTensor(handle), Vec::new()))
+            .expect_err("logical colormap geometry");
         assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
     }
 

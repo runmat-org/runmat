@@ -333,6 +333,24 @@ fn extension_gate_and_empty_rgb_inputs_precede_service() {
 }
 
 #[test]
+fn invalid_logical_hsv_resident_geometry_precedes_service() {
+    let events = Events::default();
+    let _context = enter(&events, false);
+    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let handle = owner
+        .allocate_logical(vec![0, 1, 1], vec![1, 3])
+        .unwrap()
+        .handle;
+    let error = block_on(dispatcher::call_builtin_async(
+        "hsv2rgb",
+        &[Value::GpuTensor(handle)],
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:hsv2rgb:InvalidInput"));
+    assert!(events.borrow().is_empty());
+}
+
+#[test]
 fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
     let events = Events::default();
     let _context = enter(&events, false);

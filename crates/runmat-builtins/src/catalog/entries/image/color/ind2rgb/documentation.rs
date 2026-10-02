@@ -49,7 +49,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Indexed classes, clipping, invalid indices and exact owner", location: "crates/runmat-runtime/src/builtins/image/color/ind2rgb.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled binding and fusion boundary", location: "crates/runmat-runtime/tests/image_color_catalog_binding.rs" },
         ],
-        notes: &["Native/JIT/AOT, browser, real-provider and whole-work placement qualification remain integration requirements."],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };
