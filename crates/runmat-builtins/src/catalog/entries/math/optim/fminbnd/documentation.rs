@@ -19,6 +19,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`Display` may be `'off'`, `'iter'`, `'notify'` (default; only prints when the solver fails to converge), or `'final'`.",
             "`exitflag` is `1` on convergence within `TolX`, `0` when the iteration or evaluation budget is exhausted.",
             "The fourth output is a struct with `iterations`, `funcCount`, `algorithm`, and `message` fields.",
+            "A call with no assigned output still runs the solver and its objective callback; it publishes no result value.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
             "The solver runs on the host and does not provide native gpuArray or tall-array execution. In RunMat extension mode, resident numeric operands and callback results use a separately gated gather fallback. Strict compatibility mode rejects that extension before provider access.",
@@ -48,6 +49,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "Runtime and admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/fminbnd.rs") },
         BuiltinDocumentationLink { label: "Shared Brent solver", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/brent.rs") },
         BuiltinDocumentationLink { label: "Callback and option services", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/common.rs") },
+        BuiltinDocumentationLink { label: "Typed option fields", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/common/scalar_options.rs") },
+        BuiltinDocumentationLink { label: "Invocation cooperation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/common/scalar_cooperation.rs") },
     ], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Solver behavior", location: "builtins::math::optim::fminbnd::tests" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Function handle execution", location: "runmat-vm/tests/closures.rs::fminbnd_accepts_anonymous_function" },

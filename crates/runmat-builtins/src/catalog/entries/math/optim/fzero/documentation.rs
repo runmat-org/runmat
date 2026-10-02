@@ -18,6 +18,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`fval` is the function value at the returned `x`; `exitflag` is 1 for convergence and 0 when the iteration/function-evaluation budget is exhausted.",
             "The four-output `output` struct contains `iterations`, `funcCount`, `algorithm`, and `message` fields.",
             "Requests for more than four outputs are rejected.",
+            "A call with no assigned output still runs the solver and its callback; it publishes no result value.",
             "Anonymous functions, named function handles, and function-handle strings work through RunMat's existing `feval` dispatch path.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
@@ -44,6 +45,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "Runtime and admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/fzero.rs") },
         BuiltinDocumentationLink { label: "Shared Brent solver", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/brent.rs") },
         BuiltinDocumentationLink { label: "Callback and option services", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/common.rs") },
+        BuiltinDocumentationLink { label: "Typed option fields", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/common/scalar_options.rs") },
+        BuiltinDocumentationLink { label: "Invocation cooperation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/common/scalar_cooperation.rs") },
     ], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Solver behavior", location: "builtins::math::optim::fzero::tests" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Function handle execution", location: "runmat-vm/tests/closures.rs::fzero_returns_optional_function_value" },
