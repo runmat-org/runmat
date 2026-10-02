@@ -25,16 +25,16 @@ fn scalar_bound(
             | ValueKindFact::Unknown
     ) && fact.storage != StorageFact::Sparse
         && fact.shape.element_count().is_none_or(|count| count == 1);
-    let finite_literal = request
+    let admitted_literal = request
         .literals
         .literal_args
         .get(index)
         .and_then(runmat_types::LiteralContext::numeric_from_literal)
-        .is_none_or(f64::is_finite);
-    if !admissible || !finite_literal {
+        .is_none_or(|value| !value.is_nan());
+    if !admissible || !admitted_literal {
         diagnostics.push(argument_error(
             "RM-CATALOG-INTEGRAL-BOUND",
-            "integral requires finite real scalar bounds",
+            "integral requires real scalar bounds that are not NaN",
             index,
         ));
     }

@@ -1,20 +1,23 @@
-//! Finite real waypoint geometry. Complex contours and improper domains have
-//! separate numerical rules and do not enter this finite Simpson path.
+//! Ordered real integration path admission and open-rule execution. Finite
+//! endpoint singularities and infinite tails never enter endpoint Simpson.
 
 use num_complex::Complex;
-use runmat_builtins::INTEGRAL_ERROR_INVALID_ARGUMENT;
+use runmat_builtins::{INTEGRAL_ERROR_INVALID_ARGUMENT, INTEGRAL_ERROR_INVALID_INPUT};
+use runmat_value::Value;
 
 use super::{
     integral_error_with_detail, integral_map_error, scalar_bound_host, IntegralEvaluator,
     IntegralOptionName, IntegralOptions,
 };
-use crate::builtins::math::optim::quadrature::{integrate, integrate_mesh, QuadratureCooperation};
+use crate::builtins::math::optim::quadrature::{
+    integrate_open, OpenDomain, OpenSegment, QuadratureCooperation,
+};
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
-use runmat_builtins::INTEGRAL_ERROR_INVALID_INPUT;
-use runmat_value::Value;
+
+const PATH_CHUNK: usize = 4096;
 
 fn resource_error(source: std::collections::TryReserveError) -> crate::RuntimeError {
-    build_runtime_error("integral: could not reserve waypoint path")
+    build_runtime_error("integral: could not reserve integration path")
         .with_identifier("RunMat:Internal")
         .with_builtin("integral")
         .with_source(source)
@@ -22,69 +25,98 @@ fn resource_error(source: std::collections::TryReserveError) -> crate::RuntimeEr
         .build()
 }
 
-pub(super) async fn finite_real_segments(
+fn invalid_path(detail: &str) -> crate::RuntimeError {
+    integral_error_with_detail(&INTEGRAL_ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn push_span(segments: &mut Vec<OpenSegment>, lower: f64, upper: f64) {
+    if lower == upper {
+        return;
+    }
+    match (lower.is_infinite(), upper.is_infinite()) {
+        (false, false) => segments.push(OpenSegment {
+            a: lower,
+            b: upper,
+            domain: OpenDomain::Finite,
+        }),
+        (true, false) => segments.push(OpenSegment {
+            a: 0.0,
+            b: 1.0,
+            domain: OpenDomain::LeftInfinite { bound: upper },
+        }),
+        (false, true) => segments.push(OpenSegment {
+            a: 0.0,
+            b: 1.0,
+            domain: OpenDomain::RightInfinite { bound: lower },
+        }),
+        (true, true) => {
+            push_span(segments, f64::NEG_INFINITY, 0.0);
+            push_span(segments, 0.0, f64::INFINITY);
+        }
+    }
+}
+
+pub(super) async fn real_segments(
     lower: f64,
     upper: f64,
     waypoints: &[Complex<f64>],
     cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<Vec<(f64, f64)>> {
+) -> BuiltinResult<Vec<OpenSegment>> {
     cooperation.completed(0).await?;
+    if lower == upper && lower.is_infinite() {
+        return Err(invalid_path(
+            "equal infinite bounds do not define an integration path",
+        ));
+    }
     let lo = lower.min(upper);
     let hi = lower.max(upper);
     let ascending = lower <= upper;
-    let mut segments = Vec::new();
-    segments
-        .try_reserve_exact(waypoints.len().checked_add(1).ok_or_else(|| {
-            integral_error_with_detail(&INTEGRAL_ERROR_INVALID_ARGUMENT, "too many Waypoints")
-        })?)
-        .map_err(resource_error)?;
-    let mut start = lower;
+    let mut directed = lower;
     for (index, point) in waypoints.iter().enumerate() {
-        if point.im != 0.0 || point.re < lo || point.re > hi {
-            return Err(integral_error_with_detail(
-                &INTEGRAL_ERROR_INVALID_ARGUMENT,
-                "real Waypoints must lie within the integration interval",
+        if point.im != 0.0 || !point.re.is_finite() || point.re < lo || point.re > hi {
+            return Err(invalid_path(
+                "real Waypoints must be finite and lie within the integration interval",
             ));
         }
-        if (ascending && point.re < start) || (!ascending && point.re > start) {
-            return Err(integral_error_with_detail(
-                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+        if (ascending && point.re < directed) || (!ascending && point.re > directed) {
+            return Err(invalid_path(
                 "real Waypoints must be monotone along the integration path",
             ));
         }
-        if point.re != start {
-            segments.push(if ascending {
-                (start, point.re)
-            } else {
-                (point.re, start)
-            });
-        }
-        start = point.re;
-        if (index + 1).is_multiple_of(4096) {
-            cooperation.completed(4096).await?;
+        directed = point.re;
+        if (index + 1).is_multiple_of(PATH_CHUNK) {
+            cooperation.completed(PATH_CHUNK as u64).await?;
         }
     }
     cooperation
-        .completed((waypoints.len() % 4096) as u64)
+        .completed((waypoints.len() % PATH_CHUNK) as u64)
         .await?;
-    if upper != start {
-        segments.push(if ascending {
-            (start, upper)
+
+    let capacity = waypoints
+        .len()
+        .checked_add(2)
+        .ok_or_else(|| invalid_path("too many Waypoints"))?;
+    let mut segments = Vec::new();
+    segments
+        .try_reserve_exact(capacity)
+        .map_err(resource_error)?;
+    let mut start = lo;
+    for index in 0..waypoints.len() {
+        let point = if ascending {
+            waypoints[index]
         } else {
-            (upper, start)
-        });
-    }
-    if !ascending {
-        let count = segments.len();
-        let swaps = count / 2;
-        for index in 0..swaps {
-            segments.swap(index, count - 1 - index);
-            if (index + 1).is_multiple_of(4096) {
-                cooperation.completed(4096).await?;
-            }
+            waypoints[waypoints.len() - 1 - index]
+        };
+        push_span(&mut segments, start, point.re);
+        start = point.re;
+        if (index + 1).is_multiple_of(PATH_CHUNK) {
+            cooperation.completed(PATH_CHUNK as u64).await?;
         }
-        cooperation.completed((swaps % 4096) as u64).await?;
     }
+    cooperation
+        .completed((waypoints.len() % PATH_CHUNK) as u64)
+        .await?;
+    push_span(&mut segments, start, hi);
     Ok(segments)
 }
 
@@ -94,7 +126,7 @@ pub(super) async fn preflight_host_path(
     options: &[(IntegralOptionName, &Value)],
     waypoint_receipts: &[Option<Vec<Complex<f64>>>],
     cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<Option<Vec<(f64, f64)>>> {
+) -> BuiltinResult<Option<Vec<OpenSegment>>> {
     if matches!(lower, Value::GpuTensor(_)) || matches!(upper, Value::GpuTensor(_)) {
         return Ok(None);
     }
@@ -108,12 +140,12 @@ pub(super) async fn preflight_host_path(
             (*name == IntegralOptionName::Waypoints).then_some(&waypoint_receipts[index])
         });
     if let Some(Some(points)) = last_waypoints {
-        return finite_real_segments(lower, upper, points, cooperation)
+        return real_segments(lower, upper, points, cooperation)
             .await
             .map(Some);
     }
     if last_waypoints.is_none() {
-        return finite_real_segments(lower, upper, &[], cooperation)
+        return real_segments(lower, upper, &[], cooperation)
             .await
             .map(Some);
     }
@@ -123,7 +155,7 @@ pub(super) async fn preflight_host_path(
 pub(super) async fn integrate_real_segments(
     function: &Value,
     options: &IntegralOptions,
-    segments: &[(f64, f64)],
+    segments: &[OpenSegment],
     cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<f64> {
     let mut evaluator = IntegralEvaluator {
@@ -131,13 +163,7 @@ pub(super) async fn integrate_real_segments(
         options,
         cooperation,
     };
-    if options.waypoints.is_empty() {
-        return integrate(&mut evaluator, segments[0].0, segments[0].1)
-            .await
-            .map(|result| result.q)
-            .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT));
-    }
-    let estimate = integrate_mesh(&mut evaluator, segments)
+    let estimate = integrate_open(&mut evaluator, segments)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
     estimate.to_f64().ok_or_else(|| {
@@ -151,45 +177,64 @@ pub(super) async fn integrate_real_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::math::optim::quadrature::QuadratureIdentity;
 
     #[test]
     fn real_waypoints_keep_monotone_order_and_skip_duplicate_intervals() {
-        let mut cooperation =
-            QuadratureCooperation::new(super::super::QuadratureIdentity::Integral, None);
-        assert_eq!(
-            futures::executor::block_on(finite_real_segments(
-                1.0,
-                0.0,
-                &[
-                    Complex::new(0.75, 0.0),
-                    Complex::new(0.25, 0.0),
-                    Complex::new(0.25, 0.0)
-                ],
-                &mut cooperation,
-            ))
-            .unwrap(),
-            vec![(0.0, 0.25), (0.25, 0.75), (0.75, 1.0)]
-        );
-        assert!(futures::executor::block_on(finite_real_segments(
+        let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Integral, None);
+        let segments = futures::executor::block_on(real_segments(
+            1.0,
+            0.0,
+            &[
+                Complex::new(0.75, 0.0),
+                Complex::new(0.25, 0.0),
+                Complex::new(0.25, 0.0),
+            ],
+            &mut cooperation,
+        ))
+        .expect("ordered finite path");
+        assert_eq!(segments.len(), 3);
+        assert!(matches!(segments[0].domain, OpenDomain::Finite));
+        assert_eq!((segments[0].a, segments[0].b), (0.0, 0.25));
+        assert_eq!((segments[1].a, segments[1].b), (0.25, 0.75));
+        assert_eq!((segments[2].a, segments[2].b), (0.75, 1.0));
+        assert!(futures::executor::block_on(real_segments(
             0.0,
             1.0,
             &[Complex::new(2.0, 0.0)],
-            &mut cooperation
+            &mut cooperation,
         ))
         .is_err());
-        assert!(futures::executor::block_on(finite_real_segments(
+        assert!(futures::executor::block_on(real_segments(
             0.0,
             1.0,
             &[Complex::new(0.5, 1.0)],
-            &mut cooperation
+            &mut cooperation,
         ))
         .is_err());
-        assert!(futures::executor::block_on(finite_real_segments(
+        assert!(futures::executor::block_on(real_segments(
             0.0,
             1.0,
             &[Complex::new(0.75, 0.0), Complex::new(0.25, 0.0)],
             &mut cooperation,
         ))
         .is_err());
+    }
+
+    #[test]
+    fn improper_paths_use_open_tails_and_finite_waypoint_spans() {
+        let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Integral, None);
+        let segments = futures::executor::block_on(real_segments(
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            &[Complex::new(1.0, 0.0), Complex::new(2.0, 0.0)],
+            &mut cooperation,
+        ))
+        .expect("improper path");
+        assert_eq!(segments.len(), 3);
+        assert!(matches!(segments[0].domain, OpenDomain::LeftInfinite { bound } if bound == 1.0));
+        assert!(matches!(segments[1].domain, OpenDomain::Finite));
+        assert_eq!((segments[1].a, segments[1].b), (1.0, 2.0));
+        assert!(matches!(segments[2].domain, OpenDomain::RightInfinite { bound } if bound == 2.0));
     }
 }

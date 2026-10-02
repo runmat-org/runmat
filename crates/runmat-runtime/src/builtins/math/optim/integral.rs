@@ -1,4 +1,4 @@
-//! MATLAB-compatible `integral` builtin for finite scalar numerical integration.
+//! `integral` numerical integration over real finite and improper domains.
 
 #[cfg(test)]
 use runmat_builtins::{
@@ -34,7 +34,10 @@ use options::IntegralOptions;
 
 const NAME: &str = "integral";
 const DEFAULT_MAX_FUN_EVALS: usize = 10_000;
-const MAX_DEPTH: usize = 30;
+// The open rule is iterative. Let representable interior geometry and the
+// independent callback/interval budgets, rather than an arbitrary recursion
+// depth, determine when further refinement is impossible.
+const MAX_DEPTH: usize = usize::MAX;
 
 fn integral_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -189,7 +192,7 @@ async fn integral_with_cooperation(
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
     let segments = match prepared_path {
         Some(segments) => segments,
-        None => path::finite_real_segments(a, b, &options.waypoints, cooperation).await?,
+        None => path::real_segments(a, b, &options.waypoints, cooperation).await?,
     };
     if options
         .max_interval_count
@@ -200,16 +203,8 @@ async fn integral_with_cooperation(
             "exceeded MaxIntervalCount adaptive subintervals",
         ));
     }
-    if segments
-        .len()
-        .checked_mul(5)
-        .is_none_or(|minimum| minimum > options.max_fun_evals)
-    {
-        return Err(integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            "exceeded maximum function evaluations",
-        ));
-    }
+    // The numerical rule owns its minimum callback count and checks it before
+    // any callback effect. Do not mirror a fixed batch-size policy here.
     let sign = if b < a { -1.0 } else { 1.0 };
     let lo = a.min(b);
     let hi = a.max(b);
@@ -291,7 +286,7 @@ fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
         if !scalar || handle_storage(handle) != GpuTensorStorage::Real {
             return Err(integral_error_with_detail(
                 &INTEGRAL_ERROR_INVALID_INPUT,
-                format!("{label} must be a finite real scalar"),
+                format!("{label} must be a real scalar"),
             ));
         }
         return Ok(());
@@ -407,7 +402,7 @@ fn scalar_bound_host(label: &str, value: &Value) -> BuiltinResult<f64> {
             .ok_or_else(|| {
                 integral_error_with_detail(
                     &INTEGRAL_ERROR_INVALID_INPUT,
-                    format!("{label} must be a finite real scalar"),
+                    format!("{label} must be a real scalar"),
                 )
             })?,
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
@@ -420,16 +415,16 @@ fn scalar_bound_host(label: &str, value: &Value) -> BuiltinResult<f64> {
         other => {
             return Err(integral_error_with_detail(
                 &INTEGRAL_ERROR_INVALID_INPUT,
-                format!("{label} must be a finite real scalar, got {other:?}"),
+                format!("{label} must be a real scalar, got {other:?}"),
             ))
         }
     };
-    if parsed.is_finite() {
+    if !parsed.is_nan() {
         Ok(parsed)
     } else {
         Err(integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_INPUT,
-            format!("{label} must be finite"),
+            format!("{label} must not be NaN"),
         ))
     }
 }
@@ -692,6 +687,51 @@ mod tests {
         mapped_helper(_x, |_| 1.0).await
     }
 
+    thread_local! {
+        static COUNTED_CALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[runtime_builtin(
+        name = "__integral_counted_one",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn counted_one_helper(x: Value) -> crate::BuiltinResult<Value> {
+        COUNTED_CALLBACKS.with(|count| count.set(count.get() + 1));
+        mapped_helper(x, |_| 1.0).await
+    }
+
+    #[runtime_builtin(
+        name = "__integral_endpoint_sqrt",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn endpoint_sqrt_helper(x: Value) -> crate::BuiltinResult<Value> {
+        mapped_helper(x, |value| 1.0 / value.sqrt()).await
+    }
+
+    #[runtime_builtin(
+        name = "__integral_exp_tail",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn exp_tail_helper(x: Value) -> crate::BuiltinResult<Value> {
+        mapped_helper(x, |value| (-value).exp()).await
+    }
+
+    #[runtime_builtin(
+        name = "__integral_gaussian",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn gaussian_helper(x: Value) -> crate::BuiltinResult<Value> {
+        mapped_helper(x, |value| (-value * value).exp()).await
+    }
+
     #[runtime_builtin(
         name = "__integral_scaled_identity",
         type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
@@ -774,6 +814,21 @@ mod tests {
     }
 
     #[runtime_builtin(
+        name = "__integral_array_exp_tails",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn array_exp_tails_helper(x: Value) -> crate::BuiltinResult<Value> {
+        let Value::Num(x) = x else {
+            unreachable!("array callback receives scalar")
+        };
+        Ok(Value::Tensor(
+            Tensor::new(vec![(-x).exp(), (-2.0 * x).exp()], vec![1, 2]).expect("fixed shape"),
+        ))
+    }
+
+    #[runtime_builtin(
         name = "__integral_array_changing_shape",
         type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
         descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
@@ -783,7 +838,7 @@ mod tests {
         let Value::Num(x) = x else {
             unreachable!("array callback receives scalar")
         };
-        let values = if x == 0.0 { vec![1.0] } else { vec![1.0, 2.0] };
+        let values = if x < 0.5 { vec![1.0] } else { vec![1.0, 2.0] };
         Ok(Value::Tensor(
             Tensor::new(values.clone(), vec![1, values.len()]).expect("shape"),
         ))
@@ -1335,12 +1390,12 @@ mod tests {
                 Value::from("Vectorized"),
                 Value::Bool(false),
                 Value::from("MaxFunEvals"),
-                Value::Num(5.0),
+                Value::Num(15.0),
                 Value::from("MaxIntervalCount"),
                 Value::Num(1.0),
             ],
         ))
-        .expect("a polynomial accepts within one subinterval and five evaluations");
+        .expect("a polynomial accepts within one open-rule subinterval and fifteen evaluations");
         assert!(
             matches!(scalar_polynomial, Value::Num(value) if (value - 1.0 / 3.0).abs() < 1.0e-12)
         );
@@ -1373,7 +1428,7 @@ mod tests {
                 Value::from("ArrayValued"),
                 Value::Bool(true),
                 Value::from("MaxFunEvals"),
-                Value::Num(5.0),
+                Value::Num(15.0),
                 Value::from("MaxIntervalCount"),
                 Value::Num(1.0),
             ],
@@ -1402,6 +1457,92 @@ mod tests {
         assert!(array_sine
             .message()
             .contains("MaxIntervalCount adaptive subintervals"));
+    }
+
+    #[test]
+    fn open_rule_checks_its_initial_evaluation_budget_before_callback_effects() {
+        COUNTED_CALLBACKS.with(|count| count.set(0));
+        let insufficient = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_counted_one".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), Value::Num(5.0)],
+        ))
+        .expect_err("the selected rule requires fifteen sample evaluations");
+        assert!(insufficient
+            .message()
+            .contains("exceeded maximum function evaluations"));
+        COUNTED_CALLBACKS.with(|count| assert_eq!(count.get(), 0));
+
+        let enough = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_counted_one".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![
+                Value::from("MaxFunEvals"),
+                Value::Num(15.0),
+                Value::from("MaxIntervalCount"),
+                Value::Num(1.0),
+            ],
+        ))
+        .expect("one vectorized batch is sufficient for a constant");
+        assert!(matches!(enough, Value::Num(value) if (value - 1.0).abs() < 1.0e-12));
+        COUNTED_CALLBACKS.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    #[test]
+    fn interior_rule_integrates_endpoint_singularity_and_improper_real_domains() {
+        let endpoint = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_endpoint_sqrt".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect("the callback is never evaluated at singular endpoint zero");
+        assert!(matches!(endpoint, Value::Num(value) if (value - 2.0).abs() < 1.0e-6));
+
+        let right = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_exp_tail".into()),
+            Value::Num(0.0),
+            Value::Num(f64::INFINITY),
+            Vec::new(),
+        ))
+        .expect("positive infinite tail");
+        assert!(matches!(right, Value::Num(value) if (value - 1.0).abs() < 1.0e-7));
+
+        let reversed = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_exp_tail".into()),
+            Value::Num(f64::INFINITY),
+            Value::Num(0.0),
+            Vec::new(),
+        ))
+        .expect("reversed positive infinite tail");
+        assert!(matches!(reversed, Value::Num(value) if (value + 1.0).abs() < 1.0e-7));
+
+        let both = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_gaussian".into()),
+            Value::Num(f64::NEG_INFINITY),
+            Value::Num(f64::INFINITY),
+            Vec::new(),
+        ))
+        .expect("both infinite tails share one global error budget");
+        assert!(
+            matches!(both, Value::Num(value) if (value - std::f64::consts::PI.sqrt()).abs() < 1.0e-6)
+        );
+
+        let array = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_array_exp_tails".into()),
+            Value::Num(0.0),
+            Value::Num(f64::INFINITY),
+            vec![Value::from("ArrayValued"), Value::Bool(true)],
+        ))
+        .expect("array-valued infinite tail uses the same numerical rule");
+        let Value::Tensor(array) = array else {
+            panic!("expected fixed-shape array")
+        };
+        assert_eq!(array.shape, [1, 2]);
+        assert!((tensor::tensor_value_f64(&array, 0) - 1.0).abs() < 1.0e-6);
+        assert!((tensor::tensor_value_f64(&array, 1) - 0.5).abs() < 1.0e-6);
     }
 
     #[test]

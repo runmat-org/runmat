@@ -10,7 +10,7 @@ use super::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
-    integrate_array, integrate_mesh, QuadratureArithmeticError, QuadratureCooperation,
+    integrate_open, OpenSegment, QuadratureArithmeticError, QuadratureCooperation,
     QuadratureEvaluator, ScaledEstimate,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -230,7 +230,7 @@ pub(super) async fn integrate_array_valued(
     lo: f64,
     hi: f64,
     sign: f64,
-    segments: &[(f64, f64)],
+    segments: &[OpenSegment],
     options: &IntegralOptions,
     cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<Value> {
@@ -245,12 +245,9 @@ pub(super) async fn integrate_array_valued(
         let zero = zero_values(sample.len(), evaluator.cooperation).await?;
         return finish(evaluator.shape.expect("sample establishes shape"), zero);
     }
-    let estimate = if options.waypoints.is_empty() {
-        integrate_array(&mut evaluator, lo, hi).await
-    } else {
-        integrate_mesh(&mut evaluator, segments).await
-    }
-    .map_err(|error| integral_map_error(error, &INTEGRAL_ERROR_INVALID_INPUT))?;
+    let estimate = integrate_open(&mut evaluator, segments)
+        .await
+        .map_err(|error| integral_map_error(error, &INTEGRAL_ERROR_INVALID_INPUT))?;
     let shape = evaluator
         .shape
         .expect("integration evaluates at least one sample");

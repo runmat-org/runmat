@@ -35,6 +35,38 @@ fn finite_scalar_bounds_prove_host_double_result() {
 }
 
 #[test]
+fn infinite_real_bound_is_admitted_but_nan_bound_is_diagnostic() {
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    let call = |bound: f64| {
+        request(
+            vec![
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                real.clone(),
+                real.clone(),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(0.0),
+                LiteralValue::Number(bound),
+            ],
+            1,
+        )
+    };
+    let improper = inference::infer(&call(f64::INFINITY), &INTEGRAL_CATALOG_ENTRY);
+    assert!(improper.diagnostics.is_empty());
+    assert_eq!(
+        improper.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    let invalid = inference::infer(&call(f64::NAN), &INTEGRAL_CATALOG_ENTRY);
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGRAL-BOUND"));
+    assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
 fn invalid_complex_bound_and_incomplete_option_pairs_do_not_prove_success() {
     let mut call = request(
         vec![
