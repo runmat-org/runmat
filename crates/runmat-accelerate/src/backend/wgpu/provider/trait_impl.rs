@@ -1432,12 +1432,11 @@ impl AccelProvider for WgpuProvider {
     }
     fn iir_filter<'a>(
         &'a self,
-        b: &'a GpuTensorHandle,
-        a: &'a GpuTensorHandle,
+        coefficients: runmat_accelerate_api::ProviderIirCoefficientSource<'a>,
         x: &'a GpuTensorHandle,
         options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
-        Box::pin(async move { self.iir_filter_exec(b, a, x, options).await })
+        Box::pin(async move { self.iir_filter_exec(coefficients, x, options).await })
     }
     fn moving_window<'a>(
         &'a self,

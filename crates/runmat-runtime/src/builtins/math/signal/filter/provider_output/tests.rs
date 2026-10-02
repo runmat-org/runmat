@@ -42,8 +42,7 @@ impl AccelProvider for FailingHookProvider {
     }
     fn iir_filter<'a>(
         &'a self,
-        _b: &'a GpuTensorHandle,
-        _a: &'a GpuTensorHandle,
+        _coefficients: runmat_accelerate_api::ProviderIirCoefficientSource<'a>,
         _x: &'a GpuTensorHandle,
         _options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {

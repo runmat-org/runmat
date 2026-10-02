@@ -26,9 +26,18 @@ enum GradientSpacingInput<'a> {
     Coordinates(&'a GpuTensorHandle),
 }
 
-enum IirCoefficientPlan {
-    UnitDenominatorFir,
-    Normalized { b: Vec<f64>, a: Vec<f64> },
+enum IirCoefficientPlan<'a> {
+    UnitDenominatorFir {
+        numerator: &'a GpuTensorHandle,
+    },
+    PreparedResident {
+        numerator: &'a GpuTensorHandle,
+        denominator: &'a GpuTensorHandle,
+    },
+    Normalized {
+        b: std::borrow::Cow<'a, [f64]>,
+        a: std::borrow::Cow<'a, [f64]>,
+    },
 }
 
 fn moving_window_op_code(op: ProviderMovingWindowOp) -> u32 {
@@ -852,32 +861,21 @@ impl WgpuProvider {
 
         Ok(handle)
     }
-    pub(crate) async fn iir_filter_exec(
+    pub(crate) async fn iir_filter_exec<'a>(
         &self,
-        b: &GpuTensorHandle,
-        a: &GpuTensorHandle,
+        coefficients: runmat_accelerate_api::ProviderIirCoefficientSource<'a>,
         x: &GpuTensorHandle,
         options: ProviderIirFilterOptions,
     ) -> Result<ProviderIirFilterResult> {
-        let ProviderIirFilterOptions {
-            dim,
-            zi,
-            unit_denominator,
-        } = options;
+        let ProviderIirFilterOptions { dim, zi } = options;
 
-        let entry_b = self.get_entry(b)?;
-        let entry_a = self.get_entry(a)?;
         let entry_x = self.get_entry(x)?;
         ensure!(
-            runmat_accelerate_api::handle_integer_type(b).is_none()
-                && runmat_accelerate_api::handle_integer_type(a).is_none()
-                && runmat_accelerate_api::handle_integer_type(x).is_none(),
+            runmat_accelerate_api::handle_integer_type(x).is_none(),
             "iir_filter: integer buffers must be converted before floating provider dispatch"
         );
         ensure!(
-            !runmat_accelerate_api::handle_is_logical(b)
-                && !runmat_accelerate_api::handle_is_logical(a)
-                && !runmat_accelerate_api::handle_is_logical(x),
+            !runmat_accelerate_api::handle_is_logical(x),
             "iir_filter: logical buffers must be converted before floating provider dispatch"
         );
         let effective_storage = |handle: &GpuTensorHandle, entry_storage: GpuTensorStorage| match (
@@ -888,73 +886,120 @@ impl WgpuProvider {
             | (_, GpuTensorStorage::ComplexInterleaved) => GpuTensorStorage::ComplexInterleaved,
             _ => GpuTensorStorage::Real,
         };
-        let b_storage = effective_storage(b, entry_b.storage);
-        let a_storage = effective_storage(a, entry_a.storage);
         let x_storage = effective_storage(x, entry_x.storage);
-
         ensure!(
-            b_storage == GpuTensorStorage::Real && a_storage == GpuTensorStorage::Real,
-            "iir_filter: complex filter coefficients are not supported"
-        );
-        ensure!(
-            entry_b.precision == self.precision
-                && entry_a.precision == self.precision
-                && entry_x.precision == self.precision,
+            entry_x.precision == self.precision,
             "iir_filter: mixed precision tensors are not supported"
         );
 
-        let nb = entry_b.len;
-        let na = entry_a.len;
-        ensure!(
-            nb > 0,
-            "iir_filter: numerator coefficients must not be empty"
-        );
-        ensure!(
-            na > 0,
-            "iir_filter: denominator coefficients must not be empty"
-        );
+        let (order, coefficient_plan) = match coefficients {
+            runmat_accelerate_api::ProviderIirCoefficientSource::UnitDenominatorFir {
+                numerator,
+            } => {
+                let entry_b = self.get_entry(numerator)?;
+                ensure!(
+                    entry_b.len > 0
+                        && entry_b.precision == self.precision
+                        && effective_storage(numerator, entry_b.storage) == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_integer_type(numerator).is_none()
+                        && !runmat_accelerate_api::handle_is_logical(numerator),
+                    "iir_filter: invalid resident FIR numerator"
+                );
+                (
+                    entry_b.len,
+                    IirCoefficientPlan::UnitDenominatorFir { numerator },
+                )
+            }
+            runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(prepared) => {
+                let numerator = prepared.numerator();
+                let denominator = prepared.denominator();
+                let entry_b = self.get_entry(numerator)?;
+                let entry_a = self.get_entry(denominator)?;
+                let order = entry_b.len;
+                ensure!(
+                    order > 0
+                        && entry_a.len == order
+                        && entry_b.precision == self.precision
+                        && entry_a.precision == self.precision
+                        && effective_storage(numerator, entry_b.storage) == GpuTensorStorage::Real
+                        && effective_storage(denominator, entry_a.storage)
+                            == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_integer_type(numerator).is_none()
+                        && runmat_accelerate_api::handle_integer_type(denominator).is_none()
+                        && !runmat_accelerate_api::handle_is_logical(numerator)
+                        && !runmat_accelerate_api::handle_is_logical(denominator),
+                    "iir_filter: invalid prepared resident coefficients"
+                );
+                ensure!(
+                    !numerator.shares_allocation_with(x) && !denominator.shares_allocation_with(x),
+                    "iir_filter: prepared coefficients alias the signal"
+                );
+                (
+                    order,
+                    IirCoefficientPlan::PreparedResident {
+                        numerator,
+                        denominator,
+                    },
+                )
+            }
+            runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                numerator,
+                denominator,
+            } => {
+                let entry_b = self.get_entry(numerator)?;
+                let entry_a = self.get_entry(denominator)?;
+                ensure!(
+                    entry_b.len > 0
+                        && entry_a.len > 0
+                        && entry_b.precision == self.precision
+                        && entry_a.precision == self.precision
+                        && effective_storage(numerator, entry_b.storage) == GpuTensorStorage::Real
+                        && effective_storage(denominator, entry_a.storage)
+                            == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_integer_type(numerator).is_none()
+                        && runmat_accelerate_api::handle_integer_type(denominator).is_none()
+                        && !runmat_accelerate_api::handle_is_logical(numerator)
+                        && !runmat_accelerate_api::handle_is_logical(denominator),
+                    "iir_filter: invalid resident coefficients"
+                );
+                let nb = entry_b.len;
+                let na = entry_a.len;
+                let order = nb.max(na);
+                let b_host = self.download_exec(numerator).await?;
+                let a_host = self.download_exec(denominator).await?;
+                let a0 = *a_host.data.first().ok_or_else(|| {
+                    anyhow!("iir_filter: denominator coefficients cannot be empty")
+                })?;
+                ensure!(
+                    a0 != 0.0,
+                    "iir_filter: denominator coefficient a(1) must be non-zero"
+                );
 
-        let order = nb.max(na);
+                let mut b_norm = vec![0.0f64; order];
+                let mut a_norm = vec![0.0f64; order];
+                for i in 0..order {
+                    let b_coeff = if i < nb { b_host.data[i] } else { 0.0 };
+                    b_norm[i] = b_coeff / a0;
+                    if i == 0 {
+                        a_norm[0] = 1.0;
+                    } else {
+                        let a_coeff = if i < na { a_host.data[i] } else { 0.0 };
+                        a_norm[i] = a_coeff / a0;
+                    }
+                }
+                (
+                    order,
+                    IirCoefficientPlan::Normalized {
+                        b: b_norm.into(),
+                        a: a_norm.into(),
+                    },
+                )
+            }
+        };
         ensure!(
             order <= u32::MAX as usize,
             "iir_filter: filter order exceeds GPU limits"
         );
-
-        let coefficient_plan = if unit_denominator {
-            ensure!(
-                na == 1,
-                "iir_filter: unit-denominator FIR path requires scalar denominator"
-            );
-            IirCoefficientPlan::UnitDenominatorFir
-        } else {
-            let b_host = self.download_exec(b).await?;
-            let a_host = self.download_exec(a).await?;
-            let a0 = *a_host
-                .data
-                .first()
-                .ok_or_else(|| anyhow!("iir_filter: denominator coefficients cannot be empty"))?;
-            ensure!(
-                a0 != 0.0,
-                "iir_filter: denominator coefficient a(1) must be non-zero"
-            );
-
-            let mut b_norm = vec![0.0f64; order];
-            let mut a_norm = vec![0.0f64; order];
-            for i in 0..order {
-                let b_coeff = if i < nb { b_host.data[i] } else { 0.0 };
-                b_norm[i] = b_coeff / a0;
-                if i == 0 {
-                    a_norm[0] = 1.0;
-                } else {
-                    let a_coeff = if i < na { a_host.data[i] } else { 0.0 };
-                    a_norm[i] = a_coeff / a0;
-                }
-            }
-            IirCoefficientPlan::Normalized {
-                b: b_norm,
-                a: a_norm,
-            }
-        };
 
         let state_len = order.saturating_sub(1);
 
@@ -1118,10 +1163,14 @@ impl WgpuProvider {
 
         let result = (|| -> Result<ProviderIirFilterResult> {
             let (b_norm_handle, a_norm_handle) = match &coefficient_plan {
-                IirCoefficientPlan::UnitDenominatorFir => {
+                IirCoefficientPlan::UnitDenominatorFir { numerator } => {
                     let a_norm_handle = self.zeros_exec(&[order, 1usize])?;
-                    (b.clone(), a_norm_handle)
+                    ((*numerator).clone(), a_norm_handle)
                 }
+                IirCoefficientPlan::PreparedResident {
+                    numerator,
+                    denominator,
+                } => ((*numerator).clone(), (*denominator).clone()),
                 IirCoefficientPlan::Normalized { b, a } => {
                     let b_shape = [order, 1usize];
                     let b_view = HostTensorView {
@@ -2963,8 +3012,8 @@ mod tests {
         AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
         HostTensorView, ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderHilbertRequest,
         ProviderIirFilterOptions, ProviderMovingWindowEndpoints, ProviderMovingWindowOp,
-        ProviderMovingWindowRequest, ProviderNanMode, ProviderStdNormalization,
-        ProviderTrapezoidSpacing,
+        ProviderMovingWindowRequest, ProviderNanMode, ProviderPreparedIirCoefficients,
+        ProviderStdNormalization, ProviderTrapezoidSpacing,
     };
     use runmat_runtime::builtins::math::reduction::{
         gradient_complex_tensor_host, gradient_real_tensor_host_with_coordinates,
@@ -3520,14 +3569,12 @@ mod tests {
                 .expect("upload signal");
 
             let result = pollster::block_on(provider.iir_filter(
-                &b,
-                &a,
-                &x,
-                ProviderIirFilterOptions {
-                    dim: 1,
-                    zi: None,
-                    unit_denominator: false,
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                    numerator: &b,
+                    denominator: &a,
                 },
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
             ))
             .expect("iir filter");
             let output = pollster::block_on(provider.download(&result.output)).expect("download");
@@ -3577,14 +3624,11 @@ mod tests {
             provider.reset_telemetry();
 
             let result = pollster::block_on(provider.iir_filter(
-                &b,
-                &a,
-                &x,
-                ProviderIirFilterOptions {
-                    dim: 1,
-                    zi: None,
-                    unit_denominator: true,
+                runmat_accelerate_api::ProviderIirCoefficientSource::UnitDenominatorFir {
+                    numerator: &b,
                 },
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
             ))
             .expect("iir filter");
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -3598,6 +3642,44 @@ mod tests {
 
             assert_eq!(output.shape, vec![1, 3]);
             assert_eq!(output.data, vec![1.0, 3.0, 5.0]);
+        }
+    }
+
+    #[test]
+    #[ignore = "run explicitly on actual WGPU hardware"]
+    fn prepared_iir_coefficients_are_uploaded_once_and_reused_without_download() {
+        let provider = register_wgpu_provider(WgpuProviderOptions::default())
+            .expect("actual WGPU provider required");
+        let prepared = ProviderPreparedIirCoefficients::upload(provider, &[0.5, 0.5], &[1.0, 0.0])
+            .expect("prepare coefficients once");
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 3.0, 5.0],
+                shape: &[1, 3],
+            })
+            .expect("upload signal");
+        provider.reset_telemetry();
+        let first = pollster::block_on(provider.iir_filter(
+            runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(&prepared),
+            &input,
+            ProviderIirFilterOptions { dim: 1, zi: None },
+        ))
+        .expect("first pass");
+        let second = pollster::block_on(provider.iir_filter(
+            runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(&prepared),
+            &first.output,
+            ProviderIirFilterOptions { dim: 1, zi: None },
+        ))
+        .expect("second pass");
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let output =
+            pollster::block_on(provider.download(&second.output)).expect("result readback");
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-6,
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+        };
+        for (actual, expected) in output.data.iter().zip([0.25, 1.25, 3.0]) {
+            assert!((*actual - expected).abs() < tolerance);
         }
     }
 

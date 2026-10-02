@@ -885,11 +885,17 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
     let options = ProviderIirFilterOptions {
         dim: args.dim_idx,
         zi: zi_handle_opt.clone(),
-        unit_denominator: false,
     };
 
     let result = provider
-        .iir_filter(&b_handle, &a_handle, &signal_handle, options)
+        .iir_filter(
+            runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                numerator: &b_handle,
+                denominator: &a_handle,
+            },
+            &signal_handle,
+            options,
+        )
         .await;
 
     let result = match result {

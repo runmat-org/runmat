@@ -22,6 +22,11 @@ pub use allocation::{
     GpuPhysicalDescriptor, GpuTensorHandle, GpuTensorLayout, GpuTensorView, GpuTensorWireDescriptor,
 };
 mod native_device;
+mod iir;
+pub use iir::{
+    ProviderIirCoefficientSource, ProviderIirFilterOptions, ProviderIirFilterResult,
+    ProviderPreparedIirCoefficients,
+};
 mod logical_upload;
 mod fusion_outputs;
 pub mod observation;
@@ -1444,27 +1449,6 @@ pub enum ProviderConvOrientation {
 pub struct ProviderConv1dOptions {
     pub mode: ProviderConvMode,
     pub orientation: ProviderConvOrientation,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ProviderIirFilterOptions {
-    /// Zero-based dimension along which filtering should be applied.
-    pub dim: usize,
-    /// Optional initial conditions (state vector) residing on the device.
-    pub zi: Option<GpuTensorHandle>,
-    /// Caller has already validated that `a` is the scalar denominator `[1]`.
-    ///
-    /// Providers may use this FIR-only path to avoid reading coefficient buffers
-    /// back to the host for normalization.
-    pub unit_denominator: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ProviderIirFilterResult {
-    /// Filtered output tensor, matching the input signal shape.
-    pub output: GpuTensorHandle,
-    /// Final conditions for the filter state (same shape as the requested `zi` layout).
-    pub final_state: Option<GpuTensorHandle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -3253,8 +3237,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
     }
     fn iir_filter<'a>(
         &'a self,
-        _b: &'a GpuTensorHandle,
-        _a: &'a GpuTensorHandle,
+        _coefficients: ProviderIirCoefficientSource<'a>,
         _x: &'a GpuTensorHandle,
         _options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {

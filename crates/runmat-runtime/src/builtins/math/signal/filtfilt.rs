@@ -1,7 +1,10 @@
 //! MATLAB-compatible zero-phase digital filtering.
 
 use num_complex::Complex;
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{
+    GpuTensorHandle, ProviderIirCoefficientSource, ProviderIirFilterOptions,
+    ProviderPreparedIirCoefficients,
+};
 use runmat_builtins::{
     BuiltinErrorDescriptor, FILTFILT_ERROR_ARG_COUNT, FILTFILT_ERROR_INTERNAL,
     FILTFILT_ERROR_INVALID_COEFFICIENTS, FILTFILT_ERROR_INVALID_SIGNAL, FILTFILT_ERROR_PASS_FAILED,
@@ -9,7 +12,7 @@ use runmat_builtins::{
     FILTFILT_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericDType, Tensor, Value};
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -22,7 +25,6 @@ use crate::builtins::math::signal::common::{
     complex_vector_to_value_with_dtype, preflight_iir_operands, value_to_complex_vector,
     vector_is_row, ComplexVectorInput, IirAdmissionFault, IirFaultKind, IirForm, IirOperand,
 };
-use crate::builtins::math::signal::filter;
 use crate::builtins::math::signal::resident_output::{self, OutputContext};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -606,14 +608,44 @@ async fn try_filtfilt_gpu(
         return Ok(None);
     }
     let extended = odd_reflect(&input.data, nfact)?;
-    let first_pass = gpu_filter_pass(provider, coeffs, &extended, &input.shape, &zi)
-        .await
-        .map_err(|source| provider_pass_error(FilterPass::Forward, source))?;
+    let b_real = coeffs.b.iter().map(|z| z.re).collect::<Vec<_>>();
+    let a_real = coeffs.a.iter().map(|z| z.re).collect::<Vec<_>>();
+    let prepared =
+        ProviderPreparedIirCoefficients::upload(provider, &b_real, &a_real).map_err(|source| {
+            let mut error = filtfilt_error_with_detail(
+                &FILTFILT_ERROR_PASS_FAILED,
+                "coefficient preparation failed",
+            );
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            crate::runtime_error::with_provider_execution_source(error, source.into())
+        })?;
+    let pass_borrowed = std::iter::once(input_handle)
+        .chain(borrowed.iter().copied())
+        .collect::<Vec<_>>();
+    let first_pass = gpu_filter_pass(
+        provider,
+        &prepared,
+        coeffs,
+        &extended,
+        &input.shape,
+        &zi,
+        &pass_borrowed,
+    )
+    .await
+    .map_err(|source| provider_pass_error(FilterPass::Forward, source))?;
     let mut reversed = first_pass;
     reversed.reverse();
-    let second_pass = gpu_filter_pass(provider, coeffs, &reversed, &input.shape, &zi)
-        .await
-        .map_err(|source| provider_pass_error(FilterPass::Reverse, source))?;
+    let second_pass = gpu_filter_pass(
+        provider,
+        &prepared,
+        coeffs,
+        &reversed,
+        &input.shape,
+        &zi,
+        &pass_borrowed,
+    )
+    .await
+    .map_err(|source| provider_pass_error(FilterPass::Reverse, source))?;
     let mut restored = second_pass;
     restored.reverse();
     let trimmed = restored[nfact..nfact + input.data.len()]
@@ -647,11 +679,13 @@ async fn try_filtfilt_gpu(
 }
 
 async fn gpu_filter_pass(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    prepared: &ProviderPreparedIirCoefficients,
     coeffs: &NormalizedCoefficients,
     signal: &[Complex<f64>],
     original_shape: &[usize],
     zi: &[Complex<f64>],
+    borrowed: &[&GpuTensorHandle],
 ) -> BuiltinResult<Vec<Complex<f64>>> {
     let is_row = vector_is_row(original_shape);
     let shape = if is_row {
@@ -659,7 +693,7 @@ async fn gpu_filter_pass(
     } else {
         vec![signal.len(), 1]
     };
-    let dim = if is_row { 2.0 } else { 1.0 };
+    let dim = if is_row { 1 } else { 0 };
     let real_signal = signal.iter().map(|z| z.re).collect::<Vec<_>>();
     let signal_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
@@ -672,48 +706,90 @@ async fn gpu_filter_pass(
                 source.into(),
             )
         })?;
-    let b = Tensor::new(
-        coeffs.b.iter().map(|z| z.re).collect(),
-        vec![1, coeffs.b.len()],
-    )
-    .map_err(|e| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, e))?;
-    let a = Tensor::new(
-        coeffs.a.iter().map(|z| z.re).collect(),
-        vec![1, coeffs.a.len()],
-    )
-    .map_err(|e| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, e))?;
     let scaled_zi = scale_state(zi, signal[0])
         .into_iter()
         .map(|z| z.re)
         .collect::<Vec<_>>();
     let zi_shape = vec![coeffs.state_len, 1];
-    let zi_value = Tensor::new(scaled_zi, zi_shape)
-        .map(Value::Tensor)
-        .map_err(|e| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, e))?;
-    let eval = filter::evaluate(
-        Value::Tensor(b),
-        Value::Tensor(a),
-        Value::GpuTensor(signal_handle.clone()),
-        &[zi_value, Value::Num(dim)],
-    )
-    .await?;
-    let (output, _) = eval.into_pair();
-    let tensor = match output {
-        Value::GpuTensor(handle) => {
-            gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|source| {
-                    filtfilt_error_with_source(
-                        &FILTFILT_ERROR_PASS_FAILED,
-                        "provider result gather failed",
-                        source,
-                        true,
-                    )
-                })?
-        }
-        other => tensor::value_to_tensor(&other)
-            .map_err(|e| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, e))?,
+    let zi_handle = provider
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &scaled_zi,
+            shape: &zi_shape,
+        })
+        .map_err(|source| {
+            let mut error = filtfilt_error_with_detail(
+                &FILTFILT_ERROR_PASS_FAILED,
+                "initial-state upload failed",
+            );
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            crate::runtime_error::with_provider_execution_source(error, source.into())
+        })?;
+    let result = provider
+        .iir_filter(
+            ProviderIirCoefficientSource::Prepared(prepared),
+            &signal_handle,
+            ProviderIirFilterOptions {
+                dim,
+                zi: Some(zi_handle.clone()),
+            },
+        )
+        .await
+        .map_err(|source| {
+            let mut error = filtfilt_error(&FILTFILT_ERROR_PASS_FAILED);
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            crate::runtime_error::with_provider_execution_source(error, source.into())
+        })?;
+    let runmat_accelerate_api::ProviderIirFilterResult {
+        output,
+        final_state,
+    } = result;
+    let protected = borrowed
+        .iter()
+        .copied()
+        .chain([prepared.numerator(), prepared.denominator(), &zi_handle])
+        .collect::<Vec<_>>();
+    let context = OutputContext {
+        input: &signal_handle,
+        provider,
+        caller_inputs: &protected,
     };
+    let Some(final_state) = final_state else {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            filtfilt_error(&FILTFILT_ERROR_PROVIDER_OUTPUT),
+        ));
+    };
+    let output_contract = resident_output::floating_contract(
+        &signal_handle,
+        shape,
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
+    let output = match context.admit(output, &output_contract, &[&final_state], || {
+        filtfilt_error(&FILTFILT_ERROR_PROVIDER_OUTPUT)
+    }) {
+        Ok(output) => output,
+        Err(error) => return Err(gpu_helpers::reject_gpu_output(final_state, error)),
+    };
+    let state_contract = resident_output::floating_contract(
+        &signal_handle,
+        zi_shape,
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
+    if let Err(error) = context.admit(final_state, &state_contract, &[&output], || {
+        filtfilt_error(&FILTFILT_ERROR_PROVIDER_OUTPUT)
+    }) {
+        return Err(gpu_helpers::reject_gpu_output(output, error));
+    }
+    let tensor = gpu_helpers::gather_tensor_async(&output)
+        .await
+        .map_err(|source| {
+            filtfilt_error_with_source(
+                &FILTFILT_ERROR_PASS_FAILED,
+                "provider result gather failed",
+                source,
+                true,
+            )
+        })?;
     Ok(tensor::tensor_into_values_f64(tensor)
         .into_iter()
         .map(|re| Complex::new(re, 0.0))
@@ -731,7 +807,7 @@ mod tests {
         ProviderIirFilterOptions, ProviderIirFilterResult, ProviderPrecision,
     };
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::ComplexTensor;
+    use runmat_value::{ComplexTensor, Tensor};
 
     fn call(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
         block_on(evaluate(b, a, x))
@@ -1074,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_filter_pass_frees_signal_handle_when_filter_evaluation_fails() {
+    fn gpu_filter_pass_retires_all_temporaries_when_hook_is_unsupported() {
         let _guard = test_support::accel_test_lock();
         let provider = Box::leak(Box::new(DownloadFailProvider::new()));
         let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
@@ -1086,11 +1162,21 @@ mod tests {
             .map(|value| Complex::new(value as f64, 0.0))
             .collect::<Vec<_>>();
         let zi = vec![Complex::new(0.0, 0.0)];
-
-        let result = block_on(gpu_filter_pass(provider, &coeffs, &signal, &[1, 8], &zi));
+        let prepared = ProviderPreparedIirCoefficients::upload(provider, &[0.5, 0.5], &[1.0, 0.0])
+            .expect("prepared coefficients");
+        let result = block_on(gpu_filter_pass(
+            provider,
+            &prepared,
+            &coeffs,
+            &signal,
+            &[1, 8],
+            &zi,
+            &[],
+        ));
 
         assert!(result.is_err());
-        assert_eq!(provider.free_count(), 1);
+        drop(prepared);
+        assert_eq!(provider.free_count(), 4);
     }
 
     struct OperationalFailureProvider {
@@ -1124,8 +1210,7 @@ mod tests {
         }
         fn iir_filter<'a>(
             &'a self,
-            _b: &'a GpuTensorHandle,
-            _a: &'a GpuTensorHandle,
+            _coefficients: runmat_accelerate_api::ProviderIirCoefficientSource<'a>,
             _x: &'a GpuTensorHandle,
             _options: ProviderIirFilterOptions,
         ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {

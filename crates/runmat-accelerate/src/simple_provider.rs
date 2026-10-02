@@ -7203,33 +7203,12 @@ impl AccelProvider for InProcessProvider {
     }
     fn iir_filter<'a>(
         &'a self,
-        b: &'a GpuTensorHandle,
-        a: &'a GpuTensorHandle,
+        coefficients: runmat_accelerate_api::ProviderIirCoefficientSource<'a>,
         x: &'a GpuTensorHandle,
         options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
         Box::pin(async move {
-            let ProviderIirFilterOptions {
-                dim,
-                zi,
-                unit_denominator,
-            } = options;
-
-            let nb = product(b.shape());
-            let na = product(a.shape());
-            ensure!(
-                runmat_accelerate_api::handle_storage(b) == GpuTensorStorage::Real
-                    && runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::Real,
-                "iir_filter: complex filter coefficients are not supported"
-            );
-            ensure!(
-                nb > 0,
-                "iir_filter: numerator coefficients must not be empty"
-            );
-            ensure!(
-                na > 0,
-                "iir_filter: denominator coefficients must not be empty"
-            );
+            let ProviderIirFilterOptions { dim, zi } = options;
 
             let signal_elems = product(x.shape());
             let x_storage = runmat_accelerate_api::handle_storage(x);
@@ -7247,42 +7226,54 @@ impl AccelProvider for InProcessProvider {
                 let guard = numeric_registry()
                     .lock_for(self.device_id)
                     .map_err(|_| anyhow!("iir_filter: allocation owner is poisoned"))?;
-                let b_buf = iir::floating_payload(
-                    b,
-                    guard.get(b).ok_or_else(|| {
-                        anyhow!("iir_filter: unknown numerator buffer {}", b.buffer_id())
-                    })?,
-                )?;
-                let a_buf = iir::floating_payload(
-                    a,
-                    guard.get(a).ok_or_else(|| {
-                        anyhow!("iir_filter: unknown denominator buffer {}", a.buffer_id())
-                    })?,
-                )?;
+                let resident_coefficient = |handle: &GpuTensorHandle, role: &'static str| {
+                    ensure!(
+                        runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
+                            && runmat_accelerate_api::handle_integer_type(handle).is_none()
+                            && !runmat_accelerate_api::handle_is_logical(handle),
+                        "iir_filter: {role} must be real floating storage"
+                    );
+                    let data = iir::floating_payload(
+                        handle,
+                        guard.get(handle).ok_or_else(|| {
+                            anyhow!("iir_filter: unknown {role} buffer {}", handle.buffer_id())
+                        })?,
+                    )?;
+                    ensure!(
+                        data.len() == product(handle.shape()) && !data.is_empty(),
+                        "iir_filter: {role} length does not match its resident geometry"
+                    );
+                    Ok::<Vec<f64>, anyhow::Error>(data)
+                };
+                let (b_buf, a_buf) = match &coefficients {
+                    runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                        numerator,
+                        denominator,
+                    } => (
+                        resident_coefficient(numerator, "numerator")?,
+                        resident_coefficient(denominator, "denominator")?,
+                    ),
+                    runmat_accelerate_api::ProviderIirCoefficientSource::UnitDenominatorFir {
+                        numerator,
+                    } => (resident_coefficient(numerator, "numerator")?, vec![1.0]),
+                    runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(prepared) => (
+                        {
+                            ensure!(
+                                !prepared.numerator().shares_allocation_with(x)
+                                    && !prepared.denominator().shares_allocation_with(x),
+                                "iir_filter: prepared coefficients alias the signal"
+                            );
+                            resident_coefficient(prepared.numerator(), "prepared numerator")?
+                        },
+                        resident_coefficient(prepared.denominator(), "prepared denominator")?,
+                    ),
+                };
                 let x_buf = iir::floating_payload(
                     x,
                     guard.get(x).ok_or_else(|| {
                         anyhow!("iir_filter: unknown signal buffer {}", x.buffer_id())
                     })?,
                 )?;
-                ensure!(
-                    b_buf.len() == nb,
-                    "iir_filter: numerator length mismatch (shape implies {}, buffer has {})",
-                    nb,
-                    b_buf.len()
-                );
-                ensure!(
-                    a_buf.len() == na,
-                    "iir_filter: denominator length mismatch (shape implies {}, buffer has {})",
-                    na,
-                    a_buf.len()
-                );
-                if unit_denominator {
-                    ensure!(
-                        na == 1,
-                        "iir_filter: unit-denominator FIR path requires scalar denominator"
-                    );
-                }
                 ensure!(
                     x_buf.len() == signal_lanes,
                     "iir_filter: signal raw length mismatch (shape implies {} logical elements, buffer has {}, lane factor {})",
@@ -7307,8 +7298,7 @@ impl AccelProvider for InProcessProvider {
                 } else {
                     None
                 };
-                let a_data = if unit_denominator { vec![1.0] } else { a_buf };
-                (b_buf, a_data, x_buf, zi_buf)
+                (b_buf, a_buf, x_buf, zi_buf)
             };
 
             ensure!(
@@ -7335,6 +7325,8 @@ impl AccelProvider for InProcessProvider {
             };
             let channel_count = leading * trailing;
 
+            let nb = b_data.len();
+            let na = a_data.len();
             let order = nb.max(na);
             let state_len = order.saturating_sub(1);
             let state_shape = filter_state_shape(shape_ext.clone(), dim_idx, state_len);
@@ -7375,19 +7367,30 @@ impl AccelProvider for InProcessProvider {
                 vec![0.0; expected_state_lanes]
             };
 
-            let mut b_norm = vec![0.0f64; order];
-            let mut a_norm = vec![0.0f64; order];
-            let a0 = a_data[0];
-            for i in 0..order {
-                let b_coeff = if i < nb { b_data[i] } else { 0.0 };
-                b_norm[i] = b_coeff / a0;
-                if i == 0 {
-                    a_norm[0] = 1.0;
-                } else {
-                    let a_coeff = if i < na { a_data[i] } else { 0.0 };
-                    a_norm[i] = a_coeff / a0;
+            let (b_norm, a_norm) = match coefficients {
+                runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(_) => {
+                    (b_data, a_data)
                 }
-            }
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident { .. }
+                | runmat_accelerate_api::ProviderIirCoefficientSource::UnitDenominatorFir {
+                    ..
+                } => {
+                    let mut b_norm = vec![0.0f64; order];
+                    let mut a_norm = vec![0.0f64; order];
+                    let a0 = a_data[0];
+                    for i in 0..order {
+                        let b_coeff = if i < nb { b_data[i] } else { 0.0 };
+                        b_norm[i] = b_coeff / a0;
+                        if i == 0 {
+                            a_norm[0] = 1.0;
+                        } else {
+                            let a_coeff = if i < na { a_data[i] } else { 0.0 };
+                            a_norm[i] = a_coeff / a0;
+                        }
+                    }
+                    (b_norm, a_norm)
+                }
+            };
 
             let mut output = vec![0.0f64; x_data.len()];
 
@@ -11179,14 +11182,12 @@ mod tests {
         let x = complex_handle(&provider, &[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0)], &[1, 3]);
 
         let result = block_on(provider.iir_filter(
-            &b,
-            &a,
-            &x,
-            ProviderIirFilterOptions {
-                dim: 1,
-                zi: None,
-                unit_denominator: false,
+            runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                numerator: &b,
+                denominator: &a,
             },
+            &x,
+            ProviderIirFilterOptions { dim: 1, zi: None },
         ))
         .expect("iir filter");
 
@@ -11217,14 +11218,12 @@ mod tests {
             })
             .expect("single signal");
         let result = block_on(provider.iir_filter(
-            &b,
-            &a,
-            &x,
-            ProviderIirFilterOptions {
-                dim: 1,
-                zi: None,
-                unit_denominator: false,
+            runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                numerator: &b,
+                denominator: &a,
             },
+            &x,
+            ProviderIirFilterOptions { dim: 1, zi: None },
         ))
         .expect("single IIR result");
         let final_state = result.final_state.expect("final state");

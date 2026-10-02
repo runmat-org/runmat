@@ -1069,28 +1069,13 @@ async fn resample_gpu(
             }
         }
     };
-    let a_coeff = [1.0f64];
-    let a_shape = [1usize, 1usize];
-    let a_handle = match provider.upload(&runmat_accelerate_api::HostTensorView {
-        data: &a_coeff,
-        shape: &a_shape,
-    }) {
-        Ok(handle) => handle,
-        Err(_) => {
-            return Ok(None);
-        }
-    };
-
     let filter_result = match provider
         .iir_filter(
-            &b_handle,
-            &a_handle,
-            &padded,
-            runmat_accelerate_api::ProviderIirFilterOptions {
-                dim,
-                zi: None,
-                unit_denominator: true,
+            runmat_accelerate_api::ProviderIirCoefficientSource::UnitDenominatorFir {
+                numerator: &b_handle,
             },
+            &padded,
+            runmat_accelerate_api::ProviderIirFilterOptions { dim, zi: None },
         )
         .await
     {
@@ -1103,7 +1088,6 @@ async fn resample_gpu(
     let output = provider.gather_linear(&filter_result.output, &gather_indices, &output_shape);
 
     drop(filter_result);
-    drop(a_handle);
     drop(b_handle);
     drop(padded);
     match output {
