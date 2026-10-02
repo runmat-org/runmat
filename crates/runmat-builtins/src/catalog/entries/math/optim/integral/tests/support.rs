@@ -1,4 +1,3 @@
-use super::*;
 use runmat_types::*;
 
 pub(super) fn scalar(class: NumericClass, domain: NumericDomain) -> ValueFact {
