@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::output_precision::SignalPrecision;
 use crate::builtins::math::signal::common::{
-    map_real_waveform, SignalCooperation, WaveformOutputMode,
+    map_real_waveform, prepared_real_integer_tensor, SignalCooperation, WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -121,8 +121,27 @@ async fn sinc_in_runtime(
         )?;
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    let prepared_payload = if matches!(
+        &value,
+        Value::Int(_)
+            | Value::Num(_)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+            | Value::Tensor(_)
+            | Value::GpuTensor(_)
+    ) {
+        Some(
+            cooperation
+                .prepare_integer_boundary(&value, &SINC_NONFLOATING_INPUT_EXTENSION, "input")
+                .await?
+                .into_resident_payload(),
+        )
+    } else {
+        None
+    }
+    .flatten();
     match value {
-        Value::GpuTensor(handle) => sinc_gpu(handle, &mut cooperation).await,
+        Value::GpuTensor(handle) => sinc_gpu(handle, prepared_payload, &mut cooperation).await,
         Value::Complex(re, im) => {
             let (out_re, out_im) = sinc_complex_value(re, im);
             Ok(Value::Complex(out_re, out_im))
@@ -152,8 +171,31 @@ fn is_supported_nonfloating_input(value: &Value) -> bool {
 
 async fn sinc_gpu(
     handle: GpuTensorHandle,
+    prepared_payload: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
+    {
+        let tensor = match prepared_real_integer_tensor(prepared_payload)
+            .map_err(|detail| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, detail))?
+        {
+            Some(tensor) => tensor,
+            None => gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|source| {
+                    let mut error =
+                        sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, source.message());
+                    error.source = Some(Box::new(source));
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
+                })?,
+        };
+        let host = tensor::tensor_into_value(
+            sinc_tensor_mode(tensor, WaveformOutputMode::Double, cooperation).await?,
+        );
+        return gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME);
+    }
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_precision(&handle)
             .is_some_and(|precision| precision != provider.precision())
@@ -268,14 +310,17 @@ async fn sinc_real(value: Value, cooperation: &mut SignalCooperation) -> Builtin
 }
 
 async fn sinc_tensor(tensor: Tensor, cooperation: &mut SignalCooperation) -> BuiltinResult<Tensor> {
-    map_real_waveform(
-        tensor,
-        WaveformOutputMode::PreserveSingle,
-        sinc_real_value,
-        cooperation,
-    )
-    .await
-    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL))
+    sinc_tensor_mode(tensor, WaveformOutputMode::PreserveSingle, cooperation).await
+}
+
+async fn sinc_tensor_mode(
+    tensor: Tensor,
+    output_mode: WaveformOutputMode,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Tensor> {
+    map_real_waveform(tensor, output_mode, sinc_real_value, cooperation)
+        .await
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL))
 }
 
 async fn sinc_complex_tensor(
@@ -881,7 +926,7 @@ mod tests {
             .expect("wgpu provider")
             .upload(&view)
             .expect("upload");
-        let gpu = block_on(sinc_gpu(handle, &mut cooperation)).expect("gpu sinc");
+        let gpu = block_on(sinc_gpu(handle, None, &mut cooperation)).expect("gpu sinc");
         let gathered = test_support::gather(gpu).expect("gather");
         let expected = test_support::gather(cpu).expect("gather cpu");
         assert_eq!(gathered.shape, expected.shape);
@@ -915,7 +960,7 @@ mod tests {
             ComplexTensor::new(vec![(0.0, 0.0), (0.5, 0.25), (1.0, -0.5)], vec![3, 1]).unwrap();
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
         let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
-        let gpu = block_on(sinc_gpu(handle, &mut cooperation)).expect("gpu sinc");
+        let gpu = block_on(sinc_gpu(handle, None, &mut cooperation)).expect("gpu sinc");
         let Value::GpuTensor(out_handle) = gpu else {
             panic!("expected resident gpu output");
         };

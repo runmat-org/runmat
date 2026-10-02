@@ -12,8 +12,8 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    admit_real_waveform_sample, map_real_waveform, PreparedWaveformControl, SignalCooperation,
-    WaveformControlError, WaveformOutputMode,
+    admit_real_waveform_sample, map_real_waveform, prepared_real_integer_tensor,
+    PreparedWaveformControl, SignalCooperation, WaveformControlError, WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -145,17 +145,26 @@ async fn tripuls_in_runtime(
             BUILTIN_NAME,
         )?;
     }
-    let controls = prepare_options(&rest)?;
+    let mut controls = prepare_options(&rest)?;
     admit_real_waveform_sample(&t).map_err(|_| tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))?;
-    if let Some(width) = &controls.0 {
+    if let Some(width) = &mut controls.0 {
         width
-            .admit_host_boundary()
+            .admit_host_boundary(&mut cooperation)
             .await
             .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
     }
-    if let Some(skew) = &controls.1 {
-        skew.admit_host_boundary()
+    if let Some(skew) = &mut controls.1 {
+        skew.admit_host_boundary(&mut cooperation)
             .await
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
+    }
+    if let Some(width) = &controls.0 {
+        width
+            .admit_resident_metadata(BUILTIN_NAME)
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
+    }
+    if let Some(skew) = &controls.1 {
+        skew.admit_resident_metadata(BUILTIN_NAME)
             .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
     }
     let resident_inputs: Vec<_> = std::iter::once(&t)
@@ -166,17 +175,22 @@ async fn tripuls_in_runtime(
         })
         .collect();
     gpu_helpers::select_resident_output_source(resident_inputs.iter().cloned(), BUILTIN_NAME)?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        &t,
-        &TRIPULS_INTEGER_DATA_EXTENSION,
-        BUILTIN_NAME,
-        "sample times",
-    )
-    .await?;
-    let (width, skew) = resolve_options(controls).await?;
+    let prepared = cooperation
+        .prepare_integer_boundary(&t, &TRIPULS_INTEGER_DATA_EXTENSION, "sample times")
+        .await?;
+    let prepared_payload = prepared.into_resident_payload();
+    let (width, skew) = resolve_options(controls, &mut cooperation).await?;
     match t {
         Value::GpuTensor(handle) => {
-            tripuls_gpu(handle, width, skew, &resident_inputs, &mut cooperation).await
+            tripuls_gpu(
+                handle,
+                width,
+                skew,
+                prepared_payload,
+                &resident_inputs,
+                &mut cooperation,
+            )
+            .await
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))
@@ -237,11 +251,14 @@ fn prepare_options(rest: &[Value]) -> BuiltinResult<TripulsControls<'_>> {
     Ok((width, skew))
 }
 
-async fn resolve_options(controls: TripulsControls<'_>) -> BuiltinResult<(f64, f64)> {
+async fn resolve_options(
+    controls: TripulsControls<'_>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<(f64, f64)> {
     let width = match controls.0 {
         Some(control) => {
             let raw = control
-                .resolve()
+                .resolve(cooperation)
                 .await
                 .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
             validate_width(raw)
@@ -252,7 +269,7 @@ async fn resolve_options(controls: TripulsControls<'_>) -> BuiltinResult<(f64, f
     let skew = match controls.1 {
         Some(control) => {
             let raw = control
-                .resolve()
+                .resolve(cooperation)
                 .await
                 .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
             validate_skew(raw)
@@ -280,14 +297,20 @@ async fn tripuls_gpu(
     handle: GpuTensorHandle,
     width: f64,
     skew: f64,
+    prepared_payload: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
     resident_inputs: &[GpuTensorHandle],
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|source| {
-            tripuls_error_with_source(&TRIPULS_ERROR_INTERNAL, "gpu gather failed", source)
-        })?;
+    let tensor = match prepared_real_integer_tensor(prepared_payload)
+        .map_err(|detail| tripuls_error_with_detail(&TRIPULS_ERROR_INVALID_INPUT, detail))?
+    {
+        Some(tensor) => tensor,
+        None => gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|source| {
+                tripuls_error_with_source(&TRIPULS_ERROR_INTERNAL, "gpu gather failed", source)
+            })?,
+    };
     let result = map_real_waveform(
         tensor,
         WaveformOutputMode::PreserveSingle,

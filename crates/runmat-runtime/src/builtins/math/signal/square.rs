@@ -20,8 +20,9 @@ use runmat_value::{NumericDType, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    admit_real_waveform_sample, map_real_waveform, PreparedWaveformControl, SignalCooperation,
-    WaveformControlError, WaveformOutputMode, WaveformSampleError,
+    admit_real_waveform_sample, map_real_waveform, prepared_real_integer_tensor,
+    PreparedWaveformControl, SignalCooperation, WaveformControlError, WaveformOutputMode,
+    WaveformSampleError,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -138,27 +139,31 @@ async fn square_in_runtime(
             BUILTIN_NAME,
         )?;
     }
-    let duty = prepare_duty(&varargin)?;
+    let mut duty = prepare_duty(&varargin)?;
     admit_real_waveform_sample(&t).map_err(|error| match error {
         WaveformSampleError::Complex => square_error(&SQUARE_ERROR_COMPLEX_UNSUPPORTED),
         WaveformSampleError::Unsupported => square_error(&SQUARE_ERROR_INVALID_INPUT),
     })?;
-    if let Some(control) = &duty {
+    if let Some(control) = &mut duty {
         control
-            .admit_host_boundary()
+            .admit_host_boundary(&mut cooperation)
             .await
             .map_err(duty_control_error)?;
     }
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        &t,
-        &SQUARE_NONFLOATING_INPUT_EXTENSION,
-        BUILTIN_NAME,
-        "sample-time",
-    )
-    .await?;
-    let duty = resolve_duty(duty).await?;
+    if let Some(control) = &duty {
+        control
+            .admit_resident_metadata(BUILTIN_NAME)
+            .map_err(duty_control_error)?;
+    }
+    let prepared = cooperation
+        .prepare_integer_boundary(&t, &SQUARE_NONFLOATING_INPUT_EXTENSION, "sample-time")
+        .await?;
+    let prepared_payload = prepared.into_resident_payload();
+    let duty = resolve_duty(duty, &mut cooperation).await?;
     match t {
-        Value::GpuTensor(handle) => square_gpu(handle, duty, &mut cooperation).await,
+        Value::GpuTensor(handle) => {
+            square_gpu(handle, duty, prepared_payload, &mut cooperation).await
+        }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(square_error(&SQUARE_ERROR_COMPLEX_UNSUPPORTED))
         }
@@ -207,11 +212,19 @@ fn prepare_duty(varargin: &[Value]) -> BuiltinResult<Option<PreparedWaveformCont
     }
 }
 
-async fn resolve_duty(control: Option<PreparedWaveformControl<'_>>) -> BuiltinResult<f64> {
+async fn resolve_duty(
+    control: Option<PreparedWaveformControl<'_>>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<f64> {
     let Some(control) = control else {
         return Ok(50.0);
     };
-    validate_duty(control.resolve().await.map_err(duty_control_error)?)
+    validate_duty(
+        control
+            .resolve(cooperation)
+            .await
+            .map_err(duty_control_error)?,
+    )
 }
 
 fn validate_duty(raw: f64) -> BuiltinResult<f64> {
@@ -239,13 +252,19 @@ fn duty_control_error(error: WaveformControlError) -> RuntimeError {
 async fn square_gpu(
     handle: GpuTensorHandle,
     duty: f64,
+    prepared_payload: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|source| {
-            square_error_with_source(&SQUARE_ERROR_INTERNAL, "gpu gather failed", source)
-        })?;
+    let tensor = match prepared_real_integer_tensor(prepared_payload)
+        .map_err(|detail| square_error_with_detail(&SQUARE_ERROR_INVALID_INPUT, detail))?
+    {
+        Some(tensor) => tensor,
+        None => gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|source| {
+                square_error_with_source(&SQUARE_ERROR_INTERNAL, "gpu gather failed", source)
+            })?,
+    };
     map_real_waveform(
         tensor,
         WaveformOutputMode::PreserveSingle,

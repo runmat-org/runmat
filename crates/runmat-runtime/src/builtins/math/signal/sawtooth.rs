@@ -21,8 +21,9 @@ use runmat_value::{NumericDType, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    admit_real_waveform_sample, map_real_waveform, PreparedWaveformControl, SignalCooperation,
-    WaveformControlError, WaveformOutputMode, WaveformSampleError,
+    admit_real_waveform_sample, map_real_waveform, prepared_real_integer_tensor,
+    PreparedWaveformControl, SignalCooperation, WaveformControlError, WaveformOutputMode,
+    WaveformSampleError,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -141,27 +142,31 @@ async fn sawtooth_in_runtime(
             BUILTIN_NAME,
         )?;
     }
-    let xmax = prepare_xmax(&varargin)?;
+    let mut xmax = prepare_xmax(&varargin)?;
     admit_real_waveform_sample(&t).map_err(|error| match error {
         WaveformSampleError::Complex => sawtooth_error(&SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED),
         WaveformSampleError::Unsupported => sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT),
     })?;
-    if let Some(control) = &xmax {
+    if let Some(control) = &mut xmax {
         control
-            .admit_host_boundary()
+            .admit_host_boundary(&mut cooperation)
             .await
             .map_err(xmax_control_error)?;
     }
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        &t,
-        &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
-        BUILTIN_NAME,
-        "t",
-    )
-    .await?;
-    let xmax = resolve_xmax(xmax).await?;
+    if let Some(control) = &xmax {
+        control
+            .admit_resident_metadata(BUILTIN_NAME)
+            .map_err(xmax_control_error)?;
+    }
+    let prepared = cooperation
+        .prepare_integer_boundary(&t, &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION, "t")
+        .await?;
+    let prepared_payload = prepared.into_resident_payload();
+    let xmax = resolve_xmax(xmax, &mut cooperation).await?;
     match t {
-        Value::GpuTensor(handle) => sawtooth_gpu(handle, xmax, &mut cooperation).await,
+        Value::GpuTensor(handle) => {
+            sawtooth_gpu(handle, xmax, prepared_payload, &mut cooperation).await
+        }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(sawtooth_error(&SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED))
         }
@@ -209,11 +214,19 @@ fn prepare_xmax(varargin: &[Value]) -> BuiltinResult<Option<PreparedWaveformCont
     }
 }
 
-async fn resolve_xmax(control: Option<PreparedWaveformControl<'_>>) -> BuiltinResult<f64> {
+async fn resolve_xmax(
+    control: Option<PreparedWaveformControl<'_>>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<f64> {
     let Some(control) = control else {
         return Ok(1.0);
     };
-    validate_xmax(control.resolve().await.map_err(xmax_control_error)?)
+    validate_xmax(
+        control
+            .resolve(cooperation)
+            .await
+            .map_err(xmax_control_error)?,
+    )
 }
 
 fn validate_xmax(raw: f64) -> BuiltinResult<f64> {
@@ -241,13 +254,19 @@ fn xmax_control_error(error: WaveformControlError) -> RuntimeError {
 async fn sawtooth_gpu(
     handle: GpuTensorHandle,
     xmax: f64,
+    prepared_payload: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|source| {
-            sawtooth_error_with_source(&SAWTOOTH_ERROR_INTERNAL, "gpu gather failed", source)
-        })?;
+    let tensor = match prepared_real_integer_tensor(prepared_payload)
+        .map_err(|detail| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INVALID_INPUT, detail))?
+    {
+        Some(tensor) => tensor,
+        None => gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|source| {
+                sawtooth_error_with_source(&SAWTOOTH_ERROR_INTERNAL, "gpu gather failed", source)
+            })?,
+    };
     map_real_waveform(
         tensor,
         WaveformOutputMode::Double,

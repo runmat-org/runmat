@@ -11,12 +11,14 @@ pub(super) mod output_precision;
 mod cooperation;
 mod window_generation;
 mod waveform_map;
+mod waveform_boundary;
 mod waveform_control;
 mod waveform_sample;
 #[cfg(test)]
 pub(crate) mod waveform_restore_fixture;
 pub(crate) mod window_provider;
 pub(crate) use cooperation::SignalCooperation;
+pub(crate) use waveform_boundary::prepared_real_integer_tensor;
 pub(crate) use waveform_control::{PreparedWaveformControl, WaveformControlError};
 pub(crate) use waveform_map::{map_real_waveform, WaveformMapError, WaveformOutputMode};
 pub(crate) use waveform_sample::{admit_real_waveform_sample, WaveformSampleError};

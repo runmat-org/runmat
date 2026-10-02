@@ -12,8 +12,8 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    admit_real_waveform_sample, map_real_waveform, PreparedWaveformControl, SignalCooperation,
-    WaveformControlError, WaveformOutputMode,
+    admit_real_waveform_sample, map_real_waveform, prepared_real_integer_tensor,
+    PreparedWaveformControl, SignalCooperation, WaveformControlError, WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -106,25 +106,32 @@ async fn rectpuls_in_runtime(
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
     ensure_rectpuls_compatibility(&t, &rest)?;
-    let width = prepare_width(&rest)?;
+    let mut width = prepare_width(&rest)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&t, BUILTIN_NAME)?;
     admit_real_waveform_sample(&t).map_err(|_| rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))?;
-    if let Some(control) = &width {
+    if let Some(control) = &mut width {
         control
-            .admit_host_boundary()
+            .admit_host_boundary(&mut cooperation)
             .await
             .map_err(width_control_error)?;
     }
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        &t,
-        &RECTPULS_INTEGER_T_EXTENSION,
-        BUILTIN_NAME,
-        "T",
-    )
-    .await?;
+    if let Some(control) = &width {
+        control
+            .admit_resident_metadata(BUILTIN_NAME)
+            .map_err(width_control_error)?;
+    }
+    let prepared = cooperation
+        .prepare_integer_boundary(&t, &RECTPULS_INTEGER_T_EXTENSION, "T")
+        .await?;
+    let prepared_payload = prepared.into_resident_payload();
     let (gpu_source, resident_inputs) = rectpuls_gpu_source(&t, &rest)?;
-    let width = resolve_width(width).await?;
-    let tensor = rectpuls_input_tensor(t).await?;
+    let width = resolve_width(width, &mut cooperation).await?;
+    let tensor = match prepared_real_integer_tensor(prepared_payload)
+        .map_err(|detail| rectpuls_error_with_detail(&RECTPULS_ERROR_INVALID_INPUT, detail))?
+    {
+        Some(tensor) => tensor,
+        None => rectpuls_input_tensor(t).await?,
+    };
     let output = map_real_waveform(
         tensor,
         WaveformOutputMode::Double,
@@ -213,11 +220,17 @@ fn prepare_width(rest: &[Value]) -> BuiltinResult<Option<PreparedWaveformControl
     }
 }
 
-async fn resolve_width(control: Option<PreparedWaveformControl<'_>>) -> BuiltinResult<f64> {
+async fn resolve_width(
+    control: Option<PreparedWaveformControl<'_>>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<f64> {
     let Some(control) = control else {
         return Ok(1.0);
     };
-    let raw = control.resolve().await.map_err(width_control_error)?;
+    let raw = control
+        .resolve(cooperation)
+        .await
+        .map_err(width_control_error)?;
     validate_width(raw)
         .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err))
 }
@@ -522,6 +535,93 @@ mod tests {
                 vec![1.0, 0.0]
             );
         }
+    }
+
+    #[test]
+    fn wide_resident_sample_uses_one_native_readback_before_mapping() {
+        use runmat_accelerate_api::{
+            AccelDownloadFuture, AccelIntegerDownloadFuture, AccelNumericDownloadFuture,
+            AccelProvider, GpuTensorHandle, HostNumericTensorView, HostTensorView,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountedOwner {
+            inner: runmat_accelerate::simple_provider::InProcessProvider,
+            integer_downloads: AtomicUsize,
+        }
+        impl AccelProvider for CountedOwner {
+            fn device_id(&self) -> u32 {
+                self.inner.device_id()
+            }
+            fn device_info(&self) -> String {
+                self.inner.device_info()
+            }
+            fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                self.inner.upload(host)
+            }
+            fn upload_numeric_raw(
+                &self,
+                host: &HostNumericTensorView,
+            ) -> anyhow::Result<GpuTensorHandle> {
+                self.inner.upload_numeric_raw(host)
+            }
+            fn download_integer<'a>(
+                &'a self,
+                handle: &'a GpuTensorHandle,
+            ) -> AccelIntegerDownloadFuture<'a> {
+                self.integer_downloads.fetch_add(1, Ordering::SeqCst);
+                self.inner.download_integer(handle)
+            }
+            fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                self.inner.download(handle)
+            }
+            fn download_numeric<'a>(
+                &'a self,
+                handle: &'a GpuTensorHandle,
+            ) -> AccelNumericDownloadFuture<'a> {
+                self.inner.download_numeric(handle)
+            }
+        }
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let provider: &'static CountedOwner = Box::leak(Box::new(CountedOwner {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            integer_downloads: AtomicUsize::new(0),
+        }));
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![0, 1_u64 << 54]), vec![1, 2]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
+        let invalid = call(Value::GpuTensor(handle.clone()), vec![Value::Num(0.0)])
+            .expect_err("host-invalid width precedes native sample readback");
+        assert_eq!(invalid.identifier(), RECTPULS_ERROR_WIDTH_INVALID.identifier);
+        assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 0);
+        assert!(handle.allocation_lease().validate_live().is_ok());
+        let output =
+            call(Value::GpuTensor(handle.clone()), vec![]).expect("prepared resident waveform");
+        assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 1);
+        let gathered = crate::builtins::common::test_support::gather(output).unwrap();
+        assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0]);
+        assert!(handle.allocation_lease().validate_live().is_ok());
+        handle.release().unwrap();
+
+        let control =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 54]), vec![1, 1]).unwrap();
+        let control_handle = gpu_helpers::upload_tensor(provider, &control).unwrap();
+        let control_output = call(
+            Value::Num(0.0),
+            vec![Value::GpuTensor(control_handle.clone())],
+        )
+        .expect("prepared resident width");
+        assert_eq!(
+            crate::builtins::common::test_support::gather(control_output)
+                .unwrap()
+                .materialize_f64(),
+            vec![1.0]
+        );
+        assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 2);
+        assert!(control_handle.allocation_lease().validate_live().is_ok());
+        control_handle.release().unwrap();
     }
 
     #[test]

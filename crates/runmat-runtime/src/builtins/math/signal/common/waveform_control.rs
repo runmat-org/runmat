@@ -7,6 +7,8 @@ use runmat_value::Value;
 use crate::builtins::common::{gpu_helpers, tensor, validation};
 use crate::RuntimeError;
 
+use super::{prepared_real_integer_tensor, SignalCooperation};
+
 #[derive(Debug)]
 pub(crate) enum WaveformControlError {
     Invalid(String),
@@ -20,14 +22,13 @@ pub(crate) enum PreparedWaveformControl<'a> {
     Host {
         value: &'a Value,
         scalar: f64,
+        boundary_admitted: bool,
         extension: &'static BuiltinExtensionDescriptor,
-        builtin: &'static str,
         role: &'static str,
     },
     Resident {
         value: &'a Value,
         extension: &'static BuiltinExtensionDescriptor,
-        builtin: &'static str,
         role: &'static str,
     },
 }
@@ -35,18 +36,23 @@ pub(crate) enum PreparedWaveformControl<'a> {
 impl<'a> PreparedWaveformControl<'a> {
     /// Prove a host control's integer boundary before any resident argument is
     /// downloaded. Resident controls remain deferred to `resolve`.
-    pub(crate) async fn admit_host_boundary(&self) -> Result<(), WaveformControlError> {
+    pub(crate) async fn admit_host_boundary(
+        &mut self,
+        cooperation: &mut SignalCooperation,
+    ) -> Result<(), WaveformControlError> {
         if let Self::Host {
             value,
             extension,
-            builtin,
             role,
+            boundary_admitted,
             ..
         } = self
         {
-            validation::ensure_runmat_integer_f64_boundary(value, extension, builtin, role)
+            cooperation
+                .prepare_integer_boundary(*value, *extension, *role)
                 .await
                 .map_err(WaveformControlError::Boundary)?;
+            *boundary_admitted = true;
         }
         Ok(())
     }
@@ -56,6 +62,39 @@ impl<'a> PreparedWaveformControl<'a> {
             Self::Host { scalar, .. } => Some(*scalar),
             Self::Resident { .. } => None,
         }
+    }
+
+    /// Apply host-visible resident metadata checks only after every ordinary
+    /// host argument has passed admission, but before any sample download.
+    pub(crate) fn admit_resident_metadata(
+        &self,
+        builtin: &'static str,
+    ) -> Result<(), WaveformControlError> {
+        let Self::Resident {
+            value, extension, ..
+        } = self
+        else {
+            return Ok(());
+        };
+        let Value::GpuTensor(handle) = value else {
+            unreachable!("resident plan owns a GPU handle");
+        };
+        if validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)
+                .map_err(WaveformControlError::Boundary)?;
+        }
+        validation::validate_resident_metadata(value).map_err(WaveformControlError::Boundary)?;
+        handle.allocation_lease().validate_live().map_err(|source| {
+            WaveformControlError::Boundary(
+                crate::build_runtime_error(format!(
+                    "{builtin}: resident control allocation is unavailable: {source}"
+                ))
+                .with_builtin(builtin)
+                .with_source(source)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build(),
+            )
+        })
     }
 
     pub(crate) fn admit(
@@ -80,7 +119,6 @@ impl<'a> PreparedWaveformControl<'a> {
                 Ok(Self::Resident {
                     value,
                     extension,
-                    builtin,
                     role,
                 })
             }
@@ -93,44 +131,55 @@ impl<'a> PreparedWaveformControl<'a> {
                 Ok(Self::Host {
                     value,
                     scalar,
+                    boundary_admitted: false,
                     extension,
-                    builtin,
                     role,
                 })
             }
         }
     }
 
-    pub(crate) async fn resolve(self) -> Result<f64, WaveformControlError> {
+    pub(crate) async fn resolve(
+        self,
+        cooperation: &mut SignalCooperation,
+    ) -> Result<f64, WaveformControlError> {
         match self {
             Self::Host {
                 value,
                 scalar,
                 extension,
-                builtin,
                 role,
+                boundary_admitted,
+                ..
             } => {
-                validation::ensure_runmat_integer_f64_boundary(value, extension, builtin, role)
-                    .await
-                    .map_err(WaveformControlError::Boundary)?;
+                if !boundary_admitted {
+                    cooperation
+                        .prepare_integer_boundary(value, extension, role)
+                        .await
+                        .map_err(WaveformControlError::Boundary)?;
+                }
                 Ok(scalar)
             }
             Self::Resident {
                 value,
                 extension,
-                builtin,
                 role,
+                ..
             } => {
-                if validation::value_has_native_integer_class(value) {
-                    crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)
-                        .map_err(WaveformControlError::Boundary)?;
-                }
-                let host = gpu_helpers::gather_value_async(value)
-                    .await
-                    .map_err(WaveformControlError::Provider)?;
-                validation::ensure_runmat_integer_f64_boundary(&host, extension, builtin, role)
+                let prepared = cooperation
+                    .prepare_integer_boundary(value, extension, role)
                     .await
                     .map_err(WaveformControlError::Boundary)?;
+                let payload = prepared.into_resident_payload();
+                let host = if let Some(tensor) =
+                    prepared_real_integer_tensor(payload).map_err(WaveformControlError::Invalid)?
+                {
+                    Value::Tensor(tensor)
+                } else {
+                    gpu_helpers::gather_value_async(value)
+                        .await
+                        .map_err(WaveformControlError::Provider)?
+                };
                 tensor::scalar_f64_from_host_value(&host)
                     .map_err(WaveformControlError::Invalid)?
                     .ok_or_else(|| {
