@@ -43,6 +43,7 @@ fn values(value: &Value) -> Vec<f64> {
     tensor.materialize_f64()
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn fatal_plot_failure_has_nyquist_identifier_and_retains_cause() {
     use std::error::Error;
@@ -84,6 +85,7 @@ fn continuous_and_discrete_responses_preserve_exact_output_shape() {
     assert!((values(&discrete[0])[0] - 2.0).abs() < 1e-12);
     assert_eq!(values(&discrete[1]), vec![0.0]);
 }
+#[cfg(feature = "plot-core")]
 #[test]
 fn default_grid_and_no_output_plot_form() {
     let Value::OutputList(outputs) = run(tf(vec![1.0], vec![1.0, -1.0], 0.1), None, 3).unwrap()
@@ -95,6 +97,23 @@ fn default_grid_and_no_output_plot_form() {
     assert!(values(&outputs[2]).last().unwrap() < &(std::f64::consts::PI / 0.1));
     let result = run(tf(vec![1.0], vec![1.0, 1.0], 0.0), None, 0).unwrap();
     assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
+}
+
+#[cfg(not(feature = "plot-core"))]
+#[test]
+fn numeric_nyquist_survives_without_plotting_and_statement_fails_typed() {
+    use std::error::Error;
+
+    let model = tf(vec![1.0], vec![1.0, 1.0], 0.0);
+    assert!(matches!(
+        run(model.clone(), Some(Value::Num(0.0)), 2).expect("numeric response"),
+        Value::OutputList(values) if values.len() == 2
+    ));
+    let error = run(model, None, 0).expect_err("presentation unavailable");
+    assert!(error
+        .source()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
 }
 #[test]
 fn complex_coefficients_are_evaluated_without_a_real_mirror() {

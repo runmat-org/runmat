@@ -13,8 +13,7 @@ type NumericTriplet = (Vec<f64>, Vec<f64>, Vec<f64>);
 
 /// Default error message when no plotting backend is available.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub const ERR_PLOTTING_UNAVAILABLE: &str =
-    "Plotting is unavailable in this build (enable the `gui` or `plot-web` feature).";
+pub(crate) use crate::plotting_hooks::PLOTTING_UNAVAILABLE_MESSAGE as ERR_PLOTTING_UNAVAILABLE;
 
 pub fn numeric_vector(tensor: Tensor) -> Vec<f64> {
     tensor::tensor_values_f64(&tensor)

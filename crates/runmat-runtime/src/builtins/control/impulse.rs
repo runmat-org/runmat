@@ -17,7 +17,7 @@ use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
 };
 use crate::builtins::control::tf_model::RealTfModel;
-use crate::builtins::plotting::state::presentation_failure_kind;
+use crate::plotting_hooks::{presentation_failed, with_render_cause};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "impulse";
@@ -206,7 +206,7 @@ fn value_contains_single(value: &Value) -> bool {
 
 async fn emit_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<()> {
     if let Err(err) = render_impulse_plot(response).await {
-        if presentation_failure_kind(&err).is_some() {
+        if presentation_failed(&err) {
             return Ok(());
         }
         return Err(impulse_plot_error(err));
@@ -227,7 +227,7 @@ fn impulse_plot_error(source: RuntimeError) -> RuntimeError {
             .expect("plot failure has a stable identifier"),
     )
     .build();
-    crate::builtins::plotting::state::with_render_cause(mapped, source)
+    with_render_cause(mapped, source)
 }
 
 #[derive(Clone, Debug)]
@@ -302,7 +302,7 @@ async fn render_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<Value>
 
 #[cfg(not(feature = "plot-core"))]
 async fn render_impulse_plot(_response: &ImpulseResponse) -> BuiltinResult<Value> {
-    Ok(Value::Num(f64::NAN))
+    Err(crate::plotting_hooks::unavailable_presentation())
 }
 
 #[cfg(test)]

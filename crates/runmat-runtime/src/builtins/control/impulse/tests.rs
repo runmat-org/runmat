@@ -135,6 +135,7 @@ fn impulse_multi_output_returns_y_and_t_columns() {
     }
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn impulse_zero_output_count_emits_no_values() {
     let _guard = crate::output_count::push_output_count(Some(0));
@@ -146,6 +147,7 @@ fn impulse_zero_output_count_emits_no_values() {
     assert!(outputs.is_empty());
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn impulse_requested_zero_outputs_emits_no_values() {
     let _guard = crate::output_context::push_output_count(0);
@@ -155,6 +157,29 @@ fn impulse_requested_zero_outputs_emits_no_values() {
         panic!("expected output list");
     };
     assert!(outputs.is_empty());
+}
+
+#[cfg(not(feature = "plot-core"))]
+#[test]
+fn impulse_numeric_output_survives_without_plotting_but_statement_fails_typed() {
+    use std::error::Error;
+
+    let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+    let _numeric = crate::output_count::push_output_count(Some(1));
+    assert!(matches!(
+        run_impulse(sys.clone(), Vec::new()).expect("numeric response"),
+        Value::OutputList(_)
+    ));
+    drop(_numeric);
+
+    let _statement = crate::output_count::push_output_count(Some(0));
+    let error = run_impulse(sys, Vec::new()).expect_err("presentation capability absent");
+    assert_eq!(error.identifier(), IMPULSE_ERROR_PLOT_FAILED.identifier);
+    assert!(error
+        .source()
+        .and_then(|source| source.source())
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
 }
 
 #[test]

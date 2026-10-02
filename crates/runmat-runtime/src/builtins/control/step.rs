@@ -1,8 +1,10 @@
 //! MATLAB-compatible `step` response builtin for RunMat.
 
+#[cfg(feature = "plot-core")]
+use runmat_builtins::STEP_ERROR_PLOT_FAILED;
 use runmat_builtins::{
     BuiltinErrorDescriptor, STEP_ERROR_INTERNAL, STEP_ERROR_INVALID_ARGUMENT,
-    STEP_ERROR_INVALID_TIME, STEP_ERROR_PLOT_FAILED, STEP_INTEGER_TIME_EXTENSION,
+    STEP_ERROR_INVALID_TIME, STEP_INTEGER_TIME_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -20,8 +22,10 @@ use crate::builtins::control::response::step::{
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
 };
-use crate::builtins::plotting::state::presentation_failure_kind;
+#[cfg(feature = "plot-core")]
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
+#[cfg(feature = "plot-core")]
+use crate::plotting_hooks::{presentation_failed, with_render_cause};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "step";
@@ -137,6 +141,7 @@ fn is_statement_form_call() -> bool {
             && crate::output_count::current_output_count().is_none())
 }
 
+#[cfg(feature = "plot-core")]
 async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
     let mut systems = vec![(first_sys, None)];
     let mut time_arg = None;
@@ -221,6 +226,12 @@ async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> Bui
     result
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn plot_multiple_step_responses(_first_sys: Value, _rest: Vec<Value>) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn is_plot_style_arg(value: &Value) -> bool {
     matches!(
         value,
@@ -290,6 +301,7 @@ async fn plot_response(eval: &StepResponse) -> BuiltinResult<()> {
     plot_response_with_style(eval, None).await
 }
 
+#[cfg(feature = "plot-core")]
 async fn plot_response_with_style(eval: &StepResponse, style: Option<&Value>) -> BuiltinResult<()> {
     let t = eval.t_value()?;
     let y = eval.y_value()?;
@@ -299,10 +311,10 @@ async fn plot_response_with_style(eval: &StepResponse, style: Option<&Value>) ->
         vec![t, y]
     };
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if presentation_failure_kind(&err).is_some() {
+        if presentation_failed(&err) {
             return Ok(());
         }
-        return Err(crate::builtins::plotting::state::with_render_cause(
+        return Err(with_render_cause(
             step_error_with_detail(&STEP_ERROR_PLOT_FAILED, err.message()),
             err,
         ));
@@ -311,6 +323,14 @@ async fn plot_response_with_style(eval: &StepResponse, style: Option<&Value>) ->
     let _ = crate::call_builtin_async("xlabel", &[Value::from("Time")]).await;
     let _ = crate::call_builtin_async("ylabel", &[Value::from("Amplitude")]).await;
     Ok(())
+}
+
+#[cfg(not(feature = "plot-core"))]
+async fn plot_response_with_style(
+    _eval: &StepResponse,
+    _style: Option<&Value>,
+) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
 }
 
 #[cfg(test)]
