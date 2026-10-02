@@ -1,7 +1,9 @@
 use super::*;
+use crate::*;
 use runmat_types::{
-    DynamicReason, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
-    OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, DynamicReason, EffectKind, LiteralContext, LiteralValue,
+    NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
 
 fn numeric(shape: ShapeFact) -> ValueFact {
@@ -30,8 +32,10 @@ fn call(args: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
 
 #[test]
 fn canonical_entries_have_one_binding_and_documentation() {
-    assert_eq!(ENTRIES.len(), 7);
-    for entry in ENTRIES {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
+    assert_eq!(entries.len(), 7);
+    for entry in &entries {
         assert_eq!(entry.bindings, &REQUIRED_DEFAULT_BINDING);
         assert_eq!(
             entry.documentation.authority,
@@ -51,7 +55,7 @@ fn canonical_entries_have_one_binding_and_documentation() {
         .contract
         .effects
         .contains(&EffectKind::Clock));
-    for entry in ENTRIES {
+    for entry in &entries {
         for extension in [
             BUSINESS_DAY_TYPED_LEGACY_SERIAL_EXTENSION,
             BUSINESS_DAY_RESIDENT_INPUT_EXTENSION,

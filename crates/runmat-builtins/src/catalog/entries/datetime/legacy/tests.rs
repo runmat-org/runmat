@@ -1,4 +1,5 @@
 use super::*;
+use crate::*;
 use runmat_types::*;
 
 fn number(shape: ShapeFact) -> ValueFact {
@@ -22,8 +23,10 @@ fn call(args: Vec<ValueFact>, outputs: usize) -> CallRequest {
 
 #[test]
 fn every_legacy_identity_has_one_catalog_binding_and_executable_docs() {
-    assert_eq!(ENTRIES.len(), 7);
-    for entry in ENTRIES {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
+    assert_eq!(entries.len(), 7);
+    for entry in entries {
         assert_eq!(entry.bindings, &REQUIRED_DEFAULT_BINDING);
         assert_eq!(
             entry.documentation.authority,

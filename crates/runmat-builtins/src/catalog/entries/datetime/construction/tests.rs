@@ -1,7 +1,9 @@
 use super::*;
+use crate::*;
 use runmat_types::{
-    DimensionFact, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
-    ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact, ValueFact, ValueKindFact,
+    DimensionFact, EffectKind, LiteralContext, LiteralValue, NumericClass, NumericDomain,
+    NumericFact, ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact, ValueFact,
+    ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -40,6 +42,10 @@ fn shape(rows: usize, cols: usize) -> ShapeFact {
 
 #[test]
 fn datetime_is_one_canonical_identity_with_clock_and_host_contract() {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].identity.name, "datetime");
     assert_eq!(DATETIME_CATALOG_ENTRY.identity.name, "datetime");
     assert_eq!(
         DATETIME_CATALOG_ENTRY.bindings,
