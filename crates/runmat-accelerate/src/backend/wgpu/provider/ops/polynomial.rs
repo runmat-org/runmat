@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, ProviderConv1dOptions, ProviderConvMode,
     ProviderPolyderQuotient, ProviderPolyfitOutputs, ProviderPolyfitResult, ProviderPolyvalOptions,
 };
-use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider_requested;
+use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
@@ -55,7 +55,7 @@ impl WgpuProvider {
             None => None,
         };
         let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
-        let host_result = polyfit_host_real_for_provider_requested(
+        let host_result = polyfit_host_real_for_provider(
             &x_host.data,
             &y_host.data,
             degree,

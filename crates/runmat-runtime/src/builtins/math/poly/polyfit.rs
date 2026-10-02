@@ -98,11 +98,7 @@ async fn polyfit_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let requested_count = crate::output_count::current_output_count();
-    let outputs = match requested_count {
-        Some(count) if count >= 3 => ProviderPolyfitOutputs::StatisticsAndNormalization,
-        Some(count) if count >= 2 => ProviderPolyfitOutputs::Statistics,
-        _ => ProviderPolyfitOutputs::Coefficients,
-    };
+    let outputs = requested_outputs(requested_count);
     let eval = evaluate_requested(x, y, degree, &rest, outputs).await?;
     if let Some(out_count) = requested_count {
         if out_count == 0 {
@@ -110,7 +106,9 @@ async fn polyfit_builtin(
         }
         let mut outputs = vec![eval.coefficients()];
         if out_count >= 2 {
-            outputs.push(eval.stats());
+            outputs.push(eval.stats().ok_or_else(|| {
+                polyfit_internal_error("polyfit: requested statistics were not produced")
+            })?);
         }
         if out_count >= 3 {
             outputs.push(eval.mu());
@@ -122,17 +120,26 @@ async fn polyfit_builtin(
     Ok(eval.coefficients())
 }
 
-/// Evaluate `polyfit`, returning the multi-output envelope used by the VM.
+fn requested_outputs(requested_count: Option<usize>) -> ProviderPolyfitOutputs {
+    match requested_count {
+        Some(count) if count >= 3 => ProviderPolyfitOutputs::StatisticsAndNormalization,
+        Some(count) if count >= 2 => ProviderPolyfitOutputs::Statistics,
+        _ => ProviderPolyfitOutputs::Coefficients,
+    }
+}
+
+/// Evaluate `polyfit` with statistics available to direct callers. The
+/// registered binding uses the captured requested-output count instead.
 pub async fn evaluate(
     x: Value,
     y: Value,
     degree: Value,
     rest: &[Value],
 ) -> BuiltinResult<PolyfitEval> {
-    let outputs = match crate::output_count::current_output_count() {
-        Some(count) if count >= 3 => ProviderPolyfitOutputs::StatisticsAndNormalization,
-        _ => ProviderPolyfitOutputs::Statistics,
-    };
+    let count = crate::output_count::current_output_count()
+        .unwrap_or(2)
+        .max(2);
+    let outputs = requested_outputs(Some(count));
     evaluate_requested(x, y, degree, rest, outputs).await
 }
 
@@ -204,7 +211,7 @@ async fn evaluate_requested(
         );
     }
 
-    let weights = parse_weights(rest, x_data.len(), deg).await?;
+    let weights = parse_weights(rest, x_data.len(), deg, outputs).await?;
     let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref(), outputs)?;
     if is_complex_input {
         solution.is_complex = true;
@@ -261,7 +268,11 @@ async fn try_gpu_polyfit(
         }
         count = Some(len);
     }
-    SolverGeometry::new(count.expect("x and y lengths were validated"), degree)?;
+    SolverGeometry::for_outputs(
+        count.expect("x and y lengths were validated"),
+        degree,
+        outputs,
+    )?;
     let provider = gpu_helpers::exact_provider_for_handle(x_handle)
         .ok_or_else(|| polyfit_internal_error("polyfit: no exact owner for resident input"))?;
     for input in &inputs {
@@ -388,11 +399,9 @@ impl PolyfitEval {
         self.coefficients.clone()
     }
 
-    /// Structure `S` containing fields `R`, `df`, and `normr`.
-    pub fn stats(&self) -> Value {
-        self.stats
-            .clone()
-            .expect("polyfit statistics were requested")
+    /// Structure `S` containing fields `R`, `df`, and `normr`, if requested.
+    pub fn stats(&self) -> Option<Value> {
+        self.stats.clone()
     }
 
     /// Centering and scaling vector `[mean(x), std(x)]`.
@@ -534,6 +543,7 @@ async fn parse_weights(
     rest: &[Value],
     len: usize,
     degree: usize,
+    outputs: ProviderPolyfitOutputs,
 ) -> BuiltinResult<Option<Vec<f64>>> {
     match rest.len() {
         0 => Ok(None),
@@ -545,7 +555,7 @@ async fn parse_weights(
                     "polyfit: weight vector must match the size of X",
                 ));
             }
-            SolverGeometry::new(len, degree)?;
+            SolverGeometry::for_outputs(len, degree, outputs)?;
             validate_weights(&data)?;
             Ok(Some(data))
         }
@@ -597,7 +607,7 @@ fn solve_polyfit(
 
     // Structural geometry is checked before numerical payload validation,
     // matching resident preflight and the provider's real-data adapter.
-    let geometry = SolverGeometry::new(x_data.len(), degree)?;
+    let geometry = SolverGeometry::for_outputs(x_data.len(), degree, outputs)?;
     if let Some(w) = weights {
         validate_weights(w)?;
     }
@@ -963,20 +973,6 @@ pub fn polyfit_host_real_for_provider(
     y: &[f64],
     degree: usize,
     weights: Option<&[f64]>,
-    basis: ProviderPolyfitBasis,
-) -> PolyfitKernelResult<PolyfitHostRealResult> {
-    let outputs = match basis {
-        ProviderPolyfitBasis::Original => ProviderPolyfitOutputs::Statistics,
-        ProviderPolyfitBasis::CenteredScaled => ProviderPolyfitOutputs::StatisticsAndNormalization,
-    };
-    polyfit_host_real_for_provider_requested(x, y, degree, weights, outputs)
-}
-
-pub fn polyfit_host_real_for_provider_requested(
-    x: &[f64],
-    y: &[f64],
-    degree: usize,
-    weights: Option<&[f64]>,
     outputs: ProviderPolyfitOutputs,
 ) -> PolyfitKernelResult<PolyfitHostRealResult> {
     if x.len() != y.len() {
@@ -994,7 +990,7 @@ pub fn polyfit_host_real_for_provider_requested(
     // Check the complex RHS conversion as well as the downstream matrix
     // allocations before allocating any provider-fallback workspace.
     if !x.is_empty() {
-        SolverGeometry::new(x.len(), degree)?;
+        SolverGeometry::for_outputs(x.len(), degree, outputs)?;
     }
     if let Some(w) = weights {
         validate_weights(w)?;
@@ -1136,9 +1132,9 @@ pub(crate) mod tests {
                 other => panic!("expected coefficient tensor, got {other:?}"),
             };
             let options = if outputs == 3 {
-                vec![fit.stats(), fit.mu()]
+                vec![fit.stats().expect("statistics"), fit.mu()]
             } else {
-                vec![fit.stats()]
+                vec![fit.stats().expect("statistics")]
             };
             if outputs == 3 {
                 let mu = match fit.mu() {
@@ -1184,7 +1180,7 @@ pub(crate) mod tests {
         let predicted = block_on(super::super::polyval::evaluate(
             fit.coefficients(),
             Value::Num(4.0e-14),
-            &[fit.stats(), fit.mu()],
+            &[fit.stats().expect("statistics"), fit.mu()],
             true,
         ))
         .expect("prediction in published QR basis");
@@ -1208,7 +1204,7 @@ pub(crate) mod tests {
         let prediction = block_on(super::super::polyval::evaluate(
             Value::Tensor(coefficients),
             Value::Num(4.0e-14),
-            &[fit.stats()],
+            &[fit.stats().expect("statistics")],
             true,
         ))
         .expect("original-coordinate prediction");
@@ -1219,6 +1215,19 @@ pub(crate) mod tests {
     fn degree_requires_an_exact_integer_not_a_nearby_float() {
         let error = parse_degree(&Value::Num(1.0 + 1.0e-13)).expect_err("fractional degree");
         assert!(error.message().contains("must be an integer"));
+    }
+
+    #[test]
+    fn coefficient_only_result_reports_absent_statistics_without_panicking() {
+        let fit = block_on(super::evaluate_requested(
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+            Value::Num(1.0),
+            &[],
+            ProviderPolyfitOutputs::Coefficients,
+        ))
+        .expect("coefficient-only fit");
+        assert!(fit.stats().is_none());
     }
 
     #[test]
@@ -1412,7 +1421,7 @@ pub(crate) mod tests {
         )
         .expect("polyfit");
         match eval.stats() {
-            Value::Struct(s) => {
+            Some(Value::Struct(s)) => {
                 assert!(s.fields.contains_key("R"));
                 assert!(s.fields.contains_key("df"));
                 assert!(s.fields.contains_key("normr"));
@@ -1650,11 +1659,11 @@ pub(crate) mod tests {
             }
 
             let cpu_stats = match cpu_eval.stats() {
-                Value::Struct(s) => s,
+                Some(Value::Struct(s)) => s,
                 other => panic!("expected struct stats, got {other:?}"),
             };
             let gpu_stats = match gpu_eval.stats() {
-                Value::Struct(s) => s,
+                Some(Value::Struct(s)) => s,
                 other => panic!("expected struct stats, got {other:?}"),
             };
             let cpu_r = match cpu_stats.fields.get("R").expect("R present") {

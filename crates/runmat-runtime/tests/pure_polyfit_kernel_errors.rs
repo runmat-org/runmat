@@ -1,11 +1,10 @@
 //! Pure solver diagnostics survive a real owning provider round trip.
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
-    ProviderPolyfitBasis, ProviderPolyfitOutputs,
+    ProviderPolyfitOutputs,
 };
 use runmat_runtime::builtins::math::poly::polyfit::{
     kernel_error::PolyfitKernelError, polyfit_host_real_for_provider,
-    polyfit_host_real_for_provider_requested,
 };
 use runmat_value::{Tensor, Value};
 use std::error::Error;
@@ -59,7 +58,7 @@ impl AccelProvider for SolverProvider {
                 Some(handle) => Some(self.inner.download(handle).await?),
                 None => None,
             };
-            let solved = polyfit_host_real_for_provider_requested(
+            let solved = polyfit_host_real_for_provider(
                 &x.data,
                 &y.data,
                 degree,
@@ -90,7 +89,7 @@ fn pure_solver_preserves_coefficients_and_typed_validation() {
         &[1., 3., 5.],
         1,
         None,
-        ProviderPolyfitBasis::Original,
+        ProviderPolyfitOutputs::Statistics,
     )
     .unwrap();
     assert!((result.coefficients[0] - 2.).abs() < 1e-12);
@@ -98,10 +97,15 @@ fn pure_solver_preserves_coefficients_and_typed_validation() {
     assert_eq!(result.r_matrix.as_ref().unwrap().len(), 4);
     assert_eq!(result.df, 1.);
     assert!(result.normr < 1e-12);
-    let error =
-        polyfit_host_real_for_provider(&[0., 1.], &[1.], 1, None, ProviderPolyfitBasis::Original)
-            .err()
-            .unwrap();
+    let error = polyfit_host_real_for_provider(
+        &[0., 1.],
+        &[1.],
+        1,
+        None,
+        ProviderPolyfitOutputs::Statistics,
+    )
+    .err()
+    .unwrap();
     let runtime: runmat_runtime::RuntimeError = error.into();
     assert_eq!(runtime.identifier(), Some("RunMat:polyfit:InvalidInput"));
     assert_eq!(
@@ -117,10 +121,16 @@ fn pure_provider_solver_uses_requested_coefficient_and_qr_basis() {
     let x = [10.0, 11.0, 12.0, 13.0];
     let y = [21.0, 24.0, 24.0, 28.0];
     let original =
-        polyfit_host_real_for_provider(&x, &y, 1, None, ProviderPolyfitBasis::Original).unwrap();
-    let centered =
-        polyfit_host_real_for_provider(&x, &y, 1, None, ProviderPolyfitBasis::CenteredScaled)
+        polyfit_host_real_for_provider(&x, &y, 1, None, ProviderPolyfitOutputs::Statistics)
             .unwrap();
+    let centered = polyfit_host_real_for_provider(
+        &x,
+        &y,
+        1,
+        None,
+        ProviderPolyfitOutputs::StatisticsAndNormalization,
+    )
+    .unwrap();
     assert!((original.coefficients[0] - 2.1).abs() < 1e-11);
     assert!((original.coefficients[1] - 0.1).abs() < 1e-10);
     assert_eq!(original.mu, [0.0, 1.0]);
@@ -154,7 +164,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
         &[1., 3.],
         usize::MAX,
         None,
-        ProviderPolyfitBasis::Original,
+        ProviderPolyfitOutputs::Statistics,
     )
     .err()
     .unwrap();
@@ -164,7 +174,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
         &[2., 4.],
         3,
         None,
-        ProviderPolyfitBasis::Original,
+        ProviderPolyfitOutputs::Statistics,
     )
     .unwrap();
     assert_eq!(fit.coefficients.len(), 4);
@@ -202,7 +212,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
         &[1., 3.],
         usize::MAX,
         None,
-        ProviderPolyfitBasis::Original,
+        ProviderPolyfitOutputs::Statistics,
     )
     .err()
     .unwrap()
@@ -241,7 +251,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
         &[1.],
         usize::MAX,
         None,
-        ProviderPolyfitBasis::Original,
+        ProviderPolyfitOutputs::Statistics,
     )
     .err()
     .unwrap();
@@ -254,7 +264,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
         &[1., 3.],
         usize::MAX,
         Some(&[-1., 1.]),
-        ProviderPolyfitBasis::Original,
+        ProviderPolyfitOutputs::Statistics,
     )
     .err()
     .unwrap();
@@ -277,7 +287,7 @@ fn impossible_geometry_precedes_weight_values_on_all_routes_without_resident_gat
             &data[1],
             usize::MAX,
             Some(&weights),
-            ProviderPolyfitBasis::Original,
+            ProviderPolyfitOutputs::Statistics,
         )
         .err()
         .unwrap()
@@ -369,7 +379,7 @@ fn invalid_host_degree_precedes_resident_integer_download() {
 fn extreme_original_basis_fits_coefficients_without_unrequested_overflowing_r() {
     let x_data = [f64::MAX, -f64::MAX];
     let y_data = [1.0, -1.0];
-    let coefficient_only = polyfit_host_real_for_provider_requested(
+    let coefficient_only = polyfit_host_real_for_provider(
         &x_data,
         &y_data,
         1,
@@ -381,7 +391,7 @@ fn extreme_original_basis_fits_coefficients_without_unrequested_overflowing_r() 
     assert!(coefficient_only.coefficients[0] > 0.0);
     assert!((coefficient_only.coefficients[0] * f64::MAX - 1.0).abs() < 1e-14);
     assert!(coefficient_only.coefficients[1].abs() < 1e-14);
-    let error = polyfit_host_real_for_provider_requested(
+    let error = polyfit_host_real_for_provider(
         &x_data,
         &y_data,
         1,
