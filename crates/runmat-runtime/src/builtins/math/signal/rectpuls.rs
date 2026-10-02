@@ -246,7 +246,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::{CharArray, IntegerStorage};
+    use runmat_value::{CharArray, IntValue, IntegerStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(rectpuls_builtin(t, rest))
@@ -324,6 +324,22 @@ mod tests {
         let err =
             call(Value::GpuTensor(input.handle), vec![Value::Num(0.0)]).expect_err("host width");
         assert_eq!(err.identifier(), RECTPULS_ERROR_WIDTH_INVALID.identifier);
+    }
+
+    #[test]
+    fn integer_width_requires_exact_binary64_conversion() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let rounded = call(
+            Value::Num(0.0),
+            vec![Value::Int(IntValue::U64((1u64 << 53) + 1))],
+        )
+        .expect_err("inexact width");
+        assert!(rounded
+            .to_string()
+            .contains("exactly representable as double"));
+        let exact = call(Value::Num(0.0), vec![Value::Int(IntValue::U64(1u64 << 54))])
+            .expect("exact wide width");
+        assert!(matches!(exact, Value::Num(value) if value == 1.0));
     }
 
     #[test]
