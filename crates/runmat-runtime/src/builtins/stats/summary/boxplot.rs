@@ -21,6 +21,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const NAME: &str = "boxplot";
 mod admission;
+mod extension_scan;
 mod appearance;
 mod cooperation;
 mod factor_layout;
@@ -224,16 +225,6 @@ fn value_is_logical_numeric(value: &Value) -> bool {
     }
 }
 
-fn value_contains_integer(value: &Value) -> bool {
-    value_is_integer_numeric(value)
-        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_integer))
-}
-
-fn value_contains_logical(value: &Value) -> bool {
-    value_is_logical_numeric(value)
-        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_logical))
-}
-
 fn value_contains_gpu(value: &Value) -> BuiltinResult<bool> {
     let mut found = false;
     crate::dispatcher::try_visit_gpu_handles(value, &mut |_| found = true)
@@ -245,7 +236,12 @@ fn enable_boxplot_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinRe
     crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)
 }
 
-fn ensure_sample_group_extensions(x: &Value, group: Option<&Value>) -> BuiltinResult<()> {
+async fn ensure_sample_group_extensions(
+    x: &Value,
+    group: Option<&Value>,
+    cooperation: &mut cooperation::BoxplotCooperation,
+) -> BuiltinResult<()> {
+    cooperation.completed(0).await?;
     if value_is_integer_numeric(x) {
         enable_boxplot_extension(&BOXPLOT_INTEGER_DATA_EXTENSION)?;
     }
@@ -253,10 +249,11 @@ fn ensure_sample_group_extensions(x: &Value, group: Option<&Value>) -> BuiltinRe
         enable_boxplot_extension(&BOXPLOT_LOGICAL_DATA_EXTENSION)?;
     }
     if let Some(group) = group {
-        if value_contains_integer(group) {
+        let roles = extension_scan::numeric_roles_cooperative(group, cooperation).await?;
+        if roles.integer {
             enable_boxplot_extension(&BOXPLOT_INTEGER_GROUP_EXTENSION)?;
         }
-        if value_contains_logical(group) {
+        if roles.logical {
             enable_boxplot_extension(&BOXPLOT_LOGICAL_GROUP_EXTENSION)?;
         }
     }
@@ -308,7 +305,7 @@ async fn boxplot_in_runtime(
     } else {
         None
     };
-    ensure_sample_group_extensions(&x, group.as_ref())?;
+    ensure_sample_group_extensions(&x, group.as_ref(), &mut cooperation).await?;
     admission::admit_host_visible(&x, group.as_ref(), &mut cooperation).await?;
     let option_plan = BoxplotOptionPlan::admit(args, first_option)?;
     option_plan

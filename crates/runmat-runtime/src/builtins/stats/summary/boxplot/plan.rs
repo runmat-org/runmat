@@ -116,10 +116,11 @@ impl BoxplotOptionPlan {
             };
             let value = values.next().expect("paired options checked above");
             if kind == BoxplotOptionKind::ColorGroup {
-                if value_contains_integer(&value) {
+                let roles = super::extension_scan::numeric_roles(&value)?;
+                if roles.integer {
                     enable_boxplot_extension(&BOXPLOT_INTEGER_GROUP_EXTENSION)?;
                 }
-                if value_contains_logical(&value) {
+                if roles.logical {
                     enable_boxplot_extension(&BOXPLOT_LOGICAL_GROUP_EXTENSION)?;
                 }
             } else {

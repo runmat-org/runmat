@@ -778,8 +778,12 @@ fn documented_single_data_groups_and_options_need_no_extension() {
         single(vec![1.0], vec![1, 1]),
     ];
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    ensure_sample_group_extensions(&args[0], Some(&args[1]))
-        .expect("documented single sample and group");
+    block_on(ensure_sample_group_extensions(
+        &args[0],
+        Some(&args[1]),
+        &mut cooperation::BoxplotCooperation::new(None),
+    ))
+    .expect("documented single sample and group");
     BoxplotOptionPlan::admit(args[2..].to_vec(), Some(BoxplotOptionKind::Whisker))
         .expect("documented single option");
 }
