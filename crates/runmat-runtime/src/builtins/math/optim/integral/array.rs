@@ -14,6 +14,8 @@ use crate::builtins::math::optim::quadrature::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::INTEGRAL_ERROR_INVALID_INPUT;
 
+const ELEMENT_CHUNK: usize = 4096;
+
 struct ArrayEvaluator<'a> {
     function: &'a Value,
     options: &'a IntegralOptions,
@@ -26,11 +28,13 @@ impl ArrayEvaluator<'_> {
         self.cooperation.completed(0).await?;
         let value = call_function(self.function, [Value::Num(x)]).await?;
         self.cooperation.completed(1).await?;
+        admit_callback_value(&value, self.shape.as_deref())?;
         let value = crate::dispatcher::gather_if_needed_async(&value)
             .await
             .map_err(|error| integral_map_error(error, &INTEGRAL_ERROR_INVALID_INPUT))?;
         let (shape, values) = match value {
-            Value::Num(value) => (vec![1, 1], vec![value]),
+            Value::Num(value) if value.is_finite() => (vec![1, 1], vec![value]),
+            Value::Num(_) => return Err(nonfinite_error()),
             Value::Int(value) => (vec![1, 1], vec![value.to_f64()]),
             Value::Bool(value) => (vec![1, 1], vec![if value { 1.0 } else { 0.0 }]),
             Value::Tensor(value) => {
@@ -39,8 +43,18 @@ impl ArrayEvaluator<'_> {
                     .try_reserve_exact(value.len())
                     .map_err(resource_error)?;
                 for index in 0..value.len() {
-                    values.push(tensor::tensor_value_f64(&value, index));
+                    let element = tensor::tensor_value_f64(&value, index);
+                    if !element.is_finite() {
+                        return Err(nonfinite_error());
+                    }
+                    values.push(element);
+                    if (index + 1).is_multiple_of(ELEMENT_CHUNK) {
+                        self.cooperation.completed(ELEMENT_CHUNK as u64).await?;
+                    }
                 }
+                self.cooperation
+                    .completed((value.len() % ELEMENT_CHUNK) as u64)
+                    .await?;
                 (value.shape, values)
             }
             Value::LogicalArray(value) => {
@@ -48,9 +62,15 @@ impl ArrayEvaluator<'_> {
                 values
                     .try_reserve_exact(value.data.len())
                     .map_err(resource_error)?;
-                for item in value.data {
+                for (index, item) in value.data.into_iter().enumerate() {
                     values.push(if item != 0 { 1.0 } else { 0.0 });
+                    if (index + 1).is_multiple_of(ELEMENT_CHUNK) {
+                        self.cooperation.completed(ELEMENT_CHUNK as u64).await?;
+                    }
                 }
+                self.cooperation
+                    .completed((values.len() % ELEMENT_CHUNK) as u64)
+                    .await?;
                 (value.shape, values)
             }
             other => {
@@ -62,12 +82,6 @@ impl ArrayEvaluator<'_> {
                 ))
             }
         };
-        if values.iter().any(|value| !value.is_finite()) {
-            return Err(integral_error_with_detail(
-                &INTEGRAL_ERROR_INVALID_INPUT,
-                "array-valued callback must return finite real values",
-            ));
-        }
         if let Some(expected) = &self.shape {
             if expected != &shape {
                 return Err(integral_error_with_detail(
@@ -78,9 +92,58 @@ impl ArrayEvaluator<'_> {
         } else {
             self.shape = Some(shape);
         }
-        self.cooperation.completed(values.len() as u64).await?;
         Ok(values)
     }
+}
+
+fn nonfinite_error() -> RuntimeError {
+    integral_error_with_detail(
+        &INTEGRAL_ERROR_INVALID_INPUT,
+        "array-valued callback must return finite real values",
+    )
+}
+
+fn admit_callback_value(value: &Value, expected: Option<&[usize]>) -> BuiltinResult<()> {
+    use runmat_accelerate_api::{handle_storage, GpuTensorStorage};
+    let shape: &[usize] = match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => &[1, 1],
+        Value::Tensor(tensor) => &tensor.shape,
+        Value::LogicalArray(logical) => &logical.shape,
+        Value::GpuTensor(handle) => {
+            handle
+                .allocation_lease()
+                .validate_live()
+                .map_err(|source| {
+                    build_runtime_error(
+                        "integral: array-valued callback returned an invalid resident lease",
+                    )
+                    .with_builtin(NAME)
+                    .with_source(source)
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build()
+                })?;
+            if handle_storage(handle) != GpuTensorStorage::Real {
+                return Err(integral_error_with_detail(
+                    &INTEGRAL_ERROR_INVALID_INPUT,
+                    "array-valued callback must return a real numeric array",
+                ));
+            }
+            handle.shape()
+        }
+        _ => {
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_INPUT,
+                "array-valued callback must return a real numeric array",
+            ));
+        }
+    };
+    if expected.is_some_and(|expected| expected != shape) {
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "array-valued callback changed its output size",
+        ));
+    }
+    Ok(())
 }
 
 impl QuadratureEvaluator for ArrayEvaluator<'_> {

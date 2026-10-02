@@ -937,6 +937,33 @@ mod tests {
     }
 
     #[runtime_builtin(
+        name = "__integral_array_nd",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn array_nd_helper(x: Value) -> crate::BuiltinResult<Value> {
+        let Value::Num(x) = x else {
+            unreachable!("array callback receives scalar")
+        };
+        Ok(Value::Tensor(
+            Tensor::new(vec![x, x * x, x + 1.0, 2.0 * x], vec![2, 1, 2]).expect("fixed N-D shape"),
+        ))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_array_empty",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn array_empty_helper(_x: Value) -> crate::BuiltinResult<Value> {
+        Ok(Value::Tensor(
+            Tensor::new(vec![], vec![0, 2]).expect("empty array shape"),
+        ))
+    }
+
+    #[runtime_builtin(
         name = "__integral_nan",
         type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
         descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
@@ -1190,6 +1217,63 @@ mod tests {
         .expect_err("fixed callback shape");
         assert_eq!(error.identifier(), INTEGRAL_ERROR_INVALID_INPUT.identifier);
         assert!(error.message().contains("changed its output size"));
+    }
+
+    #[test]
+    fn array_valued_nd_and_empty_outputs_keep_callback_geometry() {
+        for (helper, shape, expected) in [
+            (
+                "__integral_array_nd",
+                vec![2, 1, 2],
+                vec![0.5, 1.0 / 3.0, 1.5, 1.0],
+            ),
+            ("__integral_array_empty", vec![0, 2], vec![]),
+        ] {
+            let result = block_on(integral_builtin(
+                Value::FunctionHandle(helper.into()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                vec![Value::from("ArrayValued"), Value::Bool(true)],
+            ))
+            .expect("array integral");
+            let Value::Tensor(result) = result else {
+                panic!("expected array output")
+            };
+            assert_eq!(result.shape, shape);
+            for (index, expected) in expected.into_iter().enumerate() {
+                assert!((tensor::tensor_value_f64(&result, index) - expected).abs() < 1.0e-7);
+            }
+        }
+    }
+
+    #[test]
+    fn array_valued_overrides_vectorized_in_either_option_order() {
+        for rest in [
+            vec![
+                Value::from("ArrayValued"),
+                Value::Bool(true),
+                Value::from("Vectorized"),
+                Value::Bool(true),
+            ],
+            vec![
+                Value::from("Vectorized"),
+                Value::Bool(false),
+                Value::from("ArrayValued"),
+                Value::Bool(true),
+            ],
+        ] {
+            let result = block_on(integral_builtin(
+                Value::FunctionHandle("__integral_array_polynomial".into()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                rest,
+            ))
+            .expect("array form ignores Vectorized");
+            let Value::Tensor(result) = result else {
+                panic!("expected array output")
+            };
+            assert_eq!(result.shape, vec![1, 3]);
+        }
     }
 
     #[test]
