@@ -85,6 +85,8 @@ fn wildcard_traversal_uses_the_installed_filesystem_provider() {
         .expect("nonmatching file");
 
     let entries = runmat_filesystem::with_provider_override(Arc::new(filesystem), || {
+        futures::executor::block_on(runmat_filesystem::set_current_dir_async("/workspace"))
+            .expect("select the fixture's directory without changing provider swap semantics");
         futures::executor::block_on(matching(Path::new("source/**/*.m")))
             .expect("provider-backed matches")
     });

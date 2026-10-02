@@ -1,5 +1,7 @@
 //! Host numeric and structural value admission for empirical statistics.
 use super::*;
+use runmat_value::IntValue;
+
 pub(super) fn numeric_vector(value: &Value, builtin: EmpiricalBuiltin) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor_from_value(value.clone(), builtin)?;
     if tensor.rows() > 1 && tensor.cols() > 1 {
@@ -28,6 +30,20 @@ pub(super) fn tensor_from_value(value: Value, builtin: EmpiricalBuiltin) -> Buil
             .map_err(|err| internal_error(builtin, format!("{builtin}: {err}"))),
         Value::Bool(value) => Tensor::new(vec![if value { 1.0 } else { 0.0 }], vec![1, 1])
             .map_err(|err| internal_error(builtin, format!("{builtin}: {err}"))),
+        Value::LogicalArray(array) => {
+            let mut data = Vec::new();
+            data.try_reserve_exact(array.data.len()).map_err(|cause| {
+                let mut error = internal_error(builtin, format!("{builtin}: {cause}"));
+                error.source = Some(Box::new(cause));
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
+            })?;
+            for &bit in &array.data {
+                data.push(if bit == 0 { 0.0 } else { 1.0 });
+            }
+            Tensor::new(data, array.shape)
+                .map_err(|err| internal_error(builtin, format!("{builtin}: {err}")))
+        }
         other => Tensor::try_from(&other)
             .map_err(|err| invalid_argument(builtin, format!("{builtin}: {err}"))),
     }

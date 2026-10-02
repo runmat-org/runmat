@@ -1168,21 +1168,27 @@ pub struct PlotTestLockGuard {
     _guard: std::sync::MutexGuard<'static, ()>,
     #[cfg(test)]
     _global_state: crate::builtins::common::test_support::GlobalStateTestGuard,
+    #[cfg(not(target_arch = "wasm32"))]
     disable_previous: Option<std::ffi::OsString>,
+    #[cfg(not(target_arch = "wasm32"))]
     host_previous: Option<std::ffi::OsString>,
 }
 
 impl Drop for PlotTestLockGuard {
     fn drop(&mut self) {
-        restore_env_var(
-            "RUNMAT_DISABLE_INTERACTIVE_PLOTS",
-            self.disable_previous.take(),
-        );
-        restore_env_var("RUNMAT_HOST_MANAGED_PLOTS", self.host_previous.take());
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            restore_env_var(
+                "RUNMAT_DISABLE_INTERACTIVE_PLOTS",
+                self.disable_previous.take(),
+            );
+            restore_env_var("RUNMAT_HOST_MANAGED_PLOTS", self.host_previous.take());
+        }
         TEST_PLOT_OUTER_LOCK_HELD.with(|flag| flag.set(false));
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl PlotTestLockGuard {
     #[doc(hidden)]
     pub fn disable_host_managed_plot_env(&self) -> HostManagedPlotEnvGuard<'_> {
@@ -1209,30 +1215,38 @@ pub fn lock_plot_test_registry() -> PlotTestLockGuard {
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     TEST_PLOT_OUTER_LOCK_HELD.with(|flag| flag.set(true));
+    #[cfg(not(target_arch = "wasm32"))]
     let disable_previous = std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS");
+    #[cfg(not(target_arch = "wasm32"))]
     let host_previous = std::env::var_os("RUNMAT_HOST_MANAGED_PLOTS");
+    #[cfg(not(target_arch = "wasm32"))]
     set_plot_test_env_vars();
     PlotTestLockGuard {
         _guard: guard,
         #[cfg(test)]
         _global_state: global_state,
+        #[cfg(not(target_arch = "wasm32"))]
         disable_previous,
+        #[cfg(not(target_arch = "wasm32"))]
         host_previous,
     }
 }
 
 #[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub struct HostManagedPlotEnvGuard<'a> {
     _plot_guard: &'a PlotTestLockGuard,
     previous: Option<std::ffi::OsString>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for HostManagedPlotEnvGuard<'_> {
     fn drop(&mut self) {
         restore_env_var("RUNMAT_HOST_MANAGED_PLOTS", self.previous.take());
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn set_plot_test_env_vars() {
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
@@ -1240,6 +1254,7 @@ fn set_plot_test_env_vars() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn restore_env_var(key: &'static str, previous: Option<std::ffi::OsString>) {
     unsafe {
         if let Some(previous) = previous {
@@ -5798,6 +5813,8 @@ fn host_managed_rendering_enabled() -> bool {
 
 #[cfg(test)]
 pub(crate) fn disable_rendering_for_tests() {
+    // Web figures are presented by their host, without a process environment.
+    #[cfg(not(target_arch = "wasm32"))]
     set_plot_test_env_vars();
 }
 
@@ -5906,6 +5923,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn unavailable_presentation_is_typed_after_one_successful_plot_mutation() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 

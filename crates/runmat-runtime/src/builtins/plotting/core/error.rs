@@ -60,15 +60,10 @@ pub(crate) fn presentation_unavailable(error: &crate::RuntimeError) -> bool {
 /// Keep an owner's public wording and identifier while retaining the original
 /// rendering failure for diagnostics and typed presentation classification.
 pub(crate) fn with_render_cause(
-    mut mapped: crate::RuntimeError,
+    mapped: crate::RuntimeError,
     cause: crate::RuntimeError,
 ) -> crate::RuntimeError {
-    if mapped.span.is_none() {
-        mapped.span = cause.span;
-    }
-    mapped.gpu_gather_retry = cause.gpu_gather_retry;
-    mapped.source = Some(Box::new(cause));
-    mapped
+    crate::plotting_hooks::with_render_cause(mapped, cause)
 }
 
 #[cfg(test)]

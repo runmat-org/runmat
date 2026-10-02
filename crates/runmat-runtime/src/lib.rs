@@ -11,6 +11,10 @@
 )]
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
+// The web runtime fixtures require browser services, including WebGPU.
+#[cfg(all(test, target_arch = "wasm32", feature = "plot-web"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use runmat_types::MemberAccess;
 
 use runmat_builtins::{

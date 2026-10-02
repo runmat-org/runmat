@@ -20,6 +20,46 @@ fn canonical_entry(name: &str) -> &'static runmat_builtins::BuiltinCatalogEntry 
     entry
 }
 
+#[cfg(not(feature = "plot-core"))]
+#[test]
+fn numeric_ecdf_remains_available_without_presentation() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let result =
+        block_on(ecdf_builtin(vec![tensor(vec![1.0, 2.0, 3.0])])).expect("numeric ECDF output");
+    assert!(matches!(result, Value::OutputList(values) if values.len() == 2));
+    drop(_outputs);
+
+    let _statement = crate::output_count::push_output_count(Some(0));
+    let error = block_on(ecdf_builtin(vec![tensor(vec![1.0, 2.0, 3.0])]))
+        .expect_err("presentation unavailable");
+    assert!(error
+        .source
+        .as_deref()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
+    let logical = Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![2, 1]).unwrap());
+    let error = block_on(ecdf_builtin(vec![logical]))
+        .expect_err("valid logical statement still requires presentation");
+    assert!(error
+        .source
+        .as_deref()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
+}
+
+#[cfg(not(feature = "plot-core"))]
+#[test]
+fn cdfplot_valid_sample_reports_typed_missing_presentation_before_download() {
+    use std::error::Error;
+
+    let error = block_on(cdfplot_builtin(vec![tensor(vec![1.0, 2.0, 3.0])]))
+        .expect_err("presentation unavailable");
+    assert!(error
+        .source()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
+}
+
 fn tensor(data: Vec<f64>) -> Value {
     Value::Tensor(Tensor::new(data.clone(), vec![data.len(), 1]).unwrap())
 }
@@ -193,6 +233,7 @@ fn ecdf_classifies_resident_integer_y_before_provider_access() {
     );
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_dispatch_preserves_residency_until_builtin_preflight() {
     assert_eq!(CDFPLOT_GPU_SPEC.residency, ResidencyPolicy::NewHandle);
@@ -290,6 +331,30 @@ fn ecdf_returns_unique_sorted_points_with_initial_zero() {
     let outputs = output_tensors(value);
     assert_eq!(outputs[0].materialize_f64(), vec![0.0, 0.25, 0.75, 1.0]);
     assert_eq!(outputs[1].materialize_f64(), vec![1.0, 1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn ecdf_logical_vector_preserves_shape_and_numeric_steps() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let sample = Value::LogicalArray(
+        LogicalArray::new(vec![0, 1, 1, 0], vec![4, 1]).expect("logical vector"),
+    );
+    let outputs = output_tensors(block_on(ecdf_builtin(vec![sample])).expect("logical ecdf"));
+    assert_eq!(outputs[0].materialize_f64(), vec![0.0, 0.5, 1.0]);
+    assert_eq!(outputs[1].materialize_f64(), vec![0.0, 0.0, 1.0]);
+    assert_eq!(outputs[0].shape, vec![3, 1]);
+    assert_eq!(outputs[1].shape, vec![3, 1]);
+}
+
+#[test]
+fn ecdf_logical_sample_geometry_matches_numeric_sample_admission() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    for (data, shape) in [(vec![], vec![0, 1]), (vec![1; 6], vec![2, 3])] {
+        let sample = Value::LogicalArray(LogicalArray::new(data, shape).unwrap());
+        let error = block_on(ecdf_builtin(vec![sample])).expect_err("invalid logical shape");
+        assert_eq!(error.identifier(), Some("RunMat:ecdf:InvalidArgument"));
+    }
 }
 
 #[test]
@@ -397,6 +462,7 @@ fn ecdf_supports_left_censoring_without_right_censoring() {
         .all(|pair| pair[0] <= pair[1]));
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_returns_handle_and_stats() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -416,6 +482,7 @@ fn cdfplot_returns_handle_and_stats() {
     assert!(matches!(stats.fields.get("median"), Some(Value::Num(2.0))));
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_rejects_nonvector_nd_data_before_mutating_graphics() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -448,6 +515,7 @@ fn cdfplot_descriptor_classifies_integer_and_runtime_extensions() {
     );
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_admits_all_integer_classes_at_explicit_double_boundary() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -480,6 +548,7 @@ fn cdfplot_admits_all_integer_classes_at_explicit_double_boundary() {
     assert!(matches!(stats.fields.get("mean"), Some(Value::Num(0.5))));
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_strict_mode_rejects_integer_logical_and_gpu_extensions() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -528,6 +597,7 @@ fn cdfplot_strict_mode_rejects_integer_logical_and_gpu_extensions() {
     });
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_rejects_wide_integer_before_lossy_plotting() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -544,6 +614,7 @@ fn cdfplot_rejects_wide_integer_before_lossy_plotting() {
     );
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_resident_integer_fallback_returns_host_outputs() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -568,7 +639,7 @@ fn cdfplot_resident_integer_fallback_returns_host_outputs() {
 }
 
 #[test]
-#[cfg(feature = "wgpu")]
+#[cfg(all(feature = "plot-core", feature = "wgpu"))]
 fn cdfplot_wgpu_integer_fallback_returns_host_outputs_for_all_classes() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
     let _accel_guard = crate::builtins::common::test_support::accel_test_lock();

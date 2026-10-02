@@ -7,6 +7,7 @@ use runmat_accelerate_api::{
     GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
     HostNumericTensorView, HostTensorView, NumericElementType, ThreadProviderGuard,
 };
+use runmat_value::LogicalArray;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -192,9 +193,14 @@ fn gather_errors_preserve_owner_cause_and_borrowed_lease() {
 
     let error = block_on(ecdf_builtin(vec![resident()])).unwrap_err();
     assert_original_cause(&error, "RunMat:ecdf:InvalidArgument");
-    let error = block_on(cdfplot_builtin(vec![resident()])).unwrap_err();
-    assert_original_cause(&error, "RunMat:cdfplot:InvalidArgument");
-    assert_eq!(provider.downloads.load(Ordering::SeqCst), 2);
+    #[cfg(feature = "plot-core")]
+    {
+        let error = block_on(cdfplot_builtin(vec![resident()])).unwrap_err();
+        assert_original_cause(&error, "RunMat:cdfplot:InvalidArgument");
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 2);
+    }
+    #[cfg(not(feature = "plot-core"))]
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     allocation
         .handle
         .allocation_lease()
@@ -221,13 +227,74 @@ fn abandoned_unpolled_and_pending_calls_retain_borrowed_input() {
     let unpolled = ecdf_builtin(vec![Value::GpuTensor(allocation.handle.clone())]);
     drop(unpolled);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-    let mut pending = Box::pin(cdfplot_builtin(vec![Value::GpuTensor(
+    let mut pending = Box::pin(ecdf_builtin(vec![Value::GpuTensor(
         allocation.handle.clone(),
     )]));
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
     assert!(pending.as_mut().poll(&mut context).is_pending());
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     drop(pending);
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
+#[cfg(not(feature = "plot-core"))]
+#[test]
+fn unavailable_ecdf_statement_form_does_not_download_resident_inputs() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(WitnessProvider::new(DownloadMode::Fail)));
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let allocation = provider
+        .owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    let invalid = block_on(ecdf_builtin(vec![
+        Value::GpuTensor(allocation.handle.clone()),
+        Value::from("Alpha"),
+        Value::Num(2.0),
+    ]))
+    .expect_err("known invalid host control must precede missing presentation");
+    assert_eq!(invalid.identifier(), Some("RunMat:ecdf:InvalidArgument"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    let invalid_sample = block_on(ecdf_builtin(vec![
+        Value::from("not numeric"),
+        Value::from("Frequency"),
+        Value::GpuTensor(allocation.handle.clone()),
+    ]))
+    .expect_err("known invalid host sample must precede missing presentation");
+    assert_eq!(
+        invalid_sample.identifier(),
+        Some("RunMat:ecdf:InvalidArgument")
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    for (data, shape) in [(vec![], vec![0, 1]), (vec![1; 6], vec![2, 3])] {
+        let logical = Value::LogicalArray(LogicalArray::new(data, shape).unwrap());
+        let error = block_on(ecdf_builtin(vec![
+            logical,
+            Value::from("Frequency"),
+            Value::GpuTensor(allocation.handle.clone()),
+        ]))
+        .expect_err("known invalid logical shape must precede missing presentation");
+        assert_eq!(error.identifier(), Some("RunMat:ecdf:InvalidArgument"));
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+    let error = block_on(ecdf_builtin(vec![Value::GpuTensor(
+        allocation.handle.clone(),
+    )]))
+    .expect_err("plotting is unavailable without plot-core");
+    assert!(error
+        .source
+        .as_deref()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     allocation
         .handle
         .allocation_lease()

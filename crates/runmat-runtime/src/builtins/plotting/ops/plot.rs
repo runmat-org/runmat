@@ -1123,6 +1123,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn plot_keeps_handle_after_typed_unavailable_presentation() {
         let guard = setup_plot_tests();
         let _unmanaged = guard.disable_host_managed_plot_env();

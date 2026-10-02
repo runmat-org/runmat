@@ -1,5 +1,8 @@
 //! Host empirical distribution, censoring, frequency, and confidence arithmetic.
 use super::*;
+use std::cmp::Ordering;
+
+use crate::builtins::common::tensor;
 pub(super) fn evaluate_ecdf(value: Value, options: Options) -> BuiltinResult<EcdfEvaluation> {
     let tensor = tensor_from_value(value, ECDF_OWNER)?;
     if tensor.rows() > 1 && tensor.cols() > 1 {

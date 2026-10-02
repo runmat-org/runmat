@@ -449,6 +449,7 @@ fn tiny_nonzero_imaginary_coefficient_is_not_silently_real() {
     assert_eq!(error.identifier(), STEP_ERROR_UNSUPPORTED_MODEL.identifier);
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn invalid_statement_style_is_rejected_before_model_download() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
