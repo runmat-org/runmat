@@ -28,7 +28,7 @@ pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_coopera
         key.try_reserve_exact(stats.group_key.len())
             .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
         for atom in &stats.group_key {
-            cooperation.completed(1).await?;
+            cooperation.completed(key_clone_work(atom)).await?;
             key.push(atom.clone());
         }
         keys.push(key);
@@ -96,16 +96,58 @@ pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_coopera
         }
         cooperation.completed(1).await?;
     }
-    boxes.sort_by(|left, right| left.position.total_cmp(&right.position));
-    cooperation.completed(0).await?;
-    let mut box_index_by_key = BTreeMap::new();
-    for (index, stats) in boxes.iter().enumerate() {
-        box_index_by_key.insert(stats.group_key.clone(), index);
-        cooperation.completed(1).await?;
-    }
-    for slot in &mut slots {
-        slot.box_index = box_index_by_key.get(&slot.key).copied();
-        cooperation.completed(1).await?;
+    let boxes = if options.positions.is_some() {
+        // Explicit Positions may be nonmonotone, so preserve the established
+        // stable position ordering for that form.
+        boxes.sort_by(|left, right| left.position.total_cmp(&right.position));
+        cooperation.completed(0).await?;
+        boxes
+    } else {
+        // Generated slot positions are strictly increasing. Move observed
+        // statistics into slot order without sorting a large factor product.
+        let mut original = Vec::new();
+        original
+            .try_reserve_exact(boxes.len())
+            .map_err(|_| invalid("boxplot: observed boxes exceed available memory"))?;
+        for stats in boxes {
+            original.push(Some(stats));
+            cooperation.completed(1).await?;
+        }
+        let mut ordered = Vec::new();
+        ordered
+            .try_reserve_exact(original.len())
+            .map_err(|_| invalid("boxplot: observed boxes exceed available memory"))?;
+        for slot in &slots {
+            if let Some(index) = slot.box_index {
+                ordered.push(
+                    original[index]
+                        .take()
+                        .ok_or_else(|| internal("boxplot: repeated observed factor slot"))?,
+                );
+            }
+            cooperation.completed(1).await?;
+        }
+        ordered
+    };
+    if options.positions.is_none() {
+        let mut next_box = 0;
+        for slot in &mut slots {
+            if slot.box_index.is_some() {
+                slot.box_index = Some(next_box);
+                next_box += 1;
+            }
+            cooperation.completed(1).await?;
+        }
+    } else {
+        let mut box_index_by_key = BTreeMap::new();
+        for (index, stats) in boxes.iter().enumerate() {
+            box_index_by_key.insert(stats.group_key.clone(), index);
+            cooperation.completed(1).await?;
+        }
+        for slot in &mut slots {
+            slot.box_index = box_index_by_key.get(&slot.key).copied();
+            cooperation.completed(1).await?;
+        }
     }
     let separators = separator_positions(&slots, options, cooperation).await?;
     Ok(BoxLayout {
@@ -124,8 +166,9 @@ async fn collect_levels_cooperative(
     let mut seen = vec![BTreeSet::new(); factor_count];
     for key in keys {
         for (factor, value) in key.iter().enumerate() {
-            cooperation.completed(1).await?;
+            cooperation.completed(key_clone_work(value)).await?;
             if seen[factor].insert(value.clone()) {
+                cooperation.completed(key_clone_work(value)).await?;
                 levels[factor].push(value.clone());
             }
         }
@@ -229,7 +272,7 @@ async fn cartesian_slots(
                 .try_reserve_exact(key.len())
                 .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
             for atom in key {
-                cooperation.completed(1).await?;
+                cooperation.completed(key_clone_work(atom)).await?;
                 copied.push(atom.clone());
             }
             slots.push(FactorSlot {
@@ -247,13 +290,14 @@ async fn cartesian_slots(
         key.try_reserve_exact(levels.len())
             .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
         for (factor, &digit) in digits.iter().enumerate() {
-            cooperation.completed(1).await?;
             let level = if reverse[factor] {
                 levels[factor].len() - 1 - digit
             } else {
                 digit
             };
-            key.push(levels[factor][level].clone());
+            let atom = &levels[factor][level];
+            cooperation.completed(key_clone_work(atom)).await?;
+            key.push(atom.clone());
         }
         let box_index = observed_by_key.get(key.as_slice()).copied();
         if !observed_first || box_index.is_none() {
@@ -282,6 +326,13 @@ fn cartesian_slot_count(levels: &[Vec<KeyAtom>]) -> BuiltinResult<usize> {
         .iter()
         .try_fold(1usize, |count, level| count.checked_mul(level.len()))
         .ok_or_else(|| invalid("boxplot: FullFactors combination count overflows"))
+}
+
+fn key_clone_work(atom: &KeyAtom) -> u64 {
+    match atom {
+        KeyAtom::Text(text) => u64::try_from(text.len().max(1)).unwrap_or(u64::MAX),
+        _ => 1,
+    }
 }
 
 fn validate_factor_controls(options: &BoxplotOptions, factor_count: usize) -> BuiltinResult<()> {

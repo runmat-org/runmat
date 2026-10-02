@@ -377,6 +377,26 @@ fn factor_gap_is_a_percentage_of_final_width_and_rejects_unrepresentable_width()
         "explicit Positions own category coordinates"
     );
 
+    let nonmonotone = BoxplotOptions {
+        positions: Some(vec![30.0, 10.0, 20.0]),
+        ..options.clone()
+    };
+    let layout = groups::build_box_layout(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(groups.clone()),
+        &nonmonotone,
+    )
+    .unwrap();
+    assert_eq!(
+        layout
+            .boxes
+            .iter()
+            .map(|stats| stats.position)
+            .collect::<Vec<_>>(),
+        vec![10.0, 20.0, 30.0],
+        "explicit nonmonotone positions preserve the prior sorted box order"
+    );
+
     let excessive = BoxplotOptions {
         factor_gap: FactorGap::Percentages(vec![50.0]),
         ..Default::default()
