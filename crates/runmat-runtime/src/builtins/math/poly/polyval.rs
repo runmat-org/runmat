@@ -21,7 +21,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyval";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyval")]
@@ -101,6 +100,22 @@ pub async fn evaluate(
     rest: &[Value],
     want_delta: bool,
 ) -> BuiltinResult<PolyvalEval> {
+    // Arity and an absent/known-empty statistics argument are decidable from
+    // the public call without reading any resident numerical payload.
+    if rest.len() > 2 {
+        return Err(polyval_argument_error("polyval: too many input arguments"));
+    }
+    if want_delta
+        && (rest.is_empty()
+            || matches!(rest.first(), Some(Value::Tensor(t)) if tensor_element_len(t) == 0)
+            || matches!(rest.first(), Some(Value::LogicalArray(a)) if a.data.is_empty())
+            || matches!(rest.first(), Some(Value::Cell(a)) if a.data.is_empty())
+            || matches!(rest.first(), Some(Value::GpuTensor(h)) if h.shape().contains(&0)))
+    {
+        return Err(polyval_argument_error(
+            "polyval: S input (structure returned by polyfit) is required for delta output",
+        ));
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&coefficients, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&points, BUILTIN_NAME)?;
     for option in rest {
@@ -262,7 +277,7 @@ impl Mu {
         if !mean.is_finite() || !scale.is_finite() {
             return Err(polyval_error("polyval: mu values must be finite"));
         }
-        if scale.abs() <= EPS {
+        if scale == 0.0 {
             return Err(polyval_error("polyval: mu(2) must be non-zero"));
         }
         Ok(Self { mean, scale })
@@ -372,7 +387,7 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
             vec![Complex64::new(if flag { 1.0 } else { 0.0 }, 0.0)],
             true,
         )),
-        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im.abs() <= EPS)),
+        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im == 0.0)),
         other => Err(polyval_error(format!(
             "polyval: coefficients must be numeric, got {other:?}"
         ))),
@@ -449,7 +464,7 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
             NumericArray {
                 data: vec![Complex64::new(re, im)],
                 shape: vec![1, 1],
-                all_real: im.abs() <= EPS,
+                all_real: im == 0.0,
             },
             false,
         )),
@@ -520,7 +535,7 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
                 } else {
                     (tensor.materialize_f64()[0], tensor.materialize_f64()[1])
                 };
-            if mean_im.abs() > EPS || scale_im.abs() > EPS {
+            if mean_im != 0.0 || scale_im != 0.0 {
                 return Err(polyval_error("polyval: mu values must be real"));
             }
             Mu::new(mean_re, scale_re)
@@ -745,7 +760,10 @@ fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> BuiltinResult<
             acc -= *value * matrix.get(k, j);
         }
         let diag = matrix.get(j, j);
-        if diag.norm() <= EPS {
+        let column_scale = (0..=j)
+            .map(|row| matrix.get(row, j).norm())
+            .fold(0.0_f64, f64::max);
+        if diag.norm() <= f64::EPSILON * column_scale {
             return Err(polyval_error("polyval: S.R is singular"));
         }
         result[j] = acc / diag;
@@ -892,10 +910,7 @@ fn complex_tensor_values_are_real(tensor: &ComplexTensor) -> bool {
             .iter()
             .all(|value| value.is_zero());
     }
-    tensor
-        .materialize_f64()
-        .iter()
-        .all(|&(_, im)| im.abs() <= EPS)
+    tensor.materialize_f64().iter().all(|&(_, im)| im == 0.0)
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -914,7 +929,7 @@ async fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
 }
 
 fn values_are_real(values: &[Complex64]) -> bool {
-    values.iter().all(|c| c.im.abs() <= EPS)
+    values.iter().all(|c| c.im == 0.0)
 }
 
 #[cfg(test)]
@@ -1010,6 +1025,29 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tiny_nonzero_complex_value_and_nonzero_mu_scale_survive() {
+        let tiny = polyval_builtin(Value::Complex(1.0, 1.0e-13), Value::Num(2.0), Vec::new())
+            .expect("complex constant");
+        assert_eq!(tiny, Value::Complex(1.0, 1.0e-13));
+
+        let mu = Value::Tensor(Tensor::new(vec![2.0e-14, 1.0e-14], vec![1, 2]).unwrap());
+        let options = vec![
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            mu,
+        ];
+        let scaled = polyval_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            Value::Num(3.0e-14),
+            options,
+        )
+        .expect("small nonzero mu scale");
+        let Value::Num(scaled) = scaled else {
+            panic!("scalar prediction expected");
+        };
+        assert!((scaled - 3.0).abs() < 1.0e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

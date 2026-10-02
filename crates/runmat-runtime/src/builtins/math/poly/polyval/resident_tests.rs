@@ -69,6 +69,31 @@ impl AccelProvider for Provider {
 }
 
 #[test]
+fn missing_statistics_rejects_before_resident_readback() {
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(Provider {
+        owner: TestAllocationOwner::new(),
+        mode: Mode::Success,
+        probes: Mutex::new(Vec::new()),
+    }));
+    let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let source = provider
+        .owner
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("resident points");
+    let error = futures::executor::block_on(super::super::evaluate(
+        Value::Num(1.0),
+        Value::GpuTensor(source.handle.clone()),
+        &[],
+        true,
+    ))
+    .expect_err("missing S must fail before download");
+    assert!(error.message().contains("S input"));
+    assert!(provider.probes.lock().unwrap().is_empty());
+    assert_eq!(source.probe.retirements(), 0);
+}
+
+#[test]
 fn preparation_failure_and_alias_rejection_retire_only_owned_temporaries() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
     for mode in [

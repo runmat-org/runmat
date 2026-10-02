@@ -23,8 +23,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 
-const EPS: f64 = 1.0e-12;
-const EPS_NAN: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyfit";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
@@ -390,7 +388,7 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
                 return Err(polyfit_argument_error("polyfit: degree must be finite"));
             }
             let rounded = n.round();
-            if (rounded - n).abs() > EPS {
+            if rounded != *n {
                 return Err(polyfit_argument_error("polyfit: degree must be an integer"));
             }
             if rounded < 0.0 {
@@ -468,12 +466,9 @@ async fn complex_vector(
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
-            let is_complex = tensor
-                .materialize_f64()
-                .iter()
-                .any(|&(_, im)| im.abs() > EPS);
-            let data = tensor
-                .materialize_f64()
+            let values = tensor.materialize_f64();
+            let is_complex = values.iter().any(|&(_, im)| im != 0.0);
+            let data = values
                 .into_iter()
                 .map(|(re, im)| Complex64::new(re, im))
                 .collect::<Vec<_>>();
@@ -493,7 +488,7 @@ async fn complex_vector(
         Value::Num(n) => Ok((vec![Complex64::new(n, 0.0)], false)),
         Value::Int(i) => Ok((vec![Complex64::new(i.to_f64(), 0.0)], false)),
         Value::Bool(b) => Ok((vec![Complex64::new(if b { 1.0 } else { 0.0 }, 0.0)], false)),
-        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im.abs() > EPS)),
+        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im != 0.0)),
         Value::GpuTensor(handle) => {
             let gathered =
                 crate::builtins::common::gpu_helpers::gather_tensor_async(&handle).await?;
@@ -579,7 +574,13 @@ fn solve_polyfit(
     let (mean, scale) = match basis {
         ProviderPolyfitBasis::Original => (0.0, 1.0),
         ProviderPolyfitBasis::CenteredScaled => {
-            let mean = x_data.iter().sum::<f64>() / x_data.len() as f64;
+            let magnitude = x_data.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+            let mean = if magnitude == 0.0 {
+                0.0
+            } else {
+                magnitude
+                    * (x_data.iter().map(|x| x / magnitude).sum::<f64>() / x_data.len() as f64)
+            };
             if !mean.is_finite() {
                 return Err(PolyfitKernelError::input(
                     "polyfit: mean of X must be finite",
@@ -610,8 +611,11 @@ fn solve_polyfit(
     }
 
     let mut transformed_rhs = rhs.clone();
+    let column_norms: Vec<f64> = (0..cols)
+        .map(|col| stable_l2((0..rows).map(|row| vandermonde[row + col * rows])))
+        .collect();
     householder_qr(&mut vandermonde, rows, cols, &mut transformed_rhs)?;
-    let coeffs = solve_upper(&vandermonde, rows, cols, &transformed_rhs)?;
+    let coeffs = solve_upper(&vandermonde, rows, cols, &transformed_rhs, &column_norms)?;
 
     let normr = residual_norm(&transformed_rhs, rows, cols);
     let df = if rows > cols {
@@ -620,7 +624,7 @@ fn solve_polyfit(
         0.0
     };
     let r_matrix = extract_upper(&vandermonde, &geometry);
-    let is_complex = coeffs.iter().any(|c| c.im.abs() > EPS_NAN);
+    let is_complex = coeffs.iter().any(|c| c.im != 0.0);
 
     Ok(PolyfitSolution {
         coeffs,
@@ -638,7 +642,8 @@ fn compute_scale(data: &[f64], mean: f64) -> PolyfitKernelResult<f64> {
     if data.len() <= 1 {
         return Ok(1.0);
     }
-    let mut acc = 0.0;
+    let mut extent = 0.0_f64;
+    let mut scaled_squares = 0.0_f64;
     for &value in data {
         if !value.is_finite() {
             return Err(PolyfitKernelError::input(
@@ -646,17 +651,32 @@ fn compute_scale(data: &[f64], mean: f64) -> PolyfitKernelResult<f64> {
             ));
         }
         let diff = value - mean;
-        acc += diff * diff;
+        let abs_diff = diff.abs();
+        if abs_diff > extent {
+            scaled_squares = 1.0 + scaled_squares * (extent / abs_diff).powi(2);
+            extent = abs_diff;
+        } else if abs_diff != 0.0 {
+            scaled_squares += (abs_diff / extent).powi(2);
+        }
     }
-    let denom = (data.len() as f64 - 1.0).max(1.0);
-    let std = (acc / denom).sqrt();
-    let scale = if std.abs() <= EPS { 1.0 } else { std };
+    let denom = data.len() as f64 - 1.0;
+    let std = extent * (scaled_squares / denom).sqrt();
+    let scale = if extent == 0.0 { 1.0 } else { std };
     if !scale.is_finite() {
         return Err(PolyfitKernelError::input(
             "polyfit: failed to compute a stable scaling factor",
         ));
     }
+    if scale == 0.0 {
+        return Err(PolyfitKernelError::input(
+            "polyfit: sample spread is below representable scaling precision",
+        ));
+    }
     Ok(scale)
+}
+
+fn stable_l2(values: impl IntoIterator<Item = f64>) -> f64 {
+    values.into_iter().fold(0.0, f64::hypot)
 }
 
 fn build_vandermonde(u: &[f64], geometry: &SolverGeometry) -> Vec<f64> {
@@ -736,15 +756,10 @@ fn householder_qr(
 ) -> PolyfitKernelResult<()> {
     let min_dim = rows.min(cols);
     for k in 0..min_dim {
-        let mut norm_sq = 0.0;
-        for row in k..rows {
-            let val = matrix[row + k * rows];
-            norm_sq += val * val;
-        }
-        if norm_sq <= EPS {
+        let norm = stable_l2((k..rows).map(|row| matrix[row + k * rows]));
+        if norm == 0.0 {
             continue;
         }
-        let norm = norm_sq.sqrt();
         let x0 = matrix[k + k * rows];
         let alpha = if x0 >= 0.0 { -norm } else { norm };
         let mut v = vec![0.0; rows - k];
@@ -752,11 +767,13 @@ fn householder_qr(
         for row in (k + 1)..rows {
             v[row - k] = matrix[row + k * rows];
         }
-        let v_norm_sq: f64 = v.iter().map(|&x| x * x).sum();
-        if v_norm_sq <= EPS {
+        let v_norm = stable_l2(v.iter().copied());
+        if v_norm == 0.0 {
             continue;
         }
-        let beta = 2.0 / v_norm_sq;
+        for component in &mut v {
+            *component /= v_norm;
+        }
         matrix[k + k * rows] = alpha;
         for row in (k + 1)..rows {
             matrix[row + k * rows] = 0.0;
@@ -767,7 +784,7 @@ fn householder_qr(
                 let row_idx = k + idx;
                 dot += vi * matrix[row_idx + col * rows];
             }
-            let factor = beta * dot;
+            let factor = 2.0 * dot;
             for (idx, &vi) in v.iter().enumerate() {
                 let row_idx = k + idx;
                 matrix[row_idx + col * rows] -= factor * vi;
@@ -778,7 +795,7 @@ fn householder_qr(
             let row_idx = k + idx;
             dot += rhs[row_idx] * vi;
         }
-        let factor = Complex64::new(beta, 0.0) * dot;
+        let factor = Complex64::new(2.0, 0.0) * dot;
         for (idx, &vi) in v.iter().enumerate() {
             let row_idx = k + idx;
             rhs[row_idx] -= factor * vi;
@@ -792,6 +809,7 @@ fn solve_upper(
     rows: usize,
     cols: usize,
     rhs: &[Complex64],
+    column_norms: &[f64],
 ) -> PolyfitKernelResult<Vec<Complex64>> {
     if rhs.len() < rows {
         return Err(PolyfitKernelError::input(
@@ -805,7 +823,7 @@ fn solve_upper(
         } else {
             0.0
         };
-        if diag.abs() <= EPS {
+        if diag.abs() <= f64::EPSILON * column_norms[col] {
             coeffs[col] = Complex64::new(0.0, 0.0);
             continue;
         }
@@ -851,9 +869,7 @@ fn extract_upper(matrix: &[f64], geometry: &SolverGeometry) -> Vec<f64> {
 }
 
 fn coefficients_to_value(coeffs: &[Complex64]) -> BuiltinResult<Value> {
-    let all_real = coeffs
-        .iter()
-        .all(|c| c.im.abs() <= EPS_NAN && c.re.is_finite());
+    let all_real = coeffs.iter().all(|c| c.im == 0.0 && c.re.is_finite());
     if all_real {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
         let tensor = Tensor::new(data, vec![1, coeffs.len()])
@@ -887,7 +903,7 @@ fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> BuiltinResult<Value>
 }
 
 fn build_mu(mean: f64, scale: f64) -> BuiltinResult<Value> {
-    if !scale.is_finite() || scale.abs() <= EPS {
+    if !scale.is_finite() || scale == 0.0 {
         return Err(polyfit_error("polyfit: mu(2) must be non-zero and finite"));
     }
     let tensor = Tensor::new(vec![mean, scale], vec![1, 2])
@@ -1097,6 +1113,79 @@ pub(crate) mod tests {
             // sqrt((SSE/df) * (1 + 1/n + (x-xbar)^2/Sxx)).
             assert!((delta - 3.375_f64.sqrt()).abs() < 1e-9, "{delta}");
         }
+    }
+
+    #[test]
+    fn normalized_small_spread_retains_its_actual_basis() {
+        let x = Value::Tensor(Tensor::new(vec![1.0e-14, 2.0e-14, 3.0e-14], vec![1, 3]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+        let _requested = crate::output_count::push_output_count(Some(3));
+        let fit = evaluate(x, y, Value::Int(runmat_value::IntValue::I32(1)), &[])
+            .expect("small-spread fit");
+        let Value::Tensor(mu) = fit.mu() else {
+            panic!("mu row expected");
+        };
+        let mu_values = mu.materialize_f64();
+        assert!((mu_values[0] - 2.0e-14).abs() <= 1.0e-29);
+        assert!((mu_values[1] - 1.0e-14).abs() <= 1.0e-29);
+
+        let predicted = block_on(super::super::polyval::evaluate(
+            fit.coefficients(),
+            Value::Num(4.0e-14),
+            &[fit.stats(), fit.mu()],
+            true,
+        ))
+        .expect("prediction in published QR basis");
+        assert!((scalar(predicted.value()) - 4.0).abs() < 1.0e-10);
+        assert!(scalar(predicted.delta().expect("interval")).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn small_units_preserve_two_output_original_basis() {
+        let x = Value::Tensor(Tensor::new(vec![1.0e-14, 2.0e-14, 3.0e-14], vec![1, 3]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+        let _requested = crate::output_count::push_output_count(Some(2));
+        let fit = evaluate(x, y, Value::Int(runmat_value::IntValue::I32(1)), &[])
+            .expect("original-coordinate fit");
+        let Value::Tensor(coefficients) = fit.coefficients() else {
+            panic!("coefficient row expected");
+        };
+        let p = coefficients.materialize_f64();
+        assert!((p[0] / 1.0e14 - 1.0).abs() < 1.0e-10);
+        assert!(p[1].abs() < 1.0e-10);
+        let prediction = block_on(super::super::polyval::evaluate(
+            Value::Tensor(coefficients),
+            Value::Num(4.0e-14),
+            &[fit.stats()],
+            true,
+        ))
+        .expect("original-coordinate prediction");
+        assert!((scalar(prediction.value()) - 4.0).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn degree_requires_an_exact_integer_not_a_nearby_float() {
+        let error = parse_degree(&Value::Num(1.0 + 1.0e-13)).expect_err("fractional degree");
+        assert!(error.message().contains("must be an integer"));
+    }
+
+    #[test]
+    fn tiny_nonzero_imaginary_fit_stays_complex() {
+        let x = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+        let y = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 1.0e-13), (1.0, 1.0e-13)], vec![1, 2]).unwrap(),
+        );
+        let fit = evaluate(x, y, Value::Int(runmat_value::IntValue::I32(0)), &[])
+            .expect("complex constant fit");
+        let Value::ComplexTensor(coefficients) = fit.coefficients() else {
+            panic!("nonzero imaginary fit must stay complex");
+        };
+        let values = coefficients.materialize_f64();
+        let [(real, imaginary)] = values.as_slice() else {
+            panic!("one complex coefficient expected");
+        };
+        assert!((*real - 1.0).abs() < 1.0e-12);
+        assert!((*imaginary - 1.0e-13).abs() < 1.0e-25);
     }
 
     #[test]

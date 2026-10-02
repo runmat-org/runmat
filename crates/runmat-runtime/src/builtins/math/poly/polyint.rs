@@ -18,7 +18,6 @@ use crate::builtins::common::tensor;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyint";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyint")]
@@ -155,7 +154,7 @@ fn try_polyint_gpu(
     constant: Complex64,
     protected: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Option<runmat_accelerate_api::GpuTensorHandle>> {
-    if constant.im.abs() > EPS {
+    if constant.im != 0.0 {
         return Ok(None);
     }
     ensure_vector_shape(handle.shape())?;
@@ -243,7 +242,7 @@ fn integrate_coeffs(coeffs: &[Complex64]) -> Vec<Complex64> {
 
 fn coeffs_to_value(coeffs: &[Complex64], class: FloatingClass) -> BuiltinResult<Value> {
     let shape = vec![1, coeffs.len()];
-    if coeffs.iter().all(|c| c.im.abs() <= EPS) {
+    if coeffs.iter().all(|c| c.im == 0.0) {
         let tensor = match class {
             FloatingClass::Double => {
                 let data = coeffs.iter().map(|c| c.re).collect();
@@ -611,6 +610,17 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tiny_nonzero_imaginary_integral_is_not_retyped_real() {
+        let input = ComplexTensor::new(vec![(1.0, 1.0e-13)], vec![1, 1]).unwrap();
+        let output =
+            polyint_builtin(Value::ComplexTensor(input), Vec::new()).expect("complex integral");
+        let Value::ComplexTensor(output) = output else {
+            panic!("nonzero imaginary coefficient must remain complex");
+        };
+        assert_eq!(output.materialize_f64(), vec![(1.0, 1.0e-13), (0.0, 0.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
