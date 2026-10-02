@@ -74,6 +74,37 @@ fn pending_separable_preparation_cancels_or_abandons_without_publication() {
     }
 }
 
+#[test]
+fn pending_result_materialization_cannot_publish_after_cancellation() {
+    let source = CancellationSource::new();
+    let dropped = Rc::new(Cell::new(0));
+    let turns = dropped.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || Box::pin(PendingTurn(turns.clone())),
+    );
+    let mut cooperation = SignalCooperation::with_budget(budget, "conv2");
+    let result = real_matrix(2, 2, &[1.0, 3.0, 2.0, 4.0]);
+    let mut publish = Box::pin(super::super::matrix_to_value(
+        result,
+        false,
+        false,
+        &mut cooperation,
+    ));
+    let waker = noop_waker();
+    let mut context = Context::from_waker(&waker);
+    assert!(matches!(publish.as_mut().poll(&mut context), Poll::Pending));
+    source.cancel(CancellationReason::User);
+    let Poll::Ready(Err(error)) = publish.as_mut().poll(&mut context) else {
+        panic!("cancelled publication must not expose a tensor");
+    };
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    drop(publish);
+    assert_eq!(dropped.get(), 1);
+}
+
 fn real_matrix(rows: usize, cols: usize, data: &[f64]) -> Matrix {
     Matrix {
         rows,
