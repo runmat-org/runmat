@@ -7,7 +7,7 @@ use super::adaptive::QuadratureEvaluator;
 use super::geometry::{simpson, ScaledEstimate};
 use crate::RuntimeError;
 
-const COMPONENT_CHUNK: usize = 4096;
+pub(super) const COMPONENT_CHUNK: usize = 4096;
 
 #[derive(Debug)]
 pub(crate) enum QuadratureArithmeticError {
@@ -17,7 +17,7 @@ pub(crate) enum QuadratureArithmeticError {
 }
 
 impl QuadratureArithmeticError {
-    fn execution(source: RuntimeError) -> Self {
+    pub(super) fn execution(source: RuntimeError) -> Self {
         Self::Execution(Box::new(source))
     }
 }
@@ -59,8 +59,22 @@ pub(crate) trait AdaptiveEstimate: Clone {
     ) -> Result<bool, QuadratureArithmeticError>;
 }
 
+pub(crate) struct EmbeddedRuleInputs<'a, S: QuadratureSample> {
+    pub(crate) samples: &'a [S],
+    pub(crate) base_weights: &'a [ScaledEstimate],
+    pub(crate) jacobians: &'a [ScaledEstimate],
+    pub(crate) width: ScaledEstimate,
+    pub(crate) kronrod: &'a S::Estimate,
+    pub(crate) gauss: &'a S::Estimate,
+}
+
 pub(crate) trait QuadratureSample: Clone {
     type Estimate: AdaptiveEstimate;
+
+    async fn embedded_error<E: QuadratureEvaluator<Sample = Self>>(
+        inputs: EmbeddedRuleInputs<'_, Self>,
+        evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError>;
 
     async fn weighted_sum<E: QuadratureEvaluator<Sample = Self>>(
         samples: &[Self],
@@ -137,6 +151,13 @@ impl AdaptiveEstimate for ScaledEstimate {
 
 impl QuadratureSample for f64 {
     type Estimate = ScaledEstimate;
+
+    async fn embedded_error<E: QuadratureEvaluator<Sample = Self>>(
+        inputs: EmbeddedRuleInputs<'_, Self>,
+        evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError> {
+        super::error_estimate::scalar(inputs, evaluator).await
+    }
 
     async fn weighted_sum<E: QuadratureEvaluator<Sample = Self>>(
         samples: &[Self],
@@ -324,6 +345,13 @@ impl AdaptiveEstimate for ArrayEstimate {
 
 impl QuadratureSample for Arc<Vec<f64>> {
     type Estimate = ArrayEstimate;
+
+    async fn embedded_error<E: QuadratureEvaluator<Sample = Self>>(
+        inputs: EmbeddedRuleInputs<'_, Self>,
+        evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError> {
+        super::error_estimate::array(inputs, evaluator).await
+    }
 
     async fn weighted_sum<E: QuadratureEvaluator<Sample = Self>>(
         samples: &[Self],

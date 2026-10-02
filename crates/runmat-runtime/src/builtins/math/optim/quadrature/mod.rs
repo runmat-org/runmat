@@ -3,6 +3,7 @@
 mod algebra;
 mod adaptive;
 mod cooperation;
+mod error_estimate;
 mod geometry;
 mod mesh;
 mod open_rule;

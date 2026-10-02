@@ -37,6 +37,18 @@ impl ScaledEstimate {
         self.multiply(Self::from_f64(factor))
     }
 
+    pub(crate) fn divide(self, other: Self) -> Self {
+        debug_assert!(other.fraction != 0.0);
+        Self::from_parts(
+            self.fraction / other.fraction,
+            self.exponent - other.exponent,
+        )
+    }
+
+    pub(crate) fn is_zero(self) -> bool {
+        self.fraction == 0.0
+    }
+
     pub(crate) fn add(self, other: Self) -> Self {
         if self.fraction == 0.0 {
             return other;

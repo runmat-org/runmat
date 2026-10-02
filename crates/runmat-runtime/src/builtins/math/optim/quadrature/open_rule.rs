@@ -4,7 +4,7 @@
 //! adaptive acceptance belong to the same quadrature service, not a builtin.
 
 use super::adaptive::QuadratureEvaluator;
-use super::algebra::{AdaptiveEstimate, QuadratureSample};
+use super::algebra::{AdaptiveEstimate, EmbeddedRuleInputs, QuadratureSample};
 use super::geometry::{midpoint, ScaledEstimate};
 use super::mesh::{integrate_partition, MeshRule};
 use crate::BuiltinResult;
@@ -200,16 +200,18 @@ pub(crate) async fn evaluate_interval<E: QuadratureEvaluator>(
     }
     let samples = evaluator.evaluate_many(points).await?;
     let half_width = ScaledEstimate::from_f64(half);
+    let width = half_width.multiply_f64(2.0);
+    let mut base_weights = [ScaledEstimate::from_f64(0.0); 15];
     let mut kronrod_weights = [ScaledEstimate::from_f64(0.0); 15];
     let mut gauss_weights = [ScaledEstimate::from_f64(0.0); 15];
-    kronrod_weights[0] = half_width.multiply_f64(KRONROD[7]).multiply(jacobians[0]);
+    base_weights[0] = half_width.multiply_f64(KRONROD[7]);
+    kronrod_weights[0] = base_weights[0].multiply(jacobians[0]);
     gauss_weights[0] = half_width.multiply_f64(GAUSS[7]).multiply(jacobians[0]);
     for index in 0..7 {
         for side in 0..2 {
             let slot = 1 + index * 2 + side;
-            kronrod_weights[slot] = half_width
-                .multiply_f64(KRONROD[index])
-                .multiply(jacobians[slot]);
+            base_weights[slot] = half_width.multiply_f64(KRONROD[index]);
+            kronrod_weights[slot] = base_weights[slot].multiply(jacobians[slot]);
             gauss_weights[slot] = half_width
                 .multiply_f64(GAUSS[index])
                 .multiply(jacobians[slot]);
@@ -221,13 +223,19 @@ pub(crate) async fn evaluate_interval<E: QuadratureEvaluator>(
     let gauss = E::Sample::weighted_sum(&samples, &gauss_weights, evaluator)
         .await
         .map_err(|cause| evaluator.arithmetic_error(cause))?;
-    let error = result
-        .subtract(&gauss, evaluator)
-        .await
-        .map_err(|cause| evaluator.arithmetic_error(cause))?
-        .absolute(evaluator)
-        .await
-        .map_err(|cause| evaluator.arithmetic_error(cause))?;
+    let error = E::Sample::embedded_error(
+        EmbeddedRuleInputs {
+            samples: &samples,
+            base_weights: &base_weights,
+            jacobians: &jacobians,
+            width,
+            kronrod: &result,
+            gauss: &gauss,
+        },
+        evaluator,
+    )
+    .await
+    .map_err(|cause| evaluator.arithmetic_error(cause))?;
     let magnitude = error
         .magnitude(evaluator)
         .await
@@ -395,6 +403,7 @@ mod tests {
 
     struct ArrayWork {
         charged: u64,
+        large_first: bool,
     }
 
     impl QuadratureEvaluator for ArrayWork {
@@ -410,7 +419,10 @@ mod tests {
         }
 
         async fn evaluate(&mut self, x: f64) -> BuiltinResult<Self::Sample> {
-            Ok(Arc::new(vec![x, x * x]))
+            Ok(Arc::new(vec![
+                if self.large_first { 1.0e300 * x } else { x },
+                x * x,
+            ]))
         }
 
         fn midpoint(&self, a: f64, b: f64) -> f64 {
@@ -448,7 +460,10 @@ mod tests {
 
     #[test]
     fn array_weighted_rule_charges_every_coefficient_product() {
-        let mut evaluator = ArrayWork { charged: 0 };
+        let mut evaluator = ArrayWork {
+            charged: 0,
+            large_first: false,
+        };
         let estimate = futures::executor::block_on(evaluate_interval(
             &mut evaluator,
             OpenDomain::Finite,
@@ -460,5 +475,22 @@ mod tests {
         // Two weighted passes (Kronrod and Gauss), each with 15 terms for
         // both components. Additional estimate algebra can charge more.
         assert!(evaluator.charged >= 2 * 15 * 2);
+    }
+
+    #[test]
+    fn array_error_bounds_are_componentwise_at_extreme_scale() {
+        let mut evaluator = ArrayWork {
+            charged: 0,
+            large_first: true,
+        };
+        let estimate = futures::executor::block_on(evaluate_interval(
+            &mut evaluator,
+            OpenDomain::Finite,
+            0.0,
+            1.0,
+        ))
+        .expect("scaled componentwise open rule");
+        assert!(estimate.error.0[0].to_f64().expect("large bound") > 1.0e285);
+        assert!(estimate.error.0[1].to_f64().expect("ordinary bound") < 1.0e-10);
     }
 }

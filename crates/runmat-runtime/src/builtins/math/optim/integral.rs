@@ -1046,16 +1046,34 @@ mod tests {
             -1.0e308,
             1.0e308,
         )
-        .expect("opposite-sign interval with cancelling integrand");
-        assert!(matches!(symmetric_linear, Value::Num(value) if value == 0.0));
+        .expect_err("representable cancellation does not certify the requested tolerance");
+        assert_eq!(
+            symmetric_linear.identifier(),
+            INTEGRAL_ERROR_INVALID_INPUT.identifier
+        );
+        assert!(
+            symmetric_linear.message().contains("function evaluations")
+                || symmetric_linear.message().contains("did not converge")
+        );
 
         let cancelling_large_subintervals = run(
             Value::FunctionHandle("__integral_identity".into()),
             -1.0e308,
             1.0e308,
         )
-        .expect("nonrepresentable half-integrals cancel to zero");
-        assert!(matches!(cancelling_large_subintervals, Value::Num(value) if value == 0.0));
+        .expect_err("nonrepresentable half-integrals cannot certify absolute tolerance");
+        assert_eq!(
+            cancelling_large_subintervals.identifier(),
+            INTEGRAL_ERROR_INVALID_INPUT.identifier
+        );
+        assert!(
+            cancelling_large_subintervals
+                .message()
+                .contains("function evaluations")
+                || cancelling_large_subintervals
+                    .message()
+                    .contains("did not converge")
+        );
 
         let nonrepresentable = run(
             Value::FunctionHandle("__integral_one".into()),
