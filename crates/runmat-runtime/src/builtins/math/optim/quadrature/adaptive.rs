@@ -5,7 +5,9 @@ use crate::{BuiltinResult, RuntimeError};
 use std::sync::Arc;
 
 use super::algebra::{AdaptiveEstimate, QuadratureSample};
-use super::{ArrayEstimate, QuadratureArithmeticError, ScaledEstimate};
+#[cfg(test)]
+use super::ScaledEstimate;
+use super::{ArrayEstimate, QuadratureArithmeticError};
 
 pub(crate) trait QuadratureEvaluator {
     type Sample: QuadratureSample;

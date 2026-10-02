@@ -997,6 +997,11 @@ mod tests {
         let Value::Num(x) = x else {
             unreachable!("array callback receives scalar")
         };
+        if x < 0.0 {
+            return Ok(Value::Tensor(
+                Tensor::new(vec![x], vec![1, 1, 1]).expect("singleton N-D shape"),
+            ));
+        }
         Ok(Value::Tensor(
             Tensor::new(vec![x, x * x, x + 1.0, 2.0 * x], vec![2, 1, 2]).expect("fixed N-D shape"),
         ))
@@ -1306,6 +1311,24 @@ mod tests {
             for (index, expected) in expected.into_iter().enumerate() {
                 assert!((tensor::tensor_value_f64(&result, index) - expected).abs() < 1.0e-7);
             }
+        }
+    }
+
+    #[test]
+    fn array_valued_singleton_nd_output_keeps_callback_geometry() {
+        for (lo, hi, expected) in [(-2.0, -1.0, -1.5), (-2.0, -2.0, 0.0)] {
+            let result = block_on(integral_builtin(
+                Value::FunctionHandle("__integral_array_nd".into()),
+                Value::Num(lo),
+                Value::Num(hi),
+                vec![Value::from("ArrayValued"), Value::Bool(true)],
+            ))
+            .expect("singleton N-D array integral");
+            let Value::Tensor(result) = result else {
+                panic!("singleton N-D callback must retain its tensor result")
+            };
+            assert_eq!(result.shape, vec![1, 1, 1]);
+            assert!((tensor::tensor_value_f64(&result, 0) - expected).abs() < 1.0e-7);
         }
     }
 

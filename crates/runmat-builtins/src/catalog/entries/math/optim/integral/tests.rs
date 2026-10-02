@@ -264,6 +264,51 @@ fn array_valued_callback_proves_its_fixed_output_shape() {
 }
 
 #[test]
+fn array_valued_singleton_nd_shape_is_not_scalarized() {
+    let real = scalar(NumericClass::Double, NumericDomain::Real);
+    let singleton_nd = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1), Some(1)]),
+        StorageFact::Dense,
+    );
+    let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: CapabilitySet::default(),
+        parameters: vec![real.clone()],
+        parameters_complete: true,
+        outputs: vec![singleton_nd.clone()],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: vec![],
+        captures_complete: true,
+    }));
+    let call = request(
+        vec![
+            callback,
+            real.clone(),
+            real,
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("ArrayValued".into()),
+            LiteralValue::Bool(true),
+        ],
+        1,
+    );
+    let result = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(result.outputs[0].shape, singleton_nd.shape);
+}
+
+#[test]
 fn option_identity_is_typed_at_the_public_boundary() {
     for (spelling, identity) in [
         ("AbsTol", IntegralOptionName::AbsTol),
