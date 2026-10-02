@@ -20,8 +20,8 @@ use runmat_value::{NumericDType, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, PreparedWaveformControl, SignalCooperation, WaveformControlError,
-    WaveformOutputMode,
+    admit_real_waveform_sample, map_real_waveform, PreparedWaveformControl, SignalCooperation,
+    WaveformControlError, WaveformOutputMode, WaveformSampleError,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -132,6 +132,16 @@ async fn square_in_runtime(
         )?;
     }
     let duty = prepare_duty(&varargin)?;
+    admit_real_waveform_sample(&t).map_err(|error| match error {
+        WaveformSampleError::Complex => square_error(&SQUARE_ERROR_COMPLEX_UNSUPPORTED),
+        WaveformSampleError::Unsupported => square_error(&SQUARE_ERROR_INVALID_INPUT),
+    })?;
+    if let Some(control) = &duty {
+        control
+            .admit_host_boundary()
+            .await
+            .map_err(duty_control_error)?;
+    }
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &t,
         &SQUARE_NONFLOATING_INPUT_EXTENSION,
@@ -343,6 +353,20 @@ mod tests {
                 assert!(matches!(result.unwrap(), Value::Num(value) if value == 1.0));
             }
         }
+    }
+
+    #[test]
+    fn known_invalid_sample_does_not_download_resident_duty() {
+        use std::sync::atomic::Ordering;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let (provider, control) = counted_control(true);
+        let borrowed = control.clone();
+        let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let error = call_with_duty(Value::String("invalid".into()), Value::GpuTensor(control))
+            .expect_err("known invalid sample");
+        assert_eq!(error.identifier(), SQUARE_ERROR_INVALID_INPUT.identifier);
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+        assert!(borrowed.allocation_lease().validate_live().is_ok());
     }
 
     #[test]

@@ -21,8 +21,8 @@ use runmat_value::{NumericDType, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, PreparedWaveformControl, SignalCooperation, WaveformControlError,
-    WaveformOutputMode,
+    admit_real_waveform_sample, map_real_waveform, PreparedWaveformControl, SignalCooperation,
+    WaveformControlError, WaveformOutputMode, WaveformSampleError,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -142,6 +142,16 @@ async fn sawtooth_in_runtime(
         )?;
     }
     let xmax = prepare_xmax(&varargin)?;
+    admit_real_waveform_sample(&t).map_err(|error| match error {
+        WaveformSampleError::Complex => sawtooth_error(&SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED),
+        WaveformSampleError::Unsupported => sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT),
+    })?;
+    if let Some(control) = &xmax {
+        control
+            .admit_host_boundary()
+            .await
+            .map_err(xmax_control_error)?;
+    }
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &t,
         &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
@@ -285,6 +295,25 @@ mod tests {
             call_with_xmax(Value::GpuTensor(input.handle), Value::Num(2.0)).expect_err("host xmax");
         assert_eq!(err.identifier(), SAWTOOTH_ERROR_XMAX_RANGE.identifier);
     }
+
+    #[test]
+    fn invalid_host_sample_precedes_resident_xmax_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let control = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        control.probe.mark_unavailable();
+        let error = call_with_xmax(
+            Value::String("invalid".into()),
+            Value::GpuTensor(control.handle),
+        )
+        .expect_err("invalid sample before control download");
+        assert_eq!(error.identifier(), SAWTOOTH_ERROR_INVALID_INPUT.identifier);
+    }
+
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntValue, LogicalArray, Tensor};

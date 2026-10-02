@@ -33,6 +33,24 @@ pub(crate) enum PreparedWaveformControl<'a> {
 }
 
 impl<'a> PreparedWaveformControl<'a> {
+    /// Prove a host control's integer boundary before any resident argument is
+    /// downloaded. Resident controls remain deferred to `resolve`.
+    pub(crate) async fn admit_host_boundary(&self) -> Result<(), WaveformControlError> {
+        if let Self::Host {
+            value,
+            extension,
+            builtin,
+            role,
+            ..
+        } = self
+        {
+            validation::ensure_runmat_integer_f64_boundary(value, extension, builtin, role)
+                .await
+                .map_err(WaveformControlError::Boundary)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn host_value(&self) -> Option<f64> {
         match self {
             Self::Host { scalar, .. } => Some(*scalar),

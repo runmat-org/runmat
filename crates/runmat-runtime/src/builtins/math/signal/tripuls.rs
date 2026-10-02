@@ -12,8 +12,8 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, PreparedWaveformControl, SignalCooperation, WaveformControlError,
-    WaveformOutputMode,
+    admit_real_waveform_sample, map_real_waveform, PreparedWaveformControl, SignalCooperation,
+    WaveformControlError, WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -146,6 +146,18 @@ async fn tripuls_in_runtime(
         )?;
     }
     let controls = prepare_options(&rest)?;
+    admit_real_waveform_sample(&t).map_err(|_| tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))?;
+    if let Some(width) = &controls.0 {
+        width
+            .admit_host_boundary()
+            .await
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
+    }
+    if let Some(skew) = &controls.1 {
+        skew.admit_host_boundary()
+            .await
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
+    }
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &t,
         &TRIPULS_INTEGER_DATA_EXTENSION,
@@ -392,6 +404,43 @@ mod tests {
         )
         .expect_err("host skew");
         assert_eq!(err.identifier(), TRIPULS_ERROR_SKEW_INVALID.identifier);
+    }
+
+    #[test]
+    fn invalid_host_sample_precedes_resident_width_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let control = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        control.probe.mark_unavailable();
+        let error = call(
+            Value::String("invalid".into()),
+            vec![Value::GpuTensor(control.handle)],
+        )
+        .expect_err("invalid sample before control download");
+        assert_eq!(error.identifier(), TRIPULS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn wide_host_width_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let owner = TestAllocationOwner::new();
+        let sample = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        sample.probe.mark_unavailable();
+        let error = call(
+            Value::GpuTensor(sample.handle),
+            vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+        )
+        .expect_err("inexact width before sample download");
+        assert!(error.message().contains("exactly representable"));
     }
 
     #[test]
