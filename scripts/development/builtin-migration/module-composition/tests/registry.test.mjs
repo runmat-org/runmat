@@ -21,7 +21,7 @@ const EXPECTED_SUFFIXES = [
   "control", "datetime", "datetime/arithmetic",
   "datetime/business_calendar", "datetime/calendar_duration", "datetime/components",
   "datetime/construction", "datetime/conversion", "datetime/core", "deep_learning", "deep_learning/autodiff", "diagnostics",
-  "fea", "finance", "function_handles", "geometry", "geometry/triangulation", "graph", "image", "interop",
+  "fea", "finance", "function_handles", "geometry", "geometry/triangulation", "graph", "image", "image/analysis", "image/color", "interop",
   "introspection", "io", "io/archive", "io/filetext", "io/repl_fs", "io/tabular_reading", "logical",
   "logical/relational", "math", "math/bitwise", "math/elementwise", "math/fft", "math/linalg", "math/linalg/factor",
   "math/reduction", "math/signal", "math/symbolic", "math/trigonometry", "objects", "objects/test_support",
@@ -35,7 +35,7 @@ const EXPECTED_SUFFIXES = [
 const REVIEWED_SHARED_TARGET_PACKAGES = [
   "acceleration/gpu", "array/creation", "array/shape", "array/sorting_sets", "containers/dictionary",
   "datetime/arithmetic", "datetime/calendar_duration",
-  "datetime/components", "datetime/core", "io/archive", "io/filetext", "io/repl_fs",
+  "datetime/components", "datetime/core", "image/analysis", "image/color", "io/archive", "io/filetext", "io/repl_fs",
   "io/tabular_reading", "logical/relational", "math/bitwise", "math/fft", "math/linalg/factor", "math/reduction", "math/signal",
   "math/symbolic", "objects/test_support", "plotting/animation", "plotting/axes", "plotting/colormaps",
   "plotting/figures", "plotting/graphics_objects", "plotting/ui", "stats/hist", "stats/ml", "stats/random", "stats/summary",
@@ -43,12 +43,12 @@ const REVIEWED_SHARED_TARGET_PACKAGES = [
   "strings/transform", "table/timetable", "testing/plugins", "testing/runner", "workspace",
 ];
 
-test("registry declares the exact canonical 168-product census", () => {
+test("registry declares the exact canonical 172-product census", () => {
   assert.deepEqual(MODULE_COMPOSITION_SUFFIXES, EXPECTED_SUFFIXES);
   const products = moduleCompositionProductRegistry();
-  assert.equal(products.length, 168);
-  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 84);
-  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 84);
+  assert.equal(products.length, 172);
+  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 86);
+  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 86);
 
   const ids = new Set(products.map((entry) => entry.product_id));
   assert.ok(ids.has("catalog-aliases"));
@@ -152,8 +152,8 @@ test("registry identifiers and paths are globally unique", () => {
   const products = moduleCompositionProductRegistry();
   for (const field of ["product_id", "path", "module_path"]) {
     const values = products.map((entry) => entry[field]);
-    assert.equal(new Set(values).size, 168, `${field} must be unique`);
-    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 168,
+    assert.equal(new Set(values).size, 172, `${field} must be unique`);
+    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 172,
       `${field} must be case-fold unique`);
   }
   assert.deepEqual(products.map((entry) => entry.product_id),
