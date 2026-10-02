@@ -73,7 +73,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     let literal_property = request.literals.literal_string_at(1);
-    if known_control && literal_property.is_some_and(|name| name.eq_ignore_ascii_case("Type")) {
+    if known_control
+        && literal_property
+            .as_ref()
+            .is_some_and(|name| name.eq_ignore_ascii_case("Type"))
+    {
         diagnostics.push(argument_error(
             "RM-CATALOG-GET-PROPERTY",
             "graphics control objects do not expose a Type property",
