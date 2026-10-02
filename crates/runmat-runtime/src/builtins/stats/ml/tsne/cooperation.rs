@@ -30,6 +30,7 @@ impl TsneCooperation {
                     "tsne: sorted observations exceed available memory",
                     source,
                 ),
+                #[cfg(any(feature = "plot-core", test))]
                 CooperativeSortError::Service(source) => {
                     with_tsne_context(source.into_runtime_error())
                 }

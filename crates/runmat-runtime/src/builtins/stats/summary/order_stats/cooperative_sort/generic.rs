@@ -133,6 +133,7 @@ impl<'a, T: Copy, F: FnMut(&T, &T) -> Ordering> StableSortWork<'a, T, F> {
     }
 }
 
+#[cfg(any(feature = "plot-core", test))]
 pub(crate) fn stable_sort_by_sync<T: Copy>(
     values: &mut Vec<T>,
     compare: impl FnMut(&T, &T) -> Ordering,

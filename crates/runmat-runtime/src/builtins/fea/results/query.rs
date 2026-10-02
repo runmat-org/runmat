@@ -234,6 +234,7 @@ pub(in crate::builtins::fea) fn study_context_json_from_value(value: &Value) -> 
         })
 }
 
+#[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn study_context_from_value(
     builtin: &'static str,
     value: &Value,

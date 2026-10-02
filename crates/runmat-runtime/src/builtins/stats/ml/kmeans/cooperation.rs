@@ -53,6 +53,7 @@ impl KmeansCooperation {
                     "kmeans: sorted observations exceed available memory",
                     source,
                 ),
+                #[cfg(any(feature = "plot-core", test))]
                 CooperativeSortError::Service(source) => {
                     with_kmeans_context(source.into_runtime_error())
                 }

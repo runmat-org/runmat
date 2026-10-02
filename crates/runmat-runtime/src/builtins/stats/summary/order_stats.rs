@@ -52,7 +52,7 @@ mod ordered;
 use ordered::*;
 
 mod cooperative_sort;
-#[cfg(feature = "plot-core")]
+#[cfg(any(feature = "plot-core", test))]
 pub(crate) use cooperative_sort::stable_sort_non_nan_f64;
 pub(crate) use cooperative_sort::{CooperativeSortError, SortProgress, StableSortWork};
 

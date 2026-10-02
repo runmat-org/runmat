@@ -722,6 +722,7 @@ impl EnvelopeEvaluation {
         )
     }
 
+    #[cfg(feature = "plot-core")]
     fn input_value(&self) -> BuiltinResult<Value> {
         value_from_data(
             self.input.data.clone(),
