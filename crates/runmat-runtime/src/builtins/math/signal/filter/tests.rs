@@ -95,5 +95,7 @@ fn approx_eq_complex(lhs: &[(f64, f64)], rhs: &[(f64, f64)]) {
     }
 }
 
+#[path = "tests/host.rs"]
 mod host;
+#[path = "tests/provider.rs"]
 mod provider;
