@@ -13,11 +13,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`conv2(A,B)` computes full two-dimensional convolution. `same` selects the central result with the dimensions of `A`; even-sized kernels use the top-left alignment in each even dimension. `valid` keeps only complete kernel overlaps. A scalar is a 1-by-1 matrix.",
             "`conv2(hcol,hrow,A)` applies the outer-product kernel of two vectors to `A`, without conjugating either factor. The optional final shape selector also accepts full, same, or valid. RunMat uses a column pass followed by a row pass when checked factor balancing and intermediate ranges permit it. Otherwise, it forms the kernel and uses the general convolution path.",
             "An empty operand gives an empty full or valid result. Same mode retains the signal matrix shape and fills its empty-kernel result with zeros.",
+            "For nonempty matrices, full mode has dimensions `size(A)+size(B)-1`; valid mode has dimensions `size(A)-size(B)+1` when the kernel fits along both axes. The separable kernel has `numel(hcol)` rows and `numel(hrow)` columns.",
         ] },
         BuiltinDocumentationSection { heading: "Classes and placement", paragraphs: &[
             "Logical inputs promote to double. Explicitly complex inputs remain complex even if all computed imaginary components are zero. Integer operands, including mixed classes and host complex integer storage, convert independently to the selected floating result class before arithmetic.",
             "Same-owner, same-device real floating operands may use a native provider `conv2d` hook. Its output is admitted only with the required class, shape, owner, device, and distinct live allocation. Other supported resident values gather through their owners and eligible floating results return to the first owner. Typed complex integer host data works; the current provider ABI cannot encode typed complex-integer resident buffers.",
             "Convolution terminates fusion plans. The direct host form uses nested-loop convolution. The separable host form uses two one-dimensional passes when numerically admitted, with the general kernel as its fallback.",
+            "Numerical comparisons should account for accumulation order and precision. Representative host/provider parity tests use tolerances of `1e-9` for double and `1e-3` for single; these are test tolerances, not universal error bounds for arbitrary inputs.",
         ] },
     ],
     examples: &[
@@ -58,7 +60,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinDocumentationLink { label: "Factor balancing and range admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2/separable/balance.rs") },
             BuiltinDocumentationLink { label: "Shared resident convolution contracts", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/convolution.rs") },
         ],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Direct/separable modes, classes, and provider behavior", location: "builtins::math::signal::conv2::tests" }],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Direct/separable modes, classes, and provider behavior", location: "builtins::math::signal::conv2::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident round trip against host convolution", location: "builtins::math::signal::conv2::tests::conv2_gpu_roundtrip_matches_cpu" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "WGPU fallback parity", location: "builtins::math::signal::conv2::tests::conv2_wgpu_fallback_matches_cpu" },
+        ],
         notes: &[],
     },
     introduced: None,

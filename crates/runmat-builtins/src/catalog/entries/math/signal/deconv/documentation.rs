@@ -54,7 +54,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinDocumentationLink { label: "Division, requested outputs, and restoration", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/deconv.rs") },
             BuiltinDocumentationLink { label: "Shared resident convolution contracts", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/convolution.rs") },
         ],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Polynomial forms, class, extension, and resident ownership tests", location: "builtins::math::signal::deconv::tests" }],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Polynomial forms, class, extension, and resident ownership tests", location: "builtins::math::signal::deconv::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident quotient and remainder round trip", location: "builtins::math::signal::deconv::tests::deconv_gpu_roundtrip" },
+        ],
         notes: &[],
     },
     introduced: None,

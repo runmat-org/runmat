@@ -60,7 +60,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinDocumentationLink { label: "Convolution admission, numerical evaluation, and provider dispatch", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv.rs") },
             BuiltinDocumentationLink { label: "Shared resident convolution contracts", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/convolution.rs") },
         ],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Shape, class, integer, complex, native and fallback tests", location: "builtins::math::signal::conv::tests" }],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Shape, class, integer, complex, native and fallback tests", location: "builtins::math::signal::conv::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident round trip against host convolution", location: "builtins::math::signal::conv::tests::conv_gpu_roundtrip_matches_cpu" },
+        ],
         notes: &[],
     },
     introduced: None,
