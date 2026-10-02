@@ -567,6 +567,9 @@ async fn conv2_matrices(
     if a.is_empty() || b.is_empty() {
         return empty_result(a, b, mode);
     }
+    if mode == Conv2Mode::Valid && (a.rows < b.rows || a.cols < b.cols) {
+        return Matrix::zeros(0, 0);
+    }
 
     let rows = a
         .rows
@@ -621,9 +624,6 @@ async fn conv2_matrices(
             full.slice(row_start, row_start + a.rows, col_start, col_start + a.cols)
         }
         Conv2Mode::Valid => {
-            if a.rows < b.rows || a.cols < b.cols {
-                return Matrix::zeros(0, 0);
-            }
             let rows = a.rows - b.rows + 1;
             let cols = a.cols - b.cols + 1;
             let row_start = b.rows - 1;
