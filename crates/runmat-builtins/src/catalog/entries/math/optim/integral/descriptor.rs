@@ -90,9 +90,16 @@ pub const INTEGRAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDes
     when: "Bounds/integrand/adaptive solver semantics are invalid.",
     message: "integral: invalid input",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [
+pub const INTEGRAL_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTEGRAL.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:integral:TooManyOutputs"),
+    when: "The caller requests more than the one supported numerical output.",
+    message: "integral: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] = [
     INTEGRAL_ERROR_INVALID_ARGUMENT,
     INTEGRAL_ERROR_INVALID_INPUT,
+    INTEGRAL_ERROR_TOO_MANY_OUTPUTS,
 ];
 pub const INTEGRAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
