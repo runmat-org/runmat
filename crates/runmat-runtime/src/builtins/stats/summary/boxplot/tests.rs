@@ -367,6 +367,78 @@ fn factor_gap_is_a_percentage_of_final_width_and_rejects_unrepresentable_width()
 }
 
 #[test]
+fn rendered_tick_coordinates_follow_gap_and_full_factor_slot_positions() {
+    let _guard = crate::builtins::plotting::lock_plot_test_context();
+    let groups = Value::StringArray(
+        StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap(),
+    );
+    let options = BoxplotOptions {
+        factor_gap: FactorGap::Percentages(vec![10.0]),
+        ..Default::default()
+    };
+    let layout = groups::build_box_layout(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(groups),
+        &options,
+    )
+    .unwrap();
+    crate::builtins::plotting::reset_plot_state();
+    plot::publish_boxplot(
+        plot::prepare_box_layout(&layout, &options).unwrap(),
+        &options,
+    )
+    .unwrap();
+    let figure = clone_figure(current_figure_handle()).unwrap();
+    let meta = figure.axes_metadata(0).unwrap();
+    assert_eq!(meta.x_ticks.as_deref(), Some(&[1.0, 2.375, 3.75][..]));
+    assert_eq!(
+        meta.x_tick_labels.as_deref(),
+        Some(&["a".into(), "b".into(), "c".into()][..])
+    );
+
+    let first =
+        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap());
+    let second =
+        Value::StringArray(StringArray::new(vec!["one".into(), "two".into()], vec![2, 1]).unwrap());
+    let options = BoxplotOptions {
+        orientation: Orientation::Horizontal,
+        full_factors: true,
+        positions: Some(vec![10.0, 20.0, 30.0, 40.0]),
+        ..Default::default()
+    };
+    let layout = groups::build_box_layout(
+        tensor(vec![10.0, 20.0], vec![2, 1]),
+        Some(Value::Cell(
+            CellArray::new(vec![first, second], 1, 2).unwrap(),
+        )),
+        &options,
+    )
+    .unwrap();
+    assert_eq!(layout.boxes.len(), 2);
+    assert_eq!(layout.slots.len(), 4);
+    crate::builtins::plotting::reset_plot_state();
+    plot::publish_boxplot(
+        plot::prepare_box_layout(&layout, &options).unwrap(),
+        &options,
+    )
+    .unwrap();
+    let figure = clone_figure(current_figure_handle()).unwrap();
+    let meta = figure.axes_metadata(0).unwrap();
+    assert_eq!(meta.y_ticks.as_deref(), Some(&[10.0, 20.0, 30.0, 40.0][..]));
+    assert_eq!(
+        meta.y_tick_labels.as_deref(),
+        Some(
+            &[
+                "a,one".into(),
+                "a,two".into(),
+                "b,one".into(),
+                "b,two".into()
+            ][..]
+        )
+    );
+}
+
+#[test]
 fn factor_controls_decode_once_and_validate_against_factor_count() {
     let options = BoxplotOptions::parse(vec![
         Value::from("FactorDirection"),

@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct PreparedBoxplot {
     pub(super) plans: Vec<PlotPlan>,
     pub(super) labels: Vec<String>,
+    pub(super) ticks: Vec<f64>,
     limits: AxisLimits,
 }
 
@@ -17,11 +18,13 @@ pub(super) fn prepare_box_layout(
         options.label_verbosity,
         options.labels.is_some(),
     );
+    let ticks = layout.slots.iter().map(|slot| slot.position).collect();
     let limits = axis_limits_for_layout(layout, options)?;
     add_factor_separators(&mut plans, &layout.separators, limits, options.orientation)?;
     Ok(PreparedBoxplot {
         plans,
         labels,
+        ticks,
         limits,
     })
 }
@@ -56,6 +59,7 @@ pub(super) fn publish_boxplot(
     let PreparedBoxplot {
         plans,
         labels,
+        ticks,
         limits,
     } = prepared;
     let figure_handle = crate::builtins::plotting::current_figure_handle();
@@ -72,6 +76,7 @@ pub(super) fn publish_boxplot(
     let render_result = render_active_plot(NAME, opts, move |figure, axes| {
         match options.orientation {
             Orientation::Vertical => {
+                figure.set_axes_ticks(axes, Some(ticks.clone()), None);
                 figure.set_axes_tick_labels(axes, Some(labels.clone()), None);
                 figure.set_axes_tick_label_rotations(
                     axes,
@@ -80,6 +85,7 @@ pub(super) fn publish_boxplot(
                 );
             }
             Orientation::Horizontal => {
+                figure.set_axes_ticks(axes, None, Some(ticks.clone()));
                 figure.set_axes_tick_labels(axes, None, Some(labels.clone()));
                 figure.set_axes_tick_label_rotations(axes, None, Some(0.0));
             }
