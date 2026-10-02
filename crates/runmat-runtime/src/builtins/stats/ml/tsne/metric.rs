@@ -3,22 +3,33 @@ use crate::BuiltinResult;
 use nalgebra::DMatrix;
 use std::cmp::Ordering;
 
-pub(super) fn pairwise_squared_distances(
+pub(super) async fn pairwise_squared_distances_cooperative(
     rows: &[Vec<f64>],
     metric: DistanceMetric,
+    cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let n = rows.len();
     let cells = n
         .checked_mul(n)
         .ok_or_else(|| invalid("tsne: pairwise distance shape overflow"))?;
-    let mut data = vec![0.0; cells];
+    let mut data = Vec::new();
+    data.try_reserve_exact(cells)
+        .map_err(|_| invalid("tsne: pairwise distances exceed available memory"))?;
+    for _ in 0..cells {
+        data.push(0.0);
+        cooperation.completed(1).await?;
+    }
     let prepared = match metric {
         DistanceMetric::Euclidean => PreparedMetric::Euclidean,
-        DistanceMetric::Seuclidean => PreparedMetric::Seuclidean(column_std(rows)),
+        DistanceMetric::Seuclidean => {
+            PreparedMetric::Seuclidean(column_std(rows, cooperation).await?)
+        }
         DistanceMetric::Cityblock => PreparedMetric::Cityblock,
         DistanceMetric::Chebychev => PreparedMetric::Chebychev,
         DistanceMetric::Minkowski => PreparedMetric::Minkowski,
-        DistanceMetric::Mahalanobis => PreparedMetric::Mahalanobis(inverse_covariance(rows)?),
+        DistanceMetric::Mahalanobis => {
+            PreparedMetric::Mahalanobis(inverse_covariance(rows, cooperation).await?)
+        }
         DistanceMetric::Cosine => PreparedMetric::Cosine,
         DistanceMetric::Correlation => PreparedMetric::Correlation,
         DistanceMetric::Spearman => PreparedMetric::Spearman(row_ranks(rows)),
@@ -29,22 +40,43 @@ pub(super) fn pairwise_squared_distances(
         for j in (i + 1)..n {
             let value = match &prepared {
                 PreparedMetric::Euclidean | PreparedMetric::Minkowski => {
-                    euclidean_sq(&rows[i], &rows[j])
+                    euclidean_sq(&rows[i], &rows[j], cooperation).await?
                 }
-                PreparedMetric::Seuclidean(scale) => seuclidean_sq(&rows[i], &rows[j], scale),
-                PreparedMetric::Cityblock => cityblock(&rows[i], &rows[j]).powi(2),
-                PreparedMetric::Chebychev => chebychev(&rows[i], &rows[j]).powi(2),
-                PreparedMetric::Mahalanobis(inverse) => mahalanobis_sq(&rows[i], &rows[j], inverse),
-                PreparedMetric::Cosine => cosine_distance(&rows[i], &rows[j])?.powi(2),
-                PreparedMetric::Correlation => correlation_distance(&rows[i], &rows[j])?.powi(2),
+                PreparedMetric::Seuclidean(scale) => {
+                    seuclidean_sq(&rows[i], &rows[j], scale, cooperation).await?
+                }
+                PreparedMetric::Cityblock => {
+                    cityblock(&rows[i], &rows[j], cooperation).await?.powi(2)
+                }
+                PreparedMetric::Chebychev => {
+                    chebychev(&rows[i], &rows[j], cooperation).await?.powi(2)
+                }
+                PreparedMetric::Mahalanobis(inverse) => {
+                    mahalanobis_sq(&rows[i], &rows[j], inverse, cooperation).await?
+                }
+                PreparedMetric::Cosine => cosine_distance(&rows[i], &rows[j], cooperation)
+                    .await?
+                    .powi(2),
+                PreparedMetric::Correlation => {
+                    correlation_distance(&rows[i], &rows[j], cooperation)
+                        .await?
+                        .powi(2)
+                }
                 PreparedMetric::Spearman(ranks) => {
-                    correlation_distance(&ranks[i], &ranks[j])?.powi(2)
+                    correlation_distance(&ranks[i], &ranks[j], cooperation)
+                        .await?
+                        .powi(2)
                 }
-                PreparedMetric::Hamming => hamming_distance(&rows[i], &rows[j]).powi(2),
-                PreparedMetric::Jaccard => jaccard_distance(&rows[i], &rows[j]).powi(2),
+                PreparedMetric::Hamming => hamming_distance(&rows[i], &rows[j], cooperation)
+                    .await?
+                    .powi(2),
+                PreparedMetric::Jaccard => jaccard_distance(&rows[i], &rows[j], cooperation)
+                    .await?
+                    .powi(2),
             };
             data[i + j * n] = value;
             data[j + i * n] = value;
+            cooperation.completed(1).await?;
         }
     }
     Ok(data)
@@ -64,95 +96,142 @@ enum PreparedMetric {
     Jaccard,
 }
 
-fn euclidean_sq(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .map(|(a, b)| {
-            let diff = a - b;
-            diff * diff
-        })
-        .sum()
+async fn euclidean_sq(
+    left: &[f64],
+    right: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    let mut total = 0.0;
+    for (a, b) in left.iter().zip(right) {
+        let diff = a - b;
+        total += diff * diff;
+        cooperation.completed(1).await?;
+    }
+    Ok(total)
 }
 
-fn seuclidean_sq(left: &[f64], right: &[f64], scale: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .zip(scale.iter())
-        .map(|((a, b), s)| {
-            let diff = if *s > 0.0 { (a - b) / s } else { 0.0 };
-            diff * diff
-        })
-        .sum()
+async fn seuclidean_sq(
+    left: &[f64],
+    right: &[f64],
+    scale: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    let mut total = 0.0;
+    for ((a, b), s) in left.iter().zip(right).zip(scale) {
+        let diff = if *s > 0.0 { (a - b) / s } else { 0.0 };
+        total += diff * diff;
+        cooperation.completed(1).await?;
+    }
+    Ok(total)
 }
 
-fn cityblock(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .map(|(a, b)| (a - b).abs())
-        .sum()
+async fn cityblock(
+    left: &[f64],
+    right: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    let mut total = 0.0;
+    for (a, b) in left.iter().zip(right) {
+        total += (a - b).abs();
+        cooperation.completed(1).await?;
+    }
+    Ok(total)
 }
 
-fn chebychev(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .map(|(a, b)| (a - b).abs())
-        .fold(0.0, f64::max)
+async fn chebychev(
+    left: &[f64],
+    right: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    let mut maximum: f64 = 0.0;
+    for (a, b) in left.iter().zip(right) {
+        maximum = maximum.max((a - b).abs());
+        cooperation.completed(1).await?;
+    }
+    Ok(maximum)
 }
 
-fn cosine_distance(left: &[f64], right: &[f64]) -> BuiltinResult<f64> {
-    directional_distance(left, right, false)
+async fn cosine_distance(
+    left: &[f64],
+    right: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    directional_distance(left, right, false, cooperation).await
 }
 
-fn correlation_distance(left: &[f64], right: &[f64]) -> BuiltinResult<f64> {
-    directional_distance(left, right, true)
+async fn correlation_distance(
+    left: &[f64],
+    right: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    directional_distance(left, right, true, cooperation).await
 }
 
-fn directional_distance(left: &[f64], right: &[f64], center: bool) -> BuiltinResult<f64> {
-    use super::super::pairwise_metric::DirectionError;
-    let Some(left) = super::super::pairwise_metric::unit_direction(left, center).map_err(
-        |error| match error {
-            DirectionError::Resource(source) => {
-                crate::build_runtime_error("tsne: direction exceeds available memory")
-                    .with_builtin(super::NAME)
-                    .with_source(source)
-                    .build()
-            }
-        },
-    )?
-    else {
+async fn directional_distance(
+    left: &[f64],
+    right: &[f64],
+    center: bool,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    let Some(left) = cooperative_direction(left, center, cooperation).await? else {
         return Ok(1.0);
     };
-    let Some(right) = super::super::pairwise_metric::unit_direction(right, center).map_err(
-        |error| match error {
-            DirectionError::Resource(source) => {
-                crate::build_runtime_error("tsne: direction exceeds available memory")
-                    .with_builtin(super::NAME)
-                    .with_source(source)
-                    .build()
-            }
-        },
-    )?
-    else {
+    let Some(right) = cooperative_direction(right, center, cooperation).await? else {
         return Ok(1.0);
     };
-    let dot = left
-        .iter()
-        .zip(right.iter())
-        .map(|(a, b)| a * b)
-        .sum::<f64>();
+    let mut dot = 0.0;
+    for (a, b) in left.iter().zip(&right) {
+        dot += a * b;
+        cooperation.completed(1).await?;
+    }
     Ok((1.0 - dot).max(0.0))
 }
 
-fn hamming_distance(left: &[f64], right: &[f64]) -> f64 {
-    let mismatches = left
-        .iter()
-        .zip(right.iter())
-        .filter(|(a, b)| (*a - *b).abs() > 0.0)
-        .count();
-    mismatches as f64 / left.len().max(1) as f64
+async fn cooperative_direction(
+    row: &[f64],
+    center: bool,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<Option<Vec<f64>>> {
+    use super::super::pairwise_metric::{DirectionError, DirectionProgress, DirectionWork};
+    let mut work = DirectionWork::new(row, center);
+    loop {
+        match work.advance().map_err(|error| match error {
+            DirectionError::Resource(source) => {
+                crate::build_runtime_error("tsne: direction exceeds available memory")
+                    .with_builtin(super::NAME)
+                    .with_source(source)
+                    .build()
+            }
+        })? {
+            DirectionProgress::Pending(units) => cooperation.completed(units).await?,
+            DirectionProgress::Complete(direction, units) => {
+                cooperation.completed(units).await?;
+                return Ok(direction);
+            }
+        }
+    }
 }
 
-fn jaccard_distance(left: &[f64], right: &[f64]) -> f64 {
+async fn hamming_distance(
+    left: &[f64],
+    right: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    let mut mismatches = 0usize;
+    for (a, b) in left.iter().zip(right) {
+        if (*a - *b).abs() > 0.0 {
+            mismatches += 1;
+        }
+        cooperation.completed(1).await?;
+    }
+    Ok(mismatches as f64 / left.len().max(1) as f64)
+}
+
+async fn jaccard_distance(
+    left: &[f64],
+    right: &[f64],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
     let mut union = 0usize;
     let mut intersection = 0usize;
     for (a, b) in left.iter().zip(right.iter()) {
@@ -164,77 +243,111 @@ fn jaccard_distance(left: &[f64], right: &[f64]) -> f64 {
                 intersection += 1;
             }
         }
+        cooperation.completed(1).await?;
     }
     if union == 0 {
-        0.0
+        Ok(0.0)
     } else {
-        1.0 - intersection as f64 / union as f64
+        Ok(1.0 - intersection as f64 / union as f64)
     }
 }
 
-fn column_std(rows: &[Vec<f64>]) -> Vec<f64> {
+async fn column_std(
+    rows: &[Vec<f64>],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<Vec<f64>> {
     if rows.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let cols = rows[0].len();
-    (0..cols)
-        .map(|col| {
-            let mean = rows.iter().map(|row| row[col]).sum::<f64>() / rows.len() as f64;
-            let var = rows
-                .iter()
-                .map(|row| {
-                    let diff = row[col] - mean;
-                    diff * diff
-                })
-                .sum::<f64>()
-                / rows.len().saturating_sub(1).max(1) as f64;
-            var.sqrt()
-        })
-        .collect()
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(cols)
+        .map_err(|_| invalid("tsne: standardized-distance scales exceed available memory"))?;
+    for col in 0..cols {
+        let mut total = 0.0;
+        for row in rows {
+            total += row[col];
+            cooperation.completed(1).await?;
+        }
+        let mean = total / rows.len() as f64;
+        let mut squared = 0.0;
+        for row in rows {
+            let diff = row[col] - mean;
+            squared += diff * diff;
+            cooperation.completed(1).await?;
+        }
+        let var = squared / rows.len().saturating_sub(1).max(1) as f64;
+        result.push(var.sqrt());
+    }
+    Ok(result)
 }
 
-fn inverse_covariance(rows: &[Vec<f64>]) -> BuiltinResult<DMatrix<f64>> {
+async fn inverse_covariance(
+    rows: &[Vec<f64>],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<DMatrix<f64>> {
     if rows.is_empty() {
         return Ok(DMatrix::identity(0, 0));
     }
     let p = rows[0].len();
     let mut cov: DMatrix<f64> = DMatrix::zeros(p, p);
-    let means = (0..p)
-        .map(|col| rows.iter().map(|row| row[col]).sum::<f64>() / rows.len() as f64)
-        .collect::<Vec<_>>();
+    let mut means = Vec::new();
+    means
+        .try_reserve_exact(p)
+        .map_err(|_| invalid("tsne: covariance means exceed available memory"))?;
+    for col in 0..p {
+        let mut total = 0.0;
+        for row in rows {
+            total += row[col];
+            cooperation.completed(1).await?;
+        }
+        means.push(total / rows.len() as f64);
+    }
     let denom = rows.len().saturating_sub(1).max(1) as f64;
     for row in rows {
         for a in 0..p {
             for b in a..p {
                 cov[(a, b)] += (row[a] - means[a]) * (row[b] - means[b]) / denom;
+                cooperation.completed(1).await?;
             }
         }
     }
     for a in 0..p {
         for b in 0..a {
             cov[(a, b)] = cov[(b, a)];
+            cooperation.completed(1).await?;
         }
     }
     for idx in 0..p {
         cov[(idx, idx)] += 1.0e-10;
+        cooperation.completed(1).await?;
     }
     cov.try_inverse()
         .ok_or_else(|| invalid("tsne: Mahalanobis covariance is singular"))
 }
 
-fn mahalanobis_sq(left: &[f64], right: &[f64], inv_cov: &DMatrix<f64>) -> f64 {
-    let diff = left
-        .iter()
-        .zip(right.iter())
-        .map(|(a, b)| a - b)
-        .collect::<Vec<_>>();
+async fn mahalanobis_sq(
+    left: &[f64],
+    right: &[f64],
+    inv_cov: &DMatrix<f64>,
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> BuiltinResult<f64> {
+    let mut diff = Vec::new();
+    diff.try_reserve_exact(left.len())
+        .map_err(|_| invalid("tsne: Mahalanobis workspace exceeds available memory"))?;
+    for (a, b) in left.iter().zip(right) {
+        diff.push(a - b);
+        cooperation.completed(1).await?;
+    }
     let mut value = 0.0;
     for i in 0..diff.len() {
         for j in 0..diff.len() {
             value += diff[i] * inv_cov[(i, j)] * diff[j];
+            cooperation.completed(1).await?;
         }
     }
-    value.max(0.0)
+    Ok(value.max(0.0))
 }
 
 fn row_ranks(rows: &[Vec<f64>]) -> Vec<Vec<f64>> {

@@ -59,21 +59,28 @@ pub(super) fn guard_dense_feature_work(feature_count: usize) -> BuiltinResult<()
     Ok(())
 }
 
-pub(super) fn standardize_rows(rows: &mut [Vec<f64>]) {
+pub(super) async fn standardize_rows(
+    rows: &mut [Vec<f64>],
+    cooperation: &mut super::cooperation::TsneCooperation,
+) -> crate::BuiltinResult<()> {
     if rows.is_empty() {
-        return;
+        return Ok(());
     }
     let cols = rows[0].len();
     for col in 0..cols {
-        let mean = rows.iter().map(|row| row[col]).sum::<f64>() / rows.len() as f64;
-        let var = rows
-            .iter()
-            .map(|row| {
-                let diff = row[col] - mean;
-                diff * diff
-            })
-            .sum::<f64>()
-            / (rows.len().saturating_sub(1).max(1) as f64);
+        let mut total = 0.0;
+        for row in rows.iter() {
+            total += row[col];
+            cooperation.completed(1).await?;
+        }
+        let mean = total / rows.len() as f64;
+        let mut squared = 0.0;
+        for row in rows.iter() {
+            let diff = row[col] - mean;
+            squared += diff * diff;
+            cooperation.completed(1).await?;
+        }
+        let var = squared / (rows.len().saturating_sub(1).max(1) as f64);
         let scale = var.sqrt();
         for row in rows.iter_mut() {
             row[col] = if scale > 0.0 {
@@ -81,13 +88,16 @@ pub(super) fn standardize_rows(rows: &mut [Vec<f64>]) {
             } else {
                 0.0
             };
+            cooperation.completed(1).await?;
         }
     }
+    Ok(())
 }
 
-pub(super) fn apply_pca_if_requested(
+pub(super) async fn apply_pca_if_requested(
     rows: Vec<Vec<f64>>,
     components: usize,
+    cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     if components == 0 || rows.is_empty() || components >= rows[0].len() {
         return Ok(rows);
@@ -96,12 +106,22 @@ pub(super) fn apply_pca_if_requested(
     let p = rows[0].len();
     let k = components.min(p);
     let mut centered = rows;
-    let means = (0..p)
-        .map(|col| centered.iter().map(|row| row[col]).sum::<f64>() / n as f64)
-        .collect::<Vec<_>>();
+    let mut means = Vec::new();
+    means
+        .try_reserve_exact(p)
+        .map_err(|_| invalid("tsne: PCA means exceed available memory"))?;
+    for col in 0..p {
+        let mut total = 0.0;
+        for row in &centered {
+            total += row[col];
+            cooperation.completed(1).await?;
+        }
+        means.push(total / n as f64);
+    }
     for row in &mut centered {
         for col in 0..p {
             row[col] -= means[col];
+            cooperation.completed(1).await?;
         }
     }
     let mut cov: DMatrix<f64> = DMatrix::zeros(p, p);
@@ -110,18 +130,25 @@ pub(super) fn apply_pca_if_requested(
         for a in 0..p {
             for b in a..p {
                 cov[(a, b)] += row[a] * row[b] / denom;
+                cooperation.completed(1).await?;
             }
         }
     }
     for a in 0..p {
         for b in 0..a {
             cov[(a, b)] = cov[(b, a)];
+            cooperation.completed(1).await?;
         }
     }
     let eig = SymmetricEigen::new(cov);
-    let mut order: Vec<(usize, f64)> = (0..p)
-        .map(|idx| (idx, eig.eigenvalues[idx]))
-        .collect::<Vec<_>>();
+    let mut order: Vec<(usize, f64)> = Vec::new();
+    order
+        .try_reserve_exact(p)
+        .map_err(|_| invalid("tsne: PCA ordering exceeds available memory"))?;
+    for idx in 0..p {
+        order.push((idx, eig.eigenvalues[idx]));
+        cooperation.completed(1).await?;
+    }
     order.sort_by(|left, right| right.1.partial_cmp(&left.1).unwrap_or(Ordering::Equal));
     let mut projected = vec![vec![0.0; k]; n];
     for (new_col, (eig_col, _)) in order.into_iter().take(k).enumerate() {
@@ -129,8 +156,10 @@ pub(super) fn apply_pca_if_requested(
             let mut value = 0.0;
             for old_col in 0..p {
                 value += centered[row][old_col] * eig.eigenvectors[(old_col, eig_col)];
+                cooperation.completed(1).await?;
             }
             projected[row][new_col] = value;
+            cooperation.completed(1).await?;
         }
     }
     Ok(projected)

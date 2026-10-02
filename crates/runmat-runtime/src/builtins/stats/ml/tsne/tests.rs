@@ -49,6 +49,13 @@ fn observation_materialization_yields_and_cancels_before_solver() {
     );
     assert_eq!(turns.get(), 4);
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
 }
 
 struct RejectingDownloadProvider {

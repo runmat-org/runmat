@@ -2,12 +2,12 @@ use super::geometry::{
     apply_pca_if_requested, guard_dense_feature_work, needs_pca, prepare_data_cooperative,
     standardize_rows,
 };
-use super::metric::pairwise_squared_distances;
+use super::metric::pairwise_squared_distances_cooperative;
 use super::{
     internal, invalid, Algorithm, CacheSize, DistanceMetric, EmbeddingResult, Options,
-    PreparedData, MAX_WORK_CELLS, MIN_PROB, NAME,
+    PreparedData, MAX_WORK_CELLS, MIN_PROB,
 };
-use crate::builtins::common::{random, tensor};
+use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 use runmat_value::Tensor;
 
@@ -55,10 +55,11 @@ pub(super) async fn compute_tsne_cooperative(
         Some(CacheSize::Megabytes(_)) | Some(CacheSize::Maximal) | None => {}
     }
     if options.standardize {
-        standardize_rows(&mut rows);
+        standardize_rows(&mut rows, cooperation).await?;
     }
-    rows = apply_pca_if_requested(rows, options.num_pca_components)?;
-    let distances = pairwise_squared_distances(&rows, options.distance)?;
+    rows = apply_pca_if_requested(rows, options.num_pca_components, cooperation).await?;
+    let distances =
+        pairwise_squared_distances_cooperative(&rows, options.distance, cooperation).await?;
     let probabilities = joint_probabilities(&distances, options.perplexity, cooperation).await?;
     let mut embedding = initial_embedding(
         &options,
@@ -266,7 +267,10 @@ async fn initial_embedding(
         }
         return Ok(data);
     }
-    let normals = random::generate_normal(rows * dims, NAME)?;
+    let count = rows
+        .checked_mul(dims)
+        .ok_or_else(|| invalid("tsne: embedding shape overflow"))?;
+    let normals = cooperation.normals(count).await?;
     let mut scaled = Vec::new();
     scaled
         .try_reserve_exact(normals.len())

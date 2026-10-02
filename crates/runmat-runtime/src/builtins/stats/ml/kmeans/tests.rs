@@ -154,6 +154,10 @@ fn cancellation_during_assignment_prevents_a_partial_replicate() {
     .expect_err("cancelled assignment must not publish a replicate");
     assert_eq!(turns.get(), 12);
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error.source.as_deref().and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
 }
 
 #[test]
@@ -200,6 +204,10 @@ fn cancellation_during_output_materialization_prevents_publication() {
     .expect_err("cancelled output materialization cannot publish a partial result");
     assert_eq!(turns.get(), 3);
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error.source.as_deref().and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
 }
 
 #[test]

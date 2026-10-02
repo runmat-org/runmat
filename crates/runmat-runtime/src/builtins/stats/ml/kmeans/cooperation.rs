@@ -41,11 +41,12 @@ impl KmeansCooperation {
                 .checkpoint(units)
                 .await
                 .map_err(|error| match error {
-                    ExecutionServiceError::Cancelled => {
+                    source @ ExecutionServiceError::Cancelled => {
                         let namespace = self.namespace.as_deref().unwrap_or("RunMat");
                         build_runtime_error("kmeans: execution was cancelled")
                             .with_identifier(format!("{namespace}:Cancelled"))
                             .with_builtin(NAME)
+                            .with_source(source)
                             .build()
                     }
                     other => with_kmeans_context(other.into_runtime_error()),

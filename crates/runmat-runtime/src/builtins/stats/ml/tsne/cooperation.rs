@@ -7,6 +7,7 @@ use crate::BuiltinResult;
 
 pub(super) struct TsneCooperation {
     budget: Option<CpuCooperationBudget>,
+    runtime: Option<RuntimeContext>,
     namespace: Option<String>,
 }
 
@@ -14,7 +15,22 @@ impl TsneCooperation {
     pub(super) fn new(runtime: Option<&RuntimeContext>) -> Self {
         Self {
             budget: runtime.map(RuntimeContext::cpu_cooperation),
+            runtime: runtime.cloned(),
             namespace: runtime.map(RuntimeContext::error_namespace),
+        }
+    }
+
+    pub(super) async fn normals(&mut self, len: usize) -> BuiltinResult<Vec<f64>> {
+        match self.budget.as_mut() {
+            Some(budget) => crate::builtins::common::random::generate_normal_cooperative(
+                len,
+                NAME,
+                self.runtime.as_ref(),
+                budget,
+            )
+            .await
+            .map_err(with_tsne_context),
+            None => crate::builtins::common::random::generate_normal(len, NAME),
         }
     }
 
@@ -24,11 +40,12 @@ impl TsneCooperation {
                 .checkpoint(units)
                 .await
                 .map_err(|error| match error {
-                    ExecutionServiceError::Cancelled => {
+                    source @ ExecutionServiceError::Cancelled => {
                         let namespace = self.namespace.as_deref().unwrap_or("RunMat");
                         build_runtime_error("tsne: execution was cancelled")
                             .with_identifier(format!("{namespace}:Cancelled"))
                             .with_builtin(NAME)
+                            .with_source(source)
                             .build()
                     }
                     other => with_tsne_context(other.into_runtime_error()),
@@ -41,6 +58,7 @@ impl TsneCooperation {
     pub(super) fn with_budget(budget: CpuCooperationBudget) -> Self {
         Self {
             budget: Some(budget),
+            runtime: None,
             namespace: Some("RunMat".to_string()),
         }
     }
