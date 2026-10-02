@@ -58,6 +58,43 @@ fn parent_literal_requires_a_scalar_axes_candidate() {
 }
 
 #[test]
+fn plotting_effect_is_conditional_on_requested_outputs_and_parent() {
+    let x = signal(
+        NumericClass::Double,
+        NumericDomain::Real,
+        ResidencyFact::Host,
+    );
+    let numeric = infer(x.clone(), RequestedOutputCount::Exactly(2));
+    assert!(!numeric.effects.0.contains(&EffectKind::UserInterface));
+    assert!(!numeric
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::UserInterface));
+    let plotted = infer(x.clone(), RequestedOutputCount::Exactly(0));
+    assert!(plotted.effects.0.contains(&EffectKind::UserInterface));
+    let parent = crate::infer_catalog_call(
+        &PWELCH_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![
+                x,
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Parent".into()),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+        },
+    );
+    assert!(parent.effects.0.contains(&EffectKind::UserInterface));
+}
+
+#[test]
 fn output_class_is_signal_derived_and_residency_is_not_proven() {
     for class in [
         NumericClass::Single,

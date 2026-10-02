@@ -175,6 +175,40 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut contract = CallContract::fixed(outputs);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
+    let parent_possible = request
+        .arguments
+        .iter()
+        .enumerate()
+        .skip(1)
+        .any(|(index, fact)| match &fact.kind {
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown => request
+                .literals
+                .literal_args
+                .get(index)
+                .and_then(literal_text)
+                .is_none_or(|name| name.eq_ignore_ascii_case("parent")),
+            _ => false,
+        });
+    if request
+        .outputs
+        .requested
+        .known_count()
+        .is_some_and(|count| count > 0)
+        && !parent_possible
+    {
+        contract
+            .effects
+            .0
+            .remove(&runmat_types::EffectKind::UserInterface);
+        contract
+            .effects
+            .0
+            .remove(&runmat_types::EffectKind::HostCallback);
+        contract
+            .capabilities
+            .0
+            .remove(&runmat_types::CapabilityRequirement::UserInterface);
+    }
     let mut result = infer_call(&contract, request);
     result.dynamic_outputs = request.outputs.requested.known_count().is_none();
     result.diagnostics.extend(diagnostics);

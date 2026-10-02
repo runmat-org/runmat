@@ -1,6 +1,6 @@
 use super::*;
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 pub const PWELCH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -25,8 +25,9 @@ pub const PWELCH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
             EffectKind::UserInterface,
+            EffectKind::HostCallback,
         ],
-        capabilities: &[],
+        capabilities: &[CapabilityRequirement::UserInterface],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
