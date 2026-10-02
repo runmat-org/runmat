@@ -673,15 +673,23 @@ fn pwelch_accepts_explicit_frequency_vector() {
 }
 
 #[test]
-fn pwelch_rejects_nfft_shorter_than_window() {
+fn pwelch_short_nfft_folds_windowed_samples_modulo_transform_length() {
     let x = Tensor::new(vec![1.0; 16], vec![1, 16]).unwrap();
-    let err = call(
+    let out = call(
         Value::Tensor(x),
-        &[Value::Num(8.0), Value::Num(0.0), Value::Num(4.0)],
+        &[
+            Value::Tensor(Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap()),
+            Value::Num(0.0),
+            Value::Num(4.0),
+            Value::Num(1.0),
+        ],
         Some(2),
     )
-    .unwrap_err();
-    assert_eq!(err.identifier(), Some("RunMat:pwelch:InvalidNfft"));
+    .unwrap();
+    let (pxx, frequency) = output_pair(out);
+    assert_eq!(frequency, vec![0.0, 0.25, 0.5]);
+    assert!((pxx[0] - 8.0).abs() < 1e-12);
+    assert!(pxx[1..].iter().all(|power| power.abs() < 1e-12));
 }
 
 #[test]
@@ -771,19 +779,20 @@ fn explicit_empty_sample_rate_is_one_hertz_but_omitted_is_angular() {
 fn finite_tiny_and_huge_windows_preserve_normalized_psd() {
     for amplitude in [1e-200, 1e200] {
         let result = call(
-            Value::Num(1.0),
+            Value::Tensor(Tensor::new(vec![1.0; 2], vec![1, 2]).unwrap()),
             &[
-                Value::Tensor(Tensor::new(vec![amplitude], vec![1, 1]).unwrap()),
+                Value::Tensor(Tensor::new(vec![amplitude; 2], vec![1, 2]).unwrap()),
                 Value::Num(0.0),
-                Value::Num(1.0),
+                Value::Num(2.0),
                 Value::Num(1.0),
             ],
             Some(2),
         )
         .unwrap();
         let (pxx, frequency) = output_pair(result);
-        assert_eq!(frequency, vec![0.0]);
-        assert!((pxx[0] - 1.0).abs() < 1e-12);
+        assert_eq!(frequency, vec![0.0, 0.5]);
+        assert!((pxx[0] - 2.0).abs() < 1e-12);
+        assert!(pxx[1].abs() < 1e-12);
     }
     let scaled = call(
         Value::Num(1e200),
