@@ -6,161 +6,23 @@
 //! is the duty cycle expressed as a percentage: the output is `+1` over the
 //! first `duty/100 * 2*pi` of every period and `-1` over the remainder.
 
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SQUARE_ERROR_ARG_COUNT, SQUARE_ERROR_COMPLEX_UNSUPPORTED,
+    SQUARE_ERROR_DUTY_INVALID, SQUARE_ERROR_DUTY_RANGE, SQUARE_ERROR_INTERNAL,
+    SQUARE_ERROR_INVALID_INPUT, SQUARE_GPU_INPUT_EXTENSION, SQUARE_NONFLOATING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "square";
 const TWO_PI: f64 = 2.0 * PI;
-
-const SQUARE_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "square-nonfloating-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "square with an integer or logical argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SquareNonfloatingInputExtension"),
-};
-
-const SQUARE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "square-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interactive square gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SquareGpuInputExtension"),
-};
-
-pub const SQUARE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    SQUARE_NONFLOATING_INPUT_EXTENSION,
-    SQUARE_GPU_INPUT_EXTENSION,
-];
-
-const SQUARE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Square-wave output sampled at t.",
-}];
-
-const SQUARE_SIG_DEFAULT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "t",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sample times.",
-}];
-
-const SQUARE_SIG_DUTY_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times.",
-    },
-    BuiltinParamDescriptor {
-        name: "duty",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("50"),
-        description: "Duty cycle percentage in [0, 100].",
-    },
-];
-
-const SQUARE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = square(t)",
-        inputs: &SQUARE_SIG_DEFAULT_INPUTS,
-        outputs: &SQUARE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = square(t, duty)",
-        inputs: &SQUARE_SIG_DUTY_INPUTS,
-        outputs: &SQUARE_OUTPUT,
-    },
-];
-
-const SQUARE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.INVALID_INPUT",
-    identifier: Some("RunMat:square:InvalidInput"),
-    when: "Primary input is not numeric-real tensor/scalar compatible.",
-    message: "square: expected numeric input",
-};
-
-const SQUARE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:square:ComplexUnsupported"),
-    when: "Primary input includes complex values.",
-    message: "square: input must be real; complex values are not supported",
-};
-
-const SQUARE_ERROR_DUTY_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.DUTY_INVALID",
-    identifier: Some("RunMat:square:DutyInvalid"),
-    when: "Duty argument is not a real numeric scalar.",
-    message: "square: duty must be a real numeric scalar in [0, 100]",
-};
-
-const SQUARE_ERROR_DUTY_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.DUTY_RANGE",
-    identifier: Some("RunMat:square:DutyOutOfRange"),
-    when: "Duty argument lies outside [0, 100] or is non-finite.",
-    message: "square: duty must be a finite scalar in [0, 100]",
-};
-
-const SQUARE_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.ARG_COUNT",
-    identifier: Some("RunMat:square:ArgCount"),
-    when: "More than one optional argument is provided.",
-    message: "square: expected 1 or 2 arguments",
-};
-
-const SQUARE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.INTERNAL",
-    identifier: Some("RunMat:square:InternalError"),
-    when: "Internal tensor construction or GPU gather fails.",
-    message: "square: internal error",
-};
-
-const SQUARE_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    SQUARE_ERROR_INVALID_INPUT,
-    SQUARE_ERROR_COMPLEX_UNSUPPORTED,
-    SQUARE_ERROR_DUTY_INVALID,
-    SQUARE_ERROR_DUTY_RANGE,
-    SQUARE_ERROR_ARG_COUNT,
-    SQUARE_ERROR_INTERNAL,
-];
-
-pub const SQUARE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SQUARE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SQUARE_ERRORS,
-};
-
-const SQUARE_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "t", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The compatibility target documents single and double sample times. RunMat mode admits typed integers only when every value is exactly representable at the binary64 waveform boundary." }];
-const SQUARE_INTEGER_DUTY_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "duty", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The compatibility target documents single and double duty cycles. RunMat mode admits a typed integer scalar from 0 through 100 behind the nonfloating-input gate." }];
-pub const SQUARE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Y = square(integer_t)", inputs: &SQUARE_INTEGER_T_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer samples cross one checked binary64 phase boundary and produce a same-shaped double waveform. Automatic residency may gather transparently; explicit gpuArray input has its own extension gate." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = square(t, integer_duty)", inputs: &SQUARE_INTEGER_DUTY_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The scalar duty cycle controls the floating waveform threshold; output class and shape follow the supported t path." },
-];
 
 fn square_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     square_error_with_message(error.message, error)
@@ -220,13 +82,7 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
 
 #[runtime_builtin(
     name = "square",
-    category = "math/signal",
-    summary = "Generate periodic square waves with an optional duty-cycle argument.",
-    keywords = "square,waveform,signal processing,duty cycle,periodic",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::signal::square::SQUARE_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::square::SQUARE_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::square::SQUARE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::square"
 )]
 async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
@@ -359,7 +215,7 @@ fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntValue, LogicalArray};
 
     fn call(t: Value) -> BuiltinResult<Value> {
@@ -385,25 +241,16 @@ mod tests {
     }
 
     #[test]
-    fn square_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
     fn square_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("square builtin");
-        let descriptor = builtin.descriptor.expect("square descriptor");
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).unwrap();
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
+        let descriptor = entry.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = square(t)"));
         assert!(labels.contains(&"Y = square(t, duty)"));
