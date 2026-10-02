@@ -483,6 +483,7 @@ fn window_keyword(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::GpuGatherRetry;
     use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn first_unrepresentable_usize_double() -> f64 {

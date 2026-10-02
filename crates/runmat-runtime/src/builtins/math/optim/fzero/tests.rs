@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::math::optim::brent::interpolation_step_accepted;
 use futures::executor::block_on;
-use runmat_builtins::{FZERO_DESCRIPTOR, FZERO_EXTENSIONS, FZERO_INTEGER_CAPABILITIES};
+use runmat_builtins::FZERO_DESCRIPTOR;
 use runmat_value::{IntegerStorage, Tensor};
 use std::sync::Arc;
 

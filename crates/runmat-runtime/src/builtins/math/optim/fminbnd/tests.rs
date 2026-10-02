@@ -4,7 +4,6 @@ use futures::executor::block_on;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, FMINBND_DESCRIPTOR,
-    FMINBND_EXTENSIONS, FMINBND_INTEGER_CAPABILITIES,
 };
 use runmat_value::IntegerStorage;
 use runmat_value::Value as V;

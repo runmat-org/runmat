@@ -4,7 +4,7 @@ use futures::executor::block_on;
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::builtin_function_by_name;
-use runmat_value::IntegerStorage;
+use runmat_value::{IntegerStorage, NumericDType};
 
 fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
     let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
