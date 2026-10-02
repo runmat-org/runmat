@@ -75,7 +75,7 @@ impl IntegralOptionName {
         }
     }
 
-    pub const fn is_post_pin_tolerance_alias(self) -> bool {
+    pub const fn is_versioned_tolerance_alias(self) -> bool {
         matches!(self, Self::AbsoluteTolerance | Self::RelativeTolerance)
     }
 }

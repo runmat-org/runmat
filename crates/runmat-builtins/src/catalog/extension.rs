@@ -1,5 +1,17 @@
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub enum MatlabReleaseHalf {
+    A,
+    B,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct MatlabRelease {
+    pub year: u16,
+    pub half: MatlabReleaseHalf,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinExtensionMode {
     /// The form is rejected in the MATLAB profile with a compatibility error.
@@ -7,6 +19,9 @@ pub enum BuiltinExtensionMode {
     /// Both profiles accept the form, selecting their documented behavior.
     /// This is not an admission gate and has no rejection identifier.
     ProfileDependentBehavior,
+    /// Public form admitted by the pinned MATLAB profile once its release is
+    /// reached; earlier pins may still admit it in RunMat extension mode.
+    AvailableSince(MatlabRelease),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -20,13 +35,12 @@ pub struct BuiltinExtensionDescriptor {
 impl BuiltinExtensionDescriptor {
     pub fn validate_error_contract(&self) -> Result<(), &'static str> {
         match (self.mode, self.error_identifier) {
-            (BuiltinExtensionMode::RunMatOnly, Some(identifier))
-                if identifier.starts_with("RunMat:compatibility:") =>
-            {
-                Ok(())
-            }
+            (
+                BuiltinExtensionMode::RunMatOnly | BuiltinExtensionMode::AvailableSince(_),
+                Some(identifier),
+            ) if identifier.starts_with("RunMat:compatibility:") => Ok(()),
             (BuiltinExtensionMode::ProfileDependentBehavior, None) => Ok(()),
-            (BuiltinExtensionMode::RunMatOnly, _) => {
+            (BuiltinExtensionMode::RunMatOnly | BuiltinExtensionMode::AvailableSince(_), _) => {
                 Err("rejected extension forms require a RunMat:compatibility: error identifier")
             }
             (BuiltinExtensionMode::ProfileDependentBehavior, Some(_)) => {
@@ -58,6 +72,22 @@ mod tests {
                 true,
             ),
             (BuiltinExtensionMode::RunMatOnly, None, false),
+            (
+                BuiltinExtensionMode::AvailableSince(MatlabRelease {
+                    year: 2026,
+                    half: MatlabReleaseHalf::B,
+                }),
+                Some("RunMat:compatibility:Fixture"),
+                true,
+            ),
+            (
+                BuiltinExtensionMode::AvailableSince(MatlabRelease {
+                    year: 2026,
+                    half: MatlabReleaseHalf::B,
+                }),
+                None,
+                false,
+            ),
             (
                 BuiltinExtensionMode::RunMatOnly,
                 Some("RunMat:Fixture"),

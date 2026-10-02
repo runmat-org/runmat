@@ -140,8 +140,11 @@ pub const INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION: BuiltinExtensionDescriptor 
 pub const INTEGRAL_RENAMED_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "integral-renamed-tolerance-option",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "integral with post-pin renamed tolerance option names is a RunMat extension",
+        mode: BuiltinExtensionMode::AvailableSince(MatlabRelease {
+            year: 2026,
+            half: MatlabReleaseHalf::B,
+        }),
+        description: "integral renamed tolerance options require a newer compatibility release or RunMat extension mode",
         error_identifier: Some("RunMat:compatibility:IntegralRenamedToleranceExtension"),
     };
 pub const INTEGRAL_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [

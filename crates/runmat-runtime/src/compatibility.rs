@@ -1,7 +1,9 @@
 //! Active language compatibility policy for runtime builtin dispatch.
 
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{BuiltinExtensionDescriptor, BuiltinExtensionMode};
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, MatlabRelease, MatlabReleaseHalf,
+};
 pub use runmat_builtins::{SPARSE_EXTENSIONS, SPARSE_INTEGER_EXTENSION};
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
@@ -15,6 +17,28 @@ pub const MATLAB_COMPATIBILITY_RELEASE: &str = "R2026a";
 
 /// Numeric product version corresponding to `MATLAB_COMPATIBILITY_RELEASE`.
 pub const MATLAB_COMPATIBILITY_VERSION: &str = "26.1";
+
+fn pinned_release() -> Result<MatlabRelease, RuntimeError> {
+    let body = MATLAB_COMPATIBILITY_RELEASE
+        .strip_prefix('R')
+        .ok_or_else(invalid_release_pin)?;
+    let (year, half) = if let Some(year) = body.strip_suffix('a') {
+        (year, MatlabReleaseHalf::A)
+    } else if let Some(year) = body.strip_suffix('b') {
+        (year, MatlabReleaseHalf::B)
+    } else {
+        return Err(invalid_release_pin());
+    };
+    let year = year.parse().map_err(|_| invalid_release_pin())?;
+    Ok(MatlabRelease { year, half })
+}
+
+fn invalid_release_pin() -> RuntimeError {
+    build_runtime_error("invalid MATLAB compatibility release pin")
+        .with_identifier("RunMat:internal:InvalidCompatibilityPin")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
+}
 
 runmat_thread_local! {
     static RUNMAT_EXTENSIONS_ENABLED: Cell<bool> = const { Cell::new(false) };
@@ -62,6 +86,46 @@ pub fn ensure_builtin_extension_enabled(
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build());
     }
+    reject_unavailable_extension(extension, context)
+}
+
+/// Admit a catalog-declared public feature once the central compatibility
+/// release reaches its introduction. Earlier pins retain an explicit RunMat
+/// extension gate without changing the feature's catalog identity.
+pub fn ensure_builtin_feature_enabled(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    let BuiltinExtensionMode::AvailableSince(introduced) = extension.mode else {
+        return Err(invalid_feature_gate(context, extension));
+    };
+    if extension.validate_error_contract().is_err() {
+        return Err(invalid_feature_gate(context, extension));
+    }
+    if feature_available_at(pinned_release()?, introduced) {
+        return Ok(());
+    }
+    reject_unavailable_extension(extension, context)
+}
+
+fn feature_available_at(pin: MatlabRelease, introduced: MatlabRelease) -> bool {
+    pin >= introduced
+}
+
+fn invalid_feature_gate(context: &str, extension: &BuiltinExtensionDescriptor) -> RuntimeError {
+    build_runtime_error(format!(
+        "{context}: extension {} is not a valid release-feature admission gate",
+        extension.id
+    ))
+    .with_identifier("RunMat:internal:InvalidExtensionGate")
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .build()
+}
+
+fn reject_unavailable_extension(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
     if runmat_extensions_enabled() {
         return Ok(());
     }
@@ -163,6 +227,45 @@ impl Drop for RunMatExtensionsGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_feature_tracks_typed_pin_without_reclassifying_catalog_descriptor() {
+        let feature = BuiltinExtensionDescriptor {
+            id: "fixture-release-feature",
+            mode: BuiltinExtensionMode::AvailableSince(MatlabRelease {
+                year: 2026,
+                half: MatlabReleaseHalf::B,
+            }),
+            description: "Fixture future feature",
+            error_identifier: Some("RunMat:compatibility:FixtureFutureFeature"),
+        };
+        let current = pinned_release().expect("central release pin parses");
+        let BuiltinExtensionMode::AvailableSince(introduced) = feature.mode else {
+            unreachable!("fixture is versioned")
+        };
+        assert_eq!(
+            feature_available_at(current, introduced),
+            current >= introduced
+        );
+        assert!(feature_available_at(introduced, introduced));
+        assert!(feature_available_at(
+            MatlabRelease {
+                year: introduced.year + 1,
+                half: MatlabReleaseHalf::A,
+            },
+            introduced
+        ));
+        let _mode = push_runmat_extensions_enabled(false);
+        let admission = ensure_builtin_feature_enabled(&feature, "fixture");
+        if current < introduced {
+            assert_eq!(
+                admission.unwrap_err().identifier(),
+                feature.error_identifier
+            );
+        } else {
+            assert!(admission.is_ok());
+        }
+    }
 
     #[test]
     fn extension_gate_rejects_profile_behavior_misuse_in_both_profiles() {

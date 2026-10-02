@@ -375,8 +375,8 @@ fn decode_option_name(text: &str) -> BuiltinResult<IntegralOptionName> {
             format!("unsupported option {text}"),
         )
     })?;
-    if identity.is_post_pin_tolerance_alias() {
-        crate::compatibility::ensure_builtin_extension_enabled(
+    if identity.is_versioned_tolerance_alias() {
+        crate::compatibility::ensure_builtin_feature_enabled(
             &INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
             NAME,
         )?;
@@ -1608,7 +1608,7 @@ mod tests {
     }
 
     #[test]
-    fn renamed_tolerance_names_are_typed_post_pin_extensions_with_ordered_overrides() {
+    fn renamed_tolerance_names_follow_typed_release_gate_and_ordered_overrides() {
         let call = || {
             block_on(integral_builtin(
                 Value::FunctionHandle("__integral_square".into()),
