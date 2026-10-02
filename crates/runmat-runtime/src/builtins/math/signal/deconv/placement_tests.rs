@@ -15,7 +15,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use crate::builtins::common::test_support;
-use crate::builtins::math::signal::common::convolution::placement::tests::PlacementWitnessService;
+use crate::builtins::math::signal::common::convolution::placement::{
+    tests::PlacementWitnessService, LateUploadAdmissionError,
+};
 
 use super::deconv_builtin;
 
@@ -221,6 +223,17 @@ fn exact_late_upload_rejection_precedes_any_result_upload() {
         error.identifier(),
         Some("RunMat:Placement:LateUploadAdmissionFailed")
     );
+    let source = error
+        .source
+        .as_deref()
+        .and_then(|cause| cause.downcast_ref::<LateUploadAdmissionError>());
+    assert!(matches!(
+        source,
+        Some(LateUploadAdmissionError::ProviderRejected { rejection })
+            if rejection.code == ProviderRejectionCode::UnsupportedOperation
+                && rejection.detail.as_deref()
+                    == Some("deconv.fixture.exact_upload_rejected")
+    ));
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
     assert_eq!(service.selections(), 1);
     assert!(service.feedback().is_empty());
