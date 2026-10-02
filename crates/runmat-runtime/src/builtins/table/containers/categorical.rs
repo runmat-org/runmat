@@ -885,19 +885,11 @@ fn categorical_object_labels(object: &ObjectInstance) -> BuiltinResult<Vec<Strin
 pub(crate) fn categorical_observation_labels(
     object: &ObjectInstance,
 ) -> BuiltinResult<Vec<Option<String>>> {
-    let categories = categorical_categories(object)?;
-    let codes = categorical_codes(object)?;
-    (0..codes.len())
+    let view = categorical_label_view(object)?;
+    (0..view.len())
         .map(|index| {
-            let code = codes
-                .numeric_value_at(index)
-                .ok_or_else(|| invalid_variable("categorical: invalid numeric code storage"))?;
-            if code.materialize_f64().is_nan() {
-                return Ok(None);
-            }
-            category_label_for_numeric_code(code, &categories)
-                .map(Some)
-                .ok_or_else(|| invalid_variable("categorical: category code is out of range"))
+            view.observation_label_at(index)
+                .map(|label| label.map(str::to_owned))
         })
         .collect()
 }

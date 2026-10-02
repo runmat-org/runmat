@@ -9,7 +9,9 @@ use crate::builtins::common::grouping_keys::{
     group_key_work_units, GroupIndex, GroupIndexBuildError, KeyAtom, KeyOrder,
 };
 pub(super) use labels::{char_rows, number_label, numeric_scalar_label};
-use labels::{group_label_text, group_labels, validate_group_like, GroupLabel};
+use labels::{
+    group_label_text, group_labels, group_labels_cooperative, CooperativeLabelError, GroupLabel,
+};
 
 pub(super) fn validate_known_host_group(
     group: &Value,
@@ -73,7 +75,19 @@ pub(super) async fn build_box_layout_cooperative(
         None => ungrouped_series(&tensor, cooperation).await?,
     };
     if let Some(color_group) = &options.color_group {
-        validate_group_like(&tensor, color_group)?;
+        match group_labels_cooperative(color_group, tensor_len, cooperation).await {
+            Ok(_) => {}
+            Err(CooperativeLabelError::Semantic(err)) if tensor.rows > 1 && tensor.cols > 1 => {
+                group_labels_cooperative(color_group, tensor.rows, cooperation)
+                    .await
+                    .map(|_| ())
+                    .map_err(|second| match second {
+                        CooperativeLabelError::Semantic(_) => err,
+                        CooperativeLabelError::Service(error) => error,
+                    })?;
+            }
+            Err(err) => return Err(err.into_runtime()),
+        }
     }
     let mut nonmissing = Vec::new();
     nonmissing
@@ -153,10 +167,15 @@ async fn grouped_series(
     cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<Vec<(GroupLabel, Vec<f64>)>> {
     let tensor_len = tensor::tensor_element_len(tensor);
-    let labels = match group_labels(&group, tensor_len) {
+    let labels = match group_labels_cooperative(&group, tensor_len, cooperation).await {
         Ok(labels) => labels,
-        Err(err) if tensor.rows > 1 && tensor.cols > 1 => {
-            let row_labels = group_labels(&group, tensor.rows).map_err(|_| err)?;
+        Err(CooperativeLabelError::Semantic(err)) if tensor.rows > 1 && tensor.cols > 1 => {
+            let row_labels = group_labels_cooperative(&group, tensor.rows, cooperation)
+                .await
+                .map_err(|second| match second {
+                    CooperativeLabelError::Semantic(_) => err,
+                    CooperativeLabelError::Service(error) => error,
+                })?;
             let mut labels = Vec::new();
             labels
                 .try_reserve_exact(tensor_len)
@@ -171,7 +190,7 @@ async fn grouped_series(
             }
             labels
         }
-        Err(err) => return Err(err),
+        Err(err) => return Err(err.into_runtime()),
     };
     if labels.len() != tensor_len {
         return Err(invalid(

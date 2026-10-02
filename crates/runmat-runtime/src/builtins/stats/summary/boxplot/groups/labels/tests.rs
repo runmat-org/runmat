@@ -1,5 +1,11 @@
 use super::*;
+use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
+use runmat_value::{CharArray, ObjectInstance, StringArray};
 use runmat_value::{IntValue, IntegerStorage};
+use std::num::NonZeroU64;
+use std::rc::Rc;
 
 #[test]
 fn scalar_group_label_reads_typed_integer_storage_without_double_mirror() {
@@ -11,4 +17,94 @@ fn scalar_group_label_reads_typed_integer_storage_without_double_mirror() {
         label.as_slice(),
         [KeyAtom::Integer(IntValue::U16(42))]
     ));
+}
+
+#[test]
+fn nested_factor_labels_have_identical_sync_and_cooperative_identity() {
+    let first = Value::StringArray(
+        runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap(),
+    );
+    let second = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![(1u64 << 53) + 1, (1u64 << 53) + 2]),
+            vec![2, 1],
+        )
+        .unwrap(),
+    );
+    let group = Value::Cell(CellArray::new(vec![first, second], 1, 2).unwrap());
+    let expected = group_labels(&group, 2).unwrap();
+    let mut cooperation = super::super::super::cooperation::BoxplotCooperation::new(None);
+    let actual =
+        futures::executor::block_on(group_labels_cooperative(&group, 2, &mut cooperation)).unwrap();
+    assert_eq!(actual, expected);
+    assert!(matches!(
+        actual[0].as_deref(),
+        Some([KeyAtom::Text(text), KeyAtom::Integer(IntValue::U64(value))])
+            if text == "a" && *value == (1u64 << 53) + 1
+    ));
+}
+
+#[test]
+fn cooperative_label_decode_cancels_within_nested_cell_before_completion() {
+    let group = Value::Cell(
+        CellArray::new(
+            vec![Value::StringArray(
+                runmat_value::StringArray::new(
+                    (0..128).map(|index| format!("group{index}")).collect(),
+                    vec![128, 1],
+                )
+                .unwrap(),
+            )],
+            1,
+            1,
+        )
+        .unwrap(),
+    );
+    let source = Rc::new(CancellationSource::new());
+    let cancel_on_turn = source.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            cancel_on_turn.cancel(CancellationReason::User);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let mut cooperation = super::super::super::cooperation::BoxplotCooperation::with_budget(budget);
+    let error =
+        futures::executor::block_on(group_labels_cooperative(&group, 128, &mut cooperation))
+            .expect_err("cancelled recursive labels cannot publish a vector")
+            .into_runtime();
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}
+
+#[test]
+fn character_and_categorical_labels_keep_sync_async_policy_and_errors() {
+    let chars = Value::CharArray(CharArray::new(vec!['A', '1', 'B', '2'], 2, 2).unwrap());
+    let expected = group_labels(&chars, 2).unwrap();
+    let mut cooperation = super::super::super::cooperation::BoxplotCooperation::new(None);
+    let actual =
+        futures::executor::block_on(group_labels_cooperative(&chars, 2, &mut cooperation)).unwrap();
+    assert_eq!(actual, expected);
+    assert!(matches!(actual[0].as_deref(), Some([KeyAtom::Text(text)]) if text == "A1"));
+    assert!(matches!(actual[1].as_deref(), Some([KeyAtom::Text(text)]) if text == "B2"));
+
+    let mut categorical = ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
+    categorical.properties.insert(
+        "Categories".into(),
+        Value::StringArray(StringArray::new(vec!["one".into(), "two".into()], vec![2, 1]).unwrap()),
+    );
+    categorical.properties.insert(
+        "Codes".into(),
+        Value::Tensor(Tensor::new(vec![f64::NAN, 2.0, 3.0], vec![3, 1]).unwrap()),
+    );
+    let categorical = Value::Object(categorical);
+    let sync = group_labels(&categorical, 2).unwrap_err();
+    let async_error =
+        futures::executor::block_on(group_labels_cooperative(&categorical, 2, &mut cooperation))
+            .unwrap_err()
+            .into_runtime();
+    assert_eq!(sync.message, async_error.message);
+    assert!(sync.source.is_some());
+    assert!(async_error.source.is_some());
 }

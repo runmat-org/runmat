@@ -38,6 +38,21 @@ impl<'a> CategoricalLabelView<'a> {
             .ok_or_else(|| invalid_variable("categorical: invalid numeric code storage"))?;
         Ok(category_label_ref_for_numeric_code(code, self.categories).unwrap_or_default())
     }
+
+    /// Preserve the distinction between undefined observations and malformed
+    /// nonmissing codes without allocating an owned label vector first.
+    pub(crate) fn observation_label_at(&self, index: usize) -> BuiltinResult<Option<&'a str>> {
+        let code = self
+            .codes
+            .numeric_value_at(index)
+            .ok_or_else(|| invalid_variable("categorical: invalid numeric code storage"))?;
+        if code.materialize_f64().is_nan() {
+            return Ok(None);
+        }
+        category_label_ref_for_numeric_code(code, self.categories)
+            .map(Some)
+            .ok_or_else(|| invalid_variable("categorical: category code is out of range"))
+    }
 }
 
 #[cfg(test)]
@@ -76,5 +91,25 @@ mod tests {
                 .unwrap(),
             "two"
         );
+    }
+
+    #[test]
+    fn observation_view_distinguishes_undefined_from_invalid_nonmissing_code() {
+        let codes = Tensor::new(vec![f64::NAN, 2.0, 3.0], vec![3, 1]).unwrap();
+        let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
+        object
+            .properties
+            .insert("Codes".into(), Value::Tensor(codes));
+        object.properties.insert(
+            "Categories".into(),
+            Value::StringArray(
+                StringArray::new(vec!["one".into(), "two".into()], vec![2, 1]).unwrap(),
+            ),
+        );
+        let view = categorical_label_view(&object).unwrap();
+        assert_eq!(view.observation_label_at(0).unwrap(), None);
+        assert_eq!(view.observation_label_at(1).unwrap(), Some("two"));
+        assert!(view.observation_label_at(2).is_err());
+        assert!(categorical_observation_labels(&object).is_err());
     }
 }
