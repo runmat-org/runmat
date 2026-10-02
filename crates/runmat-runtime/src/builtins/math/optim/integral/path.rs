@@ -9,6 +9,7 @@ use super::{
     integral_error_with_detail, integral_map_error, scalar_bound_host, IntegralEvaluator,
     IntegralOptionName, IntegralOptions,
 };
+use crate::builtins::common::cooperative_sort::{SortProgress, SortResourceError, StableSortWork};
 use crate::builtins::math::optim::quadrature::{
     integrate_open, OpenDomain, OpenSegment, QuadratureCooperation,
 };
@@ -70,20 +71,17 @@ pub(super) async fn real_segments(
     }
     let lo = lower.min(upper);
     let hi = lower.max(upper);
-    let ascending = lower <= upper;
-    let mut directed = lower;
+    let mut sorted = Vec::new();
+    sorted
+        .try_reserve_exact(waypoints.len())
+        .map_err(resource_error)?;
     for (index, point) in waypoints.iter().enumerate() {
         if point.im != 0.0 || !point.re.is_finite() || point.re < lo || point.re > hi {
             return Err(invalid_path(
                 "real Waypoints must be finite and lie within the integration interval",
             ));
         }
-        if (ascending && point.re < directed) || (!ascending && point.re > directed) {
-            return Err(invalid_path(
-                "real Waypoints must be monotone along the integration path",
-            ));
-        }
-        directed = point.re;
+        sorted.push(point.re);
         if (index + 1).is_multiple_of(PATH_CHUNK) {
             cooperation.completed(PATH_CHUNK as u64).await?;
         }
@@ -91,6 +89,20 @@ pub(super) async fn real_segments(
     cooperation
         .completed((waypoints.len() % PATH_CHUNK) as u64)
         .await?;
+    let mut sort =
+        StableSortWork::new(&mut sorted, |left: &f64, right: &f64| left.total_cmp(right));
+    loop {
+        let progress = sort
+            .advance()
+            .map_err(|SortResourceError(source)| resource_error(source))?;
+        let units = match progress {
+            SortProgress::Pending(units) | SortProgress::Complete(units) => units,
+        };
+        cooperation.completed(units).await?;
+        if matches!(progress, SortProgress::Complete(_)) {
+            break;
+        }
+    }
 
     let capacity = waypoints
         .len()
@@ -101,14 +113,9 @@ pub(super) async fn real_segments(
         .try_reserve_exact(capacity)
         .map_err(resource_error)?;
     let mut start = lo;
-    for index in 0..waypoints.len() {
-        let point = if ascending {
-            waypoints[index]
-        } else {
-            waypoints[waypoints.len() - 1 - index]
-        };
-        push_span(&mut segments, start, point.re);
-        start = point.re;
+    for (index, &point) in sorted.iter().enumerate() {
+        push_span(&mut segments, start, point);
+        start = point;
         if (index + 1).is_multiple_of(PATH_CHUNK) {
             cooperation.completed(PATH_CHUNK as u64).await?;
         }
@@ -180,7 +187,7 @@ mod tests {
     use crate::builtins::math::optim::quadrature::QuadratureIdentity;
 
     #[test]
-    fn real_waypoints_keep_monotone_order_and_skip_duplicate_intervals() {
+    fn real_waypoints_normalize_order_and_skip_duplicate_intervals() {
         let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Integral, None);
         let segments = futures::executor::block_on(real_segments(
             1.0,
@@ -212,13 +219,17 @@ mod tests {
             &mut cooperation,
         ))
         .is_err());
-        assert!(futures::executor::block_on(real_segments(
+        let normalized = futures::executor::block_on(real_segments(
             0.0,
             1.0,
             &[Complex::new(0.75, 0.0), Complex::new(0.25, 0.0)],
             &mut cooperation,
         ))
-        .is_err());
+        .expect("unordered real waypoints form an initial mesh");
+        assert_eq!(normalized.len(), 3);
+        assert_eq!((normalized[0].a, normalized[0].b), (0.0, 0.25));
+        assert_eq!((normalized[1].a, normalized[1].b), (0.25, 0.75));
+        assert_eq!((normalized[2].a, normalized[2].b), (0.75, 1.0));
     }
 
     #[test]

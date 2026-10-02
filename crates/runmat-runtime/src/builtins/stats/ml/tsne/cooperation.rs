@@ -18,22 +18,18 @@ impl TsneCooperation {
         values: &mut Vec<T>,
         compare: impl FnMut(&T, &T) -> Ordering,
     ) -> BuiltinResult<()> {
-        use crate::builtins::stats::summary::order_stats::{
-            CooperativeSortError, SortProgress, StableSortWork,
+        use crate::builtins::common::cooperative_sort::{
+            SortProgress, SortResourceError, StableSortWork,
         };
 
         self.completed(0).await?;
         let mut work = StableSortWork::new(values, compare);
         loop {
-            let progress = work.advance().map_err(|error| match error {
-                CooperativeSortError::Resource(source) => super::internal_with_source(
+            let progress = work.advance().map_err(|SortResourceError(source)| {
+                super::internal_with_source(
                     "tsne: sorted observations exceed available memory",
                     source,
-                ),
-                #[cfg(any(feature = "plot-core", test))]
-                CooperativeSortError::Service(source) => {
-                    with_tsne_context(source.into_runtime_error())
-                }
+                )
             })?;
             let units = match progress {
                 SortProgress::Pending(units) | SortProgress::Complete(units) => units,

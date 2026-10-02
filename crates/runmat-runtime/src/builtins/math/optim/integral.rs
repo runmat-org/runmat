@@ -1190,8 +1190,8 @@ mod tests {
     }
 
     #[test]
-    fn monotone_real_waypoints_share_one_scalar_and_array_integration_path() {
-        let waypoints = Tensor::new(vec![0.25, 0.75], vec![1, 2]).expect("waypoints");
+    fn unordered_real_waypoints_share_one_scalar_and_array_integration_path() {
+        let waypoints = Tensor::new(vec![0.75, 0.25, 0.25], vec![1, 3]).expect("waypoints");
         let scalar = block_on(integral_builtin(
             Value::FunctionHandle("__integral_square".into()),
             Value::Num(0.0),

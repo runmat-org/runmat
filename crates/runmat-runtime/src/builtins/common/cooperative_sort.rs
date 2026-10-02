@@ -1,12 +1,14 @@
 //! Resumable stable ordering of caller-owned associated values.
 
 use std::cmp::Ordering;
+use std::collections::TryReserveError;
 
-use super::CooperativeSortError;
+#[derive(Debug)]
+pub(crate) struct SortResourceError(pub(crate) TryReserveError);
 
 // One uninterrupted library sort is bounded; the execution service owns
 // scheduling policy and the work quantum.
-pub(super) const RUN_LEN: usize = 256;
+pub(crate) const RUN_LEN: usize = 256;
 const MAX_MERGE_ELEMENTS: u64 = 4096;
 
 #[derive(Clone, Copy)]
@@ -50,7 +52,7 @@ impl<'a, T: Copy, F: FnMut(&T, &T) -> Ordering> StableSortWork<'a, T, F> {
         }
     }
 
-    pub(crate) fn advance(&mut self) -> Result<SortProgress, CooperativeSortError> {
+    pub(crate) fn advance(&mut self) -> Result<SortProgress, SortResourceError> {
         let mut work = 0_u64;
         while work < MAX_MERGE_ELEMENTS {
             match self.phase {
@@ -76,7 +78,7 @@ impl<'a, T: Copy, F: FnMut(&T, &T) -> Ordering> StableSortWork<'a, T, F> {
                     if self.merged.is_empty() && self.cursor >= self.values.len() {
                         self.merged
                             .try_reserve_exact(self.values.len())
-                            .map_err(CooperativeSortError::Resource)?;
+                            .map_err(SortResourceError)?;
                         self.cursor = 0;
                         self.begin_segment();
                         continue;
@@ -137,7 +139,7 @@ impl<'a, T: Copy, F: FnMut(&T, &T) -> Ordering> StableSortWork<'a, T, F> {
 pub(crate) fn stable_sort_by_sync<T: Copy>(
     values: &mut Vec<T>,
     compare: impl FnMut(&T, &T) -> Ordering,
-) -> Result<(), CooperativeSortError> {
+) -> Result<(), SortResourceError> {
     let mut work = StableSortWork::new(values, compare);
     loop {
         match work.advance()? {

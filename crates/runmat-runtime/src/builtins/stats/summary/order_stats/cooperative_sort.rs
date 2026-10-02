@@ -6,12 +6,12 @@ use std::cmp::Ordering;
 #[cfg(any(feature = "plot-core", test))]
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 
-mod generic;
 #[cfg(any(feature = "plot-core", test))]
-pub(crate) use generic::stable_sort_by_sync;
+use crate::builtins::common::cooperative_sort::{
+    stable_sort_by_sync, SortProgress, SortResourceError, StableSortWork,
+};
 #[cfg(test)]
-use generic::RUN_LEN;
-pub(crate) use generic::{SortProgress, StableSortWork};
+use crate::builtins::common::cooperative_sort::RUN_LEN;
 
 #[derive(Debug)]
 pub(crate) enum CooperativeSortError {
@@ -36,13 +36,16 @@ pub(crate) async fn stable_sort_non_nan_f64(
     if budget.is_none() {
         return stable_sort_by_sync(values, |left: &f64, right: &f64| {
             left.partial_cmp(right).unwrap_or(Ordering::Equal)
-        });
+        })
+        .map_err(|SortResourceError(source)| CooperativeSortError::Resource(source));
     }
     let mut work = StableSortWork::new(values, |left: &f64, right: &f64| {
         left.partial_cmp(right).unwrap_or(Ordering::Equal)
     });
     loop {
-        let progress = work.advance()?;
+        let progress = work
+            .advance()
+            .map_err(|SortResourceError(source)| CooperativeSortError::Resource(source))?;
         let units = match progress {
             SortProgress::Pending(units) | SortProgress::Complete(units) => units,
         };
