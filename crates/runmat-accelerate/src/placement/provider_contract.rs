@@ -326,7 +326,7 @@ pub(crate) fn in_process_feasibility(
     {
         return result;
     }
-    let snapshot = in_process_capability_snapshot(provider);
+    let snapshot = exact_float_upload_snapshot(in_process_capability_snapshot(provider), query);
     if let Some(result) = logarithm_roots::feasibility(
         real_unary::HookProfile::InProcess,
         provider.precision(),
@@ -403,7 +403,8 @@ pub(crate) fn wgpu_feasibility(
     {
         return result;
     }
-    let snapshot = wgpu_capability_snapshot(provider, max_buffer_bytes);
+    let snapshot =
+        exact_float_upload_snapshot(wgpu_capability_snapshot(provider, max_buffer_bytes), query);
     if let Some(result) = logarithm_roots::feasibility(
         real_unary::HookProfile::Wgpu,
         provider.precision(),
@@ -482,6 +483,64 @@ pub(crate) fn dense_capability_snapshot(
             transactional_results: true,
         },
     }
+}
+
+/// Numeric upload stores the host payload's float class verbatim, even when
+/// the provider's compute precision differs. Advertise that extra class only
+/// for an exact or bounded real-float upload query: widening the general snapshot would
+/// incorrectly admit F32 operands to F64-only compute hooks (or vice versa).
+fn exact_float_upload_snapshot(
+    mut snapshot: ProviderCapabilitySnapshot,
+    query: &ProviderFeasibilityQuery,
+) -> ProviderCapabilitySnapshot {
+    let exact = !query.inputs.is_empty()
+        && query.inputs.len() == query.outputs.len()
+        && query
+            .inputs
+            .iter()
+            .zip(&query.outputs)
+            .all(|(input, output)| {
+                input.element_type == output.element_type
+                    && matches!(
+                        input.element_type,
+                        ProviderElementType::F32 | ProviderElementType::F64
+                    )
+                    && input.storage == ProviderStorage::DenseReal
+                    && output.storage == ProviderStorage::DenseReal
+                    && input.layout == ProviderLayout::ColumnMajorContiguous
+                    && output.layout == ProviderLayout::ColumnMajorContiguous
+                    && input.shape == output.shape
+                    && input.residency == ProviderResidency::Host
+                    && output.residency == ProviderResidency::Device
+            });
+    let bounded = query.inputs.is_empty()
+        && query.outputs.is_empty()
+        && query
+            .workload
+            .transfer_output_bounds
+            .as_ref()
+            .is_some_and(|bounds| {
+                !bounds.is_empty()
+                    && bounds.iter().all(|bound| {
+                        matches!(
+                            bound.element_type,
+                            ProviderElementType::F32 | ProviderElementType::F64
+                        ) && bound.storage == ProviderStorage::DenseReal
+                            && bound.layout == ProviderLayout::ColumnMajorContiguous
+                            && bound.residency == ProviderResidency::Device
+                    })
+            });
+    if query.operation.0 == "transfer.upload"
+        && query.family == ProviderOperationFamily::Upload
+        && (exact || bounded)
+    {
+        for class in [ProviderElementType::F32, ProviderElementType::F64] {
+            if !snapshot.element_types.contains(&class) {
+                snapshot.element_types.push(class);
+            }
+        }
+    }
+    snapshot
 }
 
 pub(crate) fn dense_feasibility(
@@ -702,5 +761,68 @@ mod tests {
             dense_feasibility(&snapshot, &query),
             ProviderFeasibility::Rejected { .. }
         ));
+    }
+
+    #[test]
+    fn exact_single_upload_preserves_float_class_without_widening_compute() {
+        use crate::simple_provider::InProcessProvider;
+        use runmat_accelerate_api::observation::ProviderObservationCapability;
+        use runmat_accelerate_api::ProviderTransferOutputBound;
+
+        let provider = InProcessProvider::new();
+        let host = representation(ProviderElementType::F32);
+        let mut device = host.clone();
+        device.residency = ProviderResidency::Device;
+        let upload = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("transfer.upload"),
+            family: ProviderOperationFamily::Upload,
+            inputs: vec![host.clone()],
+            outputs: vec![device.clone()],
+            workload: ProviderWorkload {
+                requested_outputs: Some(1),
+                ..Default::default()
+            },
+        };
+        let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(&upload)
+        else {
+            panic!("actual InProcess F32 upload must be feasible");
+        };
+        assert_eq!(estimate.output_bytes, Some(4 * 4 * 4));
+        assert!(matches!(
+            provider.operation_observation_capability(&upload),
+            ProviderObservationCapability::Supported(_)
+        ));
+
+        let mut invalid = upload.clone();
+        invalid.outputs[0].shape = vec![2, 8];
+        assert!(!provider.query_feasibility(&invalid).is_supported());
+
+        let compute = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("legacy.elementwise"),
+            family: ProviderOperationFamily::Elementwise,
+            inputs: vec![device.clone()],
+            outputs: vec![device],
+            workload: ProviderWorkload::default(),
+        };
+        assert!(!provider.query_feasibility(&compute).is_supported());
+
+        let bounded = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("transfer.upload"),
+            family: ProviderOperationFamily::Upload,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            workload: ProviderWorkload {
+                requested_outputs: Some(1),
+                transfer_output_bounds: Some(vec![ProviderTransferOutputBound {
+                    element_type: ProviderElementType::F32,
+                    storage: ProviderStorage::DenseReal,
+                    layout: ProviderLayout::ColumnMajorContiguous,
+                    residency: ProviderResidency::Device,
+                    max_elements: 16,
+                }]),
+                ..Default::default()
+            },
+        };
+        assert!(provider.query_feasibility(&bounded).is_supported());
     }
 }
