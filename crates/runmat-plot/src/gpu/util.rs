@@ -188,7 +188,12 @@ async fn copy_readback_mapped<T>(
         // Even an empty export carries a device and allocation lease. Check
         // both before reporting success, without creating staging work.
         access
-            .with_shared(|emission| buffer.buffer(emission).map(|_| ()))
+            .with_shared(|emission| {
+                buffer
+                    .buffer(emission)
+                    .map(|_| ())
+                    .map_err(PlotReadbackError::Access)
+            })
             .map_err(PlotReadbackError::Access)??;
         return decode(&[]);
     }
