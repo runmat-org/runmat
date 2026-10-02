@@ -57,7 +57,10 @@ impl SelectedConvolution {
 
     fn finish(self, published: bool, error: Option<&crate::RuntimeError>) {
         let status = match error {
-            None if published => WholeWorkObservationOutcome::Success,
+            // Hook return and output adoption do not prove asynchronous
+            // provider completion. Until the convolution receipt is wired
+            // end-to-end, a successful call cannot train a duration profile.
+            None if published => WholeWorkObservationOutcome::Abandoned,
             None => WholeWorkObservationOutcome::Abandoned,
             Some(error)
                 if self.runtime.is_cancelled()
@@ -195,6 +198,16 @@ pub(crate) fn select_pair(
             ..ProviderWorkload::default()
         },
     };
+    // Current WGPU convolution only proves enqueue, and the in-process
+    // implementation has no complete-call observation declaration. Preserve
+    // their existing execution path until a provider-owned receipt tracks
+    // this exact convolution route through completion and publication.
+    if !matches!(
+        provider.operation_observation_capability(&query),
+        runmat_accelerate_api::observation::ProviderObservationCapability::Supported(_)
+    ) {
+        return Ok(None);
+    }
     let feasibility = provider.query_feasibility(&query);
     let capability = provider.capability_snapshot();
     let provider_digest =
