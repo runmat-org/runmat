@@ -311,13 +311,12 @@ fn work(
             "convolution.peak_bytes_overflow",
         );
     };
+    // This is a single-allocation limit, not total free device memory. The
+    // shared placement snapshot admits the aggregate live peak separately.
     if provider
         .capability_snapshot()
         .max_allocation_bytes
-        .is_some_and(|limit| {
-            largest_route_allocation > limit
-                || estimate.transient_bytes.is_some_and(|peak| peak > limit)
-        })
+        .is_some_and(|limit| largest_route_allocation > limit)
     {
         return reject(
             ProviderRejectionCode::ResourceLimit,

@@ -229,7 +229,7 @@ fn capability_inventory_matches_implemented_hooks() {
 }
 
 #[test]
-fn checked_peak_obeys_a_known_provider_memory_limit() {
+fn checked_peak_does_not_misuse_a_per_allocation_limit() {
     let source = crate::simple_provider::InProcessProvider::new();
     let signal = source
         .upload(&HostTensorView {
@@ -268,16 +268,10 @@ fn checked_peak_obeys_a_known_provider_memory_limit() {
         .as_mut()
         .unwrap()
         .input_backings = Some(backing);
-    let insufficient = GeometryProvider {
-        memory_limit: Some(135),
-        precision: ProviderPrecision::F64,
-    };
-    assert_eq!(
-        code(validate(&insufficient, true, &request).unwrap()),
-        ProviderRejectionCode::ResourceLimit
-    );
     let exact = GeometryProvider {
-        memory_limit: Some(136),
+        // Each allocation is at most 56 bytes, while the route has 136 bytes
+        // live in aggregate. The latter is not a single-buffer limit.
+        memory_limit: Some(100),
         precision: ProviderPrecision::F64,
     };
     assert_eq!(
