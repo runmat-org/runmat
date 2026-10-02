@@ -15,7 +15,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::builtins::math::signal::common::SignalCooperation;
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::deconv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -85,9 +86,14 @@ fn deconv_error_with_source(
 #[runtime_builtin(
     name = "deconv",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
-async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
+async fn deconv_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    numerator: Value,
+    denominator: Value,
+) -> crate::BuiltinResult<Value> {
     let requested = crate::output_count::current_output_count();
     if matches!(requested, Some(count) if count > 2) {
         return Err(build_runtime_error(DECONV_ERROR_TOO_MANY_OUTPUTS.message)
@@ -99,7 +105,13 @@ async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinR
             )
             .build());
     }
-    let mut outputs = evaluate_requested(numerator, denominator, requested.unwrap_or(1)).await?;
+    let mut outputs = evaluate_requested(
+        numerator,
+        denominator,
+        requested.unwrap_or(1),
+        runtime.as_ref(),
+    )
+    .await?;
     match requested {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(count) => {
@@ -115,7 +127,7 @@ async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinR
 
 /// Evaluate `deconv` and retain both outputs for multi-value contexts.
 pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
-    let mut outputs = evaluate_requested(numerator, denominator, 2).await?;
+    let mut outputs = evaluate_requested(numerator, denominator, 2, None).await?;
     Ok(DeconvEval {
         quotient: outputs.quotient.take().ok_or_else(deconv_missing_output)?,
         remainder: outputs.remainder.take().ok_or_else(deconv_missing_output)?,
@@ -138,6 +150,7 @@ async fn evaluate_requested(
     numerator: Value,
     denominator: Value,
     requested: usize,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<RequestedDeconvOutputs> {
     ensure_extensions(&numerator)?;
     ensure_extensions(&denominator)?;
@@ -153,6 +166,8 @@ async fn evaluate_requested(
     )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&numerator, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&denominator, BUILTIN_NAME)?;
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     let integer_or_logical = [&numerator, &denominator]
         .iter()
         .any(|value| value_is_integer_or_logical(value));
@@ -200,7 +215,8 @@ async fn evaluate_requested(
     let num_input = convert_value(numerator).await?;
     let den_input = convert_value(denominator).await?;
 
-    let (quotient_raw, remainder_raw) = polynomial_division(&num_input.data, &den_input.data)?;
+    let (quotient_raw, remainder_raw) =
+        polynomial_division(&num_input.data, &den_input.data, &mut cooperation).await?;
 
     let orientation = orientation_from_hint(num_input.hint);
     let mut quotient = (requested >= 1)
@@ -466,9 +482,10 @@ fn orientation_from_hint(hint: OrientationHint) -> Orientation {
 
 type PolyDivision = (Vec<Complex<f64>>, Vec<Complex<f64>>);
 
-fn polynomial_division(
+async fn polynomial_division(
     numerator: &[Complex<f64>],
     denominator: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PolyDivision> {
     if denominator.is_empty() {
         return Err(deconv_error_with_detail(
@@ -477,7 +494,7 @@ fn polynomial_division(
         ));
     }
 
-    let (den_trim, _) = trim_leading_zeros(denominator);
+    let den_trim = trim_leading_zeros(denominator, cooperation).await?;
     if den_trim.is_empty() {
         return Err(deconv_error_with_detail(
             &DECONV_ERROR_DENOMINATOR_INVALID,
@@ -485,64 +502,141 @@ fn polynomial_division(
         ));
     }
 
-    let (num_trim, num_all_zero) = trim_leading_zeros(numerator);
-    if num_all_zero {
-        return Ok((vec![Complex::new(0.0, 0.0)], numerator.to_vec()));
+    let num_trim = trim_leading_zeros(numerator, cooperation).await?;
+    if num_trim.is_empty() {
+        return Ok((
+            vec![Complex::new(0.0, 0.0)],
+            copy_coefficients(numerator, cooperation).await?,
+        ));
     }
 
     if num_trim.len() < den_trim.len() {
-        return Ok((vec![Complex::new(0.0, 0.0)], numerator.to_vec()));
+        return Ok((
+            vec![Complex::new(0.0, 0.0)],
+            copy_coefficients(numerator, cooperation).await?,
+        ));
     }
 
     let divisor_lead = den_trim[0];
 
     let q_len = num_trim.len() - den_trim.len() + 1;
-    let mut quotient = vec![Complex::new(0.0, 0.0); q_len];
-    let mut working = num_trim.clone();
+    let mut quotient = zero_coefficients(q_len)?;
+    let mut working = copy_coefficients(num_trim, cooperation).await?;
+    let mut work = 0_u64;
 
     for k in 0..q_len {
         let coeff = working[k] / divisor_lead;
         quotient[k] = coeff;
         for j in 0..den_trim.len() {
             working[k + j] -= coeff * den_trim[j];
+            work += 1;
+            if work == super::common::SIGNAL_WORK_CHUNK {
+                cooperation.completed(work).await?;
+                work = 0;
+            }
         }
     }
+    cooperation.completed(work).await?;
 
-    let product = convolve_complex(den_trim.as_slice(), quotient.as_slice());
-    let mut remainder = numerator.to_vec();
+    let product = convolve_complex(den_trim, &quotient, cooperation).await?;
+    let mut remainder = copy_coefficients(numerator, cooperation).await?;
     let offset = remainder.len().saturating_sub(product.len());
+    let mut work = 0_u64;
     for (index, value) in product.into_iter().enumerate() {
         remainder[offset + index] -= value;
+        work += 1;
+        if work == super::common::SIGNAL_WORK_CHUNK {
+            cooperation.completed(work).await?;
+            work = 0;
+        }
     }
+    cooperation.completed(work).await?;
 
     Ok((quotient, remainder))
 }
 
-fn trim_leading_zeros(data: &[Complex<f64>]) -> (Vec<Complex<f64>>, bool) {
-    if data.is_empty() {
-        return (Vec::new(), true);
-    }
-    let first_non_zero = data.iter().position(|c| !is_exact_zero(c));
-    match first_non_zero {
-        Some(idx) => {
-            let trimmed = data[idx..].to_vec();
-            (trimmed, false)
+async fn trim_leading_zeros<'a>(
+    data: &'a [Complex<f64>],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<&'a [Complex<f64>]> {
+    let mut work = 0_u64;
+    for (index, value) in data.iter().enumerate() {
+        work += 1;
+        if work == super::common::SIGNAL_WORK_CHUNK {
+            cooperation.completed(work).await?;
+            work = 0;
         }
-        None => (Vec::new(), true),
+        if !is_exact_zero(value) {
+            cooperation.completed(work).await?;
+            return Ok(&data[index..]);
+        }
     }
+    cooperation.completed(work).await?;
+    Ok(&[])
 }
 
-fn convolve_complex(lhs: &[Complex<f64>], rhs: &[Complex<f64>]) -> Vec<Complex<f64>> {
+async fn convolve_complex(
+    lhs: &[Complex<f64>],
+    rhs: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<Complex<f64>>> {
     if lhs.is_empty() || rhs.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let mut output = vec![Complex::new(0.0, 0.0); lhs.len() + rhs.len() - 1];
+    let len = lhs
+        .len()
+        .checked_add(rhs.len())
+        .and_then(|n| n.checked_sub(1))
+        .ok_or_else(|| deconv_error(&DECONV_ERROR_BUILD_OUTPUT))?;
+    let mut output = zero_coefficients(len)?;
+    let mut work = 0_u64;
     for (i, left) in lhs.iter().enumerate() {
         for (j, right) in rhs.iter().enumerate() {
             output[i + j] += *left * *right;
+            work += 1;
+            if work == super::common::SIGNAL_WORK_CHUNK {
+                cooperation.completed(work).await?;
+                work = 0;
+            }
         }
     }
-    output
+    cooperation.completed(work).await?;
+    Ok(output)
+}
+
+fn zero_coefficients(len: usize) -> BuiltinResult<Vec<Complex<f64>>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(deconv_allocation_error)?;
+    values.resize(len, Complex::new(0.0, 0.0));
+    Ok(values)
+}
+
+async fn copy_coefficients(
+    source: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<Complex<f64>>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(source.len())
+        .map_err(deconv_allocation_error)?;
+    for chunk in source.chunks(super::common::SIGNAL_WORK_CHUNK as usize) {
+        values.extend_from_slice(chunk);
+        cooperation.completed(chunk.len() as u64).await?;
+    }
+    Ok(values)
+}
+
+fn deconv_allocation_error(cause: std::collections::TryReserveError) -> RuntimeError {
+    let mut builder = build_runtime_error(DECONV_ERROR_BUILD_OUTPUT.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(cause)
+        .with_gpu_gather_retry(GpuGatherRetry::Never);
+    if let Some(identifier) = DECONV_ERROR_BUILD_OUTPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn is_exact_zero(value: &Complex<f64>) -> bool {
@@ -1114,6 +1208,25 @@ pub(crate) mod tests {
     }
 
     fn deconv_builtin(numerator: Value, denominator: Value) -> BuiltinResult<Value> {
-        block_on(super::deconv_builtin(numerator, denominator))
+        block_on(super::deconv_builtin(None, numerator, denominator))
+    }
+
+    #[test]
+    fn registered_deconv_binding_honors_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(super::deconv_builtin(
+            Some(runtime),
+            Value::Num(1.0),
+            Value::Num(2.0),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
+        assert!(error.source.is_some(), "preserve execution-service cause");
     }
 }
