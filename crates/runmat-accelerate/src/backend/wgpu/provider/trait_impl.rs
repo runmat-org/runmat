@@ -3,6 +3,34 @@ use runmat_accelerate_api::{
     AccelIntegerDownloadFuture, AccelNumericDownloadFuture, HostIntegerTensorView,
     HostNumericTensorView, IntegerElementType,
 };
+
+/// A host upload may use mapped-at-creation rather than a provider dispatch.
+/// Submit a provider-owned fence *after* publication so the whole-call receipt
+/// observes queue completion, not merely the return of `create_buffer_init`.
+fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
+    let operation = runmat_accelerate_api::ProviderOperationIdentity::new("transfer.upload");
+    let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation()
+        .filter(|recorder| recorder.expects_operation(&operation))
+    else {
+        return Ok(());
+    };
+    let checkpoint = recorder.submission_checkpoint();
+    provider.with_emission(|emission, pending| -> Result<()> {
+        let encoder = emission
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-observed-upload-completion"),
+            });
+        provider.submit(emission, pending, encoder)?;
+        Ok(())
+    })??;
+    recorder.confirm_submitted_provider_execution_after(
+        provider.device_id(),
+        &operation,
+        checkpoint,
+    );
+    Ok(())
+}
 use runmat_accelerate_api::{
     ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBitModulationRequest,
     ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult,
@@ -105,6 +133,21 @@ impl AccelProvider for WgpuProvider {
             .is_some_and(|progress| progress.is_available())
         {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
+        }
+        if query.operation.0 == "transfer.upload" {
+            return if self.query_feasibility(query).is_supported() {
+                runmat_accelerate_api::observation::ProviderObservationCapability::Supported(
+                    runmat_accelerate_api::observation::ProviderObservationOverhead {
+                        submissions: 1,
+                        requested_peak_buffer_bytes:
+                            crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
+                        clear_commands: 1,
+                        map_callbacks: 1,
+                    },
+                )
+            } else {
+                runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
+            };
         }
         let capability = crate::placement::provider_observation_capability(self, query);
         if matches!(
@@ -2431,25 +2474,33 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
-        self.upload_exec(host)
+        let output = self.upload_exec(host)?;
+        complete_observed_upload(self)?;
+        Ok(output)
     }
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move { self.download_exec(h).await })
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
-        self.upload_numeric_exec(host)
+        let output = self.upload_numeric_exec(host)?;
+        complete_observed_upload(self)?;
+        Ok(output)
     }
     fn upload_logical_raw(
         &self,
         host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
     ) -> Result<GpuTensorHandle> {
-        self.upload_logical_exec(host)
+        let output = self.upload_logical_exec(host)?;
+        complete_observed_upload(self)?;
+        Ok(output)
     }
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move { self.download_numeric_exec(h).await })
     }
     fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
-        self.upload_integer_exec(host)
+        let output = self.upload_integer_exec(host)?;
+        complete_observed_upload(self)?;
+        Ok(output)
     }
     fn download_integer<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
         Box::pin(async move { self.download_integer_exec(h).await })

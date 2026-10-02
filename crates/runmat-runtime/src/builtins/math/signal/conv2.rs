@@ -144,6 +144,7 @@ async fn conv2_builtin(
             if let Some(device_value) = device_value {
                 return Ok(device_value);
             }
+            let restore_recorder = placement.as_ref().and_then(|selected| selected.recorder());
             let result = async move {
                 let left = convert_matrix(a, "A", &mut cooperation).await?;
                 let right = convert_matrix(b, "B", &mut cooperation).await?;
@@ -159,14 +160,14 @@ async fn conv2_builtin(
                     let output =
                         matrix_to_value(result, single_output, complex_output, &mut cooperation)
                             .await?;
-                    return restore_to_owner(output, &resident_inputs);
+                    return restore_to_owner(output, &resident_inputs, restore_recorder.clone());
                 }
                 let result =
                     conv2_matrices(&left, &right, mode, single_output, &mut cooperation).await?;
                 let output =
                     matrix_to_value(result, single_output, complex_output, &mut cooperation)
                         .await?;
-                restore_to_owner(output, &resident_inputs)
+                restore_to_owner(output, &resident_inputs, restore_recorder)
             }
             .await;
             if let Some(placement) = placement {
@@ -189,7 +190,7 @@ async fn conv2_builtin(
             .await?;
             let output =
                 matrix_to_value(result, single_output, complex_output, &mut cooperation).await?;
-            restore_to_owner(output, &resident_inputs)
+            restore_to_owner(output, &resident_inputs, None)
         }
         _ => Err(conv2_error(&CONV2_ERROR_ARG_COUNT)),
     }
@@ -229,12 +230,20 @@ fn admit_conv2_operand(value: &Value, vector_required: bool) -> BuiltinResult<()
 fn restore_to_owner(
     value: Value,
     resident_inputs: &[runmat_accelerate_api::GpuTensorHandle],
+    recorder: Option<runmat_accelerate_api::observation::ProviderOperationRecorder>,
 ) -> BuiltinResult<Value> {
     let Some(source) = resident_inputs.first() else {
         return Ok(value);
     };
     let protected = resident_inputs.iter().collect::<Vec<_>>();
-    gpu_helpers::restore_class_preserving_value_protecting(source, value, BUILTIN_NAME, &protected)
+    runmat_accelerate_api::observation::with_provider_observation(recorder, || {
+        gpu_helpers::restore_class_preserving_value_protecting(
+            source,
+            value,
+            BUILTIN_NAME,
+            &protected,
+        )
+    })
 }
 
 fn value_uses_single(value: &Value) -> bool {

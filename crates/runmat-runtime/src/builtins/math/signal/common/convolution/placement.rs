@@ -441,9 +441,7 @@ pub(crate) fn select_pair(
     let receipt = {
         match provider.begin_operation_observation(observed_query) {
             ProviderObservationSupport::Observed(mut receipt) => {
-                if provider_route {
-                    receipt.require_provider_execution(device_id, query.operation.clone());
-                }
+                receipt.require_provider_execution(device_id, observed_query.operation.clone());
                 Some(receipt)
             }
             ProviderObservationSupport::Unsupported => return Ok(None),

@@ -108,6 +108,7 @@ async fn conv_builtin(
     if let Some(device_value) = device_value {
         return Ok(device_value);
     }
+    let restore_recorder = placement.as_ref().and_then(|selected| selected.recorder());
     let result = async move {
         let lhs = normalize_input(a, &mut cooperation).await?;
         let rhs = normalize_input(b, &mut cooperation).await?;
@@ -133,13 +134,13 @@ async fn conv_builtin(
                 Vec::new()
             };
             let output = convert_output(data, orientation, single_output, complex_output)?;
-            return restore_to_owner(output, &resident_inputs);
+            return restore_to_owner(output, &resident_inputs, restore_recorder.clone());
         }
 
         let full = convolve(&lhs.data, &rhs.data, single_output, &mut cooperation).await?;
         let shaped = apply_mode(full, mode, lhs.len, rhs.len);
         let output = convert_output(shaped, orientation, single_output, complex_output)?;
-        restore_to_owner(output, &resident_inputs)
+        restore_to_owner(output, &resident_inputs, restore_recorder)
     }
     .await;
     if let Some(placement) = placement {
@@ -188,12 +189,20 @@ fn resident_inputs<'a>(
 fn restore_to_owner(
     value: Value,
     resident_inputs: &[runmat_accelerate_api::GpuTensorHandle],
+    recorder: Option<runmat_accelerate_api::observation::ProviderOperationRecorder>,
 ) -> BuiltinResult<Value> {
     let Some(source) = resident_inputs.first() else {
         return Ok(value);
     };
     let protected = resident_inputs.iter().collect::<Vec<_>>();
-    gpu_helpers::restore_class_preserving_value_protecting(source, value, BUILTIN_NAME, &protected)
+    runmat_accelerate_api::observation::with_provider_observation(recorder, || {
+        gpu_helpers::restore_class_preserving_value_protecting(
+            source,
+            value,
+            BUILTIN_NAME,
+            &protected,
+        )
+    })
 }
 
 fn value_uses_single(value: &Value) -> bool {

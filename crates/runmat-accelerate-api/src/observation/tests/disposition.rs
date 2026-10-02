@@ -157,3 +157,35 @@ fn prior_upload_submission_cannot_certify_later_operation() {
         Err(ProviderObservationFailure::ExecutionUnproven)
     );
 }
+
+#[test]
+fn selected_upload_is_pending_until_its_post_publication_fence_completes() {
+    let upload = crate::ProviderOperationIdentity::new("transfer.upload");
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_provider_execution(7, upload.clone());
+    let recorder = receipt.recorder();
+    let checkpoint = recorder.submission_checkpoint();
+    let fence = recorder.submission().unwrap();
+    recorder.confirm_submitted_provider_execution_after(7, &upload, checkpoint);
+    receipt.publish().unwrap();
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    fence.complete();
+    assert!(matches!(
+        receipt.status(),
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+
+    let mut cancelled = ProviderOperationReceipt::new();
+    cancelled.require_provider_execution(7, upload.clone());
+    let recorder = cancelled.recorder();
+    let checkpoint = recorder.submission_checkpoint();
+    let fence = recorder.submission().unwrap();
+    recorder.confirm_submitted_provider_execution_after(7, &upload, checkpoint);
+    cancelled.publish().unwrap();
+    cancelled.fail(ProviderObservationFailure::Cancelled);
+    fence.complete();
+    assert_eq!(
+        cancelled.status(),
+        ProviderObservationStatus::Failed(ProviderObservationFailure::Cancelled)
+    );
+}

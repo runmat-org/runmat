@@ -4120,7 +4120,14 @@ impl AccelProvider for InProcessProvider {
         host.validate()?;
         let data = InProcessNumericData::from_view(host.data);
         self.telemetry.record_upload_bytes(data.byte_len());
-        self.allocate_numeric_data(data, host.shape.to_vec(), host.storage)
+        let output = self.allocate_numeric_data(data, host.shape.to_vec(), host.storage)?;
+        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("transfer.upload");
+        if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation))
+        {
+            recorder.confirm_provider_execution(self.device_id, &operation);
+        }
+        Ok(output)
     }
 
     fn upload_logical_raw(
@@ -4135,12 +4142,19 @@ impl AccelProvider for InProcessProvider {
             .collect::<Vec<_>>();
         self.telemetry
             .record_upload_bytes(std::mem::size_of_val(data.as_slice()) as u64);
-        self.allocate_produced(
+        let output = self.allocate_produced(
             InProcessNumericData::F64(data),
             host.shape.to_vec(),
             GpuTensorStorage::Real,
             true,
-        )
+        )?;
+        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("transfer.upload");
+        if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation))
+        {
+            recorder.confirm_provider_execution(self.device_id, &operation);
+        }
+        Ok(output)
     }
 
     fn download_numeric<'a>(
