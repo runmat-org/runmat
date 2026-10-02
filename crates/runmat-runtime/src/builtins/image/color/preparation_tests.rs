@@ -156,9 +156,9 @@ fn valid(name: &str) -> Value {
 
 #[test]
 fn color_forms_are_typed_gather_and_valid_calls_observe_once() {
-    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let events = Events::default();
     let _context = enter(&events, false);
+    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in NAMES {
         let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
         let BuiltinOperandPreparation::Forms(forms) = entry.placement.preparation else {
@@ -223,9 +223,9 @@ fn extension_gate_and_empty_rgb_inputs_precede_service() {
 
 #[test]
 fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
-    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let events = Events::default();
     let _context = enter(&events, false);
+    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in NAMES {
         assert!(block_on(dispatcher::call_builtin_async_with_outputs(
             name,
@@ -254,9 +254,9 @@ fn known_invalid_geometry_class_and_output_count_do_not_prepare() {
 
 #[test]
 fn unsupported_resident_metadata_rejects_before_service_or_download() {
-    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let events = Events::default();
     let _context = enter(&events, false);
+    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in NAMES {
         let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
         let (shape, dtype) = if name == "gray2rgb" {
@@ -287,9 +287,9 @@ fn unsupported_resident_metadata_rejects_before_service_or_download() {
 
 #[test]
 fn dropped_unpolled_and_polled_calls_keep_observation_transactional() {
-    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let events = Events::default();
     let _context = enter(&events, true);
+    let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in NAMES {
         let args = [valid(name)];
         drop(dispatcher::call_builtin_async(name, &args));
