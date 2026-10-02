@@ -10,9 +10,10 @@
 //! * `[x, fval, exitflag, output] = fzero(...)`
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FZERO_CALLBACK_NUMERIC_EXTENSION, FZERO_ERROR_INVALID_ARGUMENT,
-    FZERO_ERROR_INVALID_INPUT, FZERO_ERROR_TOO_MANY_OUTPUTS, FZERO_INPUT_NUMERIC_EXTENSION,
-    FZERO_OPTION_EXTENSION, FZERO_RESIDENT_EXTENSION,
+    BuiltinErrorDescriptor, OptimDisplay, OptimOptionField, OptimSolver,
+    FZERO_CALLBACK_NUMERIC_EXTENSION, FZERO_ERROR_INVALID_ARGUMENT, FZERO_ERROR_INVALID_INPUT,
+    FZERO_ERROR_TOO_MANY_OUTPUTS, FZERO_INPUT_NUMERIC_EXTENSION, FZERO_OPTION_EXTENSION,
+    FZERO_RESIDENT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{StructValue, Tensor, Value};
@@ -27,8 +28,8 @@ use crate::builtins::math::optim::brent::{
     BrentZeroStepKind,
 };
 use crate::builtins::math::optim::common::{
-    call_scalar_function_with_precision, call_scalar_function_with_precision_info, option_f64,
-    option_string, option_usize,
+    call_scalar_function_with_precision, call_scalar_function_with_precision_info,
+    option_f64_value, option_string_value, option_usize_value, ScalarOptionFields,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -145,7 +146,7 @@ async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinRe
         opts.tol_x = default_tol_x(initial_single || bracket.function_single);
     }
     let mut iter_log = IterDisplay::new(opts.display);
-    let observer: Option<&mut dyn BrentZeroObserver> = if matches!(opts.display, DisplayMode::Iter)
+    let observer: Option<&mut dyn BrentZeroObserver> = if matches!(opts.display, OptimDisplay::Iter)
     {
         Some(&mut iter_log)
     } else {
@@ -199,7 +200,7 @@ struct FzeroOptions {
     tol_x_explicit: bool,
     max_iter: usize,
     max_fun_evals: usize,
-    display: DisplayMode,
+    display: OptimDisplay,
 }
 
 impl FzeroOptions {
@@ -210,24 +211,39 @@ impl FzeroOptions {
             &FZERO_OPTION_EXTENSION,
             &FZERO_RESIDENT_EXTENSION,
         )?;
-        let display = DisplayMode::parse(&option_string(options, "Display", "off")?)?;
-        let tol_x = option_f64(NAME, options, "TolX", DEFAULT_TOL_X)?;
+        let fields = ScalarOptionFields::from_struct(options);
+        let display = parse_display(&option_string_value(
+            fields.get(OptimOptionField::Display),
+            "Display",
+            "off",
+        )?)?;
+        let tol_x = option_f64_value(
+            NAME,
+            fields.get(OptimOptionField::TolX),
+            "TolX",
+            DEFAULT_TOL_X,
+        )?;
         if tol_x <= 0.0 {
             return Err(fzero_error_with_detail(
                 &FZERO_ERROR_INVALID_ARGUMENT,
                 "option TolX must be positive",
             ));
         }
-        let max_iter = option_usize(NAME, options, "MaxIter", DEFAULT_MAX_ITER)?;
-        let max_fun_evals = option_usize(NAME, options, "MaxFunEvals", DEFAULT_MAX_FUN_EVALS)?;
+        let max_iter = option_usize_value(
+            NAME,
+            fields.get(OptimOptionField::MaxIter),
+            "MaxIter",
+            DEFAULT_MAX_ITER,
+        )?;
+        let max_fun_evals = option_usize_value(
+            NAME,
+            fields.get(OptimOptionField::MaxFunEvals),
+            "MaxFunEvals",
+            DEFAULT_MAX_FUN_EVALS,
+        )?;
         Ok(Self {
             tol_x,
-            tol_x_explicit: options.is_some_and(|options| {
-                options
-                    .fields
-                    .keys()
-                    .any(|key| key.eq_ignore_ascii_case("TolX"))
-            }),
+            tol_x_explicit: fields.get(OptimOptionField::TolX).is_some(),
             max_iter: max_iter.max(1),
             max_fun_evals: max_fun_evals.max(1),
             display,
@@ -235,24 +251,20 @@ impl FzeroOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DisplayMode {
-    Off,
-    Iter,
-    Final,
-}
-
-impl DisplayMode {
-    fn parse(text: &str) -> BuiltinResult<Self> {
-        match text.to_ascii_lowercase().as_str() {
-            "off" | "none" => Ok(Self::Off),
-            "iter" => Ok(Self::Iter),
-            "final" => Ok(Self::Final),
-            other => Err(fzero_error_with_detail(
-                &FZERO_ERROR_INVALID_ARGUMENT,
-                format!("option Display must be 'off', 'none', 'final', or 'iter', got '{other}'"),
-            )),
-        }
+fn parse_display(text: &str) -> BuiltinResult<OptimDisplay> {
+    let display = OptimDisplay::parse(text).ok_or_else(|| {
+        fzero_error_with_detail(
+            &FZERO_ERROR_INVALID_ARGUMENT,
+            format!("option Display must be 'off', 'none', 'final', or 'iter', got '{text}'"),
+        )
+    })?;
+    match display {
+        OptimDisplay::None => Ok(OptimDisplay::Off),
+        OptimDisplay::Notify => Err(fzero_error_with_detail(
+            &FZERO_ERROR_INVALID_ARGUMENT,
+            format!("option Display must be 'off', 'none', 'final', or 'iter', got '{text}'"),
+        )),
+        other => Ok(other),
     }
 }
 
@@ -272,7 +284,6 @@ async fn initial_bracket(
     options: &FzeroOptions,
     single: bool,
 ) -> BuiltinResult<Bracket> {
-    let x = crate::dispatcher::gather_if_needed_async(&x).await?;
     match x {
         Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64(&tensor);
@@ -310,7 +321,8 @@ async fn bracket_from_endpoints(
         ));
     }
     let (fa, fa_single) =
-        call_scalar_function_with_precision_info(NAME, function, a, single).await?;
+        call_scalar_function_with_precision_info(NAME, OptimSolver::Fzero, function, a, single)
+            .await?;
     if fa == 0.0 {
         return Ok(Bracket {
             a,
@@ -322,7 +334,8 @@ async fn bracket_from_endpoints(
         });
     }
     let (fb, fb_single) =
-        call_scalar_function_with_precision_info(NAME, function, b, single).await?;
+        call_scalar_function_with_precision_info(NAME, OptimSolver::Fzero, function, b, single)
+            .await?;
     if fb == 0.0 || fa.signum() != fb.signum() {
         Ok(Bracket {
             a,
@@ -353,7 +366,8 @@ async fn expand_bracket(
         ));
     }
     let (f0, function_single) =
-        call_scalar_function_with_precision_info(NAME, function, x0, single).await?;
+        call_scalar_function_with_precision_info(NAME, OptimSolver::Fzero, function, x0, single)
+            .await?;
     if f0 == 0.0 {
         return Ok(Bracket {
             a: x0,
@@ -370,8 +384,10 @@ async fn expand_bracket(
     while evals + 2 <= options.max_fun_evals {
         let a = x0 - step;
         let b = x0 + step;
-        let fa = call_scalar_function_with_precision(NAME, function, a, single).await?;
-        let fb = call_scalar_function_with_precision(NAME, function, b, single).await?;
+        let fa = call_scalar_function_with_precision(NAME, OptimSolver::Fzero, function, a, single)
+            .await?;
+        let fb = call_scalar_function_with_precision(NAME, OptimSolver::Fzero, function, b, single)
+            .await?;
         evals += 2;
         if fa == 0.0 {
             return Ok(Bracket {
@@ -485,7 +501,7 @@ fn build_message(result: &BrentZeroResult) -> String {
 }
 
 fn emit_summary(result: &BrentZeroResult, exit_flag: i32, message: &str, options: &FzeroOptions) {
-    if !matches!(options.display, DisplayMode::Final | DisplayMode::Iter) {
+    if !matches!(options.display, OptimDisplay::Final | OptimDisplay::Iter) {
         return;
     }
     crate::console::record_console_line(
@@ -499,12 +515,12 @@ fn emit_summary(result: &BrentZeroResult, exit_flag: i32, message: &str, options
 }
 
 struct IterDisplay {
-    mode: DisplayMode,
+    mode: OptimDisplay,
     printed_header: bool,
 }
 
 impl IterDisplay {
-    fn new(mode: DisplayMode) -> Self {
+    fn new(mode: OptimDisplay) -> Self {
         Self {
             mode,
             printed_header: false,
@@ -521,7 +537,7 @@ impl BrentZeroObserver for IterDisplay {
         fx: f64,
         step_kind: BrentZeroStepKind,
     ) {
-        if !matches!(self.mode, DisplayMode::Iter) {
+        if !matches!(self.mode, OptimDisplay::Iter) {
             return;
         }
         if !self.printed_header {

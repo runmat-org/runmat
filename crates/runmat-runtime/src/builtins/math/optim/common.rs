@@ -1,4 +1,5 @@
 use runmat_builtins::BuiltinExtensionDescriptor;
+use runmat_builtins::{OptimOptionField, OptimSolver};
 use runmat_value::{CharArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
@@ -17,23 +18,30 @@ pub(crate) async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinRe
     crate::call_feval_async_with_outputs(callback, &args, 1).await
 }
 
-pub(crate) async fn call_scalar_function(name: &str, handle: &Value, x: f64) -> BuiltinResult<f64> {
-    call_scalar_function_with_precision(name, handle, x, false).await
+pub(crate) async fn call_scalar_function(
+    name: &str,
+    solver: OptimSolver,
+    handle: &Value,
+    x: f64,
+) -> BuiltinResult<f64> {
+    call_scalar_function_with_precision(name, solver, handle, x, false).await
 }
 
 pub(crate) async fn call_scalar_function_with_precision(
     name: &str,
+    solver: OptimSolver,
     handle: &Value,
     x: f64,
     single: bool,
 ) -> BuiltinResult<f64> {
-    call_scalar_function_with_precision_info(name, handle, x, single)
+    call_scalar_function_with_precision_info(name, solver, handle, x, single)
         .await
         .map(|(value, _)| value)
 }
 
 pub(crate) async fn call_scalar_function_with_precision_info(
     name: &str,
+    solver: OptimSolver,
     handle: &Value,
     x: f64,
     single: bool,
@@ -57,8 +65,8 @@ pub(crate) async fn call_scalar_function_with_precision_info(
         }
         _ => false,
     };
-    let value = match name {
-        "fminbnd" => {
+    let value = match solver {
+        OptimSolver::Fminbnd => {
             prepare_floating_value(
                 name,
                 value,
@@ -68,7 +76,7 @@ pub(crate) async fn call_scalar_function_with_precision_info(
             )
             .await?
         }
-        "fzero" => {
+        OptimSolver::Fzero => {
             prepare_floating_value(
                 name,
                 value,
@@ -78,7 +86,12 @@ pub(crate) async fn call_scalar_function_with_precision_info(
             )
             .await?
         }
-        _ => crate::dispatcher::gather_if_needed_async(&value).await?,
+        _ => {
+            return Err(optim_error(
+                name,
+                "unsupported scalar solver callback identity",
+            ))
+        }
     };
     value_to_scalar(name, value).map(|value| (value, output_single))
 }
@@ -107,14 +120,13 @@ pub(crate) async fn prepare_floating_value(
     if is_typed_integer_value(&value) || is_logical_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(numeric_extension, name)?;
     }
-    if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value).await?
-    {
+    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(&value) {
         return Err(optim_error(
             name,
             format!("{name}: integer {role} must be exactly representable as double"),
         ));
     }
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
     Ok(value)
 }
 
@@ -177,6 +189,46 @@ pub(crate) fn ensure_option_extensions(
         }
     }
     Ok(())
+}
+
+/// Decodes public struct keys once. The public struct keeps its historical
+/// spellings; scalar solver policy consumes only these semantic fields.
+#[derive(Default)]
+pub(crate) struct ScalarOptionFields<'a> {
+    tol_x: Option<&'a Value>,
+    max_iter: Option<&'a Value>,
+    max_fun_evals: Option<&'a Value>,
+    display: Option<&'a Value>,
+}
+
+impl<'a> ScalarOptionFields<'a> {
+    pub(crate) fn from_struct(options: Option<&'a StructValue>) -> Self {
+        let mut fields = Self::default();
+        if let Some(options) = options {
+            for (name, value) in &options.fields {
+                match OptimOptionField::parse(name) {
+                    Some(OptimOptionField::TolX) => fields.tol_x.get_or_insert(value),
+                    Some(OptimOptionField::MaxIter) => fields.max_iter.get_or_insert(value),
+                    Some(OptimOptionField::MaxFunEvals) => {
+                        fields.max_fun_evals.get_or_insert(value)
+                    }
+                    Some(OptimOptionField::Display) => fields.display.get_or_insert(value),
+                    _ => continue,
+                };
+            }
+        }
+        fields
+    }
+
+    pub(crate) fn get(&self, field: OptimOptionField) -> Option<&'a Value> {
+        match field {
+            OptimOptionField::TolX => self.tol_x,
+            OptimOptionField::MaxIter => self.max_iter,
+            OptimOptionField::MaxFunEvals => self.max_fun_evals,
+            OptimOptionField::Display => self.display,
+            _ => None,
+        }
+    }
 }
 
 fn ensure_exact_binary64_integer(name: &str, value: &Value, role: &str) -> BuiltinResult<()> {
@@ -364,7 +416,16 @@ pub(crate) fn option_f64(
     let Some(options) = options else {
         return Ok(default);
     };
-    let Some(value) = lookup_option(options, field) else {
+    option_f64_value(builtin, lookup_option(options, field), field, default)
+}
+
+pub(crate) fn option_f64_value(
+    builtin: &str,
+    value: Option<&Value>,
+    field: &str,
+    default: f64,
+) -> BuiltinResult<f64> {
+    let Some(value) = value else {
         return Ok(default);
     };
     let parsed = match value {
@@ -399,7 +460,16 @@ pub(crate) fn option_usize(
     let Some(options) = options else {
         return Ok(default);
     };
-    let Some(raw) = lookup_option(options, field) else {
+    option_usize_value(builtin, lookup_option(options, field), field, default)
+}
+
+pub(crate) fn option_usize_value(
+    builtin: &str,
+    raw: Option<&Value>,
+    field: &str,
+    default: usize,
+) -> BuiltinResult<usize> {
+    let Some(raw) = raw else {
         return Ok(default);
     };
     if let Some(integer) = tensor::scalar_integer_value(raw) {
@@ -410,7 +480,7 @@ pub(crate) fn option_usize(
             )
         });
     }
-    let value = option_f64(builtin, Some(options), field, default as f64)?;
+    let value = option_f64_value(builtin, Some(raw), field, default as f64)?;
     if value < 0.0 {
         return Err(optim_error(
             builtin,
@@ -440,7 +510,15 @@ pub(crate) fn option_string(
     let Some(options) = options else {
         return Ok(default.to_string());
     };
-    let Some(value) = lookup_option(options, field) else {
+    option_string_value(lookup_option(options, field), field, default)
+}
+
+pub(crate) fn option_string_value(
+    value: Option<&Value>,
+    field: &str,
+    default: &str,
+) -> BuiltinResult<String> {
+    let Some(value) = value else {
         return Ok(default.to_string());
     };
     match value {
@@ -489,13 +567,31 @@ pub(crate) struct InitialGuess {
 mod tests {
     use super::{
         canonicalize_callback_handle, initial_guess, initial_guess_with_extensions, option_usize,
-        prepare_floating_value, value_to_real_vector, value_to_scalar,
+        prepare_floating_value, value_to_real_vector, value_to_scalar, ScalarOptionFields,
     };
     use futures::executor::block_on;
+    use runmat_builtins::OptimOptionField;
     use runmat_value::{
         CharArray, Closure, IntegerStorage, StringArray, StructValue, Tensor, Value,
     };
     use std::sync::Arc;
+
+    #[test]
+    fn scalar_option_fields_decode_public_aliases_to_one_typed_control_plan() {
+        let mut options = StructValue::new();
+        options.insert("StepTolerance", Value::Num(0.125));
+        options.insert("MAXITER", Value::Num(17.0));
+        options.insert("Display", Value::String("iter".to_string()));
+        let admitted = ScalarOptionFields::from_struct(Some(&options));
+        assert!(matches!(admitted.get(OptimOptionField::TolX), Some(Value::Num(v)) if *v == 0.125));
+        assert!(
+            matches!(admitted.get(OptimOptionField::MaxIter), Some(Value::Num(v)) if *v == 17.0)
+        );
+        assert!(
+            matches!(admitted.get(OptimOptionField::Display), Some(Value::String(v)) if v == "iter")
+        );
+        assert!(admitted.get(OptimOptionField::Algorithm).is_none());
+    }
 
     #[test]
     fn value_to_scalar_reads_typed_integer_storage_exactly() {

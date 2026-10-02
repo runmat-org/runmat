@@ -11,6 +11,7 @@
 //! so RunMat's function-handle dispatch path (closures, anonymous functions,
 //! named handles) flows through a single helper.
 
+use runmat_builtins::OptimSolver;
 use runmat_value::Value;
 
 use crate::builtins::math::optim::common::{
@@ -214,7 +215,8 @@ pub(crate) async fn brent_zero(
         } else {
             -tol
         };
-        fb = call_scalar_function_with_precision(name, function, b, single).await?;
+        fb = call_scalar_function_with_precision(name, OptimSolver::Fzero, function, b, single)
+            .await?;
         evals += 1;
 
         if let Some(observer) = observer.as_deref_mut() {
@@ -284,7 +286,7 @@ pub(crate) async fn brent_min(
     let scale = a.abs().max(b.abs()).max(1.0);
     if width.abs() <= f64::EPSILON * scale {
         let x = a + width * 0.5;
-        let fx = call_scalar_function(name, function, x).await?;
+        let fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x).await?;
         if let Some(observer) = observer.as_deref_mut() {
             observer.on_iteration(0, 1, x, fx, BrentStepKind::Initial);
         }
@@ -300,7 +302,7 @@ pub(crate) async fn brent_min(
     let mut x = a + CGOLD * (b - a);
     let mut w = x;
     let mut v = x;
-    let mut fx = call_scalar_function(name, function, x).await?;
+    let mut fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x).await?;
     let mut fw = fx;
     let mut fv = fx;
     let mut func_count = 1usize;
@@ -367,7 +369,7 @@ pub(crate) async fn brent_min(
                 converged: false,
             });
         }
-        let fu = call_scalar_function(name, function, u).await?;
+        let fu = call_scalar_function(name, OptimSolver::Fminbnd, function, u).await?;
         func_count += 1;
 
         if fu <= fx {

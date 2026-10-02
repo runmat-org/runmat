@@ -14,9 +14,9 @@
 //! `TolX`, `MaxIter`, `MaxFunEvals`, and `Display`.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FMINBND_CALLBACK_NUMERIC_EXTENSION, FMINBND_ERROR_INVALID_ARGUMENT,
-    FMINBND_ERROR_INVALID_INPUT, FMINBND_ERROR_TOO_MANY_OUTPUTS, FMINBND_INPUT_NUMERIC_EXTENSION,
-    FMINBND_OPTION_EXTENSION, FMINBND_RESIDENT_EXTENSION,
+    BuiltinErrorDescriptor, OptimDisplay, OptimOptionField, FMINBND_CALLBACK_NUMERIC_EXTENSION,
+    FMINBND_ERROR_INVALID_ARGUMENT, FMINBND_ERROR_INVALID_INPUT, FMINBND_ERROR_TOO_MANY_OUTPUTS,
+    FMINBND_INPUT_NUMERIC_EXTENSION, FMINBND_OPTION_EXTENSION, FMINBND_RESIDENT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, StructValue, Tensor, Value};
@@ -29,6 +29,7 @@ use crate::builtins::common::tensor;
 use crate::builtins::math::optim::brent::{
     brent_min, BrentMinObserver, BrentMinResult, BrentParams, BrentStepKind,
 };
+use crate::builtins::math::optim::common::ScalarOptionFields;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "fminbnd";
@@ -36,7 +37,7 @@ const ALGORITHM: &str = "golden section search, parabolic interpolation";
 const DEFAULT_TOL_X: f64 = 1.0e-4;
 const DEFAULT_MAX_ITER: usize = 500;
 const DEFAULT_MAX_FUN_EVALS: usize = 500;
-const DEFAULT_DISPLAY: DisplayMode = DisplayMode::Notify;
+const DEFAULT_DISPLAY: OptimDisplay = OptimDisplay::Notify;
 
 fn fminbnd_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -166,29 +167,18 @@ async fn fminbnd_builtin(
     finalize(outcome, &options)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DisplayMode {
-    Off,
-    Iter,
-    Notify,
-    Final,
-}
-
-impl DisplayMode {
-    fn parse(text: &str) -> BuiltinResult<Self> {
-        match text.to_ascii_lowercase().as_str() {
-            "off" | "none" => Ok(Self::Off),
-            "iter" => Ok(Self::Iter),
-            "notify" => Ok(Self::Notify),
-            "final" => Ok(Self::Final),
-            other => Err(fminbnd_error_with_detail(
-                &FMINBND_ERROR_INVALID_ARGUMENT,
-                format!(
-                    "option Display must be 'off', 'iter', 'notify', or 'final', got '{other}'"
-                ),
-            )),
-        }
-    }
+fn parse_display(text: &str) -> BuiltinResult<OptimDisplay> {
+    let display = OptimDisplay::parse(text).ok_or_else(|| {
+        fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            format!("option Display must be 'off', 'iter', 'notify', or 'final', got '{text}'"),
+        )
+    })?;
+    Ok(if display == OptimDisplay::None {
+        OptimDisplay::Off
+    } else {
+        display
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -196,7 +186,7 @@ struct FminbndOptions {
     tol_x: f64,
     max_iter: usize,
     max_fun_evals: usize,
-    display: DisplayMode,
+    display: OptimDisplay,
 }
 
 impl FminbndOptions {
@@ -207,14 +197,12 @@ impl FminbndOptions {
             &FMINBND_OPTION_EXTENSION,
             &FMINBND_RESIDENT_EXTENSION,
         )?;
-        let display = match options {
-            Some(opts) => match lookup(opts, "Display") {
-                Some(value) => DisplayMode::parse(&option_string("Display", value)?)?,
-                None => DEFAULT_DISPLAY,
-            },
+        let fields = ScalarOptionFields::from_struct(options);
+        let display = match fields.get(OptimOptionField::Display) {
+            Some(value) => parse_display(&option_string("Display", value)?)?,
             None => DEFAULT_DISPLAY,
         };
-        let tol_x = match options.and_then(|o| lookup(o, "TolX")) {
+        let tol_x = match fields.get(OptimOptionField::TolX) {
             Some(value) => option_f64("TolX", value)?,
             None => DEFAULT_TOL_X,
         };
@@ -224,11 +212,11 @@ impl FminbndOptions {
                 "option TolX must be positive",
             ));
         }
-        let max_iter = match options.and_then(|o| lookup(o, "MaxIter")) {
+        let max_iter = match fields.get(OptimOptionField::MaxIter) {
             Some(value) => option_positive_usize("MaxIter", value)?,
             None => DEFAULT_MAX_ITER,
         };
-        let max_fun_evals = match options.and_then(|o| lookup(o, "MaxFunEvals")) {
+        let max_fun_evals = match fields.get(OptimOptionField::MaxFunEvals) {
             Some(value) => option_positive_usize("MaxFunEvals", value)?,
             None => DEFAULT_MAX_FUN_EVALS,
         };
@@ -250,14 +238,6 @@ fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
             format!("options must be a struct, got {other:?}"),
         )),
     }
-}
-
-fn lookup<'a>(options: &'a StructValue, name: &str) -> Option<&'a Value> {
-    options
-        .fields
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, v)| v)
 }
 
 fn option_string(field: &str, value: &Value) -> BuiltinResult<String> {
@@ -352,7 +332,6 @@ fn option_positive_usize(field: &str, value: &Value) -> BuiltinResult<usize> {
 }
 
 async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
     let parsed = match value {
         Value::Num(n) => n,
         Value::Int(i) => i.to_f64(),
@@ -401,7 +380,7 @@ async fn run_solver(
 ) -> BuiltinResult<Outcome> {
     let mut iter_log = IterDisplay::new(options.display);
     let observer: Option<&mut dyn BrentMinObserver> =
-        if matches!(options.display, DisplayMode::Iter) {
+        if matches!(options.display, OptimDisplay::Iter) {
             Some(&mut iter_log)
         } else {
             None
@@ -520,9 +499,9 @@ fn build_message(result: &BrentMinResult) -> String {
 
 fn emit_summary(result: &BrentMinResult, exit_flag: i32, message: &str, options: &FminbndOptions) {
     let should_emit = match options.display {
-        DisplayMode::Off => false,
-        DisplayMode::Final | DisplayMode::Iter => true,
-        DisplayMode::Notify => exit_flag != 1,
+        OptimDisplay::Off | OptimDisplay::None => false,
+        OptimDisplay::Final | OptimDisplay::Iter => true,
+        OptimDisplay::Notify => exit_flag != 1,
     };
     if !should_emit {
         return;
@@ -537,9 +516,9 @@ fn emit_summary(result: &BrentMinResult, exit_flag: i32, message: &str, options:
 
 fn emit_invalid_summary(exit_flag: i32, message: &str, options: &FminbndOptions) {
     let should_emit = match options.display {
-        DisplayMode::Off => false,
-        DisplayMode::Final | DisplayMode::Iter => true,
-        DisplayMode::Notify => exit_flag != 1,
+        OptimDisplay::Off | OptimDisplay::None => false,
+        OptimDisplay::Final | OptimDisplay::Iter => true,
+        OptimDisplay::Notify => exit_flag != 1,
     };
     if should_emit {
         crate::console::record_console_line(
@@ -550,12 +529,12 @@ fn emit_invalid_summary(exit_flag: i32, message: &str, options: &FminbndOptions)
 }
 
 struct IterDisplay {
-    mode: DisplayMode,
+    mode: OptimDisplay,
     printed_header: bool,
 }
 
 impl IterDisplay {
-    fn new(mode: DisplayMode) -> Self {
+    fn new(mode: OptimDisplay) -> Self {
         Self {
             mode,
             printed_header: false,
@@ -572,7 +551,7 @@ impl BrentMinObserver for IterDisplay {
         fx: f64,
         step_kind: BrentStepKind,
     ) {
-        if !matches!(self.mode, DisplayMode::Iter) {
+        if !matches!(self.mode, OptimDisplay::Iter) {
             return;
         }
         if !self.printed_header {
