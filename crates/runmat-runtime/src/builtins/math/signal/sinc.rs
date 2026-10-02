@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::signal::common::output_precision::SignalPrecision;
 use crate::builtins::math::signal::common::{
     map_real_waveform, SignalCooperation, WaveformOutputMode,
 };
@@ -157,6 +158,7 @@ async fn sinc_gpu(
         if runmat_accelerate_api::handle_precision(&handle)
             .is_some_and(|precision| precision != provider.precision())
             || runmat_accelerate_api::handle_integer_type(&handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(&handle)
         {
             return sinc_gpu_host_fallback(provider, &handle, cooperation).await;
         }
@@ -211,9 +213,8 @@ async fn sinc_gpu_host_fallback(
         shape,
         storage,
     } = host;
-    let precision =
-        runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
-    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
+    let precision = SignalPrecision::of_handle(handle);
+    if precision == SignalPrecision::Single {
         for chunk in data.chunks_mut(4096) {
             for value in chunk.iter_mut() {
                 *value = (*value as f32) as f64;
@@ -239,8 +240,8 @@ async fn sinc_gpu_host_fallback(
             cooperation.completed(chunk.len() as u64).await?;
         }
         let dtype = match precision {
-            runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-            runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+            SignalPrecision::Single => NumericDType::F32,
+            SignalPrecision::Double => NumericDType::F64,
         };
         let tensor = ComplexTensor::from_f64_values_with_dtype(complex, shape, dtype)
             .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
@@ -249,8 +250,8 @@ async fn sinc_gpu_host_fallback(
     }
 
     let dtype = match precision {
-        runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-        runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+        SignalPrecision::Single => NumericDType::F32,
+        SignalPrecision::Double => NumericDType::F64,
     };
     let tensor = Tensor::new_with_dtype(data, shape, dtype)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
@@ -592,6 +593,38 @@ mod tests {
             }
             other => panic!("expected scalar results, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn integer_and_logical_resident_fallback_keep_double_on_single_provider() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_f32_test_provider(|provider| {
+            let integer = Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![0, u64::MAX]),
+                vec![1, 2],
+            )
+            .unwrap();
+            let integer = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
+            let integer_result = call(Value::GpuTensor(integer)).expect("integer sinc fallback");
+            let Value::Tensor(integer_result) = integer_result else {
+                panic!("single provider cannot retain double integer result");
+            };
+            assert_eq!(integer_result.numeric_dtype(), NumericDType::F64);
+            assert_eq!(integer_result.materialize_f64(), vec![1.0, 0.0]);
+
+            let logical = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1],
+                    shape: &[1, 2],
+                })
+                .expect("logical upload");
+            let logical_result = call(Value::GpuTensor(logical)).expect("logical sinc fallback");
+            let Value::Tensor(logical_result) = logical_result else {
+                panic!("single provider cannot retain double logical result");
+            };
+            assert_eq!(logical_result.numeric_dtype(), NumericDType::F64);
+            assert_eq!(logical_result.materialize_f64(), vec![1.0, 0.0]);
+        });
     }
 
     #[test]

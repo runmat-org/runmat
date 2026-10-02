@@ -13,6 +13,8 @@ mod window_generation;
 mod waveform_map;
 mod waveform_control;
 mod waveform_sample;
+#[cfg(test)]
+pub(crate) mod waveform_restore_fixture;
 pub(crate) mod window_provider;
 pub(crate) use cooperation::SignalCooperation;
 pub(crate) use waveform_control::{PreparedWaveformControl, WaveformControlError};

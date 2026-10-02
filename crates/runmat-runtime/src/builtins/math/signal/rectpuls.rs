@@ -61,8 +61,10 @@ pub(crate) fn rectpuls_scalar(t: f64, width: f64) -> f64 {
     if t.is_nan() {
         return f64::NAN;
     }
-    let half_width = width / 2.0;
-    if t >= -half_width && t < half_width {
+    // Doubling a finite sample is exact in binary64 unless it overflows,
+    // whereas halving the smallest positive width can round to zero.
+    let doubled_time = t * 2.0;
+    if doubled_time >= -width && doubled_time < width {
         1.0
     } else {
         0.0
@@ -120,7 +122,7 @@ async fn rectpuls_in_runtime(
         "T",
     )
     .await?;
-    let gpu_source = rectpuls_gpu_source(&t, &rest)?;
+    let (gpu_source, resident_inputs) = rectpuls_gpu_source(&t, &rest)?;
     let width = resolve_width(width).await?;
     let tensor = rectpuls_input_tensor(t).await?;
     let output = map_real_waveform(
@@ -134,8 +136,13 @@ async fn rectpuls_in_runtime(
     let Some(source) = gpu_source else {
         return Ok(tensor_into_value(output));
     };
-    let restored =
-        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(output), BUILTIN_NAME)?;
+    let protected: Vec<_> = resident_inputs.iter().collect();
+    let restored = gpu_helpers::restore_class_preserving_value_protecting(
+        &source,
+        Value::Tensor(output),
+        BUILTIN_NAME,
+        &protected,
+    )?;
     if runmat_accelerate_api::handle_is_explicit(&source)
         && !matches!(restored, Value::GpuTensor(_))
     {
@@ -166,16 +173,19 @@ fn ensure_rectpuls_compatibility(t: &Value, rest: &[Value]) -> BuiltinResult<()>
     Ok(())
 }
 
-fn rectpuls_gpu_source(t: &Value, rest: &[Value]) -> BuiltinResult<Option<GpuTensorHandle>> {
-    gpu_helpers::select_resident_output_source(
-        std::iter::once(t)
-            .chain(rest.iter())
-            .filter_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle.clone()),
-                _ => None,
-            }),
-        BUILTIN_NAME,
-    )
+fn rectpuls_gpu_source(
+    t: &Value,
+    rest: &[Value],
+) -> BuiltinResult<(Option<GpuTensorHandle>, Vec<GpuTensorHandle>)> {
+    let handles: Vec<_> = std::iter::once(t)
+        .chain(rest.iter())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    let source = gpu_helpers::select_resident_output_source(handles.iter().cloned(), BUILTIN_NAME)?;
+    Ok((source, handles))
 }
 
 fn prepare_width(rest: &[Value]) -> BuiltinResult<Option<PreparedWaveformControl<'_>>> {
@@ -290,6 +300,19 @@ mod tests {
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("rectpuls"));
         assert_eq!(out.shape, vec![1, 6]);
         assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn smallest_positive_width_keeps_zero_inside_half_open_pulse() {
+        let minimum = f64::from_bits(1);
+        assert_eq!(rectpuls_scalar(0.0, minimum), 1.0);
+        assert_eq!(rectpuls_scalar(-0.0, minimum), 1.0);
+        assert_eq!(rectpuls_scalar(minimum, minimum), 0.0);
+        assert_eq!(rectpuls_scalar(-minimum, minimum), 0.0);
+        assert_eq!(rectpuls_scalar(-minimum, 2.0 * minimum), 1.0);
+        assert_eq!(rectpuls_scalar(minimum, 2.0 * minimum), 0.0);
+        assert_eq!(rectpuls_scalar(0.0, f64::MAX), 1.0);
+        assert_eq!(rectpuls_scalar(f64::MAX, f64::MAX), 0.0);
     }
 
     #[test]
@@ -430,6 +453,37 @@ mod tests {
                 RECTPULS_EXPLICIT_GPU_EXTENSION.error_identifier
             );
         });
+    }
+
+    #[test]
+    fn restoration_never_adopts_other_borrowed_control_or_retires_it_on_failure() {
+        use crate::builtins::math::signal::common::waveform_restore_fixture::RestoreProbeProvider;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        for alias_control in [true, false] {
+            let provider = RestoreProbeProvider::new();
+            let sample = provider.input(&[0.0]);
+            let width = provider.input(&[1.0]);
+            let borrowed_sample = sample.clone();
+            let borrowed_width = width.clone();
+            if alias_control {
+                provider.alias_on_restore(&width);
+            } else {
+                provider.fail_on_restore();
+            }
+            let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let error = call(Value::GpuTensor(sample), vec![Value::GpuTensor(width)])
+                .expect_err("borrowed alias or late upload failure");
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert_eq!(provider.downloads(), 2);
+            assert!(borrowed_sample.allocation_lease().validate_live().is_ok());
+            assert!(borrowed_width.allocation_lease().validate_live().is_ok());
+            if alias_control {
+                assert!(error.message().contains("borrowed input"));
+            } else {
+                assert!(error.message().contains("late waveform restoration fault"));
+                assert!(std::error::Error::source(&error).is_some());
+            }
+        }
     }
 
     #[test]

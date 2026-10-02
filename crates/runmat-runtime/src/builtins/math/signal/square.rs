@@ -77,9 +77,16 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
     if !t.is_finite() {
         return f64::NAN;
     }
+    if duty == 0.0 {
+        return -1.0;
+    }
+    if duty == 100.0 {
+        return 1.0;
+    }
     let phi = t.rem_euclid(TWO_PI);
-    let threshold = duty * TWO_PI / 100.0;
-    if phi < threshold {
+    // Keep the percentage comparison in its non-underflowing scale. A
+    // positive subnormal duty still includes phase zero.
+    if phi * 100.0 < duty * TWO_PI {
         1.0
     } else {
         -1.0
@@ -450,6 +457,20 @@ mod tests {
         assert_eq!(expect_num(call(Value::Num(3.0 * PI / 2.0)).unwrap()), -1.0);
         // A full period wraps back to +1.
         assert_eq!(expect_num(call(Value::Num(TWO_PI)).unwrap()), 1.0);
+    }
+
+    #[test]
+    fn smallest_positive_duty_includes_only_representable_zero_phase() {
+        let minimum = f64::from_bits(1);
+        assert_eq!(square_scalar(0.0, minimum), 1.0);
+        assert_eq!(square_scalar(TWO_PI, minimum), 1.0);
+        assert_eq!(square_scalar(minimum, minimum), -1.0);
+        assert_eq!(square_scalar(0.0, 0.0), -1.0);
+        assert_eq!(square_scalar(0.0, 100.0), 1.0);
+        assert_eq!(
+            square_scalar(f64::from_bits(TWO_PI.to_bits() - 1), 100.0),
+            1.0
+        );
     }
 
     #[test]

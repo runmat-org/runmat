@@ -158,6 +158,14 @@ async fn tripuls_in_runtime(
             .await
             .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
     }
+    let resident_inputs: Vec<_> = std::iter::once(&t)
+        .chain(rest.iter())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    gpu_helpers::select_resident_output_source(resident_inputs.iter().cloned(), BUILTIN_NAME)?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &t,
         &TRIPULS_INTEGER_DATA_EXTENSION,
@@ -167,7 +175,9 @@ async fn tripuls_in_runtime(
     .await?;
     let (width, skew) = resolve_options(controls).await?;
     match t {
-        Value::GpuTensor(handle) => tripuls_gpu(handle, width, skew, &mut cooperation).await,
+        Value::GpuTensor(handle) => {
+            tripuls_gpu(handle, width, skew, &resident_inputs, &mut cooperation).await
+        }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))
         }
@@ -270,6 +280,7 @@ async fn tripuls_gpu(
     handle: GpuTensorHandle,
     width: f64,
     skew: f64,
+    resident_inputs: &[GpuTensorHandle],
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -285,9 +296,16 @@ async fn tripuls_gpu(
     )
     .await
     .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL))?;
-    let restored =
-        gpu_helpers::restore_class_preserving_value(&handle, Value::Tensor(result), BUILTIN_NAME)?;
-    if runmat_accelerate_api::handle_is_explicit(&handle)
+    let protected: Vec<_> = resident_inputs.iter().collect();
+    let restored = gpu_helpers::restore_class_preserving_value_protecting(
+        &handle,
+        Value::Tensor(result),
+        BUILTIN_NAME,
+        &protected,
+    )?;
+    if resident_inputs
+        .iter()
+        .any(runmat_accelerate_api::handle_is_explicit)
         && !matches!(restored, Value::GpuTensor(_))
     {
         return Err(tripuls_error_with_detail(
@@ -487,6 +505,37 @@ mod tests {
                 TRIPULS_GPU_INPUT_EXTENSION.error_identifier
             );
         });
+    }
+
+    #[test]
+    fn restoration_never_adopts_other_borrowed_control_or_retires_it_on_failure() {
+        use crate::builtins::math::signal::common::waveform_restore_fixture::RestoreProbeProvider;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        for alias_control in [true, false] {
+            let provider = RestoreProbeProvider::new();
+            let sample = provider.input(&[0.0]);
+            let width = provider.input(&[1.0]);
+            let borrowed_sample = sample.clone();
+            let borrowed_width = width.clone();
+            if alias_control {
+                provider.alias_on_restore(&width);
+            } else {
+                provider.fail_on_restore();
+            }
+            let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let error = call(Value::GpuTensor(sample), vec![Value::GpuTensor(width)])
+                .expect_err("borrowed alias or late upload failure");
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert_eq!(provider.downloads(), 2);
+            assert!(borrowed_sample.allocation_lease().validate_live().is_ok());
+            assert!(borrowed_width.allocation_lease().validate_live().is_ok());
+            if alias_control {
+                assert!(error.message().contains("borrowed input"));
+            } else {
+                assert!(error.message().contains("late waveform restoration fault"));
+                assert!(std::error::Error::source(&error).is_some());
+            }
+        }
     }
 
     #[test]
