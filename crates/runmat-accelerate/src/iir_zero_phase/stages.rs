@@ -50,19 +50,26 @@ impl fmt::Display for StageCompletionFailed {
             f,
             "iir_zero_phase: {} stage retirement failure(s)",
             self.cleanup.len()
-        )
+        )?;
+        if let Some(primary) = &self.primary {
+            write!(f, "; original execution failure: {primary}")?;
+        }
+        for cleanup in &self.cleanup {
+            write!(f, "; {cleanup}")?;
+        }
+        Ok(())
     }
 }
 
 impl Error for StageCompletionFailed {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.cleanup
-            .first()
-            .map(|cleanup| cleanup as &(dyn Error + 'static))
+        self.primary
+            .as_ref()
+            .map(|primary| primary as &(dyn Error + 'static))
             .or_else(|| {
-                self.primary
-                    .as_ref()
-                    .map(|primary| primary as &(dyn Error + 'static))
+                self.cleanup
+                    .first()
+                    .map(|cleanup| cleanup as &(dyn Error + 'static))
             })
     }
 }
@@ -130,11 +137,24 @@ impl<'a> Stages<'a> {
             .copied()
             .chain(self.handles.iter())
             .all(|other| !handle.shares_allocation_with(other));
+        let physical_extent = shape
+            .iter()
+            .try_fold(1u64, |count, &extent| {
+                count.checked_mul(u64::try_from(extent).ok()?)
+            })
+            .is_some_and(|count| {
+                handle.physical().element_capacity() >= count
+                    && count
+                        .checked_mul(handle.physical().element_type().element_size() as u64)
+                        .is_some_and(|bytes| handle.physical().payload_bytes() >= bytes)
+            });
         let valid = exact_owner
+            && handle.device_id() == self.provider.device_id()
             && handle.allocation_lease().validate_live().is_ok()
             && handle.shape() == shape
             && handle.view().layout() == GpuTensorLayout::Contiguous
             && valid_class
+            && physical_extent
             && distinct
             && self.handles.len() < MAX_STAGES;
         if !valid {

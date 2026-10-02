@@ -17,7 +17,10 @@ use super::{
 use crate::context::RuntimeContext;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
 
-fn real_coefficients(values: &[Complex<f64>]) -> BuiltinResult<Vec<f64>> {
+async fn real_coefficients(
+    values: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<f64>> {
     let mut real = Vec::new();
     real.try_reserve_exact(values.len()).map_err(|source| {
         let mut builder =
@@ -29,7 +32,10 @@ fn real_coefficients(values: &[Complex<f64>]) -> BuiltinResult<Vec<f64>> {
         }
         builder.with_gpu_gather_retry(GpuGatherRetry::Never).build()
     })?;
-    real.extend(values.iter().map(|value| value.re));
+    for chunk in values.chunks(4096) {
+        real.extend(chunk.iter().map(|value| value.re));
+        cooperation.completed(chunk.len() as u64).await?;
+    }
     Ok(real)
 }
 
@@ -134,12 +140,15 @@ pub(super) async fn try_execute(
     let capability_revision = provider.capability_snapshot().revision;
     cooperation.completed(0).await?;
     let zi = lfilter_zi(coeffs, cooperation).await?;
-    if zi.iter().any(|value| value.im != 0.0) {
-        return Ok(None);
+    for chunk in zi.chunks(4096) {
+        if chunk.iter().any(|value| value.im != 0.0) {
+            return Ok(None);
+        }
+        cooperation.completed(chunk.len() as u64).await?;
     }
-    let numerator = real_coefficients(&coeffs.b)?;
-    let denominator = real_coefficients(&coeffs.a)?;
-    let zi = real_coefficients(&zi)?;
+    let numerator = real_coefficients(&coeffs.b, cooperation).await?;
+    let denominator = real_coefficients(&coeffs.a, cooperation).await?;
+    let zi = real_coefficients(&zi, cooperation).await?;
     let mut protected = Vec::new();
     protected
         .try_reserve_exact(borrowed.len().saturating_add(1))

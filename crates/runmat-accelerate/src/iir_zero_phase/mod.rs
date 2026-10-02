@@ -35,14 +35,17 @@ fn check_cancel(request: &ProviderIirZeroPhaseRequest<'_>) -> ProviderExecutionR
 fn check_owner(provider: &dyn AccelProvider, handle: &GpuTensorHandle) -> anyhow::Result<()> {
     handle.allocation_lease().validate_live()?;
     ensure!(
-        provider_for_handle(handle).is_some_and(|owner| same_provider_instance(owner, provider)),
+        handle.device_id() == provider.device_id()
+            && provider_for_handle(handle)
+                .is_some_and(|owner| same_provider_instance(owner, provider)),
         "iir_zero_phase: resident operand allocation owner mismatch"
     );
     ensure!(
         handle_precision(handle) == Some(provider.precision())
             && handle_storage(handle) == GpuTensorStorage::Real
             && handle_integer_type(handle).is_none()
-            && !handle_is_logical(handle),
+            && !handle_is_logical(handle)
+            && handle.view().layout() == runmat_accelerate_api::GpuTensorLayout::Contiguous,
         "iir_zero_phase: real floating operand class mismatch"
     );
     Ok(())
