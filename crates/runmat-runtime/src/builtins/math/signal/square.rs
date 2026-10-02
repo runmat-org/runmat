@@ -20,9 +20,9 @@ use runmat_value::{NumericDType, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    admit_real_waveform_sample, map_real_waveform, prepared_real_integer_tensor,
-    PreparedWaveformControl, SignalCooperation, WaveformControlError, WaveformOutputMode,
-    WaveformSampleError,
+    admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
+    prepared_real_integer_tensor, PreparedWaveformControl, SignalCooperation, WaveformControlError,
+    WaveformOutputMode, WaveformSampleError,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -155,6 +155,7 @@ async fn square_in_runtime(
             .admit_resident_metadata(BUILTIN_NAME)
             .map_err(duty_control_error)?;
     }
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample")?;
     let prepared = cooperation
         .prepare_integer_boundary(&t, &SQUARE_NONFLOATING_INPUT_EXTENSION, "sample-time")
         .await?;

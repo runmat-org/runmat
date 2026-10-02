@@ -18,9 +18,21 @@ pub(crate) fn admit_resident_waveform_operand(
         return Ok(());
     };
     validation::validate_resident_metadata(value)?;
-    handle.allocation_lease().validate_live().map_err(|source| {
+    handle
+        .allocation_lease()
+        .validate_live()
+        .map_err(|source| {
+            build_runtime_error(format!(
+                "{builtin}: resident {role} allocation is unavailable: {source}"
+            ))
+            .with_builtin(builtin)
+            .with_source(source)
+            .with_gpu_gather_retry(GpuGatherRetry::Never)
+            .build()
+        })?;
+    handle.view().validate(handle.physical()).map_err(|source| {
         build_runtime_error(format!(
-            "{builtin}: resident {role} allocation is unavailable: {source}"
+            "{builtin}: resident {role} view is invalid: {source}"
         ))
         .with_builtin(builtin)
         .with_source(source)

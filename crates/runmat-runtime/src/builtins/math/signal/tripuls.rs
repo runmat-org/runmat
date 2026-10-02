@@ -12,8 +12,9 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    admit_real_waveform_sample, map_real_waveform, prepared_real_integer_tensor,
-    PreparedWaveformControl, SignalCooperation, WaveformControlError, WaveformOutputMode,
+    admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
+    prepared_real_integer_tensor, PreparedWaveformControl, SignalCooperation, WaveformControlError,
+    WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -167,6 +168,7 @@ async fn tripuls_in_runtime(
         skew.admit_resident_metadata(BUILTIN_NAME)
             .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
     }
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample")?;
     let resident_inputs: Vec<_> = std::iter::once(&t)
         .chain(rest.iter())
         .filter_map(|value| match value {
