@@ -5517,10 +5517,10 @@ pub fn prepare_plotyy_axes() -> Result<(FigureHandle, usize, usize, f64, f64), F
 pub fn render_active_plot<F>(
     builtin: &'static str,
     opts: PlotRenderOptions<'_>,
-    mut apply: F,
+    apply: F,
 ) -> BuiltinResult<String>
 where
-    F: FnMut(&mut Figure, usize) -> BuiltinResult<()>,
+    F: FnOnce(&mut Figure, usize) -> BuiltinResult<()>,
 {
     let rendering_disabled = interactive_rendering_disabled();
     let host_managed_rendering = host_managed_rendering_enabled();
@@ -5585,10 +5585,10 @@ where
 pub fn append_active_plot<F>(
     builtin: &'static str,
     opts: PlotRenderOptions<'_>,
-    mut apply: F,
+    apply: F,
 ) -> BuiltinResult<String>
 where
-    F: FnMut(&mut Figure, usize) -> BuiltinResult<()>,
+    F: FnOnce(&mut Figure, usize) -> BuiltinResult<()>,
 {
     let rendering_disabled = interactive_rendering_disabled();
     let host_managed_rendering = host_managed_rendering_enabled();

@@ -22,14 +22,14 @@ pub(super) fn render_scatterhist(
     let x_edges = bin_edges(x_limits, bins[0])?;
     let y_edges = bin_edges(y_limits, bins[1])?;
     let layout = axes_for_layout(options.location, options.direction);
-    let x_marginals = prepare_marginals(
+    let x_marginals = prepare_marginal_plots(
         series,
         options,
         &x_edges,
         MarginalAxis::X,
         layout.x_marginal_scale,
     )?;
-    let y_marginals = prepare_marginals(
+    let y_marginals = prepare_marginal_plots(
         series,
         options,
         &y_edges,
@@ -54,22 +54,8 @@ pub(super) fn render_scatterhist(
     }
 
     render_scatter_axes(figure, layout.scatter, series)?;
-    render_x_marginal(
-        figure,
-        layout.xhist,
-        series,
-        options,
-        &x_edges,
-        &x_marginals,
-    )?;
-    render_y_marginal(
-        figure,
-        layout.yhist,
-        series,
-        options,
-        &y_edges,
-        &y_marginals,
-    )?;
+    render_x_marginal(figure, layout.xhist, x_marginals)?;
+    render_y_marginal(figure, layout.yhist, y_marginals)?;
 
     if options
         .legend
@@ -150,13 +136,9 @@ pub(super) fn render_scatter_axes(
 pub(super) fn render_x_marginal(
     figure: crate::builtins::plotting::FigureHandle,
     axes: usize,
-    series: &[GroupSeries],
-    options: &ScatterhistOptions,
-    edges: &[f64],
-    prepared: &[PreparedMarginal],
+    prepared: Vec<PreparedMarginalPlot>,
 ) -> BuiltinResult<()> {
     select_axes_for_figure(figure, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
-    let hist_style = resolved_hist_style(options, series);
     handle_plot_render_result(render_active_plot(
         NAME,
         PlotRenderOptions {
@@ -165,42 +147,12 @@ pub(super) fn render_x_marginal(
             y_label: "Count",
             ..Default::default()
         },
-        |figure, axes| {
-            for (idx, item) in series.iter().enumerate() {
-                if let Some((xs, ys)) = &prepared[idx].kde {
-                    let line = LinePlot::new(xs.clone(), ys.clone())
-                        .map_err(|err| internal(format!("scatterhist: {err}")))?
-                        .with_style(
-                            item.style.color,
-                            item.style.line_width,
-                            item.style.line_style,
-                        )
-                        .with_label(item.label.clone());
-                    figure.add_line_plot_on_axes(line, axes);
-                }
-                if let Some(counts) = &prepared[idx].counts {
-                    let counts = counts.clone();
-                    match hist_style {
-                        HistStyle::Bar => {
-                            let mut bar =
-                                bar_from_counts(edges, counts, item.style.color, &item.label)?;
-                            bar = bar.with_group(idx, series.len());
-                            figure.add_bar_chart_on_axes(bar, axes);
-                        }
-                        HistStyle::Stairs => {
-                            let (xs, ys) = stairs_from_counts(edges, &counts, false);
-                            let line = LinePlot::new(xs, ys)
-                                .map_err(|err| internal(format!("scatterhist: {err}")))?
-                                .with_style(
-                                    item.style.color,
-                                    item.style.line_width,
-                                    item.style.line_style,
-                                )
-                                .with_label(item.label.clone());
-                            figure.add_line_plot_on_axes(line, axes);
-                        }
-                    }
-                }
+        move |figure, axes| {
+            for plot in prepared {
+                match plot {
+                    PreparedMarginalPlot::Line(line) => figure.add_line_plot_on_axes(line, axes),
+                    PreparedMarginalPlot::Bar(bar) => figure.add_bar_chart_on_axes(bar, axes),
+                };
             }
             Ok(())
         },
@@ -210,13 +162,9 @@ pub(super) fn render_x_marginal(
 pub(super) fn render_y_marginal(
     figure: crate::builtins::plotting::FigureHandle,
     axes: usize,
-    series: &[GroupSeries],
-    options: &ScatterhistOptions,
-    edges: &[f64],
-    prepared: &[PreparedMarginal],
+    prepared: Vec<PreparedMarginalPlot>,
 ) -> BuiltinResult<()> {
     select_axes_for_figure(figure, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
-    let hist_style = resolved_hist_style(options, series);
     handle_plot_render_result(render_active_plot(
         NAME,
         PlotRenderOptions {
@@ -225,65 +173,16 @@ pub(super) fn render_y_marginal(
             y_label: "Y",
             ..Default::default()
         },
-        |figure, axes| {
-            for (idx, item) in series.iter().enumerate() {
-                if let Some((density, ys)) = &prepared[idx].kde {
-                    let line = LinePlot::new(density.clone(), ys.clone())
-                        .map_err(|err| internal(format!("scatterhist: {err}")))?
-                        .with_style(
-                            item.style.color,
-                            item.style.line_width,
-                            item.style.line_style,
-                        )
-                        .with_label(item.label.clone());
-                    figure.add_line_plot_on_axes(line, axes);
-                }
-                if let Some(counts) = &prepared[idx].counts {
-                    let counts = counts.clone();
-                    match hist_style {
-                        HistStyle::Bar => {
-                            let mut bar =
-                                bar_from_counts(edges, counts, item.style.color, &item.label)?
-                                    .with_orientation(Orientation::Horizontal);
-                            bar = bar.with_group(idx, series.len());
-                            figure.add_bar_chart_on_axes(bar, axes);
-                        }
-                        HistStyle::Stairs => {
-                            let (xs, ys) = stairs_from_counts(edges, &counts, true);
-                            let line = LinePlot::new(xs, ys)
-                                .map_err(|err| internal(format!("scatterhist: {err}")))?
-                                .with_style(
-                                    item.style.color,
-                                    item.style.line_width,
-                                    item.style.line_style,
-                                )
-                                .with_label(item.label.clone());
-                            figure.add_line_plot_on_axes(line, axes);
-                        }
-                    }
-                }
+        move |figure, axes| {
+            for plot in prepared {
+                match plot {
+                    PreparedMarginalPlot::Line(line) => figure.add_line_plot_on_axes(line, axes),
+                    PreparedMarginalPlot::Bar(bar) => figure.add_bar_chart_on_axes(bar, axes),
+                };
             }
             Ok(())
         },
     ))
-}
-
-pub(super) fn bar_from_counts(
-    edges: &[f64],
-    counts: Vec<f64>,
-    color: Vec4,
-    label: &str,
-) -> BuiltinResult<BarChart> {
-    let labels = edges
-        .windows(2)
-        .map(|pair| format!("[{:.3}, {:.3})", pair[0], pair[1]))
-        .collect::<Vec<_>>();
-    let mut chart = BarChart::new(labels, counts)
-        .map_err(|err| internal(format!("scatterhist: {err}")))?
-        .with_style(color, 0.95)
-        .with_label(label.to_string());
-    chart.set_histogram_bin_edges(edges.to_vec());
-    Ok(chart)
 }
 
 pub(super) fn resolved_hist_style(
