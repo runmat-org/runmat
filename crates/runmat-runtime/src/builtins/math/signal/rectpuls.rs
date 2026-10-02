@@ -9,10 +9,11 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
+use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, WaveformOutputMode, WindowCooperation,
+    map_real_waveform, PreparedWaveformControl, WaveformControlError, WaveformOutputMode,
+    WindowCooperation,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -102,9 +103,10 @@ async fn rectpuls_in_runtime(
 ) -> BuiltinResult<Value> {
     let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
+    let width = prepare_width(&rest)?;
     ensure_rectpuls_extensions(&t, &rest).await?;
     let gpu_source = rectpuls_gpu_source(&t, &rest)?;
-    let width = parse_width(&rest).await?;
+    let width = resolve_width(width).await?;
     let tensor = rectpuls_input_tensor(t).await?;
     let output = map_real_waveform(
         tensor,
@@ -139,16 +141,6 @@ async fn ensure_rectpuls_extensions(t: &Value, rest: &[Value]) -> BuiltinResult<
         "T",
     )
     .await?;
-    if let [width] = rest {
-        crate::builtins::common::validation::reject_typed_complex_integer(width, BUILTIN_NAME)?;
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            width,
-            &RECTPULS_INTEGER_W_EXTENSION,
-            BUILTIN_NAME,
-            "W",
-        )
-        .await?;
-    }
     if std::iter::once(t)
         .chain(rest.iter())
         .any(|value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle)))
@@ -173,22 +165,49 @@ fn rectpuls_gpu_source(t: &Value, rest: &[Value]) -> BuiltinResult<Option<GpuTen
     )
 }
 
-async fn parse_width(rest: &[Value]) -> BuiltinResult<f64> {
+fn prepare_width(rest: &[Value]) -> BuiltinResult<Option<PreparedWaveformControl<'_>>> {
     match rest.len() {
-        0 => Ok(1.0),
+        0 => Ok(None),
         1 => {
-            let raw = scalar_f64_from_value_async(&rest[0])
-                .await
-                .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err))?
-                .ok_or_else(|| rectpuls_error(&RECTPULS_ERROR_WIDTH_INVALID))?;
-            validate_width(raw).map_err(|err| {
-                rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err.as_str())
-            })
+            let prepared = PreparedWaveformControl::admit(
+                &rest[0],
+                &RECTPULS_INTEGER_W_EXTENSION,
+                BUILTIN_NAME,
+                "W",
+            )
+            .map_err(width_control_error)?;
+            if let Some(raw) = prepared.host_value() {
+                validate_width(raw).map_err(|err| {
+                    rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err)
+                })?;
+            }
+            Ok(Some(prepared))
         }
         _ => Err(rectpuls_error_with_detail(
             &RECTPULS_ERROR_ARG_COUNT,
             format!("got {}", rest.len() + 1),
         )),
+    }
+}
+
+async fn resolve_width(control: Option<PreparedWaveformControl<'_>>) -> BuiltinResult<f64> {
+    let Some(control) = control else {
+        return Ok(1.0);
+    };
+    let raw = control.resolve().await.map_err(width_control_error)?;
+    validate_width(raw)
+        .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err))
+}
+
+fn width_control_error(error: WaveformControlError) -> RuntimeError {
+    match error {
+        WaveformControlError::Invalid(detail) => {
+            rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, detail)
+        }
+        WaveformControlError::Boundary(source) => source,
+        WaveformControlError::Provider(source) => {
+            rectpuls_error_with_source(&RECTPULS_ERROR_INTERNAL, "control admission failed", source)
+        }
     }
 }
 
@@ -284,6 +303,21 @@ mod tests {
         let err =
             call(Value::CharArray(CharArray::new_row("abc")), Vec::new()).expect_err("text input");
         assert_eq!(err.identifier(), RECTPULS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn invalid_host_width_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        input.probe.mark_unavailable();
+        let err =
+            call(Value::GpuTensor(input.handle), vec![Value::Num(0.0)]).expect_err("host width");
+        assert_eq!(err.identifier(), RECTPULS_ERROR_WIDTH_INVALID.identifier);
     }
 
     #[test]

@@ -10,9 +10,11 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 pub(super) mod output_precision;
 mod window_generation;
 mod waveform_map;
+mod waveform_control;
 pub(crate) mod window_provider;
-pub(crate) use window_generation::{window_allocation_error, window_tensor, WindowCooperation};
+pub(crate) use waveform_control::{PreparedWaveformControl, WaveformControlError};
 pub(crate) use waveform_map::{map_real_waveform, WaveformMapError, WaveformOutputMode};
+pub(crate) use window_generation::{window_allocation_error, window_tensor, WindowCooperation};
 
 const EPS: f64 = 1.0e-12;
 

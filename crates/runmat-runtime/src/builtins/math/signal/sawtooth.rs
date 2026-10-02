@@ -18,10 +18,11 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
 
-use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
+use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, WaveformOutputMode, WindowCooperation,
+    map_real_waveform, PreparedWaveformControl, WaveformControlError, WaveformOutputMode,
+    WindowCooperation,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -121,6 +122,7 @@ async fn sawtooth_in_runtime(
 ) -> BuiltinResult<Value> {
     let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
+    let xmax = prepare_xmax(&varargin)?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
@@ -147,16 +149,7 @@ async fn sawtooth_in_runtime(
         "t",
     )
     .await?;
-    if let [xmax] = varargin.as_slice() {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            xmax,
-            &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
-            BUILTIN_NAME,
-            "xmax",
-        )
-        .await?;
-    }
-    let xmax = parse_xmax(&varargin).await?;
+    let xmax = resolve_xmax(xmax).await?;
     match t {
         Value::GpuTensor(handle) => sawtooth_gpu(handle, xmax, &mut cooperation).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
@@ -183,26 +176,55 @@ fn is_supported_nondouble_argument(value: &Value) -> bool {
     }
 }
 
-async fn parse_xmax(varargin: &[Value]) -> BuiltinResult<f64> {
+fn prepare_xmax(varargin: &[Value]) -> BuiltinResult<Option<PreparedWaveformControl<'_>>> {
     match varargin.len() {
-        0 => Ok(1.0),
+        0 => Ok(None),
         1 => {
-            let raw = scalar_f64_from_value_async(&varargin[0])
-                .await
-                .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_XMAX_INVALID, err))?
-                .ok_or_else(|| sawtooth_error(&SAWTOOTH_ERROR_XMAX_INVALID))?;
-            if !raw.is_finite() || !(0.0..=1.0).contains(&raw) {
-                return Err(sawtooth_error_with_detail(
-                    &SAWTOOTH_ERROR_XMAX_RANGE,
-                    format!("got {raw}"),
-                ));
+            let control = PreparedWaveformControl::admit(
+                &varargin[0],
+                &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
+                BUILTIN_NAME,
+                "xmax",
+            )
+            .map_err(xmax_control_error)?;
+            if let Some(raw) = control.host_value() {
+                validate_xmax(raw)?;
             }
-            Ok(raw)
+            Ok(Some(control))
         }
         _ => Err(sawtooth_error_with_detail(
             &SAWTOOTH_ERROR_ARG_COUNT,
             format!("got {}", varargin.len() + 1),
         )),
+    }
+}
+
+async fn resolve_xmax(control: Option<PreparedWaveformControl<'_>>) -> BuiltinResult<f64> {
+    let Some(control) = control else {
+        return Ok(1.0);
+    };
+    validate_xmax(control.resolve().await.map_err(xmax_control_error)?)
+}
+
+fn validate_xmax(raw: f64) -> BuiltinResult<f64> {
+    if !raw.is_finite() || !(0.0..=1.0).contains(&raw) {
+        return Err(sawtooth_error_with_detail(
+            &SAWTOOTH_ERROR_XMAX_RANGE,
+            format!("got {raw}"),
+        ));
+    }
+    Ok(raw)
+}
+
+fn xmax_control_error(error: WaveformControlError) -> RuntimeError {
+    match error {
+        WaveformControlError::Invalid(detail) => {
+            sawtooth_error_with_detail(&SAWTOOTH_ERROR_XMAX_INVALID, detail)
+        }
+        WaveformControlError::Boundary(source) => source,
+        WaveformControlError::Provider(source) => {
+            sawtooth_error_with_source(&SAWTOOTH_ERROR_INTERNAL, "control download failed", source)
+        }
     }
 }
 
@@ -248,6 +270,21 @@ async fn sawtooth_real(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_host_xmax_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        input.probe.mark_unavailable();
+        let err =
+            call_with_xmax(Value::GpuTensor(input.handle), Value::Num(2.0)).expect_err("host xmax");
+        assert_eq!(err.identifier(), SAWTOOTH_ERROR_XMAX_RANGE.identifier);
+    }
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntValue, LogicalArray, Tensor};

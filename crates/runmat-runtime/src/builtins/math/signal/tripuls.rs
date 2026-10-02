@@ -9,10 +9,11 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
+use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, WaveformOutputMode, WindowCooperation,
+    map_real_waveform, PreparedWaveformControl, WaveformControlError, WaveformOutputMode,
+    WindowCooperation,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -128,6 +129,7 @@ async fn tripuls_in_runtime(
 ) -> BuiltinResult<Value> {
     let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
+    let controls = prepare_options(&rest)?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || rest
             .iter()
@@ -145,16 +147,7 @@ async fn tripuls_in_runtime(
         "sample times",
     )
     .await?;
-    for value in &rest {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            value,
-            &TRIPULS_INTEGER_CONTROL_EXTENSION,
-            BUILTIN_NAME,
-            "width or skew",
-        )
-        .await?;
-    }
-    let (width, skew) = parse_options(&rest).await?;
+    let (width, skew) = resolve_options(controls).await?;
     match t {
         Value::GpuTensor(handle) => tripuls_gpu(handle, width, skew, &mut cooperation).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
@@ -167,7 +160,12 @@ async fn tripuls_in_runtime(
     }
 }
 
-async fn parse_options(rest: &[Value]) -> BuiltinResult<(f64, f64)> {
+type TripulsControls<'a> = (
+    Option<PreparedWaveformControl<'a>>,
+    Option<PreparedWaveformControl<'a>>,
+);
+
+fn prepare_options(rest: &[Value]) -> BuiltinResult<TripulsControls<'_>> {
     if rest.len() > 2 {
         return Err(tripuls_error_with_detail(
             &TRIPULS_ERROR_ARG_COUNT,
@@ -176,29 +174,78 @@ async fn parse_options(rest: &[Value]) -> BuiltinResult<(f64, f64)> {
     }
     let width = match rest.first() {
         Some(value) => {
-            let raw = scalar_f64_from_value_async(value)
-                .await
-                .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_WIDTH_INVALID, err))?
-                .ok_or_else(|| tripuls_error(&TRIPULS_ERROR_WIDTH_INVALID))?;
-            validate_width(raw).map_err(|err| {
-                tripuls_error_with_detail(&TRIPULS_ERROR_WIDTH_INVALID, err.as_str())
-            })?
+            let control = PreparedWaveformControl::admit(
+                value,
+                &TRIPULS_INTEGER_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+                "width or skew",
+            )
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
+            if let Some(raw) = control.host_value() {
+                validate_width(raw)
+                    .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_WIDTH_INVALID, err))?;
+            }
+            Some(control)
         }
-        None => 1.0,
+        None => None,
     };
     let skew = match rest.get(1) {
         Some(value) => {
-            let raw = scalar_f64_from_value_async(value)
+            let control = PreparedWaveformControl::admit(
+                value,
+                &TRIPULS_INTEGER_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+                "width or skew",
+            )
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
+            if let Some(raw) = control.host_value() {
+                validate_skew(raw)
+                    .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_SKEW_INVALID, err))?;
+            }
+            Some(control)
+        }
+        None => None,
+    };
+    Ok((width, skew))
+}
+
+async fn resolve_options(controls: TripulsControls<'_>) -> BuiltinResult<(f64, f64)> {
+    let width = match controls.0 {
+        Some(control) => {
+            let raw = control
+                .resolve()
                 .await
+                .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
+            validate_width(raw)
+                .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_WIDTH_INVALID, err))?
+        }
+        None => 1.0,
+    };
+    let skew = match controls.1 {
+        Some(control) => {
+            let raw = control
+                .resolve()
+                .await
+                .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
+            validate_skew(raw)
                 .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_SKEW_INVALID, err))?
-                .ok_or_else(|| tripuls_error(&TRIPULS_ERROR_SKEW_INVALID))?;
-            validate_skew(raw).map_err(|err| {
-                tripuls_error_with_detail(&TRIPULS_ERROR_SKEW_INVALID, err.as_str())
-            })?
         }
         None => 0.0,
     };
     Ok((width, skew))
+}
+
+fn control_error(
+    error: WaveformControlError,
+    invalid: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    match error {
+        WaveformControlError::Invalid(detail) => tripuls_error_with_detail(invalid, detail),
+        WaveformControlError::Boundary(source) => source,
+        WaveformControlError::Provider(source) => {
+            tripuls_error_with_source(&TRIPULS_ERROR_INTERNAL, "control download failed", source)
+        }
+    }
 }
 
 async fn tripuls_gpu(
@@ -321,6 +368,24 @@ mod tests {
             control_error.identifier(),
             TRIPULS_INTEGER_CONTROL_EXTENSION.error_identifier
         );
+    }
+
+    #[test]
+    fn invalid_host_skew_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        input.probe.mark_unavailable();
+        let err = call(
+            Value::GpuTensor(input.handle),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+        )
+        .expect_err("host skew");
+        assert_eq!(err.identifier(), TRIPULS_ERROR_SKEW_INVALID.identifier);
     }
 
     #[test]

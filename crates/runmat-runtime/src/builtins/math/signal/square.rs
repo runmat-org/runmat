@@ -17,10 +17,11 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
 
-use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
+use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    map_real_waveform, WaveformOutputMode, WindowCooperation,
+    map_real_waveform, PreparedWaveformControl, WaveformControlError, WaveformOutputMode,
+    WindowCooperation,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -111,6 +112,7 @@ async fn square_in_runtime(
 ) -> BuiltinResult<Value> {
     let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
+    let duty = prepare_duty(&varargin)?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
@@ -137,16 +139,7 @@ async fn square_in_runtime(
         "sample-time",
     )
     .await?;
-    if let Some(duty) = varargin.first() {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            duty,
-            &SQUARE_NONFLOATING_INPUT_EXTENSION,
-            BUILTIN_NAME,
-            "duty-cycle",
-        )
-        .await?;
-    }
-    let duty = parse_duty(&varargin).await?;
+    let duty = resolve_duty(duty).await?;
     match t {
         Value::GpuTensor(handle) => square_gpu(handle, duty, &mut cooperation).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
@@ -174,26 +167,55 @@ fn is_supported_nonfloating_argument(value: &Value) -> bool {
     }
 }
 
-async fn parse_duty(varargin: &[Value]) -> BuiltinResult<f64> {
+fn prepare_duty(varargin: &[Value]) -> BuiltinResult<Option<PreparedWaveformControl<'_>>> {
     match varargin.len() {
-        0 => Ok(50.0),
+        0 => Ok(None),
         1 => {
-            let raw = scalar_f64_from_value_async(&varargin[0])
-                .await
-                .map_err(|err| square_error_with_detail(&SQUARE_ERROR_DUTY_INVALID, err))?
-                .ok_or_else(|| square_error(&SQUARE_ERROR_DUTY_INVALID))?;
-            if !raw.is_finite() || !(0.0..=100.0).contains(&raw) {
-                return Err(square_error_with_detail(
-                    &SQUARE_ERROR_DUTY_RANGE,
-                    format!("got {raw}"),
-                ));
+            let control = PreparedWaveformControl::admit(
+                &varargin[0],
+                &SQUARE_NONFLOATING_INPUT_EXTENSION,
+                BUILTIN_NAME,
+                "duty-cycle",
+            )
+            .map_err(duty_control_error)?;
+            if let Some(raw) = control.host_value() {
+                validate_duty(raw)?;
             }
-            Ok(raw)
+            Ok(Some(control))
         }
         _ => Err(square_error_with_detail(
             &SQUARE_ERROR_ARG_COUNT,
             format!("got {}", varargin.len() + 1),
         )),
+    }
+}
+
+async fn resolve_duty(control: Option<PreparedWaveformControl<'_>>) -> BuiltinResult<f64> {
+    let Some(control) = control else {
+        return Ok(50.0);
+    };
+    validate_duty(control.resolve().await.map_err(duty_control_error)?)
+}
+
+fn validate_duty(raw: f64) -> BuiltinResult<f64> {
+    if !raw.is_finite() || !(0.0..=100.0).contains(&raw) {
+        return Err(square_error_with_detail(
+            &SQUARE_ERROR_DUTY_RANGE,
+            format!("got {raw}"),
+        ));
+    }
+    Ok(raw)
+}
+
+fn duty_control_error(error: WaveformControlError) -> RuntimeError {
+    match error {
+        WaveformControlError::Invalid(detail) => {
+            square_error_with_detail(&SQUARE_ERROR_DUTY_INVALID, detail)
+        }
+        WaveformControlError::Boundary(source) => source,
+        WaveformControlError::Provider(source) => {
+            square_error_with_source(&SQUARE_ERROR_INTERNAL, "control download failed", source)
+        }
     }
 }
 
@@ -239,6 +261,21 @@ async fn square_real(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_host_duty_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        input.probe.mark_unavailable();
+        let err = call_with_duty(Value::GpuTensor(input.handle), Value::Num(101.0))
+            .expect_err("host duty");
+        assert_eq!(err.identifier(), SQUARE_ERROR_DUTY_RANGE.identifier);
+    }
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntValue, LogicalArray, NumericStorage, Tensor};
