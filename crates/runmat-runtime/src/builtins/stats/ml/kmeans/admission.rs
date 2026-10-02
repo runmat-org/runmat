@@ -1,6 +1,6 @@
 use super::{
-    invalid, typed_integer, Distance, EmptyAction, KmeansDisplay, KmeansOption, KmeansStart,
-    KmeansStatsetField, KmeansToggle, StartSpec, MAX_WORK_CELLS,
+    invalid, Distance, EmptyAction, KmeansDisplay, KmeansOption, KmeansStart, KmeansStatsetField,
+    KmeansToggle, StartSpec, MAX_WORK_CELLS,
 };
 use crate::builtins::common::{random_args::keyword_of, tensor};
 use crate::BuiltinResult;
@@ -136,7 +136,7 @@ pub(super) async fn admit_option_values_cooperative(
                     if matches!(&value, Value::GpuTensor(_)) {
                         OptionInput::Start(StartInput::Resident(value))
                     } else {
-                        if !numeric_value_is_exact(&value) {
+                        if !numeric_value_is_exact_cooperative(&value, cooperation).await? {
                             return Err(invalid("kmeans: typed-integer Start values must be exactly representable as double"));
                         }
                         OptionInput::Start(StartInput::Prepared(
@@ -390,7 +390,30 @@ fn collect_resident_handles(value: &Value, into: &mut Vec<GpuTensorHandle>) {
     }
 }
 
-pub(super) fn numeric_value_is_exact(value: &Value) -> bool {
-    !typed_integer(value)
-        || crate::builtins::common::validation::native_integer_value_is_exact_f64(value)
+pub(super) async fn numeric_value_is_exact_cooperative(
+    value: &Value,
+    cooperation: &mut super::cooperation::KmeansCooperation,
+) -> BuiltinResult<bool> {
+    match value {
+        Value::Int(integer) => Ok(crate::builtins::common::validation::integer_is_exact_f64(
+            integer,
+        )),
+        Value::Tensor(tensor) => {
+            let Some(storage) = tensor.integer_storage() else {
+                return Ok(true);
+            };
+            for index in 0..storage.len() {
+                let integer = storage
+                    .value_at(index)
+                    .expect("integer storage index is within its length");
+                let exact = crate::builtins::common::validation::integer_is_exact_f64(&integer);
+                cooperation.completed(1).await?;
+                if !exact {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        _ => Ok(true),
+    }
 }

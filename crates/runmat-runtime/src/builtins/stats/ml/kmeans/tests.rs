@@ -201,6 +201,48 @@ fn cancellation_during_output_materialization_prevents_publication() {
     assert_eq!(turns.get(), 3);
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
 }
+
+#[test]
+fn native_integer_exactness_scan_is_cooperative_without_a_f64_copy() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use runmat_value::IntegerStorage;
+    use std::cell::Cell;
+    use std::num::NonZeroU64;
+    use std::rc::Rc;
+
+    let source = Rc::new(CancellationSource::new());
+    let turns = Rc::new(Cell::new(0));
+    let cancel_on_turn = source.clone();
+    let counted = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            if counted.get() == 4 {
+                cancel_on_turn.cancel(CancellationReason::User);
+            }
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let value = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 54; 16]), vec![16, 1]).unwrap(),
+    );
+    let error = block_on(admission::numeric_value_is_exact_cooperative(
+        &value,
+        &mut cooperation::KmeansCooperation::with_budget(budget),
+    ))
+    .expect_err("cancelled integer scan must not silently pass admission");
+    assert_eq!(turns.get(), 4);
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(block_on(admission::numeric_value_is_exact_cooperative(
+        &value,
+        &mut cooperation::KmeansCooperation::new(None),
+    ))
+    .unwrap());
+}
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
 }

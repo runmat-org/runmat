@@ -28,7 +28,9 @@ pub(super) async fn parse_options(
             OptionInput::Start(StartInput::Prepared(start)) => options.start = start,
             OptionInput::Start(StartInput::Resident(value)) => {
                 let value = materialize(value, borrowed).await?;
-                if !super::admission::numeric_value_is_exact(&value) {
+                if !super::admission::numeric_value_is_exact_cooperative(&value, cooperation)
+                    .await?
+                {
                     return Err(invalid("kmeans: typed-integer Start values must be exactly representable as double"));
                 }
                 options.start = parse_numeric_start_cooperative(value, cooperation).await?;
@@ -81,7 +83,11 @@ pub(super) async fn parse_numeric_start_cooperative(
             for col in 0..cols {
                 for (row, center_row) in centers.iter_mut().enumerate().take(k) {
                     let offset = row + col * k + page * k * cols;
-                    center_row[col] = tensor::tensor_value_f64(&tensor, offset);
+                    let value = tensor::tensor_value_f64(&tensor, offset);
+                    if !value.is_finite() {
+                        return Err(invalid("kmeans: numeric Start values must be finite"));
+                    }
+                    center_row[col] = value;
                     cooperation.completed(1).await?;
                 }
             }
@@ -93,7 +99,11 @@ pub(super) async fn parse_numeric_start_cooperative(
         let mut centers = vec![vec![0.0; cols]; rows];
         for col in 0..cols {
             for (row, center_row) in centers.iter_mut().enumerate().take(rows) {
-                center_row[col] = tensor::tensor_value_f64(&tensor, col * rows + row);
+                let value = tensor::tensor_value_f64(&tensor, col * rows + row);
+                if !value.is_finite() {
+                    return Err(invalid("kmeans: numeric Start values must be finite"));
+                }
+                center_row[col] = value;
                 cooperation.completed(1).await?;
             }
         }

@@ -164,6 +164,28 @@ fn invalid_text_option_with_resident_x_does_not_download() {
 }
 
 #[test]
+fn invalid_host_numeric_start_rejects_before_resident_x_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let x = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
+    let x = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x).unwrap();
+    for invalid_value in [f64::NAN, f64::INFINITY] {
+        let start = Tensor::new(vec![0.0, invalid_value], vec![2, 1]).unwrap();
+        let error = block_on(kmeans_builtin(
+            Value::GpuTensor(x.clone()),
+            Value::Num(2.0),
+            vec![Value::from("Start"), Value::Tensor(start)],
+        ))
+        .expect_err("known invalid Start values must reject without provider access");
+        assert!(error
+            .message()
+            .contains("numeric Start values must be finite"));
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
 fn ignored_resident_statset_field_does_not_download() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = CountingProvider::new();

@@ -8,6 +8,7 @@ use super::{build_runtime_error, with_kmeans_context, NAME};
 
 pub(super) struct KmeansCooperation {
     budget: Option<CpuCooperationBudget>,
+    runtime: Option<RuntimeContext>,
     namespace: Option<String>,
 }
 
@@ -15,7 +16,22 @@ impl KmeansCooperation {
     pub(super) fn new(runtime: Option<&RuntimeContext>) -> Self {
         Self {
             budget: runtime.map(RuntimeContext::cpu_cooperation),
+            runtime: runtime.cloned(),
             namespace: runtime.map(RuntimeContext::error_namespace),
+        }
+    }
+
+    pub(super) async fn uniform(&mut self, len: usize) -> BuiltinResult<Vec<f64>> {
+        match self.budget.as_mut() {
+            Some(budget) => crate::builtins::common::random::generate_uniform_cooperative(
+                len,
+                NAME,
+                self.runtime.as_ref(),
+                budget,
+            )
+            .await
+            .map_err(with_kmeans_context),
+            None => crate::builtins::common::random::generate_uniform(len, NAME),
         }
     }
 
@@ -42,6 +58,7 @@ impl KmeansCooperation {
     pub(super) fn with_budget(budget: CpuCooperationBudget) -> Self {
         Self {
             budget: Some(budget),
+            runtime: None,
             namespace: Some("RunMat".to_string()),
         }
     }

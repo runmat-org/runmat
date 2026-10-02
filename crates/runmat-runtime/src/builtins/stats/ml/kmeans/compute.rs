@@ -2,9 +2,8 @@ use std::cmp::Ordering;
 
 use super::{
     internal, invalid, Distance, EmptyAction, KmeansStart, Options, PreparedData, ReplicateResult,
-    StartSpec, EPS, NAME,
+    StartSpec, EPS,
 };
-use crate::builtins::common::random;
 use crate::BuiltinResult;
 
 pub(super) async fn run_kmeans_cooperative(
@@ -78,7 +77,9 @@ async fn sample_start(
             "kmeans: Start 'sample' requires k no larger than the number of complete observations",
         ));
     }
-    let mut scored = random::generate_uniform(data.rows.len(), NAME)?
+    let mut scored = cooperation
+        .uniform(data.rows.len())
+        .await?
         .into_iter()
         .enumerate()
         .collect::<Vec<_>>();
@@ -109,7 +110,7 @@ async fn plus_start(
             "kmeans: Start 'plus' requires k no larger than the number of complete observations",
         ));
     }
-    let uniforms = random::generate_uniform(k.max(1), NAME)?;
+    let uniforms = cooperation.uniform(k.max(1)).await?;
     let first = ((uniforms[0] * data.rows.len() as f64).floor() as usize).min(data.rows.len() - 1);
     let mut centers = vec![clone_row(&data.rows[first], cooperation).await?];
     while centers.len() < k {
@@ -187,7 +188,10 @@ async fn uniform_start(
             cooperation.completed(1).await?;
         }
     }
-    let uniforms = random::generate_uniform(k * cols, NAME)?;
+    let draw_count = k
+        .checked_mul(cols)
+        .ok_or_else(|| invalid("kmeans: uniform start shape overflow"))?;
+    let uniforms = cooperation.uniform(draw_count).await?;
     let mut centers = vec![vec![0.0; cols]; k];
     for center in 0..k {
         for col in 0..cols {

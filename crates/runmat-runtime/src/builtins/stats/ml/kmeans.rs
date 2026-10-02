@@ -167,7 +167,8 @@ async fn kmeans_in_runtime(
     borrowed.record_consumed(&x);
     let x_was_integer = typed_integer(&x);
     let x = gather(x).await?;
-    if x_was_integer && !admission::numeric_value_is_exact(&x) {
+    if x_was_integer && !admission::numeric_value_is_exact_cooperative(&x, &mut cooperation).await?
+    {
         return Err(invalid(
             "kmeans: typed-integer observation data must be exactly representable as double",
         ));

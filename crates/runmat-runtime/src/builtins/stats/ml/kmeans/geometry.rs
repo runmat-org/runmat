@@ -305,13 +305,7 @@ async fn validate_centers(
                 "kmeans: numeric Start must be k-by-p or k-by-p-by-r",
             ));
         }
-        for value in row {
-            let nonfinite = !value.is_finite();
-            cooperation.completed(1).await?;
-            if nonfinite {
-                return Err(invalid("kmeans: numeric Start values must be finite"));
-            }
-        }
+        cooperation.completed(1).await?;
     }
     Ok(())
 }
