@@ -271,7 +271,17 @@ async fn evaluate_requested(
         .transpose()?;
     if let (Some(placement), Some(provider)) = (placement.as_ref(), provider) {
         let produced = quotient.iter().chain(remainder.iter()).collect::<Vec<_>>();
-        placement.validate_actual_host_outputs(provider, &produced);
+        if !placement.validate_actual_host_outputs(provider, &produced) {
+            // The selected whole-call route promised a bounded, exact-upload
+            // presentation. A late rejection cannot be repaired by running a
+            // different effectful restore beneath the same failed receipt.
+            return Err(build_runtime_error(
+                "deconv result cannot be restored by the admitted provider upload",
+            )
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier("RunMat:Placement:LateUploadAdmissionFailed")
+            .build());
+        }
     }
     if let Some(prototype) = resident_prototype {
         let caller_inputs = resident_inputs.iter().collect::<Vec<_>>();

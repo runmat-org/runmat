@@ -202,7 +202,6 @@ impl ProviderFeasibilityQuery {
                 );
             }
             let expected = ProviderElementType::from(precision);
-            let mut total = 0_u64;
             for bound in bounds {
                 if bound.element_type != expected
                     || bound.storage != ProviderStorage::DenseReal
@@ -214,20 +213,20 @@ impl ProviderFeasibilityQuery {
                         "provider.transfer.bound_class",
                     );
                 }
-                let Some(next) = bound.max_bytes().and_then(|bytes| total.checked_add(bytes))
-                else {
+                if bound.max_bytes().is_none() {
                     return ProviderFeasibility::rejected(
                         ProviderRejectionCode::ResourceLimit,
                         "provider.transfer.bound_overflow",
                     );
-                };
-                total = next;
+                }
             }
-            return ProviderFeasibility::supported(ProviderResourceEstimate {
-                transient_bytes: None,
-                output_bytes: Some(total),
-                dispatches: Some(0),
-            });
+            // A provider may choose a wider physical upload representation.
+            // Only an audited provider override can turn a logical bound into
+            // a truthful physical allocation estimate.
+            return ProviderFeasibility::rejected(
+                ProviderRejectionCode::UnknownResourceEstimate,
+                "provider.transfer.bound_physical_unknown",
+            );
         }
         let expected = ProviderElementType::from(precision);
         for representation in self.inputs.iter().chain(&self.outputs) {

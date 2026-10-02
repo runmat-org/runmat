@@ -25,12 +25,15 @@ fn bounded_upload_keeps_exact_shape_unclaimed_and_checks_late_shape() {
             ..ProviderWorkload::default()
         },
     };
-    let crate::ProviderFeasibility::Supported { estimate } =
+    let crate::ProviderFeasibility::Rejected { rejection } =
         query.conservative_transfer_feasibility(ProviderPrecision::F64)
     else {
-        panic!("bounded upload should be feasible");
+        panic!("generic provider cannot assert physical bounded-upload feasibility");
     };
-    assert_eq!(estimate.output_bytes, Some(64));
+    assert_eq!(
+        rejection.code,
+        crate::ProviderRejectionCode::UnknownResourceEstimate
+    );
     let mut actual = ProviderRepresentation {
         element_type: ProviderElementType::F64,
         storage: ProviderStorage::DenseReal,
