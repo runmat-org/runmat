@@ -9,22 +9,6 @@ pub fn envelope_type(args: &[Type], _context: &ResolveContext) -> Type {
     numeric_like(input)
 }
 
-pub fn filter_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let signal = args.get(2);
-    match signal {
-        Some(ty) => numeric_like(ty),
-        None => Type::Unknown,
-    }
-}
-
-pub fn filtfilt_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let signal = args.get(2);
-    match signal {
-        Some(ty) => numeric_like(ty),
-        None => Type::Unknown,
-    }
-}
-
 pub fn fir1_type(args: &[Type], context: &ResolveContext) -> Type {
     if args.len() < 2 {
         return Type::Unknown;
@@ -334,26 +318,6 @@ mod tests {
         assert_eq!(
             freqz_type(&[Type::Tensor { shape: None }], &ctx),
             Type::Unknown
-        );
-    }
-
-    #[test]
-    fn filter_preserves_signal_shape() {
-        let out = filter_type(
-            &[
-                Type::Num,
-                Type::Num,
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(2)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)])
-            }
         );
     }
 

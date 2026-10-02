@@ -20,7 +20,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::signal::type_resolvers::filter_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
@@ -138,7 +137,6 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     summary = "Apply IIR/FIR digital filters.",
     keywords = "filter,IIR,FIR,difference equation,initial conditions,gpu",
     accel = "custom",
-    type_resolver(filter_type),
     binding_variant = "default",
     descriptor(runmat_builtins::FILTER_DESCRIPTOR),
     integer_capabilities(runmat_builtins::FILTER_INTEGER_CAPABILITIES),
@@ -1221,7 +1219,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn error_message(error: RuntimeError) -> String {
@@ -1250,30 +1248,6 @@ pub(crate) mod tests {
             .unwrap_or_else(|| panic!("expected {context} tensor to use double storage"))
             .to_vec();
         (data, shape)
-    }
-
-    #[test]
-    fn filter_type_preserves_signal_shape() {
-        let out = filter_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(2)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(2)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(3), Some(4)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(4)])
-            }
-        );
     }
 
     #[test]

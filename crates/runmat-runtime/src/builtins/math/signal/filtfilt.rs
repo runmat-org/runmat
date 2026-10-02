@@ -2,12 +2,9 @@
 
 use num_complex::Complex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, FILTFILT_ERROR_ARG_COUNT, FILTFILT_ERROR_INTERNAL,
+    FILTFILT_ERROR_INVALID_COEFFICIENTS, FILTFILT_ERROR_INVALID_SIGNAL, FILTFILT_ERROR_PASS_FAILED,
+    FILTFILT_INTEGER_INPUT_EXTENSION, FILTFILT_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
@@ -24,66 +21,10 @@ use crate::builtins::math::signal::common::{
     ComplexVectorInput,
 };
 use crate::builtins::math::signal::filter;
-use crate::builtins::math::signal::type_resolvers::filtfilt_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "filtfilt";
 const EPS: f64 = 1.0e-12;
-
-const FILTFILT_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "filtfilt-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "filtfilt with typed-integer coefficients or signal data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FiltfiltIntegerInputExtension"),
-};
-
-const FILTFILT_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "filtfilt-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "filtfilt with logical coefficients or signal data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FiltfiltLogicalInputExtension"),
-};
-
-const FILTFILT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    FILTFILT_INTEGER_INPUT_EXTENSION,
-    FILTFILT_LOGICAL_INPUT_EXTENSION,
-];
-
-const FILTFILT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "b",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "MATLAB documents single and double coefficients; RunMat mode additionally accepts real integer coefficients.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "a",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "MATLAB documents single and double coefficients; RunMat mode additionally accepts real integer coefficients.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "MATLAB documents single and double signals; RunMat mode additionally accepts real integer vectors.",
-    },
-];
-
-const FILTFILT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "y = filtfilt(integer_b, integer_a, integer_x)",
-        inputs: &FILTFILT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer inputs are independently mode-gated before gathering or provider access and produce double output.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filtfilt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -110,94 +51,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: None,
     emits_nan: false,
     notes: "Zero-phase filtering is a two-pass stateful operation and is not fused.",
-};
-
-const FILTFILT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zero-phase filtered signal.",
-}];
-
-const FILTFILT_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numerator coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Denominator coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input signal vector.",
-    },
-];
-
-const FILTFILT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "y = filtfilt(b, a, x)",
-    inputs: &FILTFILT_INPUTS,
-    outputs: &FILTFILT_OUTPUT,
-}];
-
-const FILTFILT_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTFILT.ARG_COUNT",
-    identifier: Some("RunMat:filtfilt:ArgCount"),
-    when: "The argument count is not exactly three.",
-    message: "filtfilt: expected filtfilt(b, a, x)",
-};
-
-const FILTFILT_ERROR_INVALID_COEFFICIENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTFILT.INVALID_COEFFICIENTS",
-    identifier: Some("RunMat:filtfilt:InvalidCoefficients"),
-    when: "Coefficient inputs are empty, non-vector, or have a zero leading denominator.",
-    message: "filtfilt: invalid coefficient input",
-};
-
-const FILTFILT_ERROR_INVALID_SIGNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTFILT.INVALID_SIGNAL",
-    identifier: Some("RunMat:filtfilt:InvalidSignal"),
-    when: "The signal is not a numeric/logical vector or is too short for edge reflection.",
-    message: "filtfilt: invalid signal input",
-};
-
-const FILTFILT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTFILT.INTERNAL",
-    identifier: Some("RunMat:filtfilt:Internal"),
-    when: "Internal state solving, filtering, or tensor construction fails.",
-    message: "filtfilt: internal error",
-};
-
-const FILTFILT_ERROR_PASS_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTFILT.PASS_FAILED",
-    identifier: Some("RunMat:filtfilt:PassFailed"),
-    when: "A forward or reverse pass fails during preparation, provider execution, or readback.",
-    message: "filtfilt: filtering pass failed",
-};
-
-const FILTFILT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    FILTFILT_ERROR_ARG_COUNT,
-    FILTFILT_ERROR_INVALID_COEFFICIENTS,
-    FILTFILT_ERROR_INVALID_SIGNAL,
-    FILTFILT_ERROR_INTERNAL,
-    FILTFILT_ERROR_PASS_FAILED,
-];
-
-pub const FILTFILT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FILTFILT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FILTFILT_ERRORS,
 };
 
 fn filtfilt_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -259,10 +112,10 @@ fn filtfilt_error_with_message(
     summary = "Apply zero-phase forward-backward digital filtering.",
     keywords = "filtfilt,zero phase,filter,IIR,FIR,signal processing,gpu",
     accel = "custom",
-    type_resolver(filtfilt_type),
-    descriptor(crate::builtins::math::signal::filtfilt::FILTFILT_DESCRIPTOR),
-    extensions(FILTFILT_EXTENSIONS),
-    integer_capabilities(FILTFILT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    descriptor(runmat_builtins::FILTFILT_DESCRIPTOR),
+    extensions(runmat_builtins::FILTFILT_EXTENSIONS),
+    integer_capabilities(runmat_builtins::FILTFILT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::filtfilt"
 )]
 async fn filtfilt_builtin(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
