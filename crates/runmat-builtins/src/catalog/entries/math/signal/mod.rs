@@ -6,6 +6,7 @@ mod gauspuls;
 mod hamming;
 mod hann;
 mod periodogram;
+mod pwelch;
 mod spectral_facts;
 mod spectrogram;
 mod window_facts;
@@ -15,6 +16,7 @@ pub use self::gauspuls::*;
 pub use self::hamming::*;
 pub use self::hann::*;
 pub use self::periodogram::*;
+pub use self::pwelch::*;
 pub use self::spectrogram::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
@@ -23,5 +25,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(hamming::ENTRIES.iter().copied());
     values.extend(hann::ENTRIES.iter().copied());
     values.extend(periodogram::ENTRIES.iter().copied());
+    values.extend(pwelch::ENTRIES.iter().copied());
     values.extend(spectrogram::ENTRIES.iter().copied());
 }
