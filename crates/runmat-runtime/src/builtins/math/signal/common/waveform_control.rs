@@ -7,7 +7,7 @@ use runmat_value::Value;
 use crate::builtins::common::{gpu_helpers, tensor, validation};
 use crate::RuntimeError;
 
-use super::{prepared_real_integer_tensor, SignalCooperation};
+use super::{admit_resident_waveform_operand, prepared_real_integer_tensor, SignalCooperation};
 
 #[derive(Debug)]
 pub(crate) enum WaveformControlError {
@@ -76,25 +76,12 @@ impl<'a> PreparedWaveformControl<'a> {
         else {
             return Ok(());
         };
-        let Value::GpuTensor(handle) = value else {
-            unreachable!("resident plan owns a GPU handle");
-        };
         if validation::value_has_native_integer_class(value) {
             crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)
                 .map_err(WaveformControlError::Boundary)?;
         }
-        validation::validate_resident_metadata(value).map_err(WaveformControlError::Boundary)?;
-        handle.allocation_lease().validate_live().map_err(|source| {
-            WaveformControlError::Boundary(
-                crate::build_runtime_error(format!(
-                    "{builtin}: resident control allocation is unavailable: {source}"
-                ))
-                .with_builtin(builtin)
-                .with_source(source)
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build(),
-            )
-        })
+        admit_resident_waveform_operand(value, builtin, "control")
+            .map_err(WaveformControlError::Boundary)
     }
 
     pub(crate) fn admit(

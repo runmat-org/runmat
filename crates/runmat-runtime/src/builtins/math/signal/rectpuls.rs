@@ -12,8 +12,9 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::tensor::tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::{
-    admit_real_waveform_sample, map_real_waveform, prepared_real_integer_tensor,
-    PreparedWaveformControl, SignalCooperation, WaveformControlError, WaveformOutputMode,
+    admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
+    prepared_real_integer_tensor, PreparedWaveformControl, SignalCooperation, WaveformControlError,
+    WaveformOutputMode,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -120,11 +121,14 @@ async fn rectpuls_in_runtime(
             .admit_resident_metadata(BUILTIN_NAME)
             .map_err(width_control_error)?;
     }
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample")?;
+    // Authenticate every resident operand before preparation can download a
+    // wide integer sample. The same handles later protect output restoration.
+    let (gpu_source, resident_inputs) = rectpuls_gpu_source(&t, &rest)?;
     let prepared = cooperation
         .prepare_integer_boundary(&t, &RECTPULS_INTEGER_T_EXTENSION, "T")
         .await?;
     let prepared_payload = prepared.into_resident_payload();
-    let (gpu_source, resident_inputs) = rectpuls_gpu_source(&t, &rest)?;
     let width = resolve_width(width, &mut cooperation).await?;
     let tensor = match prepared_real_integer_tensor(prepared_payload)
         .map_err(|detail| rectpuls_error_with_detail(&RECTPULS_ERROR_INVALID_INPUT, detail))?
@@ -594,7 +598,10 @@ mod tests {
         let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
         let invalid = call(Value::GpuTensor(handle.clone()), vec![Value::Num(0.0)])
             .expect_err("host-invalid width precedes native sample readback");
-        assert_eq!(invalid.identifier(), RECTPULS_ERROR_WIDTH_INVALID.identifier);
+        assert_eq!(
+            invalid.identifier(),
+            RECTPULS_ERROR_WIDTH_INVALID.identifier
+        );
         assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 0);
         assert!(handle.allocation_lease().validate_live().is_ok());
         let output =
@@ -622,6 +629,31 @@ mod tests {
         assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 2);
         assert!(control_handle.allocation_lease().validate_live().is_ok());
         control_handle.release().unwrap();
+
+        let other_provider: &'static runmat_accelerate::simple_provider::InProcessProvider =
+            Box::leak(Box::new(
+                runmat_accelerate::simple_provider::InProcessProvider::new(),
+            ));
+        unsafe { runmat_accelerate_api::register_provider(other_provider) };
+        let sample = gpu_helpers::upload_tensor(provider, &input).unwrap();
+        let foreign_width = other_provider
+            .upload(&HostTensorView {
+                data: &[1.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        let before = provider.integer_downloads.load(Ordering::SeqCst);
+        let error = call(
+            Value::GpuTensor(sample.clone()),
+            vec![Value::GpuTensor(foreign_width.clone())],
+        )
+        .expect_err("mixed resident owners reject before native sample readback");
+        assert_eq!(error.identifier(), Some("RunMat:gpu:MixedProviders"));
+        assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), before);
+        assert!(sample.allocation_lease().validate_live().is_ok());
+        assert!(foreign_width.allocation_lease().validate_live().is_ok());
+        sample.release().unwrap();
+        foreign_width.release().unwrap();
     }
 
     #[test]
