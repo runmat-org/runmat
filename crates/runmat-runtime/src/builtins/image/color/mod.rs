@@ -1,6 +1,7 @@
 //! Image color and format conversion builtins.
 
 pub(crate) mod common;
+pub(crate) mod color_presentation;
 pub(crate) mod conversion_mode;
 pub mod gray2rgb;
 pub mod hsv2rgb;

@@ -5,6 +5,7 @@ use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
 fn call(indexed: Tensor, map: Tensor) -> BuiltinResult<Tensor> {
     let value = block_on(ind2rgb_builtin(
+        None,
         Value::Tensor(indexed),
         Value::Tensor(map),
         Vec::new(),
@@ -122,6 +123,7 @@ fn rejects_logical_indexed_image_and_colormap() {
     let logical_indexed = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
     let map = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
     let err = block_on(ind2rgb_builtin(
+        None,
         Value::LogicalArray(logical_indexed),
         Value::Tensor(map),
         Vec::new(),
@@ -132,6 +134,7 @@ fn rejects_logical_indexed_image_and_colormap() {
     let indexed = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
     let logical_map = LogicalArray::new(vec![1, 0, 0], vec![1, 3]).unwrap();
     let err = block_on(ind2rgb_builtin(
+        None,
         Value::Tensor(indexed),
         Value::LogicalArray(logical_map),
         Vec::new(),
@@ -145,6 +148,7 @@ fn rejects_non_colormap_map_shape() {
     let indexed = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
     let map = Tensor::new(vec![1.0; 12], vec![2, 2, 3]).unwrap();
     let err = block_on(ind2rgb_builtin(
+        None,
         Value::Tensor(indexed),
         Value::Tensor(map),
         Vec::new(),
@@ -187,6 +191,7 @@ fn ind2rgb_gpu_fallback_restores_to_owner_and_preserves_source() {
         let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
 
         let result = block_on(ind2rgb_builtin(
+            None,
             Value::GpuTensor(source.clone()),
             Value::Tensor(map),
             Vec::new(),
@@ -228,6 +233,7 @@ fn ind2rgb_rejects_unsupported_resident_integer_before_download() {
         .handle;
     let map = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
     let err = block_on(ind2rgb_builtin(
+        None,
         Value::GpuTensor(handle.clone()),
         Value::Tensor(map),
         Vec::new(),
@@ -254,6 +260,7 @@ fn ind2rgb_descriptor_errors_have_stable_codes() {
 #[test]
 fn ind2rgb_too_many_args_uses_stable_identifier() {
     let err = block_on(ind2rgb_builtin(
+        None,
         Value::Num(1.0),
         Value::Num(2.0),
         vec![Value::Num(3.0)],

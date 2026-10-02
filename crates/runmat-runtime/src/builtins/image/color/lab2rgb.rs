@@ -11,8 +11,14 @@ use runmat_value::NumericStorage;
 use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::tensor;
+use crate::builtins::image::color::color_presentation::{
+    self, ColorHostRoute, ColorHostUpload, SelectedColorPresentation,
+};
 use crate::builtins::image::color::common;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{
+    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
+    BuiltinPreparationAdmission,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "lab2rgb";
@@ -52,9 +58,14 @@ fn lab2rgb_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 #[runtime_builtin(
     name = "lab2rgb",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::color::lab2rgb"
 )]
-async fn lab2rgb_builtin(lab: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn lab2rgb_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    lab: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     let output_type = parse_output_type(&rest)?;
     crate::output_count::validate_fixed_outputs(
         &LAB2RGB_DESCRIPTOR,
@@ -66,10 +77,42 @@ async fn lab2rgb_builtin(lab: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => vec![handle.clone()],
         _ => Vec::new(),
     };
+    let selected = match &lab {
+        Value::GpuTensor(handle) => {
+            let input_dtype = match runmat_accelerate_api::handle_precision(handle) {
+                Some(runmat_accelerate_api::ProviderPrecision::F32) => NumericDType::F32,
+                _ => NumericDType::F64,
+            };
+            let output_dtype = output_type.map_or(input_dtype, |output| match output {
+                LabOutputType::Double => NumericDType::F64,
+                LabOutputType::Single => NumericDType::F32,
+                LabOutputType::UInt8 => NumericDType::U8,
+                LabOutputType::UInt16 => NumericDType::U16,
+            });
+            color_presentation::select(
+                runtime.as_ref(),
+                ColorHostUpload {
+                    route: ColorHostRoute::LabToRgb,
+                    sources: &resident_sources,
+                    output_shape: handle.shape().to_vec(),
+                    output_dtype,
+                    host_compute_scratch: color_presentation::checked_scratch(
+                        color_presentation::checked_elements(handle.shape()),
+                        16,
+                    ),
+                    control_facts: runmat_execution::Digest::sha256(
+                        serde_json::to_vec(&(input_dtype, output_dtype))
+                            .expect("typed Lab output facts serialize"),
+                    ),
+                },
+            )?
+        }
+        _ => None,
+    };
     if !admitted {
-        return lab2rgb_execute(lab, output_type, resident_sources).await;
+        return lab2rgb_execute(lab, output_type, resident_sources, selected).await;
     }
-    execute_current_invocation(
+    let request = AdmittedBuiltinPreparation::new(
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: BuiltinCatalogIdentity { name: NAME },
@@ -81,16 +124,20 @@ async fn lab2rgb_builtin(lab: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             requested_outputs: crate::output_count::current_output_count(),
         },
         vec![lab],
-        |mut operands| async move {
-            lab2rgb_execute(
-                operands.pop().expect("admitted Lab operand"),
-                output_type,
-                resident_sources,
-            )
-            .await
-        },
-    )
-    .await
+    )?;
+    let execute = |mut operands: Vec<Value>| async move {
+        lab2rgb_execute(
+            operands.pop().expect("admitted Lab operand"),
+            output_type,
+            resident_sources,
+            selected,
+        )
+        .await
+    };
+    match runtime.as_ref() {
+        Some(runtime) => execute_admitted(runtime, request, execute).await,
+        None => execute_current_request(request, execute).await,
+    }
 }
 
 fn admit_lab(lab: &Value) -> BuiltinResult<bool> {
@@ -157,6 +204,7 @@ async fn lab2rgb_execute(
     lab: Value,
     output_type: Option<LabOutputType>,
     resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
+    mut selected: Option<SelectedColorPresentation>,
 ) -> BuiltinResult<Value> {
     let logical_input = match &lab {
         Value::Bool(_) | Value::LogicalArray(_) => true,
@@ -207,11 +255,13 @@ async fn lab2rgb_execute(
     let storage = lab2rgb_output_storage(data, output_type);
     let out = Tensor::from_numeric_storage(storage, layout.output_shape())
         .map_err(|err| lab2rgb_error_with_message(err, &LAB2RGB_ERROR_INTERNAL))?;
-    common::restore_resident_numeric_result_for_sources(
-        &resident_sources,
-        common::image_value_from_tensor(out),
-        NAME,
-    )
+    color_presentation::publish(&mut selected, || {
+        common::restore_resident_numeric_result_for_sources(
+            &resident_sources,
+            common::image_value_from_tensor(out),
+            NAME,
+        )
+    })
 }
 
 fn parse_output_type(rest: &[Value]) -> BuiltinResult<Option<LabOutputType>> {

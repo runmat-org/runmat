@@ -10,9 +10,9 @@ use runmat_accelerate_api::observation::{
     ProviderObservationCapability, ProviderObservationSupport,
 };
 use runmat_accelerate_api::{
-    provider_for_handle, GpuTensorHandle, ProviderFeasibility, ProviderFeasibilityQuery,
-    ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation, ProviderResidency,
-    ProviderWorkload,
+    provider_for_handle, same_provider_instance, GpuTensorHandle, ProviderFeasibility,
+    ProviderFeasibilityQuery, ProviderOperationFamily, ProviderOperationIdentity,
+    ProviderRepresentation, ProviderResidency, ProviderWorkload,
 };
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
@@ -40,6 +40,19 @@ pub(crate) fn select_exact_host_upload(
     runtime: Option<&RuntimeContext>,
     request: ExactHostUpload<'_>,
 ) -> BuiltinResult<Option<HostPresentationReceipt>> {
+    let owner = request.owner;
+    select_exact_host_upload_with_readbacks(runtime, request, std::slice::from_ref(owner))
+}
+
+/// The readback set is exactly the resident operands that the host computation
+/// will gather. Each independently returned native payload (including aliases)
+/// contributes to peak host workspace. The owner remains the original handle
+/// selected for result publication, not an automatically prepared replacement.
+pub(crate) fn select_exact_host_upload_with_readbacks(
+    runtime: Option<&RuntimeContext>,
+    request: ExactHostUpload<'_>,
+    readbacks: &[GpuTensorHandle],
+) -> BuiltinResult<Option<HostPresentationReceipt>> {
     let Some(runtime) = runtime else {
         return Ok(None);
     };
@@ -49,6 +62,20 @@ pub(crate) fn select_exact_host_upload(
     let Some(provider) = provider_for_handle(request.owner) else {
         return Ok(None);
     };
+    if readbacks.is_empty()
+        || readbacks.iter().any(|source| {
+            source.device_id() != provider.device_id()
+                || source.allocation_lease().validate_live().is_err()
+                || provider_for_handle(source)
+                    .is_none_or(|owner| !same_provider_instance(owner, provider))
+        })
+    {
+        return Err(build_runtime_error(
+            "host readback source is not a live allocation of the result owner",
+        )
+        .with_identifier("RunMat:Placement:InvalidReadbackOwner")
+        .build());
+    }
     if request.outputs.is_empty()
         || request.outputs.iter().any(|output| {
             output.residency != ProviderResidency::Device || output.checked_byte_len().is_none()
@@ -89,7 +116,15 @@ pub(crate) fn select_exact_host_upload(
     ) {
         return Ok(None);
     }
-    let readback_host_workspace = provider.download_numeric_host_workspace_bound(request.owner);
+    let readback_host_workspace =
+        readbacks
+            .iter()
+            .try_fold(ResourceByteBound::Known(0), |total, source| {
+                combine_host_scratch(
+                    total,
+                    provider.download_numeric_host_workspace_bound(source),
+                )
+            })?;
     let total_host_scratch =
         combine_host_scratch(request.host_compute_scratch, readback_host_workspace)?;
     let device_id = provider.device_id();
@@ -111,6 +146,17 @@ pub(crate) fn select_exact_host_upload(
                 request.domain_facts,
                 &upload,
                 readback_host_workspace,
+                readbacks
+                    .iter()
+                    .map(|source| {
+                        (
+                            source.shape(),
+                            source.physical().element_type(),
+                            source.view().layout(),
+                            runmat_accelerate_api::handle_provenance(source),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
                 device_id,
                 runmat_accelerate_api::handle_provenance(request.owner),
             ))

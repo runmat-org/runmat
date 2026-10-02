@@ -11,8 +11,14 @@ use runmat_builtins::{BuiltinIntegerInputAvailability, IND2RGB_INTEGER_CAPABILIT
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericDType, Value};
 
+use crate::builtins::image::color::color_presentation::{
+    self, ColorHostRoute, ColorHostUpload, SelectedColorPresentation,
+};
 use crate::builtins::image::color::common;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{
+    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
+    BuiltinPreparationAdmission,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "ind2rgb";
@@ -51,9 +57,15 @@ fn ind2rgb_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 #[runtime_builtin(
     name = "ind2rgb",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::color::ind2rgb"
 )]
-async fn ind2rgb_builtin(indexed: Value, map: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn ind2rgb_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    indexed: Value,
+    map: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(ind2rgb_error(&IND2RGB_ERROR_TOO_MANY_INPUTS));
     }
@@ -70,10 +82,38 @@ async fn ind2rgb_builtin(indexed: Value, map: Value, rest: Vec<Value>) -> Builti
             _ => None,
         })
         .collect();
+    let selected = if admitted && !resident_sources.is_empty() {
+        let indexed_shape = match &indexed {
+            Value::Tensor(tensor) => tensor.shape.clone(),
+            Value::GpuTensor(handle) => handle.shape().to_vec(),
+            Value::Num(_) | Value::Int(_) => vec![1, 1],
+            _ => unreachable!("admitted indexed input"),
+        };
+        let mut output_shape = indexed_shape.clone();
+        output_shape.push(3);
+        color_presentation::select(
+            runtime.as_ref(),
+            ColorHostUpload {
+                route: ColorHostRoute::IndexedToRgb,
+                sources: &resident_sources,
+                output_shape,
+                output_dtype: NumericDType::F64,
+                host_compute_scratch: color_presentation::checked_scratch(
+                    color_presentation::checked_elements(&indexed_shape),
+                    8,
+                ),
+                control_facts: runmat_execution::Digest::sha256(
+                    serde_json::to_vec(&indexed_shape).expect("typed indexed geometry serializes"),
+                ),
+            },
+        )?
+    } else {
+        None
+    };
     if !admitted {
-        return ind2rgb_execute(indexed, map, resident_sources).await;
+        return ind2rgb_execute(indexed, map, resident_sources, selected).await;
     }
-    execute_current_invocation(
+    let request = AdmittedBuiltinPreparation::new(
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: BuiltinCatalogIdentity { name: NAME },
@@ -85,13 +125,16 @@ async fn ind2rgb_builtin(indexed: Value, map: Value, rest: Vec<Value>) -> Builti
             requested_outputs: crate::output_count::current_output_count(),
         },
         vec![indexed, map],
-        |mut operands| async move {
-            let map = operands.pop().expect("admitted colormap operand");
-            let indexed = operands.pop().expect("admitted indexed operand");
-            ind2rgb_execute(indexed, map, resident_sources).await
-        },
-    )
-    .await
+    )?;
+    let execute = |mut operands: Vec<Value>| async move {
+        let map = operands.pop().expect("admitted colormap operand");
+        let indexed = operands.pop().expect("admitted indexed operand");
+        ind2rgb_execute(indexed, map, resident_sources, selected).await
+    };
+    match runtime.as_ref() {
+        Some(runtime) => execute_admitted(runtime, request, execute).await,
+        None => execute_current_request(request, execute).await,
+    }
 }
 
 fn admit_inputs(indexed: &Value, map: &Value) -> BuiltinResult<bool> {
@@ -228,6 +271,7 @@ async fn ind2rgb_execute(
     indexed: Value,
     map: Value,
     resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
+    mut selected: Option<SelectedColorPresentation>,
 ) -> BuiltinResult<Value> {
     let indexed_is_logical = match &indexed {
         Value::Bool(_) | Value::LogicalArray(_) => true,
@@ -352,11 +396,13 @@ async fn ind2rgb_execute(
 
     let out = common::tensor_with_dtype(data, shape, NumericDType::F64, NAME)
         .map_err(|err| ind2rgb_map_error(err, &IND2RGB_ERROR_INTERNAL))?;
-    common::restore_resident_numeric_result_for_sources(
-        &resident_sources,
-        common::image_value_from_tensor(out),
-        NAME,
-    )
+    color_presentation::publish(&mut selected, || {
+        common::restore_resident_numeric_result_for_sources(
+            &resident_sources,
+            common::image_value_from_tensor(out),
+            NAME,
+        )
+    })
 }
 
 fn map_index(value: f64, dtype: NumericDType, map_rows: usize) -> BuiltinResult<usize> {

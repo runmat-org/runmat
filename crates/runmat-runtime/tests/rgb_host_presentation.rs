@@ -290,3 +290,95 @@ fn failed_preparation_abandons_selected_rgb_receipt_without_upload() {
     assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
     assert!(source.allocation_lease().validate_live().is_ok());
 }
+
+#[test]
+fn restored_color_conversions_select_once_and_observe_exact_owner_upload() {
+    let (provider, _guard) = provider();
+    let source = gpu_helpers::upload_tensor(
+        provider,
+        &Tensor::new(vec![0.5, 0.2, 0.8], vec![1, 1, 3]).unwrap(),
+    )
+    .unwrap();
+    for name in ["hsv2rgb", "lab2rgb", "rgb2lab"] {
+        let witness = Rc::new(Witness::default());
+        let runtime =
+            runmat_accelerate::native_auto::install_preparation_service(witness.context());
+        let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+            &runtime,
+            name,
+            &[Value::GpuTensor(source.clone())],
+        ))
+        .expect("resident color conversion") else {
+            panic!("{name} must publish to the resident owner")
+        };
+        assert_eq!(output.shape(), source.shape());
+        assert!(!output.shares_allocation_with(&source));
+        assert!(provider_for_handle(&output)
+            .is_some_and(|owner| same_provider_instance(owner, provider)));
+        assert_eq!(
+            witness.selections.get(),
+            1,
+            "{name} selects one whole route"
+        );
+        witness.drain();
+        assert_eq!(
+            witness.feedback.borrow().len(),
+            1,
+            "{name} observes upload completion"
+        );
+    }
+    assert!(source.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
+fn indexed_color_two_resident_readbacks_select_one_owner_and_finite_quota_rejects_before_effects() {
+    let (provider, _guard) = provider();
+    let indexed = gpu_helpers::upload_tensor(
+        provider,
+        &Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap(),
+    )
+    .unwrap();
+    let map = gpu_helpers::upload_tensor(
+        provider,
+        &Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap(),
+    )
+    .unwrap();
+    let map = map.with_provenance(GpuHandleProvenance::Explicit).unwrap();
+    let operands = [
+        Value::GpuTensor(indexed.clone()),
+        Value::GpuTensor(map.clone()),
+    ];
+
+    let witness = Rc::new(Witness::default());
+    let runtime = runmat_accelerate::native_auto::install_preparation_service(witness.context());
+    let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+        &runtime, "ind2rgb", &operands,
+    ))
+    .expect("two resident operands") else {
+        panic!("indexed conversion must restore")
+    };
+    assert_eq!(output.shape(), &[1, 2, 3]);
+    assert!(runmat_accelerate_api::handle_is_explicit(&output));
+    assert!(!output.shares_allocation_with(&indexed));
+    assert!(!output.shares_allocation_with(&map));
+    assert_eq!(witness.selections.get(), 1);
+    witness.drain();
+    assert_eq!(witness.feedback.borrow().len(), 1);
+
+    let quota = base_context().with_service_ports(
+        RuntimeServicePorts::default()
+            .with_placement(Rc::new(PlacementSession::new(Default::default())))
+            .with_parallel(Rc::new(HostBudget(1))),
+    );
+    let quota = runmat_accelerate::native_auto::install_preparation_service(quota);
+    provider.reset_telemetry();
+    let error = block_on(call_builtin_async_in_context(&quota, "ind2rgb", &operands))
+        .expect_err("finite quota must reject both readbacks before effects");
+    assert!(error
+        .identifier()
+        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+    assert!(indexed.allocation_lease().validate_live().is_ok());
+    assert!(map.allocation_lease().validate_live().is_ok());
+}

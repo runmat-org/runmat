@@ -4,7 +4,7 @@ use futures::executor::block_on;
 use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
 fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let value = block_on(lab2rgb_builtin(Value::Tensor(tensor), Vec::new()))?;
+    let value = block_on(lab2rgb_builtin(None, Value::Tensor(tensor), Vec::new()))?;
     let Value::Tensor(out) = value else {
         panic!("expected tensor");
     };
@@ -67,6 +67,7 @@ fn output_type_constructs_authoritative_uint8_and_uint16_storage() {
     let lab = Tensor::new(vec![70.0, 5.0, 10.0], vec![1, 1, 3]).unwrap();
     for (name, dtype) in [("uint8", NumericDType::U8), ("uint16", NumericDType::U16)] {
         let value = block_on(lab2rgb_builtin(
+            None,
             Value::Tensor(lab.clone()),
             vec![Value::from("OutputType"), Value::from(name)],
         ))
@@ -89,6 +90,7 @@ fn explicit_resident_input_restores_output_to_exact_owner() {
             .expect("publish provenance view");
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = block_on(lab2rgb_builtin(
+            None,
             Value::GpuTensor(source.clone()),
             vec![Value::from("OutputType"), Value::from("uint8")],
         ))
@@ -136,7 +138,12 @@ fn lab2rgb_rejects_every_integer_class_and_logical() {
     }
 
     let logical = LogicalArray::new(vec![1, 0, 0], vec![1, 1, 3]).unwrap();
-    let err = block_on(lab2rgb_builtin(Value::LogicalArray(logical), Vec::new())).unwrap_err();
+    let err = block_on(lab2rgb_builtin(
+        None,
+        Value::LogicalArray(logical),
+        Vec::new(),
+    ))
+    .unwrap_err();
     assert_eq!(err.identifier(), LAB2RGB_ERROR_INVALID_INPUT.identifier);
 }
 
@@ -167,6 +174,7 @@ fn lab2rgb_descriptor_errors_have_stable_codes() {
 #[test]
 fn lab2rgb_too_many_args_uses_stable_identifier() {
     let err = block_on(lab2rgb_builtin(
+        None,
         Value::Num(1.0),
         vec![Value::Num(2.0), Value::Num(3.0), Value::Num(4.0)],
     ))
@@ -184,7 +192,7 @@ fn resident_integer_input_rejects_before_provider_lookup() {
         )
         .expect("admit owned fixture")
         .handle;
-    let error = block_on(lab2rgb_builtin(Value::GpuTensor(handle), Vec::new()))
+    let error = block_on(lab2rgb_builtin(None, Value::GpuTensor(handle), Vec::new()))
         .expect_err("integer resident LAB must reject");
     assert_eq!(error.identifier(), LAB2RGB_ERROR_INVALID_INPUT.identifier);
     assert!(!error.message().to_ascii_lowercase().contains("provider"));
@@ -213,7 +221,7 @@ fn resident_floating_descriptor_must_match_exact_owner_before_download() {
             source.physical().element_type(),
             runmat_accelerate_api::NumericElementType::F32
         );
-        block_on(lab2rgb_builtin(Value::GpuTensor(source), Vec::new()))
+        block_on(lab2rgb_builtin(None, Value::GpuTensor(source), Vec::new()))
             .expect("authentic input remains usable");
     });
 }

@@ -17,7 +17,9 @@ use runmat_execution::{
 use runmat_time::duration_ns_saturating;
 
 mod admission;
-pub(crate) use admission::{select_exact_host_upload, ExactHostUpload};
+pub(crate) use admission::{
+    select_exact_host_upload, select_exact_host_upload_with_readbacks, ExactHostUpload,
+};
 
 #[cfg(test)]
 #[path = "host_presentation/tests.rs"]

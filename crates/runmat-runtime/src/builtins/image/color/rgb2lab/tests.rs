@@ -6,7 +6,7 @@ use runmat_value::{IntegerStorage, Tensor};
 
 fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
     let Value::Tensor(out) =
-        block_on(rgb2lab_builtin(Value::Tensor(tensor), Vec::new())).expect("rgb2lab")
+        block_on(rgb2lab_builtin(None, Value::Tensor(tensor), Vec::new())).expect("rgb2lab")
     else {
         panic!("expected tensor");
     };
@@ -81,6 +81,7 @@ fn accepts_documented_single_uint8_and_uint16_colormaps() {
 fn supports_documented_color_space_and_white_point_options() {
     let rgb = Tensor::new(vec![0.2, 0.3, 0.4], vec![1, 3]).unwrap();
     let Value::Tensor(adobe) = block_on(rgb2lab_builtin(
+        None,
         Value::Tensor(rgb.clone()),
         vec![
             Value::String("ColorSpace".into()),
@@ -95,6 +96,7 @@ fn supports_documented_color_space_and_white_point_options() {
     }
 
     let Value::Tensor(d50) = block_on(rgb2lab_builtin(
+        None,
         Value::Tensor(rgb),
         vec![
             Value::String("WhitePoint".into()),
@@ -114,6 +116,7 @@ fn custom_white_point_and_repeated_option_use_final_value() {
     let rgb = Tensor::new(vec![0.2, 0.3, 0.4], vec![1, 3]).unwrap();
     let custom = Tensor::new(vec![0.9642, 1.0, 0.8251], vec![1, 3]).unwrap();
     let Value::Tensor(out) = block_on(rgb2lab_builtin(
+        None,
         Value::Tensor(rgb),
         vec![
             Value::from("WhitePoint"),
@@ -188,7 +191,7 @@ fn rgb2lab_accepts_uint16_and_rejects_other_integer_classes() {
         IntegerStorage::U64(vec![0; 3]),
     ] {
         let input = Tensor::new_integer(storage, vec![1, 1, 3]).unwrap();
-        let err = block_on(rgb2lab_builtin(Value::Tensor(input), Vec::new()))
+        let err = block_on(rgb2lab_builtin(None, Value::Tensor(input), Vec::new()))
             .expect_err("unsupported integer class");
         assert_eq!(err.identifier(), RGB2LAB_ERROR_INVALID_INPUT.identifier);
     }
@@ -236,6 +239,7 @@ fn rgb2lab_explicit_gpu_form_is_extension_gated_before_download() {
         .expect("publish provenance view");
     let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
     let err = block_on(rgb2lab_builtin(
+        None,
         Value::GpuTensor(handle.clone()),
         Vec::new(),
     ))
@@ -254,6 +258,7 @@ fn rgb2lab_enabled_explicit_gpu_form_restores_output_to_exact_owner() {
             .expect("publish provenance view");
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = block_on(rgb2lab_builtin(
+            None,
             Value::GpuTensor(source.clone()),
             Vec::new(),
         ))
@@ -289,7 +294,11 @@ fn rgb2lab_descriptor_errors_have_stable_codes() {
 
 #[test]
 fn rgb2lab_malformed_name_value_uses_stable_identifier() {
-    let err = block_on(rgb2lab_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
-        .expect_err("expected argument error");
+    let err = block_on(rgb2lab_builtin(
+        None,
+        Value::Num(1.0),
+        vec![Value::Num(2.0)],
+    ))
+    .expect_err("expected argument error");
     assert_eq!(err.identifier(), RGB2LAB_ERROR_INVALID_OPTION.identifier);
 }
