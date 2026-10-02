@@ -397,13 +397,7 @@ async fn prepare_quad_floating_value(
     if has_integer {
         crate::compatibility::ensure_builtin_extension_enabled(integer_extension, NAME)?;
     }
-    if is_logical_numeric(&value) {
-        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_NUMERIC_EXTENSION, NAME)?;
-    }
-    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
-        crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_INPUT_EXTENSION, NAME)?;
-    }
-    if has_integer {
+    let prepared = if has_integer {
         let prepared = cooperation.prepare_integer_boundary(&value).await?;
         if !prepared.is_exact() {
             return Err(quad_error_with_detail(
@@ -411,6 +405,17 @@ async fn prepare_quad_floating_value(
                 format!("integer {label} must be exactly representable as double"),
             ));
         }
+        Some(prepared)
+    } else {
+        None
+    };
+    if is_logical_numeric(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_NUMERIC_EXTENSION, NAME)?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_INPUT_EXTENSION, NAME)?;
+    }
+    if let Some(prepared) = prepared {
         if let Some(payload) = prepared.into_resident_payload() {
             return match payload {
                 crate::builtins::common::validation::PreparedIntegerPayload::Real(gathered) => {
