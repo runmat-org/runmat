@@ -113,6 +113,8 @@ async fn integral_builtin(
     for (label, value) in [("lower bound", &a), ("upper bound", &b)] {
         preflight_integral_bound(label, value)?;
     }
+    IntegralOptions::preflight_host(&admitted_options)?;
+    authenticate_integral_residents(&a, &b)?;
     let options = IntegralOptions::parse(&admitted_options)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_ARGUMENT))?;
@@ -193,6 +195,16 @@ fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
                 format!("{label} must be a finite real scalar"),
             ));
         }
+        return Ok(());
+    }
+    scalar_bound_host(label, value).map(|_| ())
+}
+
+fn authenticate_integral_residents(a: &Value, b: &Value) -> BuiltinResult<()> {
+    for (label, value) in [("lower bound", a), ("upper bound", b)] {
+        let Value::GpuTensor(handle) = value else {
+            continue;
+        };
         handle
             .allocation_lease()
             .validate_live()
@@ -203,9 +215,8 @@ fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .build()
             })?;
-        return Ok(());
     }
-    scalar_bound_host(label, value).map(|_| ())
+    Ok(())
 }
 
 fn admit_option_headers(rest: &[Value]) -> BuiltinResult<Vec<(IntegralOptionName, &Value)>> {
@@ -247,19 +258,26 @@ struct IntegralOptions {
 }
 
 impl IntegralOptions {
-    async fn parse(rest: &[(IntegralOptionName, &Value)]) -> BuiltinResult<Self> {
-        let mut options = Self {
+    fn defaults() -> Self {
+        Self {
             abs_tol: DEFAULT_ABS_TOL,
             rel_tol: DEFAULT_REL_TOL,
             max_fun_evals: DEFAULT_MAX_FUN_EVALS,
-        };
-        // Every host-visible invalid value is checked before a resident
-        // option can initiate a provider read, regardless of source order.
+        }
+    }
+
+    fn preflight_host(rest: &[(IntegralOptionName, &Value)]) -> BuiltinResult<()> {
+        let mut check = Self::defaults();
         for &(name, value) in rest {
             if !matches!(value, Value::GpuTensor(_)) {
-                options.apply_option(name, value)?;
+                check.apply_option(name, value)?;
             }
         }
+        Ok(())
+    }
+
+    async fn parse(rest: &[(IntegralOptionName, &Value)]) -> BuiltinResult<Self> {
+        let mut options = Self::defaults();
         for &(name, value) in rest {
             if matches!(value, Value::GpuTensor(_)) {
                 let gathered = crate::dispatcher::gather_if_needed_async(value).await?;

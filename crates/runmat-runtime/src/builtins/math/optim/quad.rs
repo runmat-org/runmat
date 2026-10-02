@@ -101,7 +101,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::optim::quad"
 )]
-async fn quad_builtin(
+pub(super) async fn quad_builtin(
     function: Value,
     a: Value,
     b: Value,
@@ -111,6 +111,7 @@ async fn quad_builtin(
     ensure_quad_extensions(&a, &b, &rest)?;
     preflight_quad_inputs(&a, &b, &rest)?;
     crate::call::admission::admit_feval_target(&function)?;
+    authenticate_quad_residents(&a, &b, &rest)?;
     let options = QuadOptions::parse(rest)
         .await
         .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_ARGUMENT))?;
@@ -148,6 +149,33 @@ fn preflight_quad_inputs(a: &Value, b: &Value, rest: &[Value]) -> BuiltinResult<
     }
     if let Some(trace) = rest.get(1) {
         preflight_quad_scalar(QuadScalarRole::Trace, trace)?;
+    }
+    Ok(())
+}
+
+fn authenticate_quad_residents(a: &Value, b: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    for (role, value) in [
+        (QuadScalarRole::LowerBound, Some(a)),
+        (QuadScalarRole::UpperBound, Some(b)),
+        (QuadScalarRole::Tolerance, rest.first()),
+        (QuadScalarRole::Trace, rest.get(1)),
+    ] {
+        let Some(Value::GpuTensor(handle)) = value else {
+            continue;
+        };
+        handle
+            .allocation_lease()
+            .validate_live()
+            .map_err(|source| {
+                build_runtime_error(format!(
+                    "quad: {} has an invalid resident lease",
+                    role.label()
+                ))
+                .with_builtin(NAME)
+                .with_source(source)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+            })?;
     }
     Ok(())
 }
@@ -202,16 +230,6 @@ fn preflight_quad_scalar(role: QuadScalarRole, value: &Value) -> BuiltinResult<(
                     format!("{label} must be real"),
                 ));
             }
-            handle
-                .allocation_lease()
-                .validate_live()
-                .map_err(|source| {
-                    build_runtime_error(format!("quad: {label} has an invalid resident lease"))
-                        .with_builtin(NAME)
-                        .with_source(source)
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
-                })?;
             handle
                 .shape()
                 .iter()

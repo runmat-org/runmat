@@ -71,7 +71,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     );
     if request.arguments.len() > 3 {
         let fact = &request.arguments[3];
-        let empty = fact.shape.element_count() == Some(0);
+        let empty = fact.shape.element_count() == Some(0)
+            && matches!(
+                fact.kind,
+                ValueKindFact::Numeric(_) | ValueKindFact::Logical
+            );
         if !empty {
             finite_scalar(
                 request,
@@ -125,13 +129,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut contract = CallContract::fixed(vec![scalar.clone(), scalar]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
-    if let Some(callback) = scalar_facts::callback_invocation(
-        request,
-        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
-            domain: NumericDomain::Real,
-        })),
-    ) {
+    let mut callback_arguments = vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }))];
+    callback_arguments.extend(request.arguments.iter().skip(5).cloned());
+    if let Some(callback) =
+        scalar_facts::callback_invocation_with_arguments(request, callback_arguments)
+    {
         contract.effects.0.extend(callback.effects.0);
         contract.capabilities.0.extend(callback.capabilities.0);
         diagnostics.extend(callback.diagnostics);

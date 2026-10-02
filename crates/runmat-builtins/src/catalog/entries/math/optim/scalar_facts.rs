@@ -1,4 +1,4 @@
-//! Static facts shared by the two callback-driven scalar Brent solvers.
+//! Static callback and scalar facts shared by optimization and quadrature.
 
 use crate::catalog::inference::argument_error;
 use runmat_types::{
@@ -49,13 +49,20 @@ pub(super) fn callback_invocation(
     request: &CallRequest,
     argument: ValueFact,
 ) -> Option<CallInference> {
+    callback_invocation_with_arguments(request, vec![argument])
+}
+
+pub(super) fn callback_invocation_with_arguments(
+    request: &CallRequest,
+    arguments: Vec<ValueFact>,
+) -> Option<CallInference> {
     let ValueKindFact::Callable(callable) = &request.arguments.first()?.kind else {
         return None;
     };
     Some(crate::infer_callable_call(
         callable,
         &CallRequest {
-            arguments: vec![argument],
+            arguments,
             literals: LiteralContext::default(),
             outputs: OutputSelection::new(RequestedOutputCount::One),
         },

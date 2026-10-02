@@ -1,4 +1,20 @@
 use super::*;
+use runmat_types::*;
+
+fn scalar() -> ValueFact {
+    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }))
+}
+
+fn request(arguments: Vec<ValueFact>, outputs: usize) -> CallRequest {
+    CallRequest {
+        arguments,
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(outputs)),
+    }
+}
 
 #[test]
 fn descriptor_retains_legacy_public_forms() {
@@ -30,4 +46,64 @@ fn all_visible_examples_have_independent_assertions() {
             crate::BuiltinExampleVerification::Assertions { .. }
         ));
     }
+}
+
+#[test]
+fn forwarded_argument_participates_in_callback_contract() {
+    let callback = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: CapabilitySet::default(),
+        parameters: vec![scalar(), scalar()],
+        parameters_complete: true,
+        outputs: vec![scalar()],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: vec![],
+        captures_complete: true,
+    }));
+    let empty = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(0), DimensionFact::Known(0)],
+        },
+        StorageFact::Dense,
+    );
+    let call = request(
+        vec![callback, scalar(), scalar(), empty.clone(), empty, scalar()],
+        2,
+    );
+    let result = inference::infer(&call, &QUAD_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(
+        result.outputs[1].numeric().unwrap().class,
+        NumericClass::Double
+    );
+}
+
+#[test]
+fn known_invalid_empty_text_tolerance_does_not_prove_result() {
+    let mut text = ValueFact::scalar(ValueKindFact::String);
+    text.shape = ShapeFact::Shaped {
+        dims: vec![DimensionFact::Known(0), DimensionFact::Known(0)],
+    };
+    let call = request(
+        vec![
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            scalar(),
+            scalar(),
+            text,
+        ],
+        1,
+    );
+    let result = inference::infer(&call, &QUAD_CATALOG_ENTRY);
+    assert!(!result.diagnostics.is_empty());
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
 }
