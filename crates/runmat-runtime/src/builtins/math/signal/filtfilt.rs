@@ -798,8 +798,17 @@ mod tests {
 
     #[test]
     fn descriptor_is_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("filtfilt builtin");
-        let descriptor = builtin.descriptor.expect("descriptor");
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+            .expect("canonical filtfilt builtin");
+        let descriptor = builtin.descriptor;
+        assert_eq!(builtin.bindings, &runmat_builtins::REQUIRED_DEFAULT_BINDING);
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            builtin.binding_identity(&builtin.bindings[0])
+        );
         assert_eq!(descriptor.signatures[0].label, "y = filtfilt(b, a, x)");
         assert!(descriptor
             .errors

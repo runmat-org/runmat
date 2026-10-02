@@ -1260,8 +1260,17 @@ pub(crate) mod tests {
 
     #[test]
     fn filter_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("filter builtin");
-        let descriptor = builtin.descriptor.expect("filter descriptor");
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+            .expect("canonical filter builtin");
+        let descriptor = builtin.descriptor;
+        assert_eq!(builtin.bindings, &runmat_builtins::REQUIRED_DEFAULT_BINDING);
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            builtin.binding_identity(&builtin.bindings[0])
+        );
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"y = filter(b, a, x)"));
         assert!(labels.contains(&"y = filter(b, a, x, zi)"));
