@@ -10,6 +10,7 @@ pub(crate) mod cov;
 pub(crate) mod covariance_conversion;
 pub(crate) mod covariance_precision;
 pub(crate) mod descriptive;
+pub(crate) mod dispersion;
 pub(crate) mod distribution_math;
 pub(crate) mod distributions;
 pub(crate) mod ecdf;
