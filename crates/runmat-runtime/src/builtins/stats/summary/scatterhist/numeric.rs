@@ -192,6 +192,10 @@ pub(super) fn kde_line(
 }
 
 pub(super) fn scott_bandwidth(data: &[f64]) -> f64 {
+    if data.len() == 1 {
+        // Preserve the established singleton sample deviation of one.
+        return 1.06;
+    }
     let factor = 1.06 * (data.len() as f64).powf(-0.2);
     super::super::dispersion::finite_sample_std_scaled(data, factor)
         .filter(|bandwidth| *bandwidth > 0.0)

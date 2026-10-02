@@ -146,9 +146,21 @@ fn automatic_kde_bandwidth_and_density_retain_large_and_small_finite_scales() {
 
     let base = 1e200_f64;
     let next = f64::from_bits(base.to_bits() + 1);
-    assert!(scott_bandwidth(&[base, next]).is_finite());
-    assert!(scott_bandwidth(&[base, next]) > 0.0);
+    let expected = (next - base) / 2.0_f64.sqrt() * 1.06 * 2.0_f64.powf(-0.2);
+    let actual = scott_bandwidth(&[base, next]);
+    assert!(actual.is_finite() && actual > 0.0);
+    assert!(((actual - expected) / expected).abs() < 1e-12);
     assert!(scott_bandwidth(&[-1e308, 1e308]).is_finite());
+}
+
+#[test]
+fn singleton_automatic_kde_retains_existing_scott_bandwidth() {
+    assert_eq!(scott_bandwidth(&[4.0]), 1.06);
+    let (_, density) = kde_line(&[4.0], &[3.0, 4.0, 5.0], None).unwrap();
+    assert_eq!(density.len(), 2);
+    assert!(density
+        .iter()
+        .all(|value| value.is_finite() && *value > 0.0));
 }
 
 #[test]
