@@ -645,7 +645,7 @@ mod tests {
             Box::leak(Box::new(
                 runmat_accelerate::simple_provider::InProcessProvider::new(),
             ));
-        unsafe { runmat_accelerate_api::register_provider(other_provider) };
+        unsafe { runmat_accelerate_api::register_device_provider(other_provider) };
         let sample = gpu_helpers::upload_tensor(provider, &input).unwrap();
         let foreign_width = other_provider
             .upload(&HostTensorView {

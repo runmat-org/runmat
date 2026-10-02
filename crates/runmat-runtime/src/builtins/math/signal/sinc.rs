@@ -795,23 +795,23 @@ mod tests {
 
         #[derive(Default)]
         struct CountedSincProvider {
-            inner: runmat_accelerate::simple_provider::InProcessProvider,
+            owner: runmat_accelerate_api::test_support::TestAllocationOwner,
             hooks: AtomicUsize,
             downloads: AtomicUsize,
         }
         impl AccelProvider for CountedSincProvider {
-            fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-                self.inner.upload(host)
+            fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                anyhow::bail!("fixture allocation owner supplies inputs")
             }
-            fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
                 self.downloads.fetch_add(1, Ordering::SeqCst);
-                self.inner.download(handle)
+                Box::pin(async { anyhow::bail!("unavailable allocation must not be downloaded") })
             }
             fn device_info(&self) -> String {
-                self.inner.device_info()
+                "sinc unavailable allocation fixture".into()
             }
             fn device_id(&self) -> u32 {
-                self.inner.device_id()
+                self.owner.device_id()
             }
             fn unary_sinc<'a>(
                 &'a self,
@@ -830,19 +830,28 @@ mod tests {
         let provider: &'static CountedSincProvider =
             Box::leak(Box::new(CountedSincProvider::default()));
         let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = provider
-            .upload(&HostTensorView {
-                data: &[0.0, 1.0],
-                shape: &[1, 2],
-            })
+        let allocation = provider
+            .owner
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
             .unwrap();
-        let stale = handle.clone();
-        handle.release().unwrap();
-        let error = call(Value::GpuTensor(stale)).expect_err("expired input lease");
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        allocation.probe.mark_unavailable();
+        let error = call(Value::GpuTensor(allocation.handle.clone()))
+            .expect_err("unavailable input allocation");
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
         assert!(std::error::Error::source(&error).is_some());
         assert_eq!(provider.hooks.load(Ordering::SeqCst), 0);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(allocation.probe.retirements(), 0);
     }
 
     #[test]
