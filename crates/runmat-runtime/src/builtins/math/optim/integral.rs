@@ -142,7 +142,7 @@ async fn integral_in_runtime(
         preflight_integral_bound(label, value)?;
     }
     IntegralOptions::preflight_host(&admitted_options)?;
-    authenticate_integral_residents(&a, &b)?;
+    authenticate_integral_residents(&a, &b, &admitted_options)?;
     let options = IntegralOptions::parse(&admitted_options)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_ARGUMENT))?;
@@ -238,8 +238,16 @@ fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
     scalar_bound_host(label, value).map(|_| ())
 }
 
-fn authenticate_integral_residents(a: &Value, b: &Value) -> BuiltinResult<()> {
-    for (label, value) in [("lower bound", a), ("upper bound", b)] {
+fn authenticate_integral_residents(
+    a: &Value,
+    b: &Value,
+    options: &[(IntegralOptionName, &Value)],
+) -> BuiltinResult<()> {
+    for (label, value) in [("lower bound", a), ("upper bound", b)].into_iter().chain(
+        options
+            .iter()
+            .map(|(name, value)| (name.display_name(), *value)),
+    ) {
         let Value::GpuTensor(handle) = value else {
             continue;
         };
@@ -958,6 +966,92 @@ mod tests {
             handle.release().expect("release resident tolerance");
             assert!(physical.acquire().is_none());
         });
+    }
+
+    #[test]
+    fn resident_options_are_authenticated_before_the_first_bound_download() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
+            AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
+            HostNumericTensorOwned, HostTensorView, ThreadProviderGuard,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct RejectDownloadProvider {
+            owner: TestAllocationOwner,
+            downloads: AtomicUsize,
+        }
+
+        impl AccelProvider for RejectDownloadProvider {
+            fn device_id(&self) -> u32 {
+                self.owner.device_id()
+            }
+
+            fn device_info(&self) -> String {
+                "integral admission fixture".into()
+            }
+
+            fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                panic!("admission must not upload")
+            }
+
+            fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                self.downloads.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Err(std::io::Error::other("unexpected download").into()) })
+            }
+
+            fn download_numeric<'a>(
+                &'a self,
+                _: &'a GpuTensorHandle,
+            ) -> AccelNumericDownloadFuture<'a> {
+                self.downloads.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Err(std::io::Error::other("unexpected download").into()) })
+            }
+        }
+
+        let _serial = crate::builtins::common::test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(RejectDownloadProvider {
+            owner: TestAllocationOwner::new(),
+            downloads: AtomicUsize::new(0),
+        }));
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let allocated = |number| {
+            provider
+                .owner
+                .allocate_numeric(HostNumericTensorOwned {
+                    data: HostNumericDataOwned::F64(vec![number]),
+                    shape: vec![1, 1],
+                    storage: GpuTensorStorage::Real,
+                })
+                .expect("allocate fixture tensor")
+        };
+        let bound = allocated(0.0);
+        let valid_option = allocated(1.0e-8);
+        let stale_option = allocated(1.0e-7);
+        stale_option.probe.mark_unavailable();
+        let error = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::GpuTensor(bound.handle.clone()),
+            Value::Num(1.0),
+            vec![
+                Value::from("AbsTol"),
+                Value::GpuTensor(valid_option.handle.clone()),
+                Value::from("RelTol"),
+                Value::GpuTensor(stale_option.handle.clone()),
+            ],
+        ))
+        .expect_err("later stale option must fail before an earlier resident download");
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(error.source.is_some());
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(bound.probe.retirements(), 0);
+        assert_eq!(valid_option.probe.retirements(), 0);
+        bound.handle.allocation_lease().validate_live().unwrap();
+        valid_option
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
     }
 
     #[test]
