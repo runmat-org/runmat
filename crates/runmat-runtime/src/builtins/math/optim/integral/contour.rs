@@ -7,10 +7,8 @@ use runmat_builtins::{IntegralCallbackMode, INTEGRAL_ERROR_INVALID_INPUT};
 use runmat_value::{ComplexStorage, ComplexTensor, Tensor, Value};
 
 use super::{
-    integral_error_with_detail, integral_map_error, quadrature_arithmetic_error, waypoints,
-    IntegralOptions, MAX_DEPTH, NAME,
+    integral_error_with_detail, quadrature_arithmetic_error, IntegralOptions, MAX_DEPTH, NAME,
 };
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
     integrate_open, OpenDomain, OpenSegment, QuadratureArithmeticError, QuadratureCooperation,
@@ -19,22 +17,14 @@ use crate::builtins::math::optim::quadrature::{
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 mod admission;
+mod callback;
 mod publication;
 
 pub(super) use admission::{ordered_segments, scalar_bound, scalar_bound_host};
+pub(super) use callback::has_complex_class;
+use callback::{decode, materialize, shape};
 
 const COMPONENT_CHUNK: usize = 4096;
-
-pub(super) fn has_complex_class(value: &Value) -> bool {
-    match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => true,
-        Value::GpuTensor(handle) => {
-            runmat_accelerate_api::handle_storage(handle)
-                == runmat_accelerate_api::GpuTensorStorage::Complex
-        }
-        _ => false,
-    }
-}
 
 fn invalid(detail: impl AsRef<str>) -> RuntimeError {
     integral_error_with_detail(&INTEGRAL_ERROR_INVALID_INPUT, detail)
@@ -49,6 +39,7 @@ fn resource_error(source: std::collections::TryReserveError) -> RuntimeError {
         .build()
 }
 
+<<<<<<< HEAD
 async fn materialize(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, Value>> {
     let Value::GpuTensor(handle) = value else {
         return Ok(std::borrow::Cow::Borrowed(value));
@@ -161,6 +152,8 @@ async fn decode_callback(
     Ok(values)
 }
 
+=======
+>>>>>>> 23aea1e8de (Extract cooperative integral callback boundary)
 struct ContourEvaluator<'a> {
     function: &'a Value,
     options: &'a IntegralOptions,
@@ -178,7 +171,7 @@ impl ContourEvaluator<'_> {
         self.cooperation.completed(0).await?;
         let value = call_function(self.function, [point]).await?;
         self.cooperation.completed(1).await?;
-        let shape = callback_shape(&value)?;
+        let shape = shape(&value)?;
         if !self.options.array_valued && shape != [1, 1] {
             return Err(invalid(
                 "non-array-valued callback must return one value per sample",
@@ -194,7 +187,7 @@ impl ContourEvaluator<'_> {
         let owned_shape = shape.to_vec();
         self.complex_output |= has_complex_class(&value);
         let host = materialize(&value).await?;
-        let mut values = decode_callback(host.as_ref(), &owned_shape, self.cooperation).await?;
+        let mut values = decode(host.as_ref(), &owned_shape, self.cooperation).await?;
         for (index, value) in values.iter_mut().enumerate() {
             *value = value.multiply_complex(delta);
             if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
@@ -245,14 +238,14 @@ impl ContourEvaluator<'_> {
         self.cooperation.completed(0).await?;
         let value = call_function(self.function, [input]).await?;
         self.cooperation.completed(N as u64).await?;
-        if callback_shape(&value)? != [1, N] {
+        if shape(&value)? != [1, N] {
             return Err(invalid(
                 "vectorized callback must return one value per sample",
             ));
         }
         self.complex_output |= has_complex_class(&value);
         let host = materialize(&value).await?;
-        let values = decode_callback(host.as_ref(), &[1, N], self.cooperation).await?;
+        let values = decode(host.as_ref(), &[1, N], self.cooperation).await?;
         Ok(std::array::from_fn(|index| {
             Arc::new(vec![values[index].multiply_complex(delta)])
         }))

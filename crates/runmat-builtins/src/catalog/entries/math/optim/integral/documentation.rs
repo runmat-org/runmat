@@ -261,6 +261,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
                 ),
             },
             BuiltinDocumentationLink {
+                label: "Cooperative callback admission and decoding",
+                target: BuiltinDocumentationLinkTarget::Source(
+                    "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/integral/contour/callback.rs",
+                ),
+            },
+            BuiltinDocumentationLink {
                 label: "Complex result/error algebra",
                 target: BuiltinDocumentationLinkTarget::Source(
                     "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/quadrature/complex_algebra.rs",
