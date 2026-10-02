@@ -1,9 +1,9 @@
 use super::*;
 use crate::*;
 use runmat_types::{
-    DimensionFact, EffectKind, LiteralContext, LiteralValue, NumericClass, NumericDomain,
-    NumericFact, ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact, ValueFact,
-    ValueKindFact,
+    CallRequest, DimensionFact, EffectKind, LiteralContext, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact,
+    ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 

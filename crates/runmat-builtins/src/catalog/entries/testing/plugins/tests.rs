@@ -1,5 +1,4 @@
 use super::*;
-use crate::*;
 use runmat_types::{
     CallInference, CallRequest, DynamicReason, LiteralContext, LiteralValue, NumericClass,
     NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
