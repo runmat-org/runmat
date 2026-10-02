@@ -220,7 +220,7 @@ impl AdaptiveEstimate for ArrayEstimate {
         evaluator: &mut E,
     ) -> Result<bool, QuadratureArithmeticError> {
         if self.0.len() != other.0.len() {
-            return Ok(false);
+            return Err(QuadratureArithmeticError::InconsistentComponents);
         }
         for (index, (left, right)) in self.0.iter().zip(other.0.iter()).enumerate() {
             if !(*left).abs_le(*right) {
