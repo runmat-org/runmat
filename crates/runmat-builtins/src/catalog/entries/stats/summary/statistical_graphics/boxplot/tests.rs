@@ -182,6 +182,111 @@ fn scalar_text_options_reject_known_cell_or_multielement_text_facts() {
 }
 
 #[test]
+fn factor_and_visual_numeric_controls_do_not_prove_known_invalid_calls() {
+    let name = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let group = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Dense,
+    );
+    for (option, value, literal) in [
+        (
+            "FactorSeparator",
+            real(vec![Some(1), Some(1)]),
+            LiteralValue::Number(0.0),
+        ),
+        (
+            "FactorSeparator",
+            real(vec![Some(1), Some(1)]),
+            LiteralValue::Number(2.0),
+        ),
+        (
+            "FactorGap",
+            real(vec![Some(1), Some(1)]),
+            LiteralValue::Number(-1.0),
+        ),
+        (
+            "FactorGap",
+            real(vec![Some(1), Some(2)]),
+            LiteralValue::Vector(vec![LiteralValue::Number(1.0), LiteralValue::Number(2.0)]),
+        ),
+        (
+            "Positions",
+            real(vec![Some(1), Some(2)]),
+            LiteralValue::Vector(vec![
+                LiteralValue::Number(1.0),
+                LiteralValue::Number(f64::NAN),
+            ]),
+        ),
+        (
+            "Widths",
+            real(vec![Some(1), Some(1)]),
+            LiteralValue::Number(0.0),
+        ),
+        (
+            "DataLim",
+            real(vec![Some(1), Some(3)]),
+            LiteralValue::Unknown,
+        ),
+        (
+            "Labels",
+            ValueFact::proven(
+                ValueKindFact::Logical,
+                ShapeFact::Scalar,
+                StorageFact::Scalar,
+            ),
+            LiteralValue::Bool(true),
+        ),
+    ] {
+        let result = call(
+            vec![
+                real(vec![Some(2), Some(1)]),
+                group.clone(),
+                name.clone(),
+                value,
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::String(option.into()),
+                literal,
+            ],
+            1,
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "OPTION"),
+            "{option}: {:#?}",
+            result.diagnostics
+        );
+        assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+    }
+
+    let valid = call(
+        vec![
+            real(vec![Some(2), Some(1)]),
+            group,
+            name,
+            real(vec![Some(1), Some(1)]),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("FactorSeparator".into()),
+            LiteralValue::Number(1.0),
+        ],
+        1,
+    );
+    assert!(valid.diagnostics.is_empty(), "{:#?}", valid.diagnostics);
+}
+
+#[test]
 fn unrepresentable_plot_size_is_not_proven_as_an_admitted_option() {
     let text = ValueFact::proven(
         ValueKindFact::String,

@@ -48,6 +48,46 @@ pub(in crate::builtins::stats::summary::boxplot) enum FactorSeparator {
     Factors(Vec<usize>),
 }
 
+pub(in crate::builtins::stats::summary::boxplot) fn validate_direction_count(
+    requested: &[FactorDirection],
+    factor_count: usize,
+) -> BuiltinResult<()> {
+    if requested.len() != 1 && requested.len() != factor_count {
+        return Err(invalid(
+            "boxplot: FactorDirection length must match grouping factor count",
+        ));
+    }
+    Ok(())
+}
+
+pub(in crate::builtins::stats::summary::boxplot) fn validate_gap_count(
+    gap: &FactorGap,
+    factor_count: usize,
+) -> BuiltinResult<()> {
+    if let FactorGap::Percentages(gaps) = gap {
+        if gaps.len() > factor_count {
+            return Err(invalid(
+                "boxplot: FactorGap length exceeds grouping factor count",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(in crate::builtins::stats::summary::boxplot) fn validate_separator_count(
+    separator: &FactorSeparator,
+    factor_count: usize,
+) -> BuiltinResult<()> {
+    if let FactorSeparator::Factors(indices) = separator {
+        if indices.len() > factor_count || indices.iter().any(|&index| index > factor_count) {
+            return Err(invalid(
+                "boxplot: FactorSeparator index exceeds grouping factor count",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(in crate::builtins::stats::summary::boxplot) fn parse_directions(
     value: &Value,
 ) -> BuiltinResult<Vec<FactorDirection>> {

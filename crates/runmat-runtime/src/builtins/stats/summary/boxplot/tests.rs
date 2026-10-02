@@ -250,6 +250,45 @@ fn full_factors_reserves_empty_slots_without_inventing_box_statistics() {
 }
 
 #[test]
+fn explicit_group_order_precedes_missing_full_factor_combinations() {
+    let first = Value::StringArray(
+        StringArray::new(vec!["a".into(), "b".into(), "a".into()], vec![3, 1]).unwrap(),
+    );
+    let second = Value::StringArray(
+        StringArray::new(vec!["two".into(), "one".into(), "one".into()], vec![3, 1]).unwrap(),
+    );
+    let options = BoxplotOptions {
+        full_factors: true,
+        group_order: Some(vec!["a,two".into(), "b,one".into(), "a,one".into()]),
+        ..Default::default()
+    };
+    let layout = groups::build_box_layout(
+        tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+        Some(Value::Cell(
+            CellArray::new(vec![first, second], 1, 2).unwrap(),
+        )),
+        &options,
+    )
+    .unwrap();
+    assert_eq!(
+        layout
+            .slots
+            .iter()
+            .map(|slot| slot.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a,two", "b,one", "a,one", "b,two"]
+    );
+    assert_eq!(
+        layout
+            .slots
+            .iter()
+            .map(|slot| slot.box_index.is_some())
+            .collect::<Vec<_>>(),
+        vec![true, true, true, false]
+    );
+}
+
+#[test]
 fn factor_gap_separator_and_direction_change_prepared_geometry() {
     let first = Value::StringArray(
         StringArray::new(vec!["a".into(), "a".into(), "b".into()], vec![3, 1]).unwrap(),
@@ -483,6 +522,61 @@ fn factor_controls_decode_once_and_validate_against_factor_count() {
             "out-of-platform integer selector rejects exactly"
         );
     }
+}
+
+#[test]
+fn full_factor_controls_reject_before_cartesian_slot_allocation() {
+    let first = build_box_stats(
+        tensor(vec![1.0], vec![1, 1]),
+        None,
+        &BoxplotOptions::default(),
+    )
+    .unwrap()
+    .remove(0);
+    let mut second = first.clone();
+    let mut first = first;
+    first.group_key = vec![KeyAtom::Logical(false); 20];
+    second.group_key = vec![KeyAtom::Logical(true); 20];
+    let invalid_separator = BoxplotOptions {
+        full_factors: true,
+        factor_separator: FactorSeparator::Factors(vec![21]),
+        ..Default::default()
+    };
+    let error =
+        factor_layout::prepare_layout(vec![first.clone(), second.clone()], &invalid_separator)
+            .expect_err("known invalid factor index precedes 2^20 slot allocation");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+
+    let invalid_labels = BoxplotOptions {
+        full_factors: true,
+        labels: Some(vec!["one".into()]),
+        ..Default::default()
+    };
+    let error = factor_layout::prepare_layout(vec![first, second], &invalid_labels)
+        .expect_err("known invalid label count precedes 2^20 slot allocation");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+}
+
+#[test]
+fn later_factor_control_override_owns_count_validation() {
+    let plan = BoxplotOptionPlan::admit(
+        vec![
+            Value::from("FactorSeparator"),
+            Value::Num(2.0),
+            Value::from("FactorSeparator"),
+            Value::Num(1.0),
+        ],
+        None,
+    )
+    .unwrap();
+    plan.preflight_known_factor_count(Some(1))
+        .expect("later valid override supersedes prior factor selector");
 }
 
 #[test]

@@ -41,6 +41,47 @@ enum DecodedOption {
 }
 
 impl BoxplotOptionPlan {
+    pub(super) fn preflight_known_factor_count(
+        &self,
+        factor_count: Option<usize>,
+    ) -> BuiltinResult<()> {
+        let Some(factor_count) = factor_count else {
+            return Ok(());
+        };
+        let mut direction_seen = false;
+        let mut gap_seen = false;
+        let mut separator_seen = false;
+        for step in self.steps.iter().rev() {
+            match step {
+                PlannedOption::Host(DecodedOption::FactorDirection(values)) if !direction_seen => {
+                    super::factor_layout::validate_direction_count(values, factor_count)?;
+                    direction_seen = true;
+                }
+                PlannedOption::Resident(BoxplotOptionKind::FactorDirection, _) => {
+                    direction_seen = true;
+                }
+                PlannedOption::Host(DecodedOption::FactorGap(gap)) if !gap_seen => {
+                    super::factor_layout::validate_gap_count(gap, factor_count)?;
+                    gap_seen = true;
+                }
+                PlannedOption::Resident(BoxplotOptionKind::FactorGap, _) => {
+                    gap_seen = true;
+                }
+                PlannedOption::Host(DecodedOption::FactorSeparator(separator))
+                    if !separator_seen =>
+                {
+                    super::factor_layout::validate_separator_count(separator, factor_count)?;
+                    separator_seen = true;
+                }
+                PlannedOption::Resident(BoxplotOptionKind::FactorSeparator, _) => {
+                    separator_seen = true;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn admit_host_color_groups(&self, x: &Value) -> BuiltinResult<()> {
         for step in &self.steps {
             match step {

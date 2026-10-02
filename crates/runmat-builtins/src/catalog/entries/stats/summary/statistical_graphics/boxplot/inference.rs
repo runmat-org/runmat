@@ -3,8 +3,8 @@ use super::options::BoxplotOptionKind;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DimensionFact, DynamicReason,
-    InferenceDiagnostic, LiteralContext, NumericClass, NumericDomain, NumericFact, ShapeFact,
-    StorageFact, ValueFact, ValueKindFact,
+    InferenceDiagnostic, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 fn handles() -> ValueFact {
@@ -95,8 +95,14 @@ fn first_known_extent(shape: &ShapeFact) -> Option<usize> {
     }
 }
 
-fn known_bad_option(kind: BoxplotOptionKind, value: &ValueFact, numeric: Option<f64>) -> bool {
+fn known_bad_option(
+    kind: BoxplotOptionKind,
+    value: &ValueFact,
+    literal: Option<&LiteralValue>,
+    factor_count: Option<usize>,
+) -> bool {
     use BoxplotOptionKind::*;
+    let numeric = literal.and_then(LiteralContext::numeric_from_literal);
     match kind {
         Whisker | Jitter | OutlierSize => {
             !matches!(
@@ -116,14 +122,149 @@ fn known_bad_option(kind: BoxplotOptionKind, value: &ValueFact, numeric: Option<
         }
         Orientation | PlotStyle | BoxStyle | MedianStyle | ExtremeMode | LabelOrientation
         | LabelVerbosity | Symbol | Notch | FullFactors => known_bad_scalar_text(value),
-        FactorDirection => !matches!(
-            value.kind,
-            ValueKindFact::Character
-                | ValueKindFact::String
-                | ValueKindFact::Cell(_)
-                | ValueKindFact::Unknown
-        ),
+        FactorDirection => {
+            !matches!(
+                value.kind,
+                ValueKindFact::Character
+                    | ValueKindFact::String
+                    | ValueKindFact::Cell(_)
+                    | ValueKindFact::Unknown
+            ) || factor_count.is_some_and(|count| {
+                let length = if matches!(value.kind, ValueKindFact::Character) {
+                    first_known_extent(&value.shape)
+                } else {
+                    value.shape.element_count()
+                };
+                length.is_some_and(|length| length != 1 && length != count)
+            })
+        }
+        FactorGap | FactorSeparator
+            if matches!(value.kind, ValueKindFact::String | ValueKindFact::Character) =>
+        {
+            known_bad_scalar_text(value)
+                || literal.is_some_and(|literal| match literal {
+                    LiteralValue::String(text)
+                    | LiteralValue::Character(text)
+                    | LiteralValue::Keyword(text) => !text.eq_ignore_ascii_case("auto"),
+                    _ => false,
+                })
+        }
+        FactorGap | FactorSeparator | Positions | Widths | DataLim => {
+            if known_bad_numeric_vector(value) {
+                return true;
+            }
+            match kind {
+                FactorGap => {
+                    value
+                        .shape
+                        .element_count()
+                        .zip(factor_count)
+                        .is_some_and(|(len, count)| len > count)
+                        || literal.is_some_and(|literal| {
+                            any_numeric_literal(literal, |n| !n.is_finite() || n < 0.0)
+                        })
+                }
+                FactorSeparator => {
+                    value
+                        .shape
+                        .element_count()
+                        .zip(factor_count)
+                        .is_some_and(|(len, count)| len > count)
+                        || literal.is_some_and(|literal| {
+                            any_separator_literal_invalid(literal, factor_count)
+                        })
+                }
+                Positions => {
+                    literal.is_some_and(|literal| any_numeric_literal(literal, |n| !n.is_finite()))
+                }
+                Widths => {
+                    value.shape.element_count() == Some(0)
+                        || literal.is_some_and(|literal| {
+                            any_numeric_literal(literal, |n| !n.is_finite() || n <= 0.0)
+                        })
+                }
+                DataLim => {
+                    value.shape.element_count().is_some_and(|len| len != 2)
+                        || literal.is_some_and(|literal| any_numeric_literal(literal, f64::is_nan))
+                }
+                _ => false,
+            }
+        }
+        Labels | GroupOrder => {
+            matches!(value.kind, ValueKindFact::Logical)
+                || matches!(
+                    value.kind,
+                    ValueKindFact::Numeric(NumericFact {
+                        domain: NumericDomain::Complex,
+                        ..
+                    })
+                )
+        }
         _ => false,
+    }
+}
+
+fn known_bad_numeric_vector(value: &ValueFact) -> bool {
+    value.storage == StorageFact::Sparse
+        || !matches!(
+            value.kind,
+            ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Real,
+                ..
+            }) | ValueKindFact::Logical
+                | ValueKindFact::Unknown
+        )
+        || value.shape.rank().is_some_and(|rank| rank > 2)
+        || matches!(&value.shape, ShapeFact::Shaped { dims } if
+            matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows > 1)
+                && matches!(dims.get(1), Some(DimensionFact::Known(cols)) if *cols > 1))
+}
+
+fn any_numeric_literal(literal: &LiteralValue, invalid: impl Fn(f64) -> bool) -> bool {
+    match literal {
+        LiteralValue::Vector(values) => values
+            .iter()
+            .any(|value| numeric_option_literal(value).is_some_and(&invalid)),
+        value => numeric_option_literal(value).is_some_and(invalid),
+    }
+}
+
+fn numeric_option_literal(literal: &LiteralValue) -> Option<f64> {
+    match literal {
+        LiteralValue::Bool(value) => Some(f64::from(u8::from(*value))),
+        other => LiteralContext::numeric_from_literal(other),
+    }
+}
+
+fn any_separator_literal_invalid(literal: &LiteralValue, factor_count: Option<usize>) -> bool {
+    match literal {
+        LiteralValue::Vector(values) => values
+            .iter()
+            .any(|value| separator_literal_invalid(value, factor_count)),
+        value => separator_literal_invalid(value, factor_count),
+    }
+}
+
+fn separator_literal_invalid(literal: &LiteralValue, factor_count: Option<usize>) -> bool {
+    let selector = match literal {
+        LiteralValue::Integer { text, .. } => text
+            .parse::<u128>()
+            .ok()
+            .and_then(|value| usize::try_from(value).ok()),
+        other => numeric_option_literal(other)
+            .and_then(|value| runmat_types::decode_shape_dimension(value).ok()),
+    };
+    match selector {
+        Some(0) => true,
+        Some(selector) => factor_count.is_some_and(|count| selector > count),
+        None => matches!(
+            literal,
+            LiteralValue::Integer { .. }
+                | LiteralValue::Number(_)
+                | LiteralValue::Real { .. }
+                | LiteralValue::Complex { .. }
+                | LiteralValue::Bool(_)
+        ),
     }
 }
 
@@ -177,6 +318,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                         },
                     });
             let option_start = if second_is_group { 2 } else { 1 };
+            let factor_count = if second_is_group && matches!(args[1].kind, ValueKindFact::Cell(_))
+            {
+                None
+            } else {
+                Some(usize::from(second_is_group))
+            };
             if second_is_group && bad_group(&args[1], first) {
                 diagnostics.push(InferenceDiagnostic::error(
                     "GROUP",
@@ -204,11 +351,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     if known_bad_option(
                         kind,
                         value,
-                        request
-                            .literals
-                            .literal_args
-                            .get(index + 1)
-                            .and_then(LiteralContext::numeric_from_literal),
+                        request.literals.literal_args.get(index + 1),
+                        factor_count,
                     ) {
                         diagnostics.push(InferenceDiagnostic::error(
                             "OPTION",

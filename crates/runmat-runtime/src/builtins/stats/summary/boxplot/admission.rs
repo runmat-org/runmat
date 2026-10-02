@@ -31,6 +31,17 @@ pub(super) fn admit_host_visible(x: &Value, group: Option<&Value>) -> BuiltinRes
     Ok(())
 }
 
+/// A non-cell group contributes one factor; cell inputs can encode either
+/// per-observation scalar labels or multiple factor vectors, so their count
+/// remains unknown until the established group decoder resolves that role.
+pub(super) fn known_factor_count(group: Option<&Value>) -> Option<usize> {
+    match group {
+        None => Some(0),
+        Some(Value::Cell(_)) => None,
+        Some(_) => Some(1),
+    }
+}
+
 fn validate_known_group(
     group: &Value,
     x_shape: Option<&[usize]>,

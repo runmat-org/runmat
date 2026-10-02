@@ -151,6 +151,49 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
             ),
         ],
         vec![
+            Value::GpuTensor(short_group.handle.clone()),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::from("FactorSeparator"),
+            Value::Num(2.0),
+        ],
+        vec![
+            Value::GpuTensor(short_group.handle.clone()),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::from("FactorSeparator"),
+            Value::Num(0.0),
+        ],
+        vec![
+            Value::GpuTensor(short_group.handle.clone()),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::from("FactorGap"),
+            Value::Num(-1.0),
+        ],
+        vec![
+            Value::GpuTensor(short_group.handle.clone()),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::from("FactorGap"),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        ],
+        vec![
+            Value::GpuTensor(short_group.handle.clone()),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::from("FactorDirection"),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["data".into(), "list".into()], vec![1, 2])
+                    .unwrap(),
+            ),
+        ],
+        vec![
             Value::GpuTensor(resident.handle.clone()),
             categorical_group(vec![1.0, 2.0, 1.0, 2.0, 1.0], true),
         ],

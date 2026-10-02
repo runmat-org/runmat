@@ -16,22 +16,46 @@ pub(in crate::builtins::stats::summary::boxplot) fn prepare_layout(
         return Err(invalid("boxplot: grouping factors have inconsistent arity"));
     }
     let levels = collect_levels(&keys, factor_count);
+    validate_factor_controls(options, factor_count)?;
     let directions = resolved_directions(&options.factor_direction, &levels, options.orientation)?;
-    let mut slots = if options.full_factors && factor_count > 0 {
-        cartesian_slots(&levels, &directions, &keys)?
+    let slot_count = if options.full_factors && factor_count > 0 {
+        cartesian_slot_count(&levels)?
     } else {
-        observed_slots(&keys, &directions, options.group_order.is_some())
+        keys.len()
     };
-    if slots.is_empty() {
+    if slot_count == 0 {
         return Err(invalid("boxplot: no groups remain for display"));
     }
-    validate_factor_controls(options, factor_count)?;
     if let Some(labels) = &options.labels {
-        if labels.len() != slots.len() {
+        if labels.len() != slot_count {
             return Err(invalid(
                 "boxplot: Labels length must match the number of plotted slots",
             ));
         }
+    }
+    if let Some(positions) = &options.positions {
+        if positions.len() != slot_count {
+            return Err(invalid(
+                "boxplot: Positions length must match the number of plotted slots",
+            ));
+        }
+    }
+    let mut slots = if options.full_factors && factor_count > 0 {
+        cartesian_slots(&levels, &directions, &keys, slot_count)?
+    } else {
+        observed_slots(&keys, &directions, options.group_order.is_some())
+    };
+    if options.full_factors && options.group_order.is_some() {
+        // GroupOrder already resolved public labels to exact typed keys. Keep
+        // those observed keys in the requested order; append unobserved
+        // Cartesian combinations in their deterministic factor order.
+        let observed_rank = keys
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(rank, key)| (key, rank))
+            .collect::<BTreeMap<_, _>>();
+        slots.sort_by_key(|slot| observed_rank.get(&slot.key).copied().unwrap_or(usize::MAX));
     }
     let positions = slot_positions(&slots, options)?;
     let widths = super::super::plot::widths_for(slots.len(), options);
@@ -83,11 +107,7 @@ fn resolved_directions(
     levels: &[Vec<KeyAtom>],
     orientation: Orientation,
 ) -> BuiltinResult<Vec<bool>> {
-    if requested.len() != 1 && requested.len() != levels.len() {
-        return Err(invalid(
-            "boxplot: FactorDirection length must match grouping factor count",
-        ));
-    }
+    validate_direction_count(requested, levels.len())?;
     Ok(levels
         .iter()
         .enumerate()
@@ -148,11 +168,8 @@ fn cartesian_slots(
     levels: &[Vec<KeyAtom>],
     reverse: &[bool],
     observed: &[Vec<KeyAtom>],
+    count: usize,
 ) -> BuiltinResult<Vec<FactorSlot>> {
-    let count = levels
-        .iter()
-        .try_fold(1usize, |count, level| count.checked_mul(level.len()))
-        .ok_or_else(|| invalid("boxplot: FullFactors combination count overflows"))?;
     let mut slots = Vec::new();
     slots
         .try_reserve_exact(count)
@@ -195,21 +212,16 @@ fn cartesian_slots(
     Ok(slots)
 }
 
+fn cartesian_slot_count(levels: &[Vec<KeyAtom>]) -> BuiltinResult<usize> {
+    levels
+        .iter()
+        .try_fold(1usize, |count, level| count.checked_mul(level.len()))
+        .ok_or_else(|| invalid("boxplot: FullFactors combination count overflows"))
+}
+
 fn validate_factor_controls(options: &BoxplotOptions, factor_count: usize) -> BuiltinResult<()> {
-    if let FactorGap::Percentages(gaps) = &options.factor_gap {
-        if gaps.len() > factor_count {
-            return Err(invalid(
-                "boxplot: FactorGap length exceeds grouping factor count",
-            ));
-        }
-    }
-    if let FactorSeparator::Factors(indices) = &options.factor_separator {
-        if indices.len() > factor_count || indices.iter().any(|&index| index > factor_count) {
-            return Err(invalid(
-                "boxplot: FactorSeparator index exceeds grouping factor count",
-            ));
-        }
-    }
+    validate_gap_count(&options.factor_gap, factor_count)?;
+    validate_separator_count(&options.factor_separator, factor_count)?;
     Ok(())
 }
 

@@ -5,8 +5,8 @@ use crate::builtins::common::grouping_keys::KeyAtom;
 mod controls;
 mod prepare;
 pub(super) use controls::{
-    parse_directions, parse_full_factors, parse_gap, parse_separator, FactorDirection, FactorGap,
-    FactorSeparator,
+    parse_directions, parse_full_factors, parse_gap, parse_separator, validate_direction_count,
+    validate_gap_count, validate_separator_count, FactorDirection, FactorGap, FactorSeparator,
 };
 pub(super) use prepare::prepare_layout;
 
