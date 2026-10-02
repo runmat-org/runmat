@@ -3,7 +3,8 @@
 use num_complex::Complex;
 
 use super::{
-    conv2_error, conv2_matrices, outer_product, Conv2Mode, Matrix, CONV2_ERROR_BUILD_OUTPUT,
+    conv2_allocation_error, conv2_error, conv2_matrices, outer_product, Conv2Mode, Matrix,
+    CONV2_ERROR_BUILD_OUTPUT,
 };
 use crate::builtins::math::signal::common::{SignalCooperation, SIGNAL_WORK_CHUNK};
 use crate::BuiltinResult;
@@ -34,34 +35,39 @@ pub(super) async fn convolve_separable(
     if mode == Conv2Mode::Valid && (signal.rows < column.len() || signal.cols < row.len()) {
         return Matrix::zeros(0, 0, cooperation).await;
     }
-    let Some(factors) = balanced_factors(signal, column, row, single_output, cooperation).await?
-    else {
-        // An unrepresentable balance is not an excuse to erase a nonzero
-        // coefficient. The general kernel retains the prior numerical route.
+    let finite_result = {
+        let Some(factors) =
+            balanced_factors(signal, column, row, single_output, cooperation).await?
+        else {
+            // An unrepresentable balance is not an excuse to erase a nonzero
+            // coefficient. The general kernel retains the prior numerical route.
+            return general_kernel(signal, column, row, mode, single_output, cooperation).await;
+        };
+        let vertical = convolve_axis(
+            signal,
+            factors.column.as_ref(),
+            Axis::Rows,
+            single_output,
+            cooperation,
+        )
+        .await?;
+        if !all_finite(&vertical, cooperation).await? {
+            None
+        } else {
+            let full = convolve_axis(
+                &vertical,
+                factors.row.as_ref(),
+                Axis::Columns,
+                single_output,
+                cooperation,
+            )
+            .await?;
+            all_finite(&full, cooperation).await?.then_some(full)
+        }
+    };
+    let Some(full) = finite_result else {
         return general_kernel(signal, column, row, mode, single_output, cooperation).await;
     };
-    let vertical = convolve_axis(
-        signal,
-        factors.column.as_ref(),
-        Axis::Rows,
-        single_output,
-        cooperation,
-    )
-    .await?;
-    if !all_finite(&vertical, cooperation).await? {
-        return general_kernel(signal, column, row, mode, single_output, cooperation).await;
-    }
-    let full = convolve_axis(
-        &vertical,
-        factors.row.as_ref(),
-        Axis::Columns,
-        single_output,
-        cooperation,
-    )
-    .await?;
-    if !all_finite(&full, cooperation).await? {
-        return general_kernel(signal, column, row, mode, single_output, cooperation).await;
-    }
     match mode {
         Conv2Mode::Full => Ok(full),
         Conv2Mode::Same => {

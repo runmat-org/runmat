@@ -1,6 +1,78 @@
 use futures::executor::block_on;
+use futures::task::noop_waker;
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
+use std::cell::Cell;
+use std::future::Future;
+use std::num::NonZeroU64;
+use std::pin::Pin;
+use std::rc::Rc;
+use std::task::{Context, Poll};
 
 use super::*;
+use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+
+struct PendingTurn(Rc<Cell<usize>>);
+
+impl Future for PendingTurn {
+    type Output = Result<(), ExecutionServiceError>;
+
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Pending
+    }
+}
+
+impl Drop for PendingTurn {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() + 1);
+    }
+}
+
+#[test]
+fn pending_separable_preparation_cancels_or_abandons_without_publication() {
+    for cancel in [true, false] {
+        let source = CancellationSource::new();
+        let dropped = Rc::new(Cell::new(0));
+        let turns = dropped.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || Box::pin(PendingTurn(turns.clone())),
+        );
+        let mut cooperation = SignalCooperation::with_budget(budget, "conv2");
+        let signal = real_matrix(2, 2, &[1.0, 3.0, 2.0, 4.0]);
+        let column = [Complex::new(1.0, 0.0), Complex::new(2.0, 0.0)];
+        let row = [Complex::new(1.0, 0.0), Complex::new(1.0, 0.0)];
+        let mut work = Box::pin(convolve_separable(
+            &signal,
+            &column,
+            &row,
+            Conv2Mode::Full,
+            false,
+            &mut cooperation,
+        ));
+        let waker = noop_waker();
+        let mut context = Context::from_waker(&waker);
+        assert!(matches!(work.as_mut().poll(&mut context), Poll::Pending));
+        if cancel {
+            source.cancel(CancellationReason::User);
+            let Poll::Ready(Err(error)) = work.as_mut().poll(&mut context) else {
+                panic!("cancelled convolution must not publish a matrix");
+            };
+            assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+            assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+            assert!(matches!(
+                error
+                    .source
+                    .as_deref()
+                    .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+                Some(ExecutionServiceError::Cancelled)
+            ));
+        }
+        drop(work);
+        assert_eq!(dropped.get(), 1, "pending task turn must be dropped");
+    }
+}
 
 fn real_matrix(rows: usize, cols: usize, data: &[f64]) -> Matrix {
     Matrix {
