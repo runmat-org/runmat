@@ -14,6 +14,7 @@ mod trigonometry;
 mod interpolation;
 mod ode;
 mod poly;
+mod optim;
 
 pub use self::bitwise::*;
 pub use self::discrete::*;
@@ -22,6 +23,7 @@ pub use self::integer_division::*;
 pub use self::interpolation::*;
 pub use self::linalg::*;
 pub use self::ode::*;
+pub use self::optim::*;
 pub use self::poly::*;
 pub use self::reduction::*;
 pub use self::rounding::*;
