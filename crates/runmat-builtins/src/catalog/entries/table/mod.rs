@@ -23,5 +23,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(indexing::ENTRIES.iter().copied());
     values.extend(predicates::ENTRIES.iter().copied());
     values.extend(selectors::ENTRIES.iter().copied());
-    values.extend(timetable::ENTRIES.iter().copied());
+    timetable::extend_entries(values);
 }

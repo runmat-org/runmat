@@ -41,7 +41,7 @@ pub use self::view::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(animatedline::ENTRIES.iter().copied());
-    values.extend(axes::ENTRIES.iter().copied());
+    axes::extend_entries(values);
     values.extend(axis::ENTRIES.iter().copied());
     values.extend(cla::ENTRIES.iter().copied());
     values.extend(colorbar::ENTRIES.iter().copied());

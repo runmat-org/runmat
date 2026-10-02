@@ -20,7 +20,7 @@ pub use self::sequences::*;
 pub use self::training::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
-    values.extend(autodiff::ENTRIES.iter().copied());
+    autodiff::extend_entries(values);
     export::extend_entries(values);
     values.extend(graph::ENTRIES.iter().copied());
     values.extend(layers::ENTRIES.iter().copied());

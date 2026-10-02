@@ -20,6 +20,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(diagnostics::ENTRIES.iter().copied());
     values.extend(execution::ENTRIES.iter().copied());
     values.extend(fixtures::ENTRIES.iter().copied());
-    values.extend(plugins::ENTRIES.iter().copied());
+    plugins::extend_entries(values);
     values.extend(qualifications::ENTRIES.iter().copied());
 }
