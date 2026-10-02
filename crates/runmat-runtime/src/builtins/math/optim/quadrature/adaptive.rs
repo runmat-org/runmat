@@ -2,11 +2,14 @@
 //! at the owning `integral` or `quad` entrypoint.
 
 use crate::{BuiltinResult, RuntimeError};
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
+use super::algebra::ArrayEstimate;
 use super::algebra::{AdaptiveEstimate, QuadratureSample};
+use super::QuadratureArithmeticError;
 use super::ScaledEstimate;
-use super::{ArrayEstimate, QuadratureArithmeticError};
 
 pub(crate) trait QuadratureEvaluator {
     type Sample: QuadratureSample;
@@ -90,6 +93,7 @@ pub(crate) async fn integrate_scaled<E: QuadratureEvaluator<Sample = f64>>(
     integrate_domain(evaluator, a, b).await
 }
 
+#[cfg(test)]
 pub(crate) async fn integrate_array<E: QuadratureEvaluator<Sample = Arc<Vec<f64>>>>(
     evaluator: &mut E,
     a: f64,

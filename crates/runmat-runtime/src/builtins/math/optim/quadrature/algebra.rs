@@ -62,6 +62,12 @@ pub(crate) trait AdaptiveEstimate: Clone {
 pub(crate) trait QuadratureSample: Clone {
     type Estimate: AdaptiveEstimate;
 
+    async fn weighted_sum<E: QuadratureEvaluator<Sample = Self>>(
+        samples: &[Self],
+        weights: &[ScaledEstimate],
+        evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError>;
+
     async fn simpson<E: QuadratureEvaluator<Sample = Self>>(
         a: f64,
         b: f64,
@@ -131,6 +137,21 @@ impl AdaptiveEstimate for ScaledEstimate {
 
 impl QuadratureSample for f64 {
     type Estimate = ScaledEstimate;
+
+    async fn weighted_sum<E: QuadratureEvaluator<Sample = Self>>(
+        samples: &[Self],
+        weights: &[ScaledEstimate],
+        _evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError> {
+        if samples.len() != weights.len() {
+            return Err(QuadratureArithmeticError::InconsistentComponents);
+        }
+        let mut result = ScaledEstimate::from_f64(0.0);
+        for (&sample, &weight) in samples.iter().zip(weights) {
+            result = result.add(weight.multiply_f64(sample));
+        }
+        Ok(result)
+    }
 
     async fn simpson<E: QuadratureEvaluator<Sample = Self>>(
         a: f64,
@@ -299,6 +320,43 @@ impl AdaptiveEstimate for ArrayEstimate {
 
 impl QuadratureSample for Arc<Vec<f64>> {
     type Estimate = ArrayEstimate;
+
+    async fn weighted_sum<E: QuadratureEvaluator<Sample = Self>>(
+        samples: &[Self],
+        weights: &[ScaledEstimate],
+        evaluator: &mut E,
+    ) -> Result<Self::Estimate, QuadratureArithmeticError> {
+        let Some(first) = samples.first() else {
+            return Err(QuadratureArithmeticError::InconsistentComponents);
+        };
+        if samples.len() != weights.len()
+            || samples.iter().any(|sample| sample.len() != first.len())
+        {
+            return Err(QuadratureArithmeticError::InconsistentComponents);
+        }
+        let mut components = Vec::new();
+        components
+            .try_reserve_exact(first.len())
+            .map_err(QuadratureArithmeticError::Resource)?;
+        for component in 0..first.len() {
+            let mut sum = ScaledEstimate::from_f64(0.0);
+            for (sample, &weight) in samples.iter().zip(weights) {
+                sum = sum.add(weight.multiply_f64(sample[component]));
+            }
+            components.push(sum);
+            if (component + 1).is_multiple_of(COMPONENT_CHUNK) {
+                evaluator
+                    .charge(COMPONENT_CHUNK as u64)
+                    .await
+                    .map_err(QuadratureArithmeticError::execution)?;
+            }
+        }
+        evaluator
+            .charge((first.len() % COMPONENT_CHUNK) as u64)
+            .await
+            .map_err(QuadratureArithmeticError::execution)?;
+        Ok(ArrayEstimate(Arc::new(components)))
+    }
 
     async fn simpson<E: QuadratureEvaluator<Sample = Self>>(
         a: f64,
