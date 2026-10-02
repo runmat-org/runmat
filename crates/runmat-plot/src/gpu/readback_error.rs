@@ -65,7 +65,7 @@ impl Error for PlotReadbackError {
         match self {
             Self::Access(error) | Self::CleanupAccess(error) => Some(error),
             Self::Map(error) => Some(error),
-            Self::WithCleanup { primary, .. } => Some(primary),
+            Self::WithCleanup { primary, .. } => Some(primary.as_ref()),
             _ => None,
         }
     }
