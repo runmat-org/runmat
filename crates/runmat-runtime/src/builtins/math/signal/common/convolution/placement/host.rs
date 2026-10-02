@@ -326,6 +326,41 @@ fn input_facts(value: &Value) -> InputFacts {
     }
 }
 
+pub(crate) fn host_output_representations(
+    shapes: &[Vec<usize>],
+    single: bool,
+    complex: bool,
+) -> Option<Vec<ProviderRepresentation>> {
+    let element_type = match (single, complex) {
+        (true, false) => ProviderElementType::F32,
+        (false, false) => ProviderElementType::F64,
+        (true, true) => ProviderElementType::ComplexF32,
+        (false, true) => ProviderElementType::ComplexF64,
+    };
+    let storage = if complex {
+        ProviderStorage::DenseComplexInterleaved
+    } else {
+        ProviderStorage::DenseReal
+    };
+    shapes
+        .iter()
+        .map(|shape| {
+            Some(ProviderRepresentation {
+                element_type,
+                storage,
+                layout: ProviderLayout::ColumnMajorContiguous,
+                shape: shape
+                    .iter()
+                    .copied()
+                    .map(u64::try_from)
+                    .collect::<Result<_, _>>()
+                    .ok()?,
+                residency: ProviderResidency::Device,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod facts_tests {
     use super::*;
@@ -395,39 +430,4 @@ mod facts_tests {
         assert_ne!(identity(&automatic), identity(&explicit));
         assert_eq!(input_facts(&automatic).shape, vec![1, 2]);
     }
-}
-
-pub(crate) fn host_output_representations(
-    shapes: &[Vec<usize>],
-    single: bool,
-    complex: bool,
-) -> Option<Vec<ProviderRepresentation>> {
-    let element_type = match (single, complex) {
-        (true, false) => ProviderElementType::F32,
-        (false, false) => ProviderElementType::F64,
-        (true, true) => ProviderElementType::ComplexF32,
-        (false, true) => ProviderElementType::ComplexF64,
-    };
-    let storage = if complex {
-        ProviderStorage::DenseComplexInterleaved
-    } else {
-        ProviderStorage::DenseReal
-    };
-    shapes
-        .iter()
-        .map(|shape| {
-            Some(ProviderRepresentation {
-                element_type,
-                storage,
-                layout: ProviderLayout::ColumnMajorContiguous,
-                shape: shape
-                    .iter()
-                    .copied()
-                    .map(u64::try_from)
-                    .collect::<Result<_, _>>()
-                    .ok()?,
-                residency: ProviderResidency::Device,
-            })
-        })
-        .collect()
 }
