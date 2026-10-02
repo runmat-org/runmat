@@ -234,13 +234,12 @@ fn cancellation_after_actual_selection_cannot_train_success_or_failure() {
 
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 #[test]
+#[ignore = "requires a live WGPU adapter; run explicitly for hardware qualification"]
 fn actual_wgpu_host_upload_feedback_waits_for_fence_completion() {
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
 
     let _serial = test_support::accel_test_lock();
-    if register_wgpu_provider(WgpuProviderOptions::default()).is_err() {
-        return; // The feature can be enabled on a host without a usable adapter.
-    }
+    register_wgpu_provider(WgpuProviderOptions::default()).expect("live WGPU adapter required");
     let provider = runmat_accelerate_api::provider().expect("WGPU provider registered");
     let _selected = ThreadProviderGuard::set(Some(provider));
     let signal = provider
