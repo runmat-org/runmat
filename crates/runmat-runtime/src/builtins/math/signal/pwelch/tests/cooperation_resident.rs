@@ -14,7 +14,6 @@ use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
 use std::future::Future;
 use std::num::NonZeroU64;
-use std::pin::Pin;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Mutex,

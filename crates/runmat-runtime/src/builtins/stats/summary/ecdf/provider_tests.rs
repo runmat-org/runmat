@@ -7,6 +7,7 @@ use runmat_accelerate_api::{
     GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
     HostNumericTensorView, HostTensorView, NumericElementType, ThreadProviderGuard,
 };
+#[cfg(not(feature = "plot-core"))]
 use runmat_value::LogicalArray;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
