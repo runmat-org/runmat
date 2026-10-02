@@ -11,7 +11,7 @@ use runmat_accelerate_api::{
     same_provider_instance, GpuTensorHandle, GpuTensorStorage, ProviderElementType, ProviderLayout,
     ProviderPrecision, ProviderRepresentation, ProviderResidency, ProviderStorage,
 };
-use runmat_execution::{Digest, ResourceBoundUnavailable, ResourceByteBound};
+use runmat_execution::{Digest, ResourceByteBound};
 
 pub(super) struct SelectedImhist {
     owner: GpuTensorHandle,
@@ -91,8 +91,9 @@ pub(super) fn select(
         ))
         .expect("typed imhist facts serialize"),
     );
-    // The image's physical gather staging varies by provider. Do not invent a
-    // zero or conflate the output payload with the host algorithm's scratch.
+    let Some(host_compute_scratch) = host_scratch_bound(owner, bins, outputs) else {
+        return Ok(None);
+    };
     let receipt = select_exact_host_upload(
         runtime,
         ExactHostUpload {
@@ -101,9 +102,7 @@ pub(super) fn select(
             owner,
             domain_facts: facts,
             outputs: vec![output; outputs],
-            host_compute_scratch: ResourceByteBound::Unavailable(
-                ResourceBoundUnavailable::NoScratchBound,
-            ),
+            host_compute_scratch: ResourceByteBound::Known(host_compute_scratch),
         },
     )?;
     Ok(receipt.map(|receipt| SelectedImhist {
@@ -112,6 +111,62 @@ pub(super) fn select(
         expected_outputs: outputs,
         receipt,
     }))
+}
+
+/// Bound only the operation-owned host temporaries outside the published
+/// result. The source download is one native-class vector; logical decoding
+/// may form a bit vector and then an f64 vector, and f32 binning forms an f64
+/// vector. `linspace` always constructs locations, even for a one-output call.
+/// Both published tensors move their vectors and clones are COW handles.
+fn host_scratch_bound(owner: &GpuTensorHandle, bins: usize, outputs: usize) -> Option<u64> {
+    let elements = owner.shape().iter().try_fold(1_u64, |total, &extent| {
+        total.checked_mul(u64::try_from(extent).ok()?)
+    })?;
+    let native_bytes = elements
+        .checked_mul(u64::try_from(owner.physical().element_type().element_size()).ok()?)?;
+    let logical_bits = if handle_is_logical(owner) {
+        elements
+    } else {
+        0
+    };
+    let f64_conversion =
+        if handle_is_logical(owner) || handle_precision(owner) == Some(ProviderPrecision::F32) {
+            elements.checked_mul(8)?
+        } else {
+            0
+        };
+    let unused_locations = if outputs == 1 {
+        u64::try_from(bins).ok()?.checked_mul(8)?
+    } else {
+        0
+    };
+    native_bytes
+        .checked_add(logical_bits)?
+        .checked_add(f64_conversion)?
+        .checked_add(unused_locations)
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
+    use runmat_value::{NumericDType, Tensor};
+
+    #[test]
+    fn finite_host_scratch_tracks_real_buffers_and_one_output_location() {
+        test_support::with_test_provider(|provider| {
+            let source = gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new_with_dtype(vec![0.0; 4], vec![2, 2], NumericDType::F32).unwrap(),
+            )
+            .unwrap();
+            // One native f32 download (16), one f64 binning vector (32),
+            // and the unreturned locations vector (24). Counts are charged
+            // separately as host_result_bytes by shared admission.
+            assert_eq!(host_scratch_bound(&source, 3, 1), Some(72));
+            assert_eq!(host_scratch_bound(&source, 3, 2), Some(48));
+        });
+    }
 }
 
 pub(super) fn publish(
@@ -170,6 +225,8 @@ impl SelectedImhist {
                     && handle.device_id() == self.owner.device_id()
                     && handle_precision(handle) == Some(ProviderPrecision::F64)
                     && handle_storage(handle) == GpuTensorStorage::Real
+                    && !handle_is_logical(handle)
+                    && !runmat_accelerate_api::handle_is_transposed(handle)
                     && provider_for_handle(handle)
                         .is_some_and(|provider| same_provider_instance(provider, owner_provider))
                     && !handle.shares_allocation_with(&self.owner)

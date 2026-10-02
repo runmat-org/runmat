@@ -13,10 +13,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, LogicalArray, NumericStorage, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -98,33 +94,6 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
             .build()
     }
 }
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::imhist")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: NAME,
-    op_kind: GpuOpKind::Custom("image-histogram"),
-    supported_precisions: &[crate::builtins::common::spec::ScalarType::F32, crate::builtins::common::spec::ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Grayscale gpuArray inputs are downloaded non-destructively for exact image-class binning and programmatic outputs are restored to the owner; indexed gpuArray inputs reject.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::imhist")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: NAME,
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "imhist materializes histogram counts and terminates fusion chains.",
-};
 
 #[runtime_builtin(
     name = "imhist",

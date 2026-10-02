@@ -5,6 +5,34 @@ use futures::executor::block_on;
 use runmat_value::{IntegerStorage, NumericDType};
 use std::rc::Rc;
 
+struct HostBudget(u64);
+
+impl crate::context::RuntimeParallelService for HostBudget {
+    fn supports(&self, _: crate::context::ParallelCapability) -> bool {
+        false
+    }
+    fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+        crate::context::RuntimeParallelResources {
+            cpu_millicores_available: 1_000,
+            memory_available_bytes: Some(self.0),
+            epoch: 0,
+        }
+    }
+}
+
+fn budgeted_context(host_bytes: u64) -> crate::context::RuntimeContext {
+    crate::context::RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            crate::context::RuntimeServicePorts::default()
+                .with_placement(Rc::new(
+                    runmat_accelerate::placement::PlacementSession::new(
+                        runmat_accelerate::placement::PlacementSessionConfig::default(),
+                    ),
+                ))
+                .with_parallel(Rc::new(HostBudget(host_bytes))),
+        )
+}
+
 fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
     let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
     block_on(imhist_builtin(None, image, rest)).expect("imhist")
@@ -12,6 +40,26 @@ fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>, dtype: NumericDType) -> Tensor {
     Tensor::new_with_dtype(data, shape, dtype).unwrap()
+}
+
+#[test]
+fn canonical_boundary_has_no_legacy_gpu_or_fusion_spec_shadow() {
+    use crate::builtins::common::spec::{
+        builtin_fusion_specs, builtin_gpu_specs, canonical_fusion_declaration,
+    };
+    let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(NAME)
+        .expect("compiled canonical imhist");
+    assert_eq!(
+        entry.placement.preparation,
+        runmat_builtins::BuiltinOperandPreparation::RuntimeOwned
+    );
+    assert_eq!(
+        entry.placement.fusion,
+        runmat_builtins::BuiltinFusionPolicy::Boundary
+    );
+    assert!(!builtin_gpu_specs().any(|spec| spec.name == NAME));
+    assert!(!builtin_fusion_specs().any(|spec| spec.name == NAME));
+    assert!(canonical_fusion_declaration(entry.binding_identity(&entry.bindings[0])).is_none());
 }
 
 #[test]
@@ -420,6 +468,36 @@ fn selected_histogram_unpolled_and_statement_forms_do_not_probe() {
         assert!(matches!(counts, Value::Tensor(_)));
         assert_eq!(witness.selections(), 0);
         assert!(witness.feedback().is_empty());
+        assert!(source.allocation_lease().validate_live().is_ok());
+    });
+}
+
+#[test]
+fn finite_host_budget_admits_bound_and_rejects_before_gather() {
+    test_support::with_test_provider(|provider| {
+        let input = tensor(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2], NumericDType::F64);
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+        provider.reset_telemetry();
+        let admitted = block_on(imhist_builtin(
+            Some(budgeted_context(1024)),
+            Value::GpuTensor(source.clone()),
+            vec![Value::Num(3.0)],
+        ))
+        .expect("finite host budget admits real route");
+        assert!(matches!(admitted, Value::GpuTensor(_)));
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+
+        provider.reset_telemetry();
+        let rejected = block_on(imhist_builtin(
+            Some(budgeted_context(1)),
+            Value::GpuTensor(source.clone()),
+            vec![Value::Num(3.0)],
+        ))
+        .expect_err("finite budget must reject selected route before gather");
+        assert!(rejected
+            .identifier()
+            .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert!(source.allocation_lease().validate_live().is_ok());
     });
 }
