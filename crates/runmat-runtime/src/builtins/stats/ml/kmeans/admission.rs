@@ -97,7 +97,9 @@ pub(super) async fn admit_option_values_cooperative(
     let mut admitted = Vec::new();
     admitted
         .try_reserve_exact(headers.len())
-        .map_err(|_| invalid("kmeans: options exceed available memory"))?;
+        .map_err(|source| {
+            super::internal_with_source("kmeans: options exceed available memory", source)
+        })?;
     for header in headers {
         let (kind, value) = match header {
             OptionHeader::Argument { kind, value } => (kind, value),

@@ -38,7 +38,7 @@ async fn initial_centers(
         StartSpec::Numeric(centers) => Ok(vec![clone_rows(centers, cooperation).await?]),
         StartSpec::NumericPages(pages) => {
             let mut starts = Vec::new();
-            starts.try_reserve_exact(pages.len()).map_err(|_| invalid("kmeans: replicate starts exceed available memory"))?;
+            starts.try_reserve_exact(pages.len()).map_err(|source| super::internal_with_source("kmeans: replicate starts exceed available memory", source))?;
             for page in pages {
                 starts.push(clone_rows(page, cooperation).await?);
             }
@@ -51,7 +51,7 @@ async fn initial_centers(
             let mut starts = Vec::new();
             starts
                 .try_reserve_exact(options.replicates)
-                .map_err(|_| invalid("kmeans: replicate starts exceed available memory"))?;
+                .map_err(|source| super::internal_with_source("kmeans: replicate starts exceed available memory", source))?;
             for _ in 0..options.replicates {
                 let centers = match start {
                     KmeansStart::Plus => plus_start(data, k, options.distance, cooperation).await?,
@@ -79,9 +79,9 @@ async fn sample_start(
     }
     let uniforms = cooperation.uniform(data.rows.len()).await?;
     let mut scored = Vec::new();
-    scored
-        .try_reserve_exact(uniforms.len())
-        .map_err(|_| invalid("kmeans: sample scores exceed available memory"))?;
+    scored.try_reserve_exact(uniforms.len()).map_err(|source| {
+        super::internal_with_source("kmeans: sample scores exceed available memory", source)
+    })?;
     for (index, draw) in uniforms.into_iter().enumerate() {
         scored.push((index, draw));
         cooperation.completed(1).await?;
@@ -92,9 +92,9 @@ async fn sample_start(
         })
         .await?;
     let mut centers = Vec::new();
-    centers
-        .try_reserve_exact(k)
-        .map_err(|_| invalid("kmeans: sample centers exceed available memory"))?;
+    centers.try_reserve_exact(k).map_err(|source| {
+        super::internal_with_source("kmeans: sample centers exceed available memory", source)
+    })?;
     for (idx, _) in scored.into_iter().take(k) {
         centers.push(clone_row(&data.rows[idx], cooperation).await?);
     }
@@ -119,7 +119,9 @@ async fn plus_start(
         let mut weights = Vec::new();
         weights
             .try_reserve_exact(data.rows.len())
-            .map_err(|_| invalid("kmeans: start weights exceed available memory"))?;
+            .map_err(|source| {
+                super::internal_with_source("kmeans: start weights exceed available memory", source)
+            })?;
         let mut total = 0.0;
         for row in &data.rows {
             let mut best = f64::INFINITY;
@@ -195,9 +197,9 @@ async fn uniform_start(
         .ok_or_else(|| invalid("kmeans: uniform start shape overflow"))?;
     let uniforms = cooperation.uniform(draw_count).await?;
     let mut centers = Vec::new();
-    centers
-        .try_reserve_exact(k)
-        .map_err(|_| invalid("kmeans: uniform centers exceed available memory"))?;
+    centers.try_reserve_exact(k).map_err(|source| {
+        super::internal_with_source("kmeans: uniform centers exceed available memory", source)
+    })?;
     for _ in 0..k {
         centers.push(filled(cols, 0.0, cooperation).await?);
     }
@@ -231,7 +233,9 @@ async fn cluster_start(
     let mut original_to_valid = Vec::new();
     original_to_valid
         .try_reserve_exact(sample_size)
-        .map_err(|_| invalid("kmeans: subset indices exceed available memory"))?;
+        .map_err(|source| {
+            super::internal_with_source("kmeans: subset indices exceed available memory", source)
+        })?;
     for row in 0..sample_size {
         original_to_valid.push(Some(row));
         cooperation.completed(1).await?;
@@ -267,8 +271,9 @@ async fn run_replicate(
 ) -> BuiltinResult<ReplicateResult> {
     let k = centers.len();
     let mut idx = Vec::new();
-    idx.try_reserve_exact(data.rows.len())
-        .map_err(|_| invalid("kmeans: assignments exceed available memory"))?;
+    idx.try_reserve_exact(data.rows.len()).map_err(|source| {
+        super::internal_with_source("kmeans: assignments exceed available memory", source)
+    })?;
     for _ in &data.rows {
         idx.push(0);
         cooperation.completed(1).await?;
@@ -347,19 +352,24 @@ async fn assign_rows(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Assignment> {
     let mut idx = Vec::new();
-    idx.try_reserve_exact(rows.len())
-        .map_err(|_| invalid("kmeans: assignments exceed available memory"))?;
+    idx.try_reserve_exact(rows.len()).map_err(|source| {
+        super::internal_with_source("kmeans: assignments exceed available memory", source)
+    })?;
     let mut all_distances = Vec::new();
     all_distances
         .try_reserve_exact(rows.len())
-        .map_err(|_| invalid("kmeans: distances exceed available memory"))?;
+        .map_err(|source| {
+            super::internal_with_source("kmeans: distances exceed available memory", source)
+        })?;
     for row in rows {
         let mut best_idx = 0usize;
         let mut best_distance = f64::INFINITY;
         let mut row_distances = Vec::new();
         row_distances
             .try_reserve_exact(centers.len())
-            .map_err(|_| invalid("kmeans: distances exceed available memory"))?;
+            .map_err(|source| {
+                super::internal_with_source("kmeans: distances exceed available memory", source)
+            })?;
         for (center_idx, center) in centers.iter().enumerate() {
             let d = distance_value(row, center, distance, cooperation).await?;
             row_distances.push(d);
@@ -394,9 +404,9 @@ async fn update_centers(
     }
     let mut members = filled(k, Vec::<usize>::new(), cooperation).await?;
     for (member, count) in members.iter_mut().zip(counts) {
-        member
-            .try_reserve_exact(count)
-            .map_err(|_| invalid("kmeans: cluster members exceed available memory"))?;
+        member.try_reserve_exact(count).map_err(|source| {
+            super::internal_with_source("kmeans: cluster members exceed available memory", source)
+        })?;
         cooperation.completed(1).await?;
     }
     for (row, cluster) in idx.iter().enumerate() {
@@ -404,9 +414,9 @@ async fn update_centers(
         cooperation.completed(1).await?;
     }
     let mut centers = Vec::new();
-    centers
-        .try_reserve_exact(k)
-        .map_err(|_| invalid("kmeans: centers exceed available memory"))?;
+    centers.try_reserve_exact(k).map_err(|source| {
+        super::internal_with_source("kmeans: centers exceed available memory", source)
+    })?;
     for _ in 0..k {
         centers.push(filled(data.cols, f64::NAN, cooperation).await?);
     }
@@ -473,9 +483,12 @@ async fn centroid_for(
             let mut center = filled(cols, 0.0, cooperation).await?;
             for col in 0..cols {
                 let mut values = Vec::new();
-                values
-                    .try_reserve_exact(members.len())
-                    .map_err(|_| invalid("kmeans: centroid samples exceed available memory"))?;
+                values.try_reserve_exact(members.len()).map_err(|source| {
+                    super::internal_with_source(
+                        "kmeans: centroid samples exceed available memory",
+                        source,
+                    )
+                })?;
                 for row in members {
                     values.push(rows[*row][col]);
                     cooperation.completed(1).await?;
@@ -530,8 +543,9 @@ async fn clone_row(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let mut copy = Vec::new();
-    copy.try_reserve_exact(row.len())
-        .map_err(|_| invalid("kmeans: centers exceed available memory"))?;
+    copy.try_reserve_exact(row.len()).map_err(|source| {
+        super::internal_with_source("kmeans: centers exceed available memory", source)
+    })?;
     for &value in row {
         copy.push(value);
         cooperation.completed(1).await?;
@@ -544,8 +558,9 @@ async fn clone_rows(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     let mut copy = Vec::new();
-    copy.try_reserve_exact(rows.len())
-        .map_err(|_| invalid("kmeans: centers exceed available memory"))?;
+    copy.try_reserve_exact(rows.len()).map_err(|source| {
+        super::internal_with_source("kmeans: centers exceed available memory", source)
+    })?;
     for row in rows {
         copy.push(clone_row(row, cooperation).await?);
     }
@@ -558,9 +573,12 @@ async fn filled<T: Clone>(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<T>> {
     let mut values = Vec::new();
-    values
-        .try_reserve_exact(len)
-        .map_err(|_| invalid("kmeans: clustering workspace exceeds available memory"))?;
+    values.try_reserve_exact(len).map_err(|source| {
+        super::internal_with_source(
+            "kmeans: clustering workspace exceeds available memory",
+            source,
+        )
+    })?;
     for _ in 0..len {
         values.push(value.clone());
         cooperation.completed(1).await?;

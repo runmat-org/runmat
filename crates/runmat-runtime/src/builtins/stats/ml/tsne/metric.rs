@@ -13,8 +13,9 @@ pub(super) async fn pairwise_squared_distances_cooperative(
         .checked_mul(n)
         .ok_or_else(|| invalid("tsne: pairwise distance shape overflow"))?;
     let mut data = Vec::new();
-    data.try_reserve_exact(cells)
-        .map_err(|_| invalid("tsne: pairwise distances exceed available memory"))?;
+    data.try_reserve_exact(cells).map_err(|source| {
+        super::internal_with_source("tsne: pairwise distances exceed available memory", source)
+    })?;
     for _ in 0..cells {
         data.push(0.0);
         cooperation.completed(1).await?;
@@ -197,10 +198,7 @@ async fn cooperative_direction(
     loop {
         match work.advance().map_err(|error| match error {
             DirectionError::Resource(source) => {
-                crate::build_runtime_error("tsne: direction exceeds available memory")
-                    .with_builtin(super::NAME)
-                    .with_source(source)
-                    .build()
+                super::internal_with_source("tsne: direction exceeds available memory", source)
             }
         })? {
             DirectionProgress::Pending(units) => cooperation.completed(units).await?,
@@ -261,9 +259,12 @@ async fn column_std(
     }
     let cols = rows[0].len();
     let mut result = Vec::new();
-    result
-        .try_reserve_exact(cols)
-        .map_err(|_| invalid("tsne: standardized-distance scales exceed available memory"))?;
+    result.try_reserve_exact(cols).map_err(|source| {
+        super::internal_with_source(
+            "tsne: standardized-distance scales exceed available memory",
+            source,
+        )
+    })?;
     for col in 0..cols {
         let mut total = 0.0;
         for row in rows {
@@ -293,9 +294,9 @@ async fn inverse_covariance(
     let p = rows[0].len();
     let mut cov: DMatrix<f64> = super::workspace::zero_matrix(p, p, cooperation).await?;
     let mut means = Vec::new();
-    means
-        .try_reserve_exact(p)
-        .map_err(|_| invalid("tsne: covariance means exceed available memory"))?;
+    means.try_reserve_exact(p).map_err(|source| {
+        super::internal_with_source("tsne: covariance means exceed available memory", source)
+    })?;
     for col in 0..p {
         let mut total = 0.0;
         for row in rows {
@@ -334,8 +335,12 @@ async fn mahalanobis_sq(
     cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<f64> {
     let mut diff = Vec::new();
-    diff.try_reserve_exact(left.len())
-        .map_err(|_| invalid("tsne: Mahalanobis workspace exceeds available memory"))?;
+    diff.try_reserve_exact(left.len()).map_err(|source| {
+        super::internal_with_source(
+            "tsne: Mahalanobis workspace exceeds available memory",
+            source,
+        )
+    })?;
     for (a, b) in left.iter().zip(right) {
         diff.push(a - b);
         cooperation.completed(1).await?;

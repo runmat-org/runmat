@@ -160,16 +160,20 @@ pub(super) async fn prepare_data_cooperative(
     let cols = if vector_as_column { 1 } else { raw_cols };
     let mut rows = Vec::new();
     rows.try_reserve_exact(original_row_count)
-        .map_err(|_| invalid("kmeans: observations exceed available memory"))?;
+        .map_err(|source| {
+            super::internal_with_source("kmeans: observations exceed available memory", source)
+        })?;
     let mut original_to_valid = Vec::new();
     original_to_valid
         .try_reserve_exact(original_row_count)
-        .map_err(|_| invalid("kmeans: row indices exceed available memory"))?;
+        .map_err(|source| {
+            super::internal_with_source("kmeans: row indices exceed available memory", source)
+        })?;
     for row in 0..original_row_count {
         let mut row_values = Vec::new();
-        row_values
-            .try_reserve_exact(cols)
-            .map_err(|_| invalid("kmeans: observations exceed available memory"))?;
+        row_values.try_reserve_exact(cols).map_err(|source| {
+            super::internal_with_source("kmeans: observations exceed available memory", source)
+        })?;
         let mut has_nan = false;
         for col in 0..cols {
             let value: f64 = if vector_as_column {
@@ -258,10 +262,7 @@ pub(super) async fn direction_or_nan(
     loop {
         match work.advance().map_err(|error| match error {
             DirectionError::Resource(source) => {
-                crate::build_runtime_error("kmeans: direction exceeds available memory")
-                    .with_builtin(super::NAME)
-                    .with_source(source)
-                    .build()
+                super::internal_with_source("kmeans: direction exceeds available memory", source)
             }
         })? {
             DirectionProgress::Pending(units) => cooperation.completed(units).await?,
@@ -271,9 +272,12 @@ pub(super) async fn direction_or_nan(
                     return Ok(direction);
                 }
                 let mut nan_row = Vec::new();
-                nan_row
-                    .try_reserve_exact(row.len())
-                    .map_err(|_| invalid("kmeans: direction exceeds available memory"))?;
+                nan_row.try_reserve_exact(row.len()).map_err(|source| {
+                    super::internal_with_source(
+                        "kmeans: direction exceeds available memory",
+                        source,
+                    )
+                })?;
                 for _ in row {
                     nan_row.push(f64::NAN);
                     cooperation.completed(1).await?;
@@ -289,8 +293,9 @@ async fn copy_row(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let mut copy = Vec::new();
-    copy.try_reserve_exact(row.len())
-        .map_err(|_| invalid("kmeans: observations exceed available memory"))?;
+    copy.try_reserve_exact(row.len()).map_err(|source| {
+        super::internal_with_source("kmeans: observations exceed available memory", source)
+    })?;
     for value in row {
         copy.push(*value);
         cooperation.completed(1).await?;

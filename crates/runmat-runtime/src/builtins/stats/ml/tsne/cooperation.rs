@@ -26,12 +26,10 @@ impl TsneCooperation {
         let mut work = StableSortWork::new(values, compare);
         loop {
             let progress = work.advance().map_err(|error| match error {
-                CooperativeSortError::Resource(source) => {
-                    build_runtime_error("tsne: sorted observations exceed available memory")
-                        .with_builtin(NAME)
-                        .with_source(source)
-                        .build()
-                }
+                CooperativeSortError::Resource(source) => super::internal_with_source(
+                    "tsne: sorted observations exceed available memory",
+                    source,
+                ),
                 CooperativeSortError::Service(source) => {
                     with_tsne_context(source.into_runtime_error())
                 }

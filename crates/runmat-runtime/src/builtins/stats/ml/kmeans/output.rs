@@ -1,4 +1,4 @@
-use super::{internal, invalid, PreparedData, ReplicateResult};
+use super::{internal, internal_with_source, invalid, PreparedData, ReplicateResult};
 use crate::BuiltinResult;
 use runmat_value::{Tensor, Value};
 
@@ -75,7 +75,9 @@ async fn sumd_output(
     let mut values = Vec::new();
     values
         .try_reserve_exact(result.sumd.len())
-        .map_err(|_| internal("kmeans: sumd output exceeds available memory"))?;
+        .map_err(|source| {
+            internal_with_source("kmeans: sumd output exceeds available memory", source)
+        })?;
     for &value in &result.sumd {
         values.push(value);
         cooperation.completed(1).await?;
@@ -115,12 +117,31 @@ async fn filled_f64(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let mut values = Vec::new();
-    values
-        .try_reserve_exact(len)
-        .map_err(|_| internal("kmeans: output exceeds available memory"))?;
+    values.try_reserve_exact(len).map_err(|source| {
+        internal_with_source("kmeans: output exceeds available memory", source)
+    })?;
     for _ in 0..len {
         values.push(value);
         cooperation.completed(1).await?;
     }
     Ok(values)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn output_capacity_failure_preserves_operational_cause_without_retry() {
+        let mut cooperation = super::super::cooperation::KmeansCooperation::new(None);
+        let error = futures::executor::block_on(filled_f64(usize::MAX, 0.0, &mut cooperation))
+            .expect_err("capacity overflow must fail without attempting an allocation");
+        assert_eq!(error.identifier(), Some("RunMat:kmeans:Internal"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(error
+            .source()
+            .expect("original reservation failure")
+            .is::<std::collections::TryReserveError>());
+    }
 }

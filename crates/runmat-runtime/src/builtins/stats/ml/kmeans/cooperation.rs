@@ -49,12 +49,10 @@ impl KmeansCooperation {
         let mut work = StableSortWork::new(values, compare);
         loop {
             let progress = work.advance().map_err(|error| match error {
-                CooperativeSortError::Resource(source) => crate::build_runtime_error(
+                CooperativeSortError::Resource(source) => super::internal_with_source(
                     "kmeans: sorted observations exceed available memory",
-                )
-                .with_builtin(NAME)
-                .with_source(source)
-                .build(),
+                    source,
+                ),
                 CooperativeSortError::Service(source) => {
                     with_kmeans_context(source.into_runtime_error())
                 }

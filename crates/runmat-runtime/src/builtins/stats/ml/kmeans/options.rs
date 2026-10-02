@@ -78,9 +78,12 @@ pub(super) async fn parse_numeric_start_cooperative(
         let cols = tensor.shape[1];
         let reps = tensor.shape[2];
         let mut pages = Vec::new();
-        pages
-            .try_reserve_exact(reps)
-            .map_err(|_| invalid("kmeans: numeric Start pages exceed available memory"))?;
+        pages.try_reserve_exact(reps).map_err(|source| {
+            super::internal_with_source(
+                "kmeans: numeric Start pages exceed available memory",
+                source,
+            )
+        })?;
         for page in 0..reps {
             let mut centers = start_centers(k, cols, cooperation).await?;
             for col in 0..cols {
@@ -120,13 +123,14 @@ async fn start_centers(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     let mut centers = Vec::new();
-    centers
-        .try_reserve_exact(rows)
-        .map_err(|_| invalid("kmeans: numeric Start exceeds available memory"))?;
+    centers.try_reserve_exact(rows).map_err(|source| {
+        super::internal_with_source("kmeans: numeric Start exceeds available memory", source)
+    })?;
     for _ in 0..rows {
         let mut row = Vec::new();
-        row.try_reserve_exact(cols)
-            .map_err(|_| invalid("kmeans: numeric Start exceeds available memory"))?;
+        row.try_reserve_exact(cols).map_err(|source| {
+            super::internal_with_source("kmeans: numeric Start exceeds available memory", source)
+        })?;
         for _ in 0..cols {
             row.push(0.0);
             cooperation.completed(1).await?;

@@ -11,15 +11,17 @@ pub(super) async fn prepare_data_cooperative(
 ) -> BuiltinResult<PreparedData> {
     let mut rows = Vec::new();
     let mut good_rows = Vec::new();
-    rows.try_reserve_exact(x.rows)
-        .map_err(|_| invalid("tsne: observations exceed available memory"))?;
-    good_rows
-        .try_reserve_exact(x.rows)
-        .map_err(|_| invalid("tsne: row indices exceed available memory"))?;
+    rows.try_reserve_exact(x.rows).map_err(|source| {
+        super::internal_with_source("tsne: observations exceed available memory", source)
+    })?;
+    good_rows.try_reserve_exact(x.rows).map_err(|source| {
+        super::internal_with_source("tsne: row indices exceed available memory", source)
+    })?;
     for row in 0..x.rows {
         let mut out = Vec::new();
-        out.try_reserve_exact(x.cols)
-            .map_err(|_| invalid("tsne: features exceed available memory"))?;
+        out.try_reserve_exact(x.cols).map_err(|source| {
+            super::internal_with_source("tsne: features exceed available memory", source)
+        })?;
         let mut complete = true;
         for col in 0..x.cols {
             let value = tensor::tensor_value_f64(x, row + col * x.rows);
@@ -107,9 +109,9 @@ pub(super) async fn apply_pca_if_requested(
     let k = components.min(p);
     let mut centered = rows;
     let mut means = Vec::new();
-    means
-        .try_reserve_exact(p)
-        .map_err(|_| invalid("tsne: PCA means exceed available memory"))?;
+    means.try_reserve_exact(p).map_err(|source| {
+        super::internal_with_source("tsne: PCA means exceed available memory", source)
+    })?;
     for col in 0..p {
         let mut total = 0.0;
         for row in &centered {

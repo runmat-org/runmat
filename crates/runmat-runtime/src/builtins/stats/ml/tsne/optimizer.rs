@@ -236,8 +236,9 @@ async fn initial_embedding(
             .checked_mul(dims)
             .ok_or_else(|| invalid("tsne: embedding shape overflow"))?;
         let mut data = Vec::new();
-        data.try_reserve_exact(count)
-            .map_err(|_| invalid("tsne: embedding exceeds available memory"))?;
+        data.try_reserve_exact(count).map_err(|source| {
+            super::internal_with_source("tsne: embedding exceeds available memory", source)
+        })?;
         if initial.rows == original_rows {
             for col in 0..dims {
                 for &row in good_rows {
@@ -272,9 +273,9 @@ async fn initial_embedding(
         .ok_or_else(|| invalid("tsne: embedding shape overflow"))?;
     let normals = cooperation.normals(count).await?;
     let mut scaled = Vec::new();
-    scaled
-        .try_reserve_exact(normals.len())
-        .map_err(|_| invalid("tsne: embedding exceeds available memory"))?;
+    scaled.try_reserve_exact(normals.len()).map_err(|source| {
+        super::internal_with_source("tsne: embedding exceeds available memory", source)
+    })?;
     for value in normals {
         scaled.push(value * 1.0e-4);
         cooperation.completed(1).await?;
@@ -371,9 +372,9 @@ async fn filled_f64(
     cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let mut values = Vec::new();
-    values
-        .try_reserve_exact(len)
-        .map_err(|_| invalid("tsne: numerical workspace exceeds available memory"))?;
+    values.try_reserve_exact(len).map_err(|source| {
+        super::internal_with_source("tsne: numerical workspace exceeds available memory", source)
+    })?;
     for _ in 0..len {
         values.push(value);
         cooperation.completed(1).await?;
