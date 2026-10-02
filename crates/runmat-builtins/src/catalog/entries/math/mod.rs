@@ -39,7 +39,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     interpolation::extend_entries(values);
     linalg::extend_entries(values);
     ode::extend_entries(values);
-    values.extend(optim::ENTRIES.iter().copied());
+    optim::extend_entries(values);
     poly::extend_entries(values);
     reduction::extend_entries(values);
     values.extend(rounding::ENTRIES.iter().copied());

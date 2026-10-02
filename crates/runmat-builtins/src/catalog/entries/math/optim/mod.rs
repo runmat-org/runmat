@@ -10,5 +10,7 @@ pub use fminbnd::*;
 pub use fzero::*;
 pub use options::{OptimAlgorithm, OptimDisplay, OptimOptionField, OptimSolver, OptimSwitch};
 
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] =
-    &[&FMINBND_CATALOG_ENTRY, &FZERO_CATALOG_ENTRY];
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(fminbnd::ENTRIES.iter().copied());
+    values.extend(fzero::ENTRIES.iter().copied());
+}
