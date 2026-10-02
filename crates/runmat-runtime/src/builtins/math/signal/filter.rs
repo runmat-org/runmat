@@ -1,4 +1,6 @@
 //! MATLAB-compatible `filter` builtin with GPU-aware semantics for RunMat.
+mod provider_output;
+
 use std::cmp::max;
 
 use num_complex::Complex;
@@ -344,6 +346,13 @@ const FILTER_ERROR_PROVIDER_EXECUTION: BuiltinErrorDescriptor = BuiltinErrorDesc
     message: "filter: GPU provider iir_filter failed",
 };
 
+const FILTER_ERROR_PROVIDER_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.PROVIDER_OUTPUT",
+    identifier: Some("RunMat:filter:InvalidProviderOutput"),
+    when: "The provider returns missing, malformed, foreign, stale, or aliased filter results.",
+    message: "filter: invalid provider filtering output",
+};
+
 const FILTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FILTER.INTERNAL",
     identifier: Some("RunMat:filter:Internal"),
@@ -351,7 +360,7 @@ const FILTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "filter: internal error",
 };
 
-const FILTER_ERRORS: [BuiltinErrorDescriptor; 12] = [
+const FILTER_ERRORS: [BuiltinErrorDescriptor; 13] = [
     FILTER_ERROR_ARG_COUNT,
     FILTER_ERROR_INVALID_DIMENSION,
     FILTER_ERROR_EMPTY_DENOMINATOR,
@@ -363,6 +372,7 @@ const FILTER_ERRORS: [BuiltinErrorDescriptor; 12] = [
     FILTER_ERROR_GATHER_FAILED,
     FILTER_ERROR_PROVIDER_UPLOAD,
     FILTER_ERROR_PROVIDER_EXECUTION,
+    FILTER_ERROR_PROVIDER_OUTPUT,
     FILTER_ERROR_INTERNAL,
 ];
 
@@ -1158,7 +1168,7 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
 
     let options = ProviderIirFilterOptions {
         dim: args.dim_idx,
-        zi: zi_handle_opt,
+        zi: zi_handle_opt.clone(),
         unit_denominator: false,
     };
 
@@ -1179,8 +1189,18 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         }
     };
 
-    let output_value = Value::GpuTensor(result.output.clone());
-    let final_state_value = match result.final_state {
+    let (output_handle, final_state_handle) = provider_output::ProviderOutputContext {
+        provider,
+        signal: &signal_handle,
+        numerator: &b_handle,
+        denominator: &a_handle,
+        initial_state: zi_handle_opt.as_ref(),
+        state_shape: &args.state_shape,
+        state_len: args.state_len,
+    }
+    .admit(result)?;
+    let output_value = Value::GpuTensor(output_handle);
+    let final_state_value = match final_state_handle {
         Some(handle) => Value::GpuTensor(handle),
         None => {
             let values = vec![0.0; tensor::element_count(&args.state_shape)];

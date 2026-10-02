@@ -3258,7 +3258,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _x: &'a GpuTensorHandle,
         _options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("iir_filter not supported by provider")) })
+        Box::pin(async move {
+            Err(unsupported_provider_operation(
+                "iir_filter not supported by provider",
+            ))
+        })
     }
     fn uniform_spectral_estimate<'a>(
         &'a self,
