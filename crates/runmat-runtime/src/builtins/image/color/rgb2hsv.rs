@@ -326,6 +326,7 @@ mod tests {
 
     #[test]
     fn rgb2hsv_integer_capabilities_record_supported_and_rejected_classes() {
+        use runmat_builtins::BuiltinIntegerClass;
         assert_eq!(RGB2HSV_INTEGER_CAPABILITIES.len(), 2);
         assert_eq!(
             RGB2HSV_INTEGER_CAPABILITIES[0].inputs[0].availability,
@@ -333,7 +334,14 @@ mod tests {
         );
         assert_eq!(
             RGB2HSV_INTEGER_CAPABILITIES[1].inputs[0].classes,
-            &common::REJECTED_IMAGE_INTEGER_CLASSES
+            &[
+                BuiltinIntegerClass::Int8,
+                BuiltinIntegerClass::Int16,
+                BuiltinIntegerClass::Int32,
+                BuiltinIntegerClass::Int64,
+                BuiltinIntegerClass::Uint32,
+                BuiltinIntegerClass::Uint64,
+            ]
         );
     }
 

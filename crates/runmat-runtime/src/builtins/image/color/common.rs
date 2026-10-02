@@ -1,7 +1,6 @@
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, IntegerElementType, ProviderPrecision,
 };
-use runmat_builtins::BuiltinIntegerClass;
 use std::borrow::Cow;
 
 use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
@@ -14,18 +13,6 @@ pub(crate) enum ColorLayout {
     Truecolor { rows: usize, cols: usize },
     Colormap { rows: usize },
 }
-
-pub(crate) const DOCUMENTED_IMAGE_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
-    [BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16];
-
-pub(crate) const REJECTED_IMAGE_INTEGER_CLASSES: [BuiltinIntegerClass; 6] = [
-    BuiltinIntegerClass::Int8,
-    BuiltinIntegerClass::Int16,
-    BuiltinIntegerClass::Int32,
-    BuiltinIntegerClass::Int64,
-    BuiltinIntegerClass::Uint32,
-    BuiltinIntegerClass::Uint64,
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StackedColorLayout {

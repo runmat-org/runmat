@@ -366,10 +366,11 @@ mod tests {
 
     #[test]
     fn rgb2gray_integer_capabilities_record_supported_and_rejected_classes() {
+        use runmat_builtins::BuiltinIntegerClass;
         assert_eq!(RGB2GRAY_INTEGER_CAPABILITIES.len(), 2);
         assert_eq!(
             RGB2GRAY_INTEGER_CAPABILITIES[0].inputs[0].classes,
-            &common::DOCUMENTED_IMAGE_INTEGER_CLASSES
+            &[BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16]
         );
         assert_eq!(
             RGB2GRAY_INTEGER_CAPABILITIES[1].inputs[0].availability,
