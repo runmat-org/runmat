@@ -327,7 +327,7 @@ struct PolyfitSolution {
     r_matrix: Option<Vec<f64>>,
     mu_mean: f64,
     mu_scale: f64,
-    normr: f64,
+    normr: Option<f64>,
     df: f64,
     cols: usize,
     is_complex: bool,
@@ -347,6 +347,11 @@ impl PolyfitSolution {
         if result.r_matrix.is_some() != outputs.wants_statistics() {
             return Err(polyfit_internal_error(
                 "polyfit: provider returned statistics inconsistent with requested outputs",
+            ));
+        }
+        if result.normr.is_some() != outputs.wants_statistics() {
+            return Err(polyfit_internal_error(
+                "polyfit: provider returned residual statistics inconsistent with requested outputs",
             ));
         }
         if let Some(r) = &result.r_matrix {
@@ -386,11 +391,15 @@ pub struct PolyfitEval {
 impl PolyfitEval {
     fn from_solution(solution: PolyfitSolution) -> BuiltinResult<Self> {
         let coefficients = coefficients_to_value(&solution.coeffs)?;
-        let stats = solution
-            .r_matrix
-            .as_ref()
-            .map(|r| build_stats(r, solution.cols, solution.normr, solution.df))
-            .transpose()?;
+        let stats = match (&solution.r_matrix, solution.normr) {
+            (Some(r), Some(normr)) => Some(build_stats(r, solution.cols, normr, solution.df)?),
+            (None, None) => None,
+            _ => {
+                return Err(polyfit_internal_error(
+                    "polyfit: QR statistics and residual norm must be returned together",
+                ))
+            }
+        };
         let mu = build_mu(solution.mu_mean, solution.mu_scale)?;
         Ok(Self {
             coefficients,
@@ -630,7 +639,7 @@ pub struct PolyfitHostRealResult {
     pub coefficients: Vec<f64>,
     pub r_matrix: Option<Vec<f64>>,
     pub mu: [f64; 2],
-    pub normr: f64,
+    pub normr: Option<f64>,
     pub df: f64,
 }
 

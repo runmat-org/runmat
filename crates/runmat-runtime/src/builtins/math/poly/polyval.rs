@@ -382,7 +382,6 @@ async fn preflight_host_options(
     let stats = match rest.first() {
         None => None,
         Some(value) if is_known_empty_option(value) => None,
-        Some(Value::GpuTensor(_)) => None,
         Some(Value::Struct(value)) => {
             let (r, df, normr) = stat_fields(value)?;
             let has_resident_field = [r, df, normr]

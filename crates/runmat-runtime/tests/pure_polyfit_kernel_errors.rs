@@ -96,7 +96,7 @@ fn pure_solver_preserves_coefficients_and_typed_validation() {
     assert!((result.coefficients[1] - 1.).abs() < 1e-12);
     assert_eq!(result.r_matrix.as_ref().unwrap().len(), 4);
     assert_eq!(result.df, 1.);
-    assert!(result.normr < 1e-12);
+    assert!(result.normr.unwrap() < 1e-12);
     let error = polyfit_host_real_for_provider(
         &[0., 1.],
         &[1.],
@@ -434,6 +434,25 @@ fn extreme_original_basis_fits_coefficients_without_unrequested_overflowing_r() 
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
     x.allocation_lease().validate_live().unwrap();
     y.allocation_lease().validate_live().unwrap();
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn coefficient_only_fit_does_not_form_unrepresentable_residual_norm() {
+    let x = [0.0, 1.0];
+    let y = [f64::MAX, -f64::MAX];
+    let result =
+        polyfit_host_real_for_provider(&x, &y, 0, None, ProviderPolyfitOutputs::Coefficients)
+            .expect("finite constant coefficient");
+    assert_eq!(result.coefficients.len(), 1);
+    assert!(result.coefficients[0].is_finite());
+    assert!(result.coefficients[0].abs() <= f64::MAX * 1e-14);
+    assert!(result.r_matrix.is_none());
+    assert!(result.normr.is_none());
+    let error = polyfit_host_real_for_provider(&x, &y, 0, None, ProviderPolyfitOutputs::Statistics)
+        .expect_err("requested residual exceeds binary64 range");
+    assert!(matches!(error, PolyfitKernelError::InvalidInput(_)));
+    assert!(error.to_string().contains("residual norm"));
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

@@ -109,6 +109,11 @@ fn malformed_host_controls_reject_before_resident_readback() {
     for (options, wants_delta, expected) in [
         (vec![Value::Num(1.0)], true, "S input must be"),
         (
+            vec![Value::GpuTensor(source.handle.clone())],
+            true,
+            "S input must be",
+        ),
+        (
             vec![
                 Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
                 Value::Num(1.0),

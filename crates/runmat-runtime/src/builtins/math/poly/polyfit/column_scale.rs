@@ -31,12 +31,16 @@ pub(super) fn equilibrate(
 pub(super) fn restore_coefficients(
     scaled: Vec<Complex64>,
     scales: &[f64],
+    rhs_scale: f64,
 ) -> PolyfitKernelResult<Vec<Complex64>> {
     scaled
         .into_iter()
         .zip(scales)
         .map(|(value, &scale)| {
-            let restored = Complex64::new(value.re / scale, value.im / scale);
+            let restored = Complex64::new(
+                restore_component(value.re, scale, rhs_scale),
+                restore_component(value.im, scale, rhs_scale),
+            );
             if restored.re.is_finite() && restored.im.is_finite() {
                 Ok(restored)
             } else {
@@ -44,6 +48,17 @@ pub(super) fn restore_coefficients(
             }
         })
         .collect()
+}
+
+fn restore_component(value: f64, column_scale: f64, rhs_scale: f64) -> f64 {
+    let scale_ratio = rhs_scale / column_scale;
+    if scale_ratio.is_finite() && scale_ratio != 0.0 {
+        let result = value * scale_ratio;
+        if result.is_finite() {
+            return result;
+        }
+    }
+    value / column_scale * rhs_scale
 }
 
 pub(super) fn restore_upper(

@@ -823,7 +823,8 @@ pub struct ProviderPolyfitResult {
     pub coefficients: Vec<f64>,
     /// Present only when the caller requested the QR statistics output.
     pub r_matrix: Option<Vec<f64>>,
-    pub normr: f64,
+    /// Residual norm accompanies the requested statistics, not coefficient-only fits.
+    pub normr: Option<f64>,
     pub df: f64,
     pub mu: [f64; 2],
 }

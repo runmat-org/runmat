@@ -73,7 +73,22 @@ pub(super) fn solve_polyfit(
         }
     }
     let scaled = scaled_coordinates(x_data, mean, scale)?;
-    let mut rhs = y_data.to_vec();
+    // QR works in a dimensionless RHS basis too. A residual may exceed f64
+    // even when the requested coefficients are finite (for example opposite
+    // MAX-valued observations fitted by a constant).
+    let rhs_magnitude = y_data
+        .iter()
+        .flat_map(|value| [value.re.abs(), value.im.abs()])
+        .fold(0.0, f64::max);
+    let rhs_scale = if rhs_magnitude == 0.0 {
+        1.0
+    } else {
+        rhs_magnitude
+    };
+    let mut rhs = y_data
+        .iter()
+        .map(|value| Complex64::new(value.re / rhs_scale, value.im / rhs_scale))
+        .collect::<Vec<_>>();
     if let Some(w) = weights {
         apply_weights_rhs(&mut rhs, w)?;
     }
@@ -93,9 +108,22 @@ pub(super) fn solve_polyfit(
         .collect();
     householder_qr(&mut vandermonde, rows, cols, &mut transformed_rhs)?;
     let scaled_coeffs = solve_upper(&vandermonde, rows, cols, &transformed_rhs, &column_norms)?;
-    let coeffs = column_scale::restore_coefficients(scaled_coeffs, &column_scales)?;
+    let coeffs = column_scale::restore_coefficients(scaled_coeffs, &column_scales, rhs_scale)?;
 
-    let normr = residual_norm(&transformed_rhs, rows, cols)?;
+    let normr = outputs
+        .wants_statistics()
+        .then(|| {
+            let scaled = residual_norm(&transformed_rhs, rows, cols)?;
+            let restored = scaled * rhs_scale;
+            if restored.is_finite() {
+                Ok(restored)
+            } else {
+                Err(PolyfitKernelError::input(
+                    "polyfit: requested residual norm exceeds finite output range",
+                ))
+            }
+        })
+        .transpose()?;
     let df = if rows > cols {
         (rows - cols) as f64
     } else {
