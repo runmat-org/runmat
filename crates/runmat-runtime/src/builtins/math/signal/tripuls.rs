@@ -129,7 +129,6 @@ async fn tripuls_in_runtime(
 ) -> BuiltinResult<Value> {
     let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
-    let controls = prepare_options(&rest)?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || rest
             .iter()
@@ -140,6 +139,13 @@ async fn tripuls_in_runtime(
             BUILTIN_NAME,
         )?;
     }
+    if crate::builtins::common::validation::value_has_native_integer_class(&t) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRIPULS_INTEGER_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let controls = prepare_options(&rest)?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &t,
         &TRIPULS_INTEGER_DATA_EXTENSION,

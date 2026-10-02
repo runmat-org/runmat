@@ -103,8 +103,16 @@ async fn rectpuls_in_runtime(
 ) -> BuiltinResult<Value> {
     let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
+    ensure_rectpuls_compatibility(&t, &rest)?;
     let width = prepare_width(&rest)?;
-    ensure_rectpuls_extensions(&t, &rest).await?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&t, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &t,
+        &RECTPULS_INTEGER_T_EXTENSION,
+        BUILTIN_NAME,
+        "T",
+    )
+    .await?;
     let gpu_source = rectpuls_gpu_source(&t, &rest)?;
     let width = resolve_width(width).await?;
     let tensor = rectpuls_input_tensor(t).await?;
@@ -132,15 +140,13 @@ async fn rectpuls_in_runtime(
     Ok(restored)
 }
 
-async fn ensure_rectpuls_extensions(t: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    crate::builtins::common::validation::reject_typed_complex_integer(t, BUILTIN_NAME)?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        t,
-        &RECTPULS_INTEGER_T_EXTENSION,
-        BUILTIN_NAME,
-        "T",
-    )
-    .await?;
+fn ensure_rectpuls_compatibility(t: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(t) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RECTPULS_INTEGER_T_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     if std::iter::once(t)
         .chain(rest.iter())
         .any(|value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle)))

@@ -122,7 +122,6 @@ async fn sawtooth_in_runtime(
 ) -> BuiltinResult<Value> {
     let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
-    let xmax = prepare_xmax(&varargin)?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
@@ -142,6 +141,7 @@ async fn sawtooth_in_runtime(
             BUILTIN_NAME,
         )?;
     }
+    let xmax = prepare_xmax(&varargin)?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &t,
         &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
