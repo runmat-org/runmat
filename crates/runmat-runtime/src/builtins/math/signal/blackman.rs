@@ -13,7 +13,7 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
     parse_window_controls, window_allocation_error, window_options_from_length, window_tensor,
-    WindowArgError,
+    WindowArgError, WindowCooperation,
 };
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
@@ -52,6 +52,7 @@ fn blackman_map_window_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::Allocation(cause) => {
             window_allocation_error(BUILTIN_NAME, &BLACKMAN_ERROR_INTERNAL, cause)
         }
+        WindowArgError::Execution(cause) => cause,
         WindowArgError::TensorBuild(detail) => {
             blackman_error_with_detail(&BLACKMAN_ERROR_INTERNAL, detail)
         }
@@ -88,9 +89,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "blackman",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::blackman"
 )]
+async fn blackman_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    n: runmat_value::Value,
+    varargin: Vec<runmat_value::Value>,
+) -> crate::BuiltinResult<runmat_value::Value> {
+    blackman_in_runtime(runtime.as_ref(), n, varargin).await
+}
+
+#[cfg(test)]
 async fn blackman_builtin(
+    n: runmat_value::Value,
+    varargin: Vec<runmat_value::Value>,
+) -> crate::BuiltinResult<runmat_value::Value> {
+    blackman_in_runtime(None, n, varargin).await
+}
+
+async fn blackman_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
     n: runmat_value::Value,
     varargin: Vec<runmat_value::Value>,
 ) -> crate::BuiltinResult<runmat_value::Value> {
@@ -102,15 +121,22 @@ async fn blackman_builtin(
         )?;
     }
     let options = window_options_from_length(n, controls).map_err(blackman_map_window_error)?;
+    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     if let Some(value) = try_generate(CosineWindow::Blackman, options)? {
         return Ok(value);
     }
-    window_tensor(options, |idx, total| {
-        let denom = (total - 1) as f64;
-        let first = 2.0 * idx as f64 / denom;
-        let second = 4.0 * idx as f64 / denom;
-        0.42 - 0.5 * cospi_real(first) + 0.08 * cospi_real(second)
-    })
+    window_tensor(
+        options,
+        |idx, total| {
+            let denom = (total - 1) as f64;
+            let first = 2.0 * idx as f64 / denom;
+            let second = 4.0 * idx as f64 / denom;
+            0.42 - 0.5 * cospi_real(first) + 0.08 * cospi_real(second)
+        },
+        &mut cooperation,
+    )
+    .await
     .map_err(blackman_map_window_error)
 }
 
@@ -123,6 +149,24 @@ mod tests {
         BLACKMAN_CATALOG_ENTRY, BLACKMAN_EXTENSIONS, BLACKMAN_INTEGER_CAPABILITIES,
     };
     use runmat_value::{IntValue, NumericDType, Value};
+
+    #[test]
+    fn registered_blackman_binding_uses_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(blackman_builtin_registered(
+            Some(runtime),
+            Value::Num(8193.0),
+            Vec::new(),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    }
 
     #[test]
     fn blackman_returns_expected_values() {

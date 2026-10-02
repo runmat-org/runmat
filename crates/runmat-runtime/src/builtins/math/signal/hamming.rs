@@ -13,7 +13,7 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
     parse_window_controls, window_allocation_error, window_options_from_length, window_tensor,
-    WindowArgError,
+    WindowArgError, WindowCooperation,
 };
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
@@ -52,6 +52,7 @@ fn hamming_map_window_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::Allocation(cause) => {
             window_allocation_error(BUILTIN_NAME, &HAMMING_ERROR_INTERNAL, cause)
         }
+        WindowArgError::Execution(cause) => cause,
         WindowArgError::TensorBuild(detail) => {
             hamming_error_with_detail(&HAMMING_ERROR_INTERNAL, detail)
         }
@@ -88,9 +89,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "hamming",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::hamming"
 )]
+async fn hamming_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    n: runmat_value::Value,
+    varargin: Vec<runmat_value::Value>,
+) -> crate::BuiltinResult<runmat_value::Value> {
+    hamming_in_runtime(runtime.as_ref(), n, varargin).await
+}
+
+#[cfg(test)]
 async fn hamming_builtin(
+    n: runmat_value::Value,
+    varargin: Vec<runmat_value::Value>,
+) -> crate::BuiltinResult<runmat_value::Value> {
+    hamming_in_runtime(None, n, varargin).await
+}
+
+async fn hamming_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
     n: runmat_value::Value,
     varargin: Vec<runmat_value::Value>,
 ) -> crate::BuiltinResult<runmat_value::Value> {
@@ -102,13 +121,20 @@ async fn hamming_builtin(
         )?;
     }
     let options = window_options_from_length(n, controls).map_err(hamming_map_window_error)?;
+    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     if let Some(value) = try_generate(CosineWindow::Hamming, options)? {
         return Ok(value);
     }
-    window_tensor(options, |idx, total| {
-        let denom = (total - 1) as f64;
-        0.54 - 0.46 * cospi_real(2.0 * idx as f64 / denom)
-    })
+    window_tensor(
+        options,
+        |idx, total| {
+            let denom = (total - 1) as f64;
+            0.54 - 0.46 * cospi_real(2.0 * idx as f64 / denom)
+        },
+        &mut cooperation,
+    )
+    .await
     .map_err(hamming_map_window_error)
 }
 
@@ -123,6 +149,24 @@ mod tests {
         HAMMING_CATALOG_ENTRY, HAMMING_EXTENSIONS, HAMMING_INTEGER_CAPABILITIES,
     };
     use runmat_value::{IntValue, NumericDType, Value};
+
+    #[test]
+    fn registered_hamming_binding_uses_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(hamming_builtin_registered(
+            Some(runtime),
+            Value::Num(8193.0),
+            Vec::new(),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    }
 
     #[test]
     fn hamming_returns_expected_values() {

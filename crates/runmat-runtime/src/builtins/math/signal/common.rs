@@ -1,15 +1,16 @@
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
-use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_types::WindowOption;
 pub(crate) use runmat_types::{WindowOutputType, WindowSampling};
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(super) mod output_precision;
+mod window_generation;
 pub(crate) mod window_provider;
+pub(crate) use window_generation::{window_allocation_error, window_tensor, WindowCooperation};
 
 const EPS: f64 = 1.0e-12;
 
@@ -33,23 +34,8 @@ pub(crate) enum WindowArgError {
     InvalidOptionType,
     UnknownOption(String),
     Allocation(std::collections::TryReserveError),
+    Execution(RuntimeError),
     TensorBuild(String),
-}
-
-pub(crate) fn window_allocation_error(
-    builtin: &'static str,
-    descriptor: &'static BuiltinErrorDescriptor,
-    cause: std::collections::TryReserveError,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{}: {cause}", descriptor.message))
-        .with_builtin(builtin)
-        .with_source(cause);
-    if let Some(identifier) = descriptor.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    let mut error = builder.build();
-    error.gpu_gather_retry = GpuGatherRetry::Never;
-    error
 }
 
 #[derive(Debug, Clone)]
@@ -406,36 +392,6 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
     Ok(rounded as usize)
 }
 
-pub(crate) fn window_tensor(
-    options: WindowOptions,
-    coeff: impl Fn(usize, usize) -> f64,
-) -> Result<Value, WindowArgError> {
-    let len = options.len;
-    if len == 0 {
-        return Tensor::new_with_dtype(Vec::new(), vec![0, 1], dtype_for(options.output_type))
-            .map(Value::Tensor)
-            .map_err(|e| WindowArgError::TensorBuild(e.to_string()));
-    }
-    if len == 1 {
-        return Tensor::new_with_dtype(vec![1.0], vec![1, 1], dtype_for(options.output_type))
-            .map(Value::Tensor)
-            .map_err(|e| WindowArgError::TensorBuild(e.to_string()));
-    }
-    let effective_len = match options.sampling {
-        WindowSampling::Symmetric => len,
-        WindowSampling::Periodic => len.checked_add(1).ok_or(WindowArgError::InvalidLength)?,
-    };
-    let mut data = Vec::new();
-    data.try_reserve_exact(len)
-        .map_err(WindowArgError::Allocation)?;
-    for idx in 0..len {
-        data.push(coeff(idx, effective_len));
-    }
-    Tensor::new_with_dtype(data, vec![len, 1], dtype_for(options.output_type))
-        .map(Value::Tensor)
-        .map_err(|e| WindowArgError::TensorBuild(e.to_string()))
-}
-
 pub(crate) fn parse_window_controls(
     rest: &[Value],
     allow_type_name: bool,
@@ -491,13 +447,6 @@ pub(crate) fn parse_window_options(
     allow_type_name: bool,
 ) -> Result<WindowOptions, WindowArgError> {
     window_options_from_length(len_value, parse_window_controls(rest, allow_type_name)?)
-}
-
-pub(crate) fn dtype_for(output_type: WindowOutputType) -> NumericDType {
-    match output_type {
-        WindowOutputType::Double => NumericDType::F64,
-        WindowOutputType::Single => NumericDType::F32,
-    }
 }
 
 fn string_keyword(value: &Value) -> Option<String> {
@@ -689,9 +638,11 @@ mod tests {
             sampling: WindowSampling::Symmetric,
             output_type: WindowOutputType::Double,
         };
-        let WindowArgError::Allocation(cause) = window_tensor(options, |_, _| {
-            panic!("capacity overflow must precede coefficients")
-        })
+        let WindowArgError::Allocation(cause) = futures::executor::block_on(window_tensor(
+            options,
+            |_, _| panic!("capacity overflow must precede coefficients"),
+            &mut WindowCooperation::new(None, "hann"),
+        ))
         .expect_err("impossible host vector capacity") else {
             panic!("expected original allocation error");
         };
