@@ -137,11 +137,19 @@ pub const INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION: BuiltinExtensionDescriptor 
             "integral with logical tolerance or evaluation-count options is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:IntegralLogicalNumericOptionExtension"),
     };
-pub const INTEGRAL_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+pub const INTEGRAL_RENAMED_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "integral-renamed-tolerance-option",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "integral with post-pin renamed tolerance option names is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IntegralRenamedToleranceExtension"),
+    };
+pub const INTEGRAL_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
     INTEGRAL_INTEGER_BOUND_EXTENSION,
     INTEGRAL_LOGICAL_BOUND_EXTENSION,
     INTEGRAL_INTEGER_OPTION_EXTENSION,
     INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
+    INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
 ];
 
 const INTEGER_BOUND_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {

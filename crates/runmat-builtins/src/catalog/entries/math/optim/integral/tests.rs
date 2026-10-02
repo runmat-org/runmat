@@ -382,6 +382,8 @@ fn option_identity_is_typed_at_the_public_boundary() {
     for (spelling, identity) in [
         ("AbsTol", IntegralOptionName::AbsTol),
         ("reltol", IntegralOptionName::RelTol),
+        ("AbsoluteTolerance", IntegralOptionName::AbsoluteTolerance),
+        ("relativetolerance", IntegralOptionName::RelativeTolerance),
         ("MaxFunEvals", IntegralOptionName::MaxFunEvals),
         ("MaxIntervalCount", IntegralOptionName::MaxIntervalCount),
         ("ArrayValued", IntegralOptionName::ArrayValued),
@@ -457,7 +459,7 @@ fn known_invalid_controls_do_not_prove_success_and_last_override_is_respected() 
 
     call.arguments.extend([text.clone(), real]);
     call.literals.literal_args.extend([
-        LiteralValue::String("RelTol".into()),
+        LiteralValue::String("RelativeTolerance".into()),
         LiteralValue::Number(1.0e-6),
     ]);
     let overridden = inference::infer(&call, &INTEGRAL_CATALOG_ENTRY);

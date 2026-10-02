@@ -170,8 +170,14 @@ fn known_option(
             || fact.shape.element_count().is_some_and(|count| count != 1)
     });
     let bad = match option {
-        IntegralOptionName::AbsTol | IntegralOptionName::RelTol => {
-            if option == IntegralOptionName::AbsTol {
+        IntegralOptionName::AbsTol
+        | IntegralOptionName::RelTol
+        | IntegralOptionName::AbsoluteTolerance
+        | IntegralOptionName::RelativeTolerance => {
+            if matches!(
+                option,
+                IntegralOptionName::AbsTol | IntegralOptionName::AbsoluteTolerance
+            ) {
                 facts.abs_tol = numeric;
             } else {
                 facts.rel_tol = numeric;

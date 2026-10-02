@@ -4,6 +4,8 @@
 pub enum IntegralOptionName {
     AbsTol,
     RelTol,
+    AbsoluteTolerance,
+    RelativeTolerance,
     MaxFunEvals,
     MaxIntervalCount,
     ArrayValued,
@@ -35,6 +37,8 @@ impl IntegralOptionName {
         match text.trim().to_ascii_lowercase().as_str() {
             "abstol" => Some(Self::AbsTol),
             "reltol" => Some(Self::RelTol),
+            "absolutetolerance" => Some(Self::AbsoluteTolerance),
+            "relativetolerance" => Some(Self::RelativeTolerance),
             "maxfunevals" => Some(Self::MaxFunEvals),
             "maxintervalcount" => Some(Self::MaxIntervalCount),
             "arrayvalued" => Some(Self::ArrayValued),
@@ -49,6 +53,8 @@ impl IntegralOptionName {
             self,
             Self::AbsTol
                 | Self::RelTol
+                | Self::AbsoluteTolerance
+                | Self::RelativeTolerance
                 | Self::MaxFunEvals
                 | Self::MaxIntervalCount
                 | Self::Waypoints
@@ -59,11 +65,17 @@ impl IntegralOptionName {
         match self {
             Self::AbsTol => "AbsTol",
             Self::RelTol => "RelTol",
+            Self::AbsoluteTolerance => "AbsoluteTolerance",
+            Self::RelativeTolerance => "RelativeTolerance",
             Self::MaxFunEvals => "MaxFunEvals",
             Self::MaxIntervalCount => "MaxIntervalCount",
             Self::ArrayValued => "ArrayValued",
             Self::Vectorized => "Vectorized",
             Self::Waypoints => "Waypoints",
         }
+    }
+
+    pub const fn is_post_pin_tolerance_alias(self) -> bool {
+        matches!(self, Self::AbsoluteTolerance | Self::RelativeTolerance)
     }
 }

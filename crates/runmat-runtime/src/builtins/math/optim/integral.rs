@@ -10,6 +10,7 @@ use runmat_builtins::{
     INTEGRAL_ERROR_INVALID_ARGUMENT, INTEGRAL_ERROR_INVALID_INPUT, INTEGRAL_ERROR_TOO_MANY_OUTPUTS,
     INTEGRAL_INTEGER_BOUND_EXTENSION, INTEGRAL_INTEGER_OPTION_EXTENSION,
     INTEGRAL_LOGICAL_BOUND_EXTENSION, INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
+    INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Tensor, Value};
@@ -368,12 +369,19 @@ fn option_name(value: &Value) -> BuiltinResult<IntegralOptionName> {
 }
 
 fn decode_option_name(text: &str) -> BuiltinResult<IntegralOptionName> {
-    IntegralOptionName::parse(text).ok_or_else(|| {
+    let identity = IntegralOptionName::parse(text).ok_or_else(|| {
         integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_ARGUMENT,
             format!("unsupported option {text}"),
         )
-    })
+    })?;
+    if identity.is_post_pin_tolerance_alias() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(identity)
 }
 
 async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
@@ -1597,6 +1605,35 @@ mod tests {
         ))
         .expect("RunMat integer option");
         assert!(matches!(result, Value::Num(_)));
+    }
+
+    #[test]
+    fn renamed_tolerance_names_are_typed_post_pin_extensions_with_ordered_overrides() {
+        let call = || {
+            block_on(integral_builtin(
+                Value::FunctionHandle("__integral_square".into()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                vec![
+                    Value::from("AbsTol"),
+                    Value::Num(0.0),
+                    Value::from("RelTol"),
+                    Value::Num(0.0),
+                    Value::from("AbsoluteTolerance"),
+                    Value::Num(1.0e-10),
+                    Value::from("RelativeTolerance"),
+                    Value::Num(1.0e-6),
+                ],
+            ))
+        };
+        let strict = call().expect_err("renamed names are beyond the compatibility pin");
+        assert_eq!(
+            strict.identifier(),
+            INTEGRAL_RENAMED_TOLERANCE_EXTENSION.error_identifier
+        );
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = call().expect("RunMat mode accepts both renamed overrides");
+        assert!(matches!(result, Value::Num(value) if (value - 1.0 / 3.0).abs() < 1.0e-7));
     }
 
     #[test]

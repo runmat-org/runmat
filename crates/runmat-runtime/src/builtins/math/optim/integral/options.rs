@@ -66,8 +66,12 @@ impl IntegralOptions {
             waypoint_receipts.push(None);
             if matches!(value, Value::GpuTensor(_)) {
                 match name {
-                    IntegralOptionName::AbsTol => known_abs_tol = None,
-                    IntegralOptionName::RelTol => known_rel_tol = None,
+                    IntegralOptionName::AbsTol | IntegralOptionName::AbsoluteTolerance => {
+                        known_abs_tol = None
+                    }
+                    IntegralOptionName::RelTol | IntegralOptionName::RelativeTolerance => {
+                        known_rel_tol = None
+                    }
                     IntegralOptionName::MaxFunEvals
                     | IntegralOptionName::MaxIntervalCount
                     | IntegralOptionName::ArrayValued
@@ -78,8 +82,12 @@ impl IntegralOptions {
             }
             check.apply_option(name, value, cooperation).await?;
             match name {
-                IntegralOptionName::AbsTol => known_abs_tol = Some(check.abs_tol),
-                IntegralOptionName::RelTol => known_rel_tol = Some(check.rel_tol),
+                IntegralOptionName::AbsTol | IntegralOptionName::AbsoluteTolerance => {
+                    known_abs_tol = Some(check.abs_tol)
+                }
+                IntegralOptionName::RelTol | IntegralOptionName::RelativeTolerance => {
+                    known_rel_tol = Some(check.rel_tol)
+                }
                 IntegralOptionName::MaxFunEvals
                 | IntegralOptionName::MaxIntervalCount
                 | IntegralOptionName::ArrayValued
@@ -143,10 +151,10 @@ impl IntegralOptions {
         cooperation: &mut QuadratureCooperation,
     ) -> BuiltinResult<()> {
         match name {
-            IntegralOptionName::AbsTol => {
+            IntegralOptionName::AbsTol | IntegralOptionName::AbsoluteTolerance => {
                 self.abs_tol = numeric_option(name.display_name(), value)?
             }
-            IntegralOptionName::RelTol => {
+            IntegralOptionName::RelTol | IntegralOptionName::RelativeTolerance => {
                 self.rel_tol = numeric_option(name.display_name(), value)?
             }
             IntegralOptionName::MaxFunEvals => {
