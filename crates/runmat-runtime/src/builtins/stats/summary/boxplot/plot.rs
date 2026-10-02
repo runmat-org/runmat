@@ -33,10 +33,12 @@ pub(super) async fn prepare_box_layout_cooperative(
     let mut ticks = Vec::new();
     labels
         .try_reserve_exact(layout.slots.len())
-        .map_err(|_| invalid("boxplot: tick labels exceed available memory"))?;
+        .map_err(|error| {
+            allocation_failure("boxplot: tick labels exceed available memory", error)
+        })?;
     ticks
         .try_reserve_exact(layout.slots.len())
-        .map_err(|_| invalid("boxplot: ticks exceed available memory"))?;
+        .map_err(|error| allocation_failure("boxplot: ticks exceed available memory", error))?;
     for (index, slot) in layout.slots.iter().enumerate() {
         let previous = index
             .checked_sub(1)

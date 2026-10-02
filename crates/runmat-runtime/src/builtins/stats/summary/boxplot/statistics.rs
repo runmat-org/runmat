@@ -12,9 +12,9 @@ pub(super) async fn stats_for_values_cooperative(
     for value in values {
         if !value.is_nan() {
             if finite.len() == finite.capacity() {
-                finite
-                    .try_reserve(1)
-                    .map_err(|_| invalid("boxplot: sample statistics exceed available memory"))?;
+                finite.try_reserve(1).map_err(|error| {
+                    allocation_failure("boxplot: sample statistics exceed available memory", error)
+                })?;
             }
             finite.push(value);
         }
@@ -28,8 +28,8 @@ pub(super) async fn stats_for_values_cooperative(
     stable_sort_non_nan_f64(&mut finite, cooperation.budget())
         .await
         .map_err(|error| match error {
-            CooperativeSortError::Resource => {
-                invalid("boxplot: sample statistics exceed available memory")
+            CooperativeSortError::Resource(error) => {
+                allocation_failure("boxplot: sample statistics exceed available memory", error)
             }
             CooperativeSortError::Service(error) => cooperation.service_error(error),
         })?;
@@ -51,9 +51,9 @@ pub(super) async fn stats_for_values_cooperative(
     for value in finite {
         if value < lower_fence || value > upper_fence {
             if outliers.len() == outliers.capacity() {
-                outliers
-                    .try_reserve(1)
-                    .map_err(|_| invalid("boxplot: sample outliers exceed available memory"))?;
+                outliers.try_reserve(1).map_err(|error| {
+                    allocation_failure("boxplot: sample outliers exceed available memory", error)
+                })?;
             }
             outliers.push(value);
         } else {
@@ -116,6 +116,15 @@ mod tests {
         assert_eq!(stats.q1, -0.8 * max);
         assert_eq!(stats.q3, 0.8 * max);
         assert_eq!(stats.outliers, vec![max]);
+    }
+
+    #[test]
+    fn host_allocation_failure_is_internal_and_retains_original_cause() {
+        let mut values: Vec<u8> = Vec::new();
+        let cause = values.try_reserve(usize::MAX).unwrap_err();
+        let error = allocation_failure("boxplot: sample statistics exceed available memory", cause);
+        assert_eq!(error.identifier(), BOXPLOT_ERROR_INTERNAL.identifier);
+        assert!(error.source.is_some());
     }
 
     #[test]

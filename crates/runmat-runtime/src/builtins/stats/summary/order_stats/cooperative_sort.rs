@@ -11,7 +11,7 @@ const RUN_LEN: usize = 256;
 
 #[derive(Debug)]
 pub(crate) enum CooperativeSortError {
-    Resource,
+    Resource(std::collections::TryReserveError),
     Service(ExecutionServiceError),
 }
 
@@ -78,7 +78,7 @@ pub(crate) async fn stable_sort_non_nan_f64(
     let run_count = values.len().div_ceil(RUN_LEN);
     let mut heap = BinaryHeap::<Reverse<RunHead>>::new();
     heap.try_reserve(run_count)
-        .map_err(|_| CooperativeSortError::Resource)?;
+        .map_err(CooperativeSortError::Resource)?;
     for run in 0..run_count {
         heap.push(Reverse(RunHead {
             value: values[run * RUN_LEN],
@@ -91,7 +91,7 @@ pub(crate) async fn stable_sort_non_nan_f64(
     let mut merged = Vec::new();
     merged
         .try_reserve_exact(values.len())
-        .map_err(|_| CooperativeSortError::Resource)?;
+        .map_err(CooperativeSortError::Resource)?;
     while let Some(Reverse(head)) = heap.pop() {
         merged.push(head.value);
         let offset = head.offset + 1;

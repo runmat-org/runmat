@@ -21,12 +21,15 @@ pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_coopera
     cooperation: &mut super::super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<BoxLayout> {
     let mut keys = Vec::new();
-    keys.try_reserve_exact(boxes.len())
-        .map_err(|_| invalid("boxplot: grouping keys exceed available memory"))?;
+    keys.try_reserve_exact(boxes.len()).map_err(|error| {
+        allocation_failure("boxplot: grouping keys exceed available memory", error)
+    })?;
     for stats in &boxes {
         let mut key = Vec::new();
         key.try_reserve_exact(stats.group_key.len())
-            .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
+            .map_err(|error| {
+                allocation_failure("boxplot: grouping key exceeds available memory", error)
+            })?;
         for atom in &stats.group_key {
             cooperation.completed(key_clone_work(atom)).await?;
             key.push(atom.clone());
@@ -106,17 +109,17 @@ pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_coopera
         // Generated slot positions are strictly increasing. Move observed
         // statistics into slot order without sorting a large factor product.
         let mut original = Vec::new();
-        original
-            .try_reserve_exact(boxes.len())
-            .map_err(|_| invalid("boxplot: observed boxes exceed available memory"))?;
+        original.try_reserve_exact(boxes.len()).map_err(|error| {
+            allocation_failure("boxplot: observed boxes exceed available memory", error)
+        })?;
         for stats in boxes {
             original.push(Some(stats));
             cooperation.completed(1).await?;
         }
         let mut ordered = Vec::new();
-        ordered
-            .try_reserve_exact(original.len())
-            .map_err(|_| invalid("boxplot: observed boxes exceed available memory"))?;
+        ordered.try_reserve_exact(original.len()).map_err(|error| {
+            allocation_failure("boxplot: observed boxes exceed available memory", error)
+        })?;
         for slot in &slots {
             if let Some(index) = slot.box_index {
                 ordered.push(
@@ -229,9 +232,9 @@ async fn observed_slots(
         });
     }
     let mut slots = Vec::new();
-    slots
-        .try_reserve_exact(indices.len())
-        .map_err(|_| invalid("boxplot: observed slots exceed available memory"))?;
+    slots.try_reserve_exact(indices.len()).map_err(|error| {
+        allocation_failure("boxplot: observed slots exceed available memory", error)
+    })?;
     for index in indices {
         slots.push(FactorSlot {
             key: keys[index].clone(),
@@ -254,9 +257,9 @@ async fn cartesian_slots(
 ) -> BuiltinResult<Vec<FactorSlot>> {
     cooperation.completed(0).await?;
     let mut slots = Vec::new();
-    slots
-        .try_reserve_exact(count)
-        .map_err(|_| invalid("boxplot: FullFactors slots exceed available memory"))?;
+    slots.try_reserve_exact(count).map_err(|error| {
+        allocation_failure("boxplot: FullFactors slots exceed available memory", error)
+    })?;
     let observed_by_key = observed
         .iter()
         .enumerate()
@@ -268,9 +271,9 @@ async fn cartesian_slots(
         // synchronous post-expansion sort can monopolize a browser turn.
         for (index, key) in observed.iter().enumerate() {
             let mut copied = Vec::new();
-            copied
-                .try_reserve_exact(key.len())
-                .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
+            copied.try_reserve_exact(key.len()).map_err(|error| {
+                allocation_failure("boxplot: grouping key exceeds available memory", error)
+            })?;
             for atom in key {
                 cooperation.completed(key_clone_work(atom)).await?;
                 copied.push(atom.clone());
@@ -287,8 +290,9 @@ async fn cartesian_slots(
     let mut digits = vec![0usize; levels.len()];
     for _ in 0..count {
         let mut key = Vec::new();
-        key.try_reserve_exact(levels.len())
-            .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
+        key.try_reserve_exact(levels.len()).map_err(|error| {
+            allocation_failure("boxplot: grouping key exceeds available memory", error)
+        })?;
         for (factor, &digit) in digits.iter().enumerate() {
             let level = if reverse[factor] {
                 levels[factor].len() - 1 - digit
@@ -353,9 +357,9 @@ async fn slot_positions(
             ));
         }
         let mut copied = Vec::new();
-        copied
-            .try_reserve_exact(positions.len())
-            .map_err(|_| invalid("boxplot: Positions exceed available memory"))?;
+        copied.try_reserve_exact(positions.len()).map_err(|error| {
+            allocation_failure("boxplot: Positions exceed available memory", error)
+        })?;
         for &position in positions {
             copied.push(position);
             cooperation.completed(1).await?;
@@ -365,7 +369,12 @@ async fn slot_positions(
     let mut percentages = Vec::new();
     percentages
         .try_reserve_exact(slots.len().saturating_sub(1))
-        .map_err(|_| invalid("boxplot: FactorGap boundaries exceed available memory"))?;
+        .map_err(|error| {
+            allocation_failure(
+                "boxplot: FactorGap boundaries exceed available memory",
+                error,
+            )
+        })?;
     let mut total_percent = 0.0;
     for pair in slots.windows(2) {
         let mut changed = None;
@@ -395,9 +404,9 @@ async fn slot_positions(
         ));
     }
     let mut positions = Vec::new();
-    positions
-        .try_reserve_exact(slots.len())
-        .map_err(|_| invalid("boxplot: factor positions exceed available memory"))?;
+    positions.try_reserve_exact(slots.len()).map_err(|error| {
+        allocation_failure("boxplot: factor positions exceed available memory", error)
+    })?;
     let mut next = 1.0;
     for index in 0..slots.len() {
         if index > 0 {

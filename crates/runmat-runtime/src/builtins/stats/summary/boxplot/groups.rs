@@ -95,7 +95,7 @@ pub(super) async fn build_box_layout_cooperative(
     let mut nonmissing = Vec::new();
     nonmissing
         .try_reserve_exact(groups.len())
-        .map_err(|_| invalid("boxplot: groups exceed available memory"))?;
+        .map_err(|error| allocation_failure("boxplot: groups exceed available memory", error))?;
     for group in groups {
         let mut has_observation = false;
         for value in &group.1 {
@@ -114,9 +114,9 @@ pub(super) async fn build_box_layout_cooperative(
     }
     apply_group_order(&mut groups, options, cooperation).await?;
     let mut boxes = Vec::new();
-    boxes
-        .try_reserve_exact(groups.len())
-        .map_err(|_| invalid("boxplot: statistics exceed available memory"))?;
+    boxes.try_reserve_exact(groups.len()).map_err(|error| {
+        allocation_failure("boxplot: statistics exceed available memory", error)
+    })?;
     for (idx, (label, values)) in groups.into_iter().enumerate() {
         let display = group_label_text(&label);
         cooperation.completed(group_key_work_units(&label)).await?;
@@ -137,7 +137,7 @@ async fn ungrouped_series(
         let mut values = Vec::new();
         values
             .try_reserve_exact(tensor::tensor_element_len(tensor))
-            .map_err(|_| invalid("boxplot: data exceeds available memory"))?;
+            .map_err(|error| allocation_failure("boxplot: data exceeds available memory", error))?;
         for index in 0..tensor::tensor_element_len(tensor) {
             values.push(tensor::tensor_value_f64(tensor, index));
             cooperation.completed(1).await?;
@@ -147,12 +147,12 @@ async fn ungrouped_series(
     let mut groups = Vec::new();
     groups
         .try_reserve_exact(tensor.cols)
-        .map_err(|_| invalid("boxplot: groups exceed available memory"))?;
+        .map_err(|error| allocation_failure("boxplot: groups exceed available memory", error))?;
     for col in 0..tensor.cols {
         let mut values = Vec::new();
         values
             .try_reserve_exact(tensor.rows)
-            .map_err(|_| invalid("boxplot: data exceeds available memory"))?;
+            .map_err(|error| allocation_failure("boxplot: data exceeds available memory", error))?;
         for row in 0..tensor.rows {
             values.push(tensor::tensor_value_f64(tensor, col * tensor.rows + row));
             cooperation.completed(1).await?;
@@ -180,9 +180,9 @@ async fn grouped_series(
                     CooperativeLabelError::Service(error) => error,
                 })?;
             let mut labels = Vec::new();
-            labels
-                .try_reserve_exact(tensor_len)
-                .map_err(|_| invalid("boxplot: grouping labels exceed available memory"))?;
+            labels.try_reserve_exact(tensor_len).map_err(|error| {
+                allocation_failure("boxplot: grouping labels exceed available memory", error)
+            })?;
             for _col in 0..tensor.cols {
                 for label in &row_labels {
                     cooperation
@@ -221,12 +221,12 @@ async fn grouped_series(
     let mut groups = Vec::new();
     groups
         .try_reserve_exact(grouped.keys.len())
-        .map_err(|_| invalid("boxplot: groups exceed available memory"))?;
+        .map_err(|error| allocation_failure("boxplot: groups exceed available memory", error))?;
     for (key, rows) in grouped.keys.into_iter().zip(grouped.row_groups) {
         let mut values = Vec::new();
-        values
-            .try_reserve_exact(rows.len())
-            .map_err(|_| invalid("boxplot: group observations exceed available memory"))?;
+        values.try_reserve_exact(rows.len()).map_err(|error| {
+            allocation_failure("boxplot: group observations exceed available memory", error)
+        })?;
         for row in rows {
             values.push(tensor::tensor_value_f64(tensor, row));
             cooperation.completed(1).await?;
@@ -260,9 +260,9 @@ async fn apply_group_order(
             .push(index);
     }
     let mut entries = Vec::new();
-    entries
-        .try_reserve_exact(groups.len())
-        .map_err(|_| invalid("boxplot: group order exceeds available memory"))?;
+    entries.try_reserve_exact(groups.len()).map_err(|error| {
+        allocation_failure("boxplot: group order exceeds available memory", error)
+    })?;
     for group in std::mem::take(groups) {
         entries.push(Some(group));
         cooperation.completed(1).await?;

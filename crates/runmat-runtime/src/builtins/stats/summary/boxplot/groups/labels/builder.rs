@@ -1,3 +1,4 @@
+use super::text_copy::{TextCopy, TextCopyProgress};
 use super::*;
 use crate::builtins::common::grouping_keys::group_key_work_units;
 use runmat_value::{LogicalArray, ObjectInstance, StringArray};
@@ -42,6 +43,7 @@ pub(super) struct GroupLabelBuilder<'a> {
     expected_len: usize,
     index: usize,
     output: Vec<Option<GroupLabel>>,
+    pending_text: Option<TextCopy<'a>>,
 }
 
 impl<'a> GroupLabelBuilder<'a> {
@@ -83,16 +85,33 @@ impl<'a> GroupLabelBuilder<'a> {
             expected_len,
             index: 0,
             output: Vec::new(),
+            pending_text: None,
         })
     }
 
     pub(super) fn step(&mut self) -> BuiltinResult<LabelProgress> {
         loop {
+            if let Some(copy) = self.pending_text.as_mut() {
+                match copy.step()? {
+                    TextCopyProgress::Work(units) => return Ok(LabelProgress::Work(units)),
+                    TextCopyProgress::Complete(text) => {
+                        self.pending_text = None;
+                        push_label(&mut self.output, text.map(|text| vec![KeyAtom::Text(text)]))?;
+                        self.index += 1;
+                        return Ok(LabelProgress::Work(1));
+                    }
+                }
+            }
             let source = std::mem::replace(&mut self.source, Source::Done);
             match source {
                 Source::CellScalar(cell) => {
                     if self.index == cell.data.len() {
                         return Ok(LabelProgress::Complete(std::mem::take(&mut self.output)));
+                    }
+                    if let Some(copy) = scalar_text_copy(&cell.data[self.index]) {
+                        self.pending_text = Some(copy);
+                        self.source = Source::CellScalar(cell);
+                        continue;
                     }
                     match scalar_group_label(&cell.data[self.index]) {
                         Ok(label) => {
@@ -143,8 +162,11 @@ impl<'a> GroupLabelBuilder<'a> {
                                     return Err(invalid("boxplot: grouping variables in a cell array must share the X length"));
                                 }
                                 if variables.len() == variables.capacity() {
-                                    variables.try_reserve(1).map_err(|_| {
-                                        invalid("boxplot: grouping factors exceed available memory")
+                                    variables.try_reserve(1).map_err(|error| {
+                                        allocation_failure(
+                                            "boxplot: grouping factors exceed available memory",
+                                            error,
+                                        )
                                     })?;
                                 }
                                 variables.push(labels);
@@ -195,9 +217,10 @@ impl<'a> GroupLabelBuilder<'a> {
                             Some(label) if !missing => {
                                 if let Some(component) = label.get(atom) {
                                     if parts.len() == parts.capacity() {
-                                        parts.try_reserve(1).map_err(|_| {
-                                            invalid(
+                                        parts.try_reserve(1).map_err(|error| {
+                                            allocation_failure(
                                                 "boxplot: grouping key exceeds available memory",
+                                                error,
                                             )
                                         })?;
                                     }
@@ -265,6 +288,11 @@ impl<'a> GroupLabelBuilder<'a> {
                         }
                         return Ok(LabelProgress::Complete(std::mem::take(&mut self.output)));
                     }
+                    if let Some(copy) = leaf_text_copy(&leaf, self.index)? {
+                        self.pending_text = Some(copy);
+                        self.source = leaf;
+                        continue;
+                    }
                     let label = label_at(&leaf, self.index)?;
                     let units = label.as_ref().map_or(1, |key| group_key_work_units(key));
                     push_label(&mut self.output, label)?;
@@ -274,6 +302,36 @@ impl<'a> GroupLabelBuilder<'a> {
                 }
             }
         }
+    }
+}
+
+fn scalar_text_copy(value: &Value) -> Option<TextCopy<'_>> {
+    match value {
+        Value::String(text) => Some(TextCopy::utf8(text, true)),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(TextCopy::utf8(&array.data[0], true))
+        }
+        Value::CharArray(array) if array.rows == 1 => Some(TextCopy::character_row(array, 0)),
+        _ => None,
+    }
+}
+
+fn leaf_text_copy<'a>(source: &Source<'a>, index: usize) -> BuiltinResult<Option<TextCopy<'a>>> {
+    match source {
+        Source::Text(text) => Ok(Some(TextCopy::utf8(text, false))),
+        Source::Strings(array) => Ok(Some(TextCopy::utf8(&array.data[index], true))),
+        Source::Characters(array) => Ok(Some(TextCopy::character_row(array, index))),
+        Source::Categorical(object) => {
+            let view = crate::builtins::table::categorical_label_view(object).map_err(|err| {
+                invalid_with_source("boxplot: invalid categorical grouping variable", err)
+            })?;
+            view.observation_label_at(index)
+                .map(|text| text.map(|text| TextCopy::utf8(text, true)))
+                .map_err(|err| {
+                    invalid_with_source("boxplot: invalid categorical grouping variable", err)
+                })
+        }
+        _ => Ok(None),
     }
 }
 
@@ -288,35 +346,30 @@ fn validate_numeric_len(tensor: &Tensor, expected_len: usize) -> BuiltinResult<(
 
 fn label_at(source: &Source<'_>, index: usize) -> BuiltinResult<Option<GroupLabel>> {
     match source {
-        Source::Text(text) => Ok(Some(vec![KeyAtom::Text((*text).to_string())])),
-        Source::Strings(array) => {
-            let text = &array.data[index];
-            Ok(missing_text_label(text).then(|| vec![KeyAtom::Text(text.clone())]))
-        }
         Source::Logical(array) => Ok(Some(vec![KeyAtom::Logical(array.data[index] != 0)])),
-        Source::Characters(array) => {
-            let text = char_row(array, index);
-            Ok(missing_text_label(&text).then_some(vec![KeyAtom::Text(text)]))
-        }
         Source::Categorical(object) => {
             let view = crate::builtins::table::categorical_label_view(object).map_err(|err| {
                 invalid_with_source("boxplot: invalid categorical grouping variable", err)
             })?;
-            view.observation_label_at(index)
-                .map(|label| {
-                    label
-                        .filter(|text| missing_text_label(text))
-                        .map(|text| vec![KeyAtom::Text(text.to_string())])
-                })
-                .map_err(|err| {
-                    invalid_with_source("boxplot: invalid categorical grouping variable", err)
-                })
+            let label = view.observation_label_at(index).map_err(|err| {
+                invalid_with_source("boxplot: invalid categorical grouping variable", err)
+            })?;
+            if label.is_some() {
+                Err(internal(
+                    "boxplot: categorical text bypassed the label copier",
+                ))
+            } else {
+                Ok(None)
+            }
         }
         Source::Numeric(tensor) => Ok(tensor.numeric_value_at(index).and_then(numeric_group_label)),
         Source::OwnedNumeric(tensor) => {
             Ok(tensor.numeric_value_at(index).and_then(numeric_group_label))
         }
-        Source::CellScalar(_)
+        Source::Text(_)
+        | Source::Strings(_)
+        | Source::Characters(_)
+        | Source::CellScalar(_)
         | Source::CellDiscard(_)
         | Source::CellFactors { .. }
         | Source::CellCombine { .. }
@@ -329,9 +382,9 @@ fn push_label(
     label: Option<GroupLabel>,
 ) -> BuiltinResult<()> {
     if output.len() == output.capacity() {
-        output
-            .try_reserve(1)
-            .map_err(|_| invalid("boxplot: grouping labels exceed available memory"))?;
+        output.try_reserve(1).map_err(|error| {
+            allocation_failure("boxplot: grouping labels exceed available memory", error)
+        })?;
     }
     output.push(label);
     Ok(())

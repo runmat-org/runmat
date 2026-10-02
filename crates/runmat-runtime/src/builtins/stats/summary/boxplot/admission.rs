@@ -146,8 +146,11 @@ async fn could_match_group_length(
                     }
                 }
                 if !scalar_labels {
-                    pending.try_reserve(1).map_err(|_| {
-                        invalid("boxplot: grouping metadata exceeds available memory")
+                    pending.try_reserve(1).map_err(|error| {
+                        allocation_failure(
+                            "boxplot: grouping metadata exceeds available memory",
+                            error,
+                        )
                     })?;
                     pending.push(cell.data.iter());
                 }
@@ -223,9 +226,9 @@ async fn validate_group_leaf_classes(
         cooperation.completed(1).await?;
         match value {
             Value::Cell(cell) => {
-                pending
-                    .try_reserve(1)
-                    .map_err(|_| invalid("boxplot: grouping metadata exceeds available memory"))?;
+                pending.try_reserve(1).map_err(|error| {
+                    allocation_failure("boxplot: grouping metadata exceeds available memory", error)
+                })?;
                 pending.push(cell.data.iter());
             }
             Value::GpuTensor(handle) if handle.physical().storage() != GpuTensorStorage::Real => {

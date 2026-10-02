@@ -159,6 +159,19 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     error(&BOXPLOT_ERROR_INTERNAL, message)
 }
 
+fn allocation_failure(
+    message: impl Into<String>,
+    cause: std::collections::TryReserveError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_source(cause);
+    if let Some(identifier) = BOXPLOT_ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn invalid_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
     with_owned_source(&BOXPLOT_ERROR_INVALID_ARGUMENT, message, source)
 }

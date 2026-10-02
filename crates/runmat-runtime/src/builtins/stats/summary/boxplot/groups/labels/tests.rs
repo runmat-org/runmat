@@ -87,6 +87,26 @@ fn scalar_cell_precedes_multifactor_and_late_fallback_preserves_error() {
 }
 
 #[test]
+fn long_single_text_label_yields_before_it_is_published() {
+    let group = Value::String("💠".repeat(2048));
+    let source = Rc::new(CancellationSource::new());
+    let cancel_on_turn = source.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(256).unwrap()),
+        source.token(),
+        move || {
+            cancel_on_turn.cancel(CancellationReason::User);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let mut cooperation = super::super::super::cooperation::BoxplotCooperation::with_budget(budget);
+    let error = futures::executor::block_on(group_labels_cooperative(&group, 1, &mut cooperation))
+        .expect_err("a long label must yield before the finished label is published")
+        .into_runtime();
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}
+
+#[test]
 fn cooperative_label_decode_cancels_within_nested_cell_before_completion() {
     let group = Value::Cell(
         CellArray::new(

@@ -5,6 +5,7 @@ use crate::builtins::common::grouping_keys::KeyAtom;
 #[cfg(test)]
 mod tests;
 mod builder;
+mod text_copy;
 use builder::{GroupLabelBuilder, LabelProgress};
 
 pub(super) type GroupLabel = Vec<KeyAtom>;
@@ -77,17 +78,6 @@ pub(super) async fn group_labels_cooperative(
 
 fn scalar_group_label(value: &Value) -> BuiltinResult<Option<GroupLabel>> {
     match value {
-        Value::String(text) => {
-            Ok(missing_text_label(text).then(|| vec![KeyAtom::Text(text.clone())]))
-        }
-        Value::StringArray(array) if array.data.len() == 1 => {
-            let text = array.data[0].clone();
-            Ok(missing_text_label(&text).then_some(vec![KeyAtom::Text(text)]))
-        }
-        Value::CharArray(array) if array.rows == 1 => {
-            let text: String = array.data.iter().collect();
-            Ok(missing_text_label(&text).then_some(vec![KeyAtom::Text(text)]))
-        }
         Value::Num(value) => Ok(value.is_finite().then_some(vec![KeyAtom::Number(*value)])),
         Value::Int(value) => Ok(Some(vec![KeyAtom::Integer(value.clone())])),
         Value::Bool(value) => Ok(Some(vec![KeyAtom::Logical(*value)])),
@@ -99,14 +89,6 @@ fn scalar_group_label(value: &Value) -> BuiltinResult<Option<GroupLabel>> {
         }
         _ => Err(invalid("boxplot: cell grouping labels must be scalar")),
     }
-}
-
-fn missing_text_label(text: &str) -> bool {
-    let trimmed = text.trim();
-    !trimmed.is_empty()
-        && trimmed != "<missing>"
-        && trimmed != "<undefined>"
-        && !trimmed.eq_ignore_ascii_case("missing")
 }
 
 pub(in crate::builtins::stats::summary::boxplot) fn char_rows(array: &CharArray) -> Vec<String> {
