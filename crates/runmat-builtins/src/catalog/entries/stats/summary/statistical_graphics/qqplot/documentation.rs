@@ -79,6 +79,19 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
                 assertions: "assert(isequal(get(h(1),'XData'),3)); assert(isequal(get(h(1),'YData'),4));",
             },
         },
+        BuiltinExample {
+            id: "qqplot-invalid-percentage",
+            title: "Reject percentages outside the closed interval",
+            program: "qqplot([0; 10; 20], [], 101)",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::BrowserGraphics,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::ExpectedError {
+                identifier: "RunMat:qqplot:InvalidArgument",
+            },
+        },
     ],
     example_exemption: None,
     faqs: &[

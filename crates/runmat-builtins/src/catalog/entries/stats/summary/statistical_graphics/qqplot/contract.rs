@@ -48,7 +48,7 @@ const INPUT_AX_X: [BuiltinParamDescriptor; 2] = [PARAM_AX, PARAM_X];
 const INPUT_AX_X_Y_P: [BuiltinParamDescriptor; 4] = [PARAM_AX, PARAM_X, PARAM_Y, PARAM_PVEC];
 const OUTPUT_H: [BuiltinParamDescriptor; 1] = [OUTPUT_HANDLES];
 
-const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
     BuiltinSignatureDescriptor {
         label: "qqplot(x)",
         inputs: &INPUT_X,
@@ -65,6 +65,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
         outputs: &[],
     },
     BuiltinSignatureDescriptor {
+        label: "qqplot(x, [], pvec)",
+        inputs: &INPUT_X_Y_P,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
         label: "qqplot(ax, ___)",
         inputs: &INPUT_AX_X,
         outputs: &[],
@@ -76,6 +81,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     },
     BuiltinSignatureDescriptor {
         label: "h = qqplot(x, y, pvec)",
+        inputs: &INPUT_X_Y_P,
+        outputs: &OUTPUT_H,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = qqplot(x, [], pvec)",
         inputs: &INPUT_X_Y_P,
         outputs: &OUTPUT_H,
     },
