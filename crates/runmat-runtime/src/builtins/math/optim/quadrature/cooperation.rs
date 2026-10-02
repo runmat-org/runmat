@@ -1,8 +1,10 @@
 //! One invocation-owned CPU budget across all adaptive subintervals.
 
+use crate::builtins::common::validation::{self, IntegerBoundaryFailure, PreparedIntegerBoundary};
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry};
+use runmat_value::Value;
 
 #[derive(Clone, Copy)]
 pub(crate) enum QuadratureIdentity {
@@ -38,33 +40,50 @@ impl QuadratureCooperation {
         let Some(budget) = self.budget.as_mut() else {
             return Ok(());
         };
-        budget
-            .checkpoint(units)
-            .await
-            .map_err(|source| match source {
-                source @ ExecutionServiceError::Cancelled => {
-                    let namespace = self.namespace.as_deref().unwrap_or("RunMat");
-                    build_runtime_error(format!(
-                        "{}: execution was cancelled",
-                        self.identity.name()
-                    ))
+        let result = budget.checkpoint(units).await;
+        result.map_err(|source| self.execution_failure(source))
+    }
+
+    fn execution_failure(&self, source: ExecutionServiceError) -> crate::RuntimeError {
+        match source {
+            source @ ExecutionServiceError::Cancelled => {
+                let namespace = self.namespace.as_deref().unwrap_or("RunMat");
+                build_runtime_error(format!("{}: execution was cancelled", self.identity.name()))
                     .with_identifier(format!("{namespace}:Cancelled"))
                     .with_builtin(self.identity.name())
                     .with_source(source)
                     .with_gpu_gather_retry(GpuGatherRetry::Never)
                     .build()
+            }
+            other => {
+                let typed_source = other.clone();
+                let mut failure = other.into_runtime_error();
+                failure.context = failure.context.with_builtin(self.identity.name());
+                failure.gpu_gather_retry = GpuGatherRetry::Never;
+                if failure.source.is_none() {
+                    failure.source = Some(Box::new(typed_source));
                 }
-                other => {
-                    let typed_source = other.clone();
-                    let mut failure = other.into_runtime_error();
-                    failure.context = failure.context.with_builtin(self.identity.name());
-                    failure.gpu_gather_retry = GpuGatherRetry::Never;
-                    if failure.source.is_none() {
-                        failure.source = Some(Box::new(typed_source));
-                    }
-                    failure
-                }
-            })
+                failure
+            }
+        }
+    }
+
+    pub(crate) async fn prepare_integer_boundary<'a>(
+        &mut self,
+        value: &'a Value,
+    ) -> BuiltinResult<PreparedIntegerBoundary<'a>> {
+        let result =
+            validation::prepare_direct_integer_f64_boundary(value, self.budget.as_mut()).await;
+        result.map_err(|error| match error {
+            IntegerBoundaryFailure::Execution(source) => self.execution_failure(source),
+            IntegerBoundaryFailure::Operational(source) => {
+                let mut failure = *source;
+                failure.context.builtin = Some(self.identity.name().to_string());
+                failure.gpu_gather_retry = GpuGatherRetry::Never;
+                failure
+            }
+            other => other.into_runtime_error(),
+        })
     }
 
     #[cfg(test)]

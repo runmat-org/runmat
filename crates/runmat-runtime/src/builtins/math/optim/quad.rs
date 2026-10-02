@@ -12,7 +12,7 @@ use runmat_builtins::{
     QUAD_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{LogicalArray, Value};
+use runmat_value::{LogicalArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -158,13 +158,13 @@ async fn quad_in_runtime(
     preflight_quad_inputs(&a, &b, &rest)?;
     crate::call::admission::admit_feval_target(&function)?;
     authenticate_quad_residents(&a, &b, &rest)?;
-    let options = QuadOptions::parse(rest)
+    let options = QuadOptions::parse(rest, &mut cooperation)
         .await
         .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_ARGUMENT))?;
-    let a = scalar_real("lower bound", a)
+    let a = scalar_real("lower bound", a, &mut cooperation)
         .await
         .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
-    let b = scalar_real("upper bound", b)
+    let b = scalar_real("upper bound", b, &mut cooperation)
         .await
         .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
 
@@ -390,23 +390,47 @@ async fn prepare_quad_floating_value(
     label: &str,
     value: Value,
     integer_extension: &'static BuiltinExtensionDescriptor,
+    cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::value_contains_native_integer_class(&value) {
+    let has_integer =
+        crate::builtins::common::validation::value_contains_native_integer_class(&value);
+    if has_integer {
         crate::compatibility::ensure_builtin_extension_enabled(integer_extension, NAME)?;
-        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
-            .await?
-        {
-            return Err(quad_error_with_detail(
-                &QUAD_ERROR_INVALID_ARGUMENT,
-                format!("integer {label} must be exactly representable as double"),
-            ));
-        }
     }
     if is_logical_numeric(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_NUMERIC_EXTENSION, NAME)?;
     }
     if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_INPUT_EXTENSION, NAME)?;
+    }
+    if has_integer {
+        let prepared = cooperation.prepare_integer_boundary(&value).await?;
+        if !prepared.is_exact() {
+            return Err(quad_error_with_detail(
+                &QUAD_ERROR_INVALID_ARGUMENT,
+                format!("integer {label} must be exactly representable as double"),
+            ));
+        }
+        if let Some(payload) = prepared.into_resident_payload() {
+            return match payload {
+                crate::builtins::common::validation::PreparedIntegerPayload::Real(gathered) => {
+                    Tensor::new_integer(
+                        crate::builtins::common::gpu_helpers::integer_storage_from_owned(
+                            gathered.data,
+                        ),
+                        gathered.shape,
+                    )
+                    .map(Value::Tensor)
+                    .map_err(|detail| quad_error_with_detail(&QUAD_ERROR_INVALID_INPUT, detail))
+                }
+                crate::builtins::common::validation::PreparedIntegerPayload::Complex(_) => {
+                    Err(quad_error_with_detail(
+                        &QUAD_ERROR_INVALID_INPUT,
+                        format!("{label} must be real"),
+                    ))
+                }
+            };
+        }
     }
     crate::dispatcher::gather_if_needed_async(&value).await
 }
@@ -418,10 +442,13 @@ struct QuadOptions {
 }
 
 impl QuadOptions {
-    async fn parse(rest: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(
+        rest: Vec<Value>,
+        cooperation: &mut QuadratureCooperation,
+    ) -> BuiltinResult<Self> {
         let mut values = rest.into_iter();
         let tol = match values.next() {
-            Some(value) => parse_optional_tol(value).await?,
+            Some(value) => parse_optional_tol(value, cooperation).await?,
             None => DEFAULT_TOL,
         };
         let trace = match values.next() {
@@ -436,9 +463,17 @@ impl QuadOptions {
     }
 }
 
-async fn parse_optional_tol(value: Value) -> BuiltinResult<f64> {
-    let value =
-        prepare_quad_floating_value("tolerance", value, &INTEGER_TOLERANCE_EXTENSION).await?;
+async fn parse_optional_tol(
+    value: Value,
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<f64> {
+    let value = prepare_quad_floating_value(
+        "tolerance",
+        value,
+        &INTEGER_TOLERANCE_EXTENSION,
+        cooperation,
+    )
+    .await?;
     if is_empty_value(&value) {
         return Ok(DEFAULT_TOL);
     }
@@ -469,8 +504,13 @@ fn is_empty_value(value: &Value) -> bool {
     }
 }
 
-async fn scalar_real(label: &str, value: Value) -> BuiltinResult<f64> {
-    let value = prepare_quad_floating_value(label, value, &INTEGER_BOUND_EXTENSION).await?;
+async fn scalar_real(
+    label: &str,
+    value: Value,
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<f64> {
+    let value =
+        prepare_quad_floating_value(label, value, &INTEGER_BOUND_EXTENSION, cooperation).await?;
     scalar_real_sync(label, value, &QUAD_ERROR_INVALID_INPUT)
 }
 
@@ -655,8 +695,13 @@ async fn call_integrand(
     arguments[0] = Value::Num(x);
     let value = call_function(function, &*arguments).await?;
     cooperation.completed(1).await?;
-    let value =
-        prepare_quad_floating_value("integrand result", value, &INTEGER_CALLBACK_EXTENSION).await?;
+    let value = prepare_quad_floating_value(
+        "integrand result",
+        value,
+        &INTEGER_CALLBACK_EXTENSION,
+        cooperation,
+    )
+    .await?;
     value_to_scalar(NAME, value)
 }
 
