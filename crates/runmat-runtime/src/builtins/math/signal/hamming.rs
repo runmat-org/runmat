@@ -13,7 +13,7 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
     is_scalar_logical_window_length, parse_window_controls, window_allocation_error,
-    window_options_from_length, window_tensor, WindowArgError, WindowCooperation,
+    window_options_from_length, window_tensor, SignalCooperation, WindowArgError,
 };
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
@@ -121,7 +121,7 @@ async fn hamming_in_runtime(
         )?;
     }
     let options = window_options_from_length(n, controls).map_err(hamming_map_window_error)?;
-    let mut cooperation = WindowCooperation::new(runtime, BUILTIN_NAME);
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
     if let Some(value) = try_generate(CosineWindow::Hamming, options)? {
         return Ok(value);

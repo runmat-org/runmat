@@ -8,13 +8,15 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(super) mod output_precision;
+mod cooperation;
 mod window_generation;
 mod waveform_map;
 mod waveform_control;
 pub(crate) mod window_provider;
+pub(crate) use cooperation::SignalCooperation;
 pub(crate) use waveform_control::{PreparedWaveformControl, WaveformControlError};
 pub(crate) use waveform_map::{map_real_waveform, WaveformMapError, WaveformOutputMode};
-pub(crate) use window_generation::{window_allocation_error, window_tensor, WindowCooperation};
+pub(crate) use window_generation::{window_allocation_error, window_tensor};
 
 const EPS: f64 = 1.0e-12;
 
@@ -653,7 +655,7 @@ mod tests {
         let WindowArgError::Allocation(cause) = futures::executor::block_on(window_tensor(
             options,
             |_, _| panic!("capacity overflow must precede coefficients"),
-            &mut WindowCooperation::new(None, "hann"),
+            &mut SignalCooperation::new(None, "hann"),
         ))
         .expect_err("impossible host vector capacity") else {
             panic!("expected original allocation error");
