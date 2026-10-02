@@ -141,7 +141,7 @@ impl QuadratureSample for f64 {
     async fn weighted_sum<E: QuadratureEvaluator<Sample = Self>>(
         samples: &[Self],
         weights: &[ScaledEstimate],
-        _evaluator: &mut E,
+        evaluator: &mut E,
     ) -> Result<Self::Estimate, QuadratureArithmeticError> {
         if samples.len() != weights.len() {
             return Err(QuadratureArithmeticError::InconsistentComponents);
@@ -149,6 +149,10 @@ impl QuadratureSample for f64 {
         let mut result = ScaledEstimate::from_f64(0.0);
         for (&sample, &weight) in samples.iter().zip(weights) {
             result = result.add(weight.multiply_f64(sample));
+            evaluator
+                .charge(1)
+                .await
+                .map_err(QuadratureArithmeticError::execution)?;
         }
         Ok(result)
     }
@@ -345,16 +349,20 @@ impl QuadratureSample for Arc<Vec<f64>> {
             }
             components.push(sum);
             if (component + 1).is_multiple_of(COMPONENT_CHUNK) {
-                evaluator
-                    .charge(COMPONENT_CHUNK as u64)
-                    .await
-                    .map_err(QuadratureArithmeticError::execution)?;
+                for _ in samples {
+                    evaluator
+                        .charge(COMPONENT_CHUNK as u64)
+                        .await
+                        .map_err(QuadratureArithmeticError::execution)?;
+                }
             }
         }
-        evaluator
-            .charge((first.len() % COMPONENT_CHUNK) as u64)
-            .await
-            .map_err(QuadratureArithmeticError::execution)?;
+        for _ in samples {
+            evaluator
+                .charge((first.len() % COMPONENT_CHUNK) as u64)
+                .await
+                .map_err(QuadratureArithmeticError::execution)?;
+        }
         Ok(ArrayEstimate(Arc::new(components)))
     }
 

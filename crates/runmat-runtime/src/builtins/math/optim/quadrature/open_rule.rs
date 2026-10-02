@@ -269,16 +269,23 @@ mod tests {
     use crate::build_runtime_error;
     use crate::builtins::math::optim::quadrature::QuadratureArithmeticError;
     use crate::RuntimeError;
+    use std::sync::Arc;
 
     struct CancellingSine {
         max_evaluations: usize,
         calls: usize,
+        charged: u64,
     }
 
     impl QuadratureEvaluator for CancellingSine {
         type Sample = f64;
 
         async fn checkpoint(&mut self) -> BuiltinResult<()> {
+            Ok(())
+        }
+
+        async fn charge(&mut self, units: u64) -> BuiltinResult<()> {
+            self.charged += units;
             Ok(())
         }
 
@@ -337,15 +344,18 @@ mod tests {
         let mut insufficient = CancellingSine {
             max_evaluations: 30,
             calls: 0,
+            charged: 0,
         };
         let error = futures::executor::block_on(integrate_open(&mut insufficient, &segments))
             .expect_err("canceling segments need global refinement");
         assert!(error.message().contains("evaluation limit"));
         assert_eq!(insufficient.calls, 30);
+        assert!(insufficient.charged >= insufficient.calls as u64 * 2);
 
         let mut enough = CancellingSine {
             max_evaluations: 2000,
             calls: 0,
+            charged: 0,
         };
         let value = futures::executor::block_on(integrate_open(&mut enough, &segments))
             .expect("global mesh refines canceling intervals")
@@ -373,6 +383,7 @@ mod tests {
         let evaluator = CancellingSine {
             max_evaluations: 100,
             calls: 0,
+            charged: 0,
         };
         assert!(!<KronrodRule as MeshRule<CancellingSine>>::can_refine(
             &evaluator, &exhausted
@@ -380,5 +391,74 @@ mod tests {
         assert!(<KronrodRule as MeshRule<CancellingSine>>::can_refine(
             &evaluator, &available
         ));
+    }
+
+    struct ArrayWork {
+        charged: u64,
+    }
+
+    impl QuadratureEvaluator for ArrayWork {
+        type Sample = Arc<Vec<f64>>;
+
+        async fn checkpoint(&mut self) -> BuiltinResult<()> {
+            Ok(())
+        }
+
+        async fn charge(&mut self, units: u64) -> BuiltinResult<()> {
+            self.charged += units;
+            Ok(())
+        }
+
+        async fn evaluate(&mut self, x: f64) -> BuiltinResult<Self::Sample> {
+            Ok(Arc::new(vec![x, x * x]))
+        }
+
+        fn midpoint(&self, a: f64, b: f64) -> f64 {
+            super::super::midpoint(a, b)
+        }
+
+        fn tolerances(&self) -> (f64, f64) {
+            (1.0e-8, 0.0)
+        }
+
+        fn max_evaluations(&self) -> usize {
+            15
+        }
+
+        fn max_depth(&self) -> usize {
+            1
+        }
+
+        fn evaluation_limit_error(&self) -> RuntimeError {
+            build_runtime_error("array evaluation limit").build()
+        }
+
+        fn convergence_error(&self) -> RuntimeError {
+            build_runtime_error("array convergence failure").build()
+        }
+
+        fn nonrepresentable_error(&self) -> RuntimeError {
+            build_runtime_error("array nonrepresentable result").build()
+        }
+
+        fn arithmetic_error(&self, error: QuadratureArithmeticError) -> RuntimeError {
+            build_runtime_error(format!("array arithmetic: {error:?}")).build()
+        }
+    }
+
+    #[test]
+    fn array_weighted_rule_charges_every_coefficient_product() {
+        let mut evaluator = ArrayWork { charged: 0 };
+        let estimate = futures::executor::block_on(evaluate_interval(
+            &mut evaluator,
+            OpenDomain::Finite,
+            0.0,
+            1.0,
+        ))
+        .expect("array open rule");
+        assert_eq!(estimate.result.0.len(), 2);
+        // Two weighted passes (Kronrod and Gauss), each with 15 terms for
+        // both components. Additional estimate algebra can charge more.
+        assert!(evaluator.charged >= 2 * 15 * 2);
     }
 }
