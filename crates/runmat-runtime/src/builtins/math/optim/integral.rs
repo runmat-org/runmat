@@ -21,7 +21,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
-    simpson, QuadratureCooperation, QuadratureIdentity,
+    integrate, AdaptiveSimpsonResult, QuadratureCooperation, QuadratureEvaluator,
+    QuadratureIdentity,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -159,9 +160,17 @@ async fn integral_in_runtime(
     let sign = if b < a { -1.0 } else { 1.0 };
     let lo = a.min(b);
     let hi = a.max(b);
-    let result = integrate_finite_scalar(&function, lo, hi, &options, &mut cooperation)
-        .await
-        .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
+    let result = {
+        let mut evaluator = IntegralEvaluator {
+            function: &function,
+            options: &options,
+            cooperation: &mut cooperation,
+        };
+        let AdaptiveSimpsonResult { q, .. } = integrate(&mut evaluator, lo, hi)
+            .await
+            .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
+        q
+    };
     cooperation.completed(0).await?;
     Ok(Value::Num(sign * result))
 }
@@ -546,127 +555,54 @@ fn bool_option(name: &str, value: &Value) -> BuiltinResult<bool> {
     }
 }
 
-async fn integrate_finite_scalar(
-    function: &Value,
-    a: f64,
-    b: f64,
-    options: &IntegralOptions,
-    cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<f64> {
-    let fa = call_integrand(function, a, cooperation).await?;
-    let m = 0.5 * (a + b);
-    let fm = call_integrand(function, m, cooperation).await?;
-    let fb = call_integrand(function, b, cooperation).await?;
-    let mut evals = 3usize;
-    let whole = simpson(a, b, fa, fm, fb);
-    let tol = options.abs_tol.max(options.rel_tol * whole.abs());
-    adaptive_simpson(
-        function,
-        SimpsonState {
-            a,
-            b,
-            fa,
-            fm,
-            fb,
-            whole,
-            tol,
-            depth: MAX_DEPTH,
-        },
-        &mut evals,
-        options.max_fun_evals,
-        cooperation,
-    )
-    .await
+struct IntegralEvaluator<'a> {
+    function: &'a Value,
+    options: &'a IntegralOptions,
+    cooperation: &'a mut QuadratureCooperation,
 }
 
-#[derive(Clone, Copy)]
-struct SimpsonState {
-    a: f64,
-    b: f64,
-    fa: f64,
-    fm: f64,
-    fb: f64,
-    whole: f64,
-    tol: f64,
-    depth: usize,
-}
+impl QuadratureEvaluator for IntegralEvaluator<'_> {
+    async fn checkpoint(&mut self) -> BuiltinResult<()> {
+        self.cooperation.completed(0).await
+    }
 
-#[async_recursion::async_recursion(?Send)]
-async fn adaptive_simpson(
-    function: &Value,
-    state: SimpsonState,
-    evals: &mut usize,
-    max_fun_evals: usize,
-    cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<f64> {
-    cooperation.completed(0).await?;
-    if *evals + 2 > max_fun_evals {
-        return Err(integral_error_with_detail(
+    async fn evaluate(&mut self, x: f64) -> BuiltinResult<f64> {
+        call_integrand(self.function, x, self.cooperation).await
+    }
+
+    fn midpoint(&self, a: f64, b: f64) -> f64 {
+        0.5 * (a + b)
+    }
+
+    fn initial_tolerance(&self, whole: f64) -> f64 {
+        self.options.abs_tol.max(self.options.rel_tol * whole.abs())
+    }
+
+    fn max_evaluations(&self) -> usize {
+        self.options.max_fun_evals
+    }
+
+    fn max_depth(&self) -> usize {
+        MAX_DEPTH
+    }
+
+    fn evaluation_limit_error(&self) -> RuntimeError {
+        integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_INPUT,
             "exceeded maximum function evaluations",
-        ));
+        )
     }
 
-    let c = 0.5 * (state.a + state.b);
-    let d = 0.5 * (state.a + c);
-    let e = 0.5 * (c + state.b);
-    let fd = call_integrand(function, d, cooperation).await?;
-    let fe = call_integrand(function, e, cooperation).await?;
-    *evals += 2;
-
-    let left = simpson(state.a, c, state.fa, fd, state.fm);
-    let right = simpson(c, state.b, state.fm, fe, state.fb);
-    let refined = left + right;
-    let error = refined - state.whole;
-    if error.abs() <= 15.0 * state.tol {
-        return Ok(refined + error / 15.0);
-    }
-    if state.depth == 0 {
-        return Err(integral_error_with_detail(
+    fn convergence_error(&self) -> RuntimeError {
+        integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_INPUT,
             "adaptive quadrature did not converge",
-        ));
+        )
     }
-
-    let left_value = adaptive_simpson(
-        function,
-        SimpsonState {
-            a: state.a,
-            b: c,
-            fa: state.fa,
-            fm: fd,
-            fb: state.fm,
-            whole: left,
-            tol: state.tol * 0.5,
-            depth: state.depth - 1,
-        },
-        evals,
-        max_fun_evals,
-        cooperation,
-    )
-    .await?;
-    let right_value = adaptive_simpson(
-        function,
-        SimpsonState {
-            a: c,
-            b: state.b,
-            fa: state.fm,
-            fm: fe,
-            fb: state.fb,
-            whole: right,
-            tol: state.tol * 0.5,
-            depth: state.depth - 1,
-        },
-        evals,
-        max_fun_evals,
-        cooperation,
-    )
-    .await?;
-    Ok(left_value + right_value)
 }
 
 fn scalar_tensor_value(tensor: &Tensor) -> Option<f64> {
-    tensor::tensor_values_f64(tensor).into_iter().next()
+    tensor::is_scalar_tensor(tensor).then(|| tensor::tensor_value_f64(tensor, 0))
 }
 
 async fn call_integrand(

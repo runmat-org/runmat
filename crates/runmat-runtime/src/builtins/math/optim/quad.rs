@@ -21,7 +21,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, value_to_scalar};
 use crate::builtins::math::optim::quadrature::{
-    midpoint, simpson, QuadratureCooperation, QuadratureIdentity,
+    integrate, midpoint, AdaptiveSimpsonResult, QuadratureCooperation, QuadratureEvaluator,
+    QuadratureIdentity,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -158,9 +159,16 @@ async fn quad_in_runtime(
         let sign = if b < a { -1.0 } else { 1.0 };
         let lo = a.min(b);
         let hi = a.max(b);
-        let mut result = integrate_quad(&function, lo, hi, &options, &mut cooperation)
-            .await
-            .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
+        let mut result = {
+            let mut evaluator = QuadEvaluator::new(&function, options, &mut cooperation)?;
+            let AdaptiveSimpsonResult { q, evaluations } = integrate(&mut evaluator, lo, hi)
+                .await
+                .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
+            QuadResult {
+                q,
+                func_count: evaluations,
+            }
+        };
         result.q *= sign;
         result
     };
@@ -437,7 +445,7 @@ async fn parse_optional_trace(value: Value) -> BuiltinResult<bool> {
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor).is_empty(),
+        Value::Tensor(tensor) => tensor.len() == 0,
         Value::LogicalArray(LogicalArray { data, .. }) => data.is_empty(),
         _ => false,
     }
@@ -511,144 +519,103 @@ struct QuadResult {
     func_count: usize,
 }
 
-async fn integrate_quad(
-    function: &Value,
-    a: f64,
-    b: f64,
-    options: &QuadOptions,
-    cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<QuadResult> {
-    let fa = call_integrand(function, a, &options.extra_args, cooperation).await?;
-    let c = midpoint(a, b);
-    let fc = call_integrand(function, c, &options.extra_args, cooperation).await?;
-    let fb = call_integrand(function, b, &options.extra_args, cooperation).await?;
-    let whole = simpson(a, b, fa, fc, fb);
-    let mut func_count = 3usize;
-    let mut trace = options.trace.then_some(QuadTrace);
-    let q = adaptive_simpson(
-        function,
-        &options.extra_args,
-        SimpsonState {
-            a,
-            b,
-            fa,
-            fc,
-            fb,
-            whole,
-            tol: options.tol,
-            depth: MAX_DEPTH,
-        },
-        &mut func_count,
-        &mut trace,
-        cooperation,
-    )
-    .await?;
-    Ok(QuadResult { q, func_count })
+struct QuadEvaluator<'a> {
+    function: &'a Value,
+    tolerance: f64,
+    arguments: Vec<Value>,
+    cooperation: &'a mut QuadratureCooperation,
+    trace: Option<QuadTrace>,
 }
 
-#[derive(Clone, Copy)]
-struct SimpsonState {
-    a: f64,
-    b: f64,
-    fa: f64,
-    fc: f64,
-    fb: f64,
-    whole: f64,
-    tol: f64,
-    depth: usize,
+impl<'a> QuadEvaluator<'a> {
+    fn new(
+        function: &'a Value,
+        options: QuadOptions,
+        cooperation: &'a mut QuadratureCooperation,
+    ) -> BuiltinResult<Self> {
+        let capacity = options.extra_args.len().checked_add(1).ok_or_else(|| {
+            build_runtime_error("quad: callback argument count overflow")
+                .with_identifier("RunMat:Internal")
+                .with_builtin(NAME)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        })?;
+        let mut arguments = Vec::new();
+        arguments.try_reserve_exact(capacity).map_err(|source| {
+            build_runtime_error("quad: could not reserve callback arguments")
+                .with_identifier("RunMat:Internal")
+                .with_builtin(NAME)
+                .with_source(source)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        })?;
+        arguments.push(Value::Num(0.0));
+        arguments.extend(options.extra_args);
+        Ok(Self {
+            function,
+            tolerance: options.tol,
+            arguments,
+            cooperation,
+            trace: options.trace.then_some(QuadTrace),
+        })
+    }
 }
 
-#[async_recursion::async_recursion(?Send)]
-async fn adaptive_simpson(
-    function: &Value,
-    extra_args: &[Value],
-    state: SimpsonState,
-    func_count: &mut usize,
-    trace: &mut Option<QuadTrace>,
-    cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<f64> {
-    cooperation.completed(0).await?;
-    if *func_count + 2 > MAX_FUN_EVALS {
-        return Err(quad_error_with_detail(
+impl QuadratureEvaluator for QuadEvaluator<'_> {
+    async fn checkpoint(&mut self) -> BuiltinResult<()> {
+        self.cooperation.completed(0).await
+    }
+
+    async fn evaluate(&mut self, x: f64) -> BuiltinResult<f64> {
+        call_integrand(self.function, x, &mut self.arguments, self.cooperation).await
+    }
+
+    fn midpoint(&self, a: f64, b: f64) -> f64 {
+        midpoint(a, b)
+    }
+
+    fn initial_tolerance(&self, _whole: f64) -> f64 {
+        self.tolerance
+    }
+
+    fn max_evaluations(&self) -> usize {
+        MAX_FUN_EVALS
+    }
+
+    fn max_depth(&self) -> usize {
+        MAX_DEPTH
+    }
+
+    fn evaluation_limit_error(&self) -> RuntimeError {
+        quad_error_with_detail(
             &QUAD_ERROR_INVALID_INPUT,
             "exceeded maximum function evaluations",
-        ));
+        )
     }
 
-    let c = midpoint(state.a, state.b);
-    let d = midpoint(state.a, c);
-    let e = midpoint(c, state.b);
-    let fd = call_integrand(function, d, extra_args, cooperation).await?;
-    let fe = call_integrand(function, e, extra_args, cooperation).await?;
-    *func_count += 2;
-
-    let left = simpson(state.a, c, state.fa, fd, state.fc);
-    let right = simpson(c, state.b, state.fc, fe, state.fb);
-    let refined = left + right;
-    let error = refined - state.whole;
-    if let Some(trace) = trace {
-        trace.record(*func_count, state.a, state.b, refined, error);
-    }
-    if error.abs() <= 15.0 * state.tol {
-        return Ok(refined + error / 15.0);
-    }
-    if state.depth == 0 {
-        return Err(quad_error_with_detail(
+    fn convergence_error(&self) -> RuntimeError {
+        quad_error_with_detail(
             &QUAD_ERROR_INVALID_INPUT,
             "adaptive Simpson quadrature did not converge",
-        ));
+        )
     }
 
-    let left_value = adaptive_simpson(
-        function,
-        extra_args,
-        SimpsonState {
-            a: state.a,
-            b: c,
-            fa: state.fa,
-            fc: fd,
-            fb: state.fc,
-            whole: left,
-            tol: state.tol * 0.5,
-            depth: state.depth - 1,
-        },
-        func_count,
-        trace,
-        cooperation,
-    )
-    .await?;
-    let right_value = adaptive_simpson(
-        function,
-        extra_args,
-        SimpsonState {
-            a: c,
-            b: state.b,
-            fa: state.fc,
-            fc: fe,
-            fb: state.fb,
-            whole: right,
-            tol: state.tol * 0.5,
-            depth: state.depth - 1,
-        },
-        func_count,
-        trace,
-        cooperation,
-    )
-    .await?;
-    Ok(left_value + right_value)
+    fn refined(&mut self, evals: usize, a: f64, b: f64, estimate: f64, error: f64) {
+        if let Some(trace) = self.trace.as_mut() {
+            trace.record(evals, a, b, estimate, error);
+        }
+    }
 }
 
 async fn call_integrand(
     function: &Value,
     x: f64,
-    extra_args: &[Value],
+    arguments: &mut [Value],
     cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<f64> {
     cooperation.completed(0).await?;
-    let mut args = Vec::with_capacity(1 + extra_args.len());
-    args.push(Value::Num(x));
-    args.extend(extra_args.iter().cloned());
-    let value = call_function(function, args).await?;
+    arguments[0] = Value::Num(x);
+    let value = call_function(function, &*arguments).await?;
     cooperation.completed(1).await?;
     let value =
         prepare_quad_floating_value("integrand result", value, &INTEGER_CALLBACK_EXTENSION).await?;
