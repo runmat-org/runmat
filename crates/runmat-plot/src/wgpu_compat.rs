@@ -37,10 +37,7 @@ pub(crate) fn device_descriptor<'a>(
     }
 }
 
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    any(test, feature = "gui", feature = "web")
-))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "gui")))]
 pub(crate) fn device_descriptor<'a>(
     label: Option<&'a str>,
     required_features: wgpu::Features,
