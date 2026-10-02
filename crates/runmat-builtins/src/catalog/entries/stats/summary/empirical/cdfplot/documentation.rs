@@ -31,7 +31,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(h>0); assert(stats.mean==2); assert(stats.median==2); assert(numel(get(h,'XData'))>=4);" },
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(h>0); assert(stats.min==1); assert(stats.max==3); assert(stats.mean==2); assert(stats.median==2); assert(abs(stats.std-sqrt(2/3))<1e-12); assert(numel(get(h,'XData'))>=4); y = get(h,'YData'); assert(y(end)==1);" },
     }],
     example_exemption: None,
     faqs: &[],
@@ -43,7 +43,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[OWNER],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CDF line, summary fields, input classes and host plotting", location: "crates/runmat-runtime/src/builtins/stats/summary/ecdf.rs" }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CDF line, summary fields, input classes and host plotting", location: "crates/runmat-runtime/src/builtins/stats/summary/ecdf/tests.rs" }],
         notes: &["Host-side plot and summary publication; resident input gathers through the owner."],
     },
     introduced: None,
