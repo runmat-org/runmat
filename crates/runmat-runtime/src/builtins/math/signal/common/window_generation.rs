@@ -112,7 +112,14 @@ pub(crate) async fn window_tensor(
     };
     let storage = match options.output_type {
         WindowOutputType::Double => NumericStorage::F64(
-            populate(len, effective_len, &coeff, |value| value, cooperation).await?,
+            populate(
+                len,
+                effective_len,
+                &coeff,
+                std::convert::identity,
+                cooperation,
+            )
+            .await?,
         ),
         WindowOutputType::Single => NumericStorage::F32(
             populate(
