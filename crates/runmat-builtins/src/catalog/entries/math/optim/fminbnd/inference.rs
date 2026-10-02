@@ -71,7 +71,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut contract = CallContract::fixed(outputs);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
-    if let Some(callback) = scalar_facts::callback_invocation(request, NumericClass::Double) {
+    if let Some(callback) =
+        scalar_facts::callback_invocation(request, scalar_facts::host_scalar(NumericClass::Double))
+    {
         contract.effects.0.extend(callback.effects.0);
         contract.capabilities.0.extend(callback.capabilities.0);
         diagnostics.extend(callback.diagnostics);

@@ -47,7 +47,7 @@ pub(super) fn callback(request: &CallRequest, diagnostics: &mut Vec<InferenceDia
 
 pub(super) fn callback_invocation(
     request: &CallRequest,
-    argument_class: NumericClass,
+    argument: ValueFact,
 ) -> Option<CallInference> {
     let ValueKindFact::Callable(callable) = &request.arguments.first()?.kind else {
         return None;
@@ -55,7 +55,7 @@ pub(super) fn callback_invocation(
     Some(crate::infer_callable_call(
         callable,
         &CallRequest {
-            arguments: vec![host_scalar(argument_class)],
+            arguments: vec![argument],
             literals: LiteralContext::default(),
             outputs: OutputSelection::new(RequestedOutputCount::One),
         },
@@ -110,10 +110,15 @@ pub(super) fn options(
 }
 
 pub(super) fn host_scalar(class: NumericClass) -> ValueFact {
-    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+    let mut fact = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class,
         domain: NumericDomain::Real,
-    }))
+    }));
+    // Single scalars use the runtime's one-element native tensor carrier.
+    if class == NumericClass::Single {
+        fact.storage = StorageFact::Dense;
+    }
+    fact
 }
 
 pub(super) fn conditional_host_scalar() -> ValueFact {
