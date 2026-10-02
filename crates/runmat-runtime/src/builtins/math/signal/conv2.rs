@@ -19,6 +19,8 @@ use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor
 use crate::builtins::math::signal::common::SignalCooperation;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
+mod separable;
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "conv2",
@@ -148,22 +150,32 @@ async fn conv2_builtin(
             {
                 let result =
                     outer_product(&left.data, &right.data, single_output, &mut cooperation).await?;
-                let output = matrix_to_value(result, single_output, complex_output)?;
+                let output =
+                    matrix_to_value(result, single_output, complex_output, &mut cooperation)
+                        .await?;
                 return restore_to_owner(output, &resident_inputs);
             }
             let result =
                 conv2_matrices(&left, &right, mode, single_output, &mut cooperation).await?;
-            let output = matrix_to_value(result, single_output, complex_output)?;
+            let output =
+                matrix_to_value(result, single_output, complex_output, &mut cooperation).await?;
             restore_to_owner(output, &resident_inputs)
         }
         1 => {
             let signal = convert_matrix(extras.remove(0), "A", &mut cooperation).await?;
             let column = convert_vector(a, "H column", &mut cooperation).await?;
             let row = convert_vector(b, "H row", &mut cooperation).await?;
-            let kernel = outer_product(&column, &row, single_output, &mut cooperation).await?;
-            let result =
-                conv2_matrices(&signal, &kernel, mode, single_output, &mut cooperation).await?;
-            let output = matrix_to_value(result, single_output, complex_output)?;
+            let result = separable::convolve_separable(
+                &signal,
+                &column,
+                &row,
+                mode,
+                single_output,
+                &mut cooperation,
+            )
+            .await?;
+            let output =
+                matrix_to_value(result, single_output, complex_output, &mut cooperation).await?;
             restore_to_owner(output, &resident_inputs)
         }
         _ => Err(conv2_error(&CONV2_ERROR_ARG_COUNT)),
@@ -354,14 +366,22 @@ struct Matrix {
 }
 
 impl Matrix {
-    fn zeros(rows: usize, cols: usize) -> BuiltinResult<Self> {
+    async fn zeros(
+        rows: usize,
+        cols: usize,
+        cooperation: &mut SignalCooperation,
+    ) -> BuiltinResult<Self> {
         let len = rows
             .checked_mul(cols)
             .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
         let mut data = Vec::new();
         data.try_reserve_exact(len)
             .map_err(conv2_allocation_error)?;
-        data.resize(len, Complex::new(0.0, 0.0));
+        while data.len() < len {
+            let chunk = (len - data.len()).min(super::common::SIGNAL_WORK_CHUNK as usize);
+            data.resize(data.len() + chunk, Complex::new(0.0, 0.0));
+            cooperation.completed(chunk as u64).await?;
+        }
         Ok(Self { rows, cols, data })
     }
 
@@ -385,12 +405,13 @@ impl Matrix {
         self.data[idx] += value;
     }
 
-    fn slice(
+    async fn slice(
         &self,
         row_start: usize,
         row_end: usize,
         col_start: usize,
         col_end: usize,
+        cooperation: &mut SignalCooperation,
     ) -> BuiltinResult<Self> {
         let row_end = row_end.min(self.rows);
         let col_end = col_end.min(self.cols);
@@ -398,17 +419,26 @@ impl Matrix {
             return Self::zeros(
                 row_end.saturating_sub(row_start),
                 col_end.saturating_sub(col_start),
-            );
+                cooperation,
+            )
+            .await;
         }
         let rows = row_end - row_start;
         let cols = col_end - col_start;
-        let mut sliced = Self::zeros(rows, cols)?;
+        let mut sliced = Self::zeros(rows, cols, cooperation).await?;
+        let mut work = 0_u64;
         for c in 0..cols {
             for r in 0..rows {
                 let value = self.get(row_start + r, col_start + c);
                 sliced.data[c * rows + r] = value;
+                work += 1;
+                if work == super::common::SIGNAL_WORK_CHUNK {
+                    cooperation.completed(work).await?;
+                    work = 0;
+                }
             }
         }
+        cooperation.completed(work).await?;
         Ok(sliced)
     }
 }
@@ -516,7 +546,7 @@ async fn outer_product(
 ) -> BuiltinResult<Matrix> {
     let rows = column.len();
     let cols = row.len();
-    let mut matrix = Matrix::zeros(rows, cols)?;
+    let mut matrix = Matrix::zeros(rows, cols, cooperation).await?;
     let mut work = 0_u64;
     for c in 0..cols {
         for r in 0..rows {
@@ -547,10 +577,10 @@ async fn conv2_matrices(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Matrix> {
     if a.is_empty() || b.is_empty() {
-        return empty_result(a, b, mode);
+        return empty_result(a, b, mode, cooperation).await;
     }
     if mode == Conv2Mode::Valid && (a.rows < b.rows || a.cols < b.cols) {
-        return Matrix::zeros(0, 0);
+        return Matrix::zeros(0, 0, cooperation).await;
     }
 
     let rows = a
@@ -563,7 +593,7 @@ async fn conv2_matrices(
         .checked_add(b.cols)
         .and_then(|n| n.checked_sub(1))
         .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
-    let mut full = Matrix::zeros(rows, cols)?;
+    let mut full = Matrix::zeros(rows, cols, cooperation).await?;
     let mut work = 0_u64;
     for ac in 0..a.cols {
         for ar in 0..a.rows {
@@ -599,69 +629,111 @@ async fn conv2_matrices(
         Conv2Mode::Full => Ok(full),
         Conv2Mode::Same => {
             if a.is_empty() {
-                return Matrix::zeros(a.rows, a.cols);
+                return Matrix::zeros(a.rows, a.cols, cooperation).await;
             }
             let row_start = b.rows / 2;
             let col_start = b.cols / 2;
-            full.slice(row_start, row_start + a.rows, col_start, col_start + a.cols)
+            full.slice(
+                row_start,
+                row_start + a.rows,
+                col_start,
+                col_start + a.cols,
+                cooperation,
+            )
+            .await
         }
         Conv2Mode::Valid => {
             let rows = a.rows - b.rows + 1;
             let cols = a.cols - b.cols + 1;
             let row_start = b.rows - 1;
             let col_start = b.cols - 1;
-            full.slice(row_start, row_start + rows, col_start, col_start + cols)
+            full.slice(
+                row_start,
+                row_start + rows,
+                col_start,
+                col_start + cols,
+                cooperation,
+            )
+            .await
         }
     }
 }
 
-fn empty_result(a: &Matrix, _b: &Matrix, mode: Conv2Mode) -> BuiltinResult<Matrix> {
+async fn empty_result(
+    a: &Matrix,
+    _b: &Matrix,
+    mode: Conv2Mode,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
     match mode {
-        Conv2Mode::Full | Conv2Mode::Valid => Matrix::zeros(0, 0),
-        Conv2Mode::Same => Matrix::zeros(a.rows, a.cols),
+        Conv2Mode::Full | Conv2Mode::Valid => Matrix::zeros(0, 0, cooperation).await,
+        Conv2Mode::Same => Matrix::zeros(a.rows, a.cols, cooperation).await,
     }
 }
 
-fn matrix_to_value(
+async fn matrix_to_value(
     matrix: Matrix,
     single_output: bool,
     complex_output: bool,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let rows = matrix.rows;
     let cols = matrix.cols;
-    let all_real = matrix.data.iter().all(|c| c.im == 0.0);
+    let mut all_real = true;
+    for chunk in matrix
+        .data
+        .chunks(super::common::SIGNAL_WORK_CHUNK as usize)
+    {
+        all_real &= chunk.iter().all(|c| c.im == 0.0);
+        cooperation.completed(chunk.len() as u64).await?;
+    }
 
     if all_real && !complex_output {
         if single_output {
-            let real_data: Vec<f32> = matrix.data.into_iter().map(|c| c.re as f32).collect();
+            let real_data = map_matrix_data(matrix.data, cooperation, |c| c.re as f32).await?;
             let tensor = Tensor::from_f32(real_data, vec![rows, cols])
                 .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, &e))?;
             return Ok(tensor::tensor_into_value(tensor));
         }
-        let real_data: Vec<f64> = matrix.data.into_iter().map(|c| c.re).collect();
+        let real_data = map_matrix_data(matrix.data, cooperation, |c| c.re).await?;
         let tensor = Tensor::new(real_data, vec![rows, cols])
             .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, &e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
+    if !single_output && matrix.data.len() == 1 {
+        let value = matrix.data[0];
+        return Ok(Value::Complex(value.re, value.im));
+    }
     let storage = if single_output {
         ComplexStorage::F32(
-            matrix
-                .data
-                .into_iter()
-                .map(|c| (c.re as f32, c.im as f32))
-                .collect(),
+            map_matrix_data(matrix.data, cooperation, |c| (c.re as f32, c.im as f32)).await?,
         )
     } else {
-        ComplexStorage::F64(matrix.data.into_iter().map(|c| (c.re, c.im)).collect())
+        ComplexStorage::F64(map_matrix_data(matrix.data, cooperation, |c| (c.re, c.im)).await?)
     };
     let tensor = ComplexTensor::from_complex_storage(storage, vec![rows, cols])
         .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
-    if !single_output && tensor.materialize_f64().len() == 1 {
-        let (re, im) = tensor.materialize_f64()[0];
-        return Ok(Value::Complex(re, im));
-    }
     Ok(Value::ComplexTensor(tensor))
+}
+
+async fn map_matrix_data<T, F>(
+    input: Vec<Complex<f64>>,
+    cooperation: &mut SignalCooperation,
+    mut convert: F,
+) -> BuiltinResult<Vec<T>>
+where
+    F: FnMut(Complex<f64>) -> T,
+{
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(input.len())
+        .map_err(conv2_allocation_error)?;
+    for chunk in input.chunks(super::common::SIGNAL_WORK_CHUNK as usize) {
+        output.extend(chunk.iter().copied().map(&mut convert));
+        cooperation.completed(chunk.len() as u64).await?;
+    }
+    Ok(output)
 }
 
 #[cfg(test)]
