@@ -1,4 +1,3 @@
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -11,9 +10,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
-    parse_window_controls, provider_precision_matches, window_options_from_length, window_tensor,
-    WindowArgError, WindowOutputType, WindowSampling,
+    parse_window_controls, window_options_from_length, window_tensor, WindowArgError,
 };
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
@@ -68,7 +67,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Generates the Blackman window directly on the active provider when the custom hook is available; otherwise falls back to host construction.",
+    notes: "Generates the Blackman window directly on the active provider when supported; only a typed unsupported hook falls back to host construction.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::blackman")]
@@ -99,33 +98,8 @@ async fn blackman_builtin(
         )?;
     }
     let options = window_options_from_length(n, controls).map_err(blackman_map_window_error)?;
-    if options.len > 1 && provider_precision_matches(options.output_type) {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Ok(handle) = provider.blackman_window(
-                options.len,
-                matches!(options.sampling, WindowSampling::Periodic),
-            ) {
-                let element_type = match options.output_type {
-                    WindowOutputType::Double => runmat_accelerate_api::NumericElementType::F64,
-                    WindowOutputType::Single => runmat_accelerate_api::NumericElementType::F32,
-                };
-                let valid = handle.device_id() == provider.device_id()
-                    && handle.allocation_lease().validate_live().is_ok()
-                    && handle.shape() == [options.len, 1]
-                    && runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
-                        runmat_accelerate_api::same_provider_instance(owner, provider)
-                    })
-                    && gpu_helpers::numeric_descriptor_matches(
-                        &handle,
-                        element_type,
-                        runmat_accelerate_api::GpuTensorStorage::Real,
-                    );
-                if valid {
-                    return Ok(runmat_value::Value::GpuTensor(handle));
-                }
-                drop(handle);
-            }
-        }
+    if let Some(value) = try_generate(CosineWindow::Blackman, options)? {
+        return Ok(value);
     }
     window_tensor(options, |idx, total| {
         let denom = (total - 1) as f64;

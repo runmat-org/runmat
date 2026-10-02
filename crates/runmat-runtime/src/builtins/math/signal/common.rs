@@ -8,6 +8,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(super) mod output_precision;
+pub(crate) mod window_provider;
 
 const EPS: f64 = 1.0e-12;
 
@@ -479,22 +480,6 @@ pub(crate) fn dtype_for(output_type: WindowOutputType) -> NumericDType {
         WindowOutputType::Double => NumericDType::F64,
         WindowOutputType::Single => NumericDType::F32,
     }
-}
-
-pub(crate) fn provider_precision_matches(output_type: WindowOutputType) -> bool {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return false;
-    };
-    matches!(
-        (provider.precision(), output_type),
-        (
-            runmat_accelerate_api::ProviderPrecision::F64,
-            WindowOutputType::Double
-        ) | (
-            runmat_accelerate_api::ProviderPrecision::F32,
-            WindowOutputType::Single
-        )
-    )
 }
 
 fn string_keyword(value: &Value) -> Option<String> {

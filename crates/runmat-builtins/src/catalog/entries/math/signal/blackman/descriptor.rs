@@ -83,12 +83,19 @@ pub const BLACKMAN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescrip
     when: "More than two options are supplied.",
     message: "blackman: too many input arguments",
 };
-const ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const BLACKMAN_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BLACKMAN.PROVIDER_FAILED",
+    identifier: Some("RunMat:blackman:ProviderFailed"),
+    when: "A supported provider window operation fails during execution.",
+    message: "blackman: provider window generation failed",
+};
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
     BLACKMAN_ERROR_INVALID_LENGTH,
     BLACKMAN_ERROR_INVALID_OPTION,
     BLACKMAN_ERROR_UNKNOWN_OPTION,
     BLACKMAN_ERROR_INTERNAL,
     BLACKMAN_ERROR_ARG_COUNT,
+    BLACKMAN_ERROR_PROVIDER_FAILED,
 ];
 pub const BLACKMAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,

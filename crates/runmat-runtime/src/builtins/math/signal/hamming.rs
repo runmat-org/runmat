@@ -10,9 +10,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
-    parse_window_controls, provider_precision_matches, window_options_from_length, window_tensor,
-    WindowArgError, WindowOutputType, WindowSampling,
+    parse_window_controls, window_options_from_length, window_tensor, WindowArgError,
 };
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
@@ -67,7 +67,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Generates the Hamming window directly on the active provider when the custom hook is available; otherwise falls back to host construction.",
+    notes: "Generates the Hamming window directly on the active provider when supported; only a typed unsupported hook falls back to host construction.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::hamming")]
@@ -98,46 +98,14 @@ async fn hamming_builtin(
         )?;
     }
     let options = window_options_from_length(n, controls).map_err(hamming_map_window_error)?;
-    if options.len > 1 && provider_precision_matches(options.output_type) {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Ok(handle) = provider.hamming_window(
-                options.len,
-                matches!(options.sampling, WindowSampling::Periodic),
-            ) {
-                let precision = match options.output_type {
-                    WindowOutputType::Double => runmat_accelerate_api::ProviderPrecision::F64,
-                    WindowOutputType::Single => runmat_accelerate_api::ProviderPrecision::F32,
-                };
-                if valid_provider_window(&handle, provider, options.len, precision) {
-                    return Ok(runmat_value::Value::GpuTensor(handle));
-                }
-                drop(handle);
-            }
-        }
+    if let Some(value) = try_generate(CosineWindow::Hamming, options)? {
+        return Ok(value);
     }
     window_tensor(options, |idx, total| {
         let denom = (total - 1) as f64;
         0.54 - 0.46 * cospi_real(2.0 * idx as f64 / denom)
     })
     .map_err(hamming_map_window_error)
-}
-
-fn valid_provider_window(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    len: usize,
-    precision: runmat_accelerate_api::ProviderPrecision,
-) -> bool {
-    handle.shape() == [len, 1]
-        && handle.allocation_lease().validate_live().is_ok()
-        && handle.device_id() == provider.device_id()
-        && runmat_accelerate_api::handle_storage(handle)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(handle) == Some(precision)
-        && runmat_accelerate_api::handle_integer_type(handle).is_none()
-        && !runmat_accelerate_api::handle_is_logical(handle)
-        && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 #[cfg(test)]

@@ -83,12 +83,19 @@ pub const HANN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     when: "More than two options are supplied.",
     message: "hann: too many input arguments",
 };
-const ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const HANN_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HANN.PROVIDER_FAILED",
+    identifier: Some("RunMat:hann:ProviderFailed"),
+    when: "A supported provider window operation fails during execution.",
+    message: "hann: provider window generation failed",
+};
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
     HANN_ERROR_INVALID_LENGTH,
     HANN_ERROR_INVALID_OPTION,
     HANN_ERROR_UNKNOWN_OPTION,
     HANN_ERROR_INTERNAL,
     HANN_ERROR_ARG_COUNT,
+    HANN_ERROR_PROVIDER_FAILED,
 ];
 pub const HANN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,

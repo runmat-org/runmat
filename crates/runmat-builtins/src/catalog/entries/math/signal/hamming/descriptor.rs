@@ -83,12 +83,19 @@ pub const HAMMING_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "More than two options are supplied.",
     message: "hamming: too many input arguments",
 };
-const ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const HAMMING_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HAMMING.PROVIDER_FAILED",
+    identifier: Some("RunMat:hamming:ProviderFailed"),
+    when: "A supported provider window operation fails during execution.",
+    message: "hamming: provider window generation failed",
+};
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
     HAMMING_ERROR_INVALID_LENGTH,
     HAMMING_ERROR_INVALID_OPTION,
     HAMMING_ERROR_UNKNOWN_OPTION,
     HAMMING_ERROR_INTERNAL,
     HAMMING_ERROR_ARG_COUNT,
+    HAMMING_ERROR_PROVIDER_FAILED,
 ];
 pub const HAMMING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
