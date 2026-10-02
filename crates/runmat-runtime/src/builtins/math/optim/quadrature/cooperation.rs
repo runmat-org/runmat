@@ -55,9 +55,13 @@ impl QuadratureCooperation {
                     .build()
                 }
                 other => {
+                    let typed_source = other.clone();
                     let mut failure = other.into_runtime_error();
                     failure.context = failure.context.with_builtin(self.identity.name());
                     failure.gpu_gather_retry = GpuGatherRetry::Never;
+                    if failure.source.is_none() {
+                        failure.source = Some(Box::new(typed_source));
+                    }
                     failure
                 }
             })
@@ -141,6 +145,17 @@ mod tests {
             QuadratureCooperation::with_budget(QuadratureIdentity::Integral, budget);
         let error = futures::executor::block_on(cooperation.completed(1)).unwrap_err();
         assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:parallel:InfrastructureFailure")
+        );
+        assert!(matches!(
+            error
+                .source
+                .as_ref()
+                .and_then(|source| source.downcast_ref::<ExecutionServiceError>()),
+            Some(ExecutionServiceError::Infrastructure(message)) if message == "lost turn"
+        ));
         source.cancel(CancellationReason::User);
         let cancelled = futures::executor::block_on(cooperation.completed(0)).unwrap_err();
         assert_eq!(cancelled.identifier(), Some("RunMat:Cancelled"));
