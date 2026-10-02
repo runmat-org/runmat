@@ -11,6 +11,7 @@ mod identity;
 mod point_location;
 pub(crate) mod quadrature;
 mod resources;
+mod solid_integration;
 #[cfg(test)]
 pub(crate) mod test_meshes;
 
@@ -26,6 +27,10 @@ pub use finite_volume::{
     FiniteVolumeTopology,
 };
 pub use flow::FlowTopologyProjection;
+pub use solid_integration::{
+    CanonicalSolidIntegrationElement, CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule,
+    SolidIntegrationPlanError,
+};
 
 #[cfg(test)]
 mod tests;
