@@ -67,6 +67,7 @@ pub(super) fn rejected_cpu_feedback(
                         Into::into,
                     ),
                     queue_slots: 0,
+                    peak_live: None,
                 },
                 descriptor: request.cpu.clone(),
                 transactional_results: true,

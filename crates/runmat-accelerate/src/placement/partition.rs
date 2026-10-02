@@ -347,6 +347,16 @@ fn candidate_resource_adjustment_ns(
     let mut adjustment = 0_u64;
     let mut host_peak = host_retained_bytes;
     let mut provider_demands = BTreeMap::<u32, ResourceAccount>::new();
+    if let Some(peak) = demand.peak_live {
+        let incremental = peak
+            .incremental_bytes()
+            .ok_or(ResourceAdmissionError::Overflow)?;
+        if !matches!(location, CandidateExecutionLocation::Provider { .. })
+            || matches!(demand.retained_bytes, runmat_execution::ResourceByteBound::Known(retained) if retained > incremental)
+        {
+            return Err(ResourceAdmissionError::Overflow);
+        }
+    }
     match location {
         CandidateExecutionLocation::Host => {
             if demand.cpu_millicores > resources.cpu_millicores_available {
@@ -368,8 +378,17 @@ fn candidate_resource_adjustment_ns(
             {
                 return Err(ResourceAdmissionError::OverBudget);
             }
+            // A physical peak already includes the published output and any
+            // transient storage. Only the genuinely new portion is compared
+            // with free capacity; scratch is not added a second time.
             let scratch = ResourceAccount::default()
-                .add(demand.scratch_bytes)
+                .add(match demand.peak_live {
+                    Some(peak) => peak
+                        .incremental_bytes()
+                        .ok_or(ResourceAdmissionError::Overflow)?
+                        .into(),
+                    None => demand.scratch_bytes,
+                })
                 .ok_or(ResourceAdmissionError::Overflow)?;
             scratch.within(
                 provider.scratch_available_bytes,
@@ -434,9 +453,11 @@ fn candidate_resource_adjustment_ns(
         }
         CandidateOutputResidency::Provider { device_id } => {
             let retained = provider_demands.entry(device_id).or_default();
-            *retained = retained
-                .add(demand.retained_bytes)
-                .ok_or(ResourceAdmissionError::Overflow)?;
+            if demand.peak_live.is_none() {
+                *retained = retained
+                    .add(demand.retained_bytes)
+                    .ok_or(ResourceAdmissionError::Overflow)?;
+            }
         }
         CandidateOutputResidency::Mirrored { device_id } => {
             host_peak = host_peak

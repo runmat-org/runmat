@@ -785,6 +785,7 @@ mod tests {
                 retained_bytes: retained_bytes.into(),
                 scratch_bytes: 0.into(),
                 queue_slots: if kind.is_provider() { 1 } else { 0 },
+                peak_live: None,
             },
             transactional_results: transactional,
         }

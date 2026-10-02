@@ -49,15 +49,15 @@ pub use identity::{
 };
 pub use placement::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
-    CandidateObservationEvidence, CandidateOutputResidency, CandidatePreparationState,
-    CandidateResourceDemand, EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor,
-    ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate,
-    ObservedCandidateDuration, PlacementDecision, PlacementFeedback, PlacementGraph,
-    PlacementGraphCandidate, PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode,
-    PlacementInvalidation, PlacementPlanRequest, PlacementResourceSnapshot, PlacementRevision,
-    PlacementSignature, ProviderResourceSnapshot, ResourceBoundUnavailable, ResourceByteBound,
-    SelectedExecutionCandidate, WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision,
-    WholeWorkDecisionKind, WholeWorkObservation, WholeWorkObservationOutcome,
+    CandidateObservationEvidence, CandidateOutputResidency, CandidatePeakLiveDemand,
+    CandidatePreparationState, CandidateResourceDemand, EstimateConfidence, EstimateSource,
+    ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
+    ExecutionCostEstimate, ObservedCandidateDuration, PlacementDecision, PlacementFeedback,
+    PlacementGraph, PlacementGraphCandidate, PlacementGraphEdge, PlacementGraphLimits,
+    PlacementGraphNode, PlacementInvalidation, PlacementPlanRequest, PlacementResourceSnapshot,
+    PlacementRevision, PlacementSignature, ProviderResourceSnapshot, ResourceBoundUnavailable,
+    ResourceByteBound, SelectedExecutionCandidate, WholeWorkCandidate, WholeWorkConstraint,
+    WholeWorkDecision, WholeWorkDecisionKind, WholeWorkObservation, WholeWorkObservationOutcome,
     WholeWorkPlacementRequest,
 };
 pub use runmat_types::ProgramFunctionId;

@@ -48,6 +48,7 @@ fn unknown_demand(cpu_millicores: u32, queue_slots: u32) -> CandidateResourceDem
         ),
         scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
         queue_slots,
+        peak_live: None,
     }
 }
 

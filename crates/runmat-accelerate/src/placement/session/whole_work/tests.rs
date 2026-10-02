@@ -53,6 +53,7 @@ fn candidate(kind: ExecutionCandidateKind) -> WholeWorkCandidate {
             retained_bytes: 16.into(),
             scratch_bytes: 8.into(),
             queue_slots: if provider { 1 } else { 0 },
+            peak_live: None,
         },
         transactional_results: true,
     }
@@ -70,6 +71,46 @@ fn host_with_provider_presentation() -> WholeWorkCandidate {
         preparation: CandidatePreparationState::Ready,
     };
     host
+}
+
+#[test]
+fn physical_peak_admits_only_incremental_live_bytes_and_does_not_relabel_scratch() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.resources.scratch_bytes =
+        ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound);
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 112,
+        already_live_bytes: 80,
+    });
+    let mut enough = request(vec![provider.clone()]);
+    enough.resources.providers[0].live_bytes = 80;
+    enough.resources.providers[0].capacity_bytes = Some(112);
+    enough.resources.providers[0].scratch_available_bytes = Some(32);
+    assert!(session.select_whole_work(enough.clone()).is_ok());
+
+    enough.resources.providers[0].capacity_bytes = Some(111);
+    enough.resources.providers[0].scratch_available_bytes = Some(31);
+    assert_eq!(
+        session
+            .select_whole_work(enough)
+            .err()
+            .expect("over budget")
+            .code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 79,
+        already_live_bytes: 80,
+    });
+    assert_eq!(
+        session
+            .select_whole_work(request(vec![provider]))
+            .err()
+            .expect("invalid peak")
+            .code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
 }
 
 fn request(candidates: Vec<WholeWorkCandidate>) -> WholeWorkPlacementRequest {

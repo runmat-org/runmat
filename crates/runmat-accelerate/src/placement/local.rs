@@ -291,6 +291,7 @@ pub(crate) fn plan_local(
                                             Into::into,
                                         ),
                                         queue_slots: 0,
+                                        peak_live: None,
                                     },
                                     descriptor: cpu.clone(),
                                     transactional_results: true,
@@ -316,6 +317,7 @@ pub(crate) fn plan_local(
                                             )
                                         },
                                         queue_slots: 1,
+                                        peak_live: None,
                                     },
                                     descriptor: provider_candidate.clone(),
                                     transactional_results: transactional,

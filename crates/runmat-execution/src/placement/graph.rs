@@ -20,6 +20,22 @@ pub enum ResourceByteBound {
     Unavailable(ResourceBoundUnavailable),
 }
 
+/// A route's simultaneously live provider allocation bound. Unlike scratch,
+/// this may include borrowed inputs and the published output. The already-live
+/// portion is subtracted exactly once from an available-memory comparison.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CandidatePeakLiveDemand {
+    pub peak_bytes: u64,
+    pub already_live_bytes: u64,
+}
+
+impl CandidatePeakLiveDemand {
+    pub fn incremental_bytes(self) -> Option<u64> {
+        self.peak_bytes.checked_sub(self.already_live_bytes)
+    }
+}
+
 impl From<u64> for ResourceByteBound {
     fn from(bytes: u64) -> Self {
         Self::Known(bytes)
@@ -33,6 +49,8 @@ pub struct CandidateResourceDemand {
     pub retained_bytes: ResourceByteBound,
     pub scratch_bytes: ResourceByteBound,
     pub queue_slots: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_live: Option<CandidatePeakLiveDemand>,
 }
 
 impl Default for CandidateResourceDemand {
@@ -44,6 +62,7 @@ impl Default for CandidateResourceDemand {
             ),
             scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
             queue_slots: 0,
+            peak_live: None,
         }
     }
 }

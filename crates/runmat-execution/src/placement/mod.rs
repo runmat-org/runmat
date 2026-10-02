@@ -19,9 +19,9 @@ pub use decision::{
     PlacementSignature, SelectedExecutionCandidate,
 };
 pub use graph::{
-    CandidateResourceDemand, PlacementGraph, PlacementGraphCandidate, PlacementGraphEdge,
-    PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest, ResourceBoundUnavailable,
-    ResourceByteBound,
+    CandidatePeakLiveDemand, CandidateResourceDemand, PlacementGraph, PlacementGraphCandidate,
+    PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest,
+    ResourceBoundUnavailable, ResourceByteBound,
 };
 pub use resource::{PlacementResourceSnapshot, ProviderResourceSnapshot};
 pub use whole_work::{
