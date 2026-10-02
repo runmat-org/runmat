@@ -308,7 +308,7 @@ fn parse_display(text: &str) -> BuiltinResult<OptimDisplay> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Bracket {
     a: f64,
     b: f64,
@@ -477,10 +477,19 @@ async fn expand_bracket(
 
     let mut evals = 1usize;
     let mut step = (x0.abs() * 0.01).max(0.01);
+    let mut previous_interval = None;
     while evals + 2 <= options.max_fun_evals {
         cooperation.completed(1).await?;
-        let a = x0 - step;
-        let b = x0 + step;
+        // A finite initial point may be only one representable step from a
+        // numerical boundary. Search through the finite domain, never pass
+        // an overflowed abscissa to user code, and stop once expansion can
+        // no longer reach a new pair of endpoints.
+        let a = (x0 - step).max(-f64::MAX);
+        let b = (x0 + step).min(f64::MAX);
+        if previous_interval == Some((a, b)) {
+            break;
+        }
+        previous_interval = Some((a, b));
         let fa = call_scalar_function_with_precision(NAME, OptimSolver::Fzero, function, a, single)
             .await?;
         cooperation.completed(1).await?;

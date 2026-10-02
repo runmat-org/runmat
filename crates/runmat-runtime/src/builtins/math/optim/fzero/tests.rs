@@ -230,6 +230,88 @@ fn fzero_scalar_initial_guess_uses_center_sign_for_bracket() {
         other => panic!("unexpected value {other:?}"),
     }
 }
+
+#[test]
+fn scalar_expansion_near_both_finite_extremes_never_calls_nonfinite_abscissa() {
+    for start in [-f64::MAX, f64::MAX, f64::from_bits(1)] {
+        let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
+        let options = FzeroOptions::from_struct(None).unwrap();
+        let bracket = block_on(expand_bracket(
+            &Value::FunctionHandle("sign".into()),
+            start,
+            &options,
+            false,
+            &mut cooperation,
+        ))
+        .unwrap();
+        assert!(bracket.a.is_finite() && bracket.b.is_finite());
+        assert!(
+            bracket.fa == 0.0 || bracket.fb == 0.0 || bracket.fa.signum() != bracket.fb.signum()
+        );
+    }
+    let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
+    let zero = block_on(expand_bracket(
+        &Value::FunctionHandle("sign".into()),
+        0.0,
+        &FzeroOptions::from_struct(None).unwrap(),
+        false,
+        &mut cooperation,
+    ))
+    .unwrap();
+    assert_eq!(zero.evals, 1);
+    assert_eq!(zero.a, 0.0);
+}
+
+#[test]
+fn scalar_expansion_honors_eval_budget_and_stops_at_finite_domain_exhaustion() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |_function, args, requested_outputs| {
+            assert_eq!(requested_outputs, 1);
+            assert!(matches!(&args[0], Value::Num(value) if value.is_finite()));
+            observed.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(1.0)) })
+        },
+    )));
+    let function = Value::BoundFunctionHandle {
+        name: "constant_positive".into(),
+        function: 42,
+    };
+    let mut options = FzeroOptions::from_struct(None).unwrap();
+    options.max_fun_evals = 3;
+    let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
+    let limited = block_on(expand_bracket(
+        &function,
+        f64::MAX,
+        &options,
+        false,
+        &mut cooperation,
+    ))
+    .unwrap_err();
+    assert!(limited
+        .message()
+        .contains("could not find a sign-changing bracket"));
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+    options.max_fun_evals = 500;
+    let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
+    let exhausted = block_on(expand_bracket(
+        &function,
+        f64::MAX,
+        &options,
+        false,
+        &mut cooperation,
+    ))
+    .unwrap_err();
+    assert!(exhausted
+        .message()
+        .contains("could not find a sign-changing bracket"));
+    let total = calls.load(Ordering::SeqCst);
+    assert!(total > 3 && total < 503, "{total}");
+}
 #[test]
 fn fzero_accepts_semantic_function_handle_callback() {
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(

@@ -367,14 +367,14 @@ pub(crate) async fn brent_min(
             q = q.abs();
             let etemp = e;
             e = d;
-            if p.is_finite()
-                && q.is_finite()
+            let proposed = p / q;
+            if proposed.is_finite()
                 && etemp.is_finite()
-                && p.abs() < (0.5 * q * etemp).abs()
-                && p > q * (a - x)
-                && p < q * (b - x)
+                && proposed.abs() < 0.5 * etemp.abs()
+                && proposed > a - x
+                && proposed < b - x
             {
-                d = p / q;
+                d = proposed;
                 let u = x + d;
                 if (u - a) < tol2 || (b - u) < tol2 {
                     d = with_sign(tol1, xm - x);
