@@ -619,6 +619,28 @@ fn bool_option(name: &str, value: &Value) -> BuiltinResult<bool> {
                 ))
             }
         }
+        Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            if let Some(integer) = tensor::scalar_integer_value(value) {
+                match integer.try_to_usize() {
+                    Some(0) => Ok(false),
+                    Some(1) => Ok(true),
+                    _ => Err(integral_error_with_detail(
+                        &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                        format!("option {name} must be logical scalar"),
+                    )),
+                }
+            } else {
+                match tensor::tensor_value_f64(tensor, 0) {
+                    0.0 => Ok(false),
+                    1.0 => Ok(true),
+                    _ => Err(integral_error_with_detail(
+                        &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                        format!("option {name} must be logical scalar"),
+                    )),
+                }
+            }
+        }
         other => Err(integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_ARGUMENT,
             format!("option {name} must be logical scalar, got {other:?}"),
@@ -1273,6 +1295,23 @@ mod tests {
                 panic!("expected array output")
             };
             assert_eq!(result.shape, vec![1, 3]);
+        }
+    }
+
+    #[test]
+    fn scalar_array_flag_values_match_typed_logical_and_numeric_admission() {
+        for flag in [
+            Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).expect("logical scalar")),
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("numeric scalar")),
+        ] {
+            let result = block_on(integral_builtin(
+                Value::FunctionHandle("__integral_array_polynomial".into()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                vec![Value::from("ArrayValued"), flag],
+            ))
+            .expect("array-valued flag");
+            assert!(matches!(result, Value::Tensor(array) if array.shape == [1, 3]));
         }
     }
 
