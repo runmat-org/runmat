@@ -42,8 +42,33 @@ pub struct ProviderIirFilterOptions {
 pub struct ProviderIirFilterResult {
     /// Filtered output tensor, matching the input signal shape.
     pub output: GpuTensorHandle,
-    /// Final conditions for the filter state (same shape as the requested `zi` layout).
+    /// Final conditions in order-first state geometry: filter order followed by
+    /// the signal axes other than the filtered dimension.
     pub final_state: Option<GpuTensorHandle>,
+}
+
+/// Canonical public/provider state geometry. Channel-major state buffers have
+/// physical offset `channel * state_len + state_index`; the dimensions after
+/// the first follow the signal's remaining column-major axis order.
+pub fn provider_iir_state_shape(
+    signal_shape: &[usize],
+    axis: usize,
+    state_len: usize,
+) -> anyhow::Result<Vec<usize>> {
+    anyhow::ensure!(axis < signal_shape.len(), "iir_filter: invalid signal axis");
+    let mut shape = Vec::new();
+    shape.try_reserve_exact(signal_shape.len().max(2))?;
+    shape.push(state_len);
+    shape.extend(
+        signal_shape
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &extent)| (index != axis).then_some(extent)),
+    );
+    if shape.len() == 1 {
+        shape.push(1);
+    }
+    Ok(shape)
 }
 
 /// One admitted zero-phase operation. The provider owns the reflection,
@@ -389,6 +414,17 @@ mod tests {
     use super::*;
     use crate::{AccelDownloadFuture, HostTensorView, NumericElementType};
     use std::sync::{atomic::Ordering, Mutex};
+
+    #[test]
+    fn state_geometry_is_order_first_for_every_filtered_axis() {
+        assert_eq!(provider_iir_state_shape(&[3, 4], 1, 1).unwrap(), vec![1, 3]);
+        assert_eq!(
+            provider_iir_state_shape(&[2, 3, 4], 1, 2).unwrap(),
+            vec![2, 2, 4]
+        );
+        assert_eq!(provider_iir_state_shape(&[3, 4], 0, 2).unwrap(), vec![2, 4]);
+        assert!(provider_iir_state_shape(&[3, 4], 2, 1).is_err());
+    }
 
     struct UploadProvider {
         queued: Mutex<Vec<GpuTensorHandle>>,

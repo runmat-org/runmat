@@ -567,20 +567,6 @@ pub(super) fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
     true
 }
 
-pub(super) fn filter_state_shape(
-    mut base: Vec<usize>,
-    dim_idx: usize,
-    state_len: usize,
-) -> Vec<usize> {
-    if base.len() <= dim_idx {
-        base.extend(std::iter::repeat_n(1, dim_idx + 1 - base.len()));
-    }
-    if !base.is_empty() {
-        base[dim_idx] = state_len;
-    }
-    base
-}
-
 pub(crate) fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => Err(anyhow!(

@@ -270,7 +270,14 @@ impl FilterArgs {
         let order = max(coeffs_b.len, coeffs_a.len);
         let state_len = order.saturating_sub(1);
 
-        let state_shape = filter_state_shape(shape_ext.clone(), dim_idx, state_len);
+        let state_shape =
+            runmat_accelerate_api::provider_iir_state_shape(&shape_ext, dim_idx, state_len)
+                .map_err(|source| {
+                    crate::runtime_error::with_provider_execution_source(
+                        filter_error(&FILTER_ERROR_INTERNAL),
+                        source.into(),
+                    )
+                })?;
 
         let leading = if dim_idx == 0 {
             1
@@ -831,13 +838,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         return Ok(None);
     }
 
-    // Provider state buffers still use the legacy replace-axis layout for
-    // non-leading dimensions. Use the typed host fallback until that ABI is
-    // migrated; dimension one already matches the order-first public layout.
-    if args.dim_idx != 0 {
-        return Ok(None);
-    }
-
     let signal_handle = match args.signal.resident() {
         Some(handle)
             if runmat_accelerate_api::handle_integer_type(handle).is_none()
@@ -1013,12 +1013,7 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
                 ),
             ));
         }
-        states_from_column_major_complex(
-            &args.initial.column_major,
-            args.state_len,
-            args.dim_idx,
-            &args.shape_ext,
-        )
+        args.initial.column_major.clone()
     } else {
         vec![Complex::new(0.0, 0.0); expected_states]
     };
@@ -1078,7 +1073,7 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
     let final_states_column = if args.state_len == 0 {
         Vec::<Complex<f64>>::new()
     } else {
-        states_to_column_major_complex(&states, args.state_len, args.dim_idx, &args.shape_ext)
+        states
     };
 
     let output_value = if args.is_complex {
@@ -1207,40 +1202,6 @@ fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
         }
     }
     true
-}
-
-fn filter_state_shape(base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
-    let mut state_shape = Vec::with_capacity(base.len());
-    state_shape.push(state_len);
-    state_shape.extend(
-        base.into_iter()
-            .enumerate()
-            .filter_map(|(index, extent)| (index != dim_idx).then_some(extent)),
-    );
-    if state_shape.len() == 1 {
-        state_shape.push(1);
-    }
-    state_shape
-}
-
-fn states_from_column_major_complex(
-    data: &[Complex<f64>],
-    state_len: usize,
-    dim_idx: usize,
-    shape_ext: &[usize],
-) -> Vec<Complex<f64>> {
-    let _ = (state_len, dim_idx, shape_ext);
-    data.to_vec()
-}
-
-fn states_to_column_major_complex(
-    states: &[Complex<f64>],
-    state_len: usize,
-    dim_idx: usize,
-    shape_ext: &[usize],
-) -> Vec<Complex<f64>> {
-    let _ = (state_len, dim_idx, shape_ext);
-    states.to_vec()
 }
 
 fn to_real_vec(data: &[Complex<f64>]) -> Option<Vec<f64>> {
@@ -1700,6 +1661,50 @@ pub(crate) mod tests {
         assert_eq!(
             block_on(provider.download(&output)).unwrap().data,
             vec![1.0, 2.0, 3.0, 4.0]
+        );
+        assert!(signal.allocation_lease().validate_live().is_ok());
+    }
+
+    #[test]
+    fn resident_filter_nonleading_axis_preserves_order_first_state_geometry() {
+        let _lock = test_support::accel_test_lock();
+        let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let signal = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[
+                    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+                ],
+                shape: &[3, 4],
+            })
+            .expect("resident matrix");
+        provider.reset_telemetry();
+        let (output, final_state) = evaluate(
+            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+            Value::GpuTensor(signal.clone()),
+            &[
+                Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap()),
+                Value::Num(2.0),
+            ],
+        )
+        .expect("resident nonleading filter")
+        .into_pair();
+        let (Value::GpuTensor(output), Value::GpuTensor(final_state)) = (output, final_state)
+        else {
+            panic!("supported matrix filter must retain output and state on device")
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(final_state.shape(), &[1, 3]);
+        assert_eq!(
+            block_on(provider.download(&output)).unwrap().data,
+            vec![11.0, 22.0, 33.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]
+        );
+        assert_eq!(
+            block_on(provider.download(&final_state)).unwrap().data,
+            vec![0.0; 3]
         );
         assert!(signal.allocation_lease().validate_live().is_ok());
     }

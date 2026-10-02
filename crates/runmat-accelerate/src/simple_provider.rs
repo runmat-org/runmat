@@ -2662,23 +2662,6 @@ fn interp1_out_of_range(extrapolation: ProviderInterp1Extrapolation, fill_value:
     }
 }
 
-fn decode_indices(mut index: usize, dims: &[usize]) -> Vec<usize> {
-    if dims.is_empty() {
-        return Vec::new();
-    }
-    let mut coords = Vec::with_capacity(dims.len());
-    for &dim in dims {
-        if dim == 0 {
-            coords.push(0);
-        } else {
-            let coord = index % dim;
-            coords.push(coord);
-            index /= dim.max(1);
-        }
-    }
-    coords
-}
-
 fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
     let max_len = expected.len().max(actual.len());
     for i in 0..max_len {
@@ -2689,148 +2672,6 @@ fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
         }
     }
     true
-}
-
-fn filter_state_shape(mut base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
-    if base.len() <= dim_idx {
-        base.extend(std::iter::repeat_n(1, dim_idx + 1 - base.len()));
-    }
-    if !base.is_empty() {
-        base[dim_idx] = state_len;
-    }
-    base
-}
-
-fn states_from_column_major(
-    data: &[f64],
-    state_len: usize,
-    dim_idx: usize,
-    shape_ext: &[usize],
-    lane_factor: usize,
-) -> Vec<f64> {
-    if state_len == 0 {
-        return Vec::new();
-    }
-    let dims_before = &shape_ext[..dim_idx];
-    let dims_after = if dim_idx + 1 < shape_ext.len() {
-        &shape_ext[dim_idx + 1..]
-    } else {
-        &[]
-    };
-    let leading = if dims_before.is_empty() {
-        1
-    } else {
-        dims_before.iter().copied().product()
-    };
-    let trailing = if dims_after.is_empty() {
-        1
-    } else {
-        dims_after.iter().copied().product()
-    };
-    let channel_count = leading * trailing;
-    let shape = filter_state_shape(shape_ext.to_vec(), dim_idx, state_len);
-    let mut states = vec![0.0; state_len * channel_count * lane_factor];
-    for channel in 0..channel_count {
-        let before_idx = if dims_before.is_empty() {
-            0
-        } else {
-            channel % leading
-        };
-        let after_idx = if dims_after.is_empty() {
-            0
-        } else {
-            channel / leading
-        };
-        let before_coords = decode_indices(before_idx, dims_before);
-        let after_coords = decode_indices(after_idx, dims_after);
-        for s in 0..state_len {
-            let mut offset = 0usize;
-            let mut stride = 1usize;
-            for (d, size) in shape.iter().copied().enumerate() {
-                let coord = if d < dim_idx {
-                    before_coords.get(d).copied().unwrap_or(0)
-                } else if d == dim_idx {
-                    s
-                } else {
-                    let idx = d - dim_idx - 1;
-                    after_coords.get(idx).copied().unwrap_or(0)
-                };
-                offset += coord * stride;
-                stride *= size;
-            }
-            let state_base = (channel * state_len + s) * lane_factor;
-            let input_base = offset * lane_factor;
-            states[state_base..state_base + lane_factor]
-                .copy_from_slice(&data[input_base..input_base + lane_factor]);
-        }
-    }
-    states
-}
-
-fn states_to_column_major(
-    states: &[f64],
-    state_len: usize,
-    dim_idx: usize,
-    shape_ext: &[usize],
-    lane_factor: usize,
-) -> Vec<f64> {
-    if state_len == 0 {
-        return Vec::new();
-    }
-    let dims_before = &shape_ext[..dim_idx];
-    let dims_after = if dim_idx + 1 < shape_ext.len() {
-        &shape_ext[dim_idx + 1..]
-    } else {
-        &[]
-    };
-    let leading = if dims_before.is_empty() {
-        1
-    } else {
-        dims_before.iter().copied().product()
-    };
-    let trailing = if dims_after.is_empty() {
-        1
-    } else {
-        dims_after.iter().copied().product()
-    };
-    let channel_count = leading * trailing;
-    let shape = filter_state_shape(shape_ext.to_vec(), dim_idx, state_len);
-    let mut out = vec![0.0; states.len()];
-    for channel in 0..channel_count {
-        let before_idx = if dims_before.is_empty() {
-            0
-        } else {
-            channel % leading
-        };
-        let after_idx = if dims_after.is_empty() {
-            0
-        } else {
-            channel / leading
-        };
-        let before_coords = decode_indices(before_idx, dims_before);
-        let after_coords = decode_indices(after_idx, dims_after);
-        for s in 0..state_len {
-            let mut offset = 0usize;
-            let mut stride = 1usize;
-            for (d, size) in shape.iter().copied().enumerate() {
-                let coord = if d < dim_idx {
-                    before_coords.get(d).copied().unwrap_or(0)
-                } else if d == dim_idx {
-                    s
-                } else {
-                    let idx = d - dim_idx - 1;
-                    after_coords.get(idx).copied().unwrap_or(0)
-                };
-                offset += coord * stride;
-                stride *= size;
-            }
-            let output_base = offset * lane_factor;
-            let state_base = (channel * state_len + s) * lane_factor;
-            out[output_base..output_base + lane_factor]
-                .copy_from_slice(&states[state_base..state_base + lane_factor]);
-        }
-    }
-    out
 }
 
 fn permute_data<T: Copy + Default>(
@@ -7329,7 +7170,8 @@ impl AccelProvider for InProcessProvider {
             let na = a_data.len();
             let order = nb.max(na);
             let state_len = order.saturating_sub(1);
-            let state_shape = filter_state_shape(shape_ext.clone(), dim_idx, state_len);
+            let state_shape =
+                runmat_accelerate_api::provider_iir_state_shape(&shape_ext, dim_idx, state_len)?;
             let expected_states = state_len.saturating_mul(channel_count);
             let expected_state_lanes = expected_states
                 .checked_mul(lane_factor)
@@ -7362,7 +7204,7 @@ impl AccelProvider for InProcessProvider {
                     expected_state_lanes,
                     zi_buf.len()
                 );
-                states_from_column_major(zi_buf, state_len, dim_idx, &shape_ext, lane_factor)
+                zi_buf.clone()
             } else {
                 vec![0.0; expected_state_lanes]
             };
@@ -7448,11 +7290,7 @@ impl AccelProvider for InProcessProvider {
                 }
             }
 
-            let final_state_data = if state_len == 0 {
-                Vec::new()
-            } else {
-                states_to_column_major(&states, state_len, dim_idx, &shape_ext, lane_factor)
-            };
+            let final_state_data = if state_len == 0 { Vec::new() } else { states };
 
             let output_handle = self.allocate_produced(
                 iir::output_payload(output, signal_physical)?,

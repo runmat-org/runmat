@@ -1051,7 +1051,8 @@ impl WgpuProvider {
             "iir_filter: tensors exceed supported rank for GPU kernel"
         );
 
-        let state_shape = filter_state_shape(shape_ext.clone(), dim_idx, state_len);
+        let state_shape =
+            runmat_accelerate_api::provider_iir_state_shape(&shape_ext, dim_idx, state_len)?;
         ensure!(
             state_shape.len() <= crate::backend::wgpu::params::FILTER_MAX_RANK,
             "iir_filter: filter state rank exceeds GPU limits"
@@ -3594,6 +3595,76 @@ mod tests {
             assert_eq!(final_state.shape, vec![1, 1]);
             assert_eq!(final_state.data, vec![3.0, 30.0]);
         });
+    }
+
+    #[test]
+    fn iir_filter_nonleading_axis_uses_order_first_state_geometry() {
+        let Some(()) = with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 0.0],
+                    shape: &[1, 2],
+                })
+                .expect("numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 0.0],
+                    shape: &[1, 2],
+                })
+                .expect("denominator");
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[
+                        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+                    ],
+                    shape: &[3, 4],
+                })
+                .expect("matrix signal");
+            let zi = provider
+                .upload(&HostTensorView {
+                    data: &[10.0, 20.0, 30.0],
+                    shape: &[1, 3],
+                })
+                .expect("order-first initial state");
+            provider.reset_telemetry();
+            let result = pollster::block_on(provider.iir_filter(
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                    numerator: &b,
+                    denominator: &a,
+                },
+                &x,
+                ProviderIirFilterOptions {
+                    dim: 1,
+                    zi: Some(zi.clone()),
+                },
+            ))
+            .expect("resident nonleading filter");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            let final_state = result.final_state.expect("final state");
+            assert_eq!(final_state.shape(), &[1, 3]);
+            let actual = pollster::block_on(provider.download(&result.output)).unwrap();
+            let state = pollster::block_on(provider.download(&final_state)).unwrap();
+            assert_eq!(actual.shape, vec![3, 4]);
+            assert_eq!(actual.data.len(), 12);
+            for (got, want) in actual.data.iter().zip([
+                11.0, 22.0, 33.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ]) {
+                assert!((got - want).abs() < 1.0e-5);
+            }
+            assert_eq!(state.shape, vec![1, 3]);
+            assert_eq!(state.data.len(), 3);
+            assert!(state.data.iter().all(|value| value.abs() < 1.0e-5));
+            assert!(x.allocation_lease().validate_live().is_ok());
+            result.output.release().unwrap();
+            final_state.release().unwrap();
+            zi.release().unwrap();
+            x.release().unwrap();
+            a.release().unwrap();
+            b.release().unwrap();
+        }) else {
+            eprintln!("WGPU adapter unavailable: nonleading IIR hardware witness not executed");
+            return;
+        };
     }
 
     #[test]
