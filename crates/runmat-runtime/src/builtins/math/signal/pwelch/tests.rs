@@ -233,8 +233,17 @@ fn parent_name_value_uses_existing_axes_identity_only() {
 
 #[test]
 fn descriptor_is_registered() {
-    let builtin = builtin_function_by_name(BUILTIN_NAME).expect("pwelch builtin");
-    let descriptor = builtin.descriptor.expect("descriptor");
+    let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+        .expect("canonical pwelch identity");
+    assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+    assert_eq!(builtin.bindings.len(), 1);
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(
+        bindings[0].identity,
+        builtin.binding_identity(&builtin.bindings[0])
+    );
+    let descriptor = builtin.descriptor;
     assert!(descriptor
         .signatures
         .iter()
@@ -607,6 +616,7 @@ fn resident_scalar_controls_are_decoded_as_structural_values_once() {
 
 #[test]
 fn known_invalid_host_control_precedes_resident_control_access() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     test_support::with_test_provider(|provider| {
         let window = Tensor::new_integer(IntegerStorage::U16(vec![8]), vec![1, 1]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &window).expect("upload control");
