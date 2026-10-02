@@ -63,7 +63,7 @@ fn fminbnd_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
         err
     } else {
         let mut mapped = fminbnd_error_with_detail(fallback, err.message());
-        mapped.span = err.span.clone();
+        mapped.span = err.span;
         mapped.context = err.context.clone();
         mapped.context.builtin = Some(NAME.to_string());
         mapped.gpu_gather_retry = err.gpu_gather_retry;

@@ -34,7 +34,7 @@ pub(super) fn preflight_signal_carrier(value: &Value) -> BuiltinResult<bool> {
         _ => return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL)),
     };
     if let Some(shape) = shape {
-        if shape.len() > 2 || shape.iter().any(|extent| *extent == 0) {
+        if shape.len() > 2 || shape.contains(&0) {
             return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
         }
     }

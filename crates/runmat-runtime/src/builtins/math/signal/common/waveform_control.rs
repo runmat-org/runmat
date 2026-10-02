@@ -49,7 +49,7 @@ impl<'a> PreparedWaveformControl<'a> {
         } = self
         {
             cooperation
-                .prepare_integer_boundary(*value, *extension, *role)
+                .prepare_integer_boundary(value, extension, role)
                 .await
                 .map_err(WaveformControlError::Boundary)?;
             *boundary_admitted = true;
