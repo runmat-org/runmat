@@ -18,3 +18,4 @@ pub use static_balance::StructuralStaticBalanceEvidence;
 pub(crate) use static_balance::{recover_structural_static_balance, StructuralStaticBalance};
 mod symmetric_eigen;
 pub mod transient;
+pub mod uniqueness;

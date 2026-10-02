@@ -1,4 +1,5 @@
 //! Independent dense complex oracle for genuinely free phased pressure DOFs.
+mod uniqueness;
 
 use super::{solve, AcousticAssembly, AcousticHarmonicPolicy};
 use crate::{

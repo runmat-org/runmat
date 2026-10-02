@@ -37,3 +37,42 @@ scale changes by 1e±120, shared ILU as a candidate, inadequate candidates for a
 invertible matrix, overflow/cancellation-sensitive entries, exact inventory and
 pre-allocation admission, and cold operator revalidation. They are shared algebra
 evidence, not an acoustic cavity resonance or whole native execution witness.
+
+## Shared candidate provider and actual acoustic discriminator
+
+`solve::uniqueness::certify_sparse_uniqueness` constructs candidate columns with
+the existing shared fixed-support right ILU and restarted GMRES. It does not use
+a physical source or change physical solve tolerances. Its explicit candidate
+policy bounds each column's Krylov work. Factor failure or an unsuccessful column
+is `Indeterminate`; no failed factorization is mislabeled singular. The completed
+candidate must still pass the independent outward check above. Cancellation never
+produces a certificate.
+
+The shared count-only/actual-operator envelope covers all candidate columns,
+factor setup, repeated operator/triangular application, Krylov dots/updates, proof,
+coexisting factor/vector/identity storage. It excludes the original borrowed CSR.
+Admission occurs before factorization. This is a component demand, not yet a
+governed whole-task reservation, measured usage or an acoustic execution receipt.
+
+On original canonical matched ducts (Tet4/Tet10, cells1/2/4), ILU-only candidates
+have outward defects2.30–5.84 and cannot prove uniqueness. A test candidate policy
+uses tolerance1/(16n), restart64 and at most128 iterations per original column;
+these are diagnostic construction limits, not a replacement physical target.
+The corrected candidates pass all six original cases at outward defects
+0.00235–0.01127, using83–41183 actual total iterations. The finest Tet10 case
+has1458 real-block DOFs and35652 retained entries; outward defect0.00234678.
+The component's requested additional storage is8742928 bytes, excluding original
+CSR; worst-case work reservation750029617920 scalar units is conservative, not
+a measured operation count or wall-time forecast. Full task lifetime/usage remains
+unverified. The actual full matrix was checked, not sampled columns or a dense
+small-case substitute.
+
+For a unit canonical Tet4 in a rigid lossless fluid, consistent simplex integrals
+give the independent antisymmetric mode[0,1,−1,0] at omega²=20c²=80. Its actual
+operator action is near roundoff; the old homogeneous solve accepts zero residual.
+Neither candidate method establishes uniqueness there. Floating representation
+may move an exact mathematical pole, so the diagnostic stays indeterminate rather
+than claiming exact floating-matrix rank from a small null-vector residual.
+
+Authored result/accuracy/receipt/publication, full task admission, cold diagnostic
+transport and independent continuum cavity/conditioning evidence remain required.
