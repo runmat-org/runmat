@@ -37,7 +37,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
 
-    let output = output_fact(request, &mut diagnostics);
+    let output = output_fact(request, &diagnostics);
     let mut contract =
         CallContract::fixed(vec![output.clone(), final_state_fact(request, &output)]);
     // The runtime may pad surplus language outputs, but they are not numerical
@@ -81,20 +81,19 @@ fn validate_numeric_operand(
             index,
         ));
     }
-    if index < 2 {
-        if value.shape.element_count() == Some(0)
-            || matches!(&value.shape, ShapeFact::Shaped { dims } if dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(extent) if *extent > 1)).count() > 1)
-        {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-FILTER-COEFFICIENTS",
-                "filter coefficients must be nonempty vectors",
-                index,
-            ));
-        }
+    if index < 2
+        && (value.shape.element_count() == Some(0)
+            || matches!(&value.shape, ShapeFact::Shaped { dims } if dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(extent) if *extent > 1)).count() > 1))
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-FILTER-COEFFICIENTS",
+            "filter coefficients must be nonempty vectors",
+            index,
+        ));
     }
 }
 
-fn output_fact(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnostic>) -> ValueFact {
+fn output_fact(request: &CallRequest, diagnostics: &[InferenceDiagnostic]) -> ValueFact {
     let Some(signal) = request.arguments.get(2) else {
         return ValueFact::unknown(DynamicReason::RuntimeValue);
     };
