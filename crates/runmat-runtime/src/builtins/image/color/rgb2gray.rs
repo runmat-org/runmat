@@ -289,6 +289,15 @@ mod tests {
     }
 
     #[test]
+    fn one_pixel_single_grayscale_publishes_double_scalar() {
+        let rgb = Tensor::from_f32(vec![1.0, 0.0, 0.0], vec![1, 1, 3]).unwrap();
+        let Value::Num(value) = call(Value::Tensor(rgb)) else {
+            panic!("one-pixel single result is a double scalar");
+        };
+        assert_eq!(value, 0.298_936_021_293_775_f64 as f32 as f64);
+    }
+
+    #[test]
     fn preserves_2d_shape() {
         let rgb = Tensor::new(vec![1.0; 12], vec![2, 2, 3]).unwrap();
         let Value::Tensor(out) = call(Value::Tensor(rgb)) else {

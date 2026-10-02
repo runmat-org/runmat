@@ -136,7 +136,17 @@ pub(super) fn infer(
             0,
         ));
     }
+    let shape = output_shape(
+        &input.map_or(ShapeFact::Unknown, |fact| fact.shape.clone()),
+        geometry,
+        conversion,
+    );
     let output_class = match conversion {
+        RgbConversion::Gray if class == Some(NumericClass::Single) => match shape.element_count() {
+            Some(1) => Some(NumericClass::Double),
+            Some(_) => Some(NumericClass::Single),
+            None => None,
+        },
         RgbConversion::Gray => class,
         RgbConversion::Hsv => class.map(|class| {
             if class == NumericClass::Single {
@@ -152,11 +162,6 @@ pub(super) fn infer(
             domain: NumericDomain::Real,
         })
     });
-    let shape = output_shape(
-        &input.map_or(ShapeFact::Unknown, |fact| fact.shape.clone()),
-        geometry,
-        conversion,
-    );
     let storage = match shape.element_count() {
         Some(1) => StorageFact::Scalar,
         Some(_) => StorageFact::Dense,

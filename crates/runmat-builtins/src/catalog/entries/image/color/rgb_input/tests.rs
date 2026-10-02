@@ -102,6 +102,24 @@ fn singleton_truecolor_grayscale_is_scalar_and_unknown_shape_stays_unknown() {
     );
     assert_eq!(singleton.outputs[0].shape, ShapeFact::Scalar);
     assert_eq!(singleton.outputs[0].storage, StorageFact::Scalar);
+    let single_pixel = call(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(1), Some(1), Some(3)]),
+        RgbConversion::Gray,
+    );
+    assert_eq!(
+        single_pixel.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    );
+    let uncertain_single = call(
+        NumericClass::Single,
+        ShapeFact::Ranked { rank: 3 },
+        RgbConversion::Gray,
+    );
+    assert_eq!(uncertain_single.outputs[0].kind, ValueKindFact::Unknown);
     let unknown = call(NumericClass::Double, ShapeFact::Unknown, RgbConversion::Hsv);
     assert_eq!(unknown.outputs[0].shape, ShapeFact::Unknown);
 }

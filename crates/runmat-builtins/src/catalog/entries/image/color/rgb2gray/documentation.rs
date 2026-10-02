@@ -11,7 +11,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Classes and geometry", paragraphs: &[
             "Truecolor input must be a nonempty M-by-N-by-3 single, double, uint8, or uint16 array. A nonempty N-by-3 colormap is accepted only in double. Empty images, logical data, signed and wide unsigned integers, complex values, and other shapes reject.",
             "Red, green, and blue use weights 0.298936021293775, 0.587043074451121, and 0.114020904255103. Truecolor output has M-by-N shape; a double colormap yields N-by-3 equal grayscale columns. A one-pixel truecolor output is published as a scalar.",
-            "Single/double truecolor output retains its input class. uint8/uint16 output retains its integer class using nearest rounding with ties away from zero and saturation.",
+            "Multi-pixel single/double truecolor output retains its input class; the one-pixel single result is published as a double scalar. uint8/uint16 output retains its integer class using nearest rounding with ties away from zero and saturation.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
             "Supported resident input is checked by owner, class, and shape before download. The host conversion is a fusion boundary and restores a numeric result through the original provider when possible; explicit device intent is preserved or fails. The call can suspend and throw.",
