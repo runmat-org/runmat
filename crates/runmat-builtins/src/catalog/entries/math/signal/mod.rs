@@ -2,6 +2,9 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod blackman;
+mod conv;
+mod conv2;
+mod deconv;
 mod gauspuls;
 mod hamming;
 mod hann;
@@ -17,6 +20,9 @@ mod tripuls;
 mod window_facts;
 
 pub use self::blackman::*;
+pub use self::conv::*;
+pub use self::conv2::*;
+pub use self::deconv::*;
 pub use self::gauspuls::*;
 pub use self::hamming::*;
 pub use self::hann::*;
@@ -31,6 +37,9 @@ pub use self::tripuls::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(blackman::ENTRIES.iter().copied());
+    values.extend(conv::ENTRIES.iter().copied());
+    values.extend(conv2::ENTRIES.iter().copied());
+    values.extend(deconv::ENTRIES.iter().copied());
     values.extend(gauspuls::ENTRIES.iter().copied());
     values.extend(hamming::ENTRIES.iter().copied());
     values.extend(hann::ENTRIES.iter().copied());
