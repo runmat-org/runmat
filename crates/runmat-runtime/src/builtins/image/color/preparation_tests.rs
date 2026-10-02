@@ -43,6 +43,7 @@ struct Service {
     events: Events,
     pause: bool,
     replacement: Option<Value>,
+    map_replacement: Option<Value>,
 }
 impl RuntimeAccelerationService for Service {
     fn supports_operation(&self, operation: &str) -> bool {
@@ -72,6 +73,9 @@ impl RuntimeAccelerationService for Service {
         if let Some(replacement) = &self.replacement {
             operands[0] = replacement.clone();
         }
+        if let Some(replacement) = &self.map_replacement {
+            operands[1] = replacement.clone();
+        }
         let prepared =
             PreparedBuiltinOperands::new(operands, Some(Box::new(Observer(self.events.clone()))));
         let pause = self.pause;
@@ -93,6 +97,15 @@ fn enter_with_replacement(
     pause: bool,
     replacement: Option<Value>,
 ) -> RuntimeContextGuard {
+    enter_with_replacements(events, pause, replacement, None)
+}
+
+fn enter_with_replacements(
+    events: &Events,
+    pause: bool,
+    replacement: Option<Value>,
+    map_replacement: Option<Value>,
+) -> RuntimeContextGuard {
     RuntimeContextGuard::enter(
         RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
             .with_service_ports(RuntimeServicePorts::default().with_acceleration(Rc::new(
@@ -100,6 +113,7 @@ fn enter_with_replacement(
                     events: events.clone(),
                     pause,
                     replacement,
+                    map_replacement,
                 },
             ))),
     )
@@ -238,6 +252,61 @@ fn indexed_color_two_operand_form_observes_once_and_invalid_host_index_does_not_
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:ind2rgb:InvalidColormap"));
     assert!(events.borrow().is_empty());
+}
+
+#[test]
+fn scalar_index_uses_two_operand_preparation_and_prepared_resident_map_once() {
+    use crate::builtins::common::{gpu_helpers, test_support};
+    use runmat_value::IntValue;
+
+    test_support::with_test_provider(|provider| {
+        let original = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
+        let map = gpu_helpers::upload_tensor(provider, &original).unwrap();
+        let prepared = Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap());
+        for index in [
+            Value::Num(1.0),
+            Value::Int(IntValue::U8(0)),
+            Value::Int(IntValue::U16(0)),
+        ] {
+            let events = Events::default();
+            let _context = enter_with_replacements(&events, false, None, Some(prepared.clone()));
+            provider.reset_telemetry();
+            let output = block_on(dispatcher::call_builtin_async(
+                "ind2rgb",
+                &[index, Value::GpuTensor(map.clone())],
+            ))
+            .unwrap();
+            let Value::GpuTensor(output) = output else {
+                panic!("resident map must restore a resident RGB result");
+            };
+            assert_eq!(output.shape(), &[1, 1, 3]);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(output))
+                    .unwrap()
+                    .materialize_f64(),
+                vec![0.0, 1.0, 0.0]
+            );
+            assert!(map.allocation_lease().validate_live().is_ok());
+        }
+
+        for invalid in [Value::Num(f64::NAN), Value::Num(1.5)] {
+            let events = Events::default();
+            let _context = enter(&events, false);
+            provider.reset_telemetry();
+            let error = block_on(dispatcher::call_builtin_async(
+                "ind2rgb",
+                &[invalid, Value::GpuTensor(map.clone())],
+            ))
+            .unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:ind2rgb:InvalidIndex"));
+            assert!(events.borrow().is_empty());
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+            assert!(map.allocation_lease().validate_live().is_ok());
+        }
+    });
 }
 
 #[test]

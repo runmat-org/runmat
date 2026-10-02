@@ -9,7 +9,7 @@ use runmat_builtins::{
 #[cfg(test)]
 use runmat_builtins::{BuiltinIntegerInputAvailability, IND2RGB_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericDType, Value};
+use runmat_value::{IntValue, NumericDType, Value};
 
 use crate::builtins::image::color::common;
 use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
@@ -96,6 +96,19 @@ async fn ind2rgb_builtin(indexed: Value, map: Value, rest: Vec<Value>) -> Builti
 
 fn admit_inputs(indexed: &Value, map: &Value) -> BuiltinResult<bool> {
     let indexed_admitted = match indexed {
+        Value::Num(value) => {
+            if !value.is_finite() || value.fract() != 0.0 {
+                return Err(ind2rgb_error(&IND2RGB_ERROR_INVALID_INDEX));
+            }
+            true
+        }
+        Value::Int(IntValue::U8(_) | IntValue::U16(_)) => true,
+        Value::Int(value) => {
+            return Err(ind2rgb_error_with_message(
+                format!("ind2rgb: {} indexed image is not supported; expected single, double, uint8, or uint16", value.class_name()),
+                &IND2RGB_ERROR_INVALID_INPUT,
+            ));
+        }
         Value::Tensor(tensor) => {
             if tensor.shape.len() != 2 {
                 return Err(ind2rgb_error_with_message(
