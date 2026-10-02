@@ -2,12 +2,9 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, TRIPULS_ERROR_ARG_COUNT, TRIPULS_ERROR_INTERNAL,
+    TRIPULS_ERROR_INVALID_INPUT, TRIPULS_ERROR_SKEW_INVALID, TRIPULS_ERROR_WIDTH_INVALID,
+    TRIPULS_GPU_INPUT_EXTENSION, TRIPULS_INTEGER_CONTROL_EXTENSION, TRIPULS_INTEGER_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericStorage;
@@ -15,205 +12,9 @@ use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::signal::type_resolvers::numeric_unary_shape_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tripuls";
-
-const TRIPULS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Triangular pulse samples.",
-}];
-
-const TRIPULS_INPUTS_T: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "T",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sample times relative to the pulse center.",
-}];
-
-const TRIPULS_INPUTS_T_W: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "T",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times relative to the pulse center.",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Pulse width.",
-    },
-];
-
-const TRIPULS_INPUTS_T_W_S: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "T",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times relative to the pulse center.",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Pulse width.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
-        description: "Skew in [-1, 1].",
-    },
-];
-
-const TRIPULS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = tripuls(T)",
-        inputs: &TRIPULS_INPUTS_T,
-        outputs: &TRIPULS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = tripuls(T, W)",
-        inputs: &TRIPULS_INPUTS_T_W,
-        outputs: &TRIPULS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = tripuls(T, W, S)",
-        inputs: &TRIPULS_INPUTS_T_W_S,
-        outputs: &TRIPULS_OUTPUT,
-    },
-];
-
-const TRIPULS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.INVALID_INPUT",
-    identifier: Some("RunMat:tripuls:InvalidInput"),
-    when: "Input times cannot be interpreted as real numeric samples.",
-    message: "tripuls: expected real numeric input",
-};
-
-const TRIPULS_ERROR_WIDTH_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.WIDTH_INVALID",
-    identifier: Some("RunMat:tripuls:WidthInvalid"),
-    when: "Width is not a positive finite scalar.",
-    message: "tripuls: width must be a positive finite scalar",
-};
-
-const TRIPULS_ERROR_SKEW_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.SKEW_INVALID",
-    identifier: Some("RunMat:tripuls:SkewInvalid"),
-    when: "Skew is not a finite scalar in [-1, 1].",
-    message: "tripuls: skew must be a finite scalar in [-1, 1]",
-};
-
-const TRIPULS_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.ARG_COUNT",
-    identifier: Some("RunMat:tripuls:ArgCount"),
-    when: "Too many input arguments are provided.",
-    message: "tripuls: expected 1, 2, or 3 arguments",
-};
-
-const TRIPULS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.INTERNAL",
-    identifier: Some("RunMat:tripuls:InternalError"),
-    when: "Internal tensor construction or GPU gather fails.",
-    message: "tripuls: internal error",
-};
-
-const TRIPULS_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    TRIPULS_ERROR_INVALID_INPUT,
-    TRIPULS_ERROR_WIDTH_INVALID,
-    TRIPULS_ERROR_SKEW_INVALID,
-    TRIPULS_ERROR_ARG_COUNT,
-    TRIPULS_ERROR_INTERNAL,
-];
-
-pub const TRIPULS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRIPULS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TRIPULS_ERRORS,
-};
-
-const TRIPULS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tripuls-integer-sample-times",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tripuls with native typed-integer sample times is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TripulsIntegerSampleTimesExtension"),
-};
-const TRIPULS_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tripuls-integer-controls",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tripuls with native typed-integer width or skew is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TripulsIntegerControlsExtension"),
-};
-const TRIPULS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tripuls-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interactive tripuls gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TripulsGpuInputExtension"),
-};
-pub const TRIPULS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    TRIPULS_INTEGER_DATA_EXTENSION,
-    TRIPULS_INTEGER_CONTROL_EXTENSION,
-    TRIPULS_GPU_INPUT_EXTENSION,
-];
-const TRIPULS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "T",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented sample-time domain is single or double. RunMat mode admits typed integers only when every value is exactly representable at the binary64 pulse boundary.",
-    }];
-const TRIPULS_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "W",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed width is a mode-gated scalar and must convert exactly before positive-range validation.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "S",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed skew is a mode-gated scalar and must convert exactly before validation in the closed interval from -1 through 1.",
-    },
-];
-pub const TRIPULS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = tripuls(integer_T, ...)",
-        inputs: &TRIPULS_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Compatibility and exactness checks occur before provider access; admitted integer samples produce a same-shaped double waveform.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = tripuls(T, integer_W, integer_S?)",
-        inputs: &TRIPULS_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Width and skew cross checked scalar binary64 boundaries; output shape, class, and residency follow the supported sample-time path.",
-    },
-];
 
 fn tripuls_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     tripuls_error_with_message(error.message, error)
@@ -325,13 +126,7 @@ pub(crate) fn validate_skew(skew: f64) -> Result<f64, String> {
 
 #[runtime_builtin(
     name = "tripuls",
-    category = "math/signal",
-    summary = "Generate sampled triangular pulses.",
-    keywords = "tripuls,triangular pulse,pulse train,signal processing,skew",
-    type_resolver(numeric_unary_shape_type),
-    descriptor(crate::builtins::math::signal::tripuls::TRIPULS_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::tripuls::TRIPULS_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::tripuls::TRIPULS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::tripuls"
 )]
 async fn tripuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -592,6 +387,14 @@ mod tests {
 
     #[test]
     fn tripuls_is_registered() {
-        assert!(builtin_function_by_name("tripuls").is_some());
+        let entry = runmat_builtins::builtin_catalog_entry_by_name("tripuls").unwrap();
+        assert!(builtin_function_by_name("tripuls").is_none());
+        assert_eq!(entry.bindings.len(), 1);
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name("tripuls");
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
     }
 }
