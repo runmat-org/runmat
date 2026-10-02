@@ -198,6 +198,27 @@ mod tests {
     }
 
     #[test]
+    fn control_object_type_is_not_a_supported_property() {
+        let _guard = setup();
+        let controls = [
+            crate::builtins::plotting::zoom::zoom_builtin(Vec::new()).expect("zoom object"),
+            crate::builtins::plotting::pan::pan_builtin(Vec::new()).expect("pan object"),
+            crate::builtins::plotting::datacursormode::datacursormode_builtin(Vec::new())
+                .expect("data cursor object"),
+        ];
+        for control in controls {
+            let error = get_builtin(vec![control.clone(), Value::String("Type".into())])
+                .expect_err("control Type property is not exposed");
+            assert!(error.message.contains("unsupported"));
+            assert!(matches!(
+                get_builtin(vec![control, Value::String("Enable".into())])
+                    .expect("shared supported control property"),
+                Value::String(value) if value == "on" || value == "off"
+            ));
+        }
+    }
+
+    #[test]
     fn get_typed_integer_graphics_aliases_are_gated_before_lookup() {
         assert_eq!(GET_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);

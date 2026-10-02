@@ -7,6 +7,7 @@ use runmat_types::*;
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     let mut handle_class_known = true;
+    let mut known_control = false;
     if request.arguments.is_empty() || request.arguments.len() > 2 {
         diagnostics.push(argument_error(
             "RM-CATALOG-GET-ARITY",
@@ -29,7 +30,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ValueKindFact::Object(object) => {
                 match (object.runtime_class.as_ref(), object.handle_semantics) {
                     (Some(identity), Some(true)) => {
-                        !standard::is_graphics_property_control(identity)
+                        known_control = standard::is_graphics_property_control(identity);
+                        !known_control
                     }
                     (Some(_), Some(false)) => true,
                     _ => {
@@ -70,16 +72,24 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
+    let literal_property = request.literals.literal_string_at(1);
+    if known_control && literal_property.is_some_and(|name| name.eq_ignore_ascii_case("Type")) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-GET-PROPERTY",
+            "graphics control objects do not expose a Type property",
+            1,
+        ));
+    }
     let mut output = if request.arguments.len() == 1 && handle_class_known {
         ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
             Default::default(),
             false,
         )))
     } else if handle_class_known
-        && request
-            .literals
-            .literal_string_at(1)
-            .is_some_and(|name| name.eq_ignore_ascii_case("Type"))
+        && literal_property.is_some_and(|name| {
+            (!known_control && name.eq_ignore_ascii_case("Type"))
+                || (known_control && name.eq_ignore_ascii_case("Enable"))
+        })
     {
         ValueFact::scalar(ValueKindFact::String)
     } else {

@@ -79,8 +79,61 @@ fn get_accepts_known_graphics_control_object_and_keeps_unknown_object_conservati
         unknown.outputs[0].certainty,
         CertaintyFact::Dynamic(_)
     ));
+    let unknown_type = infer(
+        vec![object(None), ValueFact::scalar(ValueKindFact::String)],
+        vec![LiteralValue::Unknown, LiteralValue::String("Type".into())],
+    );
+    assert!(unknown_type.diagnostics.is_empty());
+    assert!(matches!(
+        unknown_type.outputs[0].certainty,
+        CertaintyFact::Dynamic(_)
+    ));
     let unrelated = infer(vec![object(Some(standard::TABLE.owned()))], vec![]);
     assert!(!unrelated.diagnostics.is_empty());
+}
+
+#[test]
+fn control_object_type_is_rejected_and_shared_enable_is_string() {
+    for class in [
+        standard::ZOOM_CONTROL,
+        standard::PAN_CONTROL,
+        standard::DATA_CURSOR_CONTROL,
+    ] {
+        let handle = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(class.owned()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }));
+        let name = ValueFact::scalar(ValueKindFact::String);
+        let type_result = infer(
+            vec![handle.clone(), name.clone()],
+            vec![LiteralValue::Unknown, LiteralValue::String("Type".into())],
+        );
+        assert!(!type_result.diagnostics.is_empty());
+        assert!(matches!(
+            type_result.outputs[0].certainty,
+            CertaintyFact::Dynamic(_)
+        ));
+        let enable = infer(
+            vec![handle.clone(), name.clone()],
+            vec![LiteralValue::Unknown, LiteralValue::String("Enable".into())],
+        );
+        assert!(enable.diagnostics.is_empty());
+        assert_eq!(enable.outputs[0].kind, ValueKindFact::String);
+        let other = infer(
+            vec![handle, name],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("NotAProperty".into()),
+            ],
+        );
+        assert!(matches!(
+            other.outputs[0].certainty,
+            CertaintyFact::Dynamic(_)
+        ));
+    }
 }
 
 #[test]

@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Behavior",
             paragraphs: &[
                 "`get(h)` returns a struct of the known properties for the selected graphics handle. `get(h, 'PropertyName')` returns one property value; unsupported properties raise a plotting error.",
-                "Figure, axes, text, legend, and child plot objects expose different fields. Axes-local fields include limits, scale modes, legend visibility, and text metadata. The returned property payload keeps its stored class, including integer data.",
+                "Figure, axes, text, legend, and child plot objects expose different fields. Zoom, pan, and data-cursor control objects expose controls such as `Enable`, but do not expose a universal `Type` field. Axes-local fields include limits, scale modes, legend visibility, and text metadata. The returned property payload keeps its stored class, including integer data.",
                 "Typed integer aliases for RunMat's numeric graphics handles require RunMat compatibility mode and exact representability. The documented compatibility surface is graphics objects, not arbitrary numeric arrays.",
             ],
         },
