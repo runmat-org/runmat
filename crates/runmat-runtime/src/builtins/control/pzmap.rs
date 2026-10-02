@@ -1,16 +1,20 @@
 //! Pole-zero map plotting and extraction for SISO transfer-function and state-space models.
 
 use num_complex::Complex64;
+#[cfg(feature = "plot-core")]
+use runmat_builtins::PZMAP_ERROR_PLOT_FAILED;
 use runmat_builtins::{
     BuiltinErrorDescriptor, PZMAP_ERROR_INTERNAL, PZMAP_ERROR_INVALID_ARGUMENT,
-    PZMAP_ERROR_INVALID_MODEL, PZMAP_ERROR_PLOT_FAILED, PZMAP_ERROR_UNSUPPORTED_MODEL,
+    PZMAP_ERROR_INVALID_MODEL, PZMAP_ERROR_UNSUPPORTED_MODEL,
 };
 #[cfg(test)]
 use runmat_builtins::{
     BuiltinIntegerInputAvailability, PZMAP_DESCRIPTOR, PZMAP_INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Tensor, Value};
+#[cfg(any(feature = "plot-core", test))]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -18,8 +22,10 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::control::model_polynomial::ss_object_to_tf_async;
 use crate::builtins::control::tf_model::{output_complex_column, TfModel, SS_CLASS, TF_CLASS};
-use crate::builtins::plotting::state::presentation_failure_kind;
+#[cfg(feature = "plot-core")]
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
+#[cfg(feature = "plot-core")]
+use crate::plotting_hooks::{presentation_failed, with_render_cause};
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "pzmap";
@@ -100,6 +106,7 @@ fn is_plot_form_call() -> bool {
             && crate::output_count::current_output_count().is_none())
 }
 
+#[cfg(feature = "plot-core")]
 async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
     let mut systems = vec![(first_sys, None)];
     for arg in rest {
@@ -140,10 +147,17 @@ async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> Bui
     render_pole_zero_map_args(args).await
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn plot_pole_zero_map_statement(_first_sys: Value, _rest: Vec<Value>) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn is_dynamic_model_object(value: &Value) -> bool {
     matches!(value, Value::Object(object) if object.is_class(TF_CLASS) || object.is_class(SS_CLASS))
 }
 
+#[cfg(feature = "plot-core")]
 fn is_plot_style_arg(value: &Value) -> bool {
     matches!(
         value,
@@ -207,6 +221,7 @@ impl PoleZeroMap {
     }
 }
 
+#[cfg(feature = "plot-core")]
 async fn render_pole_zero_map(
     eval: &PoleZeroMap,
     style: Option<&Value>,
@@ -217,6 +232,16 @@ async fn render_pole_zero_map(
     render_pole_zero_map_args(args).await
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn render_pole_zero_map(
+    _eval: &PoleZeroMap,
+    _style: Option<&Value>,
+    _series_index: usize,
+) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn push_pole_zero_map_series(
     args: &mut Vec<Value>,
     eval: &PoleZeroMap,
@@ -229,15 +254,16 @@ fn push_pole_zero_map_series(
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 async fn render_pole_zero_map_args(args: Vec<Value>) -> BuiltinResult<()> {
     if args.is_empty() {
         return Ok(());
     }
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if presentation_failure_kind(&err).is_some() {
+        if presentation_failed(&err) {
             return Ok(());
         }
-        return Err(crate::builtins::plotting::state::with_render_cause(
+        return Err(with_render_cause(
             pzmap_error(
                 format!("pzmap: plotting failed: {}", err.message()),
                 &PZMAP_ERROR_PLOT_FAILED,
@@ -252,6 +278,7 @@ async fn render_pole_zero_map_args(args: Vec<Value>) -> BuiltinResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 fn push_marker_series(
     args: &mut Vec<Value>,
     values: &[Complex64],
@@ -276,6 +303,7 @@ fn push_marker_series(
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 fn style_color(style: Option<&Value>, series_index: usize) -> BuiltinResult<glam::Vec4> {
     if let Some(style) = style {
         let parsed = parse_line_style_args(
@@ -290,6 +318,7 @@ fn style_color(style: Option<&Value>, series_index: usize) -> BuiltinResult<glam
     Ok(crate::builtins::plotting::state::line_color_for_series_index(series_index))
 }
 
+#[cfg(feature = "plot-core")]
 fn color_value(color: glam::Vec4) -> BuiltinResult<Value> {
     Tensor::new(
         vec![color.x as f64, color.y as f64, color.z as f64],
@@ -304,6 +333,7 @@ fn color_value(color: glam::Vec4) -> BuiltinResult<Value> {
     })
 }
 
+#[cfg(feature = "plot-core")]
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
     let rows = data.len();
     Tensor::new(data, vec![rows, 1])
@@ -334,6 +364,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_value::ObjectInstance;
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn invalid_style_rejects_before_model_download() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
@@ -489,6 +520,7 @@ mod tests {
         assert_eq!(tensor(&outputs[1]).shape, vec![0, 1]);
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_plots_without_error() {
         let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
@@ -497,6 +529,7 @@ mod tests {
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_accepts_multiple_systems() {
         let first = tf(vec![1.0], vec![1.0, 1.0]);
@@ -506,6 +539,7 @@ mod tests {
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_accepts_styles_per_system() {
         let _ = crate::builtins::plotting::clear_figure(None);
@@ -517,6 +551,7 @@ mod tests {
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn marker_series_pair_poles_and_zeros_with_same_color() {
         let eval = PoleZeroMap {
@@ -539,6 +574,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_rejects_invalid_style_tokens() {
         let sys = tf(vec![1.0], vec![1.0, 1.0]);

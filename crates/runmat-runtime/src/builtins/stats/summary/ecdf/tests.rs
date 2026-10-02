@@ -20,6 +20,38 @@ fn canonical_entry(name: &str) -> &'static runmat_builtins::BuiltinCatalogEntry 
     entry
 }
 
+#[cfg(not(feature = "plot-core"))]
+#[test]
+fn numeric_ecdf_remains_available_without_presentation() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let result =
+        block_on(ecdf_builtin(vec![tensor(vec![1.0, 2.0, 3.0])])).expect("numeric ECDF output");
+    assert!(matches!(result, Value::OutputList(values) if values.len() == 2));
+    drop(_outputs);
+
+    let _statement = crate::output_count::push_output_count(Some(0));
+    let error = block_on(ecdf_builtin(vec![tensor(vec![1.0, 2.0, 3.0])]))
+        .expect_err("presentation unavailable");
+    assert!(error
+        .source
+        .as_deref()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
+}
+
+#[cfg(not(feature = "plot-core"))]
+#[test]
+fn cdfplot_valid_sample_reports_typed_missing_presentation_before_download() {
+    use std::error::Error;
+
+    let error = block_on(cdfplot_builtin(vec![tensor(vec![1.0, 2.0, 3.0])]))
+        .expect_err("presentation unavailable");
+    assert!(error
+        .source()
+        .and_then(|source| source.downcast_ref::<crate::plotting_hooks::PlottingUnavailable>())
+        .is_some());
+}
+
 fn tensor(data: Vec<f64>) -> Value {
     Value::Tensor(Tensor::new(data.clone(), vec![data.len(), 1]).unwrap())
 }
@@ -193,6 +225,7 @@ fn ecdf_classifies_resident_integer_y_before_provider_access() {
     );
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_dispatch_preserves_residency_until_builtin_preflight() {
     assert_eq!(CDFPLOT_GPU_SPEC.residency, ResidencyPolicy::NewHandle);
@@ -397,6 +430,7 @@ fn ecdf_supports_left_censoring_without_right_censoring() {
         .all(|pair| pair[0] <= pair[1]));
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_returns_handle_and_stats() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -448,6 +482,7 @@ fn cdfplot_descriptor_classifies_integer_and_runtime_extensions() {
     );
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_admits_all_integer_classes_at_explicit_double_boundary() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -480,6 +515,7 @@ fn cdfplot_admits_all_integer_classes_at_explicit_double_boundary() {
     assert!(matches!(stats.fields.get("mean"), Some(Value::Num(0.5))));
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_strict_mode_rejects_integer_logical_and_gpu_extensions() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -528,6 +564,7 @@ fn cdfplot_strict_mode_rejects_integer_logical_and_gpu_extensions() {
     });
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_rejects_wide_integer_before_lossy_plotting() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -544,6 +581,7 @@ fn cdfplot_rejects_wide_integer_before_lossy_plotting() {
     );
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_resident_integer_fallback_returns_host_outputs() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
@@ -568,7 +606,7 @@ fn cdfplot_resident_integer_fallback_returns_host_outputs() {
 }
 
 #[test]
-#[cfg(feature = "wgpu")]
+#[cfg(all(feature = "plot-core", feature = "wgpu"))]
 fn cdfplot_wgpu_integer_fallback_returns_host_outputs_for_all_classes() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
     let _accel_guard = crate::builtins::common::test_support::accel_test_lock();

@@ -3,10 +3,11 @@
 use num_complex::Complex64;
 #[cfg(test)]
 use runmat_builtins::RLOCUS_DESCRIPTOR;
+#[cfg(feature = "plot-core")]
+use runmat_builtins::RLOCUS_ERROR_PLOT_FAILED;
 use runmat_builtins::{
     BuiltinErrorDescriptor, RLOCUS_ERROR_INTERNAL, RLOCUS_ERROR_INVALID_ARGUMENT,
-    RLOCUS_ERROR_INVALID_MODEL, RLOCUS_ERROR_PLOT_FAILED, RLOCUS_ERROR_UNSUPPORTED_MODEL,
-    RLOCUS_INTEGER_GAIN_EXTENSION,
+    RLOCUS_ERROR_INVALID_MODEL, RLOCUS_ERROR_UNSUPPORTED_MODEL, RLOCUS_INTEGER_GAIN_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -22,8 +23,10 @@ use crate::builtins::control::model_polynomial::ss_object_to_tf_async;
 use crate::builtins::control::tf_model::{
     poly_eval, polynomial_roots, TfModel, EPS, SS_CLASS, TF_CLASS,
 };
-use crate::builtins::plotting::state::presentation_failure_kind;
+#[cfg(feature = "plot-core")]
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
+#[cfg(feature = "plot-core")]
+use crate::plotting_hooks::{presentation_failed, with_render_cause};
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "rlocus";
@@ -143,6 +146,7 @@ fn is_statement_form_call() -> bool {
             && crate::output_count::current_output_count().is_none())
 }
 
+#[cfg(feature = "plot-core")]
 async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
     let mut systems = vec![(first_sys, None)];
     let mut gains = None;
@@ -208,11 +212,18 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
     Ok(())
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn plot_root_locus_statement(_first_sys: Value, _rest: Vec<Value>) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 struct HoldOffGuard {
     armed: bool,
     previous_hold_enabled: bool,
 }
 
+#[cfg(feature = "plot-core")]
 impl HoldOffGuard {
     fn new() -> Self {
         Self {
@@ -226,6 +237,7 @@ impl HoldOffGuard {
     }
 }
 
+#[cfg(feature = "plot-core")]
 impl Drop for HoldOffGuard {
     fn drop(&mut self) {
         if self.armed {
@@ -239,10 +251,12 @@ impl Drop for HoldOffGuard {
     }
 }
 
+#[cfg(feature = "plot-core")]
 fn is_dynamic_model_object(value: &Value) -> bool {
     matches!(value, Value::Object(object) if object.is_class(runmat_types::standard::TRANSFER_FUNCTION) || object.is_class(runmat_types::standard::STATE_SPACE))
 }
 
+#[cfg(feature = "plot-core")]
 fn is_plot_style_arg(value: &Value) -> bool {
     matches!(
         value,
@@ -250,6 +264,7 @@ fn is_plot_style_arg(value: &Value) -> bool {
     )
 }
 
+#[cfg(feature = "plot-core")]
 fn is_numeric_vector_like(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
@@ -678,6 +693,7 @@ fn root_distance2(a: Complex64, b: Complex64) -> Option<f64> {
     Some(dr * dr + di * di)
 }
 
+#[cfg(feature = "plot-core")]
 async fn render_root_locus_plot(eval: &RootLocus, style: Option<&Value>) -> BuiltinResult<()> {
     let mut args = Vec::new();
     for branch in 0..eval.branches {
@@ -706,10 +722,10 @@ async fn render_root_locus_plot(eval: &RootLocus, style: Option<&Value>) -> Buil
         return Ok(());
     }
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if presentation_failure_kind(&err).is_some() {
+        if presentation_failed(&err) {
             return Ok(());
         }
-        return Err(crate::builtins::plotting::state::with_render_cause(
+        return Err(with_render_cause(
             rlocus_error(
                 format!("rlocus: plotting failed: {}", err.message()),
                 &RLOCUS_ERROR_PLOT_FAILED,
@@ -724,6 +740,12 @@ async fn render_root_locus_plot(eval: &RootLocus, style: Option<&Value>) -> Buil
     Ok(())
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn render_root_locus_plot(_eval: &RootLocus, _style: Option<&Value>) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn push_marker_series(
     args: &mut Vec<Value>,
     values: &[Complex64],
@@ -745,6 +767,7 @@ fn push_marker_series(
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
     let rows = data.len();
     Tensor::new(data, vec![rows, 1])
@@ -763,6 +786,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_value::ObjectInstance;
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn invalid_gain_or_style_rejects_before_model_download() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
@@ -1020,6 +1044,7 @@ mod tests {
         assert!(roots.materialize_f64()[0].abs() < 1.0e-12);
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_plots_without_error() {
         let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
@@ -1028,6 +1053,7 @@ mod tests {
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_turns_hold_off_when_later_system_fails() {
         let _plot_guard = crate::builtins::plotting::tests::lock_plot_registry();
@@ -1044,6 +1070,7 @@ mod tests {
         assert!(!crate::builtins::plotting::state::current_hold_enabled());
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_restores_existing_hold_on_when_later_system_fails() {
         let _plot_guard = crate::builtins::plotting::tests::lock_plot_registry();

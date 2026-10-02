@@ -1,25 +1,34 @@
 //! Empirical distribution function helpers.
 
+#[cfg(feature = "plot-core")]
 use std::cmp::Ordering;
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, BuiltinExtensionDescriptor, EcdfBounds, EcdfFunction as FunctionKind,
     EcdfOptionName, EmpiricalBuiltin, CDFPLOT_ERROR_INTERNAL, CDFPLOT_ERROR_INVALID_ARGUMENT,
-    CDFPLOT_GPU_INPUT_EXTENSION, CDFPLOT_INTEGER_INPUT_EXTENSION, CDFPLOT_LOGICAL_INPUT_EXTENSION,
     ECDF_ERROR_INTERNAL, ECDF_ERROR_INVALID_ARGUMENT, ECDF_ERROR_UNSUPPORTED,
     ECDF_INTEGER_CENSORING_EXTENSION, ECDF_INTEGER_FREQUENCY_EXTENSION, ECDF_INTEGER_Y_EXTENSION,
     ECDF_LOGICAL_FREQUENCY_EXTENSION, ECDF_LOGICAL_Y_EXTENSION,
 };
+use runmat_builtins::{
+    CDFPLOT_GPU_INPUT_EXTENSION, CDFPLOT_INTEGER_INPUT_EXTENSION, CDFPLOT_LOGICAL_INPUT_EXTENSION,
+};
 use runmat_macros::runtime_builtin;
+#[cfg(feature = "plot-core")]
 use runmat_plot::plots::{LinePlot, LineStyle};
-use runmat_value::{IntValue, NumericScalar, StructValue, Tensor, Value};
+#[cfg(feature = "plot-core")]
+use runmat_value::{IntValue, NumericScalar, StructValue};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
+#[cfg(feature = "plot-core")]
 use crate::builtins::common::tensor;
+#[cfg(feature = "plot-core")]
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
+#[cfg(feature = "plot-core")]
 use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
 use crate::builtins::stats::summary::distribution_math::standard_normal_inv;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -35,8 +44,10 @@ use options::EcdfOptionPlan;
 #[path = "ecdf/engine.rs"]
 mod engine;
 use engine::evaluate_ecdf;
+#[cfg(feature = "plot-core")]
 #[path = "ecdf/plot.rs"]
 mod plot;
+#[cfg(feature = "plot-core")]
 use plot::{cdfplot_stats, plot_ecdf_line};
 #[path = "ecdf/values.rs"]
 mod values;
@@ -197,15 +208,13 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let eval = evaluate_ecdf(y, options)?;
 
     if is_statement_form_call() {
-        apply_axes_target(axes_target, ECDF_NAME).map_err(|err| map_error(ECDF_OWNER, err))?;
-        plot_ecdf_line(ECDF_OWNER, &eval)?;
+        emit_ecdf_plot(axes_target, &eval)?;
         return Ok(Value::OutputList(Vec::new()));
     }
 
     match crate::output_count::current_output_count() {
         Some(0) => {
-            apply_axes_target(axes_target, ECDF_NAME).map_err(|err| map_error(ECDF_OWNER, err))?;
-            plot_ecdf_line(ECDF_OWNER, &eval)?;
+            emit_ecdf_plot(axes_target, &eval)?;
             Ok(Value::OutputList(Vec::new()))
         }
         Some(out_count) => {
@@ -217,6 +226,22 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
         None => restore_ecdf_output(eval.f_value()?, gpu_source.as_ref(), &borrowed),
     }
+}
+
+#[cfg(feature = "plot-core")]
+type EcdfAxesTarget = crate::builtins::plotting::op_common::AxesTarget;
+#[cfg(not(feature = "plot-core"))]
+type EcdfAxesTarget = ();
+
+#[cfg(feature = "plot-core")]
+fn emit_ecdf_plot(target: EcdfAxesTarget, eval: &EcdfEvaluation) -> BuiltinResult<()> {
+    apply_axes_target(target, ECDF_NAME).map_err(|err| map_error(ECDF_OWNER, err))?;
+    plot_ecdf_line(ECDF_OWNER, eval).map(|_| ())
+}
+
+#[cfg(not(feature = "plot-core"))]
+fn emit_ecdf_plot(_target: EcdfAxesTarget, _eval: &EcdfEvaluation) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
 }
 
 fn ensure_ecdf_value_extension(
@@ -373,6 +398,7 @@ fn internal_error_with_cause(cause: RuntimeError) -> RuntimeError {
     owner
 }
 
+#[cfg(feature = "plot-core")]
 #[runtime_builtin(
     name = "cdfplot",
     binding_variant = "default",
@@ -411,6 +437,25 @@ pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
+#[cfg(not(feature = "plot-core"))]
+#[runtime_builtin(
+    name = "cdfplot",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::stats::summary::ecdf"
+)]
+pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.len() != 1 {
+        return Err(invalid_argument(
+            CDFPLOT_OWNER,
+            "cdfplot: expected exactly one numeric vector after optional axes handle",
+        ));
+    }
+    ensure_cdfplot_extensions_enabled(&args[0])?;
+    preflight_cdfplot_sample(&args[0])?;
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn split_ecdf_axes_target(
     args: Vec<Value>,
     builtin: EmpiricalBuiltin,
@@ -425,6 +470,14 @@ fn split_ecdf_axes_target(
         return Ok((None, args));
     }
     split_leading_axes_handle(args, builtin.name()).map_err(|err| map_error(builtin, err))
+}
+
+#[cfg(not(feature = "plot-core"))]
+fn split_ecdf_axes_target(
+    args: Vec<Value>,
+    _builtin: EmpiricalBuiltin,
+) -> BuiltinResult<(EcdfAxesTarget, Vec<Value>)> {
+    Ok(((), args))
 }
 
 fn ensure_cdfplot_extensions_enabled(value: &Value) -> BuiltinResult<()> {
@@ -449,6 +502,7 @@ fn ensure_cdfplot_extensions_enabled(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 fn cdfplot_numeric_vector(value: &Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
@@ -526,6 +580,7 @@ fn is_logical_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
+#[cfg(feature = "plot-core")]
 fn ensure_exact_cdfplot_integer_boundary(value: &Value) -> BuiltinResult<()> {
     const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
     let in_range = |value: i128| (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&value);
@@ -549,12 +604,14 @@ fn ensure_exact_cdfplot_integer_boundary(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 fn cdfplot_inexact_integer_error() -> RuntimeError {
     invalid_argument(CDFPLOT_OWNER,
         "cdfplot: integer sample values must lie within the contiguous exact binary64 integer range",
     )
 }
 
+#[cfg(feature = "plot-core")]
 fn int_value_i128(value: &IntValue) -> i128 {
     match value {
         IntValue::I8(value) => i128::from(*value),
@@ -568,6 +625,7 @@ fn int_value_i128(value: &IntValue) -> i128 {
     }
 }
 
+#[cfg(feature = "plot-core")]
 fn numeric_scalar_i128(value: NumericScalar) -> Option<i128> {
     match value {
         NumericScalar::I8(value) => Some(i128::from(value)),
@@ -614,6 +672,7 @@ fn wrap_gather_error(builtin: EmpiricalBuiltin, cause: RuntimeError) -> RuntimeE
     owner
 }
 
+#[cfg(feature = "plot-core")]
 async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(values.len());
     for value in values {
@@ -629,6 +688,6 @@ async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
 #[cfg(test)]
 #[path = "ecdf/tests.rs"]
 mod tests;
-#[cfg(test)]
+#[cfg(all(test, feature = "plot-core"))]
 #[path = "ecdf/provider_tests.rs"]
 mod provider_tests;

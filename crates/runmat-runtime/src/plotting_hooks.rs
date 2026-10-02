@@ -1,6 +1,58 @@
 //! Lightweight wrappers that expose plotting-specific helpers without requiring
 //! downstream crates to depend directly on the plotting feature flag.
 
+/// The unavailable capability has a typed cause even when `runmat-plot` is
+/// absent. Presentation callers must not turn this into a successful numeric
+/// value or suppress it as a render failure.
+#[cfg(not(feature = "plot-core"))]
+#[derive(Debug)]
+pub(crate) struct PlottingUnavailable;
+
+#[cfg(not(feature = "plot-core"))]
+impl std::fmt::Display for PlottingUnavailable {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(PLOTTING_UNAVAILABLE_MESSAGE)
+    }
+}
+
+#[cfg(not(feature = "plot-core"))]
+impl std::error::Error for PlottingUnavailable {}
+
+pub(crate) const PLOTTING_UNAVAILABLE_MESSAGE: &str =
+    "Plotting is unavailable in this build (enable the `gui` or `plot-web` feature).";
+
+#[cfg(not(feature = "plot-core"))]
+pub(crate) fn unavailable_presentation() -> crate::RuntimeError {
+    crate::build_runtime_error(PLOTTING_UNAVAILABLE_MESSAGE)
+        .with_identifier("RunMat:plot:EngineError")
+        .with_source(PlottingUnavailable)
+        .build()
+}
+
+#[cfg(feature = "plot-core")]
+pub(crate) fn presentation_failed(error: &crate::RuntimeError) -> bool {
+    crate::builtins::plotting::state::presentation_failure_kind(error).is_some()
+}
+
+#[cfg(not(feature = "plot-core"))]
+pub(crate) fn presentation_failed(_error: &crate::RuntimeError) -> bool {
+    false
+}
+
+/// Preserve the owning builtin's public error while retaining the original
+/// cause, span, and retry disposition.
+pub(crate) fn with_render_cause(
+    mut mapped: crate::RuntimeError,
+    cause: crate::RuntimeError,
+) -> crate::RuntimeError {
+    if mapped.span.is_none() {
+        mapped.span = cause.span;
+    }
+    mapped.gpu_gather_retry = cause.gpu_gather_retry;
+    mapped.source = Some(Box::new(cause));
+    mapped
+}
+
 /// Reset the per-thread "figures touched" set. No-op when plotting is disabled.
 pub fn reset_recent_figures() {
     #[cfg(feature = "plot-core")]
@@ -35,5 +87,22 @@ pub fn record_recent_figures(handles: impl IntoIterator<Item = u32>) {
     #[cfg(not(feature = "plot-core"))]
     {
         let _ = handles;
+    }
+}
+
+#[cfg(all(test, not(feature = "plot-core")))]
+mod unavailable_tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn disabled_presentation_retains_typed_unavailable_source() {
+        let error = unavailable_presentation();
+        assert_eq!(error.identifier(), Some("RunMat:plot:EngineError"));
+        assert!(error
+            .source()
+            .and_then(|source| source.downcast_ref::<PlottingUnavailable>())
+            .is_some());
+        assert!(!presentation_failed(&error));
     }
 }

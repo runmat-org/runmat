@@ -2,6 +2,7 @@
 
 mod admission;
 mod frequency;
+#[cfg(feature = "plot-core")]
 mod plot;
 mod solver;
 #[cfg(test)]
@@ -69,16 +70,26 @@ async fn nyquist_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
 
     if let Some(n) = crate::output_count::current_output_count() {
         if n == 0 {
-            plot::render(&response).await?;
+            render_plot(&response).await?;
             return Ok(Value::OutputList(Vec::new()));
         }
         return Ok(Value::OutputList(response.outputs(n)?));
     }
     if crate::output_context::requested_output_count() == Some(0) {
-        plot::render(&response).await?;
+        render_plot(&response).await?;
         return Ok(Value::OutputList(Vec::new()));
     }
     response.re_value()
+}
+
+#[cfg(feature = "plot-core")]
+async fn render_plot(response: &solver::NyquistResponse) -> BuiltinResult<()> {
+    plot::render(response).await
+}
+
+#[cfg(not(feature = "plot-core"))]
+async fn render_plot(_response: &solver::NyquistResponse) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
 }
 
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
