@@ -8,9 +8,10 @@ pub(super) fn operands(
     denominator: &Value,
     signal: &Value,
     initial: Option<&Value>,
-    dimension: Option<&Value>,
+    _dimension: Option<&Value>,
 ) -> BuiltinResult<()> {
     preflight_iir_operands(IirForm::Causal, numerator, denominator, signal, initial)
+        .map(|_| ())
         .map_err(own_error)
 }
 
@@ -19,6 +20,7 @@ pub(super) fn resident_owners(
     denominator: &Value,
     signal: &Value,
     initial: Option<&Value>,
+    dimension: Option<&Value>,
 ) -> BuiltinResult<()> {
     for (value, descriptor) in [
         (Some(numerator), &FILTER_ERROR_INVALID_COEFFICIENTS),

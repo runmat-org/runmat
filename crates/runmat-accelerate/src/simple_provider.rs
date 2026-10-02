@@ -7473,6 +7473,12 @@ impl AccelProvider for InProcessProvider {
             })
         })
     }
+    fn iir_zero_phase<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::ProviderIirZeroPhaseRequest<'a>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { crate::iir_zero_phase::execute(self, request).await })
+    }
     fn permute(&self, handle: &GpuTensorHandle, order: &[usize]) -> Result<GpuTensorHandle> {
         if runmat_accelerate_api::handle_integer_type(handle).is_some() {
             let data = integer_registry(self.device_id)

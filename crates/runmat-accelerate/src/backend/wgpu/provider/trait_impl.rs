@@ -260,6 +260,11 @@ impl AccelProvider for WgpuProvider {
     ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
         if query.preparation == runmat_execution::CandidatePreparationState::Unknown
             || crate::placement::floating_cast_unresolved_adaptation(&query.operation)
+            || query.operation.workload.iir.is_some_and(|workload| {
+                workload.route == runmat_accelerate_api::ProviderIirRoute::ZeroPhase
+            })
+            || query.operation.operation.0
+                == runmat_accelerate_api::PROVIDER_IIR_ZERO_PHASE_OPERATION
         {
             return None;
         }
@@ -1437,6 +1442,12 @@ impl AccelProvider for WgpuProvider {
         options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
         Box::pin(async move { self.iir_filter_exec(coefficients, x, options).await })
+    }
+    fn iir_zero_phase<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::ProviderIirZeroPhaseRequest<'a>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { crate::iir_zero_phase::execute(self, request).await })
     }
     fn moving_window<'a>(
         &'a self,

@@ -53,6 +53,24 @@ fn double() -> HostNumericTensorView<'static> {
 }
 
 #[test]
+fn staged_upload_completion_retains_the_original_provider_cause() {
+    let error = NumericUploadError::Completion(NumericUploadCompletionError::new(
+        NumericUploadError::Provider(anyhow::anyhow!("denominator transport failed")),
+        None,
+    ));
+    let NumericUploadError::Completion(completion) = &error else {
+        panic!("expected staged-upload completion carrier");
+    };
+    assert!(matches!(
+        completion.primary(),
+        NumericUploadError::Provider(_)
+    ));
+    assert!(completion.cleanup_error().is_none());
+    assert!(std::error::Error::source(completion)
+        .is_some_and(|source| source.to_string().contains("denominator transport failed")));
+}
+
+#[test]
 fn numeric_upload_protects_same_view_and_different_view_of_borrowed_allocation() {
     for different_view in [false, true] {
         let (borrowed, owner) = crate::test_support::owned(

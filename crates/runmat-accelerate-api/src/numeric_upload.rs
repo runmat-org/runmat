@@ -8,6 +8,7 @@ use crate::{AccelProvider, GpuTensorHandle, HostNumericTensorView};
 pub enum NumericUploadError {
     Provider(anyhow::Error),
     Invalid(InvalidNumericUploadResult),
+    Completion(NumericUploadCompletionError),
 }
 pub type NumericUploadResult<T> = Result<T, NumericUploadError>;
 
@@ -21,6 +22,7 @@ impl std::fmt::Display for NumericUploadError {
         match self {
             Self::Provider(error) => std::fmt::Display::fmt(error, formatter),
             Self::Invalid(error) => std::fmt::Display::fmt(error, formatter),
+            Self::Completion(error) => std::fmt::Display::fmt(error, formatter),
         }
     }
 }
@@ -29,7 +31,52 @@ impl std::error::Error for NumericUploadError {
         Some(match self {
             Self::Provider(error) => error.as_ref(),
             Self::Invalid(error) => error,
+            Self::Completion(error) => error,
         })
+    }
+}
+
+/// A later upload failed after a prior upload had to be retired. Preserve the
+/// original provider cause and any failed retirement owner independently.
+#[derive(Debug)]
+pub struct NumericUploadCompletionError {
+    primary: Box<NumericUploadError>,
+    cleanup: Option<crate::allocation::GpuHandleReleaseError>,
+}
+
+impl NumericUploadCompletionError {
+    pub fn new(
+        primary: NumericUploadError,
+        cleanup: Option<crate::allocation::GpuHandleReleaseError>,
+    ) -> Self {
+        Self {
+            primary: Box::new(primary),
+            cleanup,
+        }
+    }
+
+    pub fn primary(&self) -> &NumericUploadError {
+        &self.primary
+    }
+
+    pub fn cleanup_error(&self) -> Option<&crate::allocation::GpuHandleReleaseError> {
+        self.cleanup.as_ref()
+    }
+}
+
+impl std::fmt::Display for NumericUploadCompletionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "numeric upload failed: {}", self.primary)?;
+        if let Some(cleanup) = &self.cleanup {
+            write!(formatter, "; prior upload retirement failed: {cleanup}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for NumericUploadCompletionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.primary)
     }
 }
 

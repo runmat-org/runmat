@@ -1,10 +1,15 @@
 //! One numerical coefficient source for each provider IIR invocation.
+use runmat_execution::cancellation::CancellationToken;
 use serde::Serialize;
 
 use crate::{
-    provider_for_handle, same_provider_instance, upload_numeric_protecting, AccelProvider,
-    GpuTensorHandle, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
-    InvalidNumericUploadResult, NumericUploadError, NumericUploadResult, ProviderPrecision,
+    handle_is_logical, handle_storage, provider_for_handle, same_provider_instance,
+    upload_numeric_protecting, AccelProvider, GpuTensorHandle, GpuTensorLayout, GpuTensorStorage,
+    HostNumericDataView, HostNumericTensorView, InvalidNumericUploadResult, NumericElementType,
+    NumericUploadCompletionError, NumericUploadError, NumericUploadResult, ProviderElementType,
+    ProviderFeasibilityQuery, ProviderIirRoute, ProviderIirWorkload, ProviderLayout,
+    ProviderOperationFamily, ProviderOperationIdentity, ProviderPrecision, ProviderRepresentation,
+    ProviderResidency, ProviderStorage, ProviderWorkload, PROVIDER_IIR_ZERO_PHASE_OPERATION,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -34,6 +39,171 @@ pub struct ProviderIirFilterResult {
     pub output: GpuTensorHandle,
     /// Final conditions for the filter state (same shape as the requested `zi` layout).
     pub final_state: Option<GpuTensorHandle>,
+}
+
+/// One admitted zero-phase operation. The provider owns the reflection,
+/// forward/reverse passes, trim, and all temporary allocations. `initial_state`
+/// is the normalized steady-state vector before endpoint scaling.
+#[derive(Debug, Clone)]
+pub struct ProviderIirZeroPhaseRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub coefficients: &'a ProviderPreparedIirCoefficients,
+    pub initial_state: &'a [f64],
+    pub axis: usize,
+    pub reflection_len: usize,
+    /// Revision observed by side-effect-free whole-route feasibility.
+    pub capability_revision: u64,
+    pub cancellation: CancellationToken,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderIirZeroPhaseFault {
+    NonFiniteInput,
+    UnrepresentableReflection,
+}
+
+impl std::fmt::Display for ProviderIirZeroPhaseFault {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::NonFiniteInput => "iir_zero_phase: input must be finite",
+            Self::UnrepresentableReflection => {
+                "iir_zero_phase: endpoint reflection exceeds floating-point range"
+            }
+        })
+    }
+}
+
+impl std::error::Error for ProviderIirZeroPhaseFault {}
+
+impl ProviderIirZeroPhaseRequest<'_> {
+    pub fn feasibility_query(&self) -> anyhow::Result<ProviderFeasibilityQuery> {
+        let numerator = self.coefficients.numerator();
+        let denominator = self.coefficients.denominator();
+        for handle in [self.input, numerator, denominator] {
+            handle.allocation_lease().validate_live()?;
+        }
+        anyhow::ensure!(
+            numerator.shape().len() == 2
+                && numerator.shape()[1] == 1
+                && numerator.shape()[0] != 0
+                && denominator.shape() == numerator.shape(),
+            "iir_zero_phase: prepared coefficient geometry mismatch"
+        );
+        anyhow::ensure!(
+            numerator.view().layout() == GpuTensorLayout::Contiguous
+                && denominator.view().layout() == GpuTensorLayout::Contiguous
+                && handle_storage(numerator) == GpuTensorStorage::Real
+                && handle_storage(denominator) == GpuTensorStorage::Real
+                && numerator.physical().element_type() == self.input.physical().element_type()
+                && denominator.physical().element_type() == self.input.physical().element_type(),
+            "iir_zero_phase: prepared coefficient physical class mismatch"
+        );
+        let coefficient_len = self
+            .coefficients
+            .numerator()
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| anyhow::anyhow!("iir_zero_phase: coefficient geometry overflow"))?;
+        provider_iir_zero_phase_query(self.input, coefficient_len, self.axis, self.reflection_len)
+    }
+}
+
+/// Derive the complete route's immutable feasibility geometry from the actual
+/// input view. Runtime admission calls this before coefficient upload; provider
+/// submission rederives the same query from the received request.
+pub fn provider_iir_zero_phase_query(
+    input: &GpuTensorHandle,
+    coefficient_len: usize,
+    axis: usize,
+    reflection_len: usize,
+) -> anyhow::Result<ProviderFeasibilityQuery> {
+    let element_type = match input.physical().element_type() {
+        NumericElementType::F32 => ProviderElementType::F32,
+        NumericElementType::F64 => ProviderElementType::F64,
+        NumericElementType::I8 => ProviderElementType::I8,
+        NumericElementType::I16 => ProviderElementType::I16,
+        NumericElementType::I32 => ProviderElementType::I32,
+        NumericElementType::I64 => ProviderElementType::I64,
+        NumericElementType::U8 => ProviderElementType::U8,
+        NumericElementType::U16 => ProviderElementType::U16,
+        NumericElementType::U32 => ProviderElementType::U32,
+        NumericElementType::U64 => ProviderElementType::U64,
+    };
+    let element_type = if handle_is_logical(input) {
+        ProviderElementType::Logical
+    } else {
+        element_type
+    };
+    let layout = match input.view().layout() {
+        GpuTensorLayout::Contiguous => ProviderLayout::ColumnMajorContiguous,
+        GpuTensorLayout::Transpose(_) => ProviderLayout::Strided,
+    };
+    let signal_shape: Vec<u64> = input
+        .shape()
+        .iter()
+        .map(|&extent| u64::try_from(extent))
+        .collect::<Result<_, _>>()?;
+    let coefficient_len = u64::try_from(coefficient_len)?;
+    let state_len = coefficient_len.saturating_sub(1);
+    let reflection_len = u64::try_from(reflection_len)?;
+    let axis = u32::try_from(axis)?;
+    let storage = match handle_storage(input) {
+        GpuTensorStorage::Real => ProviderStorage::DenseReal,
+        GpuTensorStorage::ComplexInterleaved => ProviderStorage::DenseComplexInterleaved,
+    };
+    let representation = |shape: Vec<u64>, residency, layout, storage| ProviderRepresentation {
+        element_type,
+        storage,
+        layout,
+        shape,
+        residency,
+    };
+    let host = |shape| {
+        representation(
+            shape,
+            ProviderResidency::Host,
+            ProviderLayout::ColumnMajorContiguous,
+            ProviderStorage::DenseReal,
+        )
+    };
+    let state_shape = if axis == 0 {
+        vec![state_len, 1]
+    } else {
+        vec![1, state_len]
+    };
+    let signal = representation(
+        signal_shape.clone(),
+        ProviderResidency::Device,
+        layout,
+        storage,
+    );
+    let output = representation(
+        signal_shape,
+        ProviderResidency::Device,
+        ProviderLayout::ColumnMajorContiguous,
+        storage,
+    );
+    Ok(ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new(PROVIDER_IIR_ZERO_PHASE_OPERATION),
+        family: ProviderOperationFamily::Library,
+        inputs: vec![
+            host(vec![coefficient_len, 1]),
+            host(vec![coefficient_len, 1]),
+            signal,
+            host(state_shape),
+        ],
+        outputs: vec![output],
+        workload: ProviderWorkload {
+            iir: Some(ProviderIirWorkload {
+                route: ProviderIirRoute::ZeroPhase,
+                dim: axis,
+                state_len,
+                reflection_len,
+            }),
+            ..ProviderWorkload::default()
+        },
+    })
 }
 
 /// Provider-bound normalized coefficients. The constructor checks the structural
@@ -115,8 +285,13 @@ impl ProviderPreparedIirCoefficients {
             None => HostNumericDataView::F64(denominator),
         };
         let mut denominator_protected = Vec::new();
+        let protected_len = protected.len().checked_add(1).ok_or_else(|| {
+            NumericUploadError::Provider(anyhow::anyhow!(
+                "iir_filter: borrowed coefficient count overflow"
+            ))
+        })?;
         denominator_protected
-            .try_reserve_exact(protected.len().saturating_add(1))
+            .try_reserve_exact(protected_len)
             .map_err(|source| NumericUploadError::Provider(anyhow::Error::new(source)))?;
         denominator_protected.extend_from_slice(protected);
         let numerator_handle = upload_numeric_protecting(
@@ -130,7 +305,7 @@ impl ProviderPreparedIirCoefficients {
         )?;
         let numerator_handle = require_exact_owner(provider, numerator_handle)?;
         denominator_protected.push(&numerator_handle);
-        let denominator_handle = upload_numeric_protecting(
+        let denominator_result = upload_numeric_protecting(
             provider,
             &HostNumericTensorView {
                 data: denominator_data,
@@ -138,8 +313,16 @@ impl ProviderPreparedIirCoefficients {
                 storage: GpuTensorStorage::Real,
             },
             &denominator_protected,
-        )?;
-        let denominator_handle = require_exact_owner(provider, denominator_handle)?;
+        )
+        .and_then(|handle| require_exact_owner(provider, handle));
+        let denominator_handle = match denominator_result {
+            Ok(handle) => handle,
+            Err(primary) => {
+                return Err(NumericUploadError::Completion(
+                    NumericUploadCompletionError::new(primary, numerator_handle.release().err()),
+                ));
+            }
+        };
         Ok(Self {
             numerator: numerator_handle,
             denominator: denominator_handle,

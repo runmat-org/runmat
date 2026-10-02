@@ -3,7 +3,7 @@ use runmat_accelerate_api::{
     AccelProvider, ProviderElementType, ProviderFeasibility, ProviderFeasibilityQuery,
     ProviderIirRoute, ProviderLayout, ProviderOperationFamily, ProviderRejectionCode,
     ProviderResidency, ProviderResourceEstimate, ProviderStorage,
-    PROVIDER_IIR_PREPARED_PASS_OPERATION,
+    PROVIDER_IIR_PREPARED_PASS_OPERATION, PROVIDER_IIR_ZERO_PHASE_OPERATION,
 };
 
 pub(super) fn validate(
@@ -11,6 +11,14 @@ pub(super) fn validate(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
+    if query.operation.0 == PROVIDER_IIR_ZERO_PHASE_OPERATION
+        || query
+            .workload
+            .iir
+            .is_some_and(|workload| workload.route == ProviderIirRoute::ZeroPhase)
+    {
+        return Some(validate_zero_phase(provider, wgpu, query));
+    }
     let Some(workload) = query.workload.iir else {
         return (query.operation.0 == PROVIDER_IIR_PREPARED_PASS_OPERATION).then(|| {
             ProviderFeasibility::rejected(
@@ -93,6 +101,7 @@ pub(super) fn validate(
         || signal.shape != query.outputs[0].shape
         || state.shape != query.outputs[1].shape
         || workload.state_len != coefficient_len.saturating_sub(1)
+        || workload.reflection_len != 0
         || u64::from(workload.dim) >= signal.shape.len() as u64
         || state.checked_element_count() != Some(workload.state_len)
         || signal.shape[workload.dim as usize] == 0
@@ -142,6 +151,151 @@ pub(super) fn validate(
     }))
 }
 
+fn validate_zero_phase(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+) -> ProviderFeasibility {
+    let reject = |code, detail| ProviderFeasibility::rejected(code, detail);
+    let Some(workload) = query.workload.iir else {
+        return reject(
+            ProviderRejectionCode::UnsupportedOperation,
+            "iir.zero_phase.missing_typed_route",
+        );
+    };
+    if workload.route != ProviderIirRoute::ZeroPhase
+        || query.operation.0 != PROVIDER_IIR_ZERO_PHASE_OPERATION
+        || query.family != ProviderOperationFamily::Library
+        || query.inputs.len() != 4
+        || query.outputs.len() != 1
+    {
+        return reject(
+            ProviderRejectionCode::UnsupportedOperation,
+            "iir.zero_phase.invalid_query",
+        );
+    }
+    let [numerator, denominator, signal, state] = query.inputs.as_slice() else {
+        unreachable!("input arity checked above")
+    };
+    let output = &query.outputs[0];
+    let expected_class = ProviderElementType::from(provider.precision());
+    let max_allocation_bytes = provider.capability_snapshot().max_allocation_bytes;
+    for (representation, residency) in [
+        (numerator, ProviderResidency::Host),
+        (denominator, ProviderResidency::Host),
+        (signal, ProviderResidency::Device),
+        (state, ProviderResidency::Host),
+        (output, ProviderResidency::Device),
+    ] {
+        if representation.element_type != expected_class
+            || representation.storage != ProviderStorage::DenseReal
+        {
+            return reject(
+                ProviderRejectionCode::UnsupportedElementType,
+                "iir.zero_phase.class",
+            );
+        }
+        if representation.layout != ProviderLayout::ColumnMajorContiguous {
+            return reject(
+                ProviderRejectionCode::UnsupportedLayout,
+                "iir.zero_phase.layout",
+            );
+        }
+        if representation.residency != residency {
+            return reject(
+                ProviderRejectionCode::UnsupportedOperation,
+                "iir.zero_phase.residency",
+            );
+        }
+        let Some(bytes) = representation.checked_byte_len() else {
+            return reject(
+                ProviderRejectionCode::InvalidShape,
+                "iir.zero_phase.byte_overflow",
+            );
+        };
+        if max_allocation_bytes.is_some_and(|limit| bytes > limit) {
+            return reject(
+                ProviderRejectionCode::ResourceLimit,
+                "iir.zero_phase.allocation_limit",
+            );
+        }
+    }
+    let Some(coefficient_len) = numerator.checked_element_count() else {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.zero_phase.coefficient_overflow",
+        );
+    };
+    let Some(signal_len) = signal.checked_element_count() else {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.zero_phase.signal_overflow",
+        );
+    };
+    let Some(extended_len) = workload
+        .reflection_len
+        .checked_mul(2)
+        .and_then(|padding| signal_len.checked_add(padding))
+    else {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.zero_phase.reflection_overflow",
+        );
+    };
+    let Some(extended_bytes) = extended_len.checked_mul(expected_class.byte_width()) else {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.zero_phase.reflection_byte_overflow",
+        );
+    };
+    if max_allocation_bytes.is_some_and(|limit| extended_bytes > limit) {
+        return reject(
+            ProviderRejectionCode::ResourceLimit,
+            "iir.zero_phase.reflection_allocation_limit",
+        );
+    }
+    if numerator.shape != denominator.shape
+        || numerator.shape != [coefficient_len, 1]
+        || coefficient_len == 0
+        || workload.state_len != coefficient_len - 1
+        || state.shape
+            != if workload.dim == 0 {
+                [workload.state_len, 1]
+            } else {
+                [1, workload.state_len]
+            }
+        || workload.reflection_len != workload.state_len.saturating_mul(3)
+        || signal_len <= workload.reflection_len
+        || signal.shape.len() != 2
+        || signal.shape != output.shape
+        || workload.dim > 1
+        || signal.shape[workload.dim as usize] != signal_len
+        || signal.shape[1 - workload.dim as usize] != 1
+    {
+        return reject(
+            ProviderRejectionCode::InvalidShape,
+            "iir.zero_phase.geometry",
+        );
+    }
+    if wgpu
+        && (extended_len > u64::from(u32::MAX)
+            || coefficient_len > u64::from(u32::MAX)
+            || workload.state_len > u64::from(u32::MAX))
+    {
+        return reject(
+            ProviderRejectionCode::ResourceLimit,
+            "iir.zero_phase.addressable_range",
+        );
+    }
+    ProviderFeasibility::supported(ProviderResourceEstimate {
+        // The complete staged peak and dispatch inventory must be measured by
+        // the backend before automatic placement may price this route.
+        transient_bytes: None,
+        output_bytes: output.checked_byte_len(),
+        dispatches: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +329,7 @@ mod tests {
                     route: ProviderIirRoute::PreparedPass,
                     dim: 1,
                     state_len: 1,
+                    reflection_len: 0,
                 }),
                 ..Default::default()
             },

@@ -34,13 +34,18 @@ pub(crate) struct IirAdmissionFault {
     pub kind: IirFaultKind,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct IirAdmittedGeometry {
+    pub coefficient_len: usize,
+}
+
 pub(crate) fn preflight(
     form: IirForm,
     numerator: &Value,
     denominator: &Value,
     signal: &Value,
     initial_state: Option<&Value>,
-) -> Result<(), IirAdmissionFault> {
+) -> Result<IirAdmittedGeometry, IirAdmissionFault> {
     let b_len = check_operand(IirOperand::Numerator, numerator, true, true)?;
     let a_len = check_operand(IirOperand::Denominator, denominator, true, true)?;
     let x_len = check_operand(
@@ -71,7 +76,9 @@ pub(crate) fn preflight(
             });
         }
     }
-    Ok(())
+    Ok(IirAdmittedGeometry {
+        coefficient_len: b_len.max(a_len),
+    })
 }
 
 fn check_operand(

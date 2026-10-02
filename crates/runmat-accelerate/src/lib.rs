@@ -17,6 +17,7 @@ pub mod fusion_exec;
 pub mod fusion_residency;
 pub mod graph;
 mod host_lu;
+mod iir_zero_phase;
 mod kernel_math;
 pub mod native_auto;
 pub mod placement;

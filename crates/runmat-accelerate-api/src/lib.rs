@@ -24,7 +24,8 @@ pub use allocation::{
 mod native_device;
 mod iir;
 pub use iir::{
-    ProviderIirCoefficientSource, ProviderIirFilterOptions, ProviderIirFilterResult,
+    provider_iir_zero_phase_query, ProviderIirCoefficientSource, ProviderIirFilterOptions,
+    ProviderIirFilterResult, ProviderIirZeroPhaseFault, ProviderIirZeroPhaseRequest,
     ProviderPreparedIirCoefficients,
 };
 mod logical_upload;
@@ -76,7 +77,7 @@ pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
 pub use native_device::*;
 pub use numeric_upload::{
     is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
-    NumericUploadError, NumericUploadResult,
+    NumericUploadCompletionError, NumericUploadError, NumericUploadResult,
 };
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
@@ -3244,6 +3245,20 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Box::pin(async move {
             Err(unsupported_provider_operation(
                 "iir_filter not supported by provider",
+            ))
+        })
+    }
+
+    /// Submit a complete admitted zero-phase IIR route. Unsupported must be
+    /// reported before any provider effect; an operational failure after staging
+    /// must never be interpreted as permission to replay on the host.
+    fn iir_zero_phase<'a>(
+        &'a self,
+        _request: &'a ProviderIirZeroPhaseRequest<'a>,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(ProviderExecutionError::from(
+                unsupported_provider_operation("iir_zero_phase not supported by provider"),
             ))
         })
     }

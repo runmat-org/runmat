@@ -31,6 +31,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[path = "filtfilt/initial_state.rs"]
 mod initial_state;
+mod resident_zero_phase;
 use initial_state::lfilter_zi;
 
 const BUILTIN_NAME: &str = "filtfilt";
@@ -177,7 +178,7 @@ async fn evaluate_with_runtime(
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;
     ensure_filtfilt_extensions([&b, &a, &x])?;
-    preflight_iir_operands(IirForm::ZeroPhase, &b, &a, &x, None)
+    let admitted_geometry = preflight_iir_operands(IirForm::ZeroPhase, &b, &a, &x, None)
         .map_err(filtfilt_preflight_error)?;
     for (value, descriptor) in [
         (&b, &FILTFILT_ERROR_INVALID_COEFFICIENTS),
@@ -188,6 +189,15 @@ async fn evaluate_with_runtime(
             resident_output::owner(handle, || filtfilt_error(descriptor))?;
         }
     }
+    let resident_preflight = if let Value::GpuTensor(handle) = &x {
+        resident_zero_phase::preflight_route(
+            handle,
+            admitted_geometry.coefficient_len,
+            [&b, &a, &x].into_iter().any(value_is_single),
+        )?
+    } else {
+        false
+    };
     let b = gather_wide_integer_for_exactness(b).await?;
     let a = gather_wide_integer_for_exactness(a).await?;
     let x = gather_wide_integer_for_exactness(x).await?;
@@ -218,6 +228,31 @@ async fn evaluate_with_runtime(
                 false,
             )
         })?;
+    let coeffs = NormalizedCoefficients::new(&b_input.data, &a_input.data)?;
+    let output_dtype = if output_single {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    let borrowed = [b_input.gpu_handle.as_ref(), a_input.gpu_handle.as_ref()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    if let Value::GpuTensor(input) = &x {
+        if let Some(value) = resident_zero_phase::try_execute(
+            &coeffs,
+            input,
+            output_dtype,
+            &borrowed,
+            runtime,
+            &mut cooperation,
+            resident_preflight,
+        )
+        .await?
+        {
+            return Ok(value);
+        }
+    }
     let x_input = value_to_complex_vector(BUILTIN_NAME, "signal", x)
         .await
         .map_err(|source| {
@@ -228,8 +263,6 @@ async fn evaluate_with_runtime(
                 false,
             )
         })?;
-
-    let coeffs = NormalizedCoefficients::new(&b_input.data, &a_input.data)?;
     if x_input.data.is_empty() {
         return Err(filtfilt_error_with_detail(
             &FILTFILT_ERROR_INVALID_SIGNAL,
@@ -247,15 +280,6 @@ async fn evaluate_with_runtime(
         ));
     }
 
-    let output_dtype = if output_single {
-        NumericDType::F32
-    } else {
-        NumericDType::F64
-    };
-    let borrowed = [b_input.gpu_handle.as_ref(), a_input.gpu_handle.as_ref()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
     if let Some(value) =
         try_filtfilt_gpu(&coeffs, &x_input, output_dtype, &borrowed, &mut cooperation).await?
     {
@@ -625,6 +649,7 @@ async fn try_filtfilt_gpu(
                 route: runmat_accelerate_api::ProviderIirRoute::PreparedPass,
                 dim: u32::from(vector_is_row(&input.shape)),
                 state_len,
+                reflection_len: 0,
             }),
             ..Default::default()
         },
