@@ -6,6 +6,7 @@ use runmat_types::*;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
+    let mut handle_class_known = true;
     if request.arguments.is_empty() || request.arguments.len() > 2 {
         diagnostics.push(argument_error(
             "RM-CATALOG-GET-ARITY",
@@ -17,14 +18,28 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         if matches!(
             handle.residency,
             ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
-        ) || !matches!(
-            handle.kind,
-            ValueKindFact::Unknown | ValueKindFact::Numeric(_)
-        ) || handle
-            .numeric()
-            .is_some_and(|number| number.domain == NumericDomain::Complex)
-            || handle.storage == StorageFact::Sparse
-        {
+        ) || match &handle.kind {
+            ValueKindFact::Unknown => {
+                handle_class_known = false;
+                false
+            }
+            ValueKindFact::Numeric(number) => {
+                number.domain == NumericDomain::Complex || handle.storage == StorageFact::Sparse
+            }
+            ValueKindFact::Object(object) => {
+                match (object.runtime_class.as_ref(), object.handle_semantics) {
+                    (Some(identity), Some(true)) => {
+                        !standard::is_graphics_property_control(identity)
+                    }
+                    (Some(_), Some(false)) => true,
+                    _ => {
+                        handle_class_known = false;
+                        false
+                    }
+                }
+            }
+            _ => true,
+        } {
             diagnostics.push(argument_error(
                 "RM-CATALOG-GET-HANDLE",
                 "graphics handles must be host scalar identities",
@@ -54,15 +69,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    let mut output = if request.arguments.len() == 1 {
+    let mut output = if request.arguments.len() == 1 && handle_class_known {
         ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
             Default::default(),
             false,
         )))
-    } else if request
-        .literals
-        .literal_string_at(1)
-        .is_some_and(|name| name.eq_ignore_ascii_case("Type"))
+    } else if handle_class_known
+        && request
+            .literals
+            .literal_string_at(1)
+            .is_some_and(|name| name.eq_ignore_ascii_case("Type"))
     {
         ValueFact::scalar(ValueKindFact::String)
     } else {

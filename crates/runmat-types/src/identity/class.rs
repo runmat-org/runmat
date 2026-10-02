@@ -242,6 +242,16 @@ pub mod standard {
     pub const STATE_SPACE: StaticClassIdentity = StaticClassIdentity::new("ss");
     pub const HANDLE: StaticClassIdentity = StaticClassIdentity::new("handle");
     pub const DYNAMIC_PROPERTIES: StaticClassIdentity = StaticClassIdentity::new("dynamicprops");
+    pub const ZOOM_CONTROL: StaticClassIdentity =
+        StaticClassIdentity::new("matlab.graphics.interaction.internal.zoom");
+    pub const PAN_CONTROL: StaticClassIdentity =
+        StaticClassIdentity::new("matlab.graphics.interaction.internal.pan");
+    pub const DATA_CURSOR_CONTROL: StaticClassIdentity =
+        StaticClassIdentity::new("matlab.graphics.shape.internal.DataCursorManager");
+
+    pub fn is_graphics_property_control(identity: &ClassIdentity) -> bool {
+        identity.is(ZOOM_CONTROL) || identity.is(PAN_CONTROL) || identity.is(DATA_CURSOR_CONTROL)
+    }
     pub const METADATA_PROPERTY: StaticClassIdentity =
         StaticClassIdentity::new("matlab.metadata.Property");
     pub const METADATA_DYNAMIC_PROPERTY: StaticClassIdentity =

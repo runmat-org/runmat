@@ -38,3 +38,34 @@ fn set_inference_preserves_effects_and_status_without_proving_invalid_calls() {
         CertaintyFact::Dynamic(_)
     ));
 }
+
+#[test]
+fn set_accepts_known_pan_control_object_and_rejects_unrelated_class() {
+    let object = |runtime_class| {
+        ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class,
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }))
+    };
+    let name = ValueFact::scalar(ValueKindFact::String);
+    let value = ValueFact::scalar(ValueKindFact::Logical);
+    let call = |handle| {
+        inference::infer(
+            &CallRequest {
+                arguments: vec![handle, name.clone(), value.clone()],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::default(),
+            },
+            &SET_CATALOG_ENTRY,
+        )
+    };
+    assert!(call(object(Some(standard::PAN_CONTROL.owned())))
+        .diagnostics
+        .is_empty());
+    assert!(!call(object(Some(standard::TABLE.owned())))
+        .diagnostics
+        .is_empty());
+}

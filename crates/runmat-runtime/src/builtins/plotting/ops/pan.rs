@@ -21,8 +21,7 @@ use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "pan";
-const PAN_CLASS_NAME: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("matlab.graphics.interaction.internal.pan");
+const PAN_CLASS_NAME: runmat_types::StaticClassIdentity = runmat_types::standard::PAN_CONTROL;
 
 const INTEGER_TARGET_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "pan-integer-graphics-target",

@@ -58,3 +58,27 @@ fn get_rejects_known_resident_handle_without_proven_output() {
         CertaintyFact::Dynamic(_)
     ));
 }
+
+#[test]
+fn get_accepts_known_graphics_control_object_and_keeps_unknown_object_conservative() {
+    let object = |runtime_class| {
+        ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class,
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }))
+    };
+    let known = infer(vec![object(Some(standard::ZOOM_CONTROL.owned()))], vec![]);
+    assert!(known.diagnostics.is_empty());
+    assert!(matches!(known.outputs[0].kind, ValueKindFact::Struct(_)));
+    let unknown = infer(vec![object(None)], vec![]);
+    assert!(unknown.diagnostics.is_empty());
+    assert!(matches!(
+        unknown.outputs[0].certainty,
+        CertaintyFact::Dynamic(_)
+    ));
+    let unrelated = infer(vec![object(Some(standard::TABLE.owned()))], vec![]);
+    assert!(!unrelated.diagnostics.is_empty());
+}

@@ -21,7 +21,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "datacursormode";
 const DATA_CURSOR_CLASS_NAME: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("matlab.graphics.shape.internal.DataCursorManager");
+    runmat_types::standard::DATA_CURSOR_CONTROL;
 
 const OUTPUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "dcm",

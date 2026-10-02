@@ -19,14 +19,22 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             handle.residency,
             ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
         ) || handle.shape.element_count().is_some_and(|n| n != 1)
-            || !matches!(
-                handle.kind,
-                ValueKindFact::Unknown | ValueKindFact::Numeric(_)
-            )
-            || handle
-                .numeric()
-                .is_some_and(|number| number.domain == NumericDomain::Complex)
-            || handle.storage == StorageFact::Sparse
+            || match &handle.kind {
+                ValueKindFact::Unknown => false,
+                ValueKindFact::Numeric(number) => {
+                    number.domain == NumericDomain::Complex || handle.storage == StorageFact::Sparse
+                }
+                ValueKindFact::Object(object) => {
+                    match (object.runtime_class.as_ref(), object.handle_semantics) {
+                        (Some(identity), Some(true)) => {
+                            !standard::is_graphics_property_control(identity)
+                        }
+                        (Some(_), Some(false)) => true,
+                        _ => false,
+                    }
+                }
+                _ => true,
+            }
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-SET-HANDLE",
