@@ -116,7 +116,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             .literal_args
             .get(index)
             .and_then(literal_text);
-        if literal.is_some_and(|text| text.eq_ignore_ascii_case("parent")) {
+        if literal
+            .as_deref()
+            .is_some_and(|text| text.eq_ignore_ascii_case("parent"))
+        {
             index += if index + 1 < request.arguments.len() {
                 2
             } else {
