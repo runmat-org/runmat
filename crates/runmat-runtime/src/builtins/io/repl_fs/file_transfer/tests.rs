@@ -4,6 +4,7 @@ use runmat_filesystem::MemoryFsProvider;
 use runmat_value::Value;
 
 #[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn copy_and_move_use_the_portable_filesystem_provider() {
     let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
         .lock()
