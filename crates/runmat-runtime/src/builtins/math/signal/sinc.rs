@@ -7,7 +7,9 @@ use runmat_builtins::{
     SINC_NONFLOATING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
+use runmat_value::{
+    ComplexElement, ComplexStorage, ComplexTensor, HostComplexBuffer, NumericDType, Tensor, Value,
+};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -361,12 +363,12 @@ async fn sinc_complex_tensor(
     Ok(complex_tensor_into_value(tensor))
 }
 
-async fn map_complex_values<Input: Copy, Output>(
-    values: Vec<Input>,
-    into_double: impl Fn(Input) -> (f64, f64),
-    from_double: impl Fn((f64, f64)) -> Output,
+async fn map_complex_values<Input: Copy, Output: Copy>(
+    values: HostComplexBuffer<Input>,
+    into_double: impl Fn((Input, Input)) -> (f64, f64),
+    from_double: impl Fn((f64, f64)) -> (Output, Output),
     cooperation: &mut SignalCooperation,
-) -> BuiltinResult<Vec<Output>> {
+) -> BuiltinResult<HostComplexBuffer<Output>> {
     let mut result = Vec::new();
     result.try_reserve_exact(values.len()).map_err(|cause| {
         crate::builtins::math::signal::common::WaveformMapError::Allocation(cause)
@@ -374,12 +376,13 @@ async fn map_complex_values<Input: Copy, Output>(
     })?;
     for chunk in values.chunks(4096) {
         for &value in chunk {
-            let (re, im) = into_double(value);
-            result.push(from_double(sinc_complex_value(re, im)));
+            let (re, im) = into_double((value.0, value.1));
+            let (re, im) = from_double(sinc_complex_value(re, im));
+            result.push(ComplexElement(re, im));
         }
         cooperation.completed(chunk.len() as u64).await?;
     }
-    Ok(result)
+    Ok(HostComplexBuffer::from_elements(result))
 }
 
 #[inline]
@@ -1040,10 +1043,12 @@ mod tests {
         let Value::ComplexTensor(actual) = gathered else {
             panic!("expected complex tensor");
         };
-        let expected = match sinc_complex_tensor(complex).expect("cpu sinc") {
-            Value::ComplexTensor(tensor) => tensor,
-            other => panic!("expected complex tensor, got {other:?}"),
-        };
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+        let expected =
+            match block_on(sinc_complex_tensor(complex, &mut cooperation)).expect("cpu sinc") {
+                Value::ComplexTensor(tensor) => tensor,
+                other => panic!("expected complex tensor, got {other:?}"),
+            };
         assert_eq!(actual.shape, expected.shape);
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,

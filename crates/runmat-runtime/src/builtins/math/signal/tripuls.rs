@@ -7,7 +7,9 @@ use runmat_builtins::{
     TRIPULS_GPU_INPUT_EXTENSION, TRIPULS_INTEGER_CONTROL_EXTENSION, TRIPULS_INTEGER_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Tensor, Value};
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor::tensor_into_value;
