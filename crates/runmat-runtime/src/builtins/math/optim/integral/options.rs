@@ -10,8 +10,8 @@ use runmat_builtins::INTEGRAL_ERROR_INVALID_ARGUMENT;
 use runmat_value::{LogicalArray, Value};
 
 use super::waypoints;
+use crate::builtins::math::optim::quadrature::QuadratureCooperation;
 
-#[derive(Clone)]
 pub(super) struct IntegralOptions {
     pub(super) abs_tol: f64,
     pub(super) rel_tol: f64,
@@ -33,8 +33,9 @@ impl IntegralOptions {
         }
     }
 
-    pub(super) fn preflight_host(
+    pub(super) async fn preflight_host(
         rest: &[(IntegralOptionName, &Value)],
+        cooperation: &mut QuadratureCooperation,
     ) -> BuiltinResult<Vec<Option<Vec<Complex<f64>>>>> {
         let mut check = Self::defaults();
         let mut known_abs_tol = Some(check.abs_tol);
@@ -55,7 +56,7 @@ impl IntegralOptions {
                 waypoints::admit_shape(value)?;
                 waypoint_receipts.push(match value {
                     Value::GpuTensor(_) => None,
-                    host => Some(waypoints::decode(host)?),
+                    host => Some(waypoints::decode(host, cooperation).await?),
                 });
                 continue;
             }
@@ -72,7 +73,7 @@ impl IntegralOptions {
                 }
                 continue;
             }
-            check.apply_option(name, value)?;
+            check.apply_option(name, value, cooperation).await?;
             match name {
                 IntegralOptionName::AbsTol => known_abs_tol = Some(check.abs_tol),
                 IntegralOptionName::RelTol => known_rel_tol = Some(check.rel_tol),
@@ -107,6 +108,7 @@ impl IntegralOptions {
     pub(super) async fn parse(
         rest: &[(IntegralOptionName, &Value)],
         mut waypoint_receipts: Vec<Option<Vec<Complex<f64>>>>,
+        cooperation: &mut QuadratureCooperation,
     ) -> BuiltinResult<Self> {
         let mut options = Self::defaults();
         for (index, &(name, value)) in rest.iter().enumerate() {
@@ -114,24 +116,29 @@ impl IntegralOptions {
                 options.waypoints = match waypoint_receipts[index].take() {
                     Some(host) => host,
                     None => {
-                        let gathered = crate::dispatcher::gather_if_needed_async(value).await?;
-                        waypoints::decode(&gathered)?
+                        let gathered = materialize_waypoint(value, cooperation).await?;
+                        waypoints::decode_exact(&gathered, cooperation).await?
                     }
                 };
                 continue;
             }
             if matches!(value, Value::GpuTensor(_)) {
                 let gathered = crate::dispatcher::gather_if_needed_async(value).await?;
-                options.apply_option(name, &gathered)?;
+                options.apply_option(name, &gathered, cooperation).await?;
             } else {
-                options.apply_option(name, value)?;
+                options.apply_option(name, value, cooperation).await?;
             }
         }
         options.validate()?;
         Ok(options)
     }
 
-    fn apply_option(&mut self, name: IntegralOptionName, value: &Value) -> BuiltinResult<()> {
+    async fn apply_option(
+        &mut self,
+        name: IntegralOptionName,
+        value: &Value,
+        cooperation: &mut QuadratureCooperation,
+    ) -> BuiltinResult<()> {
         match name {
             IntegralOptionName::AbsTol => {
                 self.abs_tol = numeric_option(name.display_name(), value)?
@@ -157,7 +164,7 @@ impl IntegralOptions {
                     IntegralCallbackMode::from_vectorized(bool_option("Vectorized", value)?);
             }
             IntegralOptionName::Waypoints => {
-                self.waypoints = waypoints::decode(value)?;
+                self.waypoints = waypoints::decode(value, cooperation).await?;
             }
         }
         Ok(())
@@ -184,6 +191,48 @@ impl IntegralOptions {
         }
         Ok(())
     }
+}
+
+async fn materialize_waypoint(
+    value: &Value,
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<Value> {
+    use crate::builtins::common::validation::{
+        value_has_native_integer_class, PreparedIntegerPayload,
+    };
+    if value_has_native_integer_class(value) {
+        let prepared = cooperation.prepare_integer_boundary(value).await?;
+        if !prepared.is_exact() {
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                "Waypoints integer values must convert to double exactly",
+            ));
+        }
+        if let Some(payload) = prepared.into_resident_payload() {
+            let converted = match payload {
+                PreparedIntegerPayload::Real(gathered) => runmat_value::Tensor::new_integer(
+                    crate::builtins::common::gpu_helpers::integer_storage_from_owned(gathered.data),
+                    gathered.shape,
+                )
+                .map(Value::Tensor),
+                PreparedIntegerPayload::Complex(gathered) => {
+                    crate::builtins::common::gpu_helpers::value_from_numeric_download(
+                        gathered, false,
+                    )
+                }
+            };
+            return converted.map_err(|detail| {
+                crate::build_runtime_error(format!(
+                    "integral: invalid native waypoint download: {detail}"
+                ))
+                .with_identifier("RunMat:Internal")
+                .with_builtin("integral")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+            });
+        }
+    }
+    crate::dispatcher::gather_if_needed_async(value).await
 }
 
 fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {

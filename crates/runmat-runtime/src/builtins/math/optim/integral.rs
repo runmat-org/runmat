@@ -173,10 +173,12 @@ async fn integral_with_cooperation(
     for (label, value) in [("lower bound", &a), ("upper bound", &b)] {
         preflight_integral_bound(label, value)?;
     }
-    let waypoint_receipts = IntegralOptions::preflight_host(&admitted_options)?;
-    path::preflight_host_path(&a, &b, &admitted_options, &waypoint_receipts)?;
+    let waypoint_receipts = IntegralOptions::preflight_host(&admitted_options, cooperation).await?;
+    let prepared_path =
+        path::preflight_host_path(&a, &b, &admitted_options, &waypoint_receipts, cooperation)
+            .await?;
     authenticate_integral_residents(&a, &b, &admitted_options)?;
-    let options = IntegralOptions::parse(&admitted_options, waypoint_receipts)
+    let options = IntegralOptions::parse(&admitted_options, waypoint_receipts, cooperation)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_ARGUMENT))?;
     let a = scalar_bound("lower bound", a)
@@ -185,7 +187,10 @@ async fn integral_with_cooperation(
     let b = scalar_bound("upper bound", b)
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
-    let segments = path::finite_real_segments(a, b, &options.waypoints)?;
+    let segments = match prepared_path {
+        Some(segments) => segments,
+        None => path::finite_real_segments(a, b, &options.waypoints, cooperation).await?,
+    };
     if segments
         .len()
         .checked_mul(5)

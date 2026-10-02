@@ -23,6 +23,14 @@ impl QuadratureArithmeticError {
 }
 
 pub(crate) trait AdaptiveEstimate: Clone {
+    async fn absolute<E: QuadratureEvaluator>(
+        &self,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError>;
+    async fn magnitude<E: QuadratureEvaluator>(
+        &self,
+        evaluator: &mut E,
+    ) -> Result<ScaledEstimate, QuadratureArithmeticError>;
     async fn add<E: QuadratureEvaluator>(
         &self,
         other: &Self,
@@ -65,6 +73,20 @@ pub(crate) trait QuadratureSample: Clone {
 }
 
 impl AdaptiveEstimate for ScaledEstimate {
+    async fn absolute<E: QuadratureEvaluator>(
+        &self,
+        _evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        Ok(self.abs())
+    }
+
+    async fn magnitude<E: QuadratureEvaluator>(
+        &self,
+        _evaluator: &mut E,
+    ) -> Result<ScaledEstimate, QuadratureArithmeticError> {
+        Ok(self.abs())
+    }
+
     async fn add<E: QuadratureEvaluator>(
         &self,
         other: &Self,
@@ -182,6 +204,34 @@ impl ArrayEstimate {
 }
 
 impl AdaptiveEstimate for ArrayEstimate {
+    async fn absolute<E: QuadratureEvaluator>(
+        &self,
+        evaluator: &mut E,
+    ) -> Result<Self, QuadratureArithmeticError> {
+        self.map(evaluator, ScaledEstimate::abs).await
+    }
+
+    async fn magnitude<E: QuadratureEvaluator>(
+        &self,
+        evaluator: &mut E,
+    ) -> Result<ScaledEstimate, QuadratureArithmeticError> {
+        let mut largest = ScaledEstimate::from_f64(0.0);
+        for (index, &component) in self.0.iter().enumerate() {
+            largest = largest.max(component.abs());
+            if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
+                evaluator
+                    .charge(COMPONENT_CHUNK as u64)
+                    .await
+                    .map_err(QuadratureArithmeticError::execution)?;
+            }
+        }
+        evaluator
+            .charge((self.0.len() % COMPONENT_CHUNK) as u64)
+            .await
+            .map_err(QuadratureArithmeticError::execution)?;
+        Ok(largest)
+    }
+
     async fn add<E: QuadratureEvaluator>(
         &self,
         other: &Self,

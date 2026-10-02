@@ -5,7 +5,6 @@ use crate::{BuiltinResult, RuntimeError};
 use std::sync::Arc;
 
 use super::algebra::{AdaptiveEstimate, QuadratureSample};
-#[cfg(test)]
 use super::ScaledEstimate;
 use super::{ArrayEstimate, QuadratureArithmeticError};
 
@@ -85,21 +84,12 @@ pub(crate) async fn integrate_scaled<E: QuadratureEvaluator<Sample = f64>>(
     integrate_domain(evaluator, a, b).await
 }
 
-#[cfg(test)]
 pub(crate) async fn integrate_array<E: QuadratureEvaluator<Sample = Arc<Vec<f64>>>>(
     evaluator: &mut E,
     a: f64,
     b: f64,
 ) -> BuiltinResult<ArrayEstimate> {
     integrate_domain(evaluator, a, b).await.map(|(q, _)| q)
-}
-
-pub(crate) async fn integrate_array_counted<E: QuadratureEvaluator<Sample = Arc<Vec<f64>>>>(
-    evaluator: &mut E,
-    a: f64,
-    b: f64,
-) -> BuiltinResult<(ArrayEstimate, usize)> {
-    integrate_domain(evaluator, a, b).await
 }
 
 async fn integrate_domain<E: QuadratureEvaluator>(

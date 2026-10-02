@@ -10,8 +10,8 @@ use super::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
-    integrate_array_counted, AdaptiveEstimate, ArrayEstimate, QuadratureArithmeticError,
-    QuadratureCooperation, QuadratureEvaluator, ScaledEstimate,
+    integrate_array, integrate_mesh, QuadratureArithmeticError, QuadratureCooperation,
+    QuadratureEvaluator, ScaledEstimate,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::INTEGRAL_ERROR_INVALID_INPUT;
@@ -20,7 +20,7 @@ const ELEMENT_CHUNK: usize = 4096;
 
 struct ArrayEvaluator<'a> {
     function: &'a Value,
-    options: IntegralOptions,
+    options: &'a IntegralOptions,
     cooperation: &'a mut QuadratureCooperation,
     shape: Option<Vec<usize>>,
 }
@@ -225,7 +225,7 @@ pub(super) async fn integrate_array_valued(
 ) -> BuiltinResult<Value> {
     let mut evaluator = ArrayEvaluator {
         function,
-        options: options.clone(),
+        options,
         cooperation,
         shape: None,
     };
@@ -234,31 +234,12 @@ pub(super) async fn integrate_array_valued(
         let zero = zero_values(sample.len(), evaluator.cooperation).await?;
         return finish(evaluator.shape.expect("sample establishes shape"), zero);
     }
-    evaluator.options.abs_tol = options.abs_tol / segments.len() as f64;
-    let mut remaining = options.max_fun_evals;
-    let mut estimate: Option<ArrayEstimate> = None;
-    for &(start, end) in segments {
-        evaluator.cooperation.completed(0).await?;
-        if remaining < 5 {
-            return Err(integral_error_with_detail(
-                &INTEGRAL_ERROR_INVALID_INPUT,
-                "exceeded maximum function evaluations",
-            ));
-        }
-        evaluator.options.max_fun_evals = remaining;
-        let (part, evaluations) = integrate_array_counted(&mut evaluator, start, end)
-            .await
-            .map_err(|error| integral_map_error(error, &INTEGRAL_ERROR_INVALID_INPUT))?;
-        remaining -= evaluations;
-        estimate = Some(match estimate {
-            Some(current) => current
-                .add(&part, &mut evaluator)
-                .await
-                .map_err(quadrature_arithmetic_error)?,
-            None => part,
-        });
+    let estimate = if options.waypoints.is_empty() {
+        integrate_array(&mut evaluator, lo, hi).await
+    } else {
+        integrate_mesh(&mut evaluator, segments).await
     }
-    let estimate = estimate.expect("nonempty finite interval has a waypoint segment");
+    .map_err(|error| integral_map_error(error, &INTEGRAL_ERROR_INVALID_INPUT))?;
     let shape = evaluator
         .shape
         .expect("integration evaluates at least one sample");
