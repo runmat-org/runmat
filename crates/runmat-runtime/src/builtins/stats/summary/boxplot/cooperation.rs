@@ -83,6 +83,28 @@ mod tests {
     }
 
     #[test]
+    fn registered_boxplot_rejects_cancelled_invocation_before_plot_effects() {
+        let source = CancellationSource::new();
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(CancellationReason::User);
+        let error = block_on(super::super::boxplot_builtin_registered(
+            Some(runtime),
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::from("FullFactors"),
+                Value::from("on"),
+            ],
+        ))
+        .expect_err("registered invocation uses its own cancellation token");
+        assert!(error
+            .identifier()
+            .is_some_and(|identifier| identifier.ends_with(":Cancelled")));
+    }
+
+    #[test]
     fn full_factor_expansion_charges_turns_and_stops_before_publication() {
         let factors = || {
             let first = Value::StringArray(
@@ -119,6 +141,14 @@ mod tests {
         .unwrap();
         assert_eq!(layout.slots.len(), 4);
         assert!(turns.get() >= layout.slots.len());
+        let turns_after_layout = turns.get();
+        block_on(super::super::plot::prepare_box_layout_cooperative(
+            &layout,
+            &options,
+            &mut cooperation,
+        ))
+        .expect("plot-plan preparation also cooperates before effects");
+        assert!(turns.get() > turns_after_layout);
 
         let source = Rc::new(CancellationSource::new());
         let cancel_on_turn = source.clone();

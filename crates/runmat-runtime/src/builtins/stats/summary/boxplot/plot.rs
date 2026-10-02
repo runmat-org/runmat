@@ -11,19 +11,56 @@ pub(super) struct PreparedBoxplot {
     limits: AxisLimits,
 }
 
+#[cfg(test)]
 pub(super) fn prepare_box_layout(
     layout: &factor_layout::BoxLayout,
     options: &BoxplotOptions,
 ) -> BuiltinResult<PreparedBoxplot> {
-    let mut plans = build_plot_plans(&layout.boxes, options)?;
-    let labels = super::appearance::slot_tick_labels(
-        &layout.slots,
-        options.label_verbosity,
-        options.labels.is_some(),
-    );
-    let ticks = layout.slots.iter().map(|slot| slot.position).collect();
-    let limits = axis_limits_for_layout(layout, options)?;
-    add_factor_separators(&mut plans, &layout.separators, limits, options.orientation)?;
+    futures::executor::block_on(prepare_box_layout_cooperative(
+        layout,
+        options,
+        &mut super::cooperation::BoxplotCooperation::new(None),
+    ))
+}
+
+pub(super) async fn prepare_box_layout_cooperative(
+    layout: &factor_layout::BoxLayout,
+    options: &BoxplotOptions,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<PreparedBoxplot> {
+    let mut plans = build_plot_plans_cooperative(&layout.boxes, options, cooperation).await?;
+    let mut labels = Vec::new();
+    let mut ticks = Vec::new();
+    labels
+        .try_reserve_exact(layout.slots.len())
+        .map_err(|_| invalid("boxplot: tick labels exceed available memory"))?;
+    ticks
+        .try_reserve_exact(layout.slots.len())
+        .map_err(|_| invalid("boxplot: ticks exceed available memory"))?;
+    for (index, slot) in layout.slots.iter().enumerate() {
+        let previous = index
+            .checked_sub(1)
+            .and_then(|previous| layout.slots.get(previous))
+            .map(|previous| previous.key.as_slice());
+        labels.push(super::appearance::tick_label(
+            &slot.label,
+            &slot.key,
+            previous,
+            options.label_verbosity,
+            options.labels.is_some(),
+        ));
+        ticks.push(slot.position);
+        cooperation.completed(1).await?;
+    }
+    let limits = axis_limits_for_layout_cooperative(layout, options, cooperation).await?;
+    add_factor_separators_cooperative(
+        &mut plans,
+        &layout.separators,
+        limits,
+        options.orientation,
+        cooperation,
+    )
+    .await?;
     Ok(PreparedBoxplot {
         plans,
         labels,
@@ -146,24 +183,20 @@ pub(super) fn publish_boxplot(
 
 pub(super) type AxisLimits = (Option<(f64, f64)>, Option<(f64, f64)>);
 
-fn axis_limits_for_layout(
+async fn axis_limits_for_layout_cooperative(
     layout: &factor_layout::BoxLayout,
     options: &BoxplotOptions,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<AxisLimits> {
-    let limits = axis_limits(&layout.boxes, options)?;
-    let widths = widths_for(layout.slots.len(), options);
-    let min_pos = layout
-        .slots
-        .iter()
-        .zip(&widths)
-        .map(|(slot, width)| slot.position - width)
-        .fold(f64::INFINITY, f64::min);
-    let max_pos = layout
-        .slots
-        .iter()
-        .zip(&widths)
-        .map(|(slot, width)| slot.position + width)
-        .fold(f64::NEG_INFINITY, f64::max);
+    let limits = axis_limits_cooperative(&layout.boxes, options, cooperation).await?;
+    let mut min_pos = f64::INFINITY;
+    let mut max_pos = f64::NEG_INFINITY;
+    for (index, slot) in layout.slots.iter().enumerate() {
+        let width = options.widths[index % options.widths.len()];
+        min_pos = min_pos.min(slot.position - width);
+        max_pos = max_pos.max(slot.position + width);
+        cooperation.completed(1).await?;
+    }
     if !min_pos.is_finite() || !max_pos.is_finite() || min_pos >= max_pos {
         return Err(invalid("boxplot: factor slot limits are not representable"));
     }
@@ -177,11 +210,12 @@ fn axis_limits_for_layout(
     })
 }
 
-fn add_factor_separators(
+async fn add_factor_separators_cooperative(
     plans: &mut Vec<PlotPlan>,
     positions: &[f64],
     limits: AxisLimits,
     orientation: Orientation,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<()> {
     let data = match orientation {
         Orientation::Vertical => limits.1,
@@ -210,25 +244,35 @@ fn add_factor_separators(
             )
             .with_label("factor separator");
         plans.push(PlotPlan::Line(line));
+        cooperation.completed(1).await?;
     }
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn axis_limits(
     boxes: &[BoxStats],
     options: &BoxplotOptions,
 ) -> BuiltinResult<AxisLimits> {
-    let min_pos = boxes
-        .iter()
-        .map(|stats| stats.position - stats.width)
-        .fold(f64::INFINITY, f64::min);
-    let max_pos = boxes
-        .iter()
-        .map(|stats| stats.position + stats.width)
-        .fold(f64::NEG_INFINITY, f64::max);
+    futures::executor::block_on(axis_limits_cooperative(
+        boxes,
+        options,
+        &mut super::cooperation::BoxplotCooperation::new(None),
+    ))
+}
+
+async fn axis_limits_cooperative(
+    boxes: &[BoxStats],
+    options: &BoxplotOptions,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<AxisLimits> {
+    let mut min_pos = f64::INFINITY;
+    let mut max_pos = f64::NEG_INFINITY;
     let mut min_data = f64::INFINITY;
     let mut max_data = f64::NEG_INFINITY;
     for stats in boxes {
+        min_pos = min_pos.min(stats.position - stats.width);
+        max_pos = max_pos.max(stats.position + stats.width);
         min_data = min_data.min(stats.lower_whisker).min(stats.q1);
         max_data = max_data.max(stats.upper_whisker).max(stats.q3);
         if options.notch_style != NotchStyle::Off {
@@ -240,7 +284,9 @@ pub(super) fn axis_limits(
             let value = display_data_value(*value, idx, stats.outliers.len(), options);
             min_data = min_data.min(value);
             max_data = max_data.max(value);
+            cooperation.completed(1).await?;
         }
+        cooperation.completed(1).await?;
     }
     if let Some((lo, hi)) = options.data_lim {
         if lo.is_finite() {
@@ -301,9 +347,22 @@ pub(super) fn axis_limits(
     })
 }
 
+#[cfg(test)]
 pub(super) fn build_plot_plans(
     boxes: &[BoxStats],
     options: &BoxplotOptions,
+) -> BuiltinResult<Vec<PlotPlan>> {
+    futures::executor::block_on(build_plot_plans_cooperative(
+        boxes,
+        options,
+        &mut super::cooperation::BoxplotCooperation::new(None),
+    ))
+}
+
+async fn build_plot_plans_cooperative(
+    boxes: &[BoxStats],
+    options: &BoxplotOptions,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<Vec<PlotPlan>> {
     let mut plans = Vec::new();
     for stats in boxes {
@@ -321,6 +380,7 @@ pub(super) fn build_plot_plans(
                 plans.push(PlotPlan::Scatter(scatter));
             }
         }
+        cooperation.completed(1).await?;
     }
     Ok(plans)
 }
@@ -468,12 +528,6 @@ pub(super) fn handles_value(handles: Vec<f64>) -> BuiltinResult<Value> {
     Tensor::new(handles, vec![1, len])
         .map(Value::Tensor)
         .map_err(|err| internal(format!("boxplot: {err}")))
-}
-
-pub(super) fn widths_for(count: usize, options: &BoxplotOptions) -> Vec<f64> {
-    (0..count)
-        .map(|idx| options.widths[idx % options.widths.len()])
-        .collect()
 }
 
 pub(super) fn color_for(idx: usize, colors: &[Vec4]) -> Vec4 {

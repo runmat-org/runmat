@@ -300,7 +300,8 @@ async fn boxplot_in_runtime(
     let options = option_plan.evaluate().await?;
     let layout = groups::build_box_layout_cooperative(x, group, &options, &mut cooperation).await?;
 
-    let prepared = plot::prepare_box_layout(&layout, &options)?;
+    let prepared =
+        plot::prepare_box_layout_cooperative(&layout, &options, &mut cooperation).await?;
     apply_axes_target(axes_target, NAME).map_err(map_plot_error)?;
     let handles = plot::publish_boxplot(prepared, &options)?;
     let value = handles_value(handles)?;

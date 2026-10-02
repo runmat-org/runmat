@@ -20,15 +20,24 @@ pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_coopera
     options: &BoxplotOptions,
     cooperation: &mut super::super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<BoxLayout> {
-    let keys = boxes
-        .iter()
-        .map(|stats| stats.group_key.clone())
-        .collect::<Vec<_>>();
+    let mut keys = Vec::new();
+    keys.try_reserve_exact(boxes.len())
+        .map_err(|_| invalid("boxplot: grouping keys exceed available memory"))?;
+    for stats in &boxes {
+        let mut key = Vec::new();
+        key.try_reserve_exact(stats.group_key.len())
+            .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
+        for atom in &stats.group_key {
+            cooperation.completed(1).await?;
+            key.push(atom.clone());
+        }
+        keys.push(key);
+    }
     let factor_count = keys.first().map_or(0, Vec::len);
     if keys.iter().any(|key| key.len() != factor_count) {
         return Err(invalid("boxplot: grouping factors have inconsistent arity"));
     }
-    let levels = collect_levels(&keys, factor_count);
+    let levels = collect_levels_cooperative(&keys, factor_count, cooperation).await?;
     validate_factor_controls(options, factor_count)?;
     let directions = resolved_directions(&options.factor_direction, &levels, options.orientation)?;
     let slot_count = if options.full_factors && factor_count > 0 {
@@ -64,10 +73,15 @@ pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_coopera
         )
         .await?
     } else {
-        observed_slots(&keys, &directions, options.group_order.is_some())
+        observed_slots(
+            &keys,
+            &directions,
+            options.group_order.is_some(),
+            cooperation,
+        )
+        .await?
     };
-    let positions = slot_positions(&slots, options)?;
-    let widths = super::super::plot::widths_for(slots.len(), options);
+    let positions = slot_positions(&slots, options, cooperation).await?;
     for (index, slot) in slots.iter_mut().enumerate() {
         slot.position = positions[index];
         slot.label = options.labels.as_ref().map_or_else(
@@ -77,20 +91,23 @@ pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_coopera
         if let Some(box_index) = slot.box_index {
             let stats = &mut boxes[box_index];
             stats.position = slot.position;
-            stats.width = widths[index];
+            stats.width = options.widths[index % options.widths.len()];
             stats.label = slot.label.clone();
         }
+        cooperation.completed(1).await?;
     }
     boxes.sort_by(|left, right| left.position.total_cmp(&right.position));
-    let box_index_by_key = boxes
-        .iter()
-        .enumerate()
-        .map(|(index, stats)| (stats.group_key.clone(), index))
-        .collect::<BTreeMap<_, _>>();
+    cooperation.completed(0).await?;
+    let mut box_index_by_key = BTreeMap::new();
+    for (index, stats) in boxes.iter().enumerate() {
+        box_index_by_key.insert(stats.group_key.clone(), index);
+        cooperation.completed(1).await?;
+    }
     for slot in &mut slots {
         slot.box_index = box_index_by_key.get(&slot.key).copied();
+        cooperation.completed(1).await?;
     }
-    let separators = separator_positions(&slots, options);
+    let separators = separator_positions(&slots, options, cooperation).await?;
     Ok(BoxLayout {
         boxes,
         slots,
@@ -98,17 +115,22 @@ pub(in crate::builtins::stats::summary::boxplot) async fn prepare_layout_coopera
     })
 }
 
-fn collect_levels(keys: &[Vec<KeyAtom>], factor_count: usize) -> Vec<Vec<KeyAtom>> {
+async fn collect_levels_cooperative(
+    keys: &[Vec<KeyAtom>],
+    factor_count: usize,
+    cooperation: &mut super::super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<Vec<Vec<KeyAtom>>> {
     let mut levels = vec![Vec::new(); factor_count];
     let mut seen = vec![BTreeSet::new(); factor_count];
     for key in keys {
         for (factor, value) in key.iter().enumerate() {
+            cooperation.completed(1).await?;
             if seen[factor].insert(value.clone()) {
                 levels[factor].push(value.clone());
             }
         }
     }
-    levels
+    Ok(levels)
 }
 
 fn resolved_directions(
@@ -127,14 +149,15 @@ fn resolved_directions(
         .collect())
 }
 
-fn observed_slots(
+async fn observed_slots(
     keys: &[Vec<KeyAtom>],
     reverse: &[bool],
     group_order_explicit: bool,
-) -> Vec<FactorSlot> {
+    cooperation: &mut super::super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<Vec<FactorSlot>> {
     let mut indices = (0..keys.len()).collect::<Vec<_>>();
     if !group_order_explicit && reverse.iter().any(|value| *value) {
-        let levels = collect_levels(keys, reverse.len());
+        let levels = collect_levels_cooperative(keys, reverse.len(), cooperation).await?;
         let ranks = levels
             .iter()
             .map(|factor_levels| {
@@ -162,15 +185,20 @@ fn observed_slots(
             left.cmp(&right)
         });
     }
-    indices
-        .into_iter()
-        .map(|index| FactorSlot {
+    let mut slots = Vec::new();
+    slots
+        .try_reserve_exact(indices.len())
+        .map_err(|_| invalid("boxplot: observed slots exceed available memory"))?;
+    for index in indices {
+        slots.push(FactorSlot {
             key: keys[index].clone(),
             label: String::new(),
             position: 0.0,
             box_index: Some(index),
-        })
-        .collect()
+        });
+        cooperation.completed(1).await?;
+    }
+    Ok(slots)
 }
 
 async fn cartesian_slots(
@@ -188,17 +216,24 @@ async fn cartesian_slots(
         .map_err(|_| invalid("boxplot: FullFactors slots exceed available memory"))?;
     let observed_by_key = observed
         .iter()
-        .cloned()
         .enumerate()
-        .map(|(index, key)| (key, index))
+        .map(|(index, key)| (key.as_slice(), index))
         .collect::<BTreeMap<_, _>>();
     if observed_first {
         // GroupOrder has already put the observed keys in public order. Emit
         // them first, then append absent Cartesian combinations; no large
         // synchronous post-expansion sort can monopolize a browser turn.
         for (index, key) in observed.iter().enumerate() {
+            let mut copied = Vec::new();
+            copied
+                .try_reserve_exact(key.len())
+                .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
+            for atom in key {
+                cooperation.completed(1).await?;
+                copied.push(atom.clone());
+            }
             slots.push(FactorSlot {
-                key: key.clone(),
+                key: copied,
                 label: String::new(),
                 position: 0.0,
                 box_index: Some(index),
@@ -208,19 +243,19 @@ async fn cartesian_slots(
     }
     let mut digits = vec![0usize; levels.len()];
     for _ in 0..count {
-        let key = digits
-            .iter()
-            .enumerate()
-            .map(|(factor, &digit)| {
-                let level = if reverse[factor] {
-                    levels[factor].len() - 1 - digit
-                } else {
-                    digit
-                };
-                levels[factor][level].clone()
-            })
-            .collect::<Vec<_>>();
-        let box_index = observed_by_key.get(&key).copied();
+        let mut key = Vec::new();
+        key.try_reserve_exact(levels.len())
+            .map_err(|_| invalid("boxplot: grouping key exceeds available memory"))?;
+        for (factor, &digit) in digits.iter().enumerate() {
+            cooperation.completed(1).await?;
+            let level = if reverse[factor] {
+                levels[factor].len() - 1 - digit
+            } else {
+                digit
+            };
+            key.push(levels[factor][level].clone());
+        }
+        let box_index = observed_by_key.get(key.as_slice()).copied();
         if !observed_first || box_index.is_none() {
             slots.push(FactorSlot {
                 key,
@@ -255,29 +290,48 @@ fn validate_factor_controls(options: &BoxplotOptions, factor_count: usize) -> Bu
     Ok(())
 }
 
-fn slot_positions(slots: &[FactorSlot], options: &BoxplotOptions) -> BuiltinResult<Vec<f64>> {
+async fn slot_positions(
+    slots: &[FactorSlot],
+    options: &BoxplotOptions,
+    cooperation: &mut super::super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<Vec<f64>> {
     if let Some(positions) = &options.positions {
         if positions.len() != slots.len() {
             return Err(invalid(
                 "boxplot: Positions length must match the number of plotted slots",
             ));
         }
-        return Ok(positions.clone());
+        let mut copied = Vec::new();
+        copied
+            .try_reserve_exact(positions.len())
+            .map_err(|_| invalid("boxplot: Positions exceed available memory"))?;
+        for &position in positions {
+            copied.push(position);
+            cooperation.completed(1).await?;
+        }
+        return Ok(copied);
     }
-    let percentages = slots
-        .windows(2)
-        .map(|pair| {
-            pair[0]
-                .key
-                .iter()
-                .zip(&pair[1].key)
-                .position(|(prior, current)| prior != current)
-                .map_or(0.0, |factor| gap_percent(&options.factor_gap, factor))
-        })
-        .collect::<Vec<_>>();
+    let mut percentages = Vec::new();
+    percentages
+        .try_reserve_exact(slots.len().saturating_sub(1))
+        .map_err(|_| invalid("boxplot: FactorGap boundaries exceed available memory"))?;
+    let mut total_percent = 0.0;
+    for pair in slots.windows(2) {
+        let mut changed = None;
+        for (factor, (prior, current)) in pair[0].key.iter().zip(&pair[1].key).enumerate() {
+            cooperation.completed(1).await?;
+            if prior != current {
+                changed = Some(factor);
+                break;
+            }
+        }
+        let percent = changed.map_or(0.0, |factor| gap_percent(&options.factor_gap, factor));
+        percentages.push(percent);
+        total_percent += percent;
+        cooperation.completed(1).await?;
+    }
     // A percentage is measured against the final category-axis width,
     // including one unit per slot. Solve that width before placing any slot.
-    let total_percent = percentages.iter().sum::<f64>();
     if !total_percent.is_finite() || total_percent >= 100.0 {
         return Err(invalid(
             "boxplot: FactorGap exceeds the representable plot width",
@@ -289,7 +343,10 @@ fn slot_positions(slots: &[FactorSlot], options: &BoxplotOptions) -> BuiltinResu
             "boxplot: FactorGap plot width is not representable",
         ));
     }
-    let mut positions = Vec::with_capacity(slots.len());
+    let mut positions = Vec::new();
+    positions
+        .try_reserve_exact(slots.len())
+        .map_err(|_| invalid("boxplot: factor positions exceed available memory"))?;
     let mut next = 1.0;
     for index in 0..slots.len() {
         if index > 0 {
@@ -300,6 +357,7 @@ fn slot_positions(slots: &[FactorSlot], options: &BoxplotOptions) -> BuiltinResu
             return Err(invalid("boxplot: factor positions are not representable"));
         }
         positions.push(next);
+        cooperation.completed(1).await?;
     }
     Ok(positions)
 }
@@ -318,19 +376,30 @@ fn gap_percent(gap: &FactorGap, factor: usize) -> f64 {
     }
 }
 
-fn separator_positions(slots: &[FactorSlot], options: &BoxplotOptions) -> Vec<f64> {
+async fn separator_positions(
+    slots: &[FactorSlot],
+    options: &BoxplotOptions,
+    cooperation: &mut super::super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<Vec<f64>> {
     let selected = match &options.factor_separator {
-        FactorSeparator::None => return Vec::new(),
+        FactorSeparator::None => return Ok(Vec::new()),
         FactorSeparator::Auto => (1..=slots[0].key.len()).collect::<Vec<_>>(),
         FactorSeparator::Factors(indices) => indices.clone(),
     };
-    slots
-        .windows(2)
-        .filter_map(|pair| {
-            selected
-                .iter()
-                .any(|&factor| pair[0].key[factor - 1] != pair[1].key[factor - 1])
-                .then_some(pair[0].position * 0.5 + pair[1].position * 0.5)
-        })
-        .collect()
+    let mut separators = Vec::new();
+    for pair in slots.windows(2) {
+        let mut boundary = false;
+        for &factor in &selected {
+            cooperation.completed(1).await?;
+            if pair[0].key[factor - 1] != pair[1].key[factor - 1] {
+                boundary = true;
+                break;
+            }
+        }
+        if boundary {
+            separators.push(pair[0].position * 0.5 + pair[1].position * 0.5);
+        }
+        cooperation.completed(1).await?;
+    }
+    Ok(separators)
 }

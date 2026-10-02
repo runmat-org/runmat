@@ -68,25 +68,7 @@ pub(super) fn tick_labels(
         .collect()
 }
 
-pub(super) fn slot_tick_labels(
-    slots: &[super::factor_layout::FactorSlot],
-    verbosity: LabelVerbosity,
-    custom_labels: bool,
-) -> Vec<String> {
-    slots
-        .iter()
-        .enumerate()
-        .map(|(index, slot)| {
-            let previous = index
-                .checked_sub(1)
-                .and_then(|previous| slots.get(previous))
-                .map(|previous| previous.key.as_slice());
-            tick_label(&slot.label, &slot.key, previous, verbosity, custom_labels)
-        })
-        .collect()
-}
-
-fn tick_label(
+pub(super) fn tick_label(
     label: &str,
     key: &[crate::builtins::common::grouping_keys::KeyAtom],
     previous: Option<&[crate::builtins::common::grouping_keys::KeyAtom]>,
