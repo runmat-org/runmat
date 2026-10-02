@@ -538,7 +538,11 @@ fn fminbnd_descriptor_signatures_cover_core_forms() {
         .collect();
     assert_eq!(
         codes,
-        vec!["RM.FMINBND.INVALID_ARGUMENT", "RM.FMINBND.INVALID_INPUT"]
+        vec![
+            "RM.FMINBND.INVALID_ARGUMENT",
+            "RM.FMINBND.INVALID_INPUT",
+            "RM.FMINBND.TOO_MANY_OUTPUTS",
+        ]
     );
 }
 
