@@ -78,10 +78,10 @@ fn seeded_even_odd_zero_and_next_word_match_serial_box_muller() {
 fn sync_and_cooperative_normal_draws_share_sequence_and_state() {
     let _guard = test_guard();
     for len in [0, 1, 2, 3, 257] {
-        super::super::super::reset_rng();
+        super::super::reset_rng();
         let sync = generate_normal(len, "rng test").unwrap();
-        let sync_state = super::super::super::snapshot().unwrap().state;
-        super::super::super::reset_rng();
+        let sync_state = super::super::snapshot().unwrap().state;
+        super::super::reset_rng();
         let cooperative = block_on(generate_normal_cooperative(
             len,
             "rng test",
@@ -90,7 +90,7 @@ fn sync_and_cooperative_normal_draws_share_sequence_and_state() {
         ))
         .unwrap();
         assert_eq!(cooperative, sync);
-        assert_eq!(super::super::super::snapshot().unwrap().state, sync_state);
+        assert_eq!(super::super::snapshot().unwrap().state, sync_state);
     }
 }
 
