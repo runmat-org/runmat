@@ -2,7 +2,11 @@
 use super::*;
 use runmat_accelerate_api::GpuTensorStorage;
 
-pub(super) fn admit_host_visible(x: &Value, group: Option<&Value>) -> BuiltinResult<()> {
+pub(super) async fn admit_host_visible(
+    x: &Value,
+    group: Option<&Value>,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<()> {
     let (shape, count) = match x {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => (None, 1),
         Value::Tensor(tensor) => (Some(tensor.shape.as_slice()), tensor.len()),
@@ -26,7 +30,7 @@ pub(super) fn admit_host_visible(x: &Value, group: Option<&Value>) -> BuiltinRes
         return Err(invalid("boxplot: X must be a nonempty vector or matrix"));
     }
     if let Some(group) = group {
-        validate_known_group(group, shape, count)?;
+        validate_known_group(group, shape, count, cooperation).await?;
     }
     Ok(())
 }
@@ -44,23 +48,30 @@ pub(super) fn known_factor_count(group: Option<&Value>) -> Option<usize> {
     }
 }
 
-fn validate_known_group(
+async fn validate_known_group(
     group: &Value,
     x_shape: Option<&[usize]>,
     x_count: usize,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<()> {
-    validate_group_leaf_classes(group)?;
+    validate_group_leaf_classes(group, cooperation).await?;
     if matches!(group, Value::Cell(_) | Value::Object(_)) && !value_contains_gpu(group)? {
-        return super::groups::validate_known_host_group(group, x_shape, x_count);
+        return super::groups::validate_known_host_group_cooperative(
+            group,
+            x_shape,
+            x_count,
+            cooperation,
+        )
+        .await;
     }
     if matches!(group, Value::Cell(_)) {
-        let matches_elements = could_match_group_length(group, x_count)?;
+        let matches_elements = could_match_group_length(group, x_count, cooperation).await?;
         let matches_rows = if matches_elements {
             false
         } else if let Some(shape) =
             x_shape.filter(|shape| shape.len() == 2 && shape[0] > 1 && shape[1] > 1)
         {
-            could_match_group_length(group, shape[0])?
+            could_match_group_length(group, shape[0], cooperation).await?
         } else {
             false
         };
@@ -110,44 +121,75 @@ fn validate_known_group(
 /// A resident leaf keeps its known class and shape through materialization.
 /// A cell is either one scalar label per row or a list of grouping vectors;
 /// reject only when neither role can match the sample geometry.
-fn could_match_group_length(value: &Value, expected: usize) -> BuiltinResult<bool> {
-    match value {
-        Value::Cell(cell) => {
-            if cell.data.len() == expected && cell.data.iter().all(could_be_scalar_label) {
-                return Ok(true);
+async fn could_match_group_length(
+    value: &Value,
+    expected: usize,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<bool> {
+    let mut pending = vec![std::slice::from_ref(value).iter()];
+    while let Some(frame) = pending.last_mut() {
+        let Some(value) = frame.next() else {
+            pending.pop();
+            continue;
+        };
+        cooperation.completed(1).await?;
+        match value {
+            Value::Cell(cell) => {
+                let mut scalar_labels = cell.data.len() == expected;
+                if scalar_labels {
+                    for item in &cell.data {
+                        scalar_labels &= could_be_scalar_label(item);
+                        cooperation.completed(1).await?;
+                        if !scalar_labels {
+                            break;
+                        }
+                    }
+                }
+                if !scalar_labels {
+                    pending.try_reserve(1).map_err(|_| {
+                        invalid("boxplot: grouping metadata exceeds available memory")
+                    })?;
+                    pending.push(cell.data.iter());
+                }
             }
-            for element in &cell.data {
-                if !could_match_group_length(element, expected)? {
+            Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => {
+                if expected != 1 {
                     return Ok(false);
                 }
             }
-            Ok(true)
-        }
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(expected == 1),
-        Value::Tensor(tensor) => Ok(tensor.len() == expected),
-        Value::LogicalArray(array) => Ok(array.len() == expected),
-        Value::StringArray(array) => Ok(array.data.len() == expected),
-        Value::CharArray(array) => Ok(array.rows == expected),
-        Value::GpuTensor(handle) => Ok(handle
-            .shape()
-            .iter()
-            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
-            == Some(expected)),
-        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
-            // Host categorical row count belongs to the table domain. A
-            // resident property may become valid after gather, so keep that
-            // case dynamic rather than interpreting object field strings here.
-            if value_contains_gpu(value)? {
-                return Ok(true);
+            Value::Tensor(tensor) if tensor.len() == expected => {}
+            Value::LogicalArray(array) if array.len() == expected => {}
+            Value::StringArray(array) if array.data.len() == expected => {}
+            Value::CharArray(array) if array.rows == expected => {}
+            Value::GpuTensor(handle)
+                if handle
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+                    == Some(expected) => {}
+            Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
+                // Resident categorical properties remain deferred to the owner.
+                if value_contains_gpu(value)? {
+                    continue;
+                }
+                let view =
+                    crate::builtins::table::categorical_label_view(object).map_err(|err| {
+                        invalid_with_source("boxplot: invalid categorical grouping variable", err)
+                    })?;
+                for index in 0..view.len() {
+                    view.observation_label_at(index).map_err(|err| {
+                        invalid_with_source("boxplot: invalid categorical grouping variable", err)
+                    })?;
+                    cooperation.completed(1).await?;
+                }
+                if view.len() != expected {
+                    return Ok(false);
+                }
             }
-            let labels =
-                crate::builtins::table::categorical_observation_labels(object).map_err(|err| {
-                    invalid_with_source("boxplot: invalid categorical grouping variable", err)
-                })?;
-            Ok(labels.len() == expected)
+            _ => return Ok(false),
         }
-        _ => Ok(false),
     }
+    Ok(true)
 }
 
 fn could_be_scalar_label(value: &Value) -> bool {
@@ -168,26 +210,42 @@ fn could_be_scalar_label(value: &Value) -> bool {
     }
 }
 
-fn validate_group_leaf_classes(group: &Value) -> BuiltinResult<()> {
-    match group {
-        Value::Cell(cell) => {
-            for value in &cell.data {
-                validate_group_leaf_classes(value)?;
+async fn validate_group_leaf_classes(
+    group: &Value,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
+) -> BuiltinResult<()> {
+    let mut pending = vec![std::slice::from_ref(group).iter()];
+    while let Some(frame) = pending.last_mut() {
+        let Some(value) = frame.next() else {
+            pending.pop();
+            continue;
+        };
+        cooperation.completed(1).await?;
+        match value {
+            Value::Cell(cell) => {
+                pending
+                    .try_reserve(1)
+                    .map_err(|_| invalid("boxplot: grouping metadata exceeds available memory"))?;
+                pending.push(cell.data.iter());
             }
-            Ok(())
+            Value::GpuTensor(handle) if handle.physical().storage() != GpuTensorStorage::Real => {
+                return Err(invalid(
+                    "boxplot: grouping data must be real numeric or text",
+                ));
+            }
+            Value::Object(object) if !object.is_class(runmat_types::standard::CATEGORICAL) => {
+                return Err(invalid("boxplot: grouping data must be categorical"));
+            }
+            Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::SparseTensor(_)
+            | Value::Struct(_) => {
+                return Err(invalid(
+                    "boxplot: grouping data must be real numeric or text",
+                ));
+            }
+            _ => {}
         }
-        Value::GpuTensor(handle) if handle.physical().storage() != GpuTensorStorage::Real => Err(
-            invalid("boxplot: grouping data must be real numeric or text"),
-        ),
-        Value::Object(object) if !object.is_class(runmat_types::standard::CATEGORICAL) => {
-            Err(invalid("boxplot: grouping data must be categorical"))
-        }
-        Value::Complex(_, _)
-        | Value::ComplexTensor(_)
-        | Value::SparseTensor(_)
-        | Value::Struct(_) => Err(invalid(
-            "boxplot: grouping data must be real numeric or text",
-        )),
-        _ => Ok(()),
     }
+    Ok(())
 }

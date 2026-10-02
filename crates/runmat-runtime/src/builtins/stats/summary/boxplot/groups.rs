@@ -9,26 +9,29 @@ use crate::builtins::common::grouping_keys::{
     group_key_work_units, GroupIndex, GroupIndexBuildError, KeyAtom, KeyOrder,
 };
 pub(super) use labels::{char_rows, number_label, numeric_scalar_label};
-use labels::{
-    group_label_text, group_labels, group_labels_cooperative, CooperativeLabelError, GroupLabel,
-};
+use labels::{group_label_text, group_labels_cooperative, CooperativeLabelError, GroupLabel};
 
-pub(super) fn validate_known_host_group(
+pub(super) async fn validate_known_host_group_cooperative(
     group: &Value,
     x_shape: Option<&[usize]>,
     x_count: usize,
+    cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<()> {
-    match group_labels(group, x_count) {
+    match group_labels_cooperative(group, x_count, cooperation).await {
         Ok(_) => Ok(()),
-        Err(first_error)
+        Err(CooperativeLabelError::Semantic(first_error))
             if x_shape.is_some_and(|shape| shape.len() == 2 && shape[0] > 1 && shape[1] > 1) =>
         {
             let rows = x_shape.expect("matrix shape checked above")[0];
-            group_labels(group, rows)
+            group_labels_cooperative(group, rows, cooperation)
+                .await
                 .map(|_| ())
-                .map_err(|_| first_error)
+                .map_err(|second| match second {
+                    CooperativeLabelError::Semantic(_) => first_error,
+                    CooperativeLabelError::Service(error) => error,
+                })
         }
-        Err(error) => Err(error),
+        Err(error) => Err(error.into_runtime()),
     }
 }
 

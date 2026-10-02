@@ -27,6 +27,7 @@ enum Source<'a> {
         variables: Vec<Vec<Option<GroupLabel>>>,
         row: usize,
         factor: usize,
+        atom: usize,
         parts: GroupLabel,
         missing: bool,
     },
@@ -173,6 +174,7 @@ impl<'a> GroupLabelBuilder<'a> {
                         variables,
                         row: 0,
                         factor: 0,
+                        atom: 0,
                         parts: Vec::new(),
                         missing: false,
                     };
@@ -181,6 +183,7 @@ impl<'a> GroupLabelBuilder<'a> {
                     variables,
                     mut row,
                     mut factor,
+                    mut atom,
                     mut parts,
                     mut missing,
                 } => {
@@ -190,21 +193,38 @@ impl<'a> GroupLabelBuilder<'a> {
                     if factor < variables.len() {
                         let units = match &variables[factor][row] {
                             Some(label) if !missing => {
-                                let units = group_key_work_units(label);
-                                parts.extend(label.iter().cloned());
-                                units
+                                if let Some(component) = label.get(atom) {
+                                    if parts.len() == parts.capacity() {
+                                        parts.try_reserve(1).map_err(|_| {
+                                            invalid(
+                                                "boxplot: grouping key exceeds available memory",
+                                            )
+                                        })?;
+                                    }
+                                    parts.push(component.clone());
+                                    atom += 1;
+                                    group_key_work_units(std::slice::from_ref(component))
+                                } else {
+                                    factor += 1;
+                                    atom = 0;
+                                    1
+                                }
                             }
                             None => {
                                 missing = true;
+                                factor = variables.len();
                                 1
                             }
-                            Some(_) => 1,
+                            Some(_) => {
+                                factor = variables.len();
+                                1
+                            }
                         };
-                        factor = if missing { variables.len() } else { factor + 1 };
                         self.source = Source::CellCombine {
                             variables,
                             row,
                             factor,
+                            atom,
                             parts,
                             missing,
                         };
@@ -216,6 +236,7 @@ impl<'a> GroupLabelBuilder<'a> {
                         variables,
                         row,
                         factor: 0,
+                        atom: 0,
                         parts: Vec::new(),
                         missing: false,
                     };

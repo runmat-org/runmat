@@ -300,14 +300,19 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
         )
         .unwrap(),
     );
-    admission::admit_host_visible(&sample(), Some(&scalar_labels))
-        .expect("a resident scalar among four scalar labels remains admissible");
+    block_on(admission::admit_host_visible(
+        &sample(),
+        Some(&scalar_labels),
+        &mut cooperation::BoxplotCooperation::new(None),
+    ))
+    .expect("a resident scalar among four scalar labels remains admissible");
     let row_factor =
         Value::Cell(CellArray::new(vec![Value::GpuTensor(resident.handle.clone())], 1, 1).unwrap());
-    admission::admit_host_visible(
+    block_on(admission::admit_host_visible(
         &Value::Tensor(Tensor::new(vec![1.0; 8], vec![4, 2]).unwrap()),
         Some(&row_factor),
-    )
+        &mut cooperation::BoxplotCooperation::new(None),
+    ))
     .expect("a four-row factor can group a four-by-two matrix");
     let categorical_factor = Value::Cell(
         CellArray::new(
@@ -320,8 +325,12 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
         )
         .unwrap(),
     );
-    admission::admit_host_visible(&sample(), Some(&categorical_factor))
-        .expect("valid host categorical factors remain admissible beside resident factors");
+    block_on(admission::admit_host_visible(
+        &sample(),
+        Some(&categorical_factor),
+        &mut cooperation::BoxplotCooperation::new(None),
+    ))
+    .expect("valid host categorical factors remain admissible beside resident factors");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }
 
@@ -441,6 +450,52 @@ fn unpolled_and_abandoned_pending_future_keep_borrowed_input_live() {
     ));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     drop(pending);
+    resident.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(resident.probe.retirements(), 0);
+}
+
+#[test]
+fn registered_cancelled_nested_host_preflight_never_downloads_borrowed_sample() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(RejectDownloads::default()));
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let resident = provider
+        .owner
+        .allocate_zeroed(
+            vec![128, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let labels = Value::Cell(
+        CellArray::new(
+            vec![Value::StringArray(
+                runmat_value::StringArray::new(
+                    (0..128).map(|index| format!("g{index}")).collect(),
+                    vec![128, 1],
+                )
+                .unwrap(),
+            )],
+            1,
+            1,
+        )
+        .unwrap(),
+    );
+    let source = runmat_execution::cancellation::CancellationSource::new();
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+        source.token(),
+    );
+    source.cancel(runmat_execution::CancellationReason::User);
+    let error = block_on(boxplot_builtin_registered(
+        Some(runtime),
+        vec![Value::GpuTensor(resident.handle.clone()), labels],
+    ))
+    .expect_err("cancelled nested group admission must stop before resident transfer");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     resident.handle.allocation_lease().validate_live().unwrap();
     assert_eq!(resident.probe.retirements(), 0);
 }

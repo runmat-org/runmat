@@ -45,6 +45,48 @@ fn nested_factor_labels_have_identical_sync_and_cooperative_identity() {
 }
 
 #[test]
+fn scalar_cell_precedes_multifactor_and_late_fallback_preserves_error() {
+    let scalar_cell = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::String("first".into()),
+                Value::String("second".into()),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    let sync = group_labels(&scalar_cell, 2).unwrap();
+    let mut cooperation = super::super::super::cooperation::BoxplotCooperation::new(None);
+    let cooperative =
+        futures::executor::block_on(group_labels_cooperative(&scalar_cell, 2, &mut cooperation))
+            .unwrap();
+    assert_eq!(cooperative, sync);
+    assert!(matches!(sync[0].as_deref(), Some([KeyAtom::Text(text)]) if text == "first"));
+
+    let late_failure = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::String("first".into()),
+                Value::StringArray(
+                    StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap(),
+                ),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    let sync_error = group_labels(&late_failure, 2).unwrap_err();
+    let cooperative_error =
+        futures::executor::block_on(group_labels_cooperative(&late_failure, 2, &mut cooperation))
+            .unwrap_err()
+            .into_runtime();
+    assert_eq!(cooperative_error.message, sync_error.message);
+}
+
+#[test]
 fn cooperative_label_decode_cancels_within_nested_cell_before_completion() {
     let group = Value::Cell(
         CellArray::new(

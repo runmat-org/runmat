@@ -2,6 +2,7 @@ use super::*;
 use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
+use runmat_value::StringArray;
 use std::cell::Cell;
 use std::num::NonZeroU64;
 use std::rc::Rc;
@@ -58,4 +59,44 @@ fn cancellation_during_ungrouped_sample_copy_prevents_layout() {
     ))
     .expect_err("cancelled sample preparation cannot produce a layout");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}
+
+#[test]
+fn matrix_group_retry_never_relabels_service_failure_as_semantic_error() {
+    for group_count in [8, 4] {
+        let source = CancellationSource::new();
+        let turns = Rc::new(Cell::new(0));
+        let counted = turns.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                counted.set(counted.get() + 1);
+                Box::pin(async {
+                    Err(crate::execution::ExecutionServiceError::Infrastructure(
+                        "group turn failed".into(),
+                    ))
+                })
+            },
+        );
+        let mut cooperation = super::super::cooperation::BoxplotCooperation::with_budget(budget);
+        let group = Value::StringArray(
+            StringArray::new(
+                (0..group_count).map(|index| format!("g{index}")).collect(),
+                vec![group_count, 1],
+            )
+            .unwrap(),
+        );
+        let data = Value::Tensor(Tensor::new(vec![1.0; 8], vec![4, 2]).unwrap());
+        let error = futures::executor::block_on(build_box_layout_cooperative(
+            data,
+            Some(group),
+            &BoxplotOptions::default(),
+            &mut cooperation,
+        ))
+        .expect_err("service failure must stop either first or row-count retry");
+        assert_eq!(error.identifier(), BOXPLOT_ERROR_INTERNAL.identifier);
+        assert!(error.source.is_some());
+        assert_eq!(turns.get(), 1);
+    }
 }

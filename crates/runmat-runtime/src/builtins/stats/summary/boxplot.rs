@@ -296,9 +296,11 @@ async fn boxplot_in_runtime(
         None
     };
     ensure_sample_group_extensions(&x, group.as_ref())?;
-    admission::admit_host_visible(&x, group.as_ref())?;
+    admission::admit_host_visible(&x, group.as_ref(), &mut cooperation).await?;
     let option_plan = BoxplotOptionPlan::admit(args, first_option)?;
-    option_plan.admit_host_color_groups(&x)?;
+    option_plan
+        .admit_host_color_groups(&x, &mut cooperation)
+        .await?;
     option_plan.preflight_known_factor_count(admission::known_factor_count(group.as_ref()))?;
     cooperation.completed(0).await?;
     let mut inputs = vec![x];

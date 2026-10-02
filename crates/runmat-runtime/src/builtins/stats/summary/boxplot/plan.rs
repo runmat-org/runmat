@@ -82,12 +82,16 @@ impl BoxplotOptionPlan {
         Ok(())
     }
 
-    pub(super) fn admit_host_color_groups(&self, x: &Value) -> BuiltinResult<()> {
+    pub(super) async fn admit_host_color_groups(
+        &self,
+        x: &Value,
+        cooperation: &mut super::cooperation::BoxplotCooperation,
+    ) -> BuiltinResult<()> {
         for step in &self.steps {
             match step {
                 PlannedOption::Host(DecodedOption::ColorGroup(group))
                 | PlannedOption::Resident(BoxplotOptionKind::ColorGroup, group) => {
-                    super::admission::admit_host_visible(x, Some(group))?;
+                    super::admission::admit_host_visible(x, Some(group), cooperation).await?;
                 }
                 _ => {}
             }

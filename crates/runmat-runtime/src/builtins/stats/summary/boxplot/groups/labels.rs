@@ -39,6 +39,7 @@ fn numeric_group_label(value: NumericScalar) -> Option<GroupLabel> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn group_labels(
     value: &Value,
     expected_len: usize,

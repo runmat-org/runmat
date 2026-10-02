@@ -96,8 +96,12 @@ fn categorical_group_length_uses_all_codes_not_only_sample_prefix() {
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
     );
     let sample = tensor(vec![1.0, 2.0], vec![2, 1]);
-    let error = admission::admit_host_visible(&sample, Some(&Value::Object(group.clone())))
-        .expect_err("categorical group with extra code rejects at admission");
+    let error = block_on(admission::admit_host_visible(
+        &sample,
+        Some(&Value::Object(group.clone())),
+        &mut cooperation::BoxplotCooperation::new(None),
+    ))
+    .expect_err("categorical group with extra code rejects at admission");
     assert_eq!(
         error.identifier(),
         BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
