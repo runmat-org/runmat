@@ -1,5 +1,6 @@
 //! MATLAB-compatible `filter` builtin with GPU-aware semantics for RunMat.
 mod provider_output;
+mod provider;
 mod preflight;
 mod host;
 
@@ -94,32 +95,6 @@ fn filter_error_with_message(
     builder.build()
 }
 
-#[derive(Clone, Copy)]
-enum ProviderUploadRole {
-    Numerator,
-    Denominator,
-    InitialState,
-}
-
-impl ProviderUploadRole {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Numerator => "numerator",
-            Self::Denominator => "denominator",
-            Self::InitialState => "initial state",
-        }
-    }
-}
-
-fn provider_upload_error(role: ProviderUploadRole, cause: anyhow::Error) -> RuntimeError {
-    let mut error = filter_error_with_detail(
-        &FILTER_ERROR_PROVIDER_UPLOAD,
-        format!("{} upload failed", role.label()),
-    );
-    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-    crate::runtime_error::with_provider_execution_source(error, cause.into())
-}
-
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
         .await
@@ -193,7 +168,7 @@ async fn evaluate_with_runtime(
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
     let mut args = FilterArgs::parse(b, a, x, rest).await?;
-    if let Some(eval) = try_filter_gpu(&args).await? {
+    if let Some(eval) = provider::try_filter_gpu(&args, &mut cooperation).await? {
         return Ok(eval);
     }
     args.signal.materialize().await?;
@@ -864,164 +839,6 @@ fn is_empty_placeholder(value: &Value) -> bool {
     }
 }
 
-async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if runmat_accelerate_api::provider().is_none() {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
-    if args.is_complex {
-        return Ok(None);
-    }
-
-    let signal_handle = match args.signal.resident() {
-        Some(handle)
-            if runmat_accelerate_api::handle_integer_type(handle).is_none()
-                && !runmat_accelerate_api::handle_is_logical(handle) =>
-        {
-            handle.clone()
-        }
-        None => return Ok(None),
-        Some(_) => return Ok(None),
-    };
-    let provider = match gpu_helpers::exact_provider_for_handle(&signal_handle) {
-        Some(provider) => provider,
-        None => return Ok(None),
-    };
-    if args.initial.provided {
-        if let Some(handle) = &args.initial.gpu_handle {
-            if !gpu_helpers::exact_provider_for_handle(handle)
-                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-            {
-                return Ok(None);
-            }
-        }
-    }
-    let query =
-        runmat_accelerate_api::provider_iir_causal_query(&signal_handle, args.order, args.dim_idx)
-            .map_err(|source| {
-                crate::runtime_error::with_provider_execution_source(
-                    filter_error(&FILTER_ERROR_INTERNAL),
-                    source.into(),
-                )
-            })?;
-    if !provider.query_feasibility(&query).is_supported() {
-        return Ok(None);
-    }
-
-    let b_real = match to_real_vec(&args.coeffs_b.data) {
-        Some(vec) => vec,
-        None => return Ok(None),
-    };
-    let a_real = match to_real_vec(&args.coeffs_a.data) {
-        Some(vec) => vec,
-        None => return Ok(None),
-    };
-
-    let b_shape = vec![args.coeffs_b.len, 1];
-    let view_b = runmat_accelerate_api::HostTensorView {
-        data: &b_real,
-        shape: &b_shape,
-    };
-    let b_handle = provider
-        .upload(&view_b)
-        .map_err(|cause| provider_upload_error(ProviderUploadRole::Numerator, cause))?;
-
-    let a_shape = vec![args.coeffs_a.len, 1];
-    let view_a = runmat_accelerate_api::HostTensorView {
-        data: &a_real,
-        shape: &a_shape,
-    };
-    let a_handle = provider
-        .upload(&view_a)
-        .map_err(|cause| provider_upload_error(ProviderUploadRole::Denominator, cause))?;
-
-    let (zi_handle_opt, _zi_temp) = if args.state_len == 0 || !args.initial.provided {
-        (None, None)
-    } else if let Some(handle) = &args.initial.gpu_handle {
-        (Some(handle.clone()), None)
-    } else {
-        let zi_real = match to_real_vec(&args.initial.column_major) {
-            Some(vec) => vec,
-            None => {
-                return Ok(None);
-            }
-        };
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &zi_real,
-            shape: &args.initial.shape,
-        };
-        let handle = provider
-            .upload(&view)
-            .map_err(|cause| provider_upload_error(ProviderUploadRole::InitialState, cause))?;
-        (Some(handle.clone()), Some(handle))
-    };
-
-    let options = ProviderIirFilterOptions {
-        dim: args.dim_idx,
-        zi: zi_handle_opt.clone(),
-    };
-
-    let result = provider
-        .iir_filter(
-            runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
-                numerator: &b_handle,
-                denominator: &a_handle,
-            },
-            &signal_handle,
-            options,
-        )
-        .await;
-
-    let result = match result {
-        Ok(res) => res,
-        Err(err) => {
-            let mut error = filter_error(&FILTER_ERROR_PROVIDER_EXECUTION);
-            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            return Err(crate::runtime_error::with_provider_execution_source(
-                error,
-                runmat_accelerate_api::ProviderExecutionError::after_effect(err.into()),
-            ));
-        }
-    };
-
-    let (output_handle, final_state_handle) = provider_output::ProviderOutputContext {
-        provider,
-        signal: &signal_handle,
-        numerator: &b_handle,
-        denominator: &a_handle,
-        initial_state: zi_handle_opt.as_ref(),
-        state_shape: &args.state_shape,
-        state_len: args.state_len,
-    }
-    .admit(result)?;
-    let output_value = Value::GpuTensor(output_handle);
-    let final_state_value = match final_state_handle {
-        Some(handle) => Value::GpuTensor(handle),
-        None => {
-            let values = vec![0.0; tensor::element_count(&args.state_shape)];
-            let zeros = if args.signal.output_single {
-                Tensor::from_f32(
-                    values.into_iter().map(|value| value as f32).collect(),
-                    args.state_shape.clone(),
-                )
-            } else {
-                Tensor::new(values, args.state_shape.clone())
-            }
-            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
-            tensor::tensor_into_value(zeros)
-        }
-    };
-
-    Ok(Some(FilterEvaluation {
-        output: output_value,
-        final_state: final_state_value,
-    }))
-}
-
 fn ensure_vector_shape(role: CoefficientRole, shape: &[usize]) -> BuiltinResult<()> {
     let non_singleton = shape.iter().copied().filter(|&d| d > 1).count();
     if non_singleton > 1 {
@@ -1059,17 +876,6 @@ fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
         }
     }
     true
-}
-
-fn to_real_vec(data: &[Complex<f64>]) -> Option<Vec<f64>> {
-    let mut out = Vec::with_capacity(data.len());
-    for c in data {
-        if c.im != 0.0 {
-            return None;
-        }
-        out.push(c.re);
-    }
-    Some(out)
 }
 
 #[cfg(test)]
@@ -1653,6 +1459,7 @@ pub(crate) mod tests {
             shape: &x.shape,
         };
         let x_gpu = provider.upload(&view).expect("upload signal");
+        provider.reset_telemetry();
 
         let gpu_eval = evaluate(
             Value::Tensor(b),
@@ -1662,6 +1469,8 @@ pub(crate) mod tests {
         )
         .expect("wgpu filter");
         let (gpu_value, _) = gpu_eval.into_pair();
+        assert!(matches!(gpu_value, Value::GpuTensor(_)));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         approx_eq_slice(&gathered.materialize_f64(), &cpu_tensor.materialize_f64());

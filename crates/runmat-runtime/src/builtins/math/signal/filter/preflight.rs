@@ -323,6 +323,6 @@ mod tests {
 
     #[test]
     fn known_nonzero_complex_imaginary_component_never_qualifies_as_real() {
-        assert!(super::super::to_real_vec(&[Complex::new(1.0, 1e-300)]).is_none());
+        assert!(super::super::provider::to_real_vec(&[Complex::new(1.0, 1e-300)]).is_none());
     }
 }
