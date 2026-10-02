@@ -450,6 +450,7 @@ fn cdfplot_returns_handle_and_stats() {
     assert!(matches!(stats.fields.get("median"), Some(Value::Num(2.0))));
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn cdfplot_rejects_nonvector_nd_data_before_mutating_graphics() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();

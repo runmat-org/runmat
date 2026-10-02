@@ -1,8 +1,5 @@
 //! Empirical distribution function helpers.
 
-#[cfg(feature = "plot-core")]
-use std::cmp::Ordering;
-
 use runmat_builtins::{
     BuiltinErrorDescriptor, BuiltinExtensionDescriptor, EcdfBounds, EcdfFunction as FunctionKind,
     EcdfOptionName, EmpiricalBuiltin, CDFPLOT_ERROR_INTERNAL, CDFPLOT_ERROR_INVALID_ARGUMENT,
@@ -17,14 +14,13 @@ use runmat_macros::runtime_builtin;
 #[cfg(feature = "plot-core")]
 use runmat_plot::plots::{LinePlot, LineStyle};
 #[cfg(feature = "plot-core")]
-use runmat_value::{IntValue, NumericScalar, StructValue};
-use runmat_value::{Tensor, Value};
+use runmat_value::StructValue;
+use runmat_value::{IntValue, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
-#[cfg(feature = "plot-core")]
 use crate::builtins::common::tensor;
 #[cfg(feature = "plot-core")]
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -194,6 +190,12 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let options = options.preflight_known()?;
     preflight_ecdf_sample(&y)?;
     let options = options.preflight_lengths(&y)?;
+    #[cfg(not(feature = "plot-core"))]
+    if is_statement_form_call()
+        && (crate::value_contains_gpu(&y) || !options.borrowed_handles()?.is_empty())
+    {
+        return Err(crate::plotting_hooks::unavailable_presentation());
+    }
     let mut borrowed = Vec::new();
     crate::dispatcher::try_visit_gpu_handles(&y, &mut |handle| borrowed.push(handle.clone()))
         .map_err(|cause| map_error(ECDF_OWNER, cause))?;
@@ -687,6 +689,6 @@ async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
 #[cfg(test)]
 #[path = "ecdf/tests.rs"]
 mod tests;
-#[cfg(all(test, feature = "plot-core"))]
+#[cfg(test)]
 #[path = "ecdf/provider_tests.rs"]
 mod provider_tests;
