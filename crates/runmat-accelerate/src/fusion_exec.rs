@@ -358,6 +358,7 @@ fn select_fusion_provider_with_contract(
                 sum: None,
                 convolution: None,
                 iir: None,
+                transfer_output_bounds: None,
                 elements: Some(element_count),
                 flops: None,
                 scalar_work_units,
