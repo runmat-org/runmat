@@ -62,8 +62,8 @@ pub(crate) async fn call_scalar_function_with_precision_info(
             prepare_floating_value(
                 name,
                 value,
-                &super::fminbnd::FMINBND_CALLBACK_NUMERIC_EXTENSION,
-                &super::fminbnd::FMINBND_RESIDENT_EXTENSION,
+                &runmat_builtins::FMINBND_CALLBACK_NUMERIC_EXTENSION,
+                &runmat_builtins::FMINBND_RESIDENT_EXTENSION,
                 "objective value",
             )
             .await?
@@ -72,8 +72,8 @@ pub(crate) async fn call_scalar_function_with_precision_info(
             prepare_floating_value(
                 name,
                 value,
-                &super::fzero::FZERO_CALLBACK_NUMERIC_EXTENSION,
-                &super::fzero::FZERO_RESIDENT_EXTENSION,
+                &runmat_builtins::FZERO_CALLBACK_NUMERIC_EXTENSION,
+                &runmat_builtins::FZERO_RESIDENT_EXTENSION,
                 "function value",
             )
             .await?
@@ -566,10 +566,10 @@ mod tests {
     #[test]
     fn optimizer_integer_metadata_covers_every_runmat_only_role() {
         let capability_sets: [&[runmat_builtins::BuiltinIntegerCapabilityDescriptor]; 4] = [
-            &super::super::fminbnd::FMINBND_INTEGER_CAPABILITIES,
+            &runmat_builtins::FMINBND_INTEGER_CAPABILITIES,
             &super::super::fminunc::FMINUNC_INTEGER_CAPABILITIES,
             &super::super::fsolve::FSOLVE_INTEGER_CAPABILITIES,
-            &super::super::fzero::FZERO_INTEGER_CAPABILITIES,
+            &runmat_builtins::FZERO_INTEGER_CAPABILITIES,
         ];
         assert_eq!(
             capability_sets.map(|capabilities| capabilities.len()),
