@@ -1429,7 +1429,7 @@ mod tests {
         let scalar_sine = block_on(integral_builtin(
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
-            Value::Num(std::f64::consts::PI),
+            Value::Num(100.0),
             vec![
                 Value::from("AbsTol"),
                 Value::Num(1.0e-12),
@@ -1441,7 +1441,7 @@ mod tests {
                 Value::Num(1.0),
             ],
         ))
-        .expect_err("the interval cap, not the evaluation cap, stops refinement");
+        .expect_err("oscillatory sine requires refinement beyond one interval");
         assert!(scalar_sine
             .message()
             .contains("MaxIntervalCount adaptive subintervals"));
@@ -1465,7 +1465,7 @@ mod tests {
         let array_sine = block_on(integral_builtin(
             Value::FunctionHandle("__integral_array_sine".into()),
             Value::Num(0.0),
-            Value::Num(std::f64::consts::PI),
+            Value::Num(100.0),
             vec![
                 Value::from("ArrayValued"),
                 Value::Bool(true),
