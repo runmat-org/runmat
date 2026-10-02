@@ -99,6 +99,7 @@ mod buckling;
 mod buckling_tests;
 mod electrical_static;
 mod field_recovery;
+mod fluid_steady;
 mod frequency;
 mod history_finalization;
 mod magnetostatic;
@@ -131,6 +132,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::SolveElectricalStatic => electrical_static::execute(invocation),
             AnalysisWorkKind::SolveMagnetostatic => magnetostatic::execute(invocation),
             AnalysisWorkKind::SolveMaxwellHarmonic => maxwell_harmonic::execute(invocation),
+            AnalysisWorkKind::SolveFluidSteady => fluid_steady::execute(invocation),
             AnalysisWorkKind::RecoverField => field_recovery::execute_field_recovery(invocation),
             AnalysisWorkKind::EvaluateObservationPartition => {
                 observation::execute_observation_partition(invocation)

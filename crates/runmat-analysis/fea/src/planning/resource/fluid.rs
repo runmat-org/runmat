@@ -14,6 +14,13 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 mod admission;
+mod governed;
+mod recovery;
+pub use governed::{
+    build_fluid_steady_resource_plan, fluid_steady_result_payload_bytes_upper_bound,
+    PreparedFluidSteadyResourceFacts,
+};
+pub use recovery::{build_fluid_field_recovery_resource_plan, fluid_field_recovery_shape};
 #[cfg(test)]
 mod tests;
 
@@ -21,7 +28,8 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(usize::MAX, usize::MAX, usi
 
 /// Derived only from the original workload, exact mesh, source property compiler,
 /// and execution-owned result wire profile. No solve is run to derive these facts.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FluidSteadyResourceProjection {
     pub workload: AnalysisWorkloadIdentity,
     pub producer: StepIdentity,

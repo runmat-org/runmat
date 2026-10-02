@@ -9,6 +9,11 @@ mod buckling_task;
 mod callable;
 mod error;
 mod field_recovery;
+mod fluid_field_recovery;
+mod fluid_source_admission;
+mod fluid_steady_plan;
+mod fluid_steady_result;
+mod fluid_steady_task;
 mod frequency_field_recovery;
 mod frequency_object_access;
 mod frequency_task;
@@ -30,7 +35,24 @@ mod observation_history_finalization;
 mod observation_history_task;
 mod observation_partition;
 mod observation_source;
+mod portable_source_admission;
 mod portable_task_support;
+pub use fluid_field_recovery::{
+    build_prepared_fluid_field_recovery_resource_plan, decode_fluid_recovery_source,
+    import_fluid_recovered_fields, prepare_fluid_field_recovery,
+    require_fluid_recovery_source_decode_budget, FluidFieldRecoveryPreparation,
+    PreparedFluidFieldRecovery,
+};
+pub use fluid_source_admission::{
+    decode_admitted_fluid_resource_plan, require_fluid_source_decode_budget,
+};
+pub use fluid_steady_plan::{
+    prepare_fluid_steady_inputs, rederive_fluid_steady_resource_plan, PreparedFluidSteadyInputs,
+};
+pub use fluid_steady_result::{import_fluid_steady_result, ImportedFluidSteadyResult};
+pub use fluid_steady_task::{
+    prepare_fluid_steady_task, FluidSteadyTaskPreparation, PreparedFluidSteadyTask,
+};
 mod random_response_object_access;
 mod random_response_task;
 mod resource_usage;

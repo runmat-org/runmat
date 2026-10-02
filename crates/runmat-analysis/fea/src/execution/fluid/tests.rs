@@ -9,7 +9,7 @@ use runmat_canonical_codec::encode_contract;
 use runmat_execution::Digest;
 use runmat_meshing_core::{fixtures, SolverMeshArtifact};
 
-fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
+pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let mesh = fixtures::slab_mesh(1);
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.structural = None;

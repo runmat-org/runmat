@@ -1,11 +1,17 @@
 //! Portable original steady-fluid authority. Not a scheduler plan or publication gate.
 //! Cold validation evaluates original retained fields; it never invokes the solver.
+mod admitted;
 mod fields;
+mod receipt;
+pub use receipt::{
+    fluid_receipt_encoding_profile, FluidNumericalReceipt, FluidNumericalReceiptArtifact,
+    FluidSolverProvenance, FLUID_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod profile;
 mod result;
 pub use fields::fluid_native_field_definition_inventory;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod workload;
 
 pub use result::FluidSteadySolverResult;

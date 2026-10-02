@@ -4,9 +4,12 @@ mod accuracy;
 mod acoustic;
 mod electrical_static;
 mod fluid;
+pub use contract::{FluidFieldRecoveryResourceDemand, FluidSteadySolveResourceDemand};
 pub use fluid::{
-    derive_fluid_steady_resource_projection, validate_fluid_steady_prepared_facts,
-    FluidSteadyResourceProjection,
+    build_fluid_field_recovery_resource_plan, build_fluid_steady_resource_plan,
+    derive_fluid_steady_resource_projection, fluid_field_recovery_shape,
+    fluid_steady_result_payload_bytes_upper_bound, validate_fluid_steady_prepared_facts,
+    FluidSteadyResourceProjection, PreparedFluidSteadyResourceFacts,
 };
 mod magnetic_recovery;
 mod magnetic_static;

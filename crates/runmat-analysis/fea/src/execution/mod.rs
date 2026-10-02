@@ -42,8 +42,12 @@ mod field;
 mod field_plan;
 mod field_topology;
 mod fluid;
+#[cfg(test)]
+pub(crate) use fluid::tests::authored as fluid_test_workload;
 pub use fluid::{
-    fluid_native_field_definition_inventory, FluidSteadySolverResult, FluidSteadyWorkload,
+    fluid_native_field_definition_inventory, fluid_receipt_encoding_profile, FluidNumericalReceipt,
+    FluidNumericalReceiptArtifact, FluidSolverProvenance, FluidSteadySolverResult,
+    FluidSteadyWorkload, FLUID_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod frequency_assembly;
 mod frequency_balance;

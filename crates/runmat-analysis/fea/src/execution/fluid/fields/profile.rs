@@ -124,11 +124,11 @@ fn artifact_profile(
     .map_err(invalid)
 }
 
-pub(super) fn admit(
+pub(super) fn requested_bytes(
     result: &FluidSteadySolverResult,
     workload: &FluidSteadyWorkload,
     source: &super::super::workload::PreparedFluidSource,
-) -> AnalysisExecutionResult<()> {
+) -> AnalysisExecutionResult<u64> {
     let definitions = fluid_native_field_definition_inventory()?;
     let nodes = source.source.nodes.len();
     let cells = source.topology.cells.len();
@@ -206,7 +206,15 @@ pub(super) fn admit(
             workload.resident_ceiling()?
         )));
     }
-    Ok(())
+    Ok(required)
+}
+
+pub(super) fn admit(
+    result: &FluidSteadySolverResult,
+    workload: &FluidSteadyWorkload,
+    source: &super::super::workload::PreparedFluidSource,
+) -> AnalysisExecutionResult<()> {
+    requested_bytes(result, workload, source).map(|_| ())
 }
 
 #[cfg(test)]

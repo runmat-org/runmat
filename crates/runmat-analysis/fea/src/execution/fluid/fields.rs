@@ -86,6 +86,14 @@ fn plan(topology: &FiniteVolumeFieldTopology) -> AnalysisExecutionResult<FieldRe
 }
 
 impl FluidSteadySolverResult {
+    /// Source-derived requested heap for native construction; not measured execution usage.
+    pub(crate) fn native_field_resident_bytes_estimate(
+        &self,
+        workload: &FluidSteadyWorkload,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<u64> {
+        profile::requested_bytes(self, workload, &workload.prepare(mesh)?)
+    }
     pub fn native_field_topology(
         &self,
         workload: &FluidSteadyWorkload,

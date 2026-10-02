@@ -2,6 +2,7 @@ use super::*;
 use crate::planning::resource::{
     PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
 };
+mod governed;
 
 fn prepared() -> PreparedPhaseResourceFacts {
     PreparedPhaseResourceFacts {

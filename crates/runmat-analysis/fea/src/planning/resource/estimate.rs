@@ -2,6 +2,7 @@ mod accuracy;
 mod acoustic;
 mod common;
 mod electrical_static;
+mod fluid;
 mod magnetic_recovery;
 pub(super) mod magnetic_static;
 pub(super) mod maxwell_harmonic;
@@ -55,6 +56,14 @@ pub fn build_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
+        (
+            FeaResourcePhase::FluidSteadySolve(workload),
+            FeaResourceDemand::FluidSteadySolve(demand),
+        ) if *workload == demand.projection.workload => fluid::solve(input.clone(), demand),
+        (
+            FeaResourcePhase::FluidFieldRecovery(request),
+            FeaResourceDemand::FluidFieldRecovery(demand),
+        ) if *request == demand.request => fluid::recovery(input.clone(), demand),
         (
             FeaResourcePhase::MaxwellHarmonic(workload),
             FeaResourceDemand::MaxwellHarmonic(demand),

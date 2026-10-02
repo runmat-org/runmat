@@ -361,6 +361,13 @@ impl AccuracyIdentity {
 }
 
 impl NumericalPlanIdentity {
+    /// Original steady finite-volume workload and mesh; independent of placement/chunks.
+    pub fn from_fluid_steady_workload(
+        workload: AnalysisWorkloadIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("fluid-steady-numerical-plan", &(workload, topology))
+    }
     /// Original electric-phasor Maxwell workload and mesh, never worker placement.
     pub fn from_maxwell_harmonic_workload(
         workload: AnalysisWorkloadIdentity,
