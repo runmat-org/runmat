@@ -10,13 +10,18 @@ use super::{
     IntegralOptions, MAX_DEPTH, NAME, integral_error_with_detail, integral_map_error,
     quadrature_arithmetic_error, waypoints,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
     OpenDomain, OpenSegment, QuadratureArithmeticError, QuadratureCooperation, QuadratureEvaluator,
     ScaledComplex, integrate_open,
 };
 use crate::{BuiltinResult, GpuGatherRetry, RuntimeError, build_runtime_error};
+
+mod admission;
+mod publication;
+
+pub(super) use admission::{ordered_segments, scalar_bound, scalar_bound_host};
 
 const COMPONENT_CHUNK: usize = 4096;
 
@@ -61,89 +66,6 @@ async fn materialize(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, Value>
     Ok(std::borrow::Cow::Owned(downloaded))
 }
 
-fn checked_complex(real: f64, imaginary: f64) -> BuiltinResult<Complex<f64>> {
-    if real.is_finite() && imaginary.is_finite() {
-        Ok(Complex::new(real, imaginary))
-    } else {
-        Err(invalid("complex contour values must be finite"))
-    }
-}
-
-pub(super) async fn scalar_bound(label: &str, value: &Value) -> BuiltinResult<Complex<f64>> {
-    let host = materialize(value).await?;
-    scalar_bound_host(label, host.as_ref())
-}
-
-pub(super) fn scalar_bound_host(label: &str, value: &Value) -> BuiltinResult<Complex<f64>> {
-    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
-        return Err(invalid(format!(
-            "{label} must be exactly representable as double"
-        )));
-    }
-    match value {
-        Value::Complex(real, imaginary) => checked_complex(*real, *imaginary),
-        Value::ComplexTensor(array) if array.len() == 1 => {
-            let (real, imaginary) = array
-                .numeric_value_at(0)
-                .ok_or_else(|| invalid(format!("{label} has invalid complex storage")))?;
-            checked_complex(waypoints::value_f64(real), waypoints::value_f64(imaginary))
-        }
-        other => super::scalar_bound_host(label, other).and_then(|real| checked_complex(real, 0.0)),
-    }
-}
-
-pub(super) async fn ordered_segments(
-    lower: Complex<f64>,
-    upper: Complex<f64>,
-    waypoints: &[Complex<f64>],
-    cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<Vec<OpenSegment>> {
-    if !lower.re.is_finite()
-        || !lower.im.is_finite()
-        || !upper.re.is_finite()
-        || !upper.im.is_finite()
-    {
-        return Err(invalid("complex contours require finite bounds"));
-    }
-    let mut segments = Vec::new();
-    segments
-        .try_reserve_exact(
-            waypoints
-                .len()
-                .checked_add(1)
-                .ok_or_else(|| invalid("too many Waypoints"))?,
-        )
-        .map_err(resource_error)?;
-    let mut start = lower;
-    for (index, &point) in waypoints.iter().enumerate() {
-        if !point.re.is_finite() || !point.im.is_finite() {
-            return Err(invalid("complex Waypoints must be finite"));
-        }
-        if start != point {
-            segments.push(OpenSegment {
-                a: 0.0,
-                b: 1.0,
-                domain: OpenDomain::Contour { start, end: point },
-            });
-        }
-        start = point;
-        if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
-            cooperation.completed(COMPONENT_CHUNK as u64).await?;
-        }
-    }
-    cooperation
-        .completed((waypoints.len() % COMPONENT_CHUNK) as u64)
-        .await?;
-    if start != upper {
-        segments.push(OpenSegment {
-            a: 0.0,
-            b: 1.0,
-            domain: OpenDomain::Contour { start, end: upper },
-        });
-    }
-    Ok(segments)
-}
-
 fn callback_shape(value: &Value) -> BuiltinResult<&[usize]> {
     use runmat_accelerate_api::{GpuTensorStorage, handle_storage};
     match value {
@@ -178,7 +100,11 @@ fn callback_shape(value: &Value) -> BuiltinResult<&[usize]> {
     }
 }
 
-fn decode_callback(value: &Value, expected: &[usize]) -> BuiltinResult<Vec<ScaledComplex>> {
+async fn decode_callback(
+    value: &Value,
+    expected: &[usize],
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<Vec<ScaledComplex>> {
     let shape = callback_shape(value)?;
     if shape != expected {
         return Err(invalid("complex callback changed its output size"));
@@ -189,45 +115,49 @@ fn decode_callback(value: &Value, expected: &[usize]) -> BuiltinResult<Vec<Scale
         .ok_or_else(|| invalid("callback output size overflows"))?;
     let mut values = Vec::new();
     values.try_reserve_exact(count).map_err(resource_error)?;
-    match value {
-        Value::Num(real) => values.push(ScaledComplex::new(*real, 0.0)),
-        Value::Int(integer) => values.push(ScaledComplex::new(integer.to_f64(), 0.0)),
-        Value::Bool(flag) => values.push(ScaledComplex::new(f64::from(*flag as u8), 0.0)),
-        Value::Complex(real, imaginary) => values.push(ScaledComplex::new(*real, *imaginary)),
-        Value::Tensor(array) => {
-            for index in 0..array.len() {
-                values.push(ScaledComplex::new(
-                    tensor::tensor_value_f64(array, index),
-                    0.0,
-                ));
+    for index in 0..count {
+        let item = match value {
+            Value::Num(real) => ScaledComplex::new(*real, 0.0),
+            Value::Int(integer) => ScaledComplex::new(integer.to_f64(), 0.0),
+            Value::Bool(flag) => ScaledComplex::new(f64::from(*flag as u8), 0.0),
+            Value::Complex(real, imaginary) => ScaledComplex::new(*real, *imaginary),
+            Value::Tensor(array) => {
+                let element = array
+                    .numeric_value_at(index)
+                    .ok_or_else(|| invalid("invalid real callback storage"))?;
+                ScaledComplex::new(waypoints::value_f64(element), 0.0)
             }
-        }
-        Value::ComplexTensor(array) => {
-            for index in 0..array.len() {
+            Value::ComplexTensor(array) => {
                 let (real, imaginary) = array
                     .numeric_value_at(index)
                     .ok_or_else(|| invalid("invalid complex callback storage"))?;
-                values.push(ScaledComplex::new(
-                    waypoints::value_f64(real),
-                    waypoints::value_f64(imaginary),
+                ScaledComplex::new(waypoints::value_f64(real), waypoints::value_f64(imaginary))
+            }
+            Value::LogicalArray(array) => {
+                let bit = array
+                    .data
+                    .get(index)
+                    .ok_or_else(|| invalid("invalid logical callback storage"))?;
+                ScaledComplex::new(f64::from((*bit != 0) as u8), 0.0)
+            }
+            Value::GpuTensor(_) => return Err(invalid("resident callback was not materialized")),
+            _ => {
+                return Err(invalid(
+                    "callback must return real or complex numeric values",
                 ));
             }
+        };
+        if item.to_pair().is_none() {
+            return Err(invalid("complex callback must return finite values"));
         }
-        Value::LogicalArray(array) => {
-            for &bit in &array.data {
-                values.push(ScaledComplex::new(f64::from((bit != 0) as u8), 0.0));
-            }
-        }
-        Value::GpuTensor(_) => return Err(invalid("resident callback was not materialized")),
-        _ => {
-            return Err(invalid(
-                "callback must return real or complex numeric values",
-            ));
+        values.push(item);
+        if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
+            cooperation.completed(COMPONENT_CHUNK as u64).await?;
         }
     }
-    if values.iter().any(|value| value.to_pair().is_none()) {
-        return Err(invalid("complex callback must return finite values"));
-    }
+    cooperation
+        .completed((count % COMPONENT_CHUNK) as u64)
+        .await?;
     Ok(values)
 }
 
@@ -264,7 +194,7 @@ impl ContourEvaluator<'_> {
         let owned_shape = shape.to_vec();
         self.complex_output |= has_complex_class(&value);
         let host = materialize(&value).await?;
-        let mut values = decode_callback(host.as_ref(), &owned_shape)?;
+        let mut values = decode_callback(host.as_ref(), &owned_shape, self.cooperation).await?;
         for (index, value) in values.iter_mut().enumerate() {
             *value = value.multiply_complex(delta);
             if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
@@ -322,7 +252,7 @@ impl ContourEvaluator<'_> {
         }
         self.complex_output |= has_complex_class(&value);
         let host = materialize(&value).await?;
-        let values = decode_callback(host.as_ref(), &[1, N])?;
+        let values = decode_callback(host.as_ref(), &[1, N], self.cooperation).await?;
         Ok(std::array::from_fn(|index| {
             Arc::new(vec![values[index].multiply_complex(delta)])
         }))
@@ -356,17 +286,14 @@ impl QuadratureEvaluator for ContourEvaluator<'_> {
                 ScaledComplex::new(end.re, end.im).subtract(ScaledComplex::new(start.re, start.im)),
                 false,
             ),
-            OpenDomain::Finite => (
+            OpenDomain::Finite
+            | OpenDomain::RightInfinite { .. }
+            | OpenDomain::LeftInfinite { .. } => (
                 Complex::new(0.0, 0.0),
                 Complex::new(1.0, 0.0),
                 ScaledComplex::new(1.0, 0.0),
                 true,
             ),
-            _ => {
-                return Err(invalid(
-                    "complex callback requires a finite integration segment",
-                ));
-            }
         };
         if !self.options.array_valued
             && self.options.callback_mode == IntegralCallbackMode::Vectorized
@@ -466,71 +393,23 @@ pub(super) async fn integrate_contour(
             .shape
             .take()
             .ok_or_else(|| invalid("missing zero-contour callback shape"))?;
-        let mut zeros = Vec::new();
-        zeros
-            .try_reserve_exact(sample.len())
-            .map_err(resource_error)?;
-        zeros.resize(sample.len(), (0.0, 0.0));
-        return publish_values(
-            zeros,
+        return publication::zero(
+            sample.len(),
             shape,
-            options.array_valued,
             !real_axis || evaluator.complex_output,
-        );
+            evaluator.cooperation,
+        )
+        .await;
     }
     let result = integrate_open(&mut evaluator, segments).await?;
     let shape = evaluator.shape.unwrap_or_else(|| vec![1, 1]);
-    let mut values = Vec::new();
-    values
-        .try_reserve_exact(result.0.len())
-        .map_err(resource_error)?;
-    for (index, &value) in result.0.iter().enumerate() {
-        let (real, imaginary) = value
-            .to_pair()
-            .ok_or_else(|| evaluator.nonrepresentable_error())?;
-        values.push((sign * real, sign * imaginary));
-        if (index + 1).is_multiple_of(COMPONENT_CHUNK) {
-            evaluator
-                .cooperation
-                .completed(COMPONENT_CHUNK as u64)
-                .await?;
-        }
-    }
-    evaluator
-        .cooperation
-        .completed((result.0.len() % COMPONENT_CHUNK) as u64)
-        .await?;
-    publish_values(
-        values,
+    publication::estimate(
+        &result.0,
         shape,
+        sign,
         options.array_valued,
         !real_axis || evaluator.complex_output,
+        evaluator.cooperation,
     )
-}
-
-fn publish_values(
-    values: Vec<(f64, f64)>,
-    shape: Vec<usize>,
-    array_valued: bool,
-    complex: bool,
-) -> BuiltinResult<Value> {
-    if !array_valued {
-        let &(real, imaginary) = values
-            .first()
-            .ok_or_else(|| invalid("missing scalar result"))?;
-        return Ok(if complex {
-            Value::Complex(real, imaginary)
-        } else {
-            Value::Num(real)
-        });
-    }
-    if complex {
-        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(values.into()), shape)
-            .map_err(|cause| invalid(format!("complex result geometry: {cause}")))?;
-        Ok(Value::ComplexTensor(tensor))
-    } else {
-        let tensor = Tensor::new(values.into_iter().map(|(real, _)| real).collect(), shape)
-            .map_err(|cause| invalid(format!("real result geometry: {cause}")))?;
-        Ok(Value::Tensor(tensor))
-    }
+    .await
 }

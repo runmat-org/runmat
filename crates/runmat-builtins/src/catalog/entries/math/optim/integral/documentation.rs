@@ -4,8 +4,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("integral"),
     slug: Some("integral"),
-    summary: "Approximate real and finite complex-contour integrals with adaptive quadrature.",
-    description: "`q = integral(fun, a, b)` uses an interior-sampling adaptive Gauss–Kronrod rule. Finite real and complex bounds, ordered finite complex contours, infinite real bounds, endpoint singularities with integrable interior values, and scalar or fixed-shape array-valued callbacks are supported. Real waypoints define an initial sorted mesh; complex-contour waypoints retain their given order.",
+    summary: "Approximate real, complex-valued, and finite complex-contour integrals with adaptive quadrature.",
+    description: "`q = integral(fun, a, b)` uses an interior-sampling adaptive Gauss–Kronrod rule. Finite real and complex bounds, ordered finite complex contours, infinite real bounds, endpoint singularities with integrable interior values, and real or complex scalar and fixed-shape array-valued callbacks are supported. Real waypoints define an initial sorted mesh; complex-contour waypoints retain their given order.",
     keywords: &[
         "integral",
         "numerical integration",
@@ -20,6 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "The callback can be a named function handle, anonymous function, or function-handle string. By default it receives row-vector batches of interior real or complex sample locations and must return a numeric row vector of the same shape. The current rule begins with 15 samples per initial subinterval and checks `MaxFunEvals` before invoking any batch. Real and imaginary values are accumulated in one callback traversal, with a real absolute-error estimate.",
                 "`Vectorized=false` selects scalar callback calls and is available in the current MATLAB compatibility mode. With `ArrayValued=true`, each scalar sample must return a finite numeric array of a fixed shape; the result has that shape. `Vectorized` does not change this array-valued callback form.",
+                "RunMat currently publishes scalar and array estimates in double precision, including when callback values use Single storage; known array-valued callback geometry is retained even for N-D singleton and empty arrays. This describes the current RunMat result boundary, not an unverified MATLAB result-class parity claim.",
                 "Real `Waypoints` must be finite and within the bounds; RunMat sorts and deduplicates them into an initial mesh. Complex contours require finite bounds and finite waypoints; their supplied order defines consecutive directed line segments, including repeated or nonmonotone points. These policies are documented RunMat behavior, not an unverified MATLAB ordering-parity claim. All spans share one global error test, function-evaluation limit, interval limit, and invocation cancellation budget.",
                 "Finite reversed bounds negate the result. Equal bounds return zero without a callback in scalar mode; array-valued mode evaluates once to determine the result shape and returns an array of zeros.",
                 "`AbsTol` and `RelTol` set the global acceptance tolerance. The newer synonymous `AbsoluteTolerance` and `RelativeTolerance` spellings use a typed release-feature gate: they are available in RunMat extension mode before the compatible MATLAB release reaches their introduction, and are admitted in strict mode once the central compatibility pin reaches it. Ordered last-value-wins semantics apply. `MaxFunEvals` limits callback sample evaluations. RunMat's `MaxIntervalCount` extension separately limits adaptive subintervals; it is a positive structural integer and is not a synonym for `MaxFunEvals` or a claim of MATLAB `integral` option parity. These controls accept name/value pairs or scalar options-struct fields.",
@@ -165,6 +166,19 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
                 source: "assert(abs(q-1i)<1e-8);",
             },
         },
+        BuiltinExample {
+            id: "example-11",
+            title: "Integrate a complex-valued infinite tail",
+            program: "q = integral(@(x) (1+1i).*exp(-x), 0, Inf)",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::RunMat,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions {
+                source: "assert(abs(q-(1+1i))<1e-6);",
+            },
+        },
     ],
     example_exemption: None,
     faqs: &[
@@ -235,9 +249,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
                 ),
             },
             BuiltinDocumentationLink {
-                label: "Array-valued callback owner",
+                label: "Cooperative real and complex array publication",
                 target: BuiltinDocumentationLinkTarget::Source(
-                    "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/integral/array.rs",
+                    "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/integral/contour/publication.rs",
                 ),
             },
             BuiltinDocumentationLink {

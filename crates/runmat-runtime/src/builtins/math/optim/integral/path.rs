@@ -1,18 +1,13 @@
-//! Ordered real integration path admission and open-rule execution. Finite
-//! endpoint singularities and infinite tails never enter endpoint Simpson.
+//! Ordered real integration path admission. Finite endpoints and infinite
+//! tails become segments on the shared open Gauss–Kronrod mesh.
 
 use num_complex::Complex;
-use runmat_builtins::{INTEGRAL_ERROR_INVALID_ARGUMENT, INTEGRAL_ERROR_INVALID_INPUT};
+use runmat_builtins::INTEGRAL_ERROR_INVALID_ARGUMENT;
 use runmat_value::Value;
 
-use super::{
-    IntegralEvaluator, IntegralOptionName, IntegralOptions, integral_error_with_detail,
-    integral_map_error, scalar_bound_host,
-};
+use super::{IntegralOptionName, integral_error_with_detail, scalar_bound_host};
 use crate::builtins::common::cooperative_sort::{SortProgress, SortResourceError, StableSortWork};
-use crate::builtins::math::optim::quadrature::{
-    OpenDomain, OpenSegment, QuadratureCooperation, integrate_open,
-};
+use crate::builtins::math::optim::quadrature::{OpenDomain, OpenSegment, QuadratureCooperation};
 use crate::{BuiltinResult, GpuGatherRetry, build_runtime_error};
 
 const PATH_CHUNK: usize = 4096;
@@ -157,28 +152,6 @@ pub(super) async fn preflight_host_path(
             .map(Some);
     }
     Ok(None)
-}
-
-pub(super) async fn integrate_real_segments(
-    function: &Value,
-    options: &IntegralOptions,
-    segments: &[OpenSegment],
-    cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<f64> {
-    let mut evaluator = IntegralEvaluator {
-        function,
-        options,
-        cooperation,
-    };
-    let estimate = integrate_open(&mut evaluator, segments)
-        .await
-        .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
-    estimate.to_f64().ok_or_else(|| {
-        integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            "quadrature estimate is not representable as a finite double",
-        )
-    })
 }
 
 #[cfg(test)]

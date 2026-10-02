@@ -10,7 +10,7 @@ use runmat_builtins::{
     INTEGRAL_ERROR_TOO_MANY_OUTPUTS, INTEGRAL_INTEGER_BOUND_EXTENSION,
     INTEGRAL_INTEGER_OPTION_EXTENSION, INTEGRAL_LOGICAL_BOUND_EXTENSION,
     INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION, INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
-    IntegralCallbackMode, IntegralOptionName,
+    IntegralOptionName,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Tensor, Value};
@@ -20,13 +20,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::quadrature::{
-    QuadratureArithmeticError, QuadratureCooperation, QuadratureEvaluator, QuadratureIdentity,
+    QuadratureArithmeticError, QuadratureCooperation, QuadratureIdentity,
 };
 use crate::{BuiltinResult, RuntimeError, build_runtime_error};
 
-mod array;
 mod contour;
 mod options;
 mod path;
@@ -236,43 +234,18 @@ async fn integral_with_cooperation(
     // The numerical rule owns its minimum callback count and checks it before
     // any callback effect. Do not mirror a fixed batch-size policy here.
     let sign = if b < a { -1.0 } else { 1.0 };
-    let lo = a.min(b);
-    let hi = a.max(b);
-    if a.is_finite() && b.is_finite() {
-        let result = contour::integrate_contour(
-            &function,
-            &options,
-            &segments,
-            sign,
-            true,
-            num_complex::Complex::new(a, 0.0),
-            cooperation,
-        )
-        .await?;
-        cooperation.completed(0).await?;
-        return Ok(result);
-    }
-    if options.array_valued {
-        let result = array::integrate_array_valued(
-            &function,
-            lo,
-            hi,
-            sign,
-            &segments,
-            &options,
-            cooperation,
-        )
-        .await?;
-        cooperation.completed(0).await?;
-        return Ok(result);
-    }
-    if segments.is_empty() {
-        cooperation.completed(0).await?;
-        return Ok(Value::Num(0.0));
-    }
-    let result = path::integrate_real_segments(&function, &options, &segments, cooperation).await?;
+    let result = contour::integrate_contour(
+        &function,
+        &options,
+        &segments,
+        sign,
+        true,
+        num_complex::Complex::new(a, 0.0),
+        cooperation,
+    )
+    .await?;
     cooperation.completed(0).await?;
-    Ok(Value::Num(sign * result))
+    Ok(result)
 }
 
 fn preflight_integral_bound_extensions(a: &Value, b: &Value) -> BuiltinResult<()> {
@@ -340,7 +313,11 @@ fn preflight_integral_bound(label: &str, value: &Value) -> BuiltinResult<()> {
         }
         return Ok(());
     }
-    contour::scalar_bound_host(label, value).map(|_| ())
+    if contour::has_complex_class(value) {
+        contour::scalar_bound_host(label, value).map(|_| ())
+    } else {
+        scalar_bound_host(label, value).map(|_| ())
+    }
 }
 
 fn authenticate_integral_residents(
@@ -485,171 +462,8 @@ fn scalar_bound_host(label: &str, value: &Value) -> BuiltinResult<f64> {
     }
 }
 
-struct IntegralEvaluator<'a> {
-    function: &'a Value,
-    options: &'a IntegralOptions,
-    cooperation: &'a mut QuadratureCooperation,
-}
-
-impl QuadratureEvaluator for IntegralEvaluator<'_> {
-    type Sample = f64;
-
-    async fn checkpoint(&mut self) -> BuiltinResult<()> {
-        self.cooperation.completed(0).await
-    }
-
-    async fn evaluate(&mut self, x: f64) -> BuiltinResult<f64> {
-        call_integrand(self.function, x, self.cooperation).await
-    }
-
-    async fn evaluate_many<const N: usize>(&mut self, points: [f64; N]) -> BuiltinResult<[f64; N]> {
-        match self.options.callback_mode {
-            IntegralCallbackMode::Vectorized => {
-                call_integrand_batch(self.function, points, self.cooperation).await
-            }
-            IntegralCallbackMode::Scalar => {
-                let mut values = [0.0; N];
-                for (index, point) in points.into_iter().enumerate() {
-                    values[index] = self.evaluate(point).await?;
-                }
-                Ok(values)
-            }
-        }
-    }
-
-    fn midpoint(&self, a: f64, b: f64) -> f64 {
-        crate::builtins::math::optim::quadrature::midpoint(a, b)
-    }
-
-    fn tolerances(&self) -> (f64, f64) {
-        (self.options.abs_tol, self.options.rel_tol)
-    }
-
-    fn max_evaluations(&self) -> usize {
-        self.options.max_fun_evals
-    }
-
-    fn max_intervals(&self) -> Option<usize> {
-        self.options.max_interval_count.map(|limit| limit.get())
-    }
-
-    fn interval_limit_error(&self) -> RuntimeError {
-        integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            "exceeded MaxIntervalCount adaptive subintervals",
-        )
-    }
-
-    fn max_depth(&self) -> usize {
-        MAX_DEPTH
-    }
-
-    fn evaluation_limit_error(&self) -> RuntimeError {
-        integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            "exceeded maximum function evaluations",
-        )
-    }
-
-    fn convergence_error(&self) -> RuntimeError {
-        integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            "adaptive quadrature did not converge",
-        )
-    }
-
-    fn nonrepresentable_error(&self) -> RuntimeError {
-        integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            "quadrature estimate is not representable as a finite double",
-        )
-    }
-
-    fn arithmetic_error(&self, error: QuadratureArithmeticError) -> RuntimeError {
-        quadrature_arithmetic_error(error)
-    }
-}
-
 fn scalar_tensor_value(tensor: &Tensor) -> Option<f64> {
     tensor::is_scalar_tensor(tensor).then(|| tensor::tensor_value_f64(tensor, 0))
-}
-
-async fn call_integrand(
-    function: &Value,
-    x: f64,
-    cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<f64> {
-    cooperation.completed(0).await?;
-    let value = call_function(function, vec![Value::Num(x)]).await?;
-    cooperation.completed(1).await?;
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
-    match value {
-        Value::Num(n) if n.is_finite() => Ok(n),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor)
-            if tensor::is_scalar_tensor(&tensor)
-                && scalar_tensor_value(&tensor)
-                    .map(|value| value.is_finite())
-                    .unwrap_or(false) =>
-        {
-            Ok(scalar_tensor_value(&tensor).expect("finite scalar tensor value"))
-        }
-        Value::LogicalArray(logical) if logical.data.len() == 1 => {
-            Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
-        }
-        Value::Num(_) | Value::Tensor(_) => Err(integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            "function value must be a finite real scalar",
-        )),
-        other => Err(integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            format!("function value must be real numeric scalar, got {other:?}"),
-        )),
-    }
-}
-
-async fn call_integrand_batch<const N: usize>(
-    function: &Value,
-    points: [f64; N],
-    cooperation: &mut QuadratureCooperation,
-) -> BuiltinResult<[f64; N]> {
-    cooperation.completed(0).await?;
-    let samples = Tensor::new(points.to_vec(), vec![1, N]).map_err(|error| {
-        integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            format!("could not construct callback sample batch: {error}"),
-        )
-    })?;
-    let value = call_function(function, [Value::Tensor(samples)]).await?;
-    cooperation.completed(N as u64).await?;
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
-    let mut result = [0.0; N];
-    match value {
-        Value::Tensor(tensor) if tensor.shape.as_slice() == [1, N] => {
-            for (index, result) in result.iter_mut().enumerate() {
-                *result = tensor::tensor_value_f64(&tensor, index);
-            }
-        }
-        Value::LogicalArray(logical) if logical.shape.as_slice() == [1, N] => {
-            for (index, result) in result.iter_mut().enumerate() {
-                *result = if logical.data[index] != 0 { 1.0 } else { 0.0 };
-            }
-        }
-        _ => {
-            return Err(integral_error_with_detail(
-                &INTEGRAL_ERROR_INVALID_INPUT,
-                "vectorized function must return one real value for each row-vector sample",
-            ));
-        }
-    }
-    if result.iter().any(|value| !value.is_finite()) {
-        return Err(integral_error_with_detail(
-            &INTEGRAL_ERROR_INVALID_INPUT,
-            "function values must be finite real numbers",
-        ));
-    }
-    Ok(result)
 }
 
 #[cfg(test)]
@@ -793,6 +607,69 @@ mod tests {
         )
         .expect("fixed callback geometry");
         Ok(Value::ComplexTensor(tensor))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_single_array",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn single_array_helper(_x: Value) -> crate::BuiltinResult<Value> {
+        Ok(Value::Tensor(
+            Tensor::from_numeric_storage(
+                runmat_value::NumericStorage::F32(vec![1.0]),
+                vec![1, 1, 1],
+            )
+            .expect("fixed single callback geometry"),
+        ))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_single_complex_array",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn single_complex_array_helper(_x: Value) -> crate::BuiltinResult<Value> {
+        Ok(Value::ComplexTensor(
+            runmat_value::ComplexTensor::from_complex_storage(
+                runmat_value::ComplexStorage::F32(vec![(1.0_f32, 1.0_f32)].into()),
+                vec![1, 1, 1],
+            )
+            .expect("fixed single complex callback geometry"),
+        ))
+    }
+
+    #[runtime_builtin(
+        name = "__integral_complex_exp_tail",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn complex_exp_tail_helper(x: Value) -> crate::BuiltinResult<Value> {
+        COUNTED_CALLBACKS.with(|count| count.set(count.get() + 1));
+        match x {
+            Value::Tensor(samples) => {
+                let values = (0..samples.len())
+                    .map(|index| {
+                        let tail = (-tensor::tensor_value_f64(&samples, index)).exp();
+                        (tail, tail)
+                    })
+                    .collect::<Vec<_>>();
+                Ok(Value::ComplexTensor(
+                    runmat_value::ComplexTensor::from_complex_storage(
+                        runmat_value::ComplexStorage::F64(values.into()),
+                        samples.shape,
+                    )
+                    .expect("callback batch geometry"),
+                ))
+            }
+            other => {
+                let tail = (-scalar_bound("x", other).await?).exp();
+                Ok(Value::Complex(tail, tail))
+            }
+        }
     }
 
     #[runtime_builtin(
@@ -1144,6 +1021,87 @@ mod tests {
         assert!(
             matches!(array.numeric_value_at(1), Some((runmat_value::NumericScalar::F64(real), runmat_value::NumericScalar::F64(imaginary))) if (real - 1.0).abs() < 1.0e-9 && (imaginary - 2.0).abs() < 1.0e-9)
         );
+    }
+
+    #[test]
+    fn single_array_callbacks_publish_double_with_original_singleton_nd_shape() {
+        for (helper, complex) in [
+            ("__integral_single_array", false),
+            ("__integral_single_complex_array", true),
+        ] {
+            for (lower, upper, expected) in [(0.0, 1.0, 1.0), (2.0, 2.0, 0.0)] {
+                let result = block_on(integral_builtin(
+                    Value::FunctionHandle(helper.into()),
+                    Value::Num(lower),
+                    Value::Num(upper),
+                    vec![Value::from("ArrayValued"), Value::Bool(true)],
+                ))
+                .expect("single callback array integral");
+                if complex {
+                    let Value::ComplexTensor(array) = result else {
+                        panic!("expected complex double array")
+                    };
+                    assert_eq!(array.shape, vec![1, 1, 1]);
+                    assert!(matches!(
+                        array.complex_storage(),
+                        runmat_value::ComplexStorage::F64(_)
+                    ));
+                    assert!(
+                        matches!(array.numeric_value_at(0), Some((runmat_value::NumericScalar::F64(real), runmat_value::NumericScalar::F64(imaginary))) if (real-expected).abs()<1.0e-9 && (imaginary-expected).abs()<1.0e-9)
+                    );
+                } else {
+                    let Value::Tensor(array) = result else {
+                        panic!("expected real double array")
+                    };
+                    assert_eq!(array.shape, vec![1, 1, 1]);
+                    assert_eq!(array.numeric_dtype(), runmat_value::NumericDType::F64);
+                    assert!((tensor::tensor_value_f64(&array, 0) - expected).abs() < 1.0e-9);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn improper_real_bounds_admit_complex_callbacks_on_one_rule_path() {
+        COUNTED_CALLBACKS.with(|count| count.set(0));
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_complex_exp_tail".into()),
+            Value::Num(0.0),
+            Value::Num(f64::INFINITY),
+            Vec::new(),
+        ))
+        .expect("complex callback on positive infinite real tail");
+        assert!(
+            matches!(result, Value::Complex(real, imaginary) if (real-1.0).abs()<1.0e-7 && (imaginary-1.0).abs()<1.0e-7)
+        );
+        assert!(COUNTED_CALLBACKS.with(|count| count.get()) > 0);
+    }
+
+    #[test]
+    fn nonfinite_complex_contour_rejects_before_callback_and_real_infinity_remains_legal() {
+        COUNTED_CALLBACKS.with(|count| count.set(0));
+        for (lower, upper) in [
+            (Value::Complex(f64::INFINITY, 0.0), Value::Complex(1.0, 1.0)),
+            (Value::Complex(0.0, 0.0), Value::Complex(1.0, f64::NAN)),
+        ] {
+            let error = block_on(integral_builtin(
+                Value::FunctionHandle("__integral_complex_one".into()),
+                lower,
+                upper,
+                Vec::new(),
+            ))
+            .expect_err("nonfinite complex contour must reject");
+            assert_eq!(error.identifier(), INTEGRAL_ERROR_INVALID_INPUT.identifier);
+            assert_eq!(COUNTED_CALLBACKS.with(|count| count.get()), 0);
+        }
+        let legal = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_exp_tail".into()),
+            Value::Num(0.0),
+            Value::Num(f64::INFINITY),
+            Vec::new(),
+        ))
+        .expect("real +Inf bound remains legal");
+        assert!(matches!(legal, Value::Num(value) if (value-1.0).abs()<1.0e-7));
     }
 
     #[test]
