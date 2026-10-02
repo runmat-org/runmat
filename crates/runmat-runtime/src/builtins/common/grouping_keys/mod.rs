@@ -5,6 +5,6 @@ mod index;
 
 pub(crate) use atom::group_key_work_units;
 pub(crate) use atom::{format_integer, KeyAtom};
-#[cfg(any(feature = "plot-core", test))]
+#[cfg(feature = "plot-core")]
 pub(crate) use index::GroupIndexBuildError;
 pub(crate) use index::{GroupIndex, KeyOrder};

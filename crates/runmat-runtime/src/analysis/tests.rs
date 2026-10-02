@@ -676,6 +676,7 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
     }
 }
 
+#[cfg(feature = "plot-core")]
 fn split_material_through_hole_study_geometry() -> GeometryAsset {
     let mut geometry = split_material_through_hole_plate_geometry();
     add_through_hole_study_boundary_regions(&mut geometry);
