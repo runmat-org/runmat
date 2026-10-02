@@ -54,6 +54,15 @@ fn exercise_lazy_mean_and_moments(precision: NumericPrecision) {
         NumericPrecision::F32 => NumericElementType::F32,
         NumericPrecision::F64 => NumericElementType::F64,
     };
+    let native_bytes = 6 * class.element_size() as u64;
+    assert_eq!(
+        provider.download_numeric_host_workspace_bound(&original),
+        runmat_execution::ResourceByteBound::Known(native_bytes)
+    );
+    assert_eq!(
+        provider.download_numeric_host_workspace_bound(&lazy),
+        runmat_execution::ResourceByteBound::Known(native_bytes * 2)
+    );
 
     for (axis, shape, means, squares) in [
         (0, vec![1, 2], vec![3.0, 4.0], vec![35.0 / 3.0, 56.0 / 3.0]),

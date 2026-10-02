@@ -293,6 +293,19 @@ impl AccelProvider for CudaProvider {
         Box::pin(async move { self.download_numeric_impl(handle) })
     }
 
+    fn download_numeric_host_workspace_bound(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        // `zeroed_numeric` is downloaded into place and returned without a
+        // second host copy; the CUDA allocation itself is provider memory.
+        runmat_accelerate_api::checked_numeric_download_host_payload_bytes(handle)
+            .map(runmat_execution::ResourceByteBound::Known)
+            .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+            ))
+    }
+
     fn upload_integer(&self, host: &HostIntegerTensorView<'_>) -> Result<GpuTensorHandle> {
         self.upload_numeric_impl(&(*host).into())
     }

@@ -226,6 +226,18 @@ pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
     handle_transpose_info(handle).is_some()
 }
 
+/// Bytes in the native host payload returned by `download_numeric`. This is
+/// logical view geometry, not the provider's packed device allocation size.
+pub fn checked_numeric_download_host_payload_bytes(handle: &GpuTensorHandle) -> Option<u64> {
+    let bytes = native_buffer_byte_length(
+        handle.shape(),
+        handle.physical().element_type(),
+        handle.physical().storage(),
+    )
+    .ok()?;
+    u64::try_from(bytes).ok()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GpuTensorStorage {
     Real,
@@ -1672,6 +1684,20 @@ pub trait AccelProvider: AcceleratorThreadBound {
             numeric.validate()?;
             Ok(numeric)
         })
+    }
+
+    /// Peak host workspace owned by one `download_numeric` call, including its
+    /// returned native payload and any simultaneously live host temporaries.
+    /// Provider-owned device/mapped staging allocations belong to provider
+    /// scratch, not this host bound. A provider without a proven bound must
+    /// leave it unavailable; callers must not substitute the payload length.
+    fn download_numeric_host_workspace_bound(
+        &self,
+        _handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        )
     }
 
     /// Upload exact native integer storage without converting through f64.

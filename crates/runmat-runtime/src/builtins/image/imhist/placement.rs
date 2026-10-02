@@ -114,23 +114,16 @@ pub(super) fn select(
     }))
 }
 
-/// Bound only the operation-owned host temporaries outside the published
-/// result. The source download is one native-class vector, plus a second
-/// vector when a lazy transpose is materialized; logical decoding
-/// may form a bit vector and then an f64 vector, and f32 binning forms an f64
-/// vector. `linspace` always constructs locations, even for a one-output call.
-/// Both published tensors move their vectors and clones are COW handles.
+/// Bound only imhist-owned host temporaries outside the published result.
+/// Shared admission adds the provider's separately bounded native download
+/// payload and readback temporaries. Logical decoding may form a bit vector
+/// and then an f64 vector; f32 binning forms an f64 vector. `linspace` always
+/// constructs locations, even for a one-output call. Both published tensors
+/// move their vectors and clones are COW handles.
 fn host_scratch_bound(owner: &GpuTensorHandle, bins: usize, outputs: usize) -> Option<u64> {
     let elements = owner.shape().iter().try_fold(1_u64, |total, &extent| {
         total.checked_mul(u64::try_from(extent).ok()?)
     })?;
-    let native_bytes = elements
-        .checked_mul(u64::try_from(owner.physical().element_type().element_size()).ok()?)?;
-    let transpose_bytes = if runmat_accelerate_api::handle_is_transposed(owner) {
-        native_bytes
-    } else {
-        0
-    };
     let logical_bits = if handle_is_logical(owner) {
         elements
     } else {
@@ -147,9 +140,7 @@ fn host_scratch_bound(owner: &GpuTensorHandle, bins: usize, outputs: usize) -> O
     } else {
         0
     };
-    native_bytes
-        .checked_add(transpose_bytes)?
-        .checked_add(logical_bits)?
+    logical_bits
         .checked_add(f64_conversion)?
         .checked_add(unused_locations)
 }

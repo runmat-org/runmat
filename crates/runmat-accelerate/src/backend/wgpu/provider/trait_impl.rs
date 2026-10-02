@@ -2510,6 +2510,33 @@ impl AccelProvider for WgpuProvider {
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move { self.download_numeric_exec(h).await })
     }
+    fn download_numeric_host_workspace_bound(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        use runmat_execution::{ResourceBoundUnavailable, ResourceByteBound};
+
+        // Decoding allocates the returned native vector directly from mapped
+        // staging bytes. A 2-D lazy transpose clones that vector once before
+        // replacing it. The mapped wgpu buffer is provider-owned scratch.
+        let Some(payload) =
+            runmat_accelerate_api::checked_numeric_download_host_payload_bytes(handle)
+        else {
+            return ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound);
+        };
+        let extra =
+            if handle.shape().len() == 2 && runmat_accelerate_api::handle_is_transposed(handle) {
+                payload
+            } else {
+                0
+            };
+        payload
+            .checked_add(extra)
+            .map(ResourceByteBound::Known)
+            .unwrap_or(ResourceByteBound::Unavailable(
+                ResourceBoundUnavailable::NoScratchBound,
+            ))
+    }
     fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
         let output = self.upload_integer_exec(host)?;
         complete_observed_upload(self)?;

@@ -74,6 +74,10 @@ pub enum CandidateOutputPresentation {
         host_result_bytes: Option<ResourceByteBound>,
         /// Temporary host storage beyond the host-produced output itself.
         host_scratch_bytes: ResourceByteBound,
+        /// Provider-owned scratch across the complete route. A host route that
+        /// first reads back must include mapped or staged download buffers as
+        /// well as upload scratch. Unknown is not zero even when the provider
+        /// can separately bound its host workspace.
         provider_scratch_bytes: ResourceByteBound,
         queue_slots: u32,
         preparation: CandidatePreparationState,

@@ -1,6 +1,7 @@
 //! Shared exact host-result upload admission. The caller supplies checked
 //! operation-owned geometry and scratch; this boundary asks the owner about
-//! its actual upload route and submits one whole-work candidate to policy.
+//! its readback host workspace and actual upload route, then submits one
+//! whole-work candidate to policy.
 
 use super::HostPresentationReceipt;
 use crate::context::RuntimeContext;
@@ -29,6 +30,9 @@ pub(crate) struct ExactHostUpload<'a> {
     /// substitute for the live owner handle used in provider admission.
     pub(crate) domain_facts: Digest,
     pub(crate) outputs: Vec<ProviderRepresentation>,
+    /// Host temporaries owned by the operation, excluding source readback
+    /// payload and provider-internal readback workspace. Shared admission
+    /// queries the owner for those before submitting a host-memory bound.
     pub(crate) host_compute_scratch: ResourceByteBound,
 }
 
@@ -85,6 +89,12 @@ pub(crate) fn select_exact_host_upload(
     ) {
         return Ok(None);
     }
+    let readback_host_workspace = provider.download_numeric_host_workspace_bound(request.owner);
+    let Some(total_host_scratch) =
+        combine_host_scratch(request.host_compute_scratch, readback_host_workspace)
+    else {
+        return Ok(None);
+    };
     let device_id = provider.device_id();
     let provider_digest = Digest::sha256(
         serde_json::to_vec(&provider.capability_snapshot())
@@ -103,6 +113,7 @@ pub(crate) fn select_exact_host_upload(
                 request.variant,
                 request.domain_facts,
                 &upload,
+                readback_host_workspace,
                 device_id,
                 runmat_accelerate_api::handle_provenance(request.owner),
             ))
@@ -114,7 +125,7 @@ pub(crate) fn select_exact_host_upload(
         device_id,
         transfer_bytes,
         estimate.output_bytes,
-        request.host_compute_scratch,
+        total_host_scratch,
         u32::try_from(upload.outputs.len()).unwrap_or(u32::MAX),
         Digest::sha256(serde_json::to_vec(&upload).expect("typed route serializes")),
     );
@@ -163,6 +174,24 @@ pub(crate) fn select_exact_host_upload(
         selected,
         receipt,
     )))
+}
+
+/// The caller's scratch excludes the provider's native readback payload and
+/// its internal host temporaries. Unknown on either side remains unknown;
+/// only a checked sum of proven bounds can pass a finite host-memory quota.
+fn combine_host_scratch(
+    operation_owned: ResourceByteBound,
+    readback_host_workspace: ResourceByteBound,
+) -> Option<ResourceByteBound> {
+    match (operation_owned, readback_host_workspace) {
+        (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => {
+            left.checked_add(right).map(ResourceByteBound::Known)
+        }
+        (ResourceByteBound::Unavailable(reason), _)
+        | (_, ResourceByteBound::Unavailable(reason)) => {
+            Some(ResourceByteBound::Unavailable(reason))
+        }
+    }
 }
 
 fn upload_candidate(
@@ -296,5 +325,56 @@ mod tests {
             physical_retained_bound(None),
             ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound)
         );
+    }
+
+    #[test]
+    fn readback_workspace_combination_preserves_unknown_and_checks_sum() {
+        assert_eq!(
+            combine_host_scratch(ResourceByteBound::Known(56), ResourceByteBound::Known(16)),
+            Some(ResourceByteBound::Known(72))
+        );
+        assert_eq!(
+            combine_host_scratch(
+                ResourceByteBound::Known(56),
+                ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
+            ),
+            Some(ResourceByteBound::Unavailable(
+                ResourceBoundUnavailable::NoScratchBound
+            ))
+        );
+        assert_eq!(
+            combine_host_scratch(
+                ResourceByteBound::Known(u64::MAX),
+                ResourceByteBound::Known(1)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn unknown_readback_workspace_cannot_pass_finite_host_quota() {
+        let session = runmat_accelerate::placement::PlacementSession::new(
+            runmat_accelerate::placement::PlacementSessionConfig::default(),
+        );
+        let mut request = budget_request(32, 40, 1_024);
+        request.candidates[0].resources.scratch_bytes =
+            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound);
+        assert!(session.select_whole_work(request.clone()).is_err());
+        request.resources.memory_available_bytes = None;
+        assert!(session.select_whole_work(request).is_ok());
+    }
+
+    #[test]
+    fn known_readback_workspace_is_charged_to_host_peak() {
+        let session = runmat_accelerate::placement::PlacementSession::new(
+            runmat_accelerate::placement::PlacementSessionConfig::default(),
+        );
+        let mut request = budget_request(32, 40, 1_024);
+        // 72 readback + operation scratch, 32 upload staging, 32 live result.
+        request.candidates[0].resources.scratch_bytes = ResourceByteBound::Known(72);
+        request.resources.memory_available_bytes = Some(135);
+        assert!(session.select_whole_work(request.clone()).is_err());
+        request.resources.memory_available_bytes = Some(136);
+        assert!(session.select_whole_work(request).is_ok());
     }
 }

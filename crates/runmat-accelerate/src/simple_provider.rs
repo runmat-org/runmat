@@ -4179,6 +4179,18 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn download_numeric_host_workspace_bound(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        // The registry clone is moved into the returned host payload.
+        runmat_accelerate_api::checked_numeric_download_host_payload_bytes(handle)
+            .map(runmat_execution::ResourceByteBound::Known)
+            .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+            ))
+    }
+
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         self.upload_numeric_raw(&HostNumericTensorView {
             data: HostNumericDataView::F64(host.data),
