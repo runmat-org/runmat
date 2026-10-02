@@ -22,6 +22,18 @@ pub struct FiniteVolumeProjectionPolicy {
     pub max_traversal_operations: usize,
 }
 
+impl Default for FiniteVolumeProjectionPolicy {
+    fn default() -> Self {
+        Self {
+            max_cells: 1_000_000,
+            max_face_incidences: 4_000_000,
+            max_boundary_faces: 4_000_000,
+            max_scratch_bytes: 1024 * 1024 * 1024,
+            max_traversal_operations: 1_000_000_000,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FiniteVolumeReservation {
     pub cell_count: usize,

@@ -201,92 +201,16 @@ impl CfdDomainGeometrySource {
         }
     }
 }
-pub struct CfdBoundarySummary {
-    pub inlet_boundary_count: usize,
-    pub outlet_boundary_count: usize,
-    pub no_slip_wall_boundary_count: usize,
-    pub slip_wall_boundary_count: usize,
-    pub symmetry_boundary_count: usize,
-    pub authored_boundary_count: usize,
-    pub boundary_coverage_ratio: f64,
-    pub wall_boundary_coverage_ratio: f64,
+pub(super) struct CfdBoundarySummary {
     pub nominal_inlet_velocity_m_per_s: f64,
     pub outlet_pressure_pa: f64,
 }
-
 impl CfdBoundarySummary {
-    pub fn implicit_channel(node_count: usize) -> Self {
+    pub fn implicit_channel() -> Self {
         Self {
-            inlet_boundary_count: 1,
-            outlet_boundary_count: 1,
-            no_slip_wall_boundary_count: node_count.saturating_sub(1).max(1),
-            slip_wall_boundary_count: 0,
-            symmetry_boundary_count: 0,
-            authored_boundary_count: 0,
-            boundary_coverage_ratio: 1.0,
-            wall_boundary_coverage_ratio: 1.0,
             nominal_inlet_velocity_m_per_s: 0.0,
             outlet_pressure_pa: 0.0,
         }
-    }
-
-    pub fn from_model(model: &AnalysisModel, node_count: usize) -> Self {
-        let mut summary = Self {
-            inlet_boundary_count: 0,
-            outlet_boundary_count: 0,
-            no_slip_wall_boundary_count: 0,
-            slip_wall_boundary_count: 0,
-            symmetry_boundary_count: 0,
-            authored_boundary_count: 0,
-            boundary_coverage_ratio: 0.0,
-            wall_boundary_coverage_ratio: 0.0,
-            nominal_inlet_velocity_m_per_s: 0.0,
-            outlet_pressure_pa: 0.0,
-        };
-
-        for constraint in &model.constraints {
-            let AnalysisConstraint::Fluid(constraint) = constraint else {
-                continue;
-            };
-            match &constraint.kind {
-                // This legacy aggregate has no vector/frame/region authority. The
-                // reduced entry point rejects these conditions before constructing it.
-                FluidConstraintKind::PrescribedVelocity { .. }
-                | FluidConstraintKind::MovingWall { .. }
-                | FluidConstraintKind::PressureReference { .. } => {}
-                FluidConstraintKind::NoSlipWall { .. } => {
-                    summary.no_slip_wall_boundary_count += 1;
-                    summary.authored_boundary_count += 1;
-                }
-                FluidConstraintKind::SlipWall { .. } => {
-                    summary.slip_wall_boundary_count += 1;
-                    summary.authored_boundary_count += 1;
-                }
-                FluidConstraintKind::Symmetry { .. } => {
-                    summary.symmetry_boundary_count += 1;
-                    summary.authored_boundary_count += 1;
-                }
-                _ => {}
-            }
-        }
-
-        if summary.authored_boundary_count == 0 {
-            return Self::implicit_channel(node_count);
-        }
-
-        let wall_like_count = summary.no_slip_wall_boundary_count
-            + summary.slip_wall_boundary_count
-            + summary.symmetry_boundary_count;
-        let required_groups_present = usize::from(summary.inlet_boundary_count > 0)
-            + usize::from(summary.outlet_boundary_count > 0)
-            + usize::from(wall_like_count > 0);
-        summary.boundary_coverage_ratio = required_groups_present as f64 / 3.0;
-        summary.wall_boundary_coverage_ratio = if wall_like_count > 0 { 1.0 } else { 0.0 };
-        summary
-    }
-
-    pub fn wall_boundary_count(&self) -> usize {
-        self.no_slip_wall_boundary_count + self.slip_wall_boundary_count
     }
 }
 

@@ -337,29 +337,19 @@ impl Default for AnalysisAcousticRunOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisCfdRunOptions {
-    pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
-    pub quality_policy: QualityPolicy,
-    pub sample_count: usize,
-    pub max_linear_iters: usize,
-    pub tolerance: f64,
-    pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub solver_mesh_artifact_path: Option<String>,
+    pub numerical: runmat_analysis_fea::physics::cfd::canonical::CanonicalFluidPolicy,
+    pub geometry: runmat_analysis_fea::topology::FiniteVolumeProjectionPolicy,
 }
 
 impl Default for AnalysisCfdRunOptions {
     fn default() -> Self {
         Self {
-            deterministic_mode: false,
             precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            sample_count: 12,
-            max_linear_iters: 128,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-5,
-            solver_mesh_artifact_path: None,
+            numerical: Default::default(),
+            geometry: Default::default(),
         }
     }
 }

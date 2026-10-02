@@ -320,6 +320,7 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         step_id: ProcedureStepId("steady".into()),
         formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
+            fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
             maximum_nonorthogonal_iterations: 4,
             maximum_linear_iterations: 100,

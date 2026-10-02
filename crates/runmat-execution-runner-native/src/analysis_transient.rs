@@ -253,6 +253,7 @@ async fn execute_task(
         AnalysisTaskPolicy {
             resources: resources.clone(),
             resource_plan,
+            prepared_closure: None,
             retry: policy.retry,
             deadline_unix_millis: policy.deadline_unix_millis,
             priority: policy.priority,

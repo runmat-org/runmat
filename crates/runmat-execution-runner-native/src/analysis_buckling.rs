@@ -99,6 +99,7 @@ pub(crate) async fn execute_with_thermal_source(
             host: &preload.host,
             program: &preload.program,
             resource_plan: Some(&preload.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources.clone(),
             dependencies: preload_dependencies,
         }],
@@ -123,6 +124,7 @@ pub(crate) async fn execute_with_thermal_source(
             host: &state.host,
             program: &state.program,
             resource_plan: Some(&state.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources.clone(),
             dependencies: vec![crate::analysis_task_pool::AnalysisTaskDependency {
                 identity: executed_preload.identity,
@@ -151,6 +153,7 @@ pub(crate) async fn execute_with_thermal_source(
             host: &buckling.host,
             program: &buckling.program,
             resource_plan: Some(&buckling.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources.clone(),
             dependencies: vec![crate::analysis_task_pool::AnalysisTaskDependency {
                 identity: executed_state.identity,
@@ -224,6 +227,7 @@ async fn execute_with_pool(
             host: &prepared.host,
             program: &prepared.program,
             resource_plan: Some(&prepared.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources,
             dependencies: Vec::new(),
         }],

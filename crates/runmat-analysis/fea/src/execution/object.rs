@@ -33,6 +33,7 @@ mod tests;
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisNumericalObjectKind {
     FluidSteadyWorkload,
+    FluidStudyCompletion,
     AcousticStudyCompletion,
     ElectricalStudyCompletion,
     MagneticStudyCompletion,

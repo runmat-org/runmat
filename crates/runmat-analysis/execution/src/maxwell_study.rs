@@ -2,8 +2,8 @@
 //!
 //! Prepared tasks remain owned here: callers execute their immutable requests and return the
 //! associated scheduler response/accounting pair. Failed imports never advance the lifecycle.
-use crate::static_em_study::{
-    validate_accounting, StaticEmStudyPhase, StaticEmStudySource, StaticEmStudyTail,
+use crate::steady_study::{
+    validate_accounting, SteadyStudyPhase, SteadyStudySource, SteadyStudyTail,
 };
 use std::collections::BTreeSet;
 
@@ -98,7 +98,7 @@ pub struct MaxwellStudyCoordinator {
     phase: MaxwellStudyPhase,
     solve_task: Option<PreparedMaxwellHarmonicTask>,
     result: Option<ImportedMaxwellHarmonicResult>,
-    tail: Option<StaticEmStudyTail>,
+    tail: Option<SteadyStudyTail>,
     recovery_task: Option<crate::PreparedMaxwellFieldRecovery>,
     fields: Option<crate::ImportedRecoveredFields>,
     observation_state: observations::MaxwellObservations,
@@ -294,18 +294,18 @@ impl MaxwellStudyCoordinator {
         self.tail
             .as_ref()
             .map_or(self.phase, |tail| match tail.phase {
-                StaticEmStudyPhase::ReadyForAccuracy => MaxwellStudyPhase::ReadyForAccuracy,
-                StaticEmStudyPhase::AwaitingAccuracy => MaxwellStudyPhase::AwaitingAccuracy,
-                StaticEmStudyPhase::ReadyForState { ordinal } => {
+                SteadyStudyPhase::ReadyForAccuracy => MaxwellStudyPhase::ReadyForAccuracy,
+                SteadyStudyPhase::AwaitingAccuracy => MaxwellStudyPhase::AwaitingAccuracy,
+                SteadyStudyPhase::ReadyForState { ordinal } => {
                     MaxwellStudyPhase::ReadyForState { ordinal }
                 }
-                StaticEmStudyPhase::AwaitingState { ordinal } => {
+                SteadyStudyPhase::AwaitingState { ordinal } => {
                     MaxwellStudyPhase::AwaitingState { ordinal }
                 }
-                StaticEmStudyPhase::ReadyForBaseline => MaxwellStudyPhase::ReadyForBaseline,
-                StaticEmStudyPhase::ReadyForPublication => MaxwellStudyPhase::ReadyForPublication,
-                StaticEmStudyPhase::AwaitingPublication => MaxwellStudyPhase::AwaitingPublication,
-                StaticEmStudyPhase::Complete => MaxwellStudyPhase::Complete,
+                SteadyStudyPhase::ReadyForBaseline => MaxwellStudyPhase::ReadyForBaseline,
+                SteadyStudyPhase::ReadyForPublication => MaxwellStudyPhase::ReadyForPublication,
+                SteadyStudyPhase::AwaitingPublication => MaxwellStudyPhase::AwaitingPublication,
+                SteadyStudyPhase::Complete => MaxwellStudyPhase::Complete,
             })
     }
 

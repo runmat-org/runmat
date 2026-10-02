@@ -204,6 +204,11 @@ impl CanonicalFluidReservation {
         face_count: usize,
         p: CanonicalFluidPolicy,
     ) -> Result<Self, Error> {
+        if let Some(acceleration) = p.fixed_point_acceleration {
+            acceleration
+                .validate()
+                .map_err(|_| Error::Invalid("fixed-point acceleration policy"))?;
+        }
         if geometry.cell_count == 0
             || face_count == 0
             || face_count > geometry.face_incidence_count
@@ -236,26 +241,39 @@ impl CanonicalFluidReservation {
         // Three coexisting CSR operators/pattern clones plus assembly/output temporaries,
         // immutable boundary/bodyforce, all cell vectors/gradients/3x3 LS stencils, and
         // shared GMRES peak. Includes doubled Vec payload/header growth allowances.
-        let bytes = add(
+        let baseline_bytes = add(
             add(
                 add(mul(nnz, 192)?, mul(n, 65536)?)?,
                 add(mul(f, 1024)?, gmres.resident_bytes_upper_bound)?,
             )?,
             add(geometry.scratch_bytes as u64, 128 * 1024 * 1024)?,
         )?;
+        // Current component/reference, original action, defect and correction
+        // coexist with the existing shared Krylov peak in a correction solve.
+        let mut bytes = add(baseline_bytes, mul(n, 4 * 8)?)?;
+        if p.fixed_point_acceleration.is_some() {
+            // Two images/residuals, U/p/q proposal and shared coefficient workspace;
+            // one additional complete physical residual/face-force evaluation.
+            // Doubled payload growth plus fixed Vec/record headers.
+            bytes = add(bytes, add(mul(add(mul(n, 26)?, mul(f, 15)?)?, 16)?, 4096)?)?;
+        }
         let solves = mul(
             p.maximum_outer_iterations as u64,
             add(3, p.maximum_nonorthogonal_iterations as u64)?,
         )?;
         let linear_work = add(
-            mul(gmres.operator_applications_upper_bound, mul(nnz, 2)?)?,
+            mul(
+                add(gmres.operator_applications_upper_bound, 1)?,
+                mul(nnz, 2)?,
+            )?,
             mul(
                 add(gmres.dot_calls_upper_bound, gmres.axpy_calls_upper_bound)?,
                 mul(n, 4)?,
             )?,
         )?;
+        let linear_work = add(linear_work, mul(n, 4)?)?;
         let linear_iterations_upper_bound = mul(solves, p.maximum_linear_iterations as u64)?;
-        let work = add(
+        let mut work = add(
             add(
                 mul(solves, linear_work)?,
                 mul(
@@ -271,6 +289,15 @@ impl CanonicalFluidReservation {
                 )?,
             )?,
         )?;
+        if p.fixed_point_acceleration.is_some() {
+            work = add(
+                work,
+                mul(
+                    p.maximum_outer_iterations as u64,
+                    add(mul(f, 10000)?, mul(n, 100100)?)?,
+                )?,
+            )?;
+        }
         if bytes > p.maximum_resident_bytes || bytes > isize::MAX as u64 {
             return Err(Error::Resource("resident bytes"));
         }

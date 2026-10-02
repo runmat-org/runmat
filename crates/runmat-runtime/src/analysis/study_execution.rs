@@ -195,11 +195,7 @@ pub(super) fn execute_study_step(
             Ok((run, AnalysisSolverOptions::StructuralTransient(options)))
         }
         AnalysisSolverOptions::IncompressibleFlow(authored_options) => {
-            let mut options = authored_options.clone();
-            attach_solver_mesh_artifact_path(
-                &mut options.solver_mesh_artifact_path,
-                solver_mesh_artifact_path,
-            );
+            let options = authored_options.clone();
             let run = analysis_run_cfd_with_options_op(
                 &model,
                 execution.backend,

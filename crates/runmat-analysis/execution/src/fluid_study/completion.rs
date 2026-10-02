@@ -1,0 +1,240 @@
+//! Ordered, metered completion replay without solver or worker-task re-execution.
+//! Existing import-time source and numerical receipt consistency checks still run.
+use super::*;
+use crate::AnalysisWorkloadRequest;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum FluidStudyResultPhase {
+    Solve,
+    FieldRecovery,
+    ObservationPartition { ordinal: usize },
+    ObservationReduction { ordinal: usize },
+    ObservationAssembly,
+    Accuracy,
+    State { ordinal: usize },
+    Publication,
+}
+
+/// Preserves the original scheduler association; this is not a new scheduler attestation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FluidStudyResultClosure {
+    pub phase: FluidStudyResultPhase,
+    pub workload: AnalysisWorkloadRequest,
+    pub response: ProgramExecutionResponse,
+    pub accounting: AttemptResourceAccounting,
+}
+
+impl FluidStudyResultClosure {
+    pub(super) fn new(
+        phase: FluidStudyResultPhase,
+        host: &AnalysisHostWorkload,
+        response: &ProgramExecutionResponse,
+        accounting: &AttemptResourceAccounting,
+    ) -> Self {
+        Self {
+            phase,
+            workload: host.workload.clone(),
+            response: response.clone(),
+            accounting: accounting.clone(),
+        }
+    }
+
+    fn validate_for(
+        &self,
+        phase: FluidStudyResultPhase,
+        host: &AnalysisHostWorkload,
+    ) -> AnalysisBridgeResult<()> {
+        if self.phase != phase || self.workload != host.workload {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid completion phase or workload differs from its reconstructed task",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct FluidStudyReplayContext {
+    pub policy: FluidStudyPlanningPolicy,
+    pub mesh: SolverMeshArtifact,
+    pub frozen_project_digest: Option<Digest>,
+    pub artifact_access: ArtifactAccess,
+    pub program_revision: ProgramRevision,
+    pub output_policy: AnalysisOutputPolicy,
+    pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
+}
+
+impl CompletedFluidStudy {
+    /// Reconstruct the original recovery admission from the saved solve closure.
+    /// This imports and validates retained results; it never dispatches or re-solves.
+    pub fn field_recovery_resource_plan(
+        &self,
+        source: &impl CacheImport,
+    ) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::FeaResourcePlan> {
+        let mut coordinator = FluidStudyCoordinator::new(self.preparation()?)?;
+        let solve = self
+            .closures
+            .first()
+            .ok_or_else(|| invalid("fluid completion omits original solve"))?;
+        solve.validate_for(
+            FluidStudyResultPhase::Solve,
+            &coordinator.prepare_solve()?.host,
+        )?;
+        coordinator.complete_solve(source, solve.response.clone(), solve.accounting.clone())?;
+        let recovery = self
+            .closures
+            .get(1)
+            .ok_or_else(|| invalid("fluid completion omits original recovery"))?;
+        let task = coordinator.prepare_field_recovery()?;
+        recovery.validate_for(FluidStudyResultPhase::FieldRecovery, &task.host)?;
+        Ok(task.resource_plan.clone())
+    }
+
+    pub fn policy(&self) -> FluidStudyPlanningPolicy {
+        self.replay.policy
+    }
+
+    pub fn result_closures(&self) -> &[FluidStudyResultClosure] {
+        &self.closures
+    }
+
+    /// Original validated preparation, retained for durable artifact packaging.
+    pub fn preparation(&self) -> AnalysisBridgeResult<FluidStudyPreparation> {
+        self.compiled
+            .validate_against(&self.replay.mesh)
+            .map_err(|error| invalid(error.to_string()))?;
+        self.result.numerical_receipt.validate_against(
+            &self.workload,
+            &self.result.result,
+            &self.replay.mesh,
+        )?;
+        let workload =
+            plan_fluid_study_product(self.compiled.clone(), &self.replay.mesh, self.replay.policy)
+                .map_err(|error| invalid(error.to_string()))?
+                .workload;
+        if workload != self.workload {
+            return Err(invalid(
+                "completed fluid workload differs from authored plan",
+            ));
+        }
+        Ok(FluidStudyPreparation {
+            policy: self.replay.policy,
+            product: FluidStudyProduct {
+                compiled: self.compiled.clone(),
+                workload,
+            },
+            mesh: self.replay.mesh.clone(),
+            frozen_project_digest: self.replay.frozen_project_digest,
+            artifact_access: self.replay.artifact_access.clone(),
+            program_revision: self.replay.program_revision.clone(),
+            output_policy: self.replay.output_policy,
+            required_capabilities: self.replay.required_capabilities.clone(),
+        })
+    }
+}
+
+/// Reconstruct every task from authored inputs and consume its saved response/accounting pair.
+/// No unmetered shortcut: source imports, admission and terminal usage checks run unchanged.
+pub fn import_fluid_study_completion(
+    source: &impl CacheImport,
+    preparation: FluidStudyPreparation,
+    closures: Vec<FluidStudyResultClosure>,
+) -> AnalysisBridgeResult<CompletedFluidStudy> {
+    let mut study = FluidStudyCoordinator::new(preparation)?;
+    let mut closures = closures.into_iter();
+    loop {
+        if study.phase() == FluidStudyPhase::ReadyForBaseline {
+            study.freeze_baseline()?;
+        }
+        if study.phase() == FluidStudyPhase::Complete {
+            break;
+        }
+        if study.phase() == FluidStudyPhase::ReadyForObservationFanout {
+            study.prepare_observation_fanout(source)?;
+        }
+        let closure = closures
+            .next()
+            .ok_or_else(|| invalid("fluid completion omits an authored phase"))?;
+        let (phase, host) = match study.phase() {
+            FluidStudyPhase::ReadyForSolve => {
+                (FluidStudyResultPhase::Solve, &study.prepare_solve()?.host)
+            }
+            FluidStudyPhase::ReadyForFieldRecovery => (
+                FluidStudyResultPhase::FieldRecovery,
+                &study.prepare_field_recovery()?.host,
+            ),
+            FluidStudyPhase::AwaitingObservationPartitions => {
+                let FluidStudyResultPhase::ObservationPartition { ordinal } = closure.phase else {
+                    return Err(invalid("fluid completion omits a fanout partition"));
+                };
+                let task = study
+                    .observation_state
+                    .fanout
+                    .as_ref()
+                    .expect("prepared fanout")
+                    .partitions
+                    .get(ordinal)
+                    .ok_or_else(|| invalid("fluid replay partition ordinal outside fanout"))?;
+                (closure.phase, &task.host)
+            }
+            FluidStudyPhase::ReadyForObservationReduction { ordinal } => (
+                FluidStudyResultPhase::ObservationReduction { ordinal },
+                &study.prepare_observation_reduction()?.host,
+            ),
+            FluidStudyPhase::ReadyForObservationAssembly => (
+                FluidStudyResultPhase::ObservationAssembly,
+                &study.prepare_observation_assembly()?.host,
+            ),
+            FluidStudyPhase::ReadyForAccuracy => (
+                FluidStudyResultPhase::Accuracy,
+                &study.prepare_accuracy()?.host,
+            ),
+            FluidStudyPhase::ReadyForState { ordinal } => (
+                FluidStudyResultPhase::State { ordinal },
+                &study.prepare_next_state()?.host,
+            ),
+            FluidStudyPhase::ReadyForPublication => (
+                FluidStudyResultPhase::Publication,
+                &study.prepare_publication()?.host,
+            ),
+            _ => return Err(invalid("fluid completion replay reached an awaiting phase")),
+        };
+        closure.validate_for(phase, host)?;
+        match phase {
+            FluidStudyResultPhase::Solve => {
+                study.complete_solve(source, closure.response, closure.accounting)?
+            }
+            FluidStudyResultPhase::FieldRecovery => {
+                study.complete_field_recovery(source, closure.response, closure.accounting)?
+            }
+            FluidStudyResultPhase::ObservationPartition { ordinal } => study
+                .complete_observation_partition(
+                    source,
+                    ordinal,
+                    closure.response,
+                    closure.accounting,
+                )?,
+            FluidStudyResultPhase::ObservationReduction { .. } => study
+                .complete_observation_reduction(source, closure.response, closure.accounting)?,
+            FluidStudyResultPhase::ObservationAssembly => {
+                study.complete_observation_assembly(source, closure.response, closure.accounting)?
+            }
+            FluidStudyResultPhase::Accuracy => {
+                study.complete_accuracy(source, closure.response, closure.accounting)?
+            }
+            FluidStudyResultPhase::State { .. } => {
+                study.complete_next_state(source, closure.response, closure.accounting)?
+            }
+            FluidStudyResultPhase::Publication => {
+                study.complete_publication(source, closure.response, closure.accounting)?
+            }
+        }
+    }
+    if closures.next().is_some() {
+        return Err(invalid("fluid completion contains an extra phase"));
+    }
+    study.into_completed()
+}

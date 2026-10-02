@@ -7,6 +7,7 @@ use runmat_analysis_core::{
 pub(super) enum PreparedFamily {
     Acoustic,
     Electrical,
+    Fluid,
     Magnetic,
     Maxwell,
     Structural,
@@ -29,6 +30,19 @@ pub(super) fn select_family(
     let [step] = sequence.steps.as_slice() else {
         return Err(unsupported());
     };
+    if step.family == PhysicsFamily::Fluid
+        && step.procedure == AnalysisProcedure::Static
+        && step.independent_domain == runmat_analysis_core::IndependentDomain::Static
+        && step.solution_space == SolutionSpace::Direct
+        && step.restart == RestartPolicy::Fresh
+        && step.state_inputs.is_empty()
+        && step.activations.is_empty()
+        && sequence.dependencies.is_empty()
+        && sequence.transitions.is_empty()
+        && sequence.branches.is_empty()
+    {
+        return Ok(PreparedFamily::Fluid);
+    }
     if step.family == PhysicsFamily::Electromagnetic
         && step.procedure == AnalysisProcedure::HarmonicResponse
         && step.solution_space == SolutionSpace::Direct
@@ -105,13 +119,42 @@ pub(super) fn select_family(
 }
 
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, equation-selected static electrical/magnetic, singleton Maxwell harmonic, or acoustic harmonic step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady, equation-selected static electrical/magnetic, singleton Maxwell harmonic, or acoustic harmonic step".into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_analysis_core::ProcedureStep;
+
+    #[test]
+    fn fluid_dispatch_requires_one_fresh_independent_direct_static_step() {
+        let step = ProcedureStep::fluid_static("flow");
+        let sequence = AnalysisSequence::from_steps("flow", vec![step.clone()]);
+        assert_eq!(
+            super::select_family(&sequence, None).unwrap(),
+            PreparedFamily::Fluid
+        );
+        let mut transient = step.clone();
+        transient.procedure = AnalysisProcedure::TransientResponse;
+        let mut resumed = step.clone();
+        resumed.restart = RestartPolicy::ResumeCheckpoint {
+            checkpoint_id: "foreign".into(),
+            required_state_digest: "foreign".into(),
+        };
+        let mut reduced = step.clone();
+        reduced.solution_space = SolutionSpace::ModalReduced;
+        for steps in [
+            vec![transient],
+            vec![resumed],
+            vec![reduced],
+            vec![step.clone(), step],
+        ] {
+            assert!(
+                super::select_family(&AnalysisSequence::from_steps("flow", steps), None).is_err()
+            );
+        }
+    }
 
     fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamily, String> {
         super::select_family(

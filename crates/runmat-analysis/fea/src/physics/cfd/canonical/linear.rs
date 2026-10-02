@@ -66,12 +66,31 @@ pub(super) fn solve(
     p: &CanonicalFluidProblem<'_>,
     a: &RealSparseMatrix,
     b: &[f64],
+    current: &[f64],
 ) -> Result<(Vec<f64>, u64), Error> {
+    if current.len() != b.len()
+        || a.rows() != b.len()
+        || a.columns() != current.len()
+        || current.iter().chain(b).any(|v| !v.is_finite())
+    {
+        return Err(Error::Invalid("linear correction inventory"));
+    }
+    // Solve A δ = b − A x, then retain x + δ. The relative Krylov target
+    // applies to the current defect, not the much larger relaxed RHS. Starting
+    // each outer solve from zero can discard precisely the low-Re correction
+    // needed by the independently evaluated original force-balance gate.
+    let action = spmv(a, current).map_err(|e| Error::Operator(e.to_string()))?;
+    let defect = b
+        .iter()
+        .zip(&action)
+        .map(|(b, a)| b - a)
+        .collect::<Vec<_>>();
+    drop(action);
     let d = diagonal(a)?;
     let preconditioner =
         DiagonalRightPreconditioner::new(&d).map_err(|e| Error::Operator(e.to_string()))?;
     let result = restarted_gmres(
-        b,
+        &defect,
         &vec![0.0; b.len()],
         GmresPolicy {
             relative_tolerance: p.policy.linear_relative_tolerance,
@@ -98,8 +117,16 @@ pub(super) fn solve(
     if !result.converged || result.cancelled || result.breakdown {
         return Err(Error::NotConverged);
     }
-    let x = preconditioner
+    let correction = preconditioner
         .apply(&result.solution)
         .map_err(|e| Error::Operator(e.to_string()))?;
+    let x = current
+        .iter()
+        .zip(correction)
+        .map(|(x, d)| x + d)
+        .collect::<Vec<_>>();
+    if x.iter().any(|v| !v.is_finite()) {
+        return Err(Error::Invalid("nonfinite linear correction"));
+    }
     Ok((x, u64::from(result.iterations)))
 }

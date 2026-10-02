@@ -177,6 +177,7 @@ async fn execute_one<'a>(
             host,
             program,
             resource_plan: Some(resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources.clone(),
             dependencies,
         }],

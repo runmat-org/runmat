@@ -188,6 +188,7 @@ async fn execute_wave<'a>(
             host: task.host,
             program: task.program,
             resource_plan: Some(task.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources.clone(),
             dependencies,
         });

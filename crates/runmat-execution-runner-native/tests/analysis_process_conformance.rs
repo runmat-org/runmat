@@ -60,6 +60,9 @@ use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind
 
 #[path = "analysis_process_conformance/electrothermal.rs"]
 mod electrothermal;
+#[cfg(feature = "occt-native")]
+#[path = "analysis_process_conformance/fluid_authored.rs"]
+mod fluid_authored;
 #[path = "analysis_process_conformance/magnetic.rs"]
 mod magnetic;
 #[cfg(feature = "occt-native")]
@@ -129,14 +132,20 @@ fn main() {
             .block_on(run_durable_driver());
         return;
     }
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(parent());
+    let mut runtime = if std::env::args_os().any(|argument| argument == "--fluid-authored-only") {
+        tokio::runtime::Builder::new_multi_thread()
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+    };
+    runtime.enable_all().build().unwrap().block_on(parent());
 }
 
 async fn parent() {
+    #[cfg(feature = "occt-native")]
+    if std::env::args_os().any(|argument| argument == "--fluid-authored-only") {
+        fluid_authored::run().await;
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--maxwell-authored-only") {
         #[cfg(feature = "occt-native")]
         maxwell_authored::run().await;

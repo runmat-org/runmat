@@ -71,6 +71,7 @@ pub(crate) async fn execute_with_pool(
                     host,
                     program,
                     resource_plan: Some(plan),
+                    prepared_closure: None,
                     fallback_resources: policy.resources.clone(),
                     dependencies: preceding[ordinal].into_iter().collect(),
                 })
@@ -92,9 +93,7 @@ pub(crate) async fn execute_with_pool(
                 .map(|&ordinal| {
                     coordinator.entries()[ordinal]
                         .pending_task()
-                        .map(|(_, _, plan)| {
-                            (ordinal, plan.input.phase.clone(), plan.request.clone())
-                        })
+                        .map(|(_, _, plan)| (ordinal, plan.input.phase, plan.request.clone()))
                 })
                 .collect::<Result<Vec<_>, _>>();
             protocol(format!(

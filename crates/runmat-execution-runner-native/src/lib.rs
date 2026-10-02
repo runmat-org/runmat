@@ -4,9 +4,11 @@ mod accelerator_placement;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
 mod analysis_electrical;
+mod analysis_fluid;
 mod analysis_magnetic;
 mod analysis_maxwell;
 pub use analysis_electrical::source::electrical_study_completion_from_source;
+pub use analysis_fluid::source::fluid_study_completion_from_source;
 pub use analysis_magnetic::source::magnetic_study_completion_from_source;
 pub use analysis_maxwell::source::maxwell_study_completion_from_source;
 mod analysis_buckling;
@@ -228,11 +230,12 @@ pub use test_workload::{execute_host_program_request, execute_host_program_reque
 pub use typed_fea::{
     checked_fea_artifact_access, materialize_checked_fea_study_geometry, prepare_checked_fea_study,
     MaterializedFeaGeometry, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
-    PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy, PreparedAuthoredThermalStudy,
-    PreparedFeaStudy, PreparedFeaStudyRoot,
+    PreparedAuthoredFluidStudy, PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy,
+    PreparedAuthoredThermalStudy, PreparedFeaStudy, PreparedFeaStudyRoot,
 };
 pub use typed_fea::{
-    execute_checked_fea_locally, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy,
+    execute_checked_fea_locally, execute_prepared_fea_study_locally,
+    CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
     CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy, CompletedAuthoredThermalStudy,
     CompletedFeaStudyResult, CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions,
     LocalFeaMeshObserver, LocalFeaProgressObserver,

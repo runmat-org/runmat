@@ -208,6 +208,7 @@ pub(crate) async fn execute_with_pool(
                 host: &task.host,
                 program: &task.program,
                 resource_plan: Some(&task.resource_plan),
+                prepared_closure: None,
                 fallback_resources: policy.resources.clone(),
                 dependencies: initial_dependencies.clone(),
             })
@@ -264,6 +265,7 @@ pub(crate) async fn execute_with_pool(
                 host: &task.host,
                 program: &task.program,
                 resource_plan: Some(&task.resource_plan),
+                prepared_closure: None,
                 fallback_resources: policy.resources.clone(),
                 dependencies: vec![*dependency],
             })
@@ -362,6 +364,7 @@ pub(crate) async fn execute_with_pool(
             host: &result_task.host,
             program: &result_task.program,
             resource_plan: Some(&result_task.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources.clone(),
             dependencies: entry_dependencies,
         }],

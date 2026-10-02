@@ -6,37 +6,12 @@ use super::domain::{
 
 #[derive(Clone, Debug)]
 pub(super) struct CfdVelocityPressureSolution {
-    pub topology: CfdDomainTopology,
     pub velocity: Vec<f64>,
     pub pressure: Vec<f64>,
-    pub residual_momentum: Vec<f64>,
-    pub residual_continuity: Vec<f64>,
-    pub mass_balance_residual: f64,
-    pub pressure_drop_pa: f64,
-    pub control_volume_count: usize,
-    pub inlet_boundary_count: usize,
-    pub outlet_boundary_count: usize,
-    pub wall_boundary_count: usize,
-    pub no_slip_wall_boundary_count: usize,
-    pub slip_wall_boundary_count: usize,
-    pub symmetry_boundary_count: usize,
-    pub authored_boundary_count: usize,
-    pub boundary_coverage_ratio: f64,
-    pub wall_boundary_coverage_ratio: f64,
-    pub inlet_velocity_realization_ratio: f64,
-    pub nominal_inlet_velocity_m_per_s: f64,
-    pub outlet_pressure_pa: f64,
-    pub pressure_correction_iteration_count: usize,
-    pub pressure_correction_residual_ratio: f64,
-    pub velocity_correction_residual_ratio: f64,
-    pub transient_scale_min: f64,
-    pub transient_scale_max: f64,
-    pub transient_scale_variation: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CfdIterationControl {
-    pub step_count: usize,
     pub max_linear_iters: usize,
     pub tolerance: f64,
 }
@@ -83,10 +58,7 @@ pub(super) fn solve_velocity_pressure(
         .collect::<Vec<_>>();
     let correction_iters = control.max_linear_iters.max(1);
     let correction_tolerance = control.tolerance.max(1.0e-12);
-    let mut pressure_correction_residual_ratio = f64::INFINITY;
-    let mut velocity_correction_residual_ratio = f64::INFINITY;
-    let mut pressure_correction_iteration_count = 0usize;
-    for iteration in 0..correction_iters {
+    for _ in 0..correction_iters {
         let previous_pressure = pressure.clone();
         let previous_velocity = axial_velocity.clone();
         for node in 0..node_count {
@@ -123,7 +95,7 @@ pub(super) fn solve_velocity_pressure(
             .sum::<f64>()
             .sqrt()
             .max(1.0);
-        pressure_correction_residual_ratio = pressure_correction_norm / pressure_scale;
+        let pressure_correction_residual_ratio = pressure_correction_norm / pressure_scale;
         let velocity_correction_norm = axial_velocity
             .iter()
             .zip(previous_velocity.iter())
@@ -137,8 +109,7 @@ pub(super) fn solve_velocity_pressure(
             .sqrt()
             .max(inlet_velocity.abs())
             .max(1.0e-12);
-        velocity_correction_residual_ratio = velocity_correction_norm / velocity_scale;
-        pressure_correction_iteration_count = iteration + 1;
+        let velocity_correction_residual_ratio = velocity_correction_norm / velocity_scale;
         if pressure_correction_residual_ratio <= correction_tolerance
             && velocity_correction_residual_ratio <= correction_tolerance
         {
@@ -167,62 +138,10 @@ pub(super) fn solve_velocity_pressure(
         velocity.extend_from_slice(&[axial, recirculation, 0.0]);
     }
 
-    let (residual_momentum, residual_continuity) =
-        residual_norms(&velocity, &pressure, domain, topology, control.step_count);
     for value in &mut pressure {
         *value += boundary_summary.outlet_pressure_pa;
     }
-    let mass_balance_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
-    let inlet_velocity_realization_ratio =
-        inlet_velocity.abs() / nominal_inlet_velocity.abs().max(1.0e-12);
-    let (transient_scale_min, transient_scale_max) = cfd_transient_scale_bounds(profile_scales);
-
-    CfdVelocityPressureSolution {
-        topology: topology.clone(),
-        velocity,
-        pressure,
-        residual_momentum,
-        residual_continuity,
-        mass_balance_residual,
-        pressure_drop_pa,
-        control_volume_count: topology.control_volume_count,
-        inlet_boundary_count: boundary_summary.inlet_boundary_count,
-        outlet_boundary_count: boundary_summary.outlet_boundary_count,
-        wall_boundary_count: boundary_summary.wall_boundary_count(),
-        no_slip_wall_boundary_count: boundary_summary.no_slip_wall_boundary_count,
-        slip_wall_boundary_count: boundary_summary.slip_wall_boundary_count,
-        symmetry_boundary_count: boundary_summary.symmetry_boundary_count,
-        authored_boundary_count: boundary_summary.authored_boundary_count,
-        boundary_coverage_ratio: boundary_summary.boundary_coverage_ratio,
-        wall_boundary_coverage_ratio: boundary_summary.wall_boundary_coverage_ratio,
-        inlet_velocity_realization_ratio,
-        nominal_inlet_velocity_m_per_s: nominal_inlet_velocity,
-        outlet_pressure_pa: boundary_summary.outlet_pressure_pa,
-        pressure_correction_iteration_count,
-        pressure_correction_residual_ratio,
-        velocity_correction_residual_ratio,
-        transient_scale_min,
-        transient_scale_max,
-        transient_scale_variation: (transient_scale_max - transient_scale_min).abs(),
-    }
-}
-
-fn cfd_transient_scale_bounds(profile_scales: &[f64]) -> (f64, f64) {
-    if profile_scales.is_empty() {
-        return (1.0, 1.0);
-    }
-    let (min, max) = profile_scales
-        .iter()
-        .copied()
-        .filter(|scale| scale.is_finite())
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), scale| {
-            (min.min(scale), max.max(scale))
-        });
-    if min.is_finite() && max.is_finite() {
-        (min, max)
-    } else {
-        (1.0, 1.0)
-    }
+    CfdVelocityPressureSolution { velocity, pressure }
 }
 
 pub fn residual_norms(

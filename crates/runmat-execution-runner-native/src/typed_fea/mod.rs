@@ -7,6 +7,9 @@
 mod acoustic_execution;
 mod callable;
 mod electrical_execution;
+mod fluid_execution;
+mod prepared_validation;
+use prepared_validation::validate_prepared_execution;
 mod geometry;
 mod input;
 mod magnetic_execution;
@@ -16,6 +19,10 @@ mod thermal_execution;
 
 #[cfg(all(test, feature = "occt-native"))]
 mod tests;
+
+#[cfg(all(test, feature = "occt-native"))]
+#[path = "tests/prepared_execution.rs"]
+mod prepared_execution_tests;
 
 #[cfg(test)]
 #[path = "tests/thermal_signals.rs"]
@@ -27,13 +34,14 @@ mod spatial_signals;
 
 pub use acoustic_execution::CompletedAuthoredAcousticStudy;
 pub use electrical_execution::CompletedAuthoredElectricalStudy;
+pub use fluid_execution::CompletedAuthoredFluidStudy;
 pub use geometry::MaterializedFeaGeometry;
 pub use magnetic_execution::CompletedAuthoredMagneticStudy;
 pub use maxwell_execution::CompletedAuthoredMaxwellStudy;
 pub use preparation::{
     checked_fea_artifact_access, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
-    PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy, PreparedAuthoredThermalStudy,
-    PreparedFeaStudy, PreparedFeaStudyRoot,
+    PreparedAuthoredFluidStudy, PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy,
+    PreparedAuthoredThermalStudy, PreparedFeaStudy, PreparedFeaStudyRoot,
 };
 pub use thermal_execution::CompletedAuthoredThermalStudy;
 
@@ -126,6 +134,7 @@ pub struct CompletedLocalFeaCase {
 
 #[derive(Debug)]
 pub enum CompletedFeaStudyResult {
+    Fluid(Box<CompletedAuthoredFluidStudy>),
     Acoustic(Box<CompletedAuthoredAcousticStudy>),
     Electrical(Box<CompletedAuthoredElectricalStudy>),
     Magnetic(Box<CompletedAuthoredMagneticStudy>),
@@ -137,6 +146,7 @@ pub enum CompletedFeaStudyResult {
 impl CompletedFeaStudyResult {
     pub fn mesh(&self) -> &runmat_meshing_core::SolverMeshArtifact {
         match self {
+            Self::Fluid(result) => &result.mesh,
             Self::Acoustic(result) => &result.mesh,
             Self::Electrical(result) => &result.mesh,
             Self::Magnetic(result) => &result.mesh,
@@ -258,9 +268,18 @@ async fn execute_case(
     inputs: Vec<AuthoredStudyInputBinding>,
     options: &LocalFeaExecutionOptions,
 ) -> Result<CompletedLocalFeaCase, String> {
-    let case_id = study.study.study_id.clone();
     let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
     let prepared = prepare_checked_fea_study(source, study, &inputs, &authority, options).await?;
+    execute_prepared_fea_study_locally(prepared, options).await
+}
+
+/// Execute an authentic prepared study through governed family coordinators.
+pub async fn execute_prepared_fea_study_locally(
+    prepared: PreparedFeaStudy,
+    options: &LocalFeaExecutionOptions,
+) -> Result<CompletedLocalFeaCase, String> {
+    validate_prepared_execution(&prepared, options)?;
+    let case_id = prepared.realized.study_id.clone();
     let workers = options.workers.unwrap_or(prepared.workers).max(1);
     let (result, publication) = match prepared.root {
         PreparedFeaStudyRoot::Electrical(root) => {
@@ -366,6 +385,41 @@ async fn execute_case(
             .data;
             (
                 CompletedFeaStudyResult::Maxwell(Box::new(result)),
+                publication,
+            )
+        }
+        PreparedFeaStudyRoot::Fluid(root) => {
+            let result = fluid_execution::execute(root, workers, options).await?;
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            let publication_options = runmat_runtime::analysis::AnalysisCfdRunOptions {
+                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
+                numerical: result.completion.workload.policy,
+                geometry: result.completion.workload.geometry_policy,
+            };
+            let identity =
+                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
+                    "typed-local:{}:{}",
+                    digest.to_string().trim_start_matches("sha256:"),
+                    result.completion.root.logical_digest,
+                ))?;
+            let publication = runmat_runtime::analysis::publish_fluid_study_result(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &publication_options,
+                digest,
+                runmat_runtime::operations::OperationContext::new(None, None),
+                identity,
+            )
+            .map_err(|e| e.message)?
+            .data;
+            (
+                CompletedFeaStudyResult::Fluid(Box::new(result)),
                 publication,
             )
         }

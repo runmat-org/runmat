@@ -1,130 +1,147 @@
-# Canonical steady incompressible fluid evidence
+# Canonical steady incompressible fluid qualification
 
-## Envelope and physical authority
+## Current envelope and decision
 
-This is an experimental CPU FP64, serial, steady, homogeneous incompressible
-Newtonian envelope, not Stage 9 production qualification. Canonical affine
-tetrahedral cell/face geometry carries original persistent boundary ownership.
-The portable workload currently admits Tet4 only. Fields are physical cell
-velocity (m/s), pressure (Pa), and owner-oriented face volume flux (m³/s).
+Experimental CPU FP64, serial, steady, homogeneous incompressible Newtonian flow
+on canonical affine Tet4 cell/face geometry. This is not Stage 9 production
+qualification. The exact realization cannot inherit the retired reduced-channel
+operator's identity or maturity.
 
-The equations are div(U)=0 and div(ρ U⊗U)=−grad(p)+div(µ(grad(U)+grad(U)ᵀ))+f.
-The operator uses shared sparse contribution assembly and shared restarted GMRES,
-not a private matrix or a channel/profile correlation. Relaxed momentum and compact
-Rhie–Chow pressure correction retain the original unrelaxed conservative face flux.
-Physical gradient reconstruction and linear-upwind correction account for skew
-faces. Unknown pressure traces at velocity boundaries are reconstructed from
-actual neighboring pressure samples, not prescribed zero normal gradients.
+Authored fresh singleton steady Fluid studies use imported CAD, canonical meshing,
+exact Cell material ownership, governed native tasks, original state and recovered
+fields, authenticated cold completion, observations and runtime publication.
+The standalone reduced-channel solver, dispatch and surrogate field construction
+are removed. The direct model-only operation rejects with an authored-study-required
+error. Reduced helpers still used by unfinished CHT/FSI are not canonical qualification.
 
-Velocity constants preserve all three signed components. The initial kernel
-supports explicit global constants, stationary no-slip and tangential moving walls,
-physical pressure outlets and original volume body-force density. Each connected
-component requires a physical outlet; a gauge reference is not one. Outlet velocity
-uses homogeneous normal gradient, not a stress-free traction condition. Temporary
-outlet backflow is permitted only in solver trials using the signed extrapolated
-owner trace; original accepted and recovered fields reject backflow. Fluxes are
-never clipped. Normal wall motion requires ALE and is rejected.
+Unsupported authored remote/GPU execution, transient flow, numerical checkpoint
+resume, heterogeneous coefficients, turbulence, symmetry/periodic boundaries,
+spatial/generated profiles and normal wall motion/ALE remain rejected.
 
-Assigned materials use the shared closed incompressible-Newtonian law, shared mass
-density and positive dynamic viscosity. Exact Cell-role property compilation binds
-each original volume element to its material. Equal coefficients with distinct
-material IDs are supported; heterogeneous coefficients, missing owners, stale
-retained domains and substituted source/property maps reject. Solid is not a Cell
-alias. Unsupported frames, tables, turbulence, symmetry/periodic conditions,
-transient/coupled procedures and checkpoint resume remain outside this envelope.
+## Equations and retained physical authority
 
-## Independent numerical witnesses
+The equations are div(U)=0 and
+div(ρ U⊗U)=−grad(p)+div(µ(grad(U)+grad(U)ᵀ))+f.
+Original fields are cell velocity U (m/s), pressure p (Pa), and owner-oriented
+volume flux q (m³/s) on every face, including internal faces.
+
+Shared sparse assembly and restarted GMRES replace neither the equations nor their
+acceptance criteria. Momentum and reference-relative pressure corrections solve
+Aδ=b−Ax around the current state. Compact Rhie–Chow pressure correction retains
+original unrelaxed conservative fluxes. Physical gradients and linear-upwind
+correction account for skew faces; unknown pressure traces at velocity boundaries
+are reconstructed from actual neighboring samples.
+
+Safeguarded Anderson depth one uses the shared physics-independent helper. A single
+pressure-defect coefficient combines ordinary SIMPLE images of U, p and q without
+mixing units in a norm. Its explicit default magnitude cap is32. Every candidate
+is re-evaluated against original physical equations and retained only for strict
+improvement of the maximum physical acceptance residual. Degenerate or excessive
+coefficients, speculative overflow and invalid candidates retain the validated
+ordinary image; outlet backflow clears history. No flux clipping, unit-scale
+residual floor or reference-solution initialization is used.
+
+All three signed constant velocity components, no-slip walls, tangential moving
+walls, physical pressure outlets and volume body-force density are retained.
+Each connected component requires a physical outlet; a gauge is not an outlet.
+Outlet velocity has homogeneous normal gradient, not stress-free traction.
+Temporary trial backflow uses signed extrapolated owner traces; accepted/recovered
+fields reject backflow.
+
+Shared incompressible-Newtonian laws require positive density and viscosity.
+Original volume-element material ownership is exact Cell-role authority. Distinct
+material IDs with identical coefficients are supported; stale, missing, wrong-kind
+or substituted source/property maps fail closed.
+
+## Independent numerical evidence
 
 References are continuum expressions, never residual-generated forcing or fitted
-RunMat outputs. Boundary samples are frozen at original triangle centroids; these
-tests do not establish authored spatial-profile realization.
+RunMat outputs. Test boundary samples are frozen at original triangle centroids;
+they do not establish authored spatial-profile realization.
 
-* Couette: U=(y,0,0), p=0, ρ=µ=1. Analytic wall shear is ±1 Pa.
-* Nonzero affine convection: U=(1+y,0.2,0), p=−0.2x, f=0, ρ=µ=1.
-  Both div(U)=0 and ρ(U·grad)U=(0.2,0,0)=−grad(p).
-* Unit square duct: −µ(Uyy+Uzz)=G with no-slip transverse walls and G=µ=1.
-  An independent odd Fourier series provides velocity, flow and shear, with
-  explicit truncation bounds. At N=255, velocity tail ≤2/(π³N²), flow tail
-  ≤8/(3π⁴N³), and gradient tail ≤4/(π²N). Finite-series shear is not exact.
+- Couette: U=(y,0,0), p=0, ρ=µ=1; wall shear ±1 Pa.
+- Affine convection: U=(1+y,0.2,0), p=−0.2x, f=0, ρ=µ=1;
+  div(U)=0 and ρ(U·grad)U=(0.2,0,0)=−grad(p).
+- Square duct: −µ(Uyy+Uzz)=G, transverse no-slip, G=µ=1.
+  Independent odd Fourier sums carry explicit truncation bounds. At N=255,
+  velocity tail ≤2/(π³N²), flow tail ≤8/(3π⁴N³), gradient tail ≤4/(π²N).
+  Finite-series shear is not exact.
 
-For refinements n=2,3,4, the current duct relative velocity L2 errors are
-0.112188, 0.075925, 0.055199; flow errors 0.191197, 0.086351, 0.048888;
-wall-shear errors 0.325795, 0.213903, 0.151078. All strictly decrease.
-Global physical momentum imbalance is below 4.2e−8 relative.
+For duct refinements n=2,3,4, relative velocity L2 errors are
+0.112188/0.075925/0.055199; flow errors0.191197/0.086351/0.048888;
+wall-shear errors0.325795/0.213903/0.151078. All strictly decrease.
+Global momentum imbalance is below4.2e−8 relative.
 
-The affine convective velocity errors are 6.90e−9, 3.17e−8, 2.98e−8 and
-physical-pressure errors 3.90e−6, 1.53e−6, 1.74e−6. These are affine
-reproduction/iterative-accuracy evidence, NOT an observed spatial convergence
-order. Every mesh must satisfy velocity error <1e−6 and pressure error <1e−4,
-considerably tighter than the original coarse endpoint bounds. The non-affine
-duct retains strict spatial-refinement gates. Solver tolerances are unchanged:
-linear 1e−11 and physical relative 1e−7 for these witnesses.
+Affine convection errors are below1e−6 for velocity and1e−4 for physical pressure
+on every tested mesh. These are affine reproduction/iterative-accuracy gates,
+not an observed spatial convergence order. Non-affine duct gates retain strict
+spatial refinement. Witness linear tolerance1e−11 and physical tolerance1e−7
+remain unchanged.
 
-Independent affine-pressure/skew-face tests, proper rigid rotation covariance,
-weak/strong constant-Re forcing, local/global continuity and momentum, physical
-tractions, original flux constitutive closure and invalid-input/resource tests
-complete the focused kernel suite. A constant independent advecting field tests
-affine face transport exactly; it does not claim exact quadratic face quadrature.
+Final isolated candidate verification: canonical CFD20/20, shared fixed-point5/5,
+fluid-selected FEA35/35 (including one acoustic two-fluid test), full execution
+bridge180/180, native prepared-closure and metadata preflight1/1 each, bridge
+immutable source/resource authority1/1, runtime fluid publication-control test1/1.
+CLI OCCT compilation, remote-family rejection1/1 and strict FEA/bridge/native
+library/test lint pass.
+Final native fluid tests pass6/6. The pinned authored lifecycle exited0, including
+both CAD cases, cold replay/publication and policy/state/field/foreign-receipt tamper
+rejection. The full FEA regression remains running with a reported transient-rod
+time-refinement failure; no broad suite or release-lane green is claimed.
 
-## Retained and execution boundary
+The original imported 1×2×3 m moving-box witness uses U=(0.001,0,0),
+ρ=µ=1, target mesh1.5 m, outer cap400, inner1e−11 and physical1e−8.
+The final pinned moving case accepted at315outer/137982linear iterations:
+worst-cell momentum9.408899610537379e−9, global2.494419289565982e−9,
+aggregate3.027216014114704e−13, continuity2.168404344973425e−15,
+flux9.3989783610688e−15. The stationary case accepted at1outer/0linear iterations
+with all five residuals zero. Both cold original runtime publications and terminal
+lifecycle checks passed. Exact witness SHA256:
+783f8413baeb1c86015a4b6cf68700bfcd2af8ac71e23a22e31992b81c393b0b.
 
-`FluidSteadyWorkload` retains original model, producer step, geometry and numerical
-policies. `FluidSteadySolverResult` retains original U/p/q, traction/residual
-evidence, source/property/mesh/producer identities and rederived local reservations.
-Cold import authenticates the expected payload digest before decode, admits original
-source preparation and decoded heap, then checks the original equations without
-solving again or replacing any field. The eight portable tests include zero flow and
-independent nonzero rigid translation U=(1,0,0), p=0, q=S_x on every original face.
-The latter verifies velocity and face flux against the analytic solution before
-byte-exact cold roundtrip and solve-free original-equation recovery. It is not
-process-separated numerical restart or spatial-profile qualification.
+## Governed execution, original-field recovery and publication
 
-Count-only geometry/numerical bounds, metadata decode profiles and both coexisting
-compiled property maps are admitted before projection/property expansion. Full
-preparation additionally admits original authority-profile work and resident
-storage: target aliases, signal comparisons and exact volume coverage. A valid
-body-force target mixed with a missing or wrong-kind target rejects. Connected
-component outlet admission uses shared labels and a single face pass; the focused
-kernel suite is 13 tests, including these authority/resource regressions. Requested
-heap estimates are not measured RSS or scheduler-attempt usage reconciliation.
+Resource-estimation revision61 includes correction vectors/actions and acceleration
+history, proposals and physical recovery. Count-only geometry, numerical bounds,
+decoded metadata, original source preparation and coexisting property maps are
+admitted before expansion. Shared native plans govern solve, copy-only recovery,
+state publication and final observations; requested bounds are not measured RSS.
 
-The shared native-field slice represents U/p at original cells and q at
-every owner-oriented face, including internal faces. It adds a distinct source-bound
-finite-volume topology identity, not an exterior-only or nodal surrogate. Native
-recovery copies the retained original fields unchanged, without a second solve.
-Authored steady compilation preserves observation intent and exact Cell material
-ownership; native final field/extrema requests are the bounded supported subset.
-The streaming wire profile and source-authenticated resource projection are
-requested-heap admission facts, not a shared scheduler plan or usage receipt.
-Observation selection binds canonical cell order and complete exact source targets;
-the source-authenticated verifier independently re-resolves original authored
-coverage. Topology copies and metadata identity encoding are admitted before
-allocation against explicit observation limits. Regression evidence covers wrong
-cell ordering, partial targets, omitted/swapped plans, reversed owner orientation,
-self-consistent reordered cold layouts and tiny caps. Focused fluid tests pass
-23/23 and shared field/observation/accuracy results tests pass 140/140. These are
-local field/observation and authored-intent evidence, not completed native lifecycle
-integration, measured RSS, process-separated restart or production qualification.
+Portable completion retains original model/step, policies, geometry, mesh, producer,
+material map and canonical U/p/q bytes. Cold import authenticates digest before
+decode, admits original-source preparation and decoded heap, and checks original
+equations without solving again or replacing fields. Original exact state, result,
+receipts, catalogs, phase accounting and observation target coverage are validated.
+Partition observations import intersecting original Cell/all-owner-face blocks.
+Missing mandatory spatial evidence stays Indeterminate and blocks production.
 
-Governed native solve/copy-only recovery and complete original state publication
-now use shared host resource plans. Scheduled final observations import only
-intersecting original Cell/all-owner-face storage blocks, then run native
-partition evaluation and reduction. Complete Fluid state retains the original
-workload, mesh, canonical U/p/q result bytes and exact topology; cold validation
-checks original equations without solving again. It is not a numerical restart
-contract. The native cold-store chain verifies signed velocity, exact state,
-receipt-backed algebraic/conservation evidence and missing mandatory spatial
-evidence remaining `Indeterminate`. Requested bounds are not measured usage.
-Current shared verification covers 31 focused fluid tests, 102 observation tests,
-167 bridge tests and four native CFD tests. Production remains blocked.
+Runtime authenticates the entire scientific closure before publication and imports
+the original recovered artifact under codec/transport/construction budgets, checking
+bit-exact signed U/p/q. The generic prepared-study handoff validates original
+root/revision and backend admission before using existing family coordinators.
 
-Measured usage, full authored cold completion/runtime cutover, spatial/generated
-inputs, numerical restart,
-transient flow, distributed/GPU execution, conservative CHT/FSI and release
-qualification remain open. The old reduced production channel fallback has not
-been removed by this slice. Runtime fluid checks pass 4/5: the existing FSI success
-test depends on the reduced directional-excitation fallback now truthfully rejected.
-The operation-contract suite similarly passes 47/48, with the FSI success contract
-failing on the same directional fallback rejection. These coupled cutover failures
-remain explicit; they are not standalone-fluid evidence or a green release lane.
-No production gate is promoted here.
+Shared completion currently persists visible step runs before the family whole-study
+manifest. A later storage failure can leave a visible run without a returned manifest.
+No failure-injection or transaction proof closes this common-owner atomicity gap.
+Immutable partial evidence files are not a successful whole-study completion.
+
+## Historical failed trials and remaining gates
+
+Before acceleration, the same outer400/inner1e−11 case failed worst-cell momentum
+3.277707410e−8 against1e−8; tightening the inner tolerance did not close it.
+Physical and assembled momentum vectors agreed within7.91e−19 N, ruling out that
+suspected assembly/recovery discrepancy at the controlling cell. Late iterates
+showed slow fixed-point contraction, not a proven rounding plateau.
+Correction solves alone were insufficient. These failed trials are historical
+diagnosis, not current qualification or permission to relax original gates.
+
+An earlier main-source full lifecycle passed, but predates resource61 and the final
+overflow safeguard; it cannot substitute for final candidate verification.
+
+Measured memory/attempt usage reconciliation, independently satisfied mandatory
+spatial evidence, generated/time-dependent inputs, symmetry/periodicity, transient
+flow, numerical restart, partitioned/distributed algebra, GPU, conservative CHT/FSI,
+publication atomicity and the blocking release lane remain open. The older runtime
+fluid and operation-contract selections failed their FSI success expectations on
+the retired directional fallback; no green coupled release lane is claimed.
+No Stage9 or production gate is promoted by this bounded cutover.

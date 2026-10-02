@@ -29,6 +29,7 @@ pub(super) fn require_remote_root(
         runmat_execution_runner_native::PreparedFeaStudyRoot::Electrical(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone electrical authored roots are not implemented for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Magnetic(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone magnetic authored roots are not implemented for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Maxwell(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored harmonic Maxwell roots are not qualified for remote submission"),
+        runmat_execution_runner_native::PreparedFeaStudyRoot::Fluid(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored canonical steady fluid roots are not qualified for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Acoustic(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone acoustic authored roots are not implemented for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Thermal(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone thermal authored roots are not implemented for remote submission"),
     }
@@ -76,10 +77,11 @@ mod tests {
     use runmat_analysis_core::{AnalysisSequence, ProcedureStep};
 
     #[test]
-    fn remote_authored_thermal_is_rejected_before_preparation_or_submission() {
+    fn remote_authored_thermal_and_fluid_are_rejected_before_preparation_or_submission() {
         for step in [
             ProcedureStep::thermal_steady("heat"),
             ProcedureStep::thermal_transient("heat"),
+            ProcedureStep::fluid_static("flow"),
         ] {
             let error =
                 ensure_remote_structural(&AnalysisSequence::from_steps("thermal", vec![step]))

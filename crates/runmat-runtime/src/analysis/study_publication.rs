@@ -18,6 +18,7 @@ use super::{
     ThermalStudyCompletion, ThermalStudyObjectSource, ANALYSIS_RUN_STUDY_OPERATION,
     ANALYSIS_RUN_STUDY_OP_VERSION,
 };
+use super::{AnalysisCfdRunOptions, FluidStudyCompletion, FluidStudyObjectSource};
 use super::{MagneticStudyCompletion, MagneticStudyObjectSource};
 use super::{MaxwellStudyCompletion, MaxwellStudyObjectSource};
 pub use magnetic_run_options::AnalysisMagneticRunOptions;
@@ -34,6 +35,9 @@ pub use magnetic::publish_magnetic_study_result;
 #[path = "maxwell_study_publication.rs"]
 mod maxwell;
 pub use maxwell::publish_maxwell_study_result;
+#[path = "fluid_study_publication.rs"]
+mod fluid;
+pub use fluid::publish_fluid_study_result;
 #[path = "typed_study_publication.rs"]
 mod structural;
 #[path = "thermal_study_publication.rs"]

@@ -2,8 +2,8 @@
 //!
 //! Prepared tasks remain owned here: callers execute their immutable requests and return the
 //! associated scheduler response/accounting pair. Failed imports never advance the lifecycle.
-use crate::static_em_study::{
-    validate_accounting, StaticEmStudyPhase, StaticEmStudySource, StaticEmStudyTail,
+use crate::steady_study::{
+    validate_accounting, SteadyStudyPhase, SteadyStudySource, SteadyStudyTail,
 };
 use std::collections::BTreeSet;
 
@@ -88,7 +88,7 @@ pub struct ElectricalStudyCoordinator {
     phase: ElectricalStudyPhase,
     solve_task: Option<PreparedElectricalStaticTask>,
     result: Option<ImportedElectricalStaticResult>,
-    tail: Option<StaticEmStudyTail>,
+    tail: Option<SteadyStudyTail>,
 }
 
 impl ElectricalStudyCoordinator {
@@ -177,18 +177,20 @@ impl ElectricalStudyCoordinator {
             self.preparation.output_policy.inventory_limits(),
         )?;
         let workload = self.preparation.workload();
-        self.tail = Some(StaticEmStudyTail::new(StaticEmStudySource {
+        self.tail = Some(SteadyStudyTail::new(SteadyStudySource {
             host: task.host.clone(),
             result: result.objects.clone(),
-            profiles: result.source_profiles.clone(),
+            state: crate::steady_study::TerminalStatePublicationSource::Profiles {
+                profiles: Box::new(result.source_profiles.clone()),
+                kind: SemanticStatePublicationSource::StaticElectricalNativeFields,
+                topology: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
+            },
             receipt: result.numerical_receipt_objects.clone(),
             context_inputs: task.inputs.iter().filter(|input| matches!(input.manifest.kind,
                 runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ElectricalStaticWorkload
                 | runmat_analysis_fea::execution::AnalysisNumericalObjectKind::Mesh))
                 .cloned().chain(std::iter::once(result.objects.clone())).collect(),
             accuracy_kind: AccuracySourceKind::ElectricalStatic,
-            state_kind: SemanticStatePublicationSource::StaticElectricalNativeFields,
-            topology: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
             sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
             step: self.preparation.selected_step().clone(),
             formulation_requirement: workload.formulation_requirement,
@@ -295,22 +297,18 @@ impl ElectricalStudyCoordinator {
         self.tail
             .as_ref()
             .map_or(self.phase, |tail| match tail.phase {
-                StaticEmStudyPhase::ReadyForAccuracy => ElectricalStudyPhase::ReadyForAccuracy,
-                StaticEmStudyPhase::AwaitingAccuracy => ElectricalStudyPhase::AwaitingAccuracy,
-                StaticEmStudyPhase::ReadyForState { ordinal } => {
+                SteadyStudyPhase::ReadyForAccuracy => ElectricalStudyPhase::ReadyForAccuracy,
+                SteadyStudyPhase::AwaitingAccuracy => ElectricalStudyPhase::AwaitingAccuracy,
+                SteadyStudyPhase::ReadyForState { ordinal } => {
                     ElectricalStudyPhase::ReadyForState { ordinal }
                 }
-                StaticEmStudyPhase::AwaitingState { ordinal } => {
+                SteadyStudyPhase::AwaitingState { ordinal } => {
                     ElectricalStudyPhase::AwaitingState { ordinal }
                 }
-                StaticEmStudyPhase::ReadyForBaseline => ElectricalStudyPhase::ReadyForBaseline,
-                StaticEmStudyPhase::ReadyForPublication => {
-                    ElectricalStudyPhase::ReadyForPublication
-                }
-                StaticEmStudyPhase::AwaitingPublication => {
-                    ElectricalStudyPhase::AwaitingPublication
-                }
-                StaticEmStudyPhase::Complete => ElectricalStudyPhase::Complete,
+                SteadyStudyPhase::ReadyForBaseline => ElectricalStudyPhase::ReadyForBaseline,
+                SteadyStudyPhase::ReadyForPublication => ElectricalStudyPhase::ReadyForPublication,
+                SteadyStudyPhase::AwaitingPublication => ElectricalStudyPhase::AwaitingPublication,
+                SteadyStudyPhase::Complete => ElectricalStudyPhase::Complete,
             })
     }
 

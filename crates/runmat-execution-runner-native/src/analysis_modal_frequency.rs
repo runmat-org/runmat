@@ -72,6 +72,7 @@ async fn execute_with_pool(
             host: &modal.host,
             program: &modal.program,
             resource_plan: Some(&modal.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources.clone(),
             dependencies: Vec::new(),
         }],
@@ -96,6 +97,7 @@ async fn execute_with_pool(
             host: &state.host,
             program: &state.program,
             resource_plan: Some(&state.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources.clone(),
             dependencies: vec![AnalysisTaskDependency {
                 identity: executed_modal.identity,

@@ -113,10 +113,16 @@ mod electrical_static_plan;
 mod electrical_static_result;
 mod electrical_static_task;
 mod electrical_study;
+mod fluid_study;
+pub use fluid_study::{
+    import_fluid_study_completion, import_fluid_study_root, prepare_fluid_study_root,
+    CompletedFluidStudy, FluidStudyCoordinator, FluidStudyPhase, FluidStudyPreparation,
+    FluidStudyResultClosure, FluidStudyResultPhase, PreparedFluidStudyRoot,
+};
 mod magnetic_study;
 mod maxwell_study;
 mod sampled_study_observations;
-mod static_em_study;
+mod steady_study;
 pub use magnetic_study::{
     import_magnetic_study_completion, import_magnetic_study_root, prepare_magnetic_study_root,
     CompletedMagneticStudy, MagneticStudyCoordinator, MagneticStudyPhase, MagneticStudyPreparation,
@@ -520,7 +526,8 @@ pub use structural_transient_sequence::{
 };
 pub use task::{
     build_analysis_task_submission, build_resource_planned_task_submission,
-    AnalysisExecutionContext, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
+    build_resource_planned_task_submission_with_closure, AnalysisExecutionContext,
+    PreparedAnalysisTaskClosure, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
 };
 pub use thermal_execution::execute_thermal_solver_result_objects;
 pub use thermal_result_access::{

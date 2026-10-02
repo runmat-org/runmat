@@ -102,6 +102,7 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         step_id: ProcedureStepId("steady".into()),
         formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
+            fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
             maximum_nonorthogonal_iterations: 4,
             maximum_linear_iterations: 100,
@@ -185,6 +186,41 @@ fn exact_digest_precedes_decode_and_source_admission() {
         error,
         crate::execution::AnalysisExecutionError::Identity(_)
     ));
+}
+
+#[test]
+fn acceleration_controls_bind_portable_workload_result_and_original_reservation() {
+    let (mut workload, mesh) = authored();
+    let ordinary = workload.identity().unwrap();
+    workload.policy.fixed_point_acceleration =
+        Some(crate::solve::fixed_point::AndersonOnePolicy::default());
+    assert_ne!(workload.identity().unwrap(), ordinary);
+    let wire = workload.canonical_bytes().unwrap();
+    assert_eq!(
+        FluidSteadyWorkload::from_canonical_bytes(&wire).unwrap(),
+        workload
+    );
+    let result = workload.execute(&mesh).unwrap();
+    let bytes = result.canonical_bytes().unwrap();
+    let cold = FluidSteadySolverResult::from_canonical_bytes_for(
+        &bytes,
+        Digest::sha256(&bytes),
+        &workload,
+        &mesh,
+    )
+    .unwrap();
+    assert_eq!(cold.original(), result.original());
+    assert_eq!(cold.source_workload(), workload.identity().unwrap());
+    for acceleration in [
+        None,
+        Some(crate::solve::fixed_point::AndersonOnePolicy {
+            maximum_absolute_coefficient: 16.0,
+        }),
+    ] {
+        let mut substituted = workload.clone();
+        substituted.policy.fixed_point_acceleration = acceleration;
+        assert!(cold.validate_for(&substituted, &mesh).is_err());
+    }
 }
 
 #[test]

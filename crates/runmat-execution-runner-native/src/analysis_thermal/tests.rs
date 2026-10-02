@@ -3,6 +3,7 @@ mod coordinated_observations;
 pub(crate) mod history_finalization;
 mod observations;
 pub(crate) mod prestress;
+mod task_closure;
 
 use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, IndependentDomain, ProcedureStep, StateId,
@@ -167,6 +168,7 @@ fn execute(
         AnalysisTaskPolicy {
             resources: plan.request.clone(),
             resource_plan: Some(plan),
+            prepared_closure: None,
             retry: RetryPolicy::IdempotentInfrastructure,
             deadline_unix_millis: None,
             priority: 0,

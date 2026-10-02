@@ -356,6 +356,7 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
             crate::analysis_task::AnalysisTaskPolicy {
                 resources: terminal.resource_plan.request.clone(),
                 resource_plan: Some(&terminal.resource_plan),
+                prepared_closure: None,
                 retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
                 deadline_unix_millis: None,
                 priority: 0,

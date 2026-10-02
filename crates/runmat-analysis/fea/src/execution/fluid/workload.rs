@@ -42,6 +42,14 @@ pub(crate) struct PreparedFluidSource {
 }
 
 impl FluidSteadyWorkload {
+    pub fn formulation(
+        &self,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<crate::admission::AnalysisRunIdentity> {
+        self.validate()?;
+        crate::admission::admit_canonical_fluid_steady(mesh, self.formulation_requirement)
+            .map_err(invalid)
+    }
     pub(crate) fn resident_ceiling(&self) -> AnalysisExecutionResult<u64> {
         let [step] = self.model.sequence.steps.as_slice() else {
             return Err(invalid(
@@ -62,6 +70,9 @@ impl FluidSteadyWorkload {
             return Err(invalid("steady fluid requires exactly one authored step"));
         };
         let p = self.policy;
+        if let Some(policy) = p.fixed_point_acceleration {
+            policy.validate().map_err(invalid)?;
+        }
         crate::results::observation::validate_sampled_requests(step).map_err(invalid)?;
         let definitions = super::fields::fluid_native_field_definition_inventory()?;
         if step

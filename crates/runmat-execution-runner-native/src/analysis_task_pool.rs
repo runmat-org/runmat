@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use runmat_analysis_execution::{
     AnalysisHostWorkload, PlannedResourceUsageAttempt, PreparedAnalysisProgram,
+    PreparedAnalysisTaskClosure,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
@@ -26,7 +27,7 @@ use crate::{
 mod phase;
 #[cfg(test)]
 mod tests;
-pub(crate) use phase::execute_governed_analysis_phase;
+pub(crate) use phase::{execute_governed_analysis_phase, execute_governed_analysis_task};
 
 pub(crate) fn configure_local_analysis(
     config: &mut NativeExecutionConfig,
@@ -102,6 +103,7 @@ pub(crate) struct PreparedAnalysisTask<'a> {
     pub host: &'a AnalysisHostWorkload,
     pub program: &'a PreparedAnalysisProgram,
     pub resource_plan: Option<&'a FeaResourcePlan>,
+    pub prepared_closure: Option<PreparedAnalysisTaskClosure<'a>>,
     pub fallback_resources: ResourceRequest,
     pub dependencies: Vec<AnalysisTaskDependency>,
 }
@@ -183,6 +185,7 @@ pub(crate) async fn execute_analysis_task_batch(
             AnalysisTaskPolicy {
                 resources,
                 resource_plan: task.resource_plan,
+                prepared_closure: task.prepared_closure,
                 retry: policy.retry,
                 deadline_unix_millis: policy.deadline_unix_millis,
                 priority: policy.priority,

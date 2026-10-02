@@ -1,4 +1,26 @@
 #[test]
+fn canonical_fluid_general_gmres_does_not_report_reduced_channel_method() {
+    use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+    let identity = crate::admission::admit_canonical_fluid_steady(
+        &canonical_tetrahedron_solver_mesh(ElementOrder::Tet4),
+        runmat_analysis_core::FormulationRequirement::Experimental,
+    )
+    .unwrap();
+    assert!(validate_solver_formulation_compatibility(
+        &identity,
+        SolverMethod::GeneralGmres,
+        SolverPreconditioner::Jacobi
+    )
+    .is_ok());
+    assert!(validate_solver_formulation_compatibility(
+        &identity,
+        SolverMethod::CfdVelocityPressureFiniteVolume,
+        SolverPreconditioner::Jacobi
+    )
+    .is_err());
+}
+
+#[test]
 fn magnetic_saddle_method_cannot_claim_electrical_or_harmonic_algebra() {
     use super::*;
     assert!(method_is_compatible(

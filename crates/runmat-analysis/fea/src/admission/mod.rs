@@ -1,4 +1,5 @@
 mod electrical;
+mod fluid;
 mod identity;
 mod magnetic;
 mod maxwell;
@@ -17,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub use electrical::admit_canonical_electrical_static;
 pub(crate) use electrical::realization as canonical_electrical_realization;
+pub use fluid::{admit_canonical_fluid_steady, canonical_fluid_steady_realization};
 pub use identity::AnalysisRunIdentity;
 pub use magnetic::admit_canonical_magnetostatic;
 pub(crate) use magnetic::realization as canonical_magnetic_realization;

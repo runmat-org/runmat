@@ -127,6 +127,7 @@ fn task(
         step_id: ProcedureStepId("steady".into()),
         formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
+            fixed_point_acceleration: None,
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,
             maximum_linear_iterations: 100,

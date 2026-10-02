@@ -140,6 +140,7 @@ pub(crate) async fn execute_structural_frequency_observations(
                 host: &task.host,
                 program: &task.program,
                 resource_plan: Some(&task.resource_plan),
+                prepared_closure: None,
                 fallback_resources: policy.resources.clone(),
                 dependencies: vec![fanouts[*sample_index].1],
             })
@@ -208,6 +209,7 @@ pub(crate) async fn execute_structural_frequency_observations(
                 host: &task.host,
                 program: &task.program,
                 resource_plan: Some(&task.resource_plan),
+                prepared_closure: None,
                 fallback_resources: policy.resources.clone(),
                 dependencies: dependencies.clone(),
             })
@@ -361,6 +363,7 @@ async fn execute_sample_assemblies(
                 host: &task.host,
                 program: &task.program,
                 resource_plan: Some(&task.resource_plan),
+                prepared_closure: None,
                 fallback_resources: policy.resources.clone(),
                 dependencies: dependencies.clone(),
             })
@@ -462,6 +465,7 @@ async fn execute_histories(
                     host: &task.host,
                     program: &task.program,
                     resource_plan: Some(&task.resource_plan),
+                    prepared_closure: None,
                     fallback_resources: policy.resources.clone(),
                     dependencies: dependencies.clone(),
                 })

@@ -4,6 +4,7 @@
 //! Original cell velocity, physical pressure and one oriented face flux are retained.
 //! Recovery evaluates those original equations; it never invokes the solver.
 
+mod acceleration;
 mod boundary;
 mod flux_evidence;
 mod forcing;
@@ -34,6 +35,8 @@ pub use resources::CanonicalFluidReservation;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidPolicy {
+    #[serde(deserialize_with = "deserialize_acceleration")]
+    pub fixed_point_acceleration: Option<crate::solve::fixed_point::AndersonOnePolicy>,
     pub maximum_outer_iterations: usize,
     pub maximum_nonorthogonal_iterations: usize,
     pub maximum_linear_iterations: usize,
@@ -45,6 +48,31 @@ pub struct CanonicalFluidPolicy {
     pub maximum_resident_bytes: u64,
     pub maximum_operator_work: u64,
     pub maximum_authority_items: usize,
+}
+
+impl Default for CanonicalFluidPolicy {
+    fn default() -> Self {
+        Self {
+            fixed_point_acceleration: Some(crate::solve::fixed_point::AndersonOnePolicy::default()),
+            maximum_outer_iterations: 200,
+            maximum_nonorthogonal_iterations: 4,
+            maximum_linear_iterations: 1000,
+            gmres_restart: 32,
+            momentum_relaxation: 0.5,
+            pressure_relaxation: 0.25,
+            linear_relative_tolerance: 1e-8,
+            physical_relative_tolerance: 1e-8,
+            maximum_resident_bytes: 1024 * 1024 * 1024,
+            maximum_operator_work: 1_000_000_000_000,
+            maximum_authority_items: 1_000_000,
+        }
+    }
+}
+
+fn deserialize_acceleration<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::solve::fixed_point::AndersonOnePolicy>, D::Error> {
+    Option::deserialize(deserializer)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -75,13 +103,15 @@ pub enum CanonicalFluidError {
     Operator(String),
     #[error("canonical fluid iteration did not converge")]
     NotConverged,
-    #[error("canonical fluid exhausted outer={outer_iterations}, linear={linear_iterations}, momentum={momentum_relative}, continuity={continuity_relative}, flux={flux_constitutive_relative}")]
+    #[error("canonical fluid exhausted outer={outer_iterations}, linear={linear_iterations}, momentum={momentum_relative}, continuity={continuity_relative}, flux={flux_constitutive_relative}, global_momentum={global_momentum_relative}, maximum_cell_momentum={maximum_cell_momentum_relative}")]
     IterationExhausted {
         outer_iterations: usize,
         linear_iterations: u64,
         momentum_relative: f64,
         continuity_relative: f64,
         flux_constitutive_relative: f64,
+        global_momentum_relative: f64,
+        maximum_cell_momentum_relative: f64,
     },
 }
 

@@ -36,6 +36,7 @@ pub enum SpatialOperatorImplementation {
     MagneticGalerkinLowestOrderEdgeCurlCurl,
     MaxwellLowestOrderEdgeCurlCurlComplexMass,
     ReducedChannelFlow,
+    FluidCellCenteredConservativeMomentumPressure,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -61,8 +62,7 @@ pub enum TemporalImplementation {
     MaxwellComplexElectricFieldGeneralSolve,
     AcousticDomainGraphHarmonicSolve,
     AcousticCanonicalHarmonicSolve,
-    CfdReducedChannelSteadyIteration,
-    CfdReducedChannelTimeStepping,
+    FluidSteadyNonorthogonalPressureCorrection,
     CoupledSinglePassProfileTransfer,
     CoupledFixedPointRelaxation,
     CoupledScalarResidualIteration,
@@ -85,6 +85,7 @@ pub enum ConstitutiveImplementation {
     ReducedAcousticMedium,
     ElementOwnedLosslessAcousticFluid,
     ReducedIncompressibleFlowClosure,
+    CellOwnedIncompressibleNewtonianFluid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -123,6 +124,7 @@ pub enum RecoveryImplementation {
     MagneticSolverMeshVectorPotentialFluxFieldEnergy,
     MaxwellSolverMeshElectricFluxFieldPower,
     CfdReducedChannelProfile,
+    FluidOriginalCellVelocityPressureOwnerFaceFlux,
     CoupledResampledFields,
 }
 
@@ -138,6 +140,7 @@ pub enum TopologyImplementation {
     ImplicitChannel,
     DofAdjacency,
     OrientedEdgeIncidence,
+    OwnerOrientedFiniteVolumeFaceIncidence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

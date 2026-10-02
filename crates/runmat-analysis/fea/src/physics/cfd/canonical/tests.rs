@@ -1,12 +1,49 @@
 //! Independent continuum evidence on canonical fixture meshes. Boundary authority
 //! is frozen triangle-centroid samples; this is not authored CAD profile support.
+mod acceleration;
 mod authority;
 mod fixture;
+mod linear_correction;
 mod reference;
 
 use super::*;
 use fixture::{case, material, policy, ReferenceCase};
 use geometry_ops::{norm, sub};
+
+#[test]
+fn exhausted_iteration_reports_every_physical_acceptance_residual() {
+    let mut f = case(1, ReferenceCase::Convective, false);
+    f.policy.maximum_outer_iterations = 1;
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let error = p.solve().unwrap_err();
+    let CanonicalFluidError::IterationExhausted {
+        outer_iterations,
+        momentum_relative,
+        continuity_relative,
+        flux_constitutive_relative,
+        global_momentum_relative,
+        maximum_cell_momentum_relative,
+        ..
+    } = &error
+    else {
+        panic!("expected exhausted original equations: {error}");
+    };
+    assert_eq!(*outer_iterations, 1);
+    let residuals = [
+        *momentum_relative,
+        *continuity_relative,
+        *flux_constitutive_relative,
+        *global_momentum_relative,
+        *maximum_cell_momentum_relative,
+    ];
+    assert!(residuals.iter().all(|r| r.is_finite() && *r >= 0.0));
+    assert!(residuals
+        .iter()
+        .any(|r| *r > f.policy.physical_relative_tolerance));
+    let message = error.to_string();
+    assert!(message.contains("global_momentum="));
+    assert!(message.contains("maximum_cell_momentum="));
+}
 
 #[test]
 fn provisional_outlet_backflow_is_solver_only_not_original_physics() {

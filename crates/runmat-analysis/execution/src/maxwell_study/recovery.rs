@@ -90,15 +90,14 @@ impl MaxwellStudyCoordinator {
         observations: Option<
             runmat_analysis_fea::results::observation::ObservationPublicationCatalog,
         >,
-    ) -> AnalysisBridgeResult<StaticEmStudyTail> {
+    ) -> AnalysisBridgeResult<SteadyStudyTail> {
         let workload = self.preparation.workload();
         let task = self.solve_task.as_ref().expect("completed solve");
         let result = self.result.as_ref().expect("completed solve");
-        Ok(StaticEmStudyTail::new(
-            StaticEmStudySource {
+        Ok(SteadyStudyTail::new(
+            SteadyStudySource {
                 host: task.host.clone(),
                 result: result.objects.clone(),
-                profiles: result.source_profiles.clone(),
                 receipt: result.numerical_receipt_objects.clone(),
                 context_inputs: task
                     .inputs
@@ -112,16 +111,19 @@ impl MaxwellStudyCoordinator {
                     .chain(std::iter::once(result.objects.clone()))
                     .collect(),
                 accuracy_kind: AccuracySourceKind::MaxwellHarmonic,
-                state_kind: SemanticStatePublicationSource::MaxwellNativeFields,
-                topology: Digest::from_bytes(
-                    *result
-                        .result
-                        .sampling_topology()
-                        .identity()
-                        .map_err(|error| invalid(error.to_string()))?
-                        .discretization_digest()
-                        .bytes(),
-                ),
+                state: crate::steady_study::TerminalStatePublicationSource::Profiles {
+                    profiles: Box::new(result.source_profiles.clone()),
+                    kind: SemanticStatePublicationSource::MaxwellNativeFields,
+                    topology: Digest::from_bytes(
+                        *result
+                            .result
+                            .sampling_topology()
+                            .identity()
+                            .map_err(|error| invalid(error.to_string()))?
+                            .discretization_digest()
+                            .bytes(),
+                    ),
+                },
                 sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
                 step: self.preparation.selected_step().clone(),
                 formulation_requirement: workload.formulation_requirement,

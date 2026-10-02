@@ -6,7 +6,9 @@ use super::StructuralStudyNumericalResult;
 
 mod acoustic;
 mod electrical;
+mod fluid;
 mod magnetic;
+pub use fluid::{FluidStudyCompletion, FluidStudyObjectSource, FluidStudySource};
 mod maxwell;
 pub use electrical::{
     ElectricalStudyCompletion, ElectricalStudyObjectSource, ElectricalStudySource,

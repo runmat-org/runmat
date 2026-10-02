@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_execution::{
     build_analysis_task_submission, build_resource_planned_task_submission,
-    AnalysisExecutionContext, AnalysisHostWorkload, PreparedAnalysisProgram,
+    build_resource_planned_task_submission_with_closure, AnalysisExecutionContext,
+    AnalysisHostWorkload, PreparedAnalysisProgram, PreparedAnalysisTaskClosure,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
@@ -18,6 +19,7 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 pub(crate) struct AnalysisTaskPolicy<'a> {
     pub resources: ResourceRequest,
     pub resource_plan: Option<&'a FeaResourcePlan>,
+    pub prepared_closure: Option<PreparedAnalysisTaskClosure<'a>>,
     pub retry: RetryPolicy,
     pub deadline_unix_millis: Option<u64>,
     pub priority: i16,
@@ -59,8 +61,19 @@ pub(crate) fn prepare_analysis_task(
         deadline_unix_millis: policy.deadline_unix_millis,
         priority: policy.priority,
     };
-    let submission = match policy.resource_plan {
-        Some(resource_plan) => build_resource_planned_task_submission(
+    let submission = match (policy.resource_plan, policy.prepared_closure) {
+        (Some(resource_plan), Some(closure)) => {
+            build_resource_planned_task_submission_with_closure(
+                host,
+                resource_plan,
+                closure,
+                roots,
+                dependency_identities.clone(),
+                dependency_tasks,
+                context,
+            )
+        }
+        (Some(resource_plan), None) => build_resource_planned_task_submission(
             host,
             resource_plan,
             roots,
@@ -68,13 +81,18 @@ pub(crate) fn prepare_analysis_task(
             dependency_tasks,
             context,
         ),
-        None => build_analysis_task_submission(
+        (None, None) => build_analysis_task_submission(
             host,
             roots,
             dependency_identities.clone(),
             dependency_tasks,
             context,
         ),
+        (None, Some(_)) => {
+            return Err(protocol(
+                "analysis prepared source closure requires an admitted resource plan",
+            ))
+        }
     }
     .map_err(protocol)?;
     let identity = AnalysisTaskIdentity::new(host.workload.identity, dependency_identities)

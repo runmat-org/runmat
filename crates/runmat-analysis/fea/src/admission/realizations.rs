@@ -180,22 +180,10 @@ fn acoustic_realizations() -> Vec<ExactFormulationRealization> {
 }
 
 fn fluid_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
-    let temporal = match procedure {
-        AnalysisProcedure::Static => TemporalImplementation::CfdReducedChannelSteadyIteration,
-        AnalysisProcedure::TransientResponse => {
-            TemporalImplementation::CfdReducedChannelTimeStepping
-        }
-        _ => return Vec::new(),
-    };
-    domain_topology_branches()
-        .into_iter()
-        .map(|branch| ExactFormulationRealization {
-            components: vec![fluid_component(&branch)],
-            temporals: vec![temporal],
-            coupling: CouplingImplementation::Uncoupled,
-            boundary_transfers: branch.boundary_transfers,
-        })
-        .collect()
+    match procedure {
+        AnalysisProcedure::Static => vec![super::fluid::canonical_fluid_steady_realization()],
+        _ => Vec::new(),
+    }
 }
 
 fn coupled_realizations(
@@ -319,7 +307,6 @@ fn flow_thermal_realizations(
 struct DomainTopologyBranch {
     primary_topology: TopologyImplementation,
     sources: Vec<SourceImplementation>,
-    boundary_transfers: Vec<BoundaryTransferImplementation>,
 }
 
 impl DomainTopologyBranch {
@@ -342,26 +329,20 @@ fn domain_topology_branches() -> Vec<DomainTopologyBranch> {
             DomainTopologyBranch {
                 primary_topology,
                 sources: vec![SourceImplementation::CanonicalBoundaryProjection],
-                boundary_transfers: vec![
-                    BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                ],
             },
             DomainTopologyBranch {
                 primary_topology,
                 sources: vec![SourceImplementation::OrdinalDistribution],
-                boundary_transfers: vec![BoundaryTransferImplementation::GlobalCountProfile],
             },
             DomainTopologyBranch {
                 primary_topology,
                 sources: vec![SourceImplementation::UnmappedFallback],
-                boundary_transfers: vec![BoundaryTransferImplementation::UnmappedFallback],
             },
         ]);
     }
     branches.push(DomainTopologyBranch {
         primary_topology: TopologyImplementation::ImplicitChannel,
         sources: vec![SourceImplementation::OrdinalDistribution],
-        boundary_transfers: vec![BoundaryTransferImplementation::GlobalCountProfile],
     });
     branches
 }

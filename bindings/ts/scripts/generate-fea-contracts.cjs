@@ -105,6 +105,9 @@ const analysisStructTypes = [
   ["AnalysisThermalRunOptions", "FeaThermalDiffusionOptions", {}],
   ["AnalysisTransientRunOptions", "FeaStructuralTransientOptions", {}],
   ["AnalysisCfdRunOptions", "FeaIncompressibleFlowOptions", {}],
+  ["CanonicalFluidPolicy", "FeaCanonicalFluidPolicy", {}],
+  ["AndersonOnePolicy", "FeaAndersonOnePolicy", {}],
+  ["FiniteVolumeProjectionPolicy", "FeaFiniteVolumeProjectionPolicy", {}],
   ["AnalysisChtRunOptions", "FeaConjugateHeatTransferOptions", {}],
   ["AnalysisFsiRunOptions", "FeaFluidStructureInteractionOptions", {}],
   ["ContactEnforcementOptions", "FeaContactEnforcementOptions", {}],
@@ -210,6 +213,12 @@ function rustTypeToTs(type) {
       return { type: "FeaModalTruncationPolicy", nullable: false };
     case "runmat_analysis_fea::ModalConvergencePolicy":
       return { type: "FeaModalConvergencePolicy", nullable: false };
+    case "runmat_analysis_fea::physics::cfd::canonical::CanonicalFluidPolicy":
+      return { type: "FeaCanonicalFluidPolicy", nullable: false };
+    case "crate::solve::fixed_point::AndersonOnePolicy":
+      return { type: "FeaAndersonOnePolicy", nullable: false };
+    case "runmat_analysis_fea::topology::FiniteVolumeProjectionPolicy":
+      return { type: "FeaFiniteVolumeProjectionPolicy", nullable: false };
     default:
       if (/^BTreeMap<String,\s*String>$/.test(trimmed)) {
         return { type: "Record<string, string>", nullable: false };
@@ -398,7 +407,10 @@ function formatInterface(name, fields) {
 
 function main() {
   const analysisSource = fs.readFileSync(rustAnalysisContractsPath, "utf8")
-    + "\n" + fs.readFileSync(rustMaxwellRunOptionsPath, "utf8");
+    + "\n" + fs.readFileSync(rustMaxwellRunOptionsPath, "utf8")
+    + "\n" + fs.readFileSync(path.resolve(repoRoot, "crates/runmat-analysis/fea/src/physics/cfd/canonical.rs"), "utf8")
+    + "\n" + fs.readFileSync(path.resolve(repoRoot, "crates/runmat-analysis/fea/src/solve/fixed_point.rs"), "utf8")
+    + "\n" + fs.readFileSync(path.resolve(repoRoot, "crates/runmat-analysis/fea/src/topology/finite_volume.rs"), "utf8");
   const progressSource = fs.readFileSync(rustFeaProgressPath, "utf8");
   const sourceReportSource = fs.readFileSync(rustFeaSourceReportPath, "utf8");
   const diagnosticSource = fs.readFileSync(rustFeaDiagnosticPath, "utf8");

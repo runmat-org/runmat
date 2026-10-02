@@ -18,7 +18,7 @@ impl AnalysisSolverOptions {
             Self::AcousticHelmholtz(_) => {}
             Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralTransient(options) => options.solver_mesh_artifact_path = None,
-            Self::IncompressibleFlow(options) => options.solver_mesh_artifact_path = None,
+            Self::IncompressibleFlow(_) => {}
             Self::ConjugateHeatTransfer(options) => options.solver_mesh_artifact_path = None,
             Self::FluidStructureInteraction(options) => {
                 options.solver_mesh_artifact_path = None;
@@ -98,7 +98,7 @@ impl AnalysisSolverOptions {
                 TransientResponse,
                 SolutionSpace::Direct | SolutionSpace::ModalReduced,
             ) => Ok(Self::StructuralTransient(AnalysisTransientRunOptions::default())),
-            (Fluid, Static | TransientResponse, SolutionSpace::Direct) => Ok(Self::IncompressibleFlow(
+            (Fluid, Static, SolutionSpace::Direct) => Ok(Self::IncompressibleFlow(
                 AnalysisCfdRunOptions::default(),
             )),
             (

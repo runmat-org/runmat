@@ -2,8 +2,8 @@
 //!
 //! Prepared tasks remain owned here: callers execute their immutable requests and return the
 //! associated scheduler response/accounting pair. Failed imports never advance the lifecycle.
-use crate::static_em_study::{
-    validate_accounting, StaticEmStudyPhase, StaticEmStudySource, StaticEmStudyTail,
+use crate::steady_study::{
+    validate_accounting, SteadyStudyPhase, SteadyStudySource, SteadyStudyTail,
 };
 use std::collections::BTreeSet;
 
@@ -101,7 +101,7 @@ pub struct MagneticStudyCoordinator {
     phase: MagneticStudyPhase,
     solve_task: Option<PreparedMagnetostaticTask>,
     result: Option<ImportedMagnetostaticResult>,
-    tail: Option<StaticEmStudyTail>,
+    tail: Option<SteadyStudyTail>,
     recovery_task: Option<crate::PreparedMagneticFieldRecovery>,
     fields: Option<crate::ImportedRecoveredFields>,
     observation_state: observations::MagneticObservations,
@@ -297,18 +297,18 @@ impl MagneticStudyCoordinator {
         self.tail
             .as_ref()
             .map_or(self.phase, |tail| match tail.phase {
-                StaticEmStudyPhase::ReadyForAccuracy => MagneticStudyPhase::ReadyForAccuracy,
-                StaticEmStudyPhase::AwaitingAccuracy => MagneticStudyPhase::AwaitingAccuracy,
-                StaticEmStudyPhase::ReadyForState { ordinal } => {
+                SteadyStudyPhase::ReadyForAccuracy => MagneticStudyPhase::ReadyForAccuracy,
+                SteadyStudyPhase::AwaitingAccuracy => MagneticStudyPhase::AwaitingAccuracy,
+                SteadyStudyPhase::ReadyForState { ordinal } => {
                     MagneticStudyPhase::ReadyForState { ordinal }
                 }
-                StaticEmStudyPhase::AwaitingState { ordinal } => {
+                SteadyStudyPhase::AwaitingState { ordinal } => {
                     MagneticStudyPhase::AwaitingState { ordinal }
                 }
-                StaticEmStudyPhase::ReadyForBaseline => MagneticStudyPhase::ReadyForBaseline,
-                StaticEmStudyPhase::ReadyForPublication => MagneticStudyPhase::ReadyForPublication,
-                StaticEmStudyPhase::AwaitingPublication => MagneticStudyPhase::AwaitingPublication,
-                StaticEmStudyPhase::Complete => MagneticStudyPhase::Complete,
+                SteadyStudyPhase::ReadyForBaseline => MagneticStudyPhase::ReadyForBaseline,
+                SteadyStudyPhase::ReadyForPublication => MagneticStudyPhase::ReadyForPublication,
+                SteadyStudyPhase::AwaitingPublication => MagneticStudyPhase::AwaitingPublication,
+                SteadyStudyPhase::Complete => MagneticStudyPhase::Complete,
             })
     }
 

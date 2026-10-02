@@ -179,9 +179,8 @@ const fn method_is_compatible(
         TemporalImplementation::AcousticCanonicalHarmonicSolve => {
             matches!(method, SolverMethod::AcousticCanonicalHelmholtzGmres)
         }
-        TemporalImplementation::CfdReducedChannelSteadyIteration
-        | TemporalImplementation::CfdReducedChannelTimeStepping => {
-            matches!(method, SolverMethod::CfdVelocityPressureFiniteVolume)
+        TemporalImplementation::FluidSteadyNonorthogonalPressureCorrection => {
+            matches!(method, SolverMethod::GeneralGmres)
         }
         TemporalImplementation::CoupledSinglePassProfileTransfer
         | TemporalImplementation::CoupledFixedPointRelaxation
@@ -210,6 +209,10 @@ const fn preconditioner_is_compatible(
     preconditioner: SolverPreconditioner,
 ) -> bool {
     match method {
+        SolverMethod::GeneralGmres => matches!(
+            preconditioner,
+            SolverPreconditioner::None | SolverPreconditioner::Jacobi
+        ),
         SolverMethod::AssembledPcg
         | SolverMethod::MatrixFreePcg
         | SolverMethod::MatrixFreeSubspaceIteration
@@ -220,7 +223,6 @@ const fn preconditioner_is_compatible(
             SolverPreconditioner::None | SolverPreconditioner::Jacobi | SolverPreconditioner::Ilu0
         ),
         SolverMethod::AssembledSaddlePointGmres
-        | SolverMethod::GeneralGmres
         | SolverMethod::MatrixFreeSaddlePointGmres
         | SolverMethod::DenseDirect
         | SolverMethod::StructuralModalTransientNewmarkDenseFactorization

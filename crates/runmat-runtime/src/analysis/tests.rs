@@ -3784,7 +3784,7 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
 }
 
 #[test]
-fn analysis_trends_classifies_cfd_runs_separately() {
+fn analysis_trends_never_records_rejected_reduced_cfd_as_a_run() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
 
@@ -3792,14 +3792,15 @@ fn analysis_trends_classifies_cfd_runs_separately() {
     model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
     model.cfd = Some(sample_cfd_domain());
     for _ in 0..3 {
-        let _ = analysis_run_cfd_with_options_op(
+        let error = analysis_run_cfd_with_options_op(
             &model,
             ComputeBackend::Cpu,
             FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
-        .expect("cfd run should persist for trends");
+        .expect_err("the removed reduced CFD endpoint must not persist a fabricated run");
+        assert_eq!(error.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
     }
 
     let trends = analysis_trends_op(
@@ -3808,16 +3809,11 @@ fn analysis_trends_classifies_cfd_runs_separately() {
     )
     .expect("trends should succeed");
 
-    let cfd = trends
+    assert!(trends
         .data
         .summaries
         .iter()
-        .find(|summary| summary.identity.family() == PhysicsFamily::Fluid)
-        .expect("cfd trend summary should exist");
-    assert_eq!(cfd.sample_count, 2);
-    assert!(cfd.median_solve_ms.is_some());
-    assert!(cfd.p95_solve_ms.is_some());
-    assert!(cfd.failed_increment_rate.is_none());
+        .all(|summary| summary.identity.family() != PhysicsFamily::Fluid));
 
     storage::reset_artifact_store_for_tests();
 }
@@ -5222,7 +5218,7 @@ fn analysis_run_cfd_rejects_models_without_cfd_step() {
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
 }
 
 #[test]
@@ -5241,7 +5237,7 @@ fn analysis_run_cfd_rejects_model_without_cfd_domain() {
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
 }
 
 #[test]
@@ -5263,7 +5259,7 @@ fn analysis_run_cfd_rejects_moment_excitations() {
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_LOAD");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
 }
 
 #[test]
@@ -6670,25 +6666,42 @@ fn analysis_run_cfd_rejects_vector_boundaries_without_fabricated_payload() {
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        AnalysisCfdRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            sample_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: None,
-        },
+        AnalysisCfdRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect_err("reduced channel execution cannot publish an exact vector CFD solution");
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
     assert!(err
         .message
-        .contains("canonical finite-volume execution is required"));
+        .contains("canonical finite-volume execution requires an authored steady fluid study"));
+}
+
+#[test]
+fn canonical_cfd_wire_options_reject_channel_controls_and_transient_dispatch() {
+    let options = AnalysisCfdRunOptions::default();
+    let encoded = serde_json::to_value(&options).unwrap();
+    assert_eq!(
+        serde_json::from_value::<AnalysisCfdRunOptions>(encoded.clone()).unwrap(),
+        options
+    );
+    for removed in [
+        "sample_count",
+        "max_linear_iters",
+        "tolerance",
+        "residual_warn_threshold",
+        "solver_mesh_artifact_path",
+    ] {
+        let mut invalid = encoded.clone();
+        invalid[removed] = serde_json::json!(1);
+        assert!(serde_json::from_value::<AnalysisCfdRunOptions>(invalid).is_err());
+    }
+    let mut step = ProcedureStep::fluid_static("flow");
+    assert!(AnalysisSolverOptions::defaults_for(&step).is_ok());
+    step.procedure = AnalysisProcedure::TransientResponse;
+    assert!(AnalysisSolverOptions::defaults_for(&step).is_err());
+    assert!(!AnalysisSolverOptions::IncompressibleFlow(options).supports(&step));
 }
 
 #[test]
@@ -6711,17 +6724,14 @@ fn analysis_run_cfd_mesh_counts_do_not_qualify_a_reduced_vector_solve() {
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        AnalysisCfdRunOptions {
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..AnalysisCfdRunOptions::default()
-        },
+        AnalysisCfdRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect_err("having a mesh must not turn reduced channel physics into canonical CFD");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
     assert!(err
         .message
-        .contains("canonical finite-volume execution is required"));
+        .contains("canonical finite-volume execution requires an authored steady fluid study"));
     let _ = fs::remove_dir_all(mesh_root);
 }
 
@@ -6769,7 +6779,7 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
 }
 
 #[test]

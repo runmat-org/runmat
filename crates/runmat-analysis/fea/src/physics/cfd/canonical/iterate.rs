@@ -9,7 +9,8 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
     let mut physical_pressure = p.pressure_reference_pa.clone();
     let mut q = pressure::h_flux(p, &u, &vec![[0.0; 3]; n])?;
     let mut linear_iterations = 0;
-    let mut last = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut last = [f64::INFINITY; 5];
+    let mut acceleration_history = None;
     for iteration in 1..=p.policy.maximum_outer_iterations {
         let m = momentum::assemble(
             p,
@@ -21,7 +22,8 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
         let mut predicted = vec![[0.0; 3]; n];
         for k in 0..3 {
             let b = m.rhs.iter().map(|v| v[k]).collect::<Vec<_>>();
-            let (x, count) = linear::solve(p, &m.matrix, &b)?;
+            let current = u.iter().map(|v| v[k]).collect::<Vec<_>>();
+            let (x, count) = linear::solve(p, &m.matrix, &b, &current)?;
             linear_iterations += count;
             for c in 0..n {
                 predicted[c][k] = x[c];
@@ -42,9 +44,16 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
         let rf = pressure::coefficients(p, &rau)?;
         let (new_pressure, new_q, count) = pressure::solve(p, &qh, &rf, &physical_pressure)?;
         linear_iterations += count;
+        let mut pressure_defect = Vec::new();
+        if p.policy.fixed_point_acceleration.is_some() {
+            pressure_defect.reserve(n);
+        }
         for c in 0..n {
-            physical_pressure[c] +=
-                p.policy.pressure_relaxation * (new_pressure[c] - physical_pressure[c]);
+            let delta = p.policy.pressure_relaxation * (new_pressure[c] - physical_pressure[c]);
+            physical_pressure[c] += delta;
+            if p.policy.fixed_point_acceleration.is_some() {
+                pressure_defect.push(delta);
+            }
         }
         let gp = gradient(p, &physical_pressure, None)?;
         let force = pressure_force(p, &physical_pressure, &gp)?;
@@ -68,14 +77,32 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
                 )
                 && q[i] < 0.0
         }) {
+            acceleration_history = None;
             continue;
         }
         let residual = recovery::evaluate(p, &u, &physical_pressure, &q)?;
-        last = (
+        let residual = super::acceleration::consider(
+            p,
+            super::acceleration::Fields {
+                velocity: &mut u,
+                pressure: &mut physical_pressure,
+                flux: &mut q,
+            },
+            pressure_defect,
+            &mut acceleration_history,
+            residual,
+        )?;
+        last = [
             residual.momentum_relative,
             residual.continuity_relative,
             residual.flux_constitutive_relative,
-        );
+            residual.global_momentum_relative,
+            residual
+                .cell_momentum_relative
+                .iter()
+                .copied()
+                .fold(0.0, f64::max),
+        ];
         if residual.accepted(p.policy.physical_relative_tolerance) {
             return Ok(CanonicalFluidResult {
                 numerical_input_identity: p.numerical_input_identity,
@@ -92,8 +119,10 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
     Err(Error::IterationExhausted {
         outer_iterations: p.policy.maximum_outer_iterations,
         linear_iterations,
-        momentum_relative: last.0,
-        continuity_relative: last.1,
-        flux_constitutive_relative: last.2,
+        momentum_relative: last[0],
+        continuity_relative: last[1],
+        flux_constitutive_relative: last[2],
+        global_momentum_relative: last[3],
+        maximum_cell_momentum_relative: last[4],
     })
 }

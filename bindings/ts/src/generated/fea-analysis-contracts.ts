@@ -344,14 +344,36 @@ export interface FeaStructuralTransientOptions {
 }
 
 export interface FeaIncompressibleFlowOptions {
-  deterministic_mode: boolean;
   precision_mode: FeaPrecisionMode;
-  quality_policy: FeaQualityPolicy;
-  sample_count: number;
-  max_linear_iters: number;
-  tolerance: number;
-  residual_warn_threshold: number;
-  solver_mesh_artifact_path: string | null;
+  numerical: FeaCanonicalFluidPolicy;
+  geometry: FeaFiniteVolumeProjectionPolicy;
+}
+
+export interface FeaCanonicalFluidPolicy {
+  fixed_point_acceleration: FeaAndersonOnePolicy | null;
+  maximum_outer_iterations: number;
+  maximum_nonorthogonal_iterations: number;
+  maximum_linear_iterations: number;
+  gmres_restart: number;
+  momentum_relaxation: number;
+  pressure_relaxation: number;
+  linear_relative_tolerance: number;
+  physical_relative_tolerance: number;
+  maximum_resident_bytes: number;
+  maximum_operator_work: number;
+  maximum_authority_items: number;
+}
+
+export interface FeaAndersonOnePolicy {
+  maximum_absolute_coefficient: number;
+}
+
+export interface FeaFiniteVolumeProjectionPolicy {
+  max_cells: number;
+  max_face_incidences: number;
+  max_boundary_faces: number;
+  max_scratch_bytes: number;
+  max_traversal_operations: number;
 }
 
 export interface FeaConjugateHeatTransferOptions {

@@ -44,6 +44,7 @@ pub(super) fn material() -> CfdDomain {
 }
 pub(super) fn policy() -> CanonicalFluidPolicy {
     CanonicalFluidPolicy {
+        fixed_point_acceleration: None,
         maximum_outer_iterations: 2000,
         maximum_nonorthogonal_iterations: 8,
         maximum_linear_iterations: 1000,

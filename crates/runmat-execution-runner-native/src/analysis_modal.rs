@@ -56,6 +56,7 @@ async fn execute_with_pool(
             host: &prepared.host,
             program: &prepared.program,
             resource_plan: Some(&prepared.resource_plan),
+            prepared_closure: None,
             fallback_resources: policy.resources,
             dependencies: Vec::new(),
         }],
