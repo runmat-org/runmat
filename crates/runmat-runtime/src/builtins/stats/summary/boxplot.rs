@@ -161,6 +161,18 @@ fn internal(message: impl Into<String>) -> RuntimeError {
 }
 
 fn invalid_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
+    with_owned_source(&BOXPLOT_ERROR_INVALID_ARGUMENT, message, source)
+}
+
+fn internal_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
+    with_owned_source(&BOXPLOT_ERROR_INTERNAL, message, source)
+}
+
+fn with_owned_source(
+    descriptor: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: RuntimeError,
+) -> RuntimeError {
     let span = source.span;
     let mut builder = build_runtime_error(message)
         .with_builtin(NAME)
@@ -169,7 +181,7 @@ fn invalid_with_source(message: impl Into<String>, source: RuntimeError) -> Runt
     if let Some(span) = span {
         builder = builder.with_span(span);
     }
-    if let Some(identifier) = BOXPLOT_ERROR_INVALID_ARGUMENT.identifier {
+    if let Some(identifier) = descriptor.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()

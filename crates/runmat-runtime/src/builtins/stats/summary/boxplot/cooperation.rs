@@ -4,7 +4,7 @@ use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult};
 
-use super::{invalid_with_source, NAME};
+use super::{internal_with_source, NAME};
 
 pub(super) struct BoxplotCooperation {
     budget: Option<CpuCooperationBudget>,
@@ -41,7 +41,7 @@ impl BoxplotCooperation {
                     .with_builtin(NAME)
                     .build()
             }
-            other => invalid_with_source(
+            other => internal_with_source(
                 "boxplot: execution service failed during factor expansion",
                 other.into_runtime_error(),
             ),
@@ -186,7 +186,7 @@ mod tests {
         .expect_err("service failure retains its original cause");
         assert_eq!(
             error.identifier(),
-            super::super::BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+            super::super::BOXPLOT_ERROR_INTERNAL.identifier
         );
         assert!(error.source.is_some());
     }
