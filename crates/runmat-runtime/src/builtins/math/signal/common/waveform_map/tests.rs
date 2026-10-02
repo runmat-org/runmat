@@ -4,12 +4,47 @@ use futures::executor::block_on;
 use futures::task::noop_waker;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
+use runmat_value::Value;
 use std::cell::Cell;
 use std::future::Future;
 use std::num::NonZeroU64;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
+
+#[test]
+fn canonical_pulse_wave_bindings_observe_invocation_cancellation() {
+    use crate::builtin::RuntimeBuiltinInvocation;
+    use crate::context::RuntimeContext;
+    use crate::execution::RuntimeExecutionService;
+
+    let source = CancellationSource::new();
+    let runtime =
+        RuntimeContext::with_cancellation(Rc::new(RuntimeExecutionService::new()), source.token());
+    source.cancel(CancellationReason::User);
+    for name in ["rectpuls", "tripuls", "sinc", "square", "sawtooth"] {
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(name);
+        assert_eq!(bindings.len(), 1, "one canonical {name} binding");
+        let args = [Value::Tensor(
+            Tensor::new(vec![0.0; 8193], vec![1, 8193]).unwrap(),
+        )];
+        let error = block_on((bindings[0].implementation)(RuntimeBuiltinInvocation::new(
+            &args,
+            Some(runtime.clone()),
+            Some(1),
+        )))
+        .expect_err("cancelled invocation must not publish a waveform");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"), "{name}");
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(matches!(
+            error
+                .source
+                .as_deref()
+                .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+            Some(ExecutionServiceError::Cancelled)
+        ));
+    }
+}
 
 struct PendingTurn(Rc<Cell<usize>>);
 
