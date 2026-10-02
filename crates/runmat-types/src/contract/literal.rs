@@ -1,4 +1,4 @@
-use crate::NumericClass;
+use crate::{integer_magnitude_is_exact_binary64, IntegerClass, IntegerLiteral, NumericClass};
 use serde::{Deserialize, Serialize};
 
 /// Source-known literal information. Numeric text is retained for exact
@@ -29,6 +29,44 @@ pub enum LiteralValue {
     Matrix(Vec<Vec<LiteralValue>>),
     Empty,
     Unknown,
+}
+
+impl LiteralValue {
+    /// Exactness of a source-known fixed-width integer at a binary64 boundary.
+    /// None means this is not a decodable integer literal; it does not prove
+    /// that a dynamic value is exact or inexact.
+    pub fn integer_is_exact_binary64(&self) -> Option<bool> {
+        let Self::Integer { text, class } = self else {
+            return None;
+        };
+        let class = class.integer_class()?;
+        let value = parse_integer_literal_value(text, class)?;
+        let (minimum, maximum) = class.range();
+        if !(minimum..=maximum).contains(&value) {
+            return None;
+        }
+        let magnitude = u64::try_from(value.unsigned_abs()).ok()?;
+        Some(integer_magnitude_is_exact_binary64(magnitude))
+    }
+}
+
+fn parse_integer_literal_value(text: &str, class: IntegerClass) -> Option<i128> {
+    if let Ok(value) = text.parse::<i128>() {
+        return Some(value);
+    }
+    let literal = IntegerLiteral::parse(text).ok()?;
+    if literal.class() != class {
+        return None;
+    }
+    let bits = literal.bits();
+    if bits & !class.bit_mask() != 0 {
+        return None;
+    }
+    if class.is_signed() && bits & (1_u64 << (class.bit_width() - 1)) != 0 {
+        Some(i128::from(bits) - (1_i128 << class.bit_width()))
+    } else {
+        Some(i128::from(bits))
+    }
 }
 
 /// The source-known state of a colon-range step. Keeping an unknown explicit
@@ -120,6 +158,12 @@ impl LiteralContext {
             .and_then(Self::numeric_from_literal)
     }
 
+    pub fn integer_is_exact_binary64_at(&self, index: usize) -> Option<bool> {
+        self.literal_args
+            .get(index)
+            .and_then(LiteralValue::integer_is_exact_binary64)
+    }
+
     /// Project the represented numeric value into binary64. Typed single
     /// literals round to their physical precision before widening; their
     /// authored decimal text remains available on `LiteralValue::Real`.
@@ -158,6 +202,31 @@ mod tests {
             text: text.into(),
             class,
         }
+    }
+
+    #[test]
+    fn integer_binary64_exactness_uses_authored_bits_not_rounded_projection() {
+        for (text, class, expected) in [
+            ("9007199254740992", NumericClass::UInt64, true),
+            ("9007199254740993", NumericClass::UInt64, false),
+            ("18014398509481984", NumericClass::UInt64, true),
+            ("18446744073709551615", NumericClass::UInt64, false),
+            ("-9223372036854775808", NumericClass::Int64, true),
+            ("-9007199254740993", NumericClass::Int64, false),
+            ("0xFFFFFFFFFFFFFFFFu64", NumericClass::UInt64, false),
+            ("0x8000000000000000s64", NumericClass::Int64, true),
+        ] {
+            let literal = LiteralValue::Integer {
+                text: text.into(),
+                class,
+            };
+            assert_eq!(
+                literal.integer_is_exact_binary64(),
+                Some(expected),
+                "{text}"
+            );
+        }
+        assert_eq!(LiteralValue::Unknown.integer_is_exact_binary64(), None);
     }
 
     #[test]

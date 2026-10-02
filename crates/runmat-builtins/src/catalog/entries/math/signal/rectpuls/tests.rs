@@ -96,3 +96,48 @@ fn known_sparse_sample_times_are_diagnosed() {
     assert!(!result.diagnostics.is_empty());
     assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
 }
+
+#[test]
+fn partial_nonscalar_width_and_inexact_integer_literals_do_not_prove_success() {
+    let time = real(NumericClass::Double, ShapeFact::Scalar);
+    for extent in [0, 2] {
+        let width = real(
+            NumericClass::Double,
+            ShapeFact::from(vec![Some(extent), None]),
+        );
+        let result = infer(vec![time.clone(), width], vec![LiteralValue::Unknown; 2], 1);
+        assert!(!result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+    let wide = LiteralValue::Integer {
+        text: "9007199254740993".into(),
+        class: NumericClass::UInt64,
+    };
+    for (arguments, literals) in [
+        (
+            vec![real(NumericClass::UInt64, ShapeFact::Scalar)],
+            vec![wide.clone()],
+        ),
+        (
+            vec![time.clone(), real(NumericClass::UInt64, ShapeFact::Scalar)],
+            vec![LiteralValue::Unknown, wide],
+        ),
+    ] {
+        let result = infer(arguments, literals, 1);
+        assert!(!result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+    let exact = infer(
+        vec![real(NumericClass::UInt64, ShapeFact::Scalar)],
+        vec![LiteralValue::Integer {
+            text: "18014398509481984".into(),
+            class: NumericClass::UInt64,
+        }],
+        1,
+    );
+    assert!(exact.diagnostics.is_empty());
+    assert_eq!(
+        exact.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+}

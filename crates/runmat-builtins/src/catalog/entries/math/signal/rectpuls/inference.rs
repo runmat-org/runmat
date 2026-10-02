@@ -15,8 +15,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         Some(times) => sample_output(times, &mut diagnostics),
         None => ValueFact::unknown(DynamicReason::RuntimeValue),
     };
+    if request.literals.integer_is_exact_binary64_at(0) == Some(false) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-RECTPULS-INTEGER-EXACTNESS",
+            "rectpuls sample times cannot be converted to double exactly",
+            0,
+        ));
+    }
     if let Some(width) = request.arguments.get(1) {
-        let scalar = width.shape.element_count().is_none_or(|count| count == 1);
+        let scalar = !width.shape.is_definitely_nonscalar();
         let real = matches!(
             width.kind,
             ValueKindFact::Numeric(NumericFact {
@@ -36,6 +43,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             .literals
             .numeric_at(1)
             .is_some_and(|value| !value.is_finite() || value <= 0.0)
+            || request.literals.integer_is_exact_binary64_at(1) == Some(false)
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-RECTPULS-WIDTH",

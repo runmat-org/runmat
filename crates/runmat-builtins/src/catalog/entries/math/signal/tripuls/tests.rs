@@ -101,3 +101,43 @@ fn known_sparse_sample_times_are_diagnosed() {
     assert!(!result.diagnostics.is_empty());
     assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
 }
+
+#[test]
+fn partial_nonscalar_controls_and_inexact_integer_literals_do_not_prove_success() {
+    let scalar = real(NumericClass::Double, ShapeFact::Scalar);
+    for extent in [0, 2] {
+        let control = real(
+            NumericClass::Double,
+            ShapeFact::from(vec![Some(extent), None]),
+        );
+        for arguments in [
+            vec![scalar.clone(), control.clone()],
+            vec![scalar.clone(), scalar.clone(), control],
+        ] {
+            let result = infer(arguments, vec![LiteralValue::Unknown; 3], 1);
+            assert!(!result.diagnostics.is_empty());
+            assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+        }
+    }
+    let inexact = LiteralValue::Integer {
+        text: "9007199254740993".into(),
+        class: NumericClass::UInt64,
+    };
+    for (arguments, literals) in [
+        (
+            vec![real(NumericClass::UInt64, ShapeFact::Scalar)],
+            vec![inexact.clone()],
+        ),
+        (
+            vec![
+                scalar.clone(),
+                real(NumericClass::UInt64, ShapeFact::Scalar),
+            ],
+            vec![LiteralValue::Unknown, inexact],
+        ),
+    ] {
+        let result = infer(arguments, literals, 1);
+        assert!(!result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+}

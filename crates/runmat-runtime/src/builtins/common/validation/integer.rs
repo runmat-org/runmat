@@ -114,12 +114,7 @@ pub fn integer_is_exact_f64(value: &IntValue) -> bool {
         IntValue::U32(value) => u64::from(*value),
         IntValue::U64(value) => *value,
     };
-    if magnitude == 0 {
-        return true;
-    }
-    let significant_bits = u64::BITS - magnitude.leading_zeros();
-    significant_bits <= f64::MANTISSA_DIGITS
-        || magnitude.trailing_zeros() >= significant_bits - f64::MANTISSA_DIGITS
+    runmat_types::integer_magnitude_is_exact_binary64(magnitude)
 }
 
 pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {

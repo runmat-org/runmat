@@ -103,3 +103,31 @@ fn known_sparse_sample_times_are_diagnosed() {
     assert!(!result.diagnostics.is_empty());
     assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
 }
+
+#[test]
+fn partial_nonscalar_xmax_and_inexact_integer_times_do_not_prove_success() {
+    let scalar = real(NumericClass::Double, ShapeFact::Scalar);
+    for extent in [0, 2] {
+        let xmax = real(
+            NumericClass::Double,
+            ShapeFact::from(vec![Some(extent), None]),
+        );
+        let result = infer(
+            vec![scalar.clone(), xmax],
+            vec![LiteralValue::Unknown; 2],
+            1,
+        );
+        assert!(!result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+    let result = infer(
+        vec![real(NumericClass::UInt64, ShapeFact::Scalar)],
+        vec![LiteralValue::Integer {
+            text: "9007199254740993".into(),
+            class: NumericClass::UInt64,
+        }],
+        1,
+    );
+    assert!(!result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}

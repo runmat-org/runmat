@@ -297,6 +297,18 @@ mod tests {
     }
 
     #[test]
+    fn integer_sample_literal_boundary_matches_catalog_fact() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error =
+            call(Value::Int(IntValue::U64((1_u64 << 53) + 1))).expect_err("inexact sample time");
+        assert!(error.message().contains("exactly representable"));
+        assert!(matches!(
+            call(Value::Int(IntValue::U64(1_u64 << 54))).unwrap(),
+            Value::Num(_)
+        ));
+    }
+
+    #[test]
     fn invalid_host_sample_precedes_resident_xmax_access() {
         use runmat_accelerate_api::{
             test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
