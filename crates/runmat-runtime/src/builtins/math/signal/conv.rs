@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::signal::common::SignalCooperation;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv")]
@@ -86,12 +87,20 @@ fn conv_error_with_source(
 #[runtime_builtin(
     name = "conv",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::conv"
 )]
-async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn conv_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    a: Value,
+    b: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let mode = parse_mode(&rest)?;
     admit_conv_operand(&a)?;
     admit_conv_operand(&b)?;
+    let mut cooperation = SignalCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    cooperation.completed(0).await?;
     let single_output = value_uses_single(&a) || value_uses_single(&b);
     let complex_output = value_is_complex(&a) || value_is_complex(&b);
     let resident_inputs = resident_inputs([&a, &b]);
@@ -111,7 +120,12 @@ async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
 
     if lhs.len == 0 || rhs.len == 0 {
         let data = if matches!(mode, ConvMode::Valid) && rhs.len == 0 {
-            vec![Complex::new(0.0, 0.0); lhs.len]
+            let mut zeros = Vec::new();
+            zeros
+                .try_reserve_exact(lhs.len)
+                .map_err(conv_allocation_error)?;
+            zeros.resize(lhs.len, Complex::new(0.0, 0.0));
+            zeros
         } else {
             Vec::new()
         };
@@ -119,7 +133,7 @@ async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
         return restore_to_owner(output, &resident_inputs);
     }
 
-    let full = convolve(&lhs.data, &rhs.data, single_output);
+    let full = convolve(&lhs.data, &rhs.data, single_output, &mut cooperation).await?;
     let shaped = apply_mode(full, mode, lhs.len, rhs.len);
     let output = convert_output(shaped, orientation, single_output, complex_output)?;
     restore_to_owner(output, &resident_inputs)
@@ -498,32 +512,82 @@ fn shape_rows_cols(shape: &[usize]) -> (usize, usize) {
     }
 }
 
-fn convolve(a: &[Complex<f64>], b: &[Complex<f64>], single_output: bool) -> Vec<Complex<f64>> {
+async fn convolve(
+    a: &[Complex<f64>],
+    b: &[Complex<f64>],
+    single_output: bool,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<Complex<f64>>> {
+    let len = a
+        .len()
+        .checked_add(b.len())
+        .and_then(|total| total.checked_sub(1))
+        .ok_or_else(|| conv_error(&CONV_ERROR_BUILD_OUTPUT))?;
+    let mut work = 0_u64;
     if single_output {
-        let mut out = vec![Complex::<f32>::new(0.0, 0.0); a.len() + b.len() - 1];
+        let mut out = Vec::new();
+        out.try_reserve_exact(len).map_err(conv_allocation_error)?;
+        out.resize(len, Complex::<f32>::new(0.0, 0.0));
         for (i, ai) in a.iter().enumerate() {
             let ai = Complex::<f32>::new(ai.re as f32, ai.im as f32);
             for (j, bj) in b.iter().enumerate() {
                 let bj = Complex::<f32>::new(bj.re as f32, bj.im as f32);
                 out[i + j] += ai * bj;
+                work += 1;
+                if work == super::common::SIGNAL_WORK_CHUNK {
+                    cooperation.completed(work).await?;
+                    work = 0;
+                }
             }
         }
-        return out
-            .into_iter()
-            .map(|value| Complex::new(f64::from(value.re), f64::from(value.im)))
-            .collect();
+        cooperation.completed(work).await?;
+        let mut converted = Vec::new();
+        converted
+            .try_reserve_exact(len)
+            .map_err(conv_allocation_error)?;
+        for (index, value) in out.into_iter().enumerate() {
+            converted.push(Complex::new(f64::from(value.re), f64::from(value.im)));
+            if (index + 1).is_multiple_of(super::common::SIGNAL_WORK_CHUNK as usize) {
+                cooperation
+                    .completed(super::common::SIGNAL_WORK_CHUNK)
+                    .await?;
+            }
+        }
+        cooperation
+            .completed((len % super::common::SIGNAL_WORK_CHUNK as usize) as u64)
+            .await?;
+        return Ok(converted);
     }
-    let mut out = vec![Complex::new(0.0, 0.0); a.len() + b.len() - 1];
+    let mut out = Vec::new();
+    out.try_reserve_exact(len).map_err(conv_allocation_error)?;
+    out.resize(len, Complex::new(0.0, 0.0));
     for (i, &ai) in a.iter().enumerate() {
         for (j, &bj) in b.iter().enumerate() {
             out[i + j] += ai * bj;
+            work += 1;
+            if work == super::common::SIGNAL_WORK_CHUNK {
+                cooperation.completed(work).await?;
+                work = 0;
+            }
         }
     }
-    out
+    cooperation.completed(work).await?;
+    Ok(out)
+}
+
+fn conv_allocation_error(cause: std::collections::TryReserveError) -> RuntimeError {
+    let mut builder = build_runtime_error(CONV_ERROR_BUILD_OUTPUT.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(cause)
+        .with_gpu_gather_retry(GpuGatherRetry::Never);
+    if let Some(identifier) = CONV_ERROR_BUILD_OUTPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn apply_mode(
-    full: Vec<Complex<f64>>,
+    mut full: Vec<Complex<f64>>,
     mode: ConvMode,
     len_a: usize,
     len_b: usize,
@@ -536,7 +600,9 @@ fn apply_mode(
             }
             let start = len_b / 2;
             let end = (start + len_a).min(full.len());
-            full[start..end].to_vec()
+            full.copy_within(start..end, 0);
+            full.truncate(end - start);
+            full
         }
         ConvMode::Valid => {
             if len_a == 0 || len_b == 0 || len_a < len_b {
@@ -545,7 +611,9 @@ fn apply_mode(
             let start = len_b - 1;
             let valid_len = len_a - len_b + 1;
             let end = (start + valid_len).min(full.len());
-            full[start..end].to_vec()
+            full.copy_within(start..end, 0);
+            full.truncate(end - start);
+            full
         }
     }
 }
@@ -1284,7 +1352,27 @@ pub(crate) mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn registered_conv_binding_honors_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(super::conv_builtin(
+            Some(runtime),
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Vec::new(),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
+        assert!(error.source.is_some(), "preserve execution-service cause");
+    }
+
     fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::conv_builtin(a, b, rest))
+        block_on(super::conv_builtin(None, a, b, rest))
     }
 }
