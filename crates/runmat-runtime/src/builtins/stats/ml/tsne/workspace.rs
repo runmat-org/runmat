@@ -55,6 +55,20 @@ pub(super) async fn zero_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn workspace_capacity_failure_preserves_operational_cause_without_retry() {
+        let mut cooperation = TsneCooperation::new(None);
+        let error = futures::executor::block_on(zero_matrix(usize::MAX, 1, &mut cooperation))
+            .expect_err("capacity overflow must fail without attempting an allocation");
+        assert_eq!(error.identifier(), Some("RunMat:tsne:Internal"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(error
+            .source()
+            .expect("original reservation failure")
+            .is::<std::collections::TryReserveError>());
+    }
 
     #[test]
     fn checked_workspaces_keep_column_major_shape_without_infallible_bulk_fill() {
