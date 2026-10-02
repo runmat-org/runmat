@@ -75,5 +75,8 @@ fn resolve_parent(value: &Value) -> BuiltinResult<AxesTarget> {
 
 #[cfg(not(feature = "plot-core"))]
 fn resolve_parent(_value: &Value) -> BuiltinResult<AxesTarget> {
-    Err(crate::plotting_hooks::unavailable_presentation())
+    // Preserve the Parent form through host-visible admission. The caller
+    // reports the missing presentation capability before any resident input
+    // is downloaded, without masking a malformed signal or numeric control.
+    Ok(())
 }
