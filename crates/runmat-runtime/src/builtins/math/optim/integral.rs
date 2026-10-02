@@ -1626,11 +1626,19 @@ mod tests {
                 ],
             ))
         };
-        let strict = call().expect_err("renamed names are beyond the compatibility pin");
-        assert_eq!(
-            strict.identifier(),
-            INTEGRAL_RENAMED_TOLERANCE_EXTENSION.error_identifier
+        let strict_gate = crate::compatibility::ensure_builtin_feature_enabled(
+            &INTEGRAL_RENAMED_TOLERANCE_EXTENSION,
+            NAME,
         );
+        if strict_gate.is_ok() {
+            assert!(matches!(call(), Ok(Value::Num(value)) if (value - 1.0 / 3.0).abs() < 1.0e-7));
+        } else {
+            let strict = call().expect_err("feature is newer than the central pin");
+            assert_eq!(
+                strict.identifier(),
+                INTEGRAL_RENAMED_TOLERANCE_EXTENSION.error_identifier
+            );
+        }
         let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = call().expect("RunMat mode accepts both renamed overrides");
         assert!(matches!(result, Value::Num(value) if (value - 1.0 / 3.0).abs() < 1.0e-7));
