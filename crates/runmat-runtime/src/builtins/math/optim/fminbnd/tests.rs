@@ -9,6 +9,13 @@ use runmat_builtins::{
 use runmat_value::IntegerStorage;
 use runmat_value::Value as V;
 
+fn objective_result_type(
+    _args: &[runmat_builtins::Type],
+    _context: &runmat_builtins::ResolveContext,
+) -> runmat_builtins::Type {
+    runmat_builtins::Type::Num
+}
+
 #[test]
 fn registered_fminbnd_preserves_invocation_cancellation_before_solver_effects() {
     use runmat_execution::cancellation::CancellationSource;
@@ -126,7 +133,7 @@ fn fminbnd_test_helper_descriptor_is_attached_shape() {
 
 #[runtime_builtin(
     name = "__fminbnd_quad_minus_two",
-    type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+    type_resolver(crate::builtins::math::optim::fminbnd::tests::objective_result_type),
     descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::optim::fminbnd::tests"
 )]
@@ -138,7 +145,7 @@ async fn quad_minus_two(x: Value) -> crate::BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "__fminbnd_quad_minus_three",
-    type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+    type_resolver(crate::builtins::math::optim::fminbnd::tests::objective_result_type),
     descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::optim::fminbnd::tests"
 )]
@@ -150,7 +157,7 @@ async fn quad_minus_three(x: Value) -> crate::BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "__fminbnd_multi_modal",
-    type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+    type_resolver(crate::builtins::math::optim::fminbnd::tests::objective_result_type),
     descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::optim::fminbnd::tests"
 )]

@@ -1,9 +1,5 @@
 use runmat_builtins::{ResolveContext, Type};
 
-pub fn scalar_root_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Num
-}
-
 pub fn numerical_integral_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
 }
