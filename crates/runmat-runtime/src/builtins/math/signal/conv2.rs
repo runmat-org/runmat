@@ -1099,7 +1099,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 1]);
                 assert_eq!(t.materialize_f64(), vec![45.0]);
             }
-            Value::Num(n) => assert!((n - 45.0).abs() <= EPS),
+            Value::Num(n) => assert_eq!(n, 45.0),
             other => panic!("expected scalar 45, got {other:?}"),
         }
     }
@@ -1199,8 +1199,8 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 for (idx, &(re, im)) in t.materialize_f64().iter().enumerate() {
-                    assert!(re.abs() <= EPS);
-                    assert!((im - 2.0 * expected_data[idx]).abs() <= 10.0 * EPS);
+                    assert_eq!(re, 0.0);
+                    assert_eq!(im, 2.0 * expected_data[idx]);
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
