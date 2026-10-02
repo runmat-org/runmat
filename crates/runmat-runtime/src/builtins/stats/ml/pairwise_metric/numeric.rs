@@ -3,12 +3,12 @@
 mod direction;
 
 pub(in crate::builtins::stats::ml) use direction::{
-    unit_direction, DirectionError, DirectionProgress, DirectionWork,
+    DirectionError, DirectionProgress, DirectionWork,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::unit_direction;
+    use super::direction::unit_direction;
 
     #[test]
     fn large_and_small_finite_rows_keep_their_direction() {

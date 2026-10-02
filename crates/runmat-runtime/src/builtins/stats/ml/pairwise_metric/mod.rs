@@ -15,7 +15,7 @@ use runmat_builtins::{
 use crate::{build_runtime_error, RuntimeError};
 
 pub(super) use compute::{condensed_distances, distance_matrix, row_distance, row_value};
-pub(super) use numeric::{unit_direction, DirectionError, DirectionProgress, DirectionWork};
+pub(super) use numeric::{DirectionError, DirectionProgress, DirectionWork};
 pub(super) use options::{parse_metric_kind, parse_metric_name, scalar_parameter};
 
 const EPS: f64 = 1.0e-12;

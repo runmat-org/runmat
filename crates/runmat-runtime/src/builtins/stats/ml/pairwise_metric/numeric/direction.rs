@@ -222,9 +222,10 @@ impl<'a> DirectionWork<'a> {
     }
 }
 
-/// The original synchronous interface uses the same traversal as cooperative
-/// consumers. Its `Option` contract has no resource-error variant.
-pub(in crate::builtins::stats::ml) fn unit_direction(
+/// Test the synchronous driver of the same traversal used by cooperative
+/// consumers, keeping resource failures distinct from degenerate directions.
+#[cfg(test)]
+pub(super) fn unit_direction(
     row: &[f64],
     center: bool,
 ) -> Result<Option<Vec<f64>>, DirectionError> {

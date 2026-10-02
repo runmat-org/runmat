@@ -164,7 +164,3 @@ pub(super) async fn apply_pca_if_requested(
     }
     Ok(projected)
 }
-
-pub(super) fn matrix_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
-    values[row + col * rows]
-}
