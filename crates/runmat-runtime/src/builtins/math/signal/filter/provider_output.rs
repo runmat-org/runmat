@@ -20,6 +20,8 @@ pub(super) struct ProviderOutputContext<'a> {
     pub signal: &'a GpuTensorHandle,
     pub numerator: &'a GpuTensorHandle,
     pub denominator: &'a GpuTensorHandle,
+    pub original_numerator: Option<&'a GpuTensorHandle>,
+    pub original_denominator: Option<&'a GpuTensorHandle>,
     pub initial_state: Option<&'a GpuTensorHandle>,
     pub state_shape: &'a [usize],
     pub state_len: usize,
@@ -39,6 +41,12 @@ impl ProviderOutputContext<'_> {
         }
 
         let mut borrowed = vec![self.numerator, self.denominator];
+        if let Some(original) = self.original_numerator {
+            borrowed.push(original);
+        }
+        if let Some(original) = self.original_denominator {
+            borrowed.push(original);
+        }
         if let Some(initial_state) = self.initial_state {
             borrowed.push(initial_state);
         }

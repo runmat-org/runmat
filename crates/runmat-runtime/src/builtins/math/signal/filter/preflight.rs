@@ -323,6 +323,12 @@ mod tests {
 
     #[test]
     fn known_nonzero_complex_imaginary_component_never_qualifies_as_real() {
-        assert!(super::super::provider::to_real_vec(&[Complex::new(1.0, 1e-300)]).is_none());
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+        assert!(block_on(super::super::provider::to_real_vec(
+            &[Complex::new(1.0, 1e-300)],
+            &mut cooperation
+        ))
+        .unwrap()
+        .is_none());
     }
 }

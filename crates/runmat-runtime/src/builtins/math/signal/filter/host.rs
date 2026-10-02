@@ -336,11 +336,13 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     fn long_host_args() -> FilterArgs {
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
         futures::executor::block_on(FilterArgs::parse(
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0; 8192], vec![8192, 1]).unwrap()),
             &[],
+            &mut cooperation,
         ))
         .unwrap()
     }

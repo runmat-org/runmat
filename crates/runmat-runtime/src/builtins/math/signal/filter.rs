@@ -3,6 +3,7 @@ mod provider_output;
 mod provider;
 mod preflight;
 mod host;
+mod preparation;
 
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderIirFilterOptions};
@@ -167,12 +168,12 @@ async fn evaluate_with_runtime(
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
-    let mut args = FilterArgs::parse(b, a, x, rest).await?;
+    let mut args = FilterArgs::parse(b, a, x, rest, &mut cooperation).await?;
     if let Some(eval) = provider::try_filter_gpu(&args, &mut cooperation).await? {
         return Ok(eval);
     }
-    args.signal.materialize().await?;
-    args.initial.materialize().await?;
+    args.signal.materialize(&mut cooperation).await?;
+    args.initial.materialize(&mut cooperation).await?;
     host::filter_host(&args, &mut cooperation).await
 }
 
@@ -213,7 +214,13 @@ struct FilterArgs {
 }
 
 impl FilterArgs {
-    async fn parse(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<Self> {
+    async fn parse(
+        b: Value,
+        a: Value,
+        x: Value,
+        rest: &[Value],
+        cooperation: &mut SignalCooperation,
+    ) -> BuiltinResult<Self> {
         let (zi_raw, dim_raw) = parse_optional_arguments(rest)?;
         let zi_value = match zi_raw {
             Some(val) if is_empty_placeholder(&val) => None,
@@ -231,7 +238,7 @@ impl FilterArgs {
         };
         preflight::resident_owners(&b, &a, &x, zi_value.as_ref(), dim_value.as_ref())?;
 
-        let signal = SignalInput::from_value(x)?;
+        let signal = SignalInput::from_value(x, cooperation).await?;
 
         let dim = if let Some(dim_val) = dim_value {
             match host_dim {
@@ -245,6 +252,18 @@ impl FilterArgs {
 
         let mut shape_ext = signal.shape.clone();
         if dim > shape_ext.len() {
+            shape_ext
+                .try_reserve_exact(dim - shape_ext.len())
+                .map_err(|source| {
+                    filter_error_with_source(
+                        &FILTER_ERROR_INVALID_DIMENSION,
+                        "dimension extent cannot be represented",
+                        build_runtime_error(source.to_string())
+                            .with_builtin(BUILTIN_NAME)
+                            .with_source(source)
+                            .build(),
+                    )
+                })?;
             shape_ext.extend(std::iter::repeat_n(1, dim - shape_ext.len()));
         }
 
@@ -260,28 +279,37 @@ impl FilterArgs {
                     )
                 })?;
 
-        let leading = if dim_idx == 0 {
-            1
-        } else {
-            shape_ext[..dim_idx].iter().copied().product()
+        let checked_product = |extents: &[usize]| {
+            extents
+                .iter()
+                .copied()
+                .try_fold(1usize, usize::checked_mul)
+                .ok_or_else(|| filter_error(&FILTER_ERROR_INTERNAL))
         };
-        let trailing = if dim_idx + 1 >= shape_ext.len() {
-            1
-        } else {
-            shape_ext[dim_idx + 1..].iter().copied().product()
-        };
-        let channel_count = leading.saturating_mul(trailing);
-
-        let expected_states = state_len.saturating_mul(channel_count);
+        let leading = checked_product(&shape_ext[..dim_idx])?;
+        let trailing = checked_product(&shape_ext[dim_idx + 1..])?;
+        let channel_count = leading
+            .checked_mul(trailing)
+            .ok_or_else(|| filter_error(&FILTER_ERROR_INTERNAL))?;
+        let expected_states = state_len
+            .checked_mul(channel_count)
+            .ok_or_else(|| filter_error(&FILTER_ERROR_INVALID_INITIAL_STATE))?;
 
         let initial = if let Some(zi_val) = zi_value {
-            InitialState::from_value(zi_val, state_len, &state_shape, expected_states, "filter")?
+            InitialState::from_value(
+                zi_val,
+                state_len,
+                &state_shape,
+                expected_states,
+                cooperation,
+            )
+            .await?
         } else {
             InitialState::empty(state_shape.clone())
         };
 
-        let coeffs_b = CoeffInput::from_value(CoefficientRole::Numerator, b).await?;
-        let coeffs_a = CoeffInput::from_value(CoefficientRole::Denominator, a).await?;
+        let coeffs_b = CoeffInput::from_value(CoefficientRole::Numerator, b, cooperation).await?;
+        let coeffs_a = CoeffInput::from_value(CoefficientRole::Denominator, a, cooperation).await?;
 
         if coeffs_a.len == 0 {
             return Err(filter_error(&FILTER_ERROR_EMPTY_DENOMINATOR));
@@ -315,6 +343,7 @@ struct CoeffInput {
     data: Vec<Complex<f64>>,
     len: usize,
     is_complex: bool,
+    original_handle: Option<GpuTensorHandle>,
 }
 
 #[derive(Clone, Copy)]
@@ -340,9 +369,14 @@ impl CoefficientRole {
 }
 
 impl CoeffInput {
-    async fn from_value(role: CoefficientRole, value: Value) -> BuiltinResult<Self> {
+    async fn from_value(
+        role: CoefficientRole,
+        value: Value,
+        cooperation: &mut SignalCooperation,
+    ) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
+                let original_handle = handle.clone();
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
                     .map_err(|flow| {
@@ -352,11 +386,13 @@ impl CoeffInput {
                             map_control_flow_with_builtin(flow, BUILTIN_NAME),
                         )
                     })?;
-                Self::from_tensor(role, tensor)
+                let mut decoded = Self::from_tensor(role, tensor, cooperation).await?;
+                decoded.original_handle = Some(original_handle);
+                Ok(decoded)
             }
-            Value::Tensor(tensor) => Self::from_tensor(role, tensor),
+            Value::Tensor(tensor) => Self::from_tensor(role, tensor, cooperation).await,
             Value::ComplexTensor(tensor) => {
-                let len = tensor.materialize_f64().len();
+                let len = tensor.len();
                 if len == 0 {
                     return Err(filter_error_with_detail(
                         role.empty_error(),
@@ -367,45 +403,49 @@ impl CoeffInput {
                     ));
                 }
                 ensure_vector_shape(role, &tensor.shape)?;
-                let data = tensor
-                    .materialize_f64()
-                    .into_iter()
-                    .map(|(re, im)| Complex::new(re, im))
-                    .collect();
+                let data = preparation::complex_tensor(&tensor, cooperation).await?;
                 Ok(Self {
                     data,
                     len,
                     is_complex: true,
+                    original_handle: None,
                 })
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
-                    filter_error_with_detail(
-                        &FILTER_ERROR_INVALID_COEFFICIENTS,
-                        format!("{BUILTIN_NAME}: {} coefficients: {e}", role.label()),
-                    )
-                })?;
-                Self::from_tensor(role, tensor)
+                ensure_vector_shape(role, &logical.shape)?;
+                if logical.data.is_empty() {
+                    return Err(filter_error(role.empty_error()));
+                }
+                Ok(Self {
+                    len: logical.data.len(),
+                    data: preparation::logical_array(&logical, cooperation).await?,
+                    is_complex: false,
+                    original_handle: None,
+                })
             }
             Value::Num(n) => Ok(Self {
                 data: vec![Complex::new(n, 0.0)],
                 len: 1,
                 is_complex: false,
+                original_handle: None,
             }),
             Value::Int(i) => Ok(Self {
                 data: vec![Complex::new(i.to_f64(), 0.0)],
                 len: 1,
                 is_complex: false,
+                original_handle: None,
             }),
             Value::Bool(b) => Ok(Self {
                 data: vec![Complex::new(if b { 1.0 } else { 0.0 }, 0.0)],
                 len: 1,
                 is_complex: false,
+                original_handle: None,
             }),
             Value::Complex(re, im) => Ok(Self {
                 data: vec![Complex::new(re, im)],
                 len: 1,
                 is_complex: true,
+                original_handle: None,
             }),
             other => Err(filter_error_with_detail(
                 &FILTER_ERROR_INVALID_COEFFICIENTS,
@@ -414,10 +454,13 @@ impl CoeffInput {
         }
     }
 
-    fn from_tensor(role: CoefficientRole, tensor: Tensor) -> BuiltinResult<Self> {
+    async fn from_tensor(
+        role: CoefficientRole,
+        tensor: Tensor,
+        cooperation: &mut SignalCooperation,
+    ) -> BuiltinResult<Self> {
         ensure_vector_shape(role, &tensor.shape)?;
-        let values = tensor::tensor_into_values_f64(tensor);
-        let len = values.len();
+        let len = tensor.len();
         if len == 0 {
             return Err(filter_error_with_detail(
                 role.empty_error(),
@@ -427,11 +470,12 @@ impl CoeffInput {
                 ),
             ));
         }
-        let data = values.into_iter().map(|re| Complex::new(re, 0.0)).collect();
+        let data = preparation::real_tensor(&tensor, cooperation).await?;
         Ok(Self {
             data,
             len,
             is_complex: false,
+            original_handle: None,
         })
     }
 }
@@ -449,7 +493,7 @@ enum SignalPayload {
 }
 
 impl SignalInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
+    async fn from_value(value: Value, cooperation: &mut SignalCooperation) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
                 let output_single = runmat_accelerate_api::handle_integer_type(&handle).is_none()
@@ -469,10 +513,7 @@ impl SignalInput {
             Value::Tensor(tensor) => {
                 let output_single = tensor.numeric_dtype() == NumericDType::F32;
                 let shape = tensor.shape.clone();
-                let data = tensor::tensor_into_values_f64(tensor)
-                    .into_iter()
-                    .map(|re| Complex::new(re, 0.0))
-                    .collect();
+                let data = preparation::real_tensor(&tensor, cooperation).await?;
                 Ok(Self {
                     payload: SignalPayload::Host(data),
                     shape,
@@ -483,11 +524,7 @@ impl SignalInput {
             Value::ComplexTensor(tensor) => {
                 let output_single = tensor.numeric_dtype() == NumericDType::F32;
                 let shape = tensor.shape.clone();
-                let data = tensor
-                    .materialize_f64()
-                    .into_iter()
-                    .map(|(re, im)| Complex::new(re, im))
-                    .collect();
+                let data = preparation::complex_tensor(&tensor, cooperation).await?;
                 Ok(Self {
                     payload: SignalPayload::Host(data),
                     shape,
@@ -496,17 +533,8 @@ impl SignalInput {
                 })
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
-                    filter_error_with_detail(
-                        &FILTER_ERROR_INVALID_SIGNAL,
-                        format!("logical signal conversion failed: {e}"),
-                    )
-                })?;
-                let shape = tensor.shape.clone();
-                let data = tensor::tensor_into_values_f64(tensor)
-                    .into_iter()
-                    .map(|re| Complex::new(re, 0.0))
-                    .collect();
+                let shape = logical.shape.clone();
+                let data = preparation::logical_array(&logical, cooperation).await?;
                 Ok(Self {
                     payload: SignalPayload::Host(data),
                     shape,
@@ -559,7 +587,7 @@ impl SignalInput {
         }
     }
 
-    async fn materialize(&mut self) -> BuiltinResult<()> {
+    async fn materialize(&mut self, cooperation: &mut SignalCooperation) -> BuiltinResult<()> {
         let SignalPayload::Resident(handle) = &self.payload else {
             return Ok(());
         };
@@ -572,7 +600,7 @@ impl SignalInput {
                     map_control_flow_with_builtin(flow, BUILTIN_NAME),
                 )
             })?;
-        let materialized = Self::from_value(value)?;
+        let materialized = Self::from_value(value, cooperation).await?;
         if materialized.shape != self.shape
             || materialized.is_complex != self.is_complex
             || !matches!(&materialized.payload, SignalPayload::Host(_))
@@ -603,7 +631,7 @@ impl InitialState {
         }
     }
 
-    async fn materialize(&mut self) -> BuiltinResult<()> {
+    async fn materialize(&mut self, cooperation: &mut SignalCooperation) -> BuiltinResult<()> {
         let Some(handle) = &self.gpu_handle else {
             return Ok(());
         };
@@ -632,20 +660,22 @@ impl InitialState {
             self.shape[0],
             &self.shape,
             expected_states,
-            BUILTIN_NAME,
-        )?;
+            cooperation,
+        )
+        .await?;
         self.column_major = decoded.column_major;
         self.is_complex = decoded.is_complex;
         Ok(())
     }
 
-    fn from_value(
+    async fn from_value(
         value: Value,
         state_len: usize,
         expected_shape: &[usize],
         expected_states: usize,
-        name: &str,
+        cooperation: &mut SignalCooperation,
     ) -> BuiltinResult<Self> {
+        let name = BUILTIN_NAME;
         if state_len == 0 {
             match value {
                 Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => {
@@ -720,38 +750,22 @@ impl InitialState {
             Value::Tensor(tensor) => {
                 let shape = tensor.shape.clone();
                 (
-                    tensor::tensor_into_values_f64(tensor)
-                        .iter()
-                        .map(|&re| Complex::new(re, 0.0))
-                        .collect::<Vec<_>>(),
+                    preparation::real_tensor(&tensor, cooperation).await?,
                     shape,
                     false,
                     None,
                 )
             }
             Value::ComplexTensor(tensor) => (
-                tensor
-                    .materialize_f64()
-                    .iter()
-                    .map(|&(re, im)| Complex::new(re, im))
-                    .collect::<Vec<_>>(),
+                preparation::complex_tensor(&tensor, cooperation).await?,
                 tensor.shape.clone(),
                 true,
                 None,
             ),
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
-                    filter_error_with_detail(
-                        &FILTER_ERROR_INVALID_INITIAL_STATE,
-                        format!("{name}: initial conditions: {e}"),
-                    )
-                })?;
-                let shape = tensor.shape.clone();
+                let shape = logical.shape.clone();
                 (
-                    tensor::tensor_into_values_f64(tensor)
-                        .iter()
-                        .map(|&re| Complex::new(re, 0.0))
-                        .collect::<Vec<_>>(),
+                    preparation::logical_array(&logical, cooperation).await?,
                     shape,
                     false,
                     None,

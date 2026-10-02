@@ -2,7 +2,9 @@
 
 use super::*;
 use runmat_accelerate_api::{
-    ProviderIirCoefficientSource, ProviderPrecision, ProviderPreparedIirCoefficients,
+    upload_numeric_protecting, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
+    NumericUploadError, ProviderIirCoefficientSource, ProviderPrecision,
+    ProviderPreparedIirCoefficients,
 };
 
 const PREPARATION_CHUNK: usize = 4096;
@@ -24,13 +26,16 @@ impl UploadRole {
     }
 }
 
-fn upload_error(role: UploadRole, source: anyhow::Error) -> RuntimeError {
+fn upload_error(role: UploadRole, source: NumericUploadError) -> RuntimeError {
     let mut error = filter_error_with_detail(
         &FILTER_ERROR_PROVIDER_UPLOAD,
         format!("{} upload failed", role.label()),
     );
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-    crate::runtime_error::with_provider_execution_source(error, source.into())
+    crate::runtime_error::with_provider_execution_source(
+        error,
+        runmat_accelerate_api::ProviderExecutionError::from_source(source),
+    )
 }
 
 fn resource_error(source: std::collections::TryReserveError) -> RuntimeError {
@@ -214,19 +219,22 @@ pub(super) async fn try_filter_gpu(
         else {
             return Ok(None);
         };
-        let mut protected = [signal, signal];
-        let protected = if let Some(initial) = args.initial.gpu_handle.as_ref() {
-            protected[1] = initial;
-            &protected[..2]
-        } else {
-            &protected[..1]
-        };
+        let mut protected = vec![signal];
+        if let Some(initial) = args.initial.gpu_handle.as_ref() {
+            protected.push(initial);
+        }
+        if let Some(original) = args.coeffs_b.original_handle.as_ref() {
+            protected.push(original);
+        }
+        if let Some(original) = args.coeffs_a.original_handle.as_ref() {
+            protected.push(original);
+        }
         let prepared = ProviderPreparedIirCoefficients::upload(
             provider,
             &numerator,
             &denominator,
             provider.precision(),
-            protected,
+            &protected,
         )
         .map_err(|source| {
             let mut error = filter_error(&FILTER_ERROR_PROVIDER_UPLOAD);
@@ -240,26 +248,45 @@ pub(super) async fn try_filter_gpu(
     } else {
         // InProcess also accepts F32 signal buffers while its preferred upload
         // precision is F64. Preserve that supported mixed-precision hook form.
-        let Some(b_real) = to_real_vec(&args.coeffs_b.data) else {
+        let Some(b_real) = to_real_vec(&args.coeffs_b.data, cooperation).await? else {
             return Ok(None);
         };
-        let Some(a_real) = to_real_vec(&args.coeffs_a.data) else {
+        let Some(a_real) = to_real_vec(&args.coeffs_a.data, cooperation).await? else {
             return Ok(None);
         };
         let b_shape = [args.coeffs_b.len, 1];
         let a_shape = [args.coeffs_a.len, 1];
-        let numerator = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &b_real,
+        let mut protected = vec![signal];
+        if let Some(initial) = args.initial.gpu_handle.as_ref() {
+            protected.push(initial);
+        }
+        if let Some(original) = args.coeffs_b.original_handle.as_ref() {
+            protected.push(original);
+        }
+        if let Some(original) = args.coeffs_a.original_handle.as_ref() {
+            protected.push(original);
+        }
+        let numerator = upload_numeric_protecting(
+            provider,
+            &HostNumericTensorView {
+                data: HostNumericDataView::F64(&b_real),
                 shape: &b_shape,
-            })
-            .map_err(|source| upload_error(UploadRole::Numerator, source))?;
-        let denominator = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &a_real,
+                storage: GpuTensorStorage::Real,
+            },
+            &protected,
+        )
+        .map_err(|source| upload_error(UploadRole::Numerator, source))?;
+        protected.push(&numerator);
+        let denominator = upload_numeric_protecting(
+            provider,
+            &HostNumericTensorView {
+                data: HostNumericDataView::F64(&a_real),
                 shape: &a_shape,
-            })
-            .map_err(|source| upload_error(UploadRole::Denominator, source))?;
+                storage: GpuTensorStorage::Real,
+            },
+            &protected,
+        )
+        .map_err(|source| upload_error(UploadRole::Denominator, source))?;
         Coefficients::Resident {
             numerator,
             denominator,
@@ -270,14 +297,41 @@ pub(super) async fn try_filter_gpu(
     } else if let Some(handle) = &args.initial.gpu_handle {
         (Some(handle.clone()), None)
     } else {
-        let values = to_real_vec(&args.initial.column_major)
+        let values = to_real_vec(&args.initial.column_major, cooperation)
+            .await?
             .ok_or_else(|| filter_error(&FILTER_ERROR_INVALID_INITIAL_STATE))?;
-        let handle = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &values,
+        let mut protected = vec![signal, coefficients.numerator(), coefficients.denominator()];
+        if let Some(original) = args.coeffs_b.original_handle.as_ref() {
+            protected.push(original);
+        }
+        if let Some(original) = args.coeffs_a.original_handle.as_ref() {
+            protected.push(original);
+        }
+        let mut single_values = Vec::new();
+        if provider.precision() == ProviderPrecision::F32 {
+            single_values
+                .try_reserve_exact(values.len())
+                .map_err(resource_error)?;
+            for chunk in values.chunks(PREPARATION_CHUNK) {
+                single_values.extend(chunk.iter().map(|value| *value as f32));
+                cooperation.completed(chunk.len() as u64).await?;
+            }
+        }
+        let data = if provider.precision() == ProviderPrecision::F32 {
+            HostNumericDataView::F32(&single_values)
+        } else {
+            HostNumericDataView::F64(&values)
+        };
+        let handle = upload_numeric_protecting(
+            provider,
+            &HostNumericTensorView {
+                data,
                 shape: &args.initial.shape,
-            })
-            .map_err(|source| upload_error(UploadRole::InitialState, source))?;
+                storage: GpuTensorStorage::Real,
+            },
+            &protected,
+        )
+        .map_err(|source| upload_error(UploadRole::InitialState, source))?;
         (Some(handle.clone()), Some(handle))
     };
     let result = provider
@@ -303,6 +357,8 @@ pub(super) async fn try_filter_gpu(
         signal,
         numerator: coefficients.numerator(),
         denominator: coefficients.denominator(),
+        original_numerator: args.coeffs_b.original_handle.as_ref(),
+        original_denominator: args.coeffs_a.original_handle.as_ref(),
         initial_state: initial.as_ref(),
         state_shape: &args.state_shape,
         state_len: args.state_len,
@@ -330,15 +386,22 @@ pub(super) async fn try_filter_gpu(
     }))
 }
 
-pub(super) fn to_real_vec(data: &[Complex<f64>]) -> Option<Vec<f64>> {
-    let mut out = Vec::with_capacity(data.len());
-    for value in data {
-        if value.im != 0.0 {
-            return None;
+pub(super) async fn to_real_vec(
+    data: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Option<Vec<f64>>> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(data.len()).map_err(resource_error)?;
+    for chunk in data.chunks(PREPARATION_CHUNK) {
+        for value in chunk {
+            if value.im != 0.0 {
+                return Ok(None);
+            }
+            out.push(value.re);
         }
-        out.push(value.re);
+        cooperation.completed(chunk.len() as u64).await?;
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 #[cfg(test)]

@@ -125,6 +125,8 @@ fn provider_result_cannot_publish_borrowed_signal_as_new_output() {
         signal: &signal,
         numerator: &numerator,
         denominator: &denominator,
+        original_numerator: None,
+        original_denominator: None,
         initial_state: None,
         state_shape: &[0, 1],
         state_len: 0,
@@ -141,4 +143,58 @@ fn provider_result_cannot_publish_borrowed_signal_as_new_output() {
         super::super::FILTER_ERROR_PROVIDER_OUTPUT.identifier
     );
     assert!(signal.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
+fn provider_result_cannot_retire_original_resident_coefficient() {
+    let _lock = test_support::accel_test_lock();
+    let provider: &'static NoHookProvider =
+        Box::leak(Box::new(NoHookProvider(InProcessProvider::new())));
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let signal = provider
+        .upload(&HostTensorView {
+            data: &[1.0, 2.0],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let original = provider
+        .upload(&HostTensorView {
+            data: &[4.0, 5.0],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let numerator = provider
+        .upload(&HostTensorView {
+            data: &[1.0],
+            shape: &[1, 1],
+        })
+        .unwrap();
+    let denominator = provider
+        .upload(&HostTensorView {
+            data: &[1.0],
+            shape: &[1, 1],
+        })
+        .unwrap();
+    let context = super::ProviderOutputContext {
+        provider,
+        signal: &signal,
+        numerator: &numerator,
+        denominator: &denominator,
+        original_numerator: Some(&original),
+        original_denominator: None,
+        initial_state: None,
+        state_shape: &[0, 1],
+        state_len: 0,
+    };
+    let error = context
+        .admit(ProviderIirFilterResult {
+            output: original.clone(),
+            final_state: None,
+        })
+        .expect_err("original coefficient alias must not be published");
+    assert_eq!(
+        error.identifier(),
+        super::super::FILTER_ERROR_PROVIDER_OUTPUT.identifier
+    );
+    assert!(original.allocation_lease().validate_live().is_ok());
 }
