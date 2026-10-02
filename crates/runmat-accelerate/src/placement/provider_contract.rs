@@ -11,6 +11,7 @@ use runmat_value::{NumericDType, Value};
 
 mod arithmetic;
 mod complex_components;
+mod convolution;
 pub(crate) mod floating_conversion;
 pub(crate) mod fusion_elementwise;
 mod integer_conversion;
@@ -215,10 +216,11 @@ fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
 pub(crate) fn in_process_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 10, IN_PROCESS_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 12, IN_PROCESS_OPERATIONS);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);
+    convolution::append(&mut snapshot, false);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
@@ -235,10 +237,11 @@ pub(crate) fn in_process_capability_snapshot(
 pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 11, WGPU_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 13, WGPU_OPERATIONS);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);
+    convolution::append(&mut snapshot, true);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
@@ -256,6 +259,9 @@ pub(crate) fn in_process_feasibility(
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
     if let Some(result) = sum::validate(provider, false, query) {
+        return result;
+    }
+    if let Some(result) = convolution::validate(provider, false, query) {
         return result;
     }
     if let Some(result) = resident_select::validate(provider, false, query) {
@@ -327,6 +333,9 @@ pub(crate) fn wgpu_feasibility(
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
     if let Some(result) = sum::validate(provider, true, query) {
+        return result;
+    }
+    if let Some(result) = convolution::validate(provider, true, query) {
         return result;
     }
     if let Some(result) = resident_select::validate(provider, true, query) {

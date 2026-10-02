@@ -6,6 +6,10 @@
 //! each provider implementation.
 
 mod capability;
+mod convolution;
+pub use convolution::{
+    ProviderConvolutionForm, ProviderConvolutionGeometry, ProviderConvolutionWorkload,
+};
 mod cost;
 mod execution_inventory;
 mod feasibility;

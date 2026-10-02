@@ -1987,6 +1987,12 @@ pub trait AccelProvider: AcceleratorThreadBound {
         None
     }
 
+    /// Limits of this provider's actual one-dimensional convolution shader.
+    /// None does not authorize a generic or estimated device recipe.
+    fn convolution_geometry(&self) -> Option<ProviderConvolutionGeometry> {
+        None
+    }
+
     /// Read a single scalar at linear index from a device tensor, returning it as f64.
     fn read_scalar(&self, _h: &GpuTensorHandle, _linear_index: usize) -> anyhow::Result<f64> {
         Err(unsupported_provider_operation(

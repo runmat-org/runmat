@@ -198,6 +198,15 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn convolution_geometry(&self) -> Option<runmat_accelerate_api::ProviderConvolutionGeometry> {
+        Some(runmat_accelerate_api::ProviderConvolutionGeometry {
+            max_buffer_bytes: self.adapter_limits.max_buffer_size,
+            max_binding_bytes: u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+            max_workgroups_per_dimension: self.adapter_limits.max_compute_workgroups_per_dimension,
+            workgroup_size: crate::backend::wgpu::config::WORKGROUP_SIZE,
+        })
+    }
+
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
         self.export_context_exec(kind)
     }

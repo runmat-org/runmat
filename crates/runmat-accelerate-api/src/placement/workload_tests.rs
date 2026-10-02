@@ -43,3 +43,25 @@ fn preparation_route_is_explicit_and_round_trips_without_shader_payload() {
         );
     }
 }
+
+#[test]
+fn convolution_route_round_trips_without_changing_legacy_workloads() {
+    use crate::{ProviderConvOrientation, ProviderConvolutionForm, ProviderConvolutionWorkload};
+    let legacy: ProviderWorkload =
+        serde_json::from_str(r#"{"elements":3,"flops":null,"batch":null}"#).unwrap();
+    assert_eq!(legacy.convolution, None);
+    let workload = ProviderWorkload {
+        convolution: Some(ProviderConvolutionWorkload {
+            form: ProviderConvolutionForm::Vector {
+                orientation: ProviderConvOrientation::Column,
+            },
+            mode: runmat_types::ConvolutionMode::Valid,
+        }),
+        ..Default::default()
+    };
+    let encoded = serde_json::to_vec(&workload).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<ProviderWorkload>(&encoded).unwrap(),
+        workload
+    );
+}

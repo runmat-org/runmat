@@ -33,6 +33,9 @@ pub struct ProviderWorkload {
     /// Resolved ordinary-sum route; absent for every other reduction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sum: Option<super::ProviderSumWorkload>,
+    /// Physical convolution hook and public shape mode admitted by its owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub convolution: Option<super::ProviderConvolutionWorkload>,
     pub elements: Option<u64>,
     pub flops: Option<u64>,
     /// Total operation-owned scalar work prior, not a FLOP count or a timing.
