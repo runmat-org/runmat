@@ -1,7 +1,6 @@
 //! MATLAB-compatible `filter` builtin with GPU-aware semantics for RunMat.
 use std::cmp::max;
 
-use log::debug;
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderIirFilterOptions};
 use runmat_builtins::{
@@ -338,6 +337,13 @@ const FILTER_ERROR_PROVIDER_UPLOAD: BuiltinErrorDescriptor = BuiltinErrorDescrip
     message: "filter: failed to upload provider input",
 };
 
+const FILTER_ERROR_PROVIDER_EXECUTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.PROVIDER_EXECUTION",
+    identifier: Some("RunMat:filter:ProviderFailed"),
+    when: "The provider iir_filter hook fails with an operational error.",
+    message: "filter: GPU provider iir_filter failed",
+};
+
 const FILTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FILTER.INTERNAL",
     identifier: Some("RunMat:filter:Internal"),
@@ -345,7 +351,7 @@ const FILTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "filter: internal error",
 };
 
-const FILTER_ERRORS: [BuiltinErrorDescriptor; 11] = [
+const FILTER_ERRORS: [BuiltinErrorDescriptor; 12] = [
     FILTER_ERROR_ARG_COUNT,
     FILTER_ERROR_INVALID_DIMENSION,
     FILTER_ERROR_EMPTY_DENOMINATOR,
@@ -356,6 +362,7 @@ const FILTER_ERRORS: [BuiltinErrorDescriptor; 11] = [
     FILTER_ERROR_DENOMINATOR_A1_ZERO,
     FILTER_ERROR_GATHER_FAILED,
     FILTER_ERROR_PROVIDER_UPLOAD,
+    FILTER_ERROR_PROVIDER_EXECUTION,
     FILTER_ERROR_INTERNAL,
 ];
 
@@ -1161,11 +1168,14 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
 
     let result = match result {
         Ok(res) => res,
+        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => return Ok(None),
         Err(err) => {
-            debug!(
-                "filter: provider iir_filter failed ({err}); falling back to host implementation"
-            );
-            return Ok(None);
+            let mut error = filter_error(&FILTER_ERROR_PROVIDER_EXECUTION);
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(crate::runtime_error::with_provider_execution_source(
+                error,
+                err.into(),
+            ));
         }
     };
 
