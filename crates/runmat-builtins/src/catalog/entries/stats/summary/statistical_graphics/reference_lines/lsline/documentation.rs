@@ -70,7 +70,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[OWNER, DOMAIN],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Fitted line geometry, axes targeting and diagnostics", location: "crates/runmat-runtime/src/builtins/stats/summary/lsline.rs" }],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Fitted line geometry, axes targeting and diagnostics", location: "crates/runmat-runtime/src/builtins/stats/summary/lsline.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Statistics and graphics VM integration", location: "crates/runmat-vm/tests/stats_ml.rs" },
+        ],
         notes: &["The fit scans current host graphics state; no resident numeric computation is claimed."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),

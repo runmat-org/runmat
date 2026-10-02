@@ -87,6 +87,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Explicit line geometry, class extensions and graphics errors", location: "crates/runmat-runtime/src/builtins/stats/summary/refline/tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Scaled centered least-squares coefficients", location: "crates/runmat-runtime/src/builtins/stats/summary/reference_lines/fit.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Reference-line VM script execution", location: "crates/runmat-vm/tests/stats_ml.rs" },
         ],
         notes: &["Host graphics result; admitted resident coefficients materialize at the checked floating boundary."],
     },
