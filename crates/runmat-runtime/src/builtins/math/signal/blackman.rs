@@ -12,7 +12,8 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
-    parse_window_controls, window_options_from_length, window_tensor, WindowArgError,
+    parse_window_controls, window_allocation_error, window_options_from_length, window_tensor,
+    WindowArgError,
 };
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
@@ -47,6 +48,9 @@ fn blackman_map_window_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::InvalidOptionType => blackman_error(&BLACKMAN_ERROR_INVALID_OPTION),
         WindowArgError::UnknownOption(option) => {
             blackman_error_with_detail(&BLACKMAN_ERROR_UNKNOWN_OPTION, format!("'{option}'"))
+        }
+        WindowArgError::Allocation(cause) => {
+            window_allocation_error(BUILTIN_NAME, &BLACKMAN_ERROR_INTERNAL, cause)
         }
         WindowArgError::TensorBuild(detail) => {
             blackman_error_with_detail(&BLACKMAN_ERROR_INTERNAL, detail)

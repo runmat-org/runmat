@@ -1,11 +1,12 @@
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_types::WindowOption;
 pub(crate) use runmat_types::{WindowOutputType, WindowSampling};
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 pub(super) mod output_precision;
 pub(crate) mod window_provider;
@@ -25,13 +26,30 @@ pub(crate) struct WindowControls {
     pub output_type: WindowOutputType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum WindowArgError {
     TooManyOptions,
     InvalidLength,
     InvalidOptionType,
     UnknownOption(String),
+    Allocation(std::collections::TryReserveError),
     TensorBuild(String),
+}
+
+pub(crate) fn window_allocation_error(
+    builtin: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+    cause: std::collections::TryReserveError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {cause}", descriptor.message))
+        .with_builtin(builtin)
+        .with_source(cause);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    let mut error = builder.build();
+    error.gpu_gather_retry = GpuGatherRetry::Never;
+    error
 }
 
 #[derive(Debug, Clone)]
@@ -409,7 +427,7 @@ pub(crate) fn window_tensor(
     };
     let mut data = Vec::new();
     data.try_reserve_exact(len)
-        .map_err(|error| WindowArgError::TensorBuild(error.to_string()))?;
+        .map_err(WindowArgError::Allocation)?;
     for idx in 0..len {
         data.push(coeff(idx, effective_len));
     }
@@ -599,7 +617,7 @@ mod tests {
         let err = scalar_length_arg(Value::Num((usize::MAX as f64) * 2.0))
             .expect_err("out-of-range length should fail");
 
-        assert_eq!(err, WindowArgError::InvalidLength);
+        assert!(matches!(err, WindowArgError::InvalidLength));
     }
 
     #[test]
@@ -607,7 +625,7 @@ mod tests {
         let err = scalar_length_arg(Value::Num(first_unrepresentable_usize_double()))
             .expect_err("unrepresentable length should fail");
 
-        assert_eq!(err, WindowArgError::InvalidLength);
+        assert!(matches!(err, WindowArgError::InvalidLength));
     }
 
     #[test]
@@ -638,7 +656,7 @@ mod tests {
         )
         .expect_err("periodic effective length must not overflow");
 
-        assert_eq!(error, WindowArgError::InvalidLength);
+        assert!(matches!(error, WindowArgError::InvalidLength));
     }
 
     #[test]
@@ -655,10 +673,46 @@ mod tests {
         assert!(matches!(misplaced, Err(WindowArgError::UnknownOption(_))));
         let multirow =
             Value::CharArray(CharArray::new("periodic".chars().collect(), 2, 4).unwrap());
-        assert_eq!(
+        assert!(matches!(
             parse_window_controls(&[multirow], true),
             Err(WindowArgError::InvalidOptionType)
-        );
+        ));
+    }
+
+    #[test]
+    fn window_host_capacity_overflow_preserves_original_resource_cause() {
+        use runmat_builtins::{
+            BLACKMAN_ERROR_INTERNAL, HAMMING_ERROR_INTERNAL, HANN_ERROR_INTERNAL,
+        };
+        let options = WindowOptions {
+            len: usize::MAX,
+            sampling: WindowSampling::Symmetric,
+            output_type: WindowOutputType::Double,
+        };
+        let WindowArgError::Allocation(cause) = window_tensor(options, |_, _| {
+            panic!("capacity overflow must precede coefficients")
+        })
+        .expect_err("impossible host vector capacity") else {
+            panic!("expected original allocation error");
+        };
+        for (builtin, descriptor) in [
+            ("blackman", &BLACKMAN_ERROR_INTERNAL),
+            ("hamming", &HAMMING_ERROR_INTERNAL),
+            ("hann", &HANN_ERROR_INTERNAL),
+        ] {
+            let synthetic = Vec::<f64>::new()
+                .try_reserve_exact(usize::MAX)
+                .expect_err("impossible host vector capacity");
+            let error = window_allocation_error(builtin, descriptor, synthetic);
+            assert_eq!(error.identifier(), descriptor.identifier);
+            assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+            let source = error.source.as_ref().expect("typed allocation cause");
+            assert!(source
+                .as_ref()
+                .downcast_ref::<std::collections::TryReserveError>()
+                .is_some());
+        }
+        assert!(!cause.to_string().is_empty());
     }
 
     #[test]
