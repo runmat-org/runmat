@@ -324,6 +324,47 @@ fn impossible_geometry_precedes_weight_values_on_all_routes_without_resident_gat
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn invalid_host_degree_precedes_resident_integer_download() {
+    let provider = Box::leak(Box::new(SolverProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        calls: AtomicUsize::new(0),
+    }));
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let integers = [1_i64, 2];
+    let x = provider
+        .inner
+        .upload_numeric_raw(&HostNumericTensorView {
+            data: HostNumericDataView::I64(&integers),
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let y = provider
+        .inner
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &[1., 3.],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    for degree in [-1., 1.5] {
+        let error = futures::executor::block_on(runmat_runtime::call_builtin_async(
+            "polyfit",
+            &[
+                Value::GpuTensor(x.clone()),
+                Value::GpuTensor(y.clone()),
+                Value::Num(degree),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:polyfit:InvalidArgument"));
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    }
+    x.allocation_lease().validate_live().unwrap();
+    y.allocation_lease().validate_live().unwrap();
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn public_weight_errors_match_host_and_retain_provider_cause_and_inputs() {
     let provider = Box::leak(Box::new(SolverProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),

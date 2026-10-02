@@ -14,6 +14,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, LogicalArray, Tensor, Value};
 
+use super::normalization;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -105,13 +106,7 @@ pub async fn evaluate(
     if rest.len() > 2 {
         return Err(polyval_argument_error("polyval: too many input arguments"));
     }
-    if want_delta
-        && (rest.is_empty()
-            || matches!(rest.first(), Some(Value::Tensor(t)) if tensor_element_len(t) == 0)
-            || matches!(rest.first(), Some(Value::LogicalArray(a)) if a.data.is_empty())
-            || matches!(rest.first(), Some(Value::Cell(a)) if a.data.is_empty())
-            || matches!(rest.first(), Some(Value::GpuTensor(h)) if h.shape().contains(&0)))
-    {
+    if want_delta && (rest.is_empty() || rest.first().is_some_and(is_known_empty_option)) {
         return Err(polyval_argument_error(
             "polyval: S input (structure returned by polyfit) is required for delta output",
         ));
@@ -121,6 +116,7 @@ pub async fn evaluate(
     for option in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(option, BUILTIN_NAME)?;
     }
+    let (preparsed_mu, preparsed_stats) = preflight_host_options(rest, &coefficients).await?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &coefficients,
         &POLYVAL_INTEGER_COEFFICIENTS_EXTENSION,
@@ -156,9 +152,10 @@ pub async fn evaluate(
     let (mut inputs, prefer_gpu_points) = convert_points(points_clone).await?;
     let prefer_gpu_output = prefer_gpu_points || coeff_was_gpu;
 
-    let mu = match options.mu.clone() {
-        Some(mu_value) => Some(parse_mu(mu_value).await?),
-        None => None,
+    let mu = match (preparsed_mu, options.mu.clone()) {
+        (Some(mu), _) => Some(mu),
+        (None, Some(mu_value)) => Some(parse_mu(mu_value).await?),
+        (None, None) => None,
     };
 
     if prefer_gpu_output && !want_delta && options.s.is_none() {
@@ -171,10 +168,10 @@ pub async fn evaluate(
         apply_mu(&mut inputs.data, mu_val)?;
     }
 
-    let stats = if let Some(s_value) = options.s {
-        parse_stats(s_value, coeffs.len()).await?
-    } else {
-        None
+    let stats = match (preparsed_stats, options.s) {
+        (Some(stats), _) => Some(stats),
+        (None, Some(s_value)) => parse_stats(s_value, coeffs.len()).await?,
+        (None, None) => None,
     };
 
     if want_delta && stats.is_none() {
@@ -327,6 +324,99 @@ struct ParsedOptions {
     mu: Option<Value>,
 }
 
+fn is_known_empty_option(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor_element_len(tensor) == 0,
+        Value::LogicalArray(array) => array.data.is_empty(),
+        Value::Cell(array) => array.data.is_empty(),
+        Value::GpuTensor(handle) => handle.shape().contains(&0),
+        _ => false,
+    }
+}
+
+fn known_coefficient_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(tensor) => Some(tensor_element_len(tensor)),
+        Value::ComplexTensor(tensor) => Some(complex_tensor_element_len(tensor)),
+        Value::LogicalArray(array) => Some(array.data.len()),
+        Value::GpuTensor(handle) if handle.shape().contains(&0) => Some(0),
+        Value::GpuTensor(handle) => handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |n, d| n.checked_mul(*d)),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(1),
+        _ => None,
+    }
+}
+
+fn stat_fields(value: &runmat_value::StructValue) -> BuiltinResult<(&Value, &Value, &Value)> {
+    Ok((
+        required_stat_field(value, PolyfitStatField::R)?,
+        required_stat_field(value, PolyfitStatField::DegreesOfFreedom)?,
+        required_stat_field(value, PolyfitStatField::ResidualNorm)?,
+    ))
+}
+
+fn required_stat_field(
+    value: &runmat_value::StructValue,
+    identity: PolyfitStatField,
+) -> BuiltinResult<&Value> {
+    value.fields.get(identity.public_name()).ok_or_else(|| {
+        polyval_error(format!(
+            "polyval: S input is missing the field '{}'",
+            identity.public_name()
+        ))
+    })
+}
+
+async fn preflight_host_options(
+    rest: &[Value],
+    coefficients: &Value,
+) -> BuiltinResult<(Option<Mu>, Option<PolyfitStats>)> {
+    // Inspect the later host control before any earlier resident statistics
+    // field or numerical operand can initiate a provider readback.
+    let mu = match rest.get(1) {
+        Some(Value::GpuTensor(_)) | None => None,
+        Some(value) => Some(parse_host_mu(value.clone())?),
+    };
+    let stats = match rest.first() {
+        None => None,
+        Some(value) if is_known_empty_option(value) => None,
+        Some(Value::GpuTensor(_)) => None,
+        Some(Value::Struct(value)) => {
+            let (r, df, normr) = stat_fields(value)?;
+            let has_resident_field = [r, df, normr]
+                .into_iter()
+                .any(|field| matches!(field, Value::GpuTensor(_)));
+            if has_resident_field {
+                if let (Some(len), false) = (
+                    known_coefficient_len(coefficients),
+                    matches!(r, Value::GpuTensor(_)),
+                ) {
+                    let _ = convert_matrix((*r).clone(), len).await?;
+                }
+                if !matches!(df, Value::GpuTensor(_)) {
+                    let _ = scalar_to_f64((*df).clone(), "polyval: S.df").await?;
+                }
+                if !matches!(normr, Value::GpuTensor(_)) {
+                    let _ = scalar_to_f64((*normr).clone(), "polyval: S.normr").await?;
+                }
+                None
+            } else if let Some(len) = known_coefficient_len(coefficients) {
+                parse_stats(Value::Struct(value.clone()), len).await?
+            } else {
+                None
+            }
+        }
+        Some(other) => {
+            return Err(polyval_error(format!(
+                "polyval: S input must be the structure returned by polyfit, got {other:?}"
+            )))
+        }
+    };
+    Ok((mu, stats))
+}
+
 async fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
     match rest.len() {
         0 => Ok(ParsedOptions { s: None, mu: None }),
@@ -474,13 +564,16 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
     }
 }
 
-#[async_recursion::async_recursion(?Send)]
 async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
+    let host = match value {
+        Value::GpuTensor(handle) => Value::Tensor(gpu_helpers::gather_tensor_async(&handle).await?),
+        host => host,
+    };
+    parse_host_mu(host)
+}
+
+fn parse_host_mu(value: Value) -> BuiltinResult<Mu> {
     match value {
-        Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-            parse_mu(Value::Tensor(gathered)).await
-        }
         Value::Tensor(tensor) => {
             if tensor_element_len(&tensor) < 2 {
                 return Err(polyval_error(
@@ -563,25 +656,11 @@ async fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<Pol
             )))
         }
     };
-    let r_value = struct_value
-        .fields
-        .get(PolyfitStatField::R.public_name())
-        .cloned()
-        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'R'"))?;
-    let df_value = struct_value
-        .fields
-        .get(PolyfitStatField::DegreesOfFreedom.public_name())
-        .cloned()
-        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'df'"))?;
-    let normr_value = struct_value
-        .fields
-        .get(PolyfitStatField::ResidualNorm.public_name())
-        .cloned()
-        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'normr'"))?;
+    let (r_value, df_value, normr_value) = stat_fields(&struct_value)?;
 
-    let (matrix, is_real) = convert_matrix(r_value, coeff_len).await?;
-    let df = scalar_to_f64(df_value, "polyval: S.df").await?;
-    let normr = scalar_to_f64(normr_value, "polyval: S.normr").await?;
+    let (matrix, is_real) = convert_matrix((*r_value).clone(), coeff_len).await?;
+    let df = scalar_to_f64((*df_value).clone(), "polyval: S.df").await?;
+    let normr = scalar_to_f64((*normr_value).clone(), "polyval: S.normr").await?;
 
     Ok(Some(PolyfitStats {
         r: matrix,
@@ -687,10 +766,10 @@ async fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
 }
 
 fn apply_mu(values: &mut [Complex64], mu: Mu) -> BuiltinResult<()> {
-    let mean = Complex64::new(mu.mean, 0.0);
-    let scale = Complex64::new(mu.scale, 0.0);
     for v in values.iter_mut() {
-        *v = (*v - mean) / scale;
+        let real = normalization::standardize(v.re, mu.mean, mu.scale)
+            .ok_or_else(|| polyval_error("polyval: scaled query point exceeds finite range"))?;
+        *v = Complex64::new(real, v.im / mu.scale);
     }
     Ok(())
 }

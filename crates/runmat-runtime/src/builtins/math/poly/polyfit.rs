@@ -13,6 +13,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
 
+use super::normalization;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor;
 use crate::dispatcher;
@@ -126,6 +127,10 @@ pub async fn evaluate(
         Some(count) if count >= 3 => ProviderPolyfitBasis::CenteredScaled,
         _ => ProviderPolyfitBasis::Original,
     };
+    if rest.len() > 1 {
+        return Err(polyfit_argument_error("polyfit: too many input arguments"));
+    }
+    let deg = parse_degree(&degree)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&x, "polyfit")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&y, "polyfit")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&degree, "polyfit")?;
@@ -155,8 +160,6 @@ pub async fn evaluate(
         )
         .await?;
     }
-    let deg = parse_degree(&degree)?;
-
     if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest, basis).await? {
         return Ok(eval);
     }
@@ -574,18 +577,8 @@ fn solve_polyfit(
     let (mean, scale) = match basis {
         ProviderPolyfitBasis::Original => (0.0, 1.0),
         ProviderPolyfitBasis::CenteredScaled => {
-            let magnitude = x_data.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-            let mean = if magnitude == 0.0 {
-                0.0
-            } else {
-                magnitude
-                    * (x_data.iter().map(|x| x / magnitude).sum::<f64>() / x_data.len() as f64)
-            };
-            if !mean.is_finite() {
-                return Err(PolyfitKernelError::input(
-                    "polyfit: mean of X must be finite",
-                ));
-            }
+            let mean = normalization::sample_mean(x_data)
+                .ok_or_else(|| PolyfitKernelError::input("polyfit: mean of X must be finite"))?;
             (mean, compute_scale(x_data, mean)?)
         }
     };
@@ -597,7 +590,7 @@ fn solve_polyfit(
             )));
         }
     }
-    let scaled: Vec<f64> = x_data.iter().map(|&v| (v - mean) / scale).collect();
+    let scaled = scaled_coordinates(x_data, mean, scale)?;
     let mut rhs = y_data.to_vec();
     if let Some(w) = weights {
         apply_weights_rhs(&mut rhs, w)?;
@@ -617,7 +610,7 @@ fn solve_polyfit(
     householder_qr(&mut vandermonde, rows, cols, &mut transformed_rhs)?;
     let coeffs = solve_upper(&vandermonde, rows, cols, &transformed_rhs, &column_norms)?;
 
-    let normr = residual_norm(&transformed_rhs, rows, cols);
+    let normr = residual_norm(&transformed_rhs, rows, cols)?;
     let df = if rows > cols {
         (rows - cols) as f64
     } else {
@@ -639,44 +632,25 @@ fn solve_polyfit(
 }
 
 fn compute_scale(data: &[f64], mean: f64) -> PolyfitKernelResult<f64> {
-    if data.len() <= 1 {
-        return Ok(1.0);
-    }
-    let mut extent = 0.0_f64;
-    let mut scaled_squares = 0.0_f64;
-    for &value in data {
-        if !value.is_finite() {
-            return Err(PolyfitKernelError::input(
-                "polyfit: X must contain finite values",
-            ));
-        }
-        let diff = value - mean;
-        let abs_diff = diff.abs();
-        if abs_diff > extent {
-            scaled_squares = 1.0 + scaled_squares * (extent / abs_diff).powi(2);
-            extent = abs_diff;
-        } else if abs_diff != 0.0 {
-            scaled_squares += (abs_diff / extent).powi(2);
-        }
-    }
-    let denom = data.len() as f64 - 1.0;
-    let std = extent * (scaled_squares / denom).sqrt();
-    let scale = if extent == 0.0 { 1.0 } else { std };
-    if !scale.is_finite() {
-        return Err(PolyfitKernelError::input(
-            "polyfit: failed to compute a stable scaling factor",
-        ));
-    }
-    if scale == 0.0 {
-        return Err(PolyfitKernelError::input(
-            "polyfit: sample spread is below representable scaling precision",
-        ));
-    }
-    Ok(scale)
+    normalization::sample_scale(data, mean).ok_or_else(|| {
+        PolyfitKernelError::input("polyfit: failed to compute a finite, nonzero scaling factor")
+    })
+}
+
+fn scaled_coordinates(data: &[f64], mean: f64, scale: f64) -> PolyfitKernelResult<Vec<f64>> {
+    data.iter()
+        .map(|&value| {
+            normalization::standardize(value, mean, scale).ok_or_else(finite_solver_range_error)
+        })
+        .collect()
 }
 
 fn stable_l2(values: impl IntoIterator<Item = f64>) -> f64 {
     values.into_iter().fold(0.0, f64::hypot)
+}
+
+fn finite_solver_range_error() -> PolyfitKernelError {
+    PolyfitKernelError::input("polyfit: polynomial basis exceeds finite solver range")
 }
 
 fn build_vandermonde(u: &[f64], geometry: &SolverGeometry) -> Vec<f64> {
@@ -754,18 +728,30 @@ fn householder_qr(
     cols: usize,
     rhs: &mut [Complex64],
 ) -> PolyfitKernelResult<()> {
+    if matrix.iter().any(|value| !value.is_finite())
+        || rhs
+            .iter()
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(finite_solver_range_error());
+    }
     let min_dim = rows.min(cols);
     for k in 0..min_dim {
         let norm = stable_l2((k..rows).map(|row| matrix[row + k * rows]));
+        if !norm.is_finite() {
+            return Err(finite_solver_range_error());
+        }
         if norm == 0.0 {
             continue;
         }
         let x0 = matrix[k + k * rows];
         let alpha = if x0 >= 0.0 { -norm } else { norm };
         let mut v = vec![0.0; rows - k];
-        v[0] = x0 - alpha;
+        // Dividing the column before forming the reflector avoids x0-alpha
+        // overflowing when both x0 and the column norm are finite.
+        v[0] = x0 / norm + if x0 >= 0.0 { 1.0 } else { -1.0 };
         for row in (k + 1)..rows {
-            v[row - k] = matrix[row + k * rows];
+            v[row - k] = matrix[row + k * rows] / norm;
         }
         let v_norm = stable_l2(v.iter().copied());
         if v_norm == 0.0 {
@@ -785,9 +771,15 @@ fn householder_qr(
                 dot += vi * matrix[row_idx + col * rows];
             }
             let factor = 2.0 * dot;
+            if !factor.is_finite() {
+                return Err(finite_solver_range_error());
+            }
             for (idx, &vi) in v.iter().enumerate() {
                 let row_idx = k + idx;
                 matrix[row_idx + col * rows] -= factor * vi;
+                if !matrix[row_idx + col * rows].is_finite() {
+                    return Err(finite_solver_range_error());
+                }
             }
         }
         let mut dot = Complex64::new(0.0, 0.0);
@@ -796,9 +788,15 @@ fn householder_qr(
             dot += rhs[row_idx] * vi;
         }
         let factor = Complex64::new(2.0, 0.0) * dot;
+        if !factor.re.is_finite() || !factor.im.is_finite() {
+            return Err(finite_solver_range_error());
+        }
         for (idx, &vi) in v.iter().enumerate() {
             let row_idx = k + idx;
             rhs[row_idx] -= factor * vi;
+            if !rhs[row_idx].re.is_finite() || !rhs[row_idx].im.is_finite() {
+                return Err(finite_solver_range_error());
+            }
         }
     }
     Ok(())
@@ -840,18 +838,22 @@ fn solve_upper(
             };
             acc -= Complex64::new(idx, 0.0) * coeffs[next];
         }
-        coeffs[col] = acc / Complex64::new(diag, 0.0);
+        let coefficient = Complex64::new(acc.re / diag, acc.im / diag);
+        if !coefficient.re.is_finite() || !coefficient.im.is_finite() {
+            return Err(finite_solver_range_error());
+        }
+        coeffs[col] = coefficient;
     }
     Ok(coeffs)
 }
 
-fn residual_norm(rhs: &[Complex64], rows: usize, cols: usize) -> f64 {
+fn residual_norm(rhs: &[Complex64], rows: usize, cols: usize) -> PolyfitKernelResult<f64> {
     let tail_start = rows.min(cols);
-    let mut acc = 0.0;
-    for value in rhs.iter().skip(tail_start) {
-        acc += value.norm_sqr();
+    let norm = stable_l2(rhs.iter().skip(tail_start).map(|value| value.norm()));
+    if !norm.is_finite() {
+        return Err(finite_solver_range_error());
     }
-    acc.sqrt()
+    Ok(norm)
 }
 
 fn extract_upper(matrix: &[f64], geometry: &SolverGeometry) -> Vec<f64> {
@@ -1167,6 +1169,88 @@ pub(crate) mod tests {
     fn degree_requires_an_exact_integer_not_a_nearby_float() {
         let error = parse_degree(&Value::Num(1.0 + 1.0e-13)).expect_err("fractional degree");
         assert!(error.message().contains("must be an integer"));
+    }
+
+    #[test]
+    fn householder_reflector_reconstructs_large_small_and_ordinary_columns() {
+        for (source, observations, expected) in [
+            ([1.0e308, 1.0e307], [1.0, 0.1], 1.0e-308),
+            ([1.0e-300, 1.0e-301], [1.0, 0.1], 1.0e300),
+            ([1.0, 0.1], [2.0, 0.2], 2.0),
+        ] {
+            let mut column = source;
+            let norm = stable_l2(source);
+            let mut rhs = observations.map(|value| Complex64::new(value, 0.0));
+            householder_qr(&mut column, 2, 1, &mut rhs).expect("finite reflector");
+            assert!(column.iter().all(|value| value.is_finite()));
+            assert!(rhs.iter().all(|value| value.re.is_finite()));
+            let coefficients = solve_upper(&column, 2, 1, &rhs, &[norm]).expect("finite solve");
+            let coefficient = coefficients[0].re;
+            assert!((coefficient / expected - 1.0).abs() < 1.0e-13);
+            for (input, target) in source.into_iter().zip(observations) {
+                assert!(((input * coefficient) / target - 1.0).abs() < 1.0e-13);
+            }
+        }
+
+        let mut zero = [0.0, 0.0];
+        let mut rhs = [Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)];
+        householder_qr(&mut zero, 2, 1, &mut rhs).expect("zero column is unchanged");
+        assert_eq!(zero, [0.0, 0.0]);
+        assert_eq!(rhs, [Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)]);
+    }
+
+    #[test]
+    fn nonrepresentable_qr_norm_reports_input_error_instead_of_nan() {
+        let mut column = [1.5e308, 1.5e308];
+        let mut rhs = [Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)];
+        let error =
+            householder_qr(&mut column, 2, 1, &mut rhs).expect_err("norm exceeds binary64 range");
+        assert!(matches!(error, PolyfitKernelError::InvalidInput(_)));
+        assert!(column.iter().all(|value| value.is_finite()));
+        assert!(rhs.iter().all(|value| value.re.is_finite()));
+
+        let mut nonfinite = [f64::INFINITY];
+        let mut rhs = [Complex64::new(1.0, 0.0)];
+        assert!(matches!(
+            householder_qr(&mut nonfinite, 1, 1, &mut rhs),
+            Err(PolyfitKernelError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn finite_extreme_samples_keep_analytic_center_scale_and_coordinates() {
+        let maximum = f64::MAX;
+        let samples = [maximum, -maximum, -maximum, -maximum, -maximum];
+        let mean = normalization::sample_mean(&samples).expect("finite sample mean");
+        assert!((mean / maximum + 0.6).abs() < 1.0e-14);
+        let scale = compute_scale(&samples, mean).expect("finite sample spread");
+        assert!((scale / maximum - 0.8_f64.sqrt()).abs() < 1.0e-14);
+        let normalized = scaled_coordinates(&samples, mean, scale)
+            .expect("finite standardized sample locations");
+        assert!((normalized[0] - 1.6 / 0.8_f64.sqrt()).abs() < 1.0e-14);
+        for coordinate in &normalized[1..] {
+            assert!((*coordinate + 0.4 / 0.8_f64.sqrt()).abs() < 1.0e-14);
+        }
+
+        let _requested = crate::output_count::push_output_count(Some(3));
+        let fit = evaluate(
+            Value::Tensor(Tensor::new(samples.to_vec(), vec![1, 5]).unwrap()),
+            Value::Tensor(Tensor::new(vec![4.0, 0.0, 0.0, 0.0, 0.0], vec![1, 5]).unwrap()),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            &[],
+        )
+        .expect("finite extreme-scale fit");
+        let prediction = block_on(super::super::polyval::evaluate(
+            fit.coefficients(),
+            Value::Num(maximum),
+            &[
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                fit.mu(),
+            ],
+            false,
+        ))
+        .expect("finite extreme-scale evaluation");
+        assert!((scalar(prediction.value()) - 4.0).abs() < 1.0e-11);
     }
 
     #[test]

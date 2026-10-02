@@ -94,6 +94,43 @@ fn missing_statistics_rejects_before_resident_readback() {
 }
 
 #[test]
+fn malformed_host_controls_reject_before_resident_readback() {
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(Provider {
+        owner: TestAllocationOwner::new(),
+        mode: Mode::Success,
+        probes: Mutex::new(Vec::new()),
+    }));
+    let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let source = provider
+        .owner
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("resident points");
+    for (options, wants_delta, expected) in [
+        (vec![Value::Num(1.0)], true, "S input must be"),
+        (
+            vec![
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(1.0),
+            ],
+            false,
+            "mu must be a numeric vector",
+        ),
+    ] {
+        let error = futures::executor::block_on(super::super::evaluate(
+            Value::Num(1.0),
+            Value::GpuTensor(source.handle.clone()),
+            &options,
+            wants_delta,
+        ))
+        .expect_err("known-invalid host control");
+        assert!(error.message().contains(expected), "{error:?}");
+    }
+    assert!(provider.probes.lock().unwrap().is_empty());
+    assert_eq!(source.probe.retirements(), 0);
+}
+
+#[test]
 fn preparation_failure_and_alias_rejection_retire_only_owned_temporaries() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
     for mode in [
