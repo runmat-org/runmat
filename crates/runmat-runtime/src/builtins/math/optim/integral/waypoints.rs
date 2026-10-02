@@ -194,7 +194,7 @@ mod tests {
         let mut cooperation =
             QuadratureCooperation::new(super::super::QuadratureIdentity::Integral, None);
         let complex = ComplexTensor::from_complex_storage(
-            ComplexStorage::F64(vec![(1.0, 1.0), (2.0, -1.0)]),
+            ComplexStorage::F64(vec![(1.0, 1.0), (2.0, -1.0)].into()),
             vec![1, 2],
         )
         .unwrap();
