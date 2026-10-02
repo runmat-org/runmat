@@ -9,12 +9,14 @@ use runmat_runtime::builtins::math::poly::polyfit::{
 use runmat_value::{Tensor, Value};
 use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 // InProcess intentionally has no polyfit override. This fixture adds exactly
 // that hook over genuine InProcess allocations and the production pure solver.
 struct SolverProvider {
     inner: runmat_accelerate::simple_provider::InProcessProvider,
     calls: AtomicUsize,
+    override_result: Mutex<Option<runmat_accelerate_api::ProviderPolyfitResult>>,
 }
 impl AccelProvider for SolverProvider {
     fn device_id(&self) -> u32 {
@@ -52,6 +54,9 @@ impl AccelProvider for SolverProvider {
     {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(result) = self.override_result.lock().unwrap().clone() {
+                return Ok(result);
+            }
             let x = self.inner.download(x).await?;
             let y = self.inner.download(y).await?;
             let weights = match weights {
@@ -190,6 +195,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
     let provider = Box::leak(Box::new(SolverProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
         calls: AtomicUsize::new(0),
+        override_result: Mutex::new(None),
     }));
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
@@ -277,6 +283,7 @@ fn impossible_geometry_precedes_weight_values_on_all_routes_without_resident_gat
     let provider = Box::leak(Box::new(SolverProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
         calls: AtomicUsize::new(0),
+        override_result: Mutex::new(None),
     }));
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
@@ -339,6 +346,7 @@ fn invalid_host_degree_precedes_resident_integer_download() {
     let provider = Box::leak(Box::new(SolverProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
         calls: AtomicUsize::new(0),
+        override_result: Mutex::new(None),
     }));
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
@@ -404,6 +412,7 @@ fn extreme_original_basis_fits_coefficients_without_unrequested_overflowing_r() 
     let provider = Box::leak(Box::new(SolverProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
         calls: AtomicUsize::new(0),
+        override_result: Mutex::new(None),
     }));
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let x = provider
@@ -457,10 +466,87 @@ fn coefficient_only_fit_does_not_form_unrepresentable_residual_norm() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn malformed_provider_success_is_operational_and_preserves_borrowed_inputs() {
+    let provider = Box::leak(Box::new(SolverProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        calls: AtomicUsize::new(0),
+        override_result: Mutex::new(None),
+    }));
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let x = provider
+        .inner
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &[0.0, 1.0],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let y = provider
+        .inner
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &[1.0, 3.0],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let args = [
+        Value::GpuTensor(x.clone()),
+        Value::GpuTensor(y.clone()),
+        Value::Num(1.0),
+    ];
+    let base = runmat_accelerate_api::ProviderPolyfitResult {
+        coefficients: vec![2.0, 1.0],
+        r_matrix: None,
+        normr: None,
+        df: 0.0,
+        mu: [0.0, 1.0],
+    };
+    for malformed in [
+        runmat_accelerate_api::ProviderPolyfitResult {
+            coefficients: vec![f64::NAN, 1.0],
+            ..base.clone()
+        },
+        runmat_accelerate_api::ProviderPolyfitResult {
+            r_matrix: Some(vec![1.0; 4]),
+            ..base.clone()
+        },
+        runmat_accelerate_api::ProviderPolyfitResult {
+            normr: Some(f64::NAN),
+            ..base.clone()
+        },
+        runmat_accelerate_api::ProviderPolyfitResult {
+            df: 1.0,
+            ..base.clone()
+        },
+        runmat_accelerate_api::ProviderPolyfitResult {
+            mu: [f64::NAN, 1.0],
+            ..base.clone()
+        },
+    ] {
+        *provider.override_result.lock().unwrap() = Some(malformed);
+        let error =
+            futures::executor::block_on(runmat_runtime::call_builtin_async("polyfit", &args))
+                .expect_err("malformed provider success must not publish or gather");
+        assert_eq!(error.identifier(), Some("RunMat:polyfit:ProviderFailed"));
+        assert_eq!(
+            error.gpu_gather_retry(),
+            runmat_runtime::GpuGatherRetry::Never
+        );
+        assert!(
+            error.source().is_some(),
+            "typed validation cause must be retained"
+        );
+        x.allocation_lease().validate_live().unwrap();
+        y.allocation_lease().validate_live().unwrap();
+    }
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 5);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn public_weight_errors_match_host_and_retain_provider_cause_and_inputs() {
     let provider = Box::leak(Box::new(SolverProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
         calls: AtomicUsize::new(0),
+        override_result: Mutex::new(None),
     }));
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);

@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn provider_output_fault_remains_typed_and_non_retryable() {
+    let result = ProviderPolyfitResult {
+        coefficients: vec![f64::NAN, 1.0],
+        r_matrix: None,
+        normr: None,
+        df: 0.0,
+        mu: [0.0, 1.0],
+    };
+    let error = PolyfitSolution::from_provider(result, ProviderPolyfitOutputs::Coefficients, 1, 2)
+        .expect_err("nonfinite successful provider output");
+    assert_eq!(error.identifier(), Some("RunMat:polyfit:ProviderFailed"));
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    let source = std::error::Error::source(&error).expect("owned validation cause");
+    assert!(source.is::<provider_output::ProviderOutputFault>());
+
+    let valid_stats = ProviderPolyfitResult {
+        coefficients: vec![2.0, 1.0],
+        r_matrix: Some(vec![1.0, 0.0, 0.0, 1.0]),
+        normr: Some(0.0),
+        df: 0.0,
+        mu: [0.0, 1.0],
+    };
+    for result in [
+        ProviderPolyfitResult {
+            r_matrix: Some(vec![f64::NAN, 0.0, 0.0, 1.0]),
+            ..valid_stats.clone()
+        },
+        ProviderPolyfitResult {
+            normr: Some(f64::NAN),
+            ..valid_stats.clone()
+        },
+        ProviderPolyfitResult {
+            df: 1.0,
+            ..valid_stats.clone()
+        },
+        ProviderPolyfitResult {
+            mu: [0.0, -1.0],
+            ..valid_stats.clone()
+        },
+    ] {
+        let error =
+            PolyfitSolution::from_provider(result, ProviderPolyfitOutputs::Statistics, 1, 2)
+                .expect_err("malformed requested statistics");
+        assert_eq!(error.identifier(), Some("RunMat:polyfit:ProviderFailed"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(std::error::Error::source(&error)
+            .expect("owned validation cause")
+            .is::<provider_output::ProviderOutputFault>());
+    }
+}
+
+#[test]
 fn degree_parser_preserves_representable_uint64() {
     assert_eq!(
         parse_degree(&Value::Int(IntValue::U64(u64::MAX))).ok(),

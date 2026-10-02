@@ -7,8 +7,8 @@ use runmat_accelerate_api::{ProviderPolyfitOutputs, ProviderPolyfitResult};
 use runmat_builtins::POLYFIT_DESCRIPTOR;
 use runmat_builtins::{
     BuiltinErrorDescriptor, PolyfitStatField, POLYFIT_ERROR_INTERNAL,
-    POLYFIT_ERROR_INVALID_ARGUMENT, POLYFIT_ERROR_INVALID_INPUT, POLYFIT_INTEGER_WEIGHTS_EXTENSION,
-    POLYFIT_INTEGER_X_EXTENSION, POLYFIT_INTEGER_Y_EXTENSION,
+    POLYFIT_ERROR_INVALID_ARGUMENT, POLYFIT_ERROR_INVALID_INPUT, POLYFIT_ERROR_PROVIDER_FAILED,
+    POLYFIT_INTEGER_WEIGHTS_EXTENSION, POLYFIT_INTEGER_X_EXTENSION, POLYFIT_INTEGER_Y_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
@@ -54,6 +54,9 @@ use geometry::SolverGeometry;
 mod column_scale;
 #[path = "polyfit/solver.rs"]
 mod solver;
+#[path = "polyfit/provider_output.rs"]
+mod provider_output;
+use provider_output::{failure as provider_output_failure, ProviderOutputFault};
 #[cfg(test)]
 use solver::{compute_scale, householder_qr, scaled_coordinates, solve_upper, stable_l2};
 use solver::{solve_polyfit, validate_weights};
@@ -312,12 +315,12 @@ async fn try_gpu_polyfit(
             ))
         }
     };
-    if degree.checked_add(1) != Some(result.coefficients.len()) {
-        return Err(polyfit_internal_error(
-            "polyfit: provider returned incorrect coefficient count",
-        ));
-    }
-    let solution = PolyfitSolution::from_provider(result, outputs)?;
+    let solution = PolyfitSolution::from_provider(
+        result,
+        outputs,
+        degree,
+        count.expect("resident input count validated"),
+    )?;
     PolyfitEval::from_solution(solution).map(Some)
 }
 
@@ -337,31 +340,93 @@ impl PolyfitSolution {
     fn from_provider(
         result: ProviderPolyfitResult,
         outputs: ProviderPolyfitOutputs,
+        degree: usize,
+        rows: usize,
     ) -> BuiltinResult<Self> {
         let cols = result.coefficients.len();
-        if cols == 0 {
-            return Err(polyfit_internal_error(
-                "polyfit: provider returned empty coefficient vector",
+        let expected_cols = degree.checked_add(1).ok_or_else(|| {
+            provider_output_failure(ProviderOutputFault::CoefficientCount {
+                expected: usize::MAX,
+                observed: cols,
+            })
+        })?;
+        if cols != expected_cols {
+            return Err(provider_output_failure(
+                ProviderOutputFault::CoefficientCount {
+                    expected: expected_cols,
+                    observed: cols,
+                },
+            ));
+        }
+        if let Some(index) = result
+            .coefficients
+            .iter()
+            .position(|value| !value.is_finite())
+        {
+            return Err(provider_output_failure(
+                ProviderOutputFault::NonFiniteCoefficient { index },
             ));
         }
         if result.r_matrix.is_some() != outputs.wants_statistics() {
-            return Err(polyfit_internal_error(
-                "polyfit: provider returned statistics inconsistent with requested outputs",
+            return Err(provider_output_failure(
+                ProviderOutputFault::StatisticsPresence,
             ));
         }
         if result.normr.is_some() != outputs.wants_statistics() {
-            return Err(polyfit_internal_error(
-                "polyfit: provider returned residual statistics inconsistent with requested outputs",
+            return Err(provider_output_failure(
+                ProviderOutputFault::ResidualPresence,
             ));
         }
         if let Some(r) = &result.r_matrix {
-            if cols.checked_mul(cols) != Some(r.len()) {
-                return Err(polyfit_internal_error(
-                    "polyfit: provider returned malformed R matrix",
-                ));
+            let expected = cols.checked_mul(cols).ok_or_else(|| {
+                provider_output_failure(ProviderOutputFault::RLength {
+                    expected: usize::MAX,
+                    observed: r.len(),
+                })
+            })?;
+            if r.len() != expected {
+                return Err(provider_output_failure(ProviderOutputFault::RLength {
+                    expected,
+                    observed: r.len(),
+                }));
+            }
+            if let Some(index) = r.iter().position(|value| !value.is_finite()) {
+                return Err(provider_output_failure(ProviderOutputFault::NonFiniteR {
+                    index,
+                }));
             }
         }
+        if result
+            .normr
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err(provider_output_failure(
+                ProviderOutputFault::NonFiniteResidual,
+            ));
+        }
+        let expected_df = rows.saturating_sub(cols) as f64;
+        if result.df != expected_df {
+            return Err(provider_output_failure(
+                ProviderOutputFault::DegreesOfFreedom {
+                    expected: expected_df,
+                    observed: result.df,
+                },
+            ));
+        }
         let [mu_mean, mu_scale] = result.mu;
+        let valid_mu = match outputs.basis() {
+            runmat_accelerate_api::ProviderPolyfitBasis::Original => {
+                mu_mean == 0.0 && mu_scale == 1.0
+            }
+            runmat_accelerate_api::ProviderPolyfitBasis::CenteredScaled => {
+                mu_mean.is_finite() && mu_scale.is_finite() && mu_scale > 0.0
+            }
+        };
+        if !valid_mu {
+            return Err(provider_output_failure(
+                ProviderOutputFault::InvalidNormalization,
+            ));
+        }
         Ok(Self {
             coeffs: result
                 .coefficients
