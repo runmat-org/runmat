@@ -8,25 +8,24 @@ const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Convolution result.",
 }];
 
-const INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input vector/scalar.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input vector/scalar.",
-    },
-];
+const INPUT_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "First input vector/scalar.",
+};
+const INPUT_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Second input vector/scalar.",
+};
+const INPUTS: [BuiltinParamDescriptor; 2] = [INPUT_A, INPUT_B];
 const SHAPE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    INPUTS[0],
-    INPUTS[1],
+    INPUT_A,
+    INPUT_B,
     BuiltinParamDescriptor {
         name: "shape",
         ty: BuiltinParamType::StringScalar,
