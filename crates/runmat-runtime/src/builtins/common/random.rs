@@ -4,6 +4,9 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod uniform;
+pub(crate) use uniform::{generate_uniform, generate_uniform_cooperative};
+
 pub(crate) const DEFAULT_RNG_SEED: u64 = 0x9e3779b97f4a7c15;
 pub(crate) const DEFAULT_USER_SEED: u64 = 0;
 const RNG_MULTIPLIER: u64 = 6364136223846793005;
@@ -135,6 +138,20 @@ fn with_rng_state<T>(
         .lock()
         .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
     Ok(operation(&mut state))
+}
+
+fn with_rng_state_in<T>(
+    context: Option<&crate::context::RuntimeContext>,
+    label: &str,
+    operation: impl FnOnce(&mut RuntimeRng) -> T,
+) -> BuiltinResult<T> {
+    if let Some(context) = context {
+        let mut state = context.state().random.try_borrow_mut().map_err(|_| {
+            random_error(label, format!("{label}: random stream is already in use"))
+        })?;
+        return Ok(operation(&mut state));
+    }
+    with_rng_state(label, operation)
 }
 
 fn legacy_tokens() -> &'static Mutex<LegacyTokenState> {
@@ -281,14 +298,6 @@ pub fn enter_parallel_random_stream(
     Ok(ParallelRandomStreamGuard {
         context: context.clone(),
         previous,
-    })
-}
-
-pub(crate) fn generate_uniform(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        (0..len)
-            .map(|_| next_uniform_state(&mut state.state))
-            .collect()
     })
 }
 
