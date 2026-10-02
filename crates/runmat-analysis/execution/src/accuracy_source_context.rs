@@ -2,6 +2,7 @@
 //! independently of the observation catalog's own declarations and hashes.
 mod acoustic;
 mod electrical;
+pub(crate) mod fluid;
 mod magnetic;
 mod maxwell;
 mod structural;
@@ -33,6 +34,9 @@ pub fn validate_accuracy_source_context(
         return Err(AnalysisBridgeError::Identity(
             "accuracy source context differs from request",
         ));
+    }
+    if let AccuracySourceReceipt::FluidSteady(receipt) = receipt {
+        return fluid::validate(request, receipt, observations, inputs);
     }
     if let AccuracySourceReceipt::AcousticHarmonic(receipt) = receipt {
         return acoustic::validate(request, receipt, observations, inputs);

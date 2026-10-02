@@ -410,7 +410,37 @@ pub fn import_semantic_state_completion(
             "semantic-state result inventory differs from its canonical closure",
         ));
     }
-    let state = CanonicalSemanticState::from_canonical_bytes(&imported.payload())?;
+    // Import admission precedes joining output chunks or decoding the owned semantic
+    // payload. A matching response/request alone does not bound output materialization.
+    prepared.resource_plan.validate_identity()?;
+    let runmat_analysis_fea::planning::resource::FeaResourceDemand::SemanticStatePublication(
+        demand,
+    ) = &prepared.resource_plan.input.demand
+    else {
+        return Err(AnalysisBridgeError::Identity(
+            "semantic import lacks publication resource authority",
+        ));
+    };
+    if demand.request != Digest::sha256(prepared.request.canonical_bytes()?)
+        || demand.source != prepared.request.source
+        || demand.source_result != prepared.request.source_result
+        || demand.topology_digest != prepared.request.topology_digest
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "semantic import resource request differs",
+        ));
+    }
+    crate::object::validate_prepared_output_resource_facts(&imported, &demand.output)?;
+    let payload = imported.payload();
+    let materialization =
+        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(&payload)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if materialization > demand.state_materialization_resident_bytes_estimate.0 {
+        return Err(AnalysisBridgeError::Identity(
+            "semantic output actual codec profile exceeds publication admission",
+        ));
+    }
+    let state = CanonicalSemanticState::from_canonical_bytes(&payload)?;
     if output.logical_identity != state.identity.digest()
         || state.producer != prepared.request.producer
         || state.state_id != prepared.request.declaration.state_id

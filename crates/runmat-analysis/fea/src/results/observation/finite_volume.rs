@@ -9,6 +9,112 @@ use crate::{
 };
 use runmat_analysis_core::ProcedureStep;
 
+/// Borrowed original-native discretization authority. Validation remains phase-local;
+/// constructing this context never clones a topology or recovers numerical values.
+#[derive(Clone, Copy)]
+pub struct FiniteVolumeObservationSource<'a> {
+    pub layout: &'a FiniteVolumeFieldTopology,
+    pub projection: &'a AnalysisProjection,
+    pub geometry: &'a FiniteVolumeTopology,
+}
+
+pub fn finite_volume_observation_partition_source_indices(
+    plan: &ResolvedObservationPlan,
+    partition_plan: &super::ObservationPartitionPlan,
+    partition: &super::ObservationPartition,
+    source: FiniteVolumeObservationSource<'_>,
+    limits: ObservationLimits,
+) -> Result<Vec<usize>, ObservationError> {
+    let FiniteVolumeObservationSource {
+        layout,
+        projection,
+        geometry,
+    } = source;
+    remaining_limits(
+        layout,
+        projection,
+        geometry,
+        limits,
+        metadata_resident_bytes(plan)?,
+    )?;
+    super::sampled::validate_plan(plan)?;
+    let topology = ObservationTopology::from_finite_volume(layout, projection, geometry)?;
+    super::distributed::source_selection::observation_partition_source_indices(
+        plan,
+        partition_plan,
+        partition,
+        &topology,
+    )
+}
+
+pub fn prepare_finite_volume_observation_field_partition(
+    plan: &ResolvedObservationPlan,
+    partition_plan: &super::ObservationPartitionPlan,
+    partition: &super::ObservationPartition,
+    source: FiniteVolumeObservationSource<'_>,
+    field: &crate::results::field::RecoveredField,
+    limits: ObservationLimits,
+) -> Result<crate::results::field::RecoveredFieldPartitionSet, ObservationError> {
+    let FiniteVolumeObservationSource {
+        layout,
+        projection,
+        geometry,
+    } = source;
+    remaining_limits(
+        layout,
+        projection,
+        geometry,
+        limits,
+        metadata_resident_bytes(plan)?,
+    )?;
+    super::sampled::validate_plan(plan)?;
+    let topology = ObservationTopology::from_finite_volume(layout, projection, geometry)?;
+    super::distributed::source_selection::prepare_observation_field_partition(
+        plan,
+        partition_plan,
+        partition,
+        field,
+        &topology,
+    )
+}
+
+pub fn evaluate_finite_volume_observation_partition(
+    plan: &ResolvedObservationPlan,
+    partition_plan: &super::ObservationPartitionPlan,
+    partition: &super::ObservationPartition,
+    source: FiniteVolumeObservationSource<'_>,
+    fields: &crate::results::field::RecoveredFieldPartitionSet,
+    limits: ObservationLimits,
+) -> Result<super::ObservationPartitionContribution, ObservationError> {
+    let FiniteVolumeObservationSource {
+        layout,
+        projection,
+        geometry,
+    } = source;
+    remaining_limits(
+        layout,
+        projection,
+        geometry,
+        limits,
+        metadata_resident_bytes(plan)?,
+    )?;
+    super::sampled::validate_plan(plan)?;
+    let topology = ObservationTopology::from_finite_volume(layout, projection, geometry)?;
+    if topology.digest() != plan.topology_digest {
+        return Err(ObservationError::Identity(
+            "finite-volume partition topology differs from original plan",
+        ));
+    }
+    super::distributed::evaluate_observation_partition_with_attribution(
+        plan,
+        partition_plan,
+        partition,
+        fields,
+        &topology,
+        None,
+    )
+}
+
 /// Additional requested heap before any owned topology clone or source
 /// revalidation. Original inputs are borrowed, not charged as new storage.
 pub fn finite_volume_observation_topology_resident_bytes(

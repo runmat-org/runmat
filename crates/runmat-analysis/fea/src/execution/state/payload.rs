@@ -5,12 +5,16 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,
-    CanonicalMagnetostaticStatePayload, CanonicalMaxwellStatePayload, CanonicalThermalStatePayload,
+    CanonicalFluidStatePayload, CanonicalMagnetostaticStatePayload, CanonicalMaxwellStatePayload,
+    CanonicalThermalStatePayload,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum CanonicalSemanticStatePayload {
+    Fluid {
+        state: Box<CanonicalFluidStatePayload>,
+    },
     Fields {
         fields: Vec<AnalysisField>,
     },
@@ -48,6 +52,12 @@ pub enum CanonicalSemanticStatePayload {
 }
 
 impl CanonicalSemanticStatePayload {
+    pub fn fluid(&self) -> Option<&CanonicalFluidStatePayload> {
+        match self {
+            Self::Fluid { state } => Some(state),
+            _ => None,
+        }
+    }
     pub fn maxwell_harmonic(&self) -> Option<&CanonicalMaxwellStatePayload> {
         match self {
             Self::MaxwellHarmonic { state } => Some(state),

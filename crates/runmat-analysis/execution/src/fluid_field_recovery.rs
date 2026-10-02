@@ -108,7 +108,7 @@ pub fn prepare_fluid_field_recovery(
     }
     validate_inventory(&p.source_result.objects, p.output_policy.inventory_limits())?;
     authenticate_source_objects(&p.source_result, AnalysisNumericalObjectKind::SolverResult)?;
-    let source_plan = crate::decode_admitted_fluid_resource_plan(
+    let source_plan = crate::decode_admitted_resource_plan(
         &p.source_resource_plan,
         p.output_policy.inventory_limits(),
     )?;
@@ -231,7 +231,7 @@ pub fn build_prepared_fluid_field_recovery_resource_plan(
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     admission::validate_inventory_shape(inputs)?;
     if inputs.len() == 6 {
-        let carried = crate::decode_admitted_fluid_resource_plan(
+        let carried = crate::decode_admitted_resource_plan(
             unique(inputs, AnalysisNumericalObjectKind::ResourcePlan)?,
             policy.inventory_limits(),
         )?;

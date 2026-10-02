@@ -25,6 +25,8 @@ fn run(
         .program_response()
 }
 
+mod publication;
+
 #[test]
 fn native_solve_receipt_and_copy_only_all_face_recovery_survive_cold_store() {
     for nonzero in [false, true] {

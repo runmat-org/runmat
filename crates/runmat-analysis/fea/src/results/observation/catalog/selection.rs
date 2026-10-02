@@ -12,6 +12,7 @@ mod tests;
 /// selects exactly one authored source sample. This is not a partition or CPU coordinate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObservationSelectionCoordinate {
+    FiniteVolumeRecovery,
     SampledRecovery,
     StructuralRecovery,
     ThermalSample { ordinal: usize },
@@ -30,6 +31,19 @@ impl ObservationFieldCatalog {
         plan.validate_identity().map_err(invalid)?;
         let selected = self.canonical_selected_fields(plan, coordinate)?;
         match (&self.source, coordinate) {
+            (
+                ObservationFieldCatalogSource::FiniteVolumeRecovery {
+                    recovery_request,
+                    manifest,
+                    layout,
+                },
+                ObservationSelectionCoordinate::FiniteVolumeRecovery,
+            ) => ObservationFieldSelection::finite_volume_recovery(
+                recovery_request,
+                manifest,
+                layout,
+                selected,
+            ),
             (
                 ObservationFieldCatalogSource::SampledRecovery {
                     recovery_request,
@@ -77,6 +91,9 @@ impl ObservationFieldCatalog {
         selection: &ObservationFieldSelection,
     ) -> AnalysisExecutionResult<()> {
         let coordinate = match selection.source() {
+            ObservationFieldSource::FiniteVolumeRecovery { .. } => {
+                ObservationSelectionCoordinate::FiniteVolumeRecovery
+            }
             ObservationFieldSource::SampledRecovery { .. } => {
                 ObservationSelectionCoordinate::SampledRecovery
             }
@@ -111,6 +128,10 @@ impl ObservationFieldCatalog {
         coordinate: ObservationSelectionCoordinate,
     ) -> AnalysisExecutionResult<Vec<RecoveredFieldIdentity>> {
         let entries: &[_] = match (&self.source, coordinate) {
+            (
+                ObservationFieldCatalogSource::FiniteVolumeRecovery { manifest, .. },
+                ObservationSelectionCoordinate::FiniteVolumeRecovery,
+            ) => &manifest.fields,
             (
                 ObservationFieldCatalogSource::SampledRecovery { manifest, .. },
                 ObservationSelectionCoordinate::SampledRecovery,

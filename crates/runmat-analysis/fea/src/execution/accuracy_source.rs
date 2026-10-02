@@ -5,14 +5,15 @@ use crate::results::accuracy::{AccuracyEvidence, AccuracyEvidenceScope, Accuracy
 use super::{
     AccuracyEvaluationRequest, AccuracySourceKind, AcousticNumericalReceiptArtifact,
     AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity,
-    ElectricalNumericalReceiptArtifact, MagneticNumericalReceiptArtifact,
-    MaxwellNumericalReceiptArtifact, SolverResultIdentity,
+    ElectricalNumericalReceiptArtifact, FluidNumericalReceiptArtifact,
+    MagneticNumericalReceiptArtifact, MaxwellNumericalReceiptArtifact, SolverResultIdentity,
     StructuralLinearNumericalReceiptArtifact, StructuralModalResponseSpectrumNumericalReceipt,
     StructuralRandomResponseNumericalReceipt, ThermalNumericalReceiptArtifact,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccuracySourceReceipt {
+    FluidSteady(FluidNumericalReceiptArtifact),
     MaxwellHarmonic(MaxwellNumericalReceiptArtifact),
     Magnetostatic(MagneticNumericalReceiptArtifact),
     ElectricalStatic(ElectricalNumericalReceiptArtifact),
@@ -29,6 +30,9 @@ impl AccuracySourceReceipt {
         bytes: &[u8],
     ) -> AnalysisExecutionResult<Self> {
         let receipt = match kind {
+            AccuracySourceKind::FluidSteady => {
+                Self::FluidSteady(FluidNumericalReceiptArtifact::from_canonical_bytes(bytes)?)
+            }
             AccuracySourceKind::MaxwellHarmonic => Self::MaxwellHarmonic(
                 MaxwellNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
             ),
@@ -62,6 +66,7 @@ impl AccuracySourceReceipt {
 
     pub const fn kind(&self) -> AccuracySourceKind {
         match self {
+            Self::FluidSteady(_) => AccuracySourceKind::FluidSteady,
             Self::MaxwellHarmonic(_) => AccuracySourceKind::MaxwellHarmonic,
             Self::Magnetostatic(_) => AccuracySourceKind::Magnetostatic,
             Self::ElectricalStatic(_) => AccuracySourceKind::ElectricalStatic,
@@ -77,6 +82,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
         match self {
+            Self::FluidSteady(receipt) => receipt.source_workload(),
             Self::MaxwellHarmonic(receipt) => receipt.source_workload(),
             Self::Magnetostatic(receipt) => receipt.source_workload(),
             Self::ElectricalStatic(receipt) => receipt.source_workload(),
@@ -90,6 +96,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_result(&self) -> SolverResultIdentity {
         match self {
+            Self::FluidSteady(receipt) => receipt.source_result(),
             Self::MaxwellHarmonic(receipt) => receipt.source_result(),
             Self::Magnetostatic(receipt) => receipt.source_result(),
             Self::ElectricalStatic(receipt) => receipt.source_result(),
@@ -103,6 +110,7 @@ impl AccuracySourceReceipt {
 
     pub const fn identity(&self) -> super::NumericalReceiptIdentity {
         match self {
+            Self::FluidSteady(receipt) => receipt.identity(),
             Self::MaxwellHarmonic(receipt) => receipt.identity(),
             Self::Magnetostatic(receipt) => receipt.identity(),
             Self::ElectricalStatic(receipt) => receipt.identity(),
@@ -123,6 +131,13 @@ impl AccuracySourceReceipt {
             return Err(AnalysisExecutionError::Identity(
                 "accuracy receipt differs from its admitted request",
             ));
+        }
+        if let Self::FluidSteady(receipt) = self {
+            if receipt.receipt().producer != request.producer {
+                return Err(AnalysisExecutionError::Identity(
+                    "fluid accuracy original producer differs",
+                ));
+            }
         }
         if let Self::MaxwellHarmonic(receipt) = self {
             if receipt.receipt().producer != request.producer {
@@ -162,6 +177,20 @@ impl AccuracySourceReceipt {
         let mut evidence = Vec::new();
         for criterion in &request.plan.criteria {
             let measured = match self {
+                Self::FluidSteady(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound => {
+                    Some((receipt.receipt().momentum_relative.max(receipt.receipt().flux_constitutive_relative),
+                        "maximum original unrelaxed sparse momentum-action relative residual and owner-face constitutive flux relative defect; exact zero scales use absolute defects; algebraic/constitutive equation satisfaction only, not independent spatial accuracy"))
+                }
+                Self::FluidSteady(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ConservationBalance => {
+                    Some((receipt.receipt().continuity_relative.max(receipt.receipt().maximum_cell_momentum_relative).max(receipt.receipt().global_momentum_relative),
+                        "maximum original per-cell owner-oriented signed volume-flux defect normalized by sum of absolute incident fluxes, independent physical face-force/body-force cell momentum defect and global boundary/body momentum defect normalized by sums of absolute physical terms; exact zero scales use absolute defects; conservation closure only, not independent spatial accuracy"))
+                }
                 Self::MaxwellHarmonic(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic
@@ -291,6 +320,7 @@ impl AccuracySourceReceipt {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
+            Self::FluidSteady(receipt) => receipt.validate(),
             Self::MaxwellHarmonic(receipt) => receipt.validate(),
             Self::Magnetostatic(receipt) => receipt.validate(),
             Self::ElectricalStatic(receipt) => receipt.validate(),
@@ -311,3 +341,6 @@ mod electrical_tests;
 
 #[cfg(test)]
 mod magnetic_tests;
+
+#[cfg(test)]
+mod fluid_tests;

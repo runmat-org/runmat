@@ -309,3 +309,223 @@ fn tiny_heap_cap_rejects_before_original_topology_revalidation_or_clone() {
         ))
     ));
 }
+
+#[test]
+fn native_cell_fanout_preserves_exact_indices_and_matches_serial_values() {
+    use crate::results::observation::{
+        reduce_observation_partitions, ObservationExecutionPolicy, ObservationPartitionPlan,
+    };
+    use std::num::NonZeroU32;
+    let (projection, geometry, layout) = fixture();
+    let mut target = RegionTarget::new(
+        "cells",
+        EntityDimension::Volume,
+        ExpectedTopology::Cell,
+        TargetCardinality::OneOrMore,
+    );
+    target
+        .bind_resolved_entities(
+            geometry
+                .cells
+                .iter()
+                .map(|cell| cell.region.clone())
+                .collect(),
+        )
+        .unwrap();
+    let (step, definition) = step(target, false);
+    let limits = ObservationLimits::default();
+    let plan = resolve_finite_volume_observation_plan(
+        &step,
+        &layout,
+        &projection,
+        &geometry,
+        std::slice::from_ref(&definition),
+        limits,
+    )
+    .unwrap();
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(
+            "native",
+            vec![geometry.cells.len()],
+            (0..geometry.cells.len()).map(|i| i as f64 + 2.0).collect(),
+        ),
+    )
+    .unwrap();
+    let catalog = RecoveredFieldCatalog::new_for_topology(
+        layout.identity().discretization_digest(),
+        layout.entity_counts(),
+        vec![field.clone()],
+    )
+    .unwrap();
+    let serial = evaluate_finite_volume_observations(
+        &plan,
+        &layout,
+        &projection,
+        &geometry,
+        &catalog,
+        limits,
+    )
+    .unwrap()
+    .remove(0);
+    let partition_plan = ObservationPartitionPlan::derive(
+        &plan,
+        &ObservationId("native".into()),
+        ObservationExecutionPolicy::canonical(NonZeroU32::new(3).unwrap()),
+    )
+    .unwrap();
+    let mut contributions = Vec::new();
+    for partition in &partition_plan.partitions {
+        let indices = finite_volume_observation_partition_source_indices(
+            &plan,
+            &partition_plan,
+            partition,
+            FiniteVolumeObservationSource {
+                layout: &layout,
+                projection: &projection,
+                geometry: &geometry,
+            },
+            limits,
+        )
+        .unwrap();
+        let selected = prepare_finite_volume_observation_field_partition(
+            &plan,
+            &partition_plan,
+            partition,
+            FiniteVolumeObservationSource {
+                layout: &layout,
+                projection: &projection,
+                geometry: &geometry,
+            },
+            &field,
+            limits,
+        )
+        .unwrap();
+        assert_eq!(
+            selected
+                .partitions
+                .iter()
+                .flat_map(|p| p.source_indices.iter().copied())
+                .collect::<Vec<_>>(),
+            indices
+        );
+        assert!(indices.len() < geometry.cells.len());
+        let cold = crate::results::field::RecoveredFieldPartitionSet::from_canonical_bytes(
+            &selected.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        contributions.push(
+            evaluate_finite_volume_observation_partition(
+                &plan,
+                &partition_plan,
+                partition,
+                FiniteVolumeObservationSource {
+                    layout: &layout,
+                    projection: &projection,
+                    geometry: &geometry,
+                },
+                &cold,
+                limits,
+            )
+            .unwrap(),
+        );
+    }
+    let reduced = reduce_observation_partitions(&plan, &partition_plan, contributions).unwrap();
+    assert_eq!(reduced.field, serial.field);
+    let mut substituted = geometry.clone();
+    substituted.geometry_digest = runmat_execution::Digest::sha256("foreign-native-layout");
+    assert!(finite_volume_observation_partition_source_indices(
+        &plan,
+        &partition_plan,
+        &partition_plan.partitions[0],
+        FiniteVolumeObservationSource {
+            layout: &layout,
+            projection: &projection,
+            geometry: &substituted
+        },
+        limits
+    )
+    .is_err());
+}
+
+#[test]
+fn whole_model_native_velocity_and_flux_keep_global_components_and_internal_faces() {
+    let (projection, geometry, layout) = fixture();
+    assert!(geometry.faces.len() > projection.boundary_faces.len());
+    for (quantity, location, domain, shape, entities) in [
+        (
+            ObservationQuantity::FluidVelocity,
+            FieldLocation::Cell,
+            RecoveredFieldEntityDomain::VolumeElements,
+            ObservationValueShape::Vector3,
+            geometry.cells.len(),
+        ),
+        (
+            ObservationQuantity::VolumeFlowRate,
+            FieldLocation::Face,
+            RecoveredFieldEntityDomain::OrientedFaces,
+            ObservationValueShape::Scalar,
+            geometry.faces.len(),
+        ),
+    ] {
+        let mut declaration = spec("native", ObservationTarget::WholeModel);
+        declaration.quantity = quantity;
+        declaration.source_location = location;
+        declaration.output_location = location;
+        declaration.value_shape = shape.clone();
+        let components = shape.component_count().unwrap();
+        let definition = RecoveredFieldDefinition::new(
+            "native",
+            quantity,
+            location,
+            domain,
+            shape,
+            RecoveredFieldNumericRepresentation::Real,
+        )
+        .unwrap();
+        let mut authored = ProcedureStep::fluid_static("native");
+        authored.observations = vec![ObservationRequest::Field(declaration)];
+        let plan = resolve_finite_volume_observation_plan(
+            &authored,
+            &layout,
+            &projection,
+            &geometry,
+            std::slice::from_ref(&definition),
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let values = (0..entities * components)
+            .map(|i| i as f64 - 3.0)
+            .collect::<Vec<_>>();
+        let storage_shape = if components == 1 {
+            vec![entities]
+        } else {
+            vec![entities, components]
+        };
+        let field = RecoveredField::new(
+            definition,
+            RecoveredFieldSample::Final,
+            AnalysisField::host_f64("native", storage_shape, values.clone()),
+        )
+        .unwrap();
+        let catalog = RecoveredFieldCatalog::new_for_topology(
+            layout.identity().discretization_digest(),
+            layout.entity_counts(),
+            vec![field],
+        )
+        .unwrap();
+        let result = evaluate_finite_volume_observations(
+            &plan,
+            &layout,
+            &projection,
+            &geometry,
+            &catalog,
+            ObservationLimits::default(),
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(result.field.values, AnalysisFieldValues::HostF64(values));
+        assert_eq!(result.field.shape[0], entities);
+    }
+}

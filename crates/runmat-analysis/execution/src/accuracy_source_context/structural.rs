@@ -76,7 +76,8 @@ pub(super) fn validate(
             AnalysisWorkKind::AssembleStructuralRandomResponseResult,
             Kind::StructuralRandomResponseWorkload,
         ),
-        AccuracySourceKind::MaxwellHarmonic
+        AccuracySourceKind::FluidSteady
+        | AccuracySourceKind::MaxwellHarmonic
         | AccuracySourceKind::Thermal
         | AccuracySourceKind::Magnetostatic
         | AccuracySourceKind::AcousticHarmonic
@@ -170,7 +171,8 @@ pub(super) fn validate(
                 mesh.as_ref(),
             )
         }
-        AccuracySourceKind::MaxwellHarmonic
+        AccuracySourceKind::FluidSteady
+        | AccuracySourceKind::MaxwellHarmonic
         | AccuracySourceKind::Thermal
         | AccuracySourceKind::Magnetostatic
         | AccuracySourceKind::AcousticHarmonic

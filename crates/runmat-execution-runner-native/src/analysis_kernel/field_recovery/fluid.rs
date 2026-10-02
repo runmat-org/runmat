@@ -1,7 +1,7 @@
 //! Separate admitted original cell/all-face publication; no fluid solve is called.
 use super::*;
 use runmat_analysis_execution::{
-    build_prepared_fluid_field_recovery_resource_plan, decode_admitted_fluid_resource_plan,
+    build_prepared_fluid_field_recovery_resource_plan, decode_admitted_resource_plan,
     decode_fluid_recovery_source, require_fluid_recovery_source_decode_budget,
     AnalysisWorkloadInput,
 };
@@ -43,10 +43,8 @@ pub(super) fn execute(
         return Err(invalid("fluid field task immutable closure differs"));
     }
     let plan_objects = unique_input(&invocation, ResourcePlan)?;
-    let plan = decode_admitted_fluid_resource_plan(
-        plan_objects,
-        invocation.output_policy.inventory_limits(),
-    )?;
+    let plan =
+        decode_admitted_resource_plan(plan_objects, invocation.output_policy.inventory_limits())?;
     require_fluid_recovery_source_decode_budget(
         invocation.inputs,
         &plan,

@@ -1,5 +1,6 @@
 use super::*;
 use runmat_analysis_fea::execution::SemanticStatePublicationProfileSource;
+mod fluid;
 
 #[cfg(test)]
 mod magnetic_tests;
@@ -7,6 +8,14 @@ mod magnetic_tests;
 pub(super) fn execute(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    if optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::FluidSteadyWorkload,
+    )?
+    .is_some()
+    {
+        return fluid::execute(invocation);
+    }
     let publication = unique_input(
         &invocation,
         AnalysisNumericalObjectKind::StatePublicationRequest,
@@ -58,6 +67,11 @@ pub(super) fn execute(
         Ok(())
     };
     let state = match publication.source {
+        SemanticStatePublicationSource::FluidPrimaryFields => {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid state requires its original immutable closure",
+            ));
+        }
         SemanticStatePublicationSource::MaxwellNativeFields => {
             let result =
                 runmat_analysis_fea::execution::MaxwellHarmonicSolverResult::from_canonical_bytes(

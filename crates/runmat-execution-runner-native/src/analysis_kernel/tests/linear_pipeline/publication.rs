@@ -186,7 +186,9 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
         .unwrap_err();
     // Plan authentication must win over expensive source reconstruction. The stale plan
     // still accounts for the removed input, so it must fail before source decoding.
-    assert!(error.to_string().contains("accuracy resource plan differs"));
+    assert!(error
+        .to_string()
+        .contains("accuracy exact source decode profiles differ"));
     replan_accuracy(&mut missing_context);
     let missing_host = test_host_for_inputs(
         host,

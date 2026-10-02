@@ -20,7 +20,7 @@ pub(super) fn build_state_publication_plan(
         || demand.inputs.decoded_resident_bytes_admission_budget
             < demand.inputs.encoded_payload_bytes
         || demand.source_validation_workspace_bytes
-            != demand.inputs.decoded_resident_bytes_admission_budget
+            < demand.inputs.decoded_resident_bytes_admission_budget
         || demand.output.encoded_payload_bytes_upper_bound.0 != state_bytes
         || demand.output.transport_closure_bytes_upper_bound.0 < state_bytes
         || demand.output.construction_resident_bytes_admission_budget.0 < construction
@@ -42,6 +42,9 @@ pub(super) fn build_state_publication_plan(
     // digest construction. Output construction independently covers canonical encoding and
     // retained prepared chunks. Repeated digest/validation passes are sequential, not multiplied
     // by their invocation count. These are codec admission estimates, not heap measurements.
+    // Source-specific validation can require more than the generic decode envelope (for
+    // example complete FV source/layout and constitutive verification). Its authentic
+    // rederived budget must dominate, rather than equal, the shared input decode budget.
     // Source validation also remains live: response-spectrum verification clones direction
     // contributions; random-response verification clones interval contributions and creates
     // total/compensation/flat vectors plus variance/RMS reconstruction. These are linear copies

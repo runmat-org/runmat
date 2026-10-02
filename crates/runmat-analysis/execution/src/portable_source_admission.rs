@@ -1,8 +1,34 @@
 //! Shared streaming authentication of immutable numerical-object closures.
 use crate::{AnalysisBridgeError, AnalysisBridgeResult, PreparedAnalysisObjects};
 use runmat_analysis_fea::execution::AnalysisNumericalObjectKind;
+use runmat_analysis_fea::planning::resource::{FeaResourcePlan, RESOURCE_PLAN_MAX_ENCODED_BYTES};
 use runmat_execution::Digest;
-use runmat_execution_artifact::ObjectNamespace;
+use runmat_execution_artifact::{
+    object::{validate_inventory, ObjectInventoryLimits},
+    ObjectNamespace,
+};
+
+/// Authenticate and decode the bounded immutable resource plan before any numerical
+/// source join. The consuming phase still rederives its exact physical authority.
+pub fn decode_admitted_resource_plan(
+    input: &PreparedAnalysisObjects,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
+    validate_inventory(&input.objects, limits)?;
+    if input.manifest.encoded_length > RESOURCE_PLAN_MAX_ENCODED_BYTES {
+        return Err(AnalysisBridgeError::Identity(
+            "resource input exceeds canonical bound",
+        ));
+    }
+    authenticate_source_objects(input, AnalysisNumericalObjectKind::ResourcePlan)?;
+    let plan = FeaResourcePlan::from_canonical_bytes(&input.payload())?;
+    if input.manifest.logical_identity != plan.identity.digest() {
+        return Err(AnalysisBridgeError::Identity(
+            "resource input identity differs",
+        ));
+    }
+    Ok(plan)
+}
 /// Authenticate the exact owned closure without joining its payload chunks.
 /// Retained results remain ResultValue objects; original inputs remain InputValue objects.
 pub(crate) fn authenticate_source_objects(

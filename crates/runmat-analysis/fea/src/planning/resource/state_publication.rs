@@ -3,6 +3,9 @@ use super::*;
 use crate::execution::{SemanticStatePublicationRequest, StatePublicationProfiles};
 use runmat_execution::Digest;
 
+mod fluid;
+pub use fluid::build_fluid_state_publication_resource_plan;
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

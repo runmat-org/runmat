@@ -106,8 +106,20 @@ self-consistent reordered cold layouts and tiny caps. Focused fluid tests pass
 local field/observation and authored-intent evidence, not completed native lifecycle
 integration, measured RSS, process-separated restart or production qualification.
 
-Native task scheduling, shared state publication, governed observations/accuracy/usage,
-full authored runtime cutover, spatial/generated inputs, numerical restart,
+Governed native solve/copy-only recovery and complete original state publication
+now use shared host resource plans. Scheduled final observations import only
+intersecting original Cell/all-owner-face storage blocks, then run native
+partition evaluation and reduction. Complete Fluid state retains the original
+workload, mesh, canonical U/p/q result bytes and exact topology; cold validation
+checks original equations without solving again. It is not a numerical restart
+contract. The native cold-store chain verifies signed velocity, exact state,
+receipt-backed algebraic/conservation evidence and missing mandatory spatial
+evidence remaining `Indeterminate`. Requested bounds are not measured usage.
+Current shared verification covers 31 focused fluid tests, 102 observation tests,
+167 bridge tests and four native CFD tests. Production remains blocked.
+
+Measured usage, full authored cold completion/runtime cutover, spatial/generated
+inputs, numerical restart,
 transient flow, distributed/GPU execution, conservative CHT/FSI and release
 qualification remain open. The old reduced production channel fallback has not
 been removed by this slice. Runtime fluid checks pass 4/5: the existing FSI success

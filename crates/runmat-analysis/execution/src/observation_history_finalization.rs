@@ -156,6 +156,7 @@ pub fn prepare_observation_history_finalization_task(
                     frequency.canonical_bytes()?
                 }
                 AdmittedObservationWorkload::Thermal(_)
+                | AdmittedObservationWorkload::FluidSteady(_)
                 | AdmittedObservationWorkload::Magnetostatic(_)
                 | AdmittedObservationWorkload::MaxwellHarmonic(_) => {
                     return Err(invalid(
@@ -217,6 +218,7 @@ pub fn prepare_observation_history_finalization_task(
     };
     let context = match &decoded_workload {
         AdmittedObservationWorkload::Magnetostatic(_)
+        | AdmittedObservationWorkload::FluidSteady(_)
         | AdmittedObservationWorkload::MaxwellHarmonic(_) => {
             return Err(invalid(
                 "sampled electromagnetic history finalization is not admitted",

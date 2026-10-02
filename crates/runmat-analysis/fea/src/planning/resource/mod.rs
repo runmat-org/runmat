@@ -52,12 +52,16 @@ pub use result_publication::build_result_publication_resource_plan;
 mod static_profiles;
 pub use contract::SemanticStatePublicationResourceDemand;
 pub use contract::StructuralLinearPipelineResourceDemand;
+pub use state_publication::build_fluid_state_publication_resource_plan;
 pub use state_publication::build_state_publication_resource_plan;
 pub use static_profiles::{
     projected_canonical_output_resource_facts, structural_state_profiles_output_resource_facts,
 };
 mod admission;
-pub use accuracy::build_accuracy_resource_plan;
+pub use accuracy::preflight_fluid_accuracy_source;
+pub use accuracy::{
+    build_accuracy_resource_plan, build_accuracy_resource_plan_with_source_workspace,
+};
 mod assembly_sizing;
 mod buckling;
 mod connector_buffers;

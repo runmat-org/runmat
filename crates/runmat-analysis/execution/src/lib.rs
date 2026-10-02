@@ -10,6 +10,11 @@ mod callable;
 mod error;
 mod field_recovery;
 mod fluid_field_recovery;
+mod fluid_state_publication;
+pub use fluid_state_publication::{
+    build_prepared_fluid_state_publication_resource_plan, prepare_fluid_state_publication,
+    require_fluid_state_source_decode_budget, FluidStatePublicationPreparation,
+};
 mod fluid_source_admission;
 mod fluid_steady_plan;
 mod fluid_steady_result;
@@ -34,8 +39,10 @@ mod observation_history_checkpoint;
 mod observation_history_finalization;
 mod observation_history_task;
 mod observation_partition;
+pub use observation_partition::require_observation_partition_source_decode_budget;
 mod observation_source;
 mod portable_source_admission;
+pub use portable_source_admission::decode_admitted_resource_plan;
 mod portable_task_support;
 pub use fluid_field_recovery::{
     build_prepared_fluid_field_recovery_resource_plan, decode_fluid_recovery_source,
@@ -43,9 +50,7 @@ pub use fluid_field_recovery::{
     require_fluid_recovery_source_decode_budget, FluidFieldRecoveryPreparation,
     PreparedFluidFieldRecovery,
 };
-pub use fluid_source_admission::{
-    decode_admitted_fluid_resource_plan, require_fluid_source_decode_budget,
-};
+pub use fluid_source_admission::require_fluid_source_decode_budget;
 pub use fluid_steady_plan::{
     prepare_fluid_steady_inputs, rederive_fluid_steady_resource_plan, PreparedFluidSteadyInputs,
 };
@@ -56,7 +61,9 @@ pub use fluid_steady_task::{
 mod random_response_object_access;
 mod random_response_task;
 mod resource_usage;
-pub use accuracy_resource::build_prepared_accuracy_resource_plan;
+pub use accuracy_resource::{
+    build_prepared_accuracy_resource_plan, require_accuracy_source_decode_budget,
+};
 mod response;
 mod response_spectrum_object_access;
 mod response_spectrum_task;
@@ -130,9 +137,7 @@ pub use maxwell_harmonic_result::{import_maxwell_harmonic_result, ImportedMaxwel
 pub use maxwell_harmonic_task::{
     prepare_maxwell_harmonic_task, MaxwellHarmonicTaskPreparation, PreparedMaxwellHarmonicTask,
 };
-pub use maxwell_source_admission::{
-    decode_admitted_maxwell_resource_plan, require_maxwell_source_decode_budget,
-};
+pub use maxwell_source_admission::require_maxwell_source_decode_budget;
 pub use maxwell_state_profiles::maxwell_state_publication_profiles;
 mod magnetostatic_plan;
 mod magnetostatic_result;

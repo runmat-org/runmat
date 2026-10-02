@@ -89,20 +89,36 @@ where
         .iter()
         .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
         .collect::<Vec<_>>();
-    if resource_plan_inputs.len() > 1 {
-        return Err(AnalysisBridgeError::Invalid(
-            "analysis execution has more than one resource plan".into(),
-        ));
-    }
-    let resource_plan = resource_plan_inputs
-        .first()
-        .map(|input| {
-            runmat_analysis_fea::planning::resource::FeaResourcePlan::from_canonical_bytes(
-                &input.payload(),
-            )
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
-        })
-        .transpose()?;
+    let mut resource_plans = resource_plan_inputs
+        .iter()
+        .map(|input| crate::decode_admitted_resource_plan(input, limits))
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    // A publication may carry immutable upstream plans as original source authority.
+    // Only one plan may govern this task's complete output inventory. Workers still
+    // validate each source plan and the phase-specific exact immutable closure.
+    let resource_plan = if resource_plans.len() <= 1 {
+        resource_plans.pop()
+    } else {
+        let applicable = resource_plans
+            .iter()
+            .enumerate()
+            .filter(|(_, plan)| {
+                plan.input.demand.governs_prepared_outputs()
+                    && host
+                        .workload
+                        .outputs
+                        .iter()
+                        .all(|kind| plan.input.demand.output_facts(*kind).is_some())
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let [index] = applicable.as_slice() else {
+            return Err(AnalysisBridgeError::Identity(
+                "analysis task requires exactly one output-governing resource plan",
+            ));
+        };
+        Some(resource_plans.swap_remove(*index))
+    };
 
     let kernel_outputs = kernel.execute(AnalysisKernelInvocation {
         output_policy,

@@ -4,7 +4,7 @@ use super::{
     AnalysisKernelOutput,
 };
 use runmat_analysis_execution::{
-    decode_admitted_maxwell_resource_plan, prepare_analysis_objects,
+    decode_admitted_resource_plan, prepare_analysis_objects,
     rederive_maxwell_harmonic_resource_plan, require_maxwell_source_decode_budget,
     AnalysisWorkloadInput,
 };
@@ -58,10 +58,8 @@ pub(super) fn execute(
         ));
     }
     // Authenticate and decode only the bounded plan first, then admit original source bytes.
-    let plan = decode_admitted_maxwell_resource_plan(
-        resource_input,
-        invocation.output_policy.inventory_limits(),
-    )?;
+    let plan =
+        decode_admitted_resource_plan(resource_input, invocation.output_policy.inventory_limits())?;
     require_maxwell_source_decode_budget(
         invocation.inputs,
         &plan,

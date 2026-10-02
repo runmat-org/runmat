@@ -49,6 +49,12 @@ pub enum ObservationPublishedSource {
         fields: ImportedRecoveredFields,
         sampling: runmat_analysis_fea::results::field::SampledVolumeFieldTopology,
     },
+    FiniteVolumeRecovery {
+        recovery_request: FieldRecoveryRequest,
+        fields: ImportedRecoveredFields,
+        layout: runmat_analysis_fea::results::field::FiniteVolumeFieldTopology,
+        resource_plan: PreparedAnalysisObjects,
+    },
     Thermal {
         manifest: ThermalSolverResultManifest,
         output: AnalysisOutputRoot,
@@ -60,20 +66,24 @@ pub enum ObservationPublishedSource {
 impl ObservationPublishedSource {
     pub(crate) fn output(&self) -> &AnalysisOutputRoot {
         match self {
-            Self::Structural { fields, .. } | Self::SampledRecovery { fields, .. } => {
-                &fields.output
-            }
+            Self::Structural { fields, .. }
+            | Self::SampledRecovery { fields, .. }
+            | Self::FiniteVolumeRecovery { fields, .. } => &fields.output,
             Self::Thermal { output, .. } => output,
         }
     }
     pub(crate) fn access<'a>(&'a self, host: &'a AnalysisHostWorkload) -> &'a ArtifactAccess {
         match self {
-            Self::Structural { .. } | Self::SampledRecovery { .. } => &host.artifact_access,
+            Self::Structural { .. }
+            | Self::SampledRecovery { .. }
+            | Self::FiniteVolumeRecovery { .. } => &host.artifact_access,
             Self::Thermal { access, .. } => access,
         }
     }
 }
 
+#[path = "observation_finite_volume.rs"]
+mod finite_volume;
 #[path = "observation_sampled.rs"]
 mod sampled;
 #[path = "observation_thermal.rs"]
@@ -100,6 +110,18 @@ pub(crate) fn admit_observation(
     preparation: &ObservationPreparation,
 ) -> AnalysisBridgeResult<AdmittedObservation> {
     match &preparation.source {
+        ObservationPublishedSource::FiniteVolumeRecovery {
+            recovery_request,
+            fields,
+            layout,
+            resource_plan,
+        } => finite_volume::admit_finite_volume(
+            preparation,
+            recovery_request,
+            fields,
+            layout,
+            resource_plan,
+        ),
         ObservationPublishedSource::Structural {
             recovery_request,
             fields,
@@ -184,6 +206,7 @@ fn admit_recovery_source(
     let workload = preparation.source_workload.decode()?;
     match (&workload, source_request.source) {
         (AdmittedObservationWorkload::Linear(_), FieldRecoverySource::SolverResult(_))
+        | (AdmittedObservationWorkload::FluidSteady(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::Magnetostatic(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::MaxwellHarmonic(_), FieldRecoverySource::SolverResult(_))
         | (

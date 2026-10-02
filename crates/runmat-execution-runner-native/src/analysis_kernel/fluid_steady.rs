@@ -4,8 +4,8 @@ use super::{
     AnalysisKernelOutput,
 };
 use runmat_analysis_execution::{
-    decode_admitted_fluid_resource_plan, prepare_analysis_objects,
-    rederive_fluid_steady_resource_plan, require_fluid_source_decode_budget, AnalysisWorkloadInput,
+    decode_admitted_resource_plan, prepare_analysis_objects, rederive_fluid_steady_resource_plan,
+    require_fluid_source_decode_budget, AnalysisWorkloadInput,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ExecutionPlanIdentity,
@@ -54,10 +54,8 @@ pub(super) fn execute(
         ));
     }
     // Bounded authenticated plan first; original source join/decode follows admission.
-    let plan = decode_admitted_fluid_resource_plan(
-        plan_objects,
-        invocation.output_policy.inventory_limits(),
-    )?;
+    let plan =
+        decode_admitted_resource_plan(plan_objects, invocation.output_policy.inventory_limits())?;
     require_fluid_source_decode_budget(
         invocation.inputs,
         &plan,

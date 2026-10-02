@@ -19,6 +19,7 @@ use crate::pipeline::{
 
 mod acoustic;
 mod electrical;
+mod fluid;
 mod magnetic;
 mod maxwell;
 #[cfg(test)]
@@ -29,6 +30,11 @@ mod thermal;
 /// complete result on the driver solely to obtain this projection. Thermal requires metadata
 /// only; no field partitions are consumed.
 pub enum SemanticStatePublicationProfileSource<'a> {
+    FluidPrimaryFields {
+        workload: &'a crate::execution::FluidSteadyWorkload,
+        mesh: &'a runmat_meshing_core::SolverMeshArtifact,
+        result: &'a crate::execution::FluidSteadySolverResult,
+    },
     StructuralPrimaryFields(&'a [AnalysisField]),
     StructuralLinearization(&'a StructuralLinearizationArtifact),
     ModalBasis(&'a ModalBasisArtifact),
@@ -50,6 +56,14 @@ impl SemanticStatePublicationRequest {
     ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
         self.validate()?;
         match (self.source, source) {
+            (
+                SemanticStatePublicationSource::FluidPrimaryFields,
+                SemanticStatePublicationProfileSource::FluidPrimaryFields {
+                    workload,
+                    mesh,
+                    result,
+                },
+            ) => fluid::profile(self, workload, mesh, result),
             (
                 SemanticStatePublicationSource::MaxwellNativeFields,
                 SemanticStatePublicationProfileSource::MaxwellNativeFields(result),

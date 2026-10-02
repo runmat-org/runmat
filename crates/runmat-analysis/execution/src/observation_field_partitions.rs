@@ -138,12 +138,49 @@ mod tests {
     }
 
     fn check_large_partition_import(source_kind: AnalysisNumericalObjectKind) {
-        let entity_count = RECOVERED_FIELD_PARTITION_ENTITY_COUNT * 2 + 17;
-        let definition = RecoveredFieldDefinition::new(
-            "large.temperature",
+        check_native_partition_import(
+            source_kind,
             ObservationQuantity::Temperature,
             FieldLocation::Node,
             RecoveredFieldEntityDomain::Nodes,
+        );
+    }
+
+    #[test]
+    fn native_cells_and_all_oriented_faces_read_only_intersecting_blocks() {
+        for (quantity, location, domain) in [
+            (
+                ObservationQuantity::FluidPressure,
+                FieldLocation::Cell,
+                RecoveredFieldEntityDomain::VolumeElements,
+            ),
+            (
+                ObservationQuantity::VolumeFlowRate,
+                FieldLocation::Face,
+                RecoveredFieldEntityDomain::OrientedFaces,
+            ),
+        ] {
+            check_native_partition_import(
+                AnalysisNumericalObjectKind::Field,
+                quantity,
+                location,
+                domain,
+            );
+        }
+    }
+
+    fn check_native_partition_import(
+        source_kind: AnalysisNumericalObjectKind,
+        quantity: ObservationQuantity,
+        location: FieldLocation,
+        domain: RecoveredFieldEntityDomain,
+    ) {
+        let entity_count = RECOVERED_FIELD_PARTITION_ENTITY_COUNT * 2 + 17;
+        let definition = RecoveredFieldDefinition::new(
+            "large.temperature",
+            quantity,
+            location,
+            domain,
             ObservationValueShape::Scalar,
             RecoveredFieldNumericRepresentation::Real,
         )

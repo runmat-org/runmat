@@ -39,6 +39,60 @@ use super::observation_field_partitions::{
     import_required_field_partitions, RequiredFieldPartitionImport,
 };
 
+/// Authenticate and profile an observation partition's immutable input closure before
+/// decoding typed source/catalog/field values. The worker still rederives the exact plan.
+pub fn require_observation_partition_source_decode_budget(
+    inputs: &[PreparedAnalysisObjects],
+    plan: &FeaResourcePlan,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<()> {
+    use runmat_analysis_fea::planning::resource::{FeaResourceDemand, FeaResourcePhase};
+    plan.validate_identity()?;
+    let FeaResourceDemand::StructuralObservationPartition(demand) = &plan.input.demand else {
+        return Err(AnalysisBridgeError::Identity(
+            "observation admission requires partition reservation",
+        ));
+    };
+    let mut encoded = 0_u64;
+    for input in inputs {
+        runmat_execution_artifact::object::validate_inventory(&input.objects, limits)?;
+        crate::portable_source_admission::authenticate_source_objects(input, input.manifest.kind)?;
+        if input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan {
+            if crate::decode_admitted_resource_plan(input, limits)? != *plan {
+                return Err(AnalysisBridgeError::Identity(
+                    "observation carried resource plan differs",
+                ));
+            }
+        } else {
+            encoded = encoded.checked_add(input.manifest.encoded_length).ok_or(
+                AnalysisBridgeError::Identity("observation source wire overflow"),
+            )?;
+        }
+    }
+    let requests = inputs
+        .iter()
+        .filter(|i| {
+            i.manifest.kind == AnalysisNumericalObjectKind::ObservationPartitionEvaluationRequest
+        })
+        .collect::<Vec<_>>();
+    if requests.len() != 1
+        || !matches!(plan.input.phase, FeaResourcePhase::StructuralObservationPartition(id) if id.digest() == requests[0].manifest.logical_identity)
+        || encoded != demand.inputs.encoded_payload_bytes.0
+        || encoded > demand.inputs.decoded_resident_bytes_admission_budget.0
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "observation request or raw decode budget differs",
+        ));
+    }
+    let actual = crate::prepared_input_resource_facts_without_resource_plan(inputs)?;
+    if actual != demand.inputs {
+        return Err(AnalysisBridgeError::Identity(
+            "observation actual decode profile differs",
+        ));
+    }
+    Ok(())
+}
+
 pub struct PreparedObservationPartition {
     pub source_request: ObservationEvaluationRequest,
     pub request: ObservationPartitionEvaluationRequest,
@@ -160,7 +214,19 @@ pub fn prepare_observation_fanout(
                 }
                 _ => None,
             };
-            let required_indices = if let Some(sampling) = sampled {
+            let required_indices = if let crate::ObservationPublishedSource::FiniteVolumeRecovery { layout, .. } = &preparation.source {
+                let super::observation_source::AdmittedObservationWorkload::FluidSteady(fluid) = &admitted.workload else {
+                    return Err(AnalysisBridgeError::Identity("finite-volume original workload absent"));
+                };
+                let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity("finite-volume observation mesh absent"))?;
+                let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
+                    .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
+                let geometry = runmat_analysis_fea::topology::FiniteVolumeTopology::derive(&projection, fluid.geometry_policy)
+                    .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
+                runmat_analysis_fea::results::observation::finite_volume_observation_partition_source_indices(
+                    &admitted.request.plan, &plan, partition,
+                    runmat_analysis_fea::results::observation::FiniteVolumeObservationSource { layout, projection: &projection, geometry: &geometry }, preparation.limits)
+            } else if let Some(sampling) = sampled {
                 let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
                     "sampled observation mesh absent",
                 ))?;

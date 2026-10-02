@@ -61,6 +61,7 @@ pub fn prepare_accuracy(
 ) -> AnalysisBridgeResult<PreparedAccuracy> {
     preparation.solve_host.validate()?;
     let expected_work_kind = match preparation.source_kind {
+        AccuracySourceKind::FluidSteady => AnalysisWorkKind::SolveFluidSteady,
         AccuracySourceKind::ElectricalStatic => AnalysisWorkKind::SolveElectricalStatic,
         AccuracySourceKind::Magnetostatic => AnalysisWorkKind::SolveMagnetostatic,
         AccuracySourceKind::MaxwellHarmonic => AnalysisWorkKind::SolveMaxwellHarmonic,
@@ -90,6 +91,11 @@ pub fn prepare_accuracy(
             "accuracy procedure step differs from its solver workload",
         ));
     }
+    runmat_execution_artifact::object::validate_inventory(
+        &preparation.source_numerical_receipt.objects,
+        preparation.inventory_limits,
+    )?;
+    crate::accuracy_resource::authenticate_accuracy_objects(&preparation.source_numerical_receipt)?;
     let numerical_receipt = AccuracySourceReceipt::from_canonical_bytes(
         preparation.source_kind,
         &preparation.source_numerical_receipt.payload(),
@@ -126,6 +132,7 @@ pub fn prepare_accuracy(
     if !matches!(
         preparation.source_kind,
         AccuracySourceKind::Thermal
+            | AccuracySourceKind::FluidSteady
             | AccuracySourceKind::AcousticHarmonic
             | AccuracySourceKind::ElectricalStatic
             | AccuracySourceKind::Magnetostatic
@@ -249,6 +256,23 @@ pub fn prepare_accuracy(
 
 fn receipt_matches_solve(receipt: &AccuracySourceReceipt, host: &AnalysisHostWorkload) -> bool {
     match receipt {
+        AccuracySourceReceipt::FluidSteady(fluid) => {
+            let mut workloads = host
+                .workload
+                .inputs
+                .iter()
+                .filter(|input| input.kind == AnalysisNumericalObjectKind::FluidSteadyWorkload);
+            let mut meshes = host
+                .workload
+                .inputs
+                .iter()
+                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
+            matches!(workloads.next(),Some(input) if input.logical_identity==fluid.source_workload().digest())
+                && workloads.next().is_none()
+                && matches!(meshes.next(),Some(input) if input.logical_identity==fluid.receipt().mesh_digest)
+                && meshes.next().is_none()
+                && fluid.receipt().producer == host.workload.step
+        }
         AccuracySourceReceipt::MaxwellHarmonic(maxwell) => {
             let mut workloads =
                 host.workload.inputs.iter().filter(|input| {
@@ -365,8 +389,110 @@ pub fn import_accuracy(
             "accuracy result inventory differs from its canonical closure",
         ));
     }
+    if prepared.request.source_kind == AccuracySourceKind::FluidSteady {
+        crate::require_accuracy_source_decode_budget(
+            &prepared.inputs,
+            &prepared.resource_plan,
+            limits,
+        )?;
+        let runmat_analysis_fea::planning::resource::FeaResourceDemand::AccuracyEvaluation(demand) =
+            &prepared.resource_plan.input.demand
+        else {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid accuracy output resource family",
+            ));
+        };
+        if imported.manifest.encoded_length > demand.output.encoded_payload_bytes_upper_bound.0 {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid accuracy output exceeds admitted wire bound",
+            ));
+        }
+        let payload = imported.payload();
+        let resident =
+            runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+                &payload,
+            )
+            .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
+        if resident > demand.output.construction_resident_bytes_admission_budget.0 {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid accuracy output exceeds admitted decode bound",
+            ));
+        }
+    }
     let artifact = AccuracyArtifact::from_canonical_bytes(&imported.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if prepared.request.source_kind == AccuracySourceKind::FluidSteady {
+        crate::require_accuracy_source_decode_budget(
+            &prepared.inputs,
+            &prepared.resource_plan,
+            limits,
+        )?;
+        let receipt_objects = prepared
+            .inputs
+            .iter()
+            .filter(|i| i.manifest.kind == AnalysisNumericalObjectKind::NumericalReceipt)
+            .collect::<Vec<_>>();
+        let [receipt_objects] = receipt_objects.as_slice() else {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid accuracy original receipt closure",
+            ));
+        };
+        let receipt = AccuracySourceReceipt::from_canonical_bytes(
+            AccuracySourceKind::FluidSteady,
+            &receipt_objects.payload(),
+        )?;
+        if receipt.identity().digest() != receipt_objects.manifest.logical_identity {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid accuracy receipt logical identity",
+            ));
+        }
+        let catalogs = prepared
+            .inputs
+            .iter()
+            .filter(|i| i.manifest.kind == AnalysisNumericalObjectKind::ObservationCatalog)
+            .collect::<Vec<_>>();
+        let catalog = match catalogs.as_slice() {
+            [] => None,
+            [c] => Some(
+                ObservationPublicationCatalog::from_canonical_bytes(&c.payload())
+                    .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?,
+            ),
+            _ => {
+                return Err(AnalysisBridgeError::Identity(
+                    "fluid accuracy original catalog closure",
+                ))
+            }
+        };
+        let original = prepared
+            .inputs
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i.manifest.kind,
+                    AnalysisNumericalObjectKind::FluidSteadyWorkload
+                        | AnalysisNumericalObjectKind::Mesh
+                        | AnalysisNumericalObjectKind::SolverResult
+                )
+            })
+            .collect::<Vec<_>>();
+        crate::validate_accuracy_source_context(
+            &prepared.request,
+            &receipt,
+            catalog.as_ref(),
+            &original,
+        )?;
+        if crate::build_prepared_accuracy_resource_plan(
+            &prepared.request,
+            &receipt,
+            &prepared.inputs,
+        )? != prepared.resource_plan
+            || artifact.evidence() != receipt.evidence(&prepared.request)?.as_slice()
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid accuracy differs from original source-derived plan/evidence",
+            ));
+        }
+    }
     let expected_evaluation = evaluate_accuracy(&prepared.request.plan, artifact.evidence())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let expected_gate = publication_gate(

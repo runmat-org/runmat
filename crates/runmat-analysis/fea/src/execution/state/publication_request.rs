@@ -18,6 +18,7 @@ pub struct SemanticStatePublicationRequest {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticStatePublicationSource {
+    FluidPrimaryFields,
     StructuralPrimaryFields,
     ThermalPrimaryField,
     AcousticNativeFields,
@@ -58,6 +59,9 @@ impl SemanticStatePublicationRequest {
             || !matches!(
                 (self.source, self.declaration.kind),
                 (
+                    SemanticStatePublicationSource::FluidPrimaryFields,
+                    StateKind::Fluid
+                ) | (
                     SemanticStatePublicationSource::StructuralPrimaryFields,
                     StateKind::StructuralPrimary
                 ) | (

@@ -21,9 +21,14 @@ mod resource_profile;
 pub use resource_profile::SemanticStatePublicationProfileSource;
 mod acoustic;
 mod electrical;
+mod fluid;
 mod magnetic;
 mod maxwell;
 pub use electrical::CanonicalElectricalStaticStatePayload;
+pub use fluid::{
+    fluid_state_publication_profiles, fluid_state_publication_requests,
+    fluid_state_publication_workspace_bytes, CanonicalFluidStatePayload,
+};
 pub use magnetic::CanonicalMagnetostaticStatePayload;
 pub use maxwell::CanonicalMaxwellStatePayload;
 mod payload;
@@ -113,6 +118,7 @@ impl CanonicalSemanticState {
                 if matches!(
                     self.kind,
                     StateKind::Thermal
+                        | StateKind::Fluid
                         | StateKind::ElectromagneticStatic
                         | StateKind::ElectromagneticComplex
                         | StateKind::AcousticComplex
@@ -136,6 +142,29 @@ impl CanonicalSemanticState {
                     ));
                 }
                 state.validate()?;
+            }
+            CanonicalSemanticStatePayload::Fluid { state } => {
+                if self.kind != StateKind::Fluid || self.completeness != StateCompleteness::Complete
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "fluid semantic payload requires complete fluid state".into(),
+                    ));
+                }
+                state.validate_for(self.topology_digest, self.source_result, self.producer)?;
+                if !state.workload.model.sequence.steps[0]
+                    .state_outputs
+                    .iter()
+                    .any(|d| {
+                        d.state_id == self.state_id
+                            && d.kind == self.kind
+                            && d.completeness == self.completeness
+                            && d.persistence == self.persistence
+                    })
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "fluid state declaration differs from original authored authority".into(),
+                    ));
+                }
             }
             CanonicalSemanticStatePayload::Acoustic { state } => {
                 if self.kind != StateKind::AcousticComplex

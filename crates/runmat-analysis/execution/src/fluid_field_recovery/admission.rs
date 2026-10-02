@@ -49,7 +49,7 @@ pub fn require_fluid_recovery_source_decode_budget(
         validate_inventory(&input.objects, limits)?;
         authenticate_source_objects(input, input.manifest.kind)?;
         if input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan {
-            if crate::decode_admitted_fluid_resource_plan(input, limits)? != *plan {
+            if crate::decode_admitted_resource_plan(input, limits)? != *plan {
                 return Err(invalid("fluid recovery carried resource plan differs"));
             }
         } else {

@@ -247,8 +247,10 @@ pub use solve::{
     StructuralLinearStateInput, StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 pub use state::{
-    AcousticPhasorConvention, BoundThermalStateTransfer, CanonicalAcousticStatePayload,
-    CanonicalElectricalStaticStatePayload, CanonicalMaxwellStatePayload, CanonicalSemanticState,
+    fluid_state_publication_profiles, fluid_state_publication_requests,
+    fluid_state_publication_workspace_bytes, AcousticPhasorConvention, BoundThermalStateTransfer,
+    CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,
+    CanonicalFluidStatePayload, CanonicalMaxwellStatePayload, CanonicalSemanticState,
     CanonicalSemanticStateInput, CanonicalSemanticStatePayload, CanonicalStateTransition,
     CanonicalStateTransitionInput, SemanticStatePublicationProfileSource,
     SemanticStatePublicationRequest, SemanticStatePublicationSource, StatePublicationProfileEntry,
