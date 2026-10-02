@@ -51,7 +51,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample { id: "numeric", title: "Classify two numeric observations",
             program: "training = [0; 0.5; 2; 2.5]; group = [1; 1; 2; 2]; [class,err,posterior] = classify([0.2; 2.2], training, group); disp(class); disp(err);",
-            display_output: Some("The predicted labels are 1 and 2; the training error is zero."),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -59,7 +59,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample { id: "text-prior", title: "Use text labels and empirical priors",
             program: "group = [\"low\"; \"low\"; \"high\"; \"high\"]; class = classify([0.1; 3.2], [0; 0.4; 3; 3.4], group, 'quadratic', 'empirical'); disp(class);",
-            display_output: Some("The class result contains low and high string labels."),
+            display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
