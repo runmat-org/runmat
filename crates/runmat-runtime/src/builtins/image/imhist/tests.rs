@@ -1,11 +1,13 @@
 use super::*;
 use crate::builtins::common::{gpu_helpers, test_support};
+use crate::context::host_presentation::tests::Witness as PresentationWitness;
 use futures::executor::block_on;
 use runmat_value::{IntegerStorage, NumericDType};
+use std::rc::Rc;
 
 fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
     let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
-    block_on(imhist_builtin(image, rest)).expect("imhist")
+    block_on(imhist_builtin(None, image, rest)).expect("imhist")
 }
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>, dtype: NumericDType) -> Tensor {
@@ -233,7 +235,7 @@ fn bin_count_parser_rejects_unrepresentable_double_before_casting() {
 #[test]
 fn rejects_out_of_range_floating_grayscale_values() {
     let image = tensor(vec![0.0, 35.0, 220.0, 255.0], vec![2, 2], NumericDType::F64);
-    let err = block_on(imhist_builtin(Value::Tensor(image), vec![])).unwrap_err();
+    let err = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:imhist:InvalidArgument"));
     assert!(err.message().contains("normalized to [0, 1]"));
 }
@@ -243,6 +245,7 @@ fn rejects_nan_indexed_image_values() {
     let image = tensor(vec![1.0, f64::NAN], vec![1, 2], NumericDType::F64);
     let map = tensor(vec![0.0; 6], vec![2, 3], NumericDType::F64);
     let err = block_on(imhist_builtin(
+        None,
         Value::Tensor(image),
         vec![Value::Tensor(map)],
     ))
@@ -256,6 +259,7 @@ fn rejects_colormap_values_outside_unit_range() {
     let image = tensor(vec![1.0], vec![1, 1], NumericDType::F64);
     let map = tensor(vec![1.5, 0.0, 0.0], vec![1, 3], NumericDType::F64);
     let err = block_on(imhist_builtin(
+        None,
         Value::Tensor(image),
         vec![Value::Tensor(map)],
     ))
@@ -269,7 +273,7 @@ fn rejects_more_than_two_outputs() {
     let image = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
     let err = {
         let _guard = crate::output_count::push_output_count(Some(3));
-        block_on(imhist_builtin(Value::Tensor(image), vec![])).unwrap_err()
+        block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap_err()
     };
     assert_eq!(err.identifier(), Some("RunMat:imhist:TooManyOutputs"));
 }
@@ -279,17 +283,23 @@ fn output_and_arity_rejection_precede_image_materialization() {
     let wide = Value::Int(IntValue::U64(u64::MAX));
     let excess = {
         let _outputs = crate::output_count::push_output_count(Some(3));
-        block_on(imhist_builtin(wide.clone(), vec![])).unwrap_err()
+        block_on(imhist_builtin(None, wide.clone(), vec![])).unwrap_err()
     };
     assert_eq!(excess.identifier(), Some("RunMat:imhist:TooManyOutputs"));
-    let arity = block_on(imhist_builtin(wide, vec![Value::Num(2.0), Value::Num(3.0)])).unwrap_err();
+    let arity = block_on(imhist_builtin(
+        None,
+        wide,
+        vec![Value::Num(2.0), Value::Num(3.0)],
+    ))
+    .unwrap_err();
     assert_eq!(arity.identifier(), Some("RunMat:imhist:InvalidArgument"));
 }
 
 #[test]
 fn accepts_n_dimensional_grayscale_input_including_three_plane_shape() {
     let image = tensor(vec![0.0; 12], vec![2, 2, 3], NumericDType::F64);
-    let Value::Tensor(counts) = block_on(imhist_builtin(Value::Tensor(image), vec![])).unwrap()
+    let Value::Tensor(counts) =
+        block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap()
     else {
         panic!("expected counts tensor");
     };
@@ -308,8 +318,12 @@ fn resident_programmatic_outputs_are_deferred_unique_and_owner_preserving() {
             .expect("publish provenance view");
         let result = {
             let _outputs = crate::output_count::push_output_count(Some(2));
-            block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
-                .expect("resident histogram")
+            block_on(imhist_builtin(
+                None,
+                Value::GpuTensor(source.clone()),
+                vec![],
+            ))
+            .expect("resident histogram")
         };
         let Value::OutputList(outputs) = result else {
             panic!("expected two outputs");
@@ -345,11 +359,68 @@ fn unpolled_resident_histogram_future_leaves_caller_lease_live() {
     test_support::with_test_provider(|provider| {
         let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
         let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-        let pending = imhist_builtin(Value::GpuTensor(source.clone()), vec![]);
+        let pending = imhist_builtin(None, Value::GpuTensor(source.clone()), vec![]);
         drop(pending);
         assert!(source.allocation_lease().validate_live().is_ok());
         let gathered = test_support::gather(Value::GpuTensor(source)).expect("caller remains live");
         assert_eq!(gathered.materialize_f64(), input.materialize_f64());
+    });
+}
+
+#[test]
+fn selected_host_histogram_reports_completed_owner_upload_once() {
+    test_support::with_test_provider(|provider| {
+        let witness = Rc::new(PresentationWitness::default());
+        let runtime = witness.context();
+        let input = tensor(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2], NumericDType::F64);
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+        let result = {
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            block_on(imhist_builtin(
+                Some(runtime),
+                Value::GpuTensor(source.clone()),
+                vec![],
+            ))
+            .expect("selected histogram")
+        };
+        let Value::OutputList(outputs) = result else {
+            panic!("two outputs")
+        };
+        assert!(matches!(
+            outputs.as_slice(),
+            [Value::GpuTensor(_), Value::GpuTensor(_)]
+        ));
+        witness.drain();
+        assert_eq!(witness.selections(), 1);
+        assert_eq!(witness.feedback().len(), 1);
+        assert!(source.allocation_lease().validate_live().is_ok());
+    });
+}
+
+#[test]
+fn selected_histogram_unpolled_and_statement_forms_do_not_probe() {
+    test_support::with_test_provider(|provider| {
+        let witness = Rc::new(PresentationWitness::default());
+        let runtime = witness.context();
+        let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F64);
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
+        drop(imhist_builtin(
+            Some(runtime.clone()),
+            Value::GpuTensor(source.clone()),
+            vec![],
+        ));
+        assert_eq!(witness.selections(), 0);
+        let _requested = crate::output_context::push_output_count(0);
+        let counts = block_on(imhist_builtin(
+            Some(runtime),
+            Value::GpuTensor(source.clone()),
+            vec![],
+        ))
+        .expect("statement histogram");
+        assert!(matches!(counts, Value::Tensor(_)));
+        assert_eq!(witness.selections(), 0);
+        assert!(witness.feedback().is_empty());
+        assert!(source.allocation_lease().validate_live().is_ok());
     });
 }
 
@@ -363,8 +434,12 @@ fn resident_statement_form_returns_host_counts_without_plotting_or_publication()
             .expect("publish provenance view");
         let result = {
             let _requested = crate::output_context::push_output_count(0);
-            block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
-                .expect("resident statement histogram")
+            block_on(imhist_builtin(
+                None,
+                Value::GpuTensor(source.clone()),
+                vec![],
+            ))
+            .expect("resident statement histogram")
         };
         let Value::Tensor(counts) = result else {
             panic!("gpuArray statement form must return host counts in ans");
@@ -385,7 +460,7 @@ fn explicit_resident_input_preserves_unsupported_typed_upload_error() {
         let source = source
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("publish provenance view");
-        let err = block_on(imhist_builtin(Value::GpuTensor(source), vec![]))
+        let err = block_on(imhist_builtin(None, Value::GpuTensor(source), vec![]))
             .expect_err("double output cannot silently become host output");
         assert!(
             err.message().contains("failed to restore GPU result")
@@ -410,8 +485,12 @@ fn automatic_f32_resident_outputs_fall_back_to_host_without_publication() {
         runmat_accelerate_api::mark_residency(&source);
         let result = {
             let _outputs = crate::output_count::push_output_count(Some(2));
-            block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
-                .expect("automatic precision mismatch falls back")
+            block_on(imhist_builtin(
+                None,
+                Value::GpuTensor(source.clone()),
+                vec![],
+            ))
+            .expect("automatic precision mismatch falls back")
         };
         let Value::OutputList(outputs) = result else {
             panic!("expected two outputs");
@@ -434,6 +513,7 @@ fn indexed_resident_image_rejects_before_download() {
             .expect("publish provenance view");
         let map = tensor(vec![0.0; 6], vec![2, 3], NumericDType::F64);
         let err = block_on(imhist_builtin(
+            None,
             Value::GpuTensor(source.clone()),
             vec![Value::Tensor(map)],
         ))
@@ -476,7 +556,7 @@ fn statement_form_renders_bar_chart_without_value() {
     let _ = clear_figure(None);
     let _requested = crate::output_context::push_output_count(0);
     let image = tensor(vec![0.0, 1.0, 1.0, 2.0], vec![2, 2], NumericDType::U8);
-    let out = block_on(imhist_builtin(Value::Tensor(image), vec![])).unwrap();
+    let out = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap();
     assert_eq!(out, Value::OutputList(Vec::new()));
     if let Some(fig) = clone_figure(current_figure_handle()) {
         if let Some(plot) = fig.plots().next() {
@@ -490,6 +570,6 @@ fn statement_form_renders_bar_chart_without_value() {
 fn statement_form_noops_without_plot_core() {
     let _requested = crate::output_context::push_output_count(0);
     let image = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
-    let out = block_on(imhist_builtin(Value::Tensor(image), vec![])).unwrap();
+    let out = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap();
     assert_eq!(out, Value::OutputList(Vec::new()));
 }

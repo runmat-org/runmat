@@ -6,8 +6,9 @@ use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::{
     CancellationReason, Digest, ExecutionCandidateKind, PlacementDecision, PlacementInvalidation,
     PlacementPlanRequest, PlacementRevision, WholeWorkDecision, WholeWorkDecisionKind,
+    WholeWorkPlacementRequest,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -15,13 +16,27 @@ use std::sync::{
 };
 
 #[derive(Default)]
-struct Witness {
+pub(crate) struct Witness {
+    selections: Cell<usize>,
     feedback: RefCell<Vec<PlacementFeedback>>,
     pending: RefCell<Vec<Box<dyn RuntimePlacementFeedbackSource>>>,
 }
 
 impl Witness {
-    fn drain(&self) {
+    pub(crate) fn context(self: &Rc<Self>) -> RuntimeContext {
+        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+            .with_service_ports(RuntimeServicePorts::default().with_placement(self.clone()))
+    }
+
+    pub(crate) fn selections(&self) -> usize {
+        self.selections.get()
+    }
+
+    pub(crate) fn feedback(&self) -> Vec<PlacementFeedback> {
+        self.feedback.borrow().clone()
+    }
+
+    pub(crate) fn drain(&self) {
         let mut pending = std::mem::take(&mut *self.pending.borrow_mut());
         for mut source in pending.drain(..) {
             if let Some(feedback) = source.take_ready() {
@@ -34,6 +49,38 @@ impl Witness {
 }
 
 impl RuntimePlacementService for Witness {
+    fn whole_work_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        provider: Digest,
+    ) -> Option<PlacementRevision> {
+        let digest = Digest::sha256(b"host-presentation-witness");
+        Some(PlacementRevision {
+            program,
+            catalog: digest,
+            compiler: digest,
+            provider,
+            policy: digest,
+        })
+    }
+
+    fn select_whole_work(
+        &self,
+        request: WholeWorkPlacementRequest,
+    ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
+        request.validate().expect("admitted host presentation");
+        let candidate = request.candidates.first().expect("host upload candidate");
+        self.selections.set(self.selections.get() + 1);
+        Ok(RuntimeWholeWorkSelection {
+            decision: WholeWorkDecision {
+                signature: request.signature.clone(),
+                selected: candidate.selected(&request.signature.operation),
+                kind: WholeWorkDecisionKind::Unmeasured,
+                predicted_total_ns: None,
+            },
+            probe: None,
+        })
+    }
     fn plan(&self, _: PlacementPlanRequest) -> Result<PlacementDecision, RuntimeError> {
         unreachable!("receipt owner never schedules")
     }

@@ -129,12 +129,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "imhist",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::imhist"
 )]
-async fn imhist_builtin(image: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn imhist_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    image: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(too_many_outputs());
     }
+    let output_count = crate::output_count::current_output_count().unwrap_or_else(|| {
+        if crate::output_context::requested_output_count() == Some(0) {
+            0
+        } else {
+            1
+        }
+    });
+    let mut selected = placement::select(runtime.as_ref(), &image, &rest, output_count)?;
     let eval = evaluate(image, &rest).await?;
 
     if crate::output_context::requested_output_count() == Some(0)
@@ -156,15 +169,17 @@ async fn imhist_builtin(image: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_counts_value()?]));
+            let output = placement::publish(&mut selected, || eval.into_counts_value())?;
+            return Ok(Value::OutputList(vec![output]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(eval.into_outputs()?));
+            let outputs = placement::publish_many(&mut selected, || eval.into_outputs())?;
+            return Ok(Value::OutputList(outputs));
         }
         return Err(too_many_outputs());
     }
 
-    eval.into_counts_value()
+    placement::publish(&mut selected, || eval.into_counts_value())
 }
 
 pub async fn evaluate(image: Value, rest: &[Value]) -> BuiltinResult<ImhistEvaluation> {
@@ -267,6 +282,7 @@ fn is_colormap_argument(value: &Value) -> bool {
 mod binning;
 mod call;
 mod inputs;
+mod placement;
 mod presentation;
 #[cfg(test)]
 #[path = "imhist/tests.rs"]

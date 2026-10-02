@@ -16,9 +16,12 @@ use runmat_execution::{
 };
 use runmat_time::duration_ns_saturating;
 
+mod admission;
+pub(crate) use admission::{select_exact_host_upload, ExactHostUpload};
+
 #[cfg(test)]
 #[path = "host_presentation/tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 /// A borrowed provider recorder must surround the actual upload/restore call.
 /// Dropping this owner before `finish` abandons the sample and releases the
