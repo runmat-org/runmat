@@ -182,16 +182,14 @@ async fn evaluate_requested(
         })
         .collect::<Vec<_>>();
     let resident_prototype = resident_inputs.first();
-    let provider = resident_prototype
-        .as_ref()
-        .and_then(runmat_accelerate_api::provider_for_handle);
+    let provider = resident_prototype.and_then(runmat_accelerate_api::provider_for_handle);
     if !resident_inputs.is_empty() && provider.is_none() {
         return Err(deconv_error_with_detail(
             &DECONV_ERROR_GATHER_FAILED,
             "resident input has no owning provider",
         ));
     }
-    if let (Some(provider), Some(prototype)) = (provider, resident_prototype.as_ref()) {
+    if let (Some(provider), Some(prototype)) = (provider, resident_prototype) {
         for value in [&numerator, &denominator] {
             if let Value::GpuTensor(handle) = value {
                 let owner =
