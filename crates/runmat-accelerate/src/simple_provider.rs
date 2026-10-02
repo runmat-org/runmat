@@ -16,6 +16,7 @@ mod dot;
 mod matmul;
 mod numeric_reduction;
 mod integer_floating_sum;
+mod gather;
 mod deep_learning_activation;
 mod imfilter;
 #[cfg(test)]
@@ -3981,21 +3982,12 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
-        // Authenticate every allocation before distinguishing unsupported storage.
-        {
-            let guard = numeric_registry()
-                .lock_for(self.device_id)
-                .map_err(|_| anyhow!("gather_linear: allocation owner is poisoned"))?;
-            ensure!(guard.get(source).is_some(), "gather_linear: unknown buffer");
-            if [source]
-                .iter()
-                .any(|input| input.physical().element_type() == NumericElementType::F32)
-            {
-                return Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "gather_linear: F32 storage requires a typed kernel",
-                ));
-            }
-        }
+        // Authenticate the owner and lease before distinguishing physical storage.
+        let guard = numeric_registry()
+            .lock_for(self.device_id)
+            .map_err(|_| anyhow!("gather_linear: allocation owner is poisoned"))?;
+        ensure!(guard.get(source).is_some(), "gather_linear: unknown buffer");
+        drop(guard);
 
         if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(source) {
             let output_len = output_shape
@@ -4040,39 +4032,53 @@ impl AccelProvider for InProcessProvider {
             GpuTensorStorage::Real => 1usize,
             GpuTensorStorage::ComplexInterleaved => 2usize,
         };
+        let source_elements = source
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| anyhow!("gather_linear: source shape product overflow"))?;
+        let output_elements = output_shape
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
         let data = {
-            let guard = registry(self.device_id)
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("gather_linear: allocation owner is poisoned"))?;
             guard
                 .get(source)
                 .cloned()
                 .ok_or_else(|| anyhow!("gather_linear: unknown buffer {}", source.buffer_id()))?
         };
-        ensure!(
-            data.len() % lane_factor == 0,
-            "gather_linear: buffer {} length {} is not aligned to storage lane factor {}",
-            source.buffer_id(),
-            data.len(),
-            lane_factor
-        );
-        let logical_len = data.len() / lane_factor;
-        let mut out = Vec::with_capacity(indices.len() * lane_factor);
-        for (pos, &idx) in indices.iter().enumerate() {
-            let lin = idx as usize;
-            ensure!(
-                lin < logical_len,
-                "gather_linear: index {} (position {}) out of bounds for buffer {} (logical_len={})",
-                lin,
-                pos,
-                source.buffer_id(),
-                logical_len
-            );
-            let start = lin * lane_factor;
-            out.extend_from_slice(&data[start..start + lane_factor]);
-        }
+        let result = match (source.physical().element_type(), data) {
+            (NumericElementType::F32, InProcessNumericData::F32(data)) => {
+                InProcessNumericData::F32(gather::floating_elements(
+                    &data,
+                    lane_factor,
+                    source_elements,
+                    indices,
+                    output_elements,
+                )?)
+            }
+            (NumericElementType::F64, InProcessNumericData::F64(data)) => {
+                InProcessNumericData::F64(gather::floating_elements(
+                    &data,
+                    lane_factor,
+                    source_elements,
+                    indices,
+                    output_elements,
+                )?)
+            }
+            (declared, payload) => {
+                return Err(anyhow!(
+                    "gather_linear: physical element type {:?} does not match payload {:?}",
+                    declared,
+                    payload
+                ));
+            }
+        };
         self.allocate_produced(
-            InProcessNumericData::F64(out),
+            result,
             output_shape.to_vec(),
             storage,
             runmat_accelerate_api::handle_is_logical(source),
@@ -9759,6 +9765,38 @@ mod tests {
             Some(InProcessNumericData::F32(_))
         ));
         handle.release().expect("release native single buffer");
+    }
+
+    #[test]
+    fn gather_linear_keeps_native_single_physical_storage() {
+        let provider = InProcessProvider::new();
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.25, -2.5, 3.75]),
+                shape: &[1, 3],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("native single input");
+        let selected = provider
+            .gather_linear(&input, &[2, 0, 2], &[3, 1])
+            .expect("native single gather");
+        assert_eq!(
+            block_on(provider.download_numeric(&selected))
+                .expect("selected values")
+                .data,
+            HostNumericDataOwned::F32(vec![3.75, 1.25, 3.75])
+        );
+        assert!(matches!(
+            numeric_registry()
+                .lock_for(provider.device_id)
+                .expect("numeric registry")
+                .get(&selected),
+            Some(InProcessNumericData::F32(_))
+        ));
+        assert!(provider.gather_linear(&input, &[3], &[1, 1]).is_err());
+        assert!(provider.gather_linear(&input, &[0], &[2, 1]).is_err());
+        selected.release().expect("release gathered output");
+        input.release().expect("release input");
     }
 
     #[test]
