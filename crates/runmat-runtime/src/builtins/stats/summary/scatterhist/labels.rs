@@ -45,6 +45,23 @@ pub(super) fn group_labels(
     expected_len: usize,
 ) -> BuiltinResult<Vec<Option<KeyAtom>>> {
     match value {
+        Value::Num(value) if expected_len == 1 => {
+            Ok(vec![scatterhist_numeric_key(NumericScalar::F64(*value))])
+        }
+        Value::Int(value) if expected_len == 1 => {
+            Ok(vec![Some(KeyAtom::Integer(value.clone()))])
+        }
+        Value::Bool(value) if expected_len == 1 => {
+            Ok(vec![Some(KeyAtom::Logical(*value))])
+        }
+        Value::String(value) if expected_len == 1 => {
+            Ok(vec![Some(KeyAtom::Text(value.clone()))])
+        }
+        Value::LogicalArray(array) if array.len() == expected_len => Ok(array
+            .data
+            .iter()
+            .map(|value| Some(KeyAtom::Logical(*value != 0)))
+            .collect()),
         Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == expected_len => {
             Ok((0..expected_len)
                 .map(|index| tensor.numeric_value_at(index).and_then(scatterhist_numeric_key))

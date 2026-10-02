@@ -47,6 +47,90 @@ fn character_group_rows_follow_character_payload_layout() {
 }
 
 #[test]
+fn scalar_and_logical_group_values_match_catalog_admission() {
+    assert_eq!(
+        group_labels(&Value::Num(1.0), 1).unwrap(),
+        vec![Some(KeyAtom::Number(1.0))]
+    );
+    assert_eq!(
+        group_labels(&Value::Int(IntValue::U64(1)), 1).unwrap(),
+        vec![Some(KeyAtom::Integer(IntValue::U64(1)))]
+    );
+    assert_eq!(
+        group_labels(&Value::Bool(true), 1).unwrap(),
+        vec![Some(KeyAtom::Logical(true))]
+    );
+    assert_eq!(
+        group_labels(&Value::String("one".into()), 1).unwrap(),
+        vec![Some(KeyAtom::Text("one".into()))]
+    );
+    let logical =
+        Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0, 1, 0], vec![4, 1]).unwrap());
+    assert_eq!(
+        group_labels(&logical, 4).unwrap(),
+        vec![
+            Some(KeyAtom::Logical(true)),
+            Some(KeyAtom::Logical(false)),
+            Some(KeyAtom::Logical(true)),
+            Some(KeyAtom::Logical(false))
+        ]
+    );
+    assert!(group_labels(&Value::Num(1.0), 2).is_err());
+}
+
+#[test]
+fn multirow_character_option_name_is_rejected_before_chart_effects() {
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    reset_hold_state_for_run();
+    let figure = current_figure_handle();
+    let before = clone_figure(figure).unwrap().plots().count();
+    let name = Value::CharArray(
+        runmat_value::CharArray::new(vec!['N', 'B', 'i', 'n', 's', ' '], 2, 3).unwrap(),
+    );
+    let err = futures::executor::block_on(scatterhist_builtin(vec![
+        vec_tensor(&[1.0, 2.0]),
+        vec_tensor(&[2.0, 1.0]),
+        name,
+        Value::Num(2.0),
+    ]))
+    .expect_err("multirow option name cannot concatenate into NBins");
+    assert_eq!(
+        err.identifier(),
+        SCATTERHIST_ERROR_INVALID_ARGUMENT.identifier
+    );
+    assert_eq!(clone_figure(figure).unwrap().plots().count(), before);
+}
+
+#[test]
+fn scalar_string_array_option_values_decode_once_as_text() {
+    let scalar =
+        |text: &str| Value::StringArray(StringArray::new(vec![text.into()], vec![1, 1]).unwrap());
+    assert_eq!(
+        parse_kernel(&scalar("overlay")).unwrap(),
+        KernelMode::Overlay
+    );
+    assert!(option_bool(&scalar("on"), "Legend").unwrap());
+    assert_eq!(
+        parse_style(&scalar("stairs")).unwrap(),
+        (KernelMode::Off, HistStyle::Stairs)
+    );
+    assert_eq!(
+        parse_location(&scalar("northeast")).unwrap(),
+        Location::NorthEast
+    );
+    assert_eq!(parse_direction(&scalar("out")).unwrap(), Direction::Out);
+
+    let multiple =
+        Value::StringArray(StringArray::new(vec!["on".into(), "off".into()], vec![2, 1]).unwrap());
+    assert!(parse_kernel(&multiple).is_err());
+    assert!(option_bool(&multiple, "Legend").is_err());
+    assert!(parse_style(&multiple).is_err());
+    assert!(parse_location(&multiple).is_err());
+    assert!(parse_direction(&multiple).is_err());
+}
+
+#[test]
 fn mixed_cell_groups_keep_typed_identity_until_rendering() {
     let labels = Value::Cell(
         CellArray::new(

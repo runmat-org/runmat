@@ -1,7 +1,8 @@
 use super::*;
 use runmat_types::{
-    CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
-    OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallRequest, CellFact, DynamicReason, LiteralContext, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 fn real(rows: usize, columns: usize) -> ValueFact {
@@ -13,6 +14,123 @@ fn real(rows: usize, columns: usize) -> ValueFact {
         ShapeFact::from(vec![Some(rows), Some(columns)]),
         StorageFact::Dense,
     )
+}
+
+#[test]
+fn known_group_cardinality_uses_observation_count_not_character_elements() {
+    let name = ValueFact::scalar(ValueKindFact::String);
+    let literal = vec![
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::String("Group".into()),
+        LiteralValue::Unknown,
+    ];
+    let cell = ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            elements: Vec::new(),
+            elements_complete: false,
+        }),
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Dense,
+    );
+    for group in [
+        real(2, 1),
+        ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::from(vec![Some(2), Some(1)]),
+            StorageFact::Dense,
+        ),
+        cell,
+        ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        ),
+    ] {
+        let result = infer(
+            vec![real(4, 1), real(4, 1), name.clone(), group],
+            literal.clone(),
+            1,
+        );
+        assert!(!result.diagnostics.is_empty());
+        assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+    }
+    let matching_char_rows = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(4), Some(3)]),
+        StorageFact::Dense,
+    );
+    let accepted = infer(
+        vec![real(4, 1), real(4, 1), name, matching_char_rows],
+        literal,
+        1,
+    );
+    assert!(accepted.diagnostics.is_empty());
+}
+
+#[test]
+fn scalar_text_option_values_match_runtime_geometry() {
+    let name = ValueFact::scalar(ValueKindFact::String);
+    let single = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Dense,
+    );
+    let multiple = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Dense,
+    );
+    for option in [
+        "Kernel",
+        "Legend",
+        "PlotGroup",
+        "Location",
+        "Direction",
+        "Style",
+    ] {
+        let literals = vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String(option.into()),
+            LiteralValue::Unknown,
+        ];
+        let accepted = infer(
+            vec![real(3, 1), real(3, 1), name.clone(), single.clone()],
+            literals.clone(),
+            1,
+        );
+        assert!(accepted.diagnostics.is_empty(), "{option}");
+        let rejected = infer(
+            vec![real(3, 1), real(3, 1), name.clone(), multiple.clone()],
+            literals,
+            1,
+        );
+        assert!(!rejected.diagnostics.is_empty(), "{option}");
+        assert!(matches!(rejected.outputs[0].kind, ValueKindFact::Unknown));
+    }
+}
+
+#[test]
+fn multirow_character_option_name_does_not_prove_handles() {
+    let name = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    let result = infer(
+        vec![real(2, 1), real(2, 1), name, real(1, 1)],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("NBins".into()),
+            LiteralValue::Number(2.0),
+        ],
+        1,
+    );
+    assert!(!result.diagnostics.is_empty());
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
 }
 
 fn infer(

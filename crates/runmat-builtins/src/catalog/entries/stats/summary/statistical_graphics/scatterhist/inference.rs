@@ -54,8 +54,17 @@ fn numeric_control(fact: &ValueFact) -> bool {
 }
 
 fn bad_option_name(fact: &ValueFact) -> bool {
-    match fact.kind {
-        ValueKindFact::String => fact.shape.element_count().is_some_and(|n| n != 1),
+    bad_scalar_text(fact)
+}
+
+fn bad_scalar_text(fact: &ValueFact) -> bool {
+    match &fact.kind {
+        ValueKindFact::String => match &fact.shape {
+            ShapeFact::Shaped { dims } => dims.iter().any(
+                |dim| matches!(dim, runmat_types::DimensionFact::Known(extent) if *extent != 1),
+            ),
+            _ => false,
+        },
         ValueKindFact::Character => match &fact.shape {
             ShapeFact::Shaped { dims } => matches!(
                 dims.first(),
@@ -100,10 +109,15 @@ fn bad_option(
                 .is_some_and(|class| !class.is(runmat_types::standard::CATEGORICAL)),
             _ => true,
         },
-        K::Kernel | K::Legend | K::PlotGroup => {
-            count.is_some_and(|n| n != 1)
-                && !matches!(fact.kind, ValueKindFact::String | ValueKindFact::Character)
-        }
+        K::Kernel | K::Legend | K::PlotGroup => match &fact.kind {
+            ValueKindFact::String | ValueKindFact::Character => bad_scalar_text(fact),
+            ValueKindFact::Numeric(number) => {
+                number.domain != NumericDomain::Real || count.is_some_and(|n| n != 1)
+            }
+            ValueKindFact::Logical => count.is_some_and(|n| n != 1),
+            ValueKindFact::Unknown => false,
+            _ => true,
+        },
         K::MarkerSize | K::LineWidth | K::Bandwidth => {
             !numeric_control(fact)
                 || count == Some(0)
@@ -114,7 +128,8 @@ fn bad_option(
         K::Color => {
             matches!(&fact.kind, ValueKindFact::Numeric(number) if number.domain == NumericDomain::Complex)
         }
-        K::Location | K::Direction | K::Marker | K::LineStyle | K::Style => !matches!(
+        K::Location | K::Direction | K::Style => bad_scalar_text(fact),
+        K::Marker | K::LineStyle => !matches!(
             fact.kind,
             ValueKindFact::String
                 | ValueKindFact::Character
@@ -122,6 +137,36 @@ fn bad_option(
                 | ValueKindFact::Unknown
         ),
         K::Parent => false,
+    }
+}
+
+fn known_group_count(fact: &ValueFact) -> Option<usize> {
+    match &fact.kind {
+        ValueKindFact::Character => match &fact.shape {
+            ShapeFact::Shaped { dims } => match dims.first() {
+                Some(runmat_types::DimensionFact::Known(rows)) => Some(*rows),
+                _ => None,
+            },
+            _ => None,
+        },
+        ValueKindFact::Numeric(_)
+        | ValueKindFact::Logical
+        | ValueKindFact::String
+        | ValueKindFact::Cell(_) => fact.shape.element_count(),
+        ValueKindFact::Never
+        | ValueKindFact::Unknown
+        | ValueKindFact::Void
+        | ValueKindFact::Symbolic
+        | ValueKindFact::Struct(_)
+        | ValueKindFact::Object(_)
+        | ValueKindFact::ClassReference(_)
+        | ValueKindFact::Callable(_)
+        | ValueKindFact::OutputList(_)
+        | ValueKindFact::Exception(_)
+        | ValueKindFact::Execution(_)
+        | ValueKindFact::Distributed(_)
+        | ValueKindFact::Composite(_)
+        | ValueKindFact::Foreign(_) => None,
     }
 }
 
@@ -192,6 +237,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                         "OPTION",
                         "scatterhist option value is invalid",
                     ));
+                }
+                if kind == ScatterhistOptionKind::Group {
+                    if let Some(group_count) = known_group_count(value) {
+                        if args.iter().take(2).any(|observation| {
+                            observation
+                                .shape
+                                .element_count()
+                                .is_some_and(|n| n != group_count)
+                        }) {
+                            diagnostics.push(InferenceDiagnostic::error(
+                                "LENGTH",
+                                "scatterhist Group must have one label per observation",
+                            ));
+                        }
+                    }
                 }
             }
         }

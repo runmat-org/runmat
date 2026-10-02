@@ -41,7 +41,7 @@ use crate::builtins::plotting::state::{
     configure_subplot, current_axes_state, encode_axes_handle, render_active_plot,
     select_axes_for_figure, set_legend_for_axes, FigureHandle, PlotRenderOptions,
 };
-use crate::builtins::plotting::style::{parse_color_value, value_as_string, LineStyleParseOptions};
+use crate::builtins::plotting::style::{parse_color_value, LineStyleParseOptions};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "scatterhist";

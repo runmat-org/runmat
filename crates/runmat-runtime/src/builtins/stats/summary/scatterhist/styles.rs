@@ -92,7 +92,7 @@ pub(super) fn style_text_entries(value: &Value, option_name: &str) -> BuiltinRes
             .data
             .iter()
             .map(|entry| {
-                value_as_string(entry).ok_or_else(|| {
+                scalar_text(entry).ok_or_else(|| {
                     invalid(format!(
                         "scatterhist: {option_name} cell entries must be text"
                     ))
