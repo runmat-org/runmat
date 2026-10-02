@@ -74,11 +74,11 @@ pub(super) async fn scalar<E: QuadratureEvaluator<Sample = f64>>(
         let (absolute, deviation) = sample_terms(sample, jacobian, weight, mean);
         resabs = resabs.add(absolute);
         resasc = resasc.add(deviation);
-        evaluator
-            .charge(1)
-            .await
-            .map_err(QuadratureArithmeticError::execution)?;
     }
+    evaluator
+        .charge(samples.len() as u64)
+        .await
+        .map_err(QuadratureArithmeticError::execution)?;
     Ok(adjusted_error(kronrod.subtract(*gauss), resabs, resasc))
 }
 
@@ -109,6 +109,7 @@ pub(super) async fn array<E: QuadratureEvaluator<Sample = Arc<Vec<f64>>>>(
     errors
         .try_reserve_exact(first.len())
         .map_err(QuadratureArithmeticError::Resource)?;
+    let mut pending_work = 0_usize;
     for component in 0..first.len() {
         let mean = kronrod.0[component].divide(width);
         let mut resabs = ScaledEstimate::from_f64(0.0);
@@ -117,27 +118,25 @@ pub(super) async fn array<E: QuadratureEvaluator<Sample = Arc<Vec<f64>>>>(
             let (absolute, deviation) = sample_terms(sample[component], jacobian, weight, mean);
             resabs = resabs.add(absolute);
             resasc = resasc.add(deviation);
+            pending_work += 1;
+            if pending_work == COMPONENT_CHUNK {
+                evaluator
+                    .charge(COMPONENT_CHUNK as u64)
+                    .await
+                    .map_err(QuadratureArithmeticError::execution)?;
+                pending_work = 0;
+            }
         }
         errors.push(adjusted_error(
             kronrod.0[component].subtract(gauss.0[component]),
             resabs,
             resasc,
         ));
-        if (component + 1).is_multiple_of(COMPONENT_CHUNK) {
-            for _ in samples {
-                evaluator
-                    .charge(COMPONENT_CHUNK as u64)
-                    .await
-                    .map_err(QuadratureArithmeticError::execution)?;
-            }
-        }
     }
-    for _ in samples {
-        evaluator
-            .charge((first.len() % COMPONENT_CHUNK) as u64)
-            .await
-            .map_err(QuadratureArithmeticError::execution)?;
-    }
+    evaluator
+        .charge(pending_work as u64)
+        .await
+        .map_err(QuadratureArithmeticError::execution)?;
     Ok(ArrayEstimate(Arc::new(errors)))
 }
 

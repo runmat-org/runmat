@@ -277,7 +277,13 @@ mod tests {
     use crate::build_runtime_error;
     use crate::builtins::math::optim::quadrature::QuadratureArithmeticError;
     use crate::RuntimeError;
+    use futures::task::noop_waker;
+    use std::cell::Cell;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::rc::Rc;
     use std::sync::Arc;
+    use std::task::{Context, Poll};
 
     struct CancellingSine {
         max_evaluations: usize,
@@ -299,7 +305,10 @@ mod tests {
 
         async fn evaluate(&mut self, x: f64) -> BuiltinResult<f64> {
             self.calls += 1;
-            Ok(1.0e5 * (2.0 * std::f64::consts::PI * x).sin())
+            // Three periods have an analytic zero integral on [0,1], but
+            // each half-span has a nonzero integral and the initial embedded
+            // rule does not satisfy the requested global tolerance.
+            Ok(1.0e5 * (6.0 * std::f64::consts::PI * x).sin())
         }
 
         fn midpoint(&self, a: f64, b: f64) -> f64 {
@@ -402,8 +411,39 @@ mod tests {
     }
 
     struct ArrayWork {
-        charged: u64,
+        charged: Rc<Cell<u64>>,
         large_first: bool,
+        components: usize,
+        pending_at: Option<u64>,
+        pending_dropped: Rc<Cell<bool>>,
+    }
+
+    impl ArrayWork {
+        fn new(components: usize, large_first: bool, pending_at: Option<u64>) -> Self {
+            Self {
+                charged: Rc::new(Cell::new(0)),
+                large_first,
+                components,
+                pending_at,
+                pending_dropped: Rc::new(Cell::new(false)),
+            }
+        }
+    }
+
+    struct PendingCharge(Rc<Cell<bool>>);
+
+    impl Future for PendingCharge {
+        type Output = BuiltinResult<()>;
+
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for PendingCharge {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
     }
 
     impl QuadratureEvaluator for ArrayWork {
@@ -414,15 +454,23 @@ mod tests {
         }
 
         async fn charge(&mut self, units: u64) -> BuiltinResult<()> {
-            self.charged += units;
+            let charged = self.charged.get() + units;
+            self.charged.set(charged);
+            if self.pending_at == Some(charged) {
+                PendingCharge(self.pending_dropped.clone()).await?;
+            }
             Ok(())
         }
 
         async fn evaluate(&mut self, x: f64) -> BuiltinResult<Self::Sample> {
-            Ok(Arc::new(vec![
-                if self.large_first { 1.0e300 * x } else { x },
-                x * x,
-            ]))
+            let mut values = vec![x; self.components];
+            if self.large_first {
+                values[0] = 1.0e300 * x;
+            }
+            if self.components > 1 {
+                values[1] = x * x;
+            }
+            Ok(Arc::new(values))
         }
 
         fn midpoint(&self, a: f64, b: f64) -> f64 {
@@ -460,10 +508,7 @@ mod tests {
 
     #[test]
     fn array_weighted_rule_charges_every_coefficient_product() {
-        let mut evaluator = ArrayWork {
-            charged: 0,
-            large_first: false,
-        };
+        let mut evaluator = ArrayWork::new(2, false, None);
         let estimate = futures::executor::block_on(evaluate_interval(
             &mut evaluator,
             OpenDomain::Finite,
@@ -474,15 +519,12 @@ mod tests {
         assert_eq!(estimate.result.0.len(), 2);
         // Two weighted passes (Kronrod and Gauss), each with 15 terms for
         // both components. Additional estimate algebra can charge more.
-        assert!(evaluator.charged >= 2 * 15 * 2);
+        assert!(evaluator.charged.get() >= 2 * 15 * 2);
     }
 
     #[test]
     fn array_error_bounds_are_componentwise_at_extreme_scale() {
-        let mut evaluator = ArrayWork {
-            charged: 0,
-            large_first: true,
-        };
+        let mut evaluator = ArrayWork::new(2, true, None);
         let estimate = futures::executor::block_on(evaluate_interval(
             &mut evaluator,
             OpenDomain::Finite,
@@ -492,5 +534,29 @@ mod tests {
         .expect("scaled componentwise open rule");
         assert!(estimate.error.0[0].to_f64().expect("large bound") > 1.0e285);
         assert!(estimate.error.0[1].to_f64().expect("ordinary bound") < 1.0e-10);
+    }
+
+    #[test]
+    fn array_rule_can_suspend_and_drop_after_bounded_actual_coefficient_work() {
+        for pending_at in [4096, 2 * 15 * 5000 + 4096] {
+            let mut evaluator = ArrayWork::new(5000, false, Some(pending_at));
+            let charged = evaluator.charged.clone();
+            let dropped = evaluator.pending_dropped.clone();
+            let mut invocation = Box::pin(evaluate_interval(
+                &mut evaluator,
+                OpenDomain::Finite,
+                0.0,
+                1.0,
+            ));
+            let waker = noop_waker();
+            assert!(invocation
+                .as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending());
+            assert_eq!(charged.get(), pending_at);
+            assert!(!dropped.get());
+            drop(invocation);
+            assert!(dropped.get());
+        }
     }
 }

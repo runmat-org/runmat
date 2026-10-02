@@ -170,11 +170,11 @@ impl QuadratureSample for f64 {
         let mut result = ScaledEstimate::from_f64(0.0);
         for (&sample, &weight) in samples.iter().zip(weights) {
             result = result.add(weight.multiply_f64(sample));
-            evaluator
-                .charge(1)
-                .await
-                .map_err(QuadratureArithmeticError::execution)?;
         }
+        evaluator
+            .charge(samples.len() as u64)
+            .await
+            .map_err(QuadratureArithmeticError::execution)?;
         Ok(result)
     }
 
@@ -370,27 +370,26 @@ impl QuadratureSample for Arc<Vec<f64>> {
         components
             .try_reserve_exact(first.len())
             .map_err(QuadratureArithmeticError::Resource)?;
+        let mut pending_work = 0_usize;
         for component in 0..first.len() {
             let mut sum = ScaledEstimate::from_f64(0.0);
             for (sample, &weight) in samples.iter().zip(weights) {
                 sum = sum.add(weight.multiply_f64(sample[component]));
-            }
-            components.push(sum);
-            if (component + 1).is_multiple_of(COMPONENT_CHUNK) {
-                for _ in samples {
+                pending_work += 1;
+                if pending_work == COMPONENT_CHUNK {
                     evaluator
                         .charge(COMPONENT_CHUNK as u64)
                         .await
                         .map_err(QuadratureArithmeticError::execution)?;
+                    pending_work = 0;
                 }
             }
+            components.push(sum);
         }
-        for _ in samples {
-            evaluator
-                .charge((first.len() % COMPONENT_CHUNK) as u64)
-                .await
-                .map_err(QuadratureArithmeticError::execution)?;
-        }
+        evaluator
+            .charge(pending_work as u64)
+            .await
+            .map_err(QuadratureArithmeticError::execution)?;
         Ok(ArrayEstimate(Arc::new(components)))
     }
 
