@@ -80,7 +80,13 @@ fn bad_group(fact: &ValueFact, sample: &ValueFact) -> bool {
     };
     // Matrix inputs also admit row-wise groups, which are repeated per column.
     let rows = first_known_extent(&sample.shape);
-    let matrix_rows = matches!(&sample.shape, ShapeFact::Shaped { dims } if dims.len() == 2 && matches!(dims.get(0), Some(DimensionFact::Known(rows)) if *rows > 1) && matches!(dims.get(1), Some(DimensionFact::Known(cols)) if *cols > 1));
+    let matrix_rows = match &sample.shape {
+        ShapeFact::Shaped { dims } => matches!(
+            dims.as_slice(),
+            [DimensionFact::Known(rows), DimensionFact::Known(cols)] if *rows > 1 && *cols > 1
+        ),
+        _ => false,
+    };
     group_count != sample_count && !(matrix_rows && rows == Some(group_count))
 }
 
@@ -330,7 +336,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     "boxplot grouping data are incompatible with X",
                 ));
             }
-            if (args.len() - option_start) % 2 != 0 {
+            if !(args.len() - option_start).is_multiple_of(2) {
                 diagnostics.push(InferenceDiagnostic::error(
                     "OPTION",
                     "boxplot name-value options must be paired",
