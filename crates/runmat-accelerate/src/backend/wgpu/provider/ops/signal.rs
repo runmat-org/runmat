@@ -766,7 +766,13 @@ impl WgpuProvider {
         _kernel: &GpuTensorHandle,
         _mode: ProviderConvMode,
     ) -> Result<GpuTensorHandle> {
-        Err(anyhow!("conv2d not implemented for the WGPU provider yet"))
+        // The capability snapshot and feasibility query both reject this
+        // absent hook before any device work. Preserve the same typed
+        // Unsupported result for direct legacy invocations so an unselected
+        // runtime call may gather and use its existing host implementation.
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "conv2d not implemented for the WGPU provider yet",
+        ))
     }
 
     pub(crate) fn conv1d_exec(

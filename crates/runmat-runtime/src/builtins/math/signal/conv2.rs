@@ -1761,6 +1761,15 @@ pub(crate) mod tests {
         let a_handle = provider.upload(&a_view).expect("upload A");
         let b_handle = provider.upload(&b_view).expect("upload B");
 
+        let unsupported = provider
+            .conv2d(&a_handle, &b_handle, ProviderConvMode::Valid)
+            .expect_err("WGPU advertises no conv2d hook");
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &unsupported
+        ));
+        a_handle.allocation_lease().validate_live().unwrap();
+        b_handle.allocation_lease().validate_live().unwrap();
+
         let gpu_value = conv2_builtin(
             Value::GpuTensor(a_handle),
             Value::GpuTensor(b_handle),
