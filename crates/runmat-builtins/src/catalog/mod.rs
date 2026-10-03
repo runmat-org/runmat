@@ -27,7 +27,7 @@ mod entries;
 mod entry;
 mod extension;
 mod fingerprint;
-pub(crate) mod inference;
+mod inference;
 mod integer;
 mod link;
 mod placement;

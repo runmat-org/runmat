@@ -7,7 +7,7 @@ use super::identities::{
     FEA_VALIDATION_CLASS,
 };
 use crate::{
-    catalog::inference::{argument_error, finish_fixed},
+    catalog::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
 };
 use runmat_types::{
