@@ -33,6 +33,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct NestedPythonCall {
     pub call: ForeignCall,
     pub reply: oneshot::Sender<Result<Vec<Value>, RuntimeError>>,
+    pub(crate) ownership: Rc<()>,
 }
 
 pub type NestedPythonQueue = Rc<RefCell<VecDeque<NestedPythonCall>>>;
@@ -48,6 +49,7 @@ pub struct IsolatedPythonClient {
     local_to_remote: BTreeMap<u64, u64>,
     remote_to_local: BTreeMap<u64, (u64, WeakForeignRef)>,
     callbacks: BTreeMap<u64, Value>,
+    nested_aborted: bool,
 }
 
 impl IsolatedPythonClient {
@@ -70,6 +72,7 @@ impl IsolatedPythonClient {
             local_to_remote: BTreeMap::new(),
             remote_to_local: BTreeMap::new(),
             callbacks: BTreeMap::new(),
+            nested_aborted: false,
         }
     }
 
@@ -156,6 +159,7 @@ impl IsolatedPythonClient {
             local_to_remote: BTreeMap::new(),
             remote_to_local: BTreeMap::new(),
             callbacks: BTreeMap::new(),
+            nested_aborted: false,
         })
     }
 
@@ -237,6 +241,12 @@ impl IsolatedPythonClient {
                     let response = self
                         .handle_callback(callback, runtime.clone(), handles, host_identity, nested)
                         .await;
+                    if self.nested_aborted {
+                        return Err(runtime_error(wire_error(
+                            "RunMat:Python:Cancelled",
+                            "nested isolated Python requester was abandoned",
+                        )));
+                    }
                     self.write(&PythonDriverMessage::CallbackResult(response))
                         .await
                         .map_err(runtime_error)?;
@@ -311,10 +321,9 @@ impl IsolatedPythonClient {
                 _ = tokio::time::sleep(Duration::from_millis(1)) => {
                     let queued = nested.borrow_mut().pop_front();
                     if let Some(queued) = queued {
-                        let result = self.invoke_nested(
-                            runtime.clone(), queued.call, handles, host_identity, nested,
-                        ).await;
-                        let _ = queued.reply.send(result);
+                        self.dispatch_nested_call(
+                            runtime.clone(), queued, handles, host_identity, nested,
+                        ).await?;
                     }
                 }
             }
@@ -356,6 +365,41 @@ impl IsolatedPythonClient {
             .map_err(runtime_error)?;
         Box::pin(self.wait_for_invocation(request_id, runtime, handles, host_identity, nested))
             .await
+    }
+
+    async fn dispatch_nested_call(
+        &mut self,
+        runtime: RuntimeContext,
+        mut queued: NestedPythonCall,
+        handles: &ForeignHandleRegistry,
+        host_identity: &str,
+        nested: &NestedPythonQueue,
+    ) -> Result<(), RuntimeError> {
+        if queued.reply.is_closed() {
+            return Ok(());
+        }
+        let result = tokio::select! {
+            result = self.invoke_nested(
+                runtime, queued.call, handles, host_identity, nested,
+            ) => Some(result),
+            _ = queued.reply.closed() => None,
+        };
+        let Some(result) = result else {
+            self.nested_aborted = true;
+            return Err(runtime_error(wire_error(
+                "RunMat:Python:Cancelled",
+                "nested isolated Python requester was abandoned",
+            )));
+        };
+        if queued.reply.is_closed() {
+            self.nested_aborted = true;
+            return Err(runtime_error(wire_error(
+                "RunMat:Python:Cancelled",
+                "nested isolated Python requester was abandoned",
+            )));
+        }
+        let _ = queued.reply.send(result);
+        Ok(())
     }
 
     async fn encode_driver_value(
@@ -592,3 +636,6 @@ async fn write_message(
         .await
         .map_err(|error| wire_error("RunMat:Python:HostTransport", error.to_string()))
 }
+
+#[cfg(all(test, unix))]
+mod tests;

@@ -18,7 +18,7 @@ use runmat_value::{ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
 mod environment;
 mod isolated;
 use environment::{environment_metadata, issued_python_status_value, validate_environment};
-use isolated::IsolatedCallGuard;
+use isolated::{IsolatedCallGuard, NestedCallLease};
 
 use super::super::{
     foreign_callback_request, foreign_error, invoke_foreign_callback, ForeignAdapter,
@@ -728,10 +728,13 @@ async fn invoke_isolated(
     if state.call_active.replace(true) {
         let requested_outputs = call.requested_outputs;
         let (reply, response) = tokio::sync::oneshot::channel();
-        state
-            .nested_calls
-            .borrow_mut()
-            .push_back(NestedPythonCall { call, reply });
+        let ownership = Rc::new(());
+        state.nested_calls.borrow_mut().push_back(NestedPythonCall {
+            call,
+            reply,
+            ownership: Rc::clone(&ownership),
+        });
+        let _lease = NestedCallLease::new(Rc::clone(&state.nested_calls), ownership);
         let outputs = response.await.map_err(|_| {
             foreign_error(
                 ForeignErrorKind::HostUnavailable,
@@ -1124,6 +1127,7 @@ mod tests {
                     requested_outputs: 1,
                 },
                 reply,
+                ownership: Rc::new(()),
             });
         assert_eq!(
             adapter.retained_values(),
@@ -1476,6 +1480,7 @@ mod tests {
                 requested_outputs: 1,
             },
             reply,
+            ownership: Rc::new(()),
         });
         drop(guard);
         assert!(!state.call_active.get());
@@ -1514,6 +1519,36 @@ mod tests {
         assert!(!adapter.isolated_call_active.get());
         assert!(!adapter.terminated.get());
         validate_environment(&adapter.handles, &adapter.host_identity, &[status]).unwrap();
+    }
+
+    #[tokio::test]
+    async fn dropped_queued_nested_request_cannot_dispatch_or_retain_arguments() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let status = adapter.status_value().unwrap();
+        // A callback's outer client owns the active slot; the nested future
+        // only owns its queued request, not the session or its controls.
+        adapter.isolated_call_active.set(true);
+        let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let mut pending = Box::pin(invoke_isolated(
+            adapter.isolated_state(),
+            context,
+            ForeignCall {
+                adapter: PYTHON_ADAPTER_ID.into(),
+                symbol: "status".into(),
+                arguments: vec![Value::String("must-not-dispatch".into())],
+                requested_outputs: 1,
+            },
+        ));
+        tokio::select! {
+            result = &mut pending => panic!("queued nested call unexpectedly completed: {result:?}"),
+            () = tokio::time::sleep(std::time::Duration::from_millis(1)) => {}
+        }
+        assert_eq!(adapter.nested_isolated_calls.borrow().len(), 1);
+        drop(pending);
+        assert!(adapter.nested_isolated_calls.borrow().is_empty());
+        assert_eq!(adapter.retained_values(), Some(vec![]));
+        validate_environment(&adapter.handles, &adapter.host_identity, &[status]).unwrap();
+        assert!(adapter.isolated_call_active.get());
     }
 
     #[cfg(unix)]

@@ -1,6 +1,32 @@
 //! Owns an isolated call across suspension, including abandonment cleanup.
 
-use super::{IsolatedPythonClient, IsolatedPythonState};
+use std::rc::Rc;
+
+use super::{IsolatedPythonClient, IsolatedPythonState, NestedPythonQueue};
+
+/// Removes a not-yet-dispatched callback reentrant call when its waiter dies.
+/// Once dispatched, dropping the oneshot receiver wakes the client-side
+/// terminal branch instead.
+pub(super) struct NestedCallLease {
+    queue: NestedPythonQueue,
+    ownership: Rc<()>,
+}
+
+impl NestedCallLease {
+    pub(super) fn new(queue: NestedPythonQueue, ownership: Rc<()>) -> Self {
+        Self { queue, ownership }
+    }
+}
+
+impl Drop for NestedCallLease {
+    fn drop(&mut self) {
+        if let Ok(mut queue) = self.queue.try_borrow_mut() {
+            queue.retain(|call| !Rc::ptr_eq(&call.ownership, &self.ownership));
+        }
+        // If the queue is momentarily borrowed, receiver Drop still closes
+        // the oneshot and dispatch_nested_call refuses to run that entry.
+    }
+}
 
 pub(super) struct IsolatedCallGuard {
     state: IsolatedPythonState,
