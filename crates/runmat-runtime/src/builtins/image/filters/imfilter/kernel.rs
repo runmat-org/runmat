@@ -69,7 +69,7 @@ impl ImfilterPlan {
         self.evaluate_with_accumulation(image_data, options, FilterAccumulation::HostDouble)
     }
 
-    fn evaluate_with_accumulation(
+    pub(super) fn evaluate_with_accumulation(
         &self,
         image_data: &[f64],
         options: &ImfilterOptions,
