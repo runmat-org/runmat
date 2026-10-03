@@ -190,3 +190,65 @@ async fn worker_unzip_streams_real_zip_into_captured_memory_filesystem() {
     assert!(decoy.read_project_path(&paths[0]).is_err());
     assert!(decoy.read_project_path(&paths[1]).is_err());
 }
+
+#[wasm_bindgen_test(async)]
+async fn worker_crc_failure_removes_unpublished_partial_output() {
+    let _scope = worker_scope();
+    let selected = Arc::new(MemoryFsProvider::with_current_dir("/worker"));
+    let _filesystem = vfs::replace_provider(selected.clone());
+    let calls = Rc::new(Cell::new(0usize));
+    let calls_for_fetch = Rc::clone(&calls);
+    let mut bytes = archive_bytes();
+    let original = b"stored Worker bytes";
+    let offset = bytes
+        .windows(original.len())
+        .position(|window| window == original)
+        .expect("stored entry payload in ZIP fixture");
+    bytes[offset] ^= 1;
+    let _fetch = FetchOverride::install(Closure::new(move |request: Request| {
+        calls_for_fetch.set(calls_for_fetch.get() + 1);
+        assert_eq!(request.url(), ARCHIVE_URL);
+        let response: JsValue = streamed_response(&bytes).into();
+        Promise::resolve(&response)
+    }));
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_http(Rc::new(BrowserHttpService::new())),
+    );
+    let error = runmat_runtime::call_builtin_async_in_context(
+        &context,
+        "unzip",
+        &[
+            Value::String(ARCHIVE_URL.into()),
+            Value::String(OUTPUT_ROOT.into()),
+        ],
+    )
+    .await
+    .expect_err("corrupt stored entry CRC must fail");
+    assert_eq!(error.identifier(), Some("RunMat:unzip:Zip"));
+    assert_eq!(calls.get(), 1);
+    assert!(selected
+        .read_project_path("/worker/unpacked/bundle/stored.txt")
+        .is_err());
+
+    // PartialEntry's Worker drop schedules its provider-owned removal on the
+    // next microtask; do not mistake its asynchronous cleanup for publication.
+    for _ in 0..4 {
+        if selected
+            .list_project_path("/worker/unpacked/bundle")
+            .expect("created output folder")
+            .is_empty()
+        {
+            break;
+        }
+        wasm_bindgen_futures::JsFuture::from(Promise::resolve(&JsValue::UNDEFINED))
+            .await
+            .expect("advance cleanup microtask");
+    }
+    assert!(selected
+        .list_project_path("/worker/unpacked/bundle")
+        .expect("created output folder")
+        .is_empty());
+}

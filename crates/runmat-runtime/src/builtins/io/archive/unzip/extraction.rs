@@ -6,6 +6,8 @@ mod partial;
 use self::partial::PartialEntry;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+#[cfg(test)]
+mod path_tests;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) async fn extract_archive_file_on_worker(
