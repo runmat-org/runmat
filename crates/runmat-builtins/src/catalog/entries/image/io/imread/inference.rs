@@ -56,7 +56,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     contract.capabilities = entry.contract.capability_set();
     match request.literals.literal_string_at(0) {
         Some(source)
-            if ImreadSourceRoute::from_proven_literal(source) == Some(ImreadSourceRoute::Http) =>
+            if ImreadSourceRoute::from_proven_literal(&source) == Some(ImreadSourceRoute::Http) =>
         {
             contract.effects.0.remove(&EffectKind::FilesystemRead);
             contract
@@ -69,7 +69,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 .insert(CapabilityRequirement::Network);
         }
         Some(source)
-            if ImreadSourceRoute::from_proven_literal(source)
+            if ImreadSourceRoute::from_proven_literal(&source)
                 == Some(ImreadSourceRoute::UnsupportedScheme) =>
         {
             contract.effects.0.remove(&EffectKind::FilesystemRead);
@@ -89,7 +89,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
         Some(source)
-            if ImreadSourceRoute::from_proven_literal(source).is_some()
+            if ImreadSourceRoute::from_proven_literal(&source).is_some()
                 || !source.contains("://") =>
         {
             contract.effects.0.remove(&EffectKind::Network);
