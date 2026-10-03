@@ -212,8 +212,15 @@ fn native_audio_pending_open_resumes_without_replaying_source_effects() {
         assert_eq!(evidence.completed.load(Ordering::SeqCst), 0);
         release.send(()).unwrap();
         let result = block_on(pending).unwrap();
-        assert_eq!(result.as_slice()[0], Value::Num(1.0));
-        assert_eq!(result.as_slice().len(), 2);
+        let [Value::Num(effect_count), Value::Tensor(samples)] = result.as_slice() else {
+            panic!("expected effect count and native PCM16 samples");
+        };
+        assert_eq!(*effect_count, 1.0);
+        assert_eq!(samples.shape, vec![2, 2]);
+        assert_eq!(
+            samples.integer_storage(),
+            Some(&IntegerStorage::I16(vec![-4, 10, 5, -10]))
+        );
         assert_eq!(evidence.attempts.load(Ordering::SeqCst), 1);
         assert_eq!(evidence.completed.load(Ordering::SeqCst), 1);
         assert_eq!(evidence.retired_futures.load(Ordering::SeqCst), 1);
@@ -236,15 +243,18 @@ fn native_audioinfo_pending_open_resumes_once_with_exact_metadata() {
         assert_eq!(evidence.completed.load(Ordering::SeqCst), 0);
         release.send(()).unwrap();
         let result = block_on(pending).unwrap();
-        let [Value::Num(count), Value::Struct(info)] = result.as_slice() else {
+        let [Value::Num(effect_count), Value::Struct(info)] = result.as_slice() else {
             panic!("expected count and audioinfo struct");
         };
-        assert_eq!(*count, 1.0);
+        assert_eq!(*effect_count, 1.0);
         assert_eq!(
             info.fields.get("Format"),
             Some(&Value::String("WAV".into()))
         );
         assert_eq!(info.fields.get("TotalSamples"), Some(&Value::Num(3.0)));
+        assert_eq!(info.fields.get("NumChannels"), Some(&Value::Num(2.0)));
+        assert_eq!(info.fields.get("SampleRate"), Some(&Value::Num(22_050.0)));
+        assert_eq!(info.fields.get("BitsPerSample"), Some(&Value::Num(16.0)));
         assert_eq!(evidence.attempts.load(Ordering::SeqCst), 1);
         assert_eq!(evidence.completed.load(Ordering::SeqCst), 1);
         assert_eq!(evidence.retired_futures.load(Ordering::SeqCst), 1);
