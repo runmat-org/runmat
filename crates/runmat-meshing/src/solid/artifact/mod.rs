@@ -8,12 +8,7 @@ use runmat_meshing_core::{
         BoundaryElementKind, MeshEntityProvenance, MeshingStage, SourceEntityKind, SurfaceMesh,
         TopologyEntityId, VolumeElementKind,
     },
-    quality::{
-        predicate::{
-            tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian, tetrahedron_volume,
-        },
-        AnalysisMeshQualityReport, ElementQuality,
-    },
+    quality::report::quality_report,
 };
 use runmat_meshing_size::field::MeshSizingField;
 use runmat_meshing_tetrahedron::{generate::TetrahedronMesh, recover::TetrahedronRecoveryQueue};
@@ -354,62 +349,5 @@ fn sorted_edge(left: u32, right: u32) -> [u32; 2] {
         [left, right]
     } else {
         [right, left]
-    }
-}
-
-fn quality_report(
-    volume_elements: &[AnalysisVolumeElement],
-    coordinates_by_node_id: &BTreeMap<u32, [f64; 3]>,
-) -> AnalysisMeshQualityReport {
-    let elements = volume_elements
-        .iter()
-        .filter_map(|element| {
-            if element.node_ids.len() != 4 {
-                return None;
-            }
-            let points = [
-                *coordinates_by_node_id.get(&element.node_ids[0])?,
-                *coordinates_by_node_id.get(&element.node_ids[1])?,
-                *coordinates_by_node_id.get(&element.node_ids[2])?,
-                *coordinates_by_node_id.get(&element.node_ids[3])?,
-            ];
-            Some(ElementQuality {
-                element_id: element.element_id.clone(),
-                scaled_jacobian: tetrahedron_scaled_jacobian(points),
-                exact_scaled_jacobian: tetrahedron_scaled_jacobian(points),
-                aspect_ratio: tetrahedron_edge_aspect_ratio(points),
-                volume_m3: tetrahedron_volume(points),
-            })
-        })
-        .collect::<Vec<_>>();
-    let min_scaled_jacobian = elements
-        .iter()
-        .map(|element| element.scaled_jacobian)
-        .fold(f64::INFINITY, f64::min);
-    let max_aspect_ratio = elements
-        .iter()
-        .map(|element| element.aspect_ratio)
-        .fold(0.0_f64, f64::max);
-    let mean_aspect_ratio = if elements.is_empty() {
-        0.0
-    } else {
-        elements
-            .iter()
-            .map(|element| element.aspect_ratio)
-            .sum::<f64>()
-            / elements.len() as f64
-    };
-    AnalysisMeshQualityReport {
-        min_scaled_jacobian: min_scaled_jacobian.min(1.0),
-        min_exact_scaled_jacobian: min_scaled_jacobian.min(1.0),
-        mean_aspect_ratio,
-        max_aspect_ratio,
-        inverted_element_count: elements
-            .iter()
-            .filter(|element| element.volume_m3 <= 0.0)
-            .count(),
-        mean_boundary_projection_error_m: 0.0,
-        max_boundary_projection_error_m: 0.0,
-        elements,
     }
 }

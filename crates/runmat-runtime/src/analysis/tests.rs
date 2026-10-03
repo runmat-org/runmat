@@ -87,6 +87,58 @@ use runmat_meshing_core::{
 
 use super::*;
 
+#[cfg(feature = "fea-example-fixtures")]
+#[test]
+fn imported_author_study_fixture_loads_through_analysis_artifact_contract() {
+    use runmat_filesystem::MemoryFsProvider;
+    use runmat_meshing_evidence::example_fixtures::{
+        author_study_example_files, EVIDENCE_PATH, MESH_PATH, TETRA_PATH, TETRA_STL,
+    };
+
+    let _guard = analysis_test_guard();
+    let geometry = crate::geometry::geometry_load(TETRA_PATH, TETRA_STL.as_bytes())
+        .expect("public tetra STL should import");
+    let files = author_study_example_files(&geometry).expect("typed fixture should validate");
+    let filesystem = MemoryFsProvider::with_current_dir("/fixture");
+    for (path, bytes) in files.entries() {
+        filesystem
+            .write_project_path(format!("/fixture/{path}"), bytes)
+            .expect("materialize the exact relative fixture entry");
+    }
+    runmat_filesystem::with_provider_override(Arc::new(filesystem), || {
+        let context = OperationContext::new(None, None);
+        let mesh = resolve_analysis_mesh_artifact(
+            Some(MESH_PATH),
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+        )
+        .expect("runtime should read and validate the serialized mesh")
+        .expect("mesh path was supplied");
+        assert_eq!(mesh.provenance.source_geometry_id, geometry.geometry_id);
+        assert_eq!(mesh.provenance.source_geometry_revision, geometry.revision);
+        // The STL importer does not presently supply a source content hash.
+        assert_eq!(mesh.provenance.source_geometry_sha256, None);
+        assert_eq!(mesh.volume_elements[0].material_region_id, "region_default");
+
+        let evidence = resolve_analysis_mesh_validation_evidence_status(
+            Some(MESH_PATH),
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+        )
+        .expect("runtime should follow and parse the relative evidence reference");
+        let MeshValidationEvidenceStatus::Present(evidence) = evidence else {
+            panic!("the serialized mesh must reference present validation evidence");
+        };
+        assert!(evidence.solve_ready);
+        assert_eq!(
+            runmat_filesystem::read(EVIDENCE_PATH).expect("relative evidence should resolve"),
+            files.evidence
+        );
+    });
+}
+
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 

@@ -1,5 +1,8 @@
 //! Development-only exporter/checker for the typed public authorStudy fixture.
 //! The package declares this binary with `required-features = ["fea-example-fixtures"]`.
+//! Its four relative paths form one isolated fixture root. Run examples with
+//! that root as the filesystem current directory; no absolute machine path is
+//! embedded in the typed mesh or evidence artifacts.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;

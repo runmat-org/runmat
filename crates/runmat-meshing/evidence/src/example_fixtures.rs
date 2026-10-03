@@ -8,7 +8,7 @@ use runmat_meshing_core::{
         AnalysisMeshArtifact, AnalysisMeshNode, AnalysisMeshProvenance, AnalysisVolumeElement,
         BoundaryElementKind, MeshBackendSummary, VolumeElementKind,
     },
-    quality::{AnalysisMeshQualityReport, ElementQuality},
+    quality::report::quality_report,
     validate_analysis_mesh_with_options, AnalysisMeshValidationOptions, MeshSizingField,
 };
 use serde::Serialize;
@@ -37,6 +37,9 @@ pub struct AuthorStudyExampleFiles {
 }
 
 impl AuthorStudyExampleFiles {
+    /// Paths are relative to one isolated fixture root. The standalone example
+    /// runner must execute with that root as its filesystem current directory
+    /// so the mesh envelope's evidence reference resolves to the same bytes.
     pub fn entries(&self) -> [(&'static str, &[u8]); 4] {
         [
             (MESH_PATH, &self.mesh),
@@ -49,6 +52,8 @@ impl AuthorStudyExampleFiles {
 
 /// `geometry` must be the result of importing `TETRA_STL` as `TETRA_PATH`.
 /// No geometry ID, revision, or source hash is guessed by the fixture builder.
+/// The STL importer currently leaves its source content hash empty; the mesh
+/// therefore records no source hash rather than claiming one it did not obtain.
 pub fn author_study_example_files(
     geometry: &GeometryAsset,
 ) -> Result<AuthorStudyExampleFiles, Box<dyn std::error::Error>> {
@@ -172,22 +177,7 @@ fn tetrahedron_mesh(geometry: &GeometryAsset) -> AnalysisMeshArtifact {
                 provenance: Vec::new(),
             })
             .collect(),
-        quality: AnalysisMeshQualityReport {
-            min_scaled_jacobian: 0.5,
-            min_exact_scaled_jacobian: 0.45,
-            mean_aspect_ratio: 2.0,
-            max_aspect_ratio: 2.0,
-            inverted_element_count: 0,
-            mean_boundary_projection_error_m: 0.0,
-            max_boundary_projection_error_m: 0.0,
-            elements: vec![ElementQuality {
-                element_id: "tetrahedron_1".to_string(),
-                scaled_jacobian: 0.5,
-                exact_scaled_jacobian: 0.45,
-                aspect_ratio: 2.0,
-                volume_m3: 1.0 / 6.0,
-            }],
-        },
+        quality: Default::default(),
         sizing: MeshSizingField::default(),
         field_topology: Vec::new(),
         backend: MeshBackendSummary {
@@ -209,6 +199,14 @@ fn tetrahedron_mesh(geometry: &GeometryAsset) -> AnalysisMeshArtifact {
                 .then(|| geometry.source.sha256.clone()),
         },
     };
+    mesh.quality = quality_report(
+        &mesh.volume_elements,
+        &mesh
+            .nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m))
+            .collect(),
+    );
     mesh.refresh_field_topology();
     mesh
 }
