@@ -295,3 +295,6 @@ where
 #[cfg(test)]
 #[path = "unzip/tests.rs"]
 mod tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "unzip/path_authority_tests.rs"]
+mod path_authority_tests;
