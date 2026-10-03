@@ -95,18 +95,20 @@ pub(super) fn plan(
             queue_slots: u32::from(kernel_len != 0),
         });
     }
-    stages.extend([
-        ProviderInputStageDemand {
+    if image_len != 0 {
+        stages.push(ProviderInputStageDemand {
             device_id: provider.device_id(),
             incremental_peak_bytes: ResourceByteBound::Known(image_stage),
-            queue_slots: u32::from(image_len != 0),
-        },
-        ProviderInputStageDemand {
+            queue_slots: 1,
+        });
+    }
+    if kernel_len != 0 {
+        stages.push(ProviderInputStageDemand {
             device_id: provider.device_id(),
             incremental_peak_bytes: ResourceByteBound::Known(kernel_stage),
-            queue_slots: u32::from(kernel_len != 0),
-        },
-    ]);
+            queue_slots: 1,
+        });
+    }
     let input_stages = ProviderInputStageDemands::sequential(stages)?;
     let output_stage = prepared_kernel_bytes.checked_add(output_bytes)?;
     let transient_bytes =
