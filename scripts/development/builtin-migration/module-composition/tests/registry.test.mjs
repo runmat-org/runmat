@@ -21,7 +21,7 @@ const EXPECTED_SUFFIXES = [
   "control", "datetime", "datetime/arithmetic",
   "datetime/business_calendar", "datetime/calendar_duration", "datetime/components",
   "datetime/construction", "datetime/conversion", "datetime/core", "deep_learning", "deep_learning/autodiff", "diagnostics",
-  "fea", "finance", "function_handles", "geometry", "geometry/triangulation", "graph", "image", "image/analysis", "image/color", "image/io", "interop",
+  "fea", "finance", "function_handles", "geometry", "geometry/triangulation", "graph", "image", "image/analysis", "image/color", "image/filters", "image/io", "interop",
   "introspection", "io", "io/archive", "io/filetext", "io/http", "io/repl_fs", "io/tabular_reading", "logical",
   "logical/relational", "math", "math/bitwise", "math/elementwise", "math/fft", "math/linalg", "math/linalg/factor",
   "math/reduction", "math/signal", "math/symbolic", "math/trigonometry", "objects", "objects/test_support",
@@ -43,12 +43,12 @@ const REVIEWED_SHARED_TARGET_PACKAGES = [
   "strings/transform", "table/timetable", "testing/plugins", "testing/runner", "workspace",
 ];
 
-test("registry declares the exact canonical 176-product census", () => {
+test("registry declares the exact canonical 178-product census", () => {
   assert.deepEqual(MODULE_COMPOSITION_SUFFIXES, EXPECTED_SUFFIXES);
   const products = moduleCompositionProductRegistry();
-  assert.equal(products.length, 176);
-  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 88);
-  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 88);
+  assert.equal(products.length, 178);
+  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 89);
+  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 89);
 
   const ids = new Set(products.map((entry) => entry.product_id));
   assert.ok(ids.has("catalog-aliases"));
@@ -152,8 +152,8 @@ test("registry identifiers and paths are globally unique", () => {
   const products = moduleCompositionProductRegistry();
   for (const field of ["product_id", "path", "module_path"]) {
     const values = products.map((entry) => entry[field]);
-    assert.equal(new Set(values).size, 176, `${field} must be unique`);
-    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 176,
+    assert.equal(new Set(values).size, 178, `${field} must be unique`);
+    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 178,
       `${field} must be case-fold unique`);
   }
   assert.deepEqual(products.map((entry) => entry.product_id),

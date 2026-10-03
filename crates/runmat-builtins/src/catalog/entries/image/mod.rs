@@ -3,14 +3,17 @@
 
 mod analysis;
 mod color;
+mod filters;
 mod io;
 
 pub use self::analysis::*;
 pub use self::color::*;
+pub use self::filters::*;
 pub use self::io::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     analysis::extend_entries(values);
     color::extend_entries(values);
+    filters::extend_entries(values);
     io::extend_entries(values);
 }
