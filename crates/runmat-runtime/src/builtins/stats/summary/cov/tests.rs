@@ -695,6 +695,7 @@ fn cov_wgpu_matches_cpu() {
 #[test]
 #[cfg(feature = "wgpu")]
 fn cov_wgpu_noncentered_f32_cancellation_matches_quantized_oracle() {
+    let _accel_guard = test_support::accel_test_lock();
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
     )
@@ -752,11 +753,16 @@ fn cov_wgpu_noncentered_f32_cancellation_matches_quantized_oracle() {
     let gathered = test_support::gather(gpu_value).expect("gather resident covariance");
     assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F32);
     assert_eq!(gathered.shape, vec![2, 2]);
-    // The provider forms XᵀX - nμμᵀ before dividing by n-1. Bound F32
-    // roundoff by the actual magnitudes of those cancelling terms per cell,
-    // rather than relaxing every covariance test by a fixed tolerance.
+    // The provider forms XᵀX - nμμᵀ before dividing by n-1. For five rows,
+    // a dot product takes at most five products/four additions; mean reduction
+    // and division take five more steps; the outer product, subtraction, and
+    // final scaling fit within twenty F32 roundings along either branch.
+    // Use gamma_20 = 20u/(1-20u), u = epsilon/2, against the magnitudes of
+    // the cancelling terms for each cell, not a fixed absolute tolerance.
+    let unit_roundoff = f32::EPSILON as f64 / 2.0;
+    let gamma_20 = 20.0 * unit_roundoff / (1.0 - 20.0 * unit_roundoff);
     for (index, (got, want)) in gathered.materialize_f64().iter().zip(expected).enumerate() {
-        let tolerance = 8.0 * f32::EPSILON as f64 * cancellation_scale[index];
+        let tolerance = gamma_20 * cancellation_scale[index];
         assert!(
             (got - want).abs() <= tolerance,
             "noncentered covariance {index}: got {got}, quantized oracle {want}, bound {tolerance}"
