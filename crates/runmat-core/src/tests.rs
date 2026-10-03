@@ -17,6 +17,9 @@ mod native_object_indexing;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_method_expansion.rs"]
 mod native_method_expansion;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_audio.rs"]
+mod native_audio;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
