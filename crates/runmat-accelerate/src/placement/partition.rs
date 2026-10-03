@@ -500,9 +500,14 @@ fn candidate_resource_adjustment_ns(
         }
     }
     let mut readback_stage_demands = BTreeMap::new();
-    if let CandidateOutputPresentation::ProviderReadbackUpload { readbacks, .. }
-    | CandidateOutputPresentation::ProviderReadbacksHost { readbacks } = presentation
-    {
+    let readbacks = match presentation {
+        CandidateOutputPresentation::ProviderReadbackUpload { readbacks, .. } => {
+            Some(readbacks.as_ref())
+        }
+        CandidateOutputPresentation::ProviderReadbacksHost { readbacks } => Some(readbacks),
+        _ => None,
+    };
+    if let Some(readbacks) = readbacks {
         for readback in readbacks.iter() {
             let provider = resources
                 .provider(readback.device_id)
@@ -847,7 +852,7 @@ fn transition_ns(
     edge: &runmat_execution::PlacementGraphEdge,
 ) -> u64 {
     use CandidateExecutionLocation::{Host as ExecuteHost, Provider as ExecuteProvider};
-    use CandidateOutputResidency::{Host, Mirrored, Provider, Unknown};
+    use CandidateOutputResidency::{ConditionalHostOrProvider, Host, Mirrored, Provider, Unknown};
     match (from, to) {
         (Host, ExecuteHost) | (Mirrored { .. }, ExecuteHost) => 0,
         (Host, ExecuteProvider { .. }) => edge.host_to_provider_ns,
@@ -859,6 +864,19 @@ fn transition_ns(
         }
         (Unknown, ExecuteHost) => edge.provider_to_host_ns,
         (Unknown, ExecuteProvider { .. }) => edge.cross_provider_ns,
+        // Until execution resolves the conditional publication, charge the
+        // greater of its admitted host/provider transition costs. Neither
+        // branch is a mirrored copy available to the next operation.
+        (ConditionalHostOrProvider { .. }, ExecuteHost) => edge.provider_to_host_ns,
+        (
+            ConditionalHostOrProvider {
+                device_id: left, ..
+            },
+            ExecuteProvider { device_id: right },
+        ) if left == right => edge.host_to_provider_ns,
+        (ConditionalHostOrProvider { .. }, ExecuteProvider { .. }) => {
+            edge.host_to_provider_ns.max(edge.cross_provider_ns)
+        }
     }
 }
 
@@ -888,6 +906,9 @@ fn candidate_identity_sequence<'a>(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod conditional_transition_tests;
 
 #[cfg(test)]
 mod eviction_boundary_tests {

@@ -57,10 +57,7 @@ impl HostPresentationReceipt {
         }
     }
 
-    fn with_admitted_upload_outputs(
-        mut self,
-        admitted: AdmittedHostUploadOutputs,
-    ) -> Self {
+    fn with_admitted_upload_outputs(mut self, admitted: AdmittedHostUploadOutputs) -> Self {
         self.upload_publication = UploadPublication::Selected {
             admitted,
             state: SelectedUploadPublication::Pending,
