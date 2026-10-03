@@ -109,6 +109,9 @@ pub enum ProviderObservationStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderRouteOutcome {
     SelectedProvider,
+    /// Provider-owned exact hook ran its typed native readback/host compute/
+    /// resident upload route rather than its direct shader.
+    ProviderHostMediated,
     ConditionalHostFallback,
     /// The selected hook returned Unsupported; the admitted conditional host
     /// continuation published a validated result on the original provider.

@@ -6,95 +6,38 @@ use super::*;
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::{
     observation::{ProviderObservationCapability, ProviderObservationOverhead},
-    ProviderImfilterPhysicalEvidence, ProviderWorkload,
+    ProviderImfilterPhysicalEvidence, ProviderImfilterPhysicalRoute, ProviderWorkload,
 };
 #[cfg(feature = "wgpu")]
 use runmat_execution::{ProviderInputStageDemand, ProviderInputStageDemands, ResourceByteBound};
 
 #[cfg(feature = "wgpu")]
-struct DirectPlan {
+mod host;
+
+#[cfg(feature = "wgpu")]
+struct HookPlan {
     estimate: ProviderResourceEstimate,
     physical: ProviderImfilterPhysicalEvidence,
     submissions: u32,
 }
 
-pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot, wgpu: bool) {
-    if wgpu {
-        snapshot.operations.push(ProviderCapabilityOperation {
-            identity: ProviderOperationIdentity::new("imfilter"),
-            family: ProviderOperationFamily::Library,
-        });
-    }
-}
-
-pub(super) fn validate(
-    provider: &(impl AccelProvider + ?Sized),
-    wgpu: bool,
-    query: &ProviderFeasibilityQuery,
-) -> Option<ProviderFeasibility> {
-    if query.operation.0 != "imfilter" {
-        return None;
-    }
-    if !wgpu {
-        return Some(ProviderFeasibility::rejected(
-            ProviderRejectionCode::UnknownResourceEstimate,
-            "imfilter.in_process_unobserved",
-        ));
-    }
-    #[cfg(feature = "wgpu")]
-    {
-        return Some(match direct_plan(provider, query) {
-            Some(plan) => ProviderFeasibility::supported(plan.estimate),
-            None => ProviderFeasibility::rejected(
-                ProviderRejectionCode::UnknownResourceEstimate,
-                "imfilter.direct_route_unproven",
-            ),
-        });
-    }
-    #[cfg(not(feature = "wgpu"))]
-    {
-        let _ = provider;
-        Some(ProviderFeasibility::rejected(
-            ProviderRejectionCode::UnsupportedOperation,
-            "imfilter.no_wgpu_recipe",
-        ))
-    }
+#[cfg(feature = "wgpu")]
+struct ValidatedImfilterQuery<'a> {
+    workload: &'a runmat_accelerate_api::ProviderImfilterWorkload,
+    image: &'a ProviderRepresentation,
+    kernel: &'a ProviderRepresentation,
+    output: &'a ProviderRepresentation,
+    image_shape: Vec<usize>,
+    kernel_shape: Vec<usize>,
+    borrowed_bytes: u64,
+    planned_kernel: bool,
 }
 
 #[cfg(feature = "wgpu")]
-pub(crate) fn physical_evidence(
+fn validated_query<'a>(
     provider: &(impl AccelProvider + ?Sized),
-    query: &ProviderFeasibilityQuery,
-) -> Option<ProviderImfilterPhysicalEvidence> {
-    direct_plan(provider, query).map(|plan| plan.physical)
-}
-
-#[cfg(feature = "wgpu")]
-pub(crate) fn observation_capability(
-    provider: &(impl AccelProvider + ?Sized),
-    query: &ProviderFeasibilityQuery,
-) -> ProviderObservationCapability {
-    let Some(plan) = direct_plan(provider, query) else {
-        return ProviderObservationCapability::Unsupported;
-    };
-    let Some(requested_peak_buffer_bytes) = u64::from(plan.submissions)
-        .checked_mul(crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES)
-    else {
-        return ProviderObservationCapability::Unsupported;
-    };
-    ProviderObservationCapability::Supported(ProviderObservationOverhead {
-        submissions: plan.submissions,
-        requested_peak_buffer_bytes,
-        clear_commands: plan.submissions,
-        map_callbacks: plan.submissions,
-    })
-}
-
-#[cfg(feature = "wgpu")]
-fn direct_plan(
-    provider: &(impl AccelProvider + ?Sized),
-    query: &ProviderFeasibilityQuery,
-) -> Option<DirectPlan> {
+    query: &'a ProviderFeasibilityQuery,
+) -> Option<ValidatedImfilterQuery<'a>> {
     if query.family != ProviderOperationFamily::Library
         || query.inputs.len() != 2
         || query.outputs.len() != 1
@@ -173,18 +116,130 @@ fn direct_plan(
     {
         return None;
     }
+    Some(ValidatedImfilterQuery {
+        workload,
+        image,
+        kernel,
+        output,
+        image_shape,
+        kernel_shape,
+        borrowed_bytes,
+        planned_kernel,
+    })
+}
+
+pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot, wgpu: bool) {
+    if wgpu {
+        snapshot.operations.push(ProviderCapabilityOperation {
+            identity: ProviderOperationIdentity::new("imfilter"),
+            family: ProviderOperationFamily::Library,
+        });
+    }
+}
+
+pub(super) fn validate(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+) -> Option<ProviderFeasibility> {
+    if query.operation.0 != "imfilter" {
+        return None;
+    }
+    if !wgpu {
+        return Some(ProviderFeasibility::rejected(
+            ProviderRejectionCode::UnknownResourceEstimate,
+            "imfilter.in_process_unobserved",
+        ));
+    }
+    #[cfg(feature = "wgpu")]
+    {
+        return Some(match planned_route(provider, query) {
+            Some(plan) => ProviderFeasibility::supported(plan.estimate),
+            None => ProviderFeasibility::rejected(
+                ProviderRejectionCode::UnknownResourceEstimate,
+                "imfilter.physical_route_unproven",
+            ),
+        });
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        let _ = provider;
+        Some(ProviderFeasibility::rejected(
+            ProviderRejectionCode::UnsupportedOperation,
+            "imfilter.no_wgpu_recipe",
+        ))
+    }
+}
+
+#[cfg(feature = "wgpu")]
+pub(crate) fn physical_evidence(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> Option<ProviderImfilterPhysicalEvidence> {
+    planned_route(provider, query).map(|plan| plan.physical)
+}
+
+#[cfg(feature = "wgpu")]
+pub(crate) fn observation_capability(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> ProviderObservationCapability {
+    let Some(plan) = planned_route(provider, query) else {
+        return ProviderObservationCapability::Unsupported;
+    };
+    let Some(requested_peak_buffer_bytes) = u64::from(plan.submissions)
+        .checked_mul(crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES)
+    else {
+        return ProviderObservationCapability::Unsupported;
+    };
+    ProviderObservationCapability::Supported(ProviderObservationOverhead {
+        submissions: plan.submissions,
+        requested_peak_buffer_bytes,
+        clear_commands: plan.submissions,
+        map_callbacks: plan.submissions,
+    })
+}
+
+#[cfg(feature = "wgpu")]
+fn planned_route(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> Option<HookPlan> {
+    direct_plan(provider, query).or_else(|| host::plan(provider, query))
+}
+
+#[cfg(feature = "wgpu")]
+pub(crate) fn shader_disabled() -> bool {
+    std::env::var("RUNMAT_WGPU_DISABLE_IMFILTER")
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+}
+
+#[cfg(feature = "wgpu")]
+fn direct_plan(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> Option<HookPlan> {
+    let ValidatedImfilterQuery {
+        workload,
+        image,
+        kernel,
+        output,
+        image_shape,
+        kernel_shape,
+        borrowed_bytes,
+        planned_kernel,
+    } = validated_query(provider, query)?;
     let geometry = provider.imfilter_geometry()?;
     if geometry.max_rank == 0
         || geometry.workgroup_size == 0
         || geometry.max_workgroups_per_dispatch == 0
-        || std::env::var("RUNMAT_WGPU_DISABLE_IMFILTER")
-            .ok()
-            .is_some_and(|value| {
-                matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes"
-                )
-            })
+        || shader_disabled()
     {
         return None;
     }
@@ -322,13 +377,14 @@ fn direct_plan(
         u32::try_from(chunks.checked_add(u64::from(image.layout == ProviderLayout::Strided))?)
             .ok()?;
     let submissions = output_queue_slots.checked_add(1)?;
-    Some(DirectPlan {
+    Some(HookPlan {
         estimate: ProviderResourceEstimate {
             transient_bytes: Some(peak),
             output_bytes: Some(output_bytes),
             dispatches: Some(submissions),
         },
         physical: ProviderImfilterPhysicalEvidence {
+            route: ProviderImfilterPhysicalRoute::Direct,
             host_workspace: ResourceByteBound::Known(host_workspace),
             input_stages,
             output_queue_slots,

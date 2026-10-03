@@ -304,3 +304,86 @@ fn explicit_unsupported_restores_exact_owner_after_one_completed_whole_call() {
         "preparation Unsupported must have one completion-qualified receipt"
     );
 }
+
+#[test]
+#[ignore = "requires actual WGPU adapter; run this exact test alone in the native image-filter gate"]
+fn actual_provider_host_mediated_route_has_one_completed_whole_call() {
+    struct ResetImfilterDisable;
+    impl Drop for ResetImfilterDisable {
+        fn drop(&mut self) {
+            std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER");
+        }
+    }
+    assert!(
+        std::env::var("RUNMAT_WGPU_DISABLE_IMFILTER").is_err(),
+        "run exact test with no pre-existing disabled-filter setting"
+    );
+    std::env::set_var("RUNMAT_WGPU_DISABLE_IMFILTER", "1");
+    let _restore_env = ResetImfilterDisable;
+    let backend: &'static WgpuProvider = Box::leak(Box::new(
+        WgpuProvider::new(Default::default()).expect("actual WGPU adapter required"),
+    ));
+    assert_eq!(backend.precision(), ProviderPrecision::F32);
+    let _owner = ThreadProviderGuard::set(Some(backend));
+    let input = backend
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0]),
+            shape: &[2, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("input upload")
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap();
+    let kernel = backend
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0]),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("kernel upload");
+    let query = runmat_runtime::builtins::image::filters::placement::exact_hook_query(
+        &input,
+        &kernel,
+        &ImfilterOptions::default(),
+    )
+    .expect("live exact query");
+    assert_eq!(
+        backend.imfilter_physical_evidence(&query).unwrap().route,
+        runmat_accelerate_api::ProviderImfilterPhysicalRoute::HostMediatedEarly
+    );
+    let args = [
+        Value::GpuTensor(input.clone()),
+        Value::GpuTensor(kernel.clone()),
+    ];
+    let session = Rc::new(PlacementSession::new(Default::default()));
+    let result = block_on(call_builtin_async_in_context(
+        &context(session.clone(), 4096),
+        "imfilter",
+        &args,
+    ))
+    .expect("admitted provider-owned host route");
+    let Value::GpuTensor(output) = result else {
+        panic!("explicit output must remain resident")
+    };
+    assert_eq!(output.device_id(), input.device_id());
+    assert_eq!(output.shape(), &[2, 2]);
+    assert_eq!(
+        block_on(backend.download_numeric(&output)).unwrap().data,
+        HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
+    );
+    assert!(
+        (0..1000).any(|_| {
+            if session.profile_snapshot().feedback.iter().any(|sample| {
+                sample.signature.operation == "imfilter"
+                    && sample.samples == 1
+                    && sample.failures == 0
+            }) {
+                true
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                false
+            }
+        }),
+        "whole-call feedback requires the provider's final upload fence"
+    );
+}

@@ -15,6 +15,7 @@ struct State {
     conditional_provider_upload: bool,
     conditional_provider_upload_active: bool,
     preparation_fallback: bool,
+    provider_host_mediated_allowed: bool,
     route_outcome: Option<ProviderRouteOutcome>,
     expected_execution: Option<(u32, crate::ProviderOperationIdentity)>,
     stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
@@ -155,6 +156,7 @@ impl ProviderOperationReceipt {
                     conditional_provider_upload: false,
                     conditional_provider_upload_active: false,
                     preparation_fallback: false,
+                    provider_host_mediated_allowed: false,
                     route_outcome: None,
                     expected_execution: None,
                     stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
@@ -226,6 +228,19 @@ impl ProviderOperationReceipt {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else {
                 state.conditional_host_fallback = true;
+            }
+        });
+    }
+
+    /// The provider's own exact hook may execute a typed native readback,
+    /// host computation and resident upload. Require its distinct completion
+    /// witness; neither an upload alone nor a direct-shader witness relabels it.
+    pub fn allow_provider_host_mediated(&mut self) {
+        self.0.with(|state| {
+            if state.registered != 0 || state.publication.is_some() || state.taken {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.provider_host_mediated_allowed = true;
             }
         });
     }
@@ -451,6 +466,33 @@ impl Drop for ProviderOperationReceipt {
 pub struct ProviderOperationRecorder(Arc<Shared>, #[cfg(feature = "wgpu")] ProgressOwner);
 
 impl ProviderOperationRecorder {
+    pub fn confirm_provider_host_mediated_after(
+        &self,
+        device_id: u32,
+        operation: &crate::ProviderOperationIdentity,
+        checkpoint: u64,
+    ) {
+        self.0.with(|state| {
+            if !state.provider_host_mediated_allowed
+                || state
+                    .expected_execution
+                    .as_ref()
+                    .is_none_or(|(expected, identity)| {
+                        *expected != device_id || identity != operation
+                    })
+                || state.selected_execution != Some(false)
+                || state.registered <= checkpoint
+                || state.publication.is_some()
+                || state.taken
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::ProviderHostMediated);
+            }
+        });
+    }
+
     /// True only in the Unsupported continuation, after the owning runtime
     /// activated its admitted provider-upload stage. A raw upload can then
     /// attach a completion fence without claiming the original shader ran.
@@ -535,6 +577,7 @@ impl ProviderOperationRecorder {
         self.0.with(|state| {
             if state.publication.is_some()
                 || state.taken
+                || state.provider_host_mediated_allowed
                 || state.expected_execution.as_ref().is_none_or(
                     |(expected_device, expected_operation)| {
                         *expected_device != device_id || expected_operation != operation

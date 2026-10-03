@@ -27,7 +27,15 @@ pub struct ProviderImfilterGeometry {
 /// returned host bound includes internal native H readback/plan workspace;
 /// runtime-owned preparation before the hook is accounted separately.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderImfilterPhysicalRoute {
+    Direct,
+    HostMediatedEarly,
+    HostMediatedAfterKernelReadback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderImfilterPhysicalEvidence {
+    pub route: ProviderImfilterPhysicalRoute,
     pub host_workspace: runmat_execution::ResourceByteBound,
     pub input_stages: runmat_execution::ProviderInputStageDemands,
     pub output_queue_slots: u32,

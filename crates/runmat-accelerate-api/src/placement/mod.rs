@@ -19,7 +19,7 @@ pub use fspecial::ProviderFspecialFilter;
 mod imfilter;
 pub use imfilter::{
     ProviderImfilterGeometry, ProviderImfilterInputBackings, ProviderImfilterPhysicalEvidence,
-    ProviderImfilterPreparedKernel, ProviderImfilterWorkload,
+    ProviderImfilterPhysicalRoute, ProviderImfilterPreparedKernel, ProviderImfilterWorkload,
 };
 mod iir;
 pub use iir::{

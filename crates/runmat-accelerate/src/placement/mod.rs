@@ -33,7 +33,7 @@ pub(crate) use provider_contract::fusion_elementwise::physical_work as fusion_ph
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::imfilter::{
     observation_capability as imfilter_observation_capability,
-    physical_evidence as imfilter_physical_evidence,
+    physical_evidence as imfilter_physical_evidence, shader_disabled as imfilter_shader_disabled,
 };
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::sum::observation_capability as sum_observation_capability;

@@ -83,6 +83,7 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// result is published on host, unlike provider upload's exclusive scratch.
     pub(crate) conditional_host_scratch: ResourceByteBound,
     pub(crate) conditional_provider_upload: Option<ExactConditionalProviderUpload>,
+    pub(crate) provider_host_mediated: bool,
 }
 
 pub(crate) struct SelectedProviderOperation {
@@ -362,6 +363,7 @@ pub(crate) fn select_exact_provider_operation(
                 request.output_queue_slots,
                 request.conditional_host_fallback,
                 request.conditional_host_scratch,
+                request.provider_host_mediated,
                 conditional_provider_upload.as_ref().map(|upload| {
                     (
                         upload.transfer_bytes,
@@ -419,6 +421,7 @@ pub(crate) fn select_exact_provider_operation(
                 query,
                 &estimate,
                 request.conditional_host_fallback,
+                request.provider_host_mediated,
                 conditional_provider_upload.as_ref().map(|upload| {
                     (
                         upload.transfer_bytes,
@@ -498,6 +501,9 @@ pub(crate) fn select_exact_provider_operation(
     }
     if conditional_provider_upload.is_some() {
         receipt.allow_conditional_provider_upload();
+    }
+    if request.provider_host_mediated {
+        receipt.allow_provider_host_mediated();
     }
     Ok(Some(SelectedProviderOperation {
         provider,

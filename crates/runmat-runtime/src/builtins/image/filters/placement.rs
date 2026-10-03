@@ -361,6 +361,8 @@ pub(in crate::builtins::image::filters) fn select_direct(
             conditional_host_fallback: conditional_host.map(|route| route.result_bytes),
             conditional_host_scratch,
             conditional_provider_upload: conditional_upload,
+            provider_host_mediated: physical.route
+                != runmat_accelerate_api::ProviderImfilterPhysicalRoute::Direct,
         },
     )
 }
@@ -606,6 +608,8 @@ pub(in crate::builtins::image::filters) fn select_prepared(
             conditional_host_fallback: conditional_host.map(|route| route.result_bytes),
             conditional_host_scratch,
             conditional_provider_upload: conditional_upload,
+            provider_host_mediated: physical.route
+                != runmat_accelerate_api::ProviderImfilterPhysicalRoute::Direct,
         },
     )?;
     Ok(selected.map(|selection| SelectedPreparedFilter {

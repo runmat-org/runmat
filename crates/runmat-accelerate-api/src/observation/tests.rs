@@ -235,6 +235,45 @@ fn missing_or_invalid_timing_never_becomes_positive_feedback() {
     );
 }
 
+#[test]
+fn provider_host_mediation_needs_its_own_post_upload_submission() {
+    let operation = crate::ProviderOperationIdentity::new("imfilter");
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_selected_execution();
+    receipt.require_provider_execution(7, operation.clone());
+    receipt.allow_provider_host_mediated();
+    let recorder = receipt.recorder();
+    let preupload = recorder.submission().unwrap();
+    preupload.complete();
+    let checkpoint = recorder.submission_checkpoint();
+    recorder.confirm_provider_host_mediated_after(7, &operation, checkpoint);
+    assert_eq!(
+        receipt.status(),
+        ProviderObservationStatus::Failed(ProviderObservationFailure::ExecutionUnproven)
+    );
+
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_selected_execution();
+    receipt.require_provider_execution(7, operation.clone());
+    receipt.allow_provider_host_mediated();
+    let recorder = receipt.recorder();
+    let checkpoint = recorder.submission_checkpoint();
+    let completion_fence = recorder.submission().unwrap();
+    recorder.confirm_provider_host_mediated_after(7, &operation, checkpoint);
+    receipt.publish().unwrap();
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    completion_fence.complete();
+    let completed = receipt.take_completed().unwrap();
+    assert!(matches!(
+        completed.status,
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+    assert_eq!(
+        completed.route_outcome,
+        Some(ProviderRouteOutcome::ProviderHostMediated)
+    );
+}
+
 struct Noop;
 impl Wake for Noop {
     fn wake(self: Arc<Self>) {}

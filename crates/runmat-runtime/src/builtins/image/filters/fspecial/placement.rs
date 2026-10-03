@@ -78,6 +78,7 @@ pub(super) fn select(
             conditional_host_fallback: Some(host_scratch),
             conditional_host_scratch: ResourceByteBound::Known(0),
             conditional_provider_upload: None,
+            provider_host_mediated: false,
         },
     )
 }
