@@ -618,7 +618,7 @@ fn actual_wgpu_gray_host_sink_completes_nonempty_empty_and_lazy_readbacks() {
         assert_eq!(actual.len(), expected.len());
         for (actual, expected) in actual.iter().zip(expected) {
             assert!(
-                (actual - expected).abs() <= 1e-6,
+                (*actual - expected).abs() <= 1e-6,
                 "{name}: {actual} != {expected}"
             );
         }
