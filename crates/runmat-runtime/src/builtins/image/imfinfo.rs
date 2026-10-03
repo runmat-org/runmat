@@ -80,9 +80,9 @@ async fn imfinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .get(1)
         .map(|value| {
             let hint = scalar_text(value, "fmt")?;
-            let normalized = hint.trim().trim_start_matches('.').to_ascii_lowercase();
-            image::ImageFormat::from_extension(&normalized)
-                .map(|format| (format, normalized))
+            let extension = hint.trim().trim_start_matches('.');
+            image::ImageFormat::from_extension(&extension.to_ascii_lowercase())
+                .map(|format| (format, extension.to_string()))
                 .ok_or_else(|| info_error(&IMFINFO_ERROR_FORMAT, "unsupported image format hint"))
         })
         .transpose()?;
@@ -224,6 +224,21 @@ mod tests {
         assert_eq!(
             fields.fields.get("Filename"),
             Some(&char_value(&path_to_string(&bare)))
+        );
+
+        let upper = root.path().join("upper.PNG");
+        std::fs::copy(&with_extension, &upper).unwrap();
+        let info = run(imfinfo_builtin(vec![
+            Value::String(path_to_string(&root.path().join("upper"))),
+            Value::String("PNG".into()),
+        ]))
+        .unwrap();
+        let Value::Struct(fields) = info else {
+            panic!("expected metadata struct")
+        };
+        assert_eq!(
+            fields.fields.get("Filename"),
+            Some(&char_value(&path_to_string(&upper)))
         );
     }
 

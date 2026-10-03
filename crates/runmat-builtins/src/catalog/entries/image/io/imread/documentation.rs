@@ -26,7 +26,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["imwrite", "imfinfo", "gpuArray", "size"],
     sections: &[
         BuiltinDocumentationSection { heading: "Sources and formats", paragraphs: &[
-            "The source and optional format are scalar text. Local paths and local `file://` URLs use the active filesystem; `http://` and `https://` URLs use the configured HTTP transport. A browser needs the corresponding filesystem bridge or network permission and may additionally be constrained by CORS. Unsupported URL schemes reject. Common explicit hints include png, jpg/jpeg, tif/tiff, bmp, gif, and webp; byte-stream detection is used when the hint is omitted.",
+            "The source and optional format are scalar text. Local paths and local `file://` URLs use the active filesystem; `http://` and `https://` URLs use the configured HTTP transport. A browser needs the corresponding filesystem bridge or network permission and may additionally be constrained by CORS. Unsupported URL schemes reject. Common explicit hints include png, jpg/jpeg, tif/tiff, bmp, gif, and webp; byte-stream detection is used when the hint is omitted. A format hint selects a decoder but does not search for a missing `filename.fmt` path.",
             "Reading can suspend and fail before decoding. The HTTP path has a finite request timeout and reports status, timeout, connection, and header failures distinctly. The file path retains an I/O cause. There is no provider kernel or fusion route; output remains host-owned, and numeric gpuArray arguments are not filenames.",
         ]},
         BuiltinDocumentationSection { heading: "Arrays and requested outputs", paragraphs: &[

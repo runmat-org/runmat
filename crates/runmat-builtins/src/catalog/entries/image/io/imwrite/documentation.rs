@@ -17,7 +17,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Options and effects", paragraphs: &[
             "`Alpha` supplies an M-by-N double, single, uint8, or uint16 plane for formats that support alpha. JPEG `Quality` is 0 to 100 (default 75). GIF `DelayTime` is a non-negative number of seconds; `LoopCount` is non-negative or Inf. `WriteMode` is `overwrite` or `append`; append is supported only for GIF and reads existing frames before rewriting the destination.",
             "Unsupported advanced controls such as Compression and BitDepth fail explicitly. Image, option, and encoder validation occurs before the final write, but a filesystem write failure can leave a partial destination. GIF append is read-modify-write without a portable file lock, so concurrent writers must coordinate externally. This call returns no outputs and does not print an automatic result.",
-            "The destination uses the active filesystem service. Native and browser runtimes need a writable filesystem or browser filesystem bridge. A local destination is not implicitly transferable to a remote worker; run the effect where its filesystem is available.",
+            "Direct single-precision GIF and TIFF writes are a RunMat extension and require that compatibility extensions be enabled. The destination uses the active filesystem service. Native and browser runtimes need a writable filesystem or browser filesystem bridge. A local destination is not implicitly transferable to a remote worker; run the effect where its filesystem is available.",
         ]},
     ],
     examples: &[
