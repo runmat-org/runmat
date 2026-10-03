@@ -389,20 +389,45 @@ fn candidate_resource_adjustment_ns(
         || matches!(
             presentation,
             CandidateOutputPresentation::ProviderUpload { .. }
+                | CandidateOutputPresentation::ProviderReadbackUpload { .. }
         ))
         && require_transactional_results
         && !transactional_results
     {
         return Err(ResourceAdmissionError::TransactionalResultsRequired);
     }
-    if let CandidateOutputPresentation::ProviderUpload {
+    let upload_stage = match presentation {
+        CandidateOutputPresentation::ProviderUpload {
+            device_id,
+            host_result_bytes,
+            host_scratch_bytes,
+            provider_scratch_bytes,
+            queue_slots,
+            ..
+        }
+        | CandidateOutputPresentation::ProviderReadbackUpload {
+            device_id,
+            host_result_bytes,
+            host_scratch_bytes,
+            provider_scratch_bytes,
+            queue_slots,
+            ..
+        } => Some((
+            device_id,
+            host_result_bytes,
+            host_scratch_bytes,
+            provider_scratch_bytes,
+            queue_slots,
+        )),
+        _ => None,
+    };
+    if let Some((
         device_id,
         host_result_bytes,
         host_scratch_bytes,
         provider_scratch_bytes,
         queue_slots,
-        ..
-    } = presentation
+    )) = upload_stage
     {
         let provider = resources
             .provider(device_id)
@@ -434,6 +459,34 @@ fn candidate_resource_adjustment_ns(
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
     }
+    if let CandidateOutputPresentation::ProviderReadbackUpload { readbacks, .. } = presentation {
+        for readback in readbacks.iter() {
+            let provider = resources
+                .provider(readback.device_id)
+                .ok_or(ResourceAdmissionError::UnavailableProvider)?;
+            if provider.lost
+                || provider
+                    .queue_depth
+                    .zip(provider.queue_limit)
+                    .is_some_and(|(depth, limit)| {
+                        readback.queue_slots > limit.saturating_sub(depth)
+                    })
+            {
+                return Err(ResourceAdmissionError::OverBudget);
+            }
+            let scratch = ResourceAccount::default()
+                .add(readback.provider_scratch_bytes)
+                .ok_or(ResourceAdmissionError::Overflow)?;
+            scratch.within(
+                provider.scratch_available_bytes,
+                ResourceBudgetKind::ProviderScratch(readback.device_id),
+            )?;
+            provider_demands
+                .entry(readback.device_id)
+                .and_modify(|existing| *existing = existing.peak(scratch))
+                .or_insert(scratch);
+        }
+    }
     if let CandidateOutputPresentation::ProviderDownload {
         device_id,
         provider_scratch_bytes,
@@ -462,6 +515,9 @@ fn candidate_resource_adjustment_ns(
     }
     let host_published_bound = match presentation {
         CandidateOutputPresentation::ProviderUpload {
+            host_result_bytes, ..
+        }
+        | CandidateOutputPresentation::ProviderReadbackUpload {
             host_result_bytes, ..
         } => host_result_bytes.unwrap_or(demand.retained_bytes),
         CandidateOutputPresentation::Direct

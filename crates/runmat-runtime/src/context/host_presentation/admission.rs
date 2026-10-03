@@ -18,8 +18,8 @@ use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
     CandidateOutputPresentation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementResourceSnapshot,
-    PlacementSignature, ResourceBoundUnavailable, ResourceByteBound, WholeWorkCandidate,
-    WholeWorkConstraint, WholeWorkPlacementRequest,
+    PlacementSignature, ProviderReadbackDemand, ProviderReadbackDemands, ResourceBoundUnavailable,
+    ResourceByteBound, WholeWorkCandidate, WholeWorkConstraint, WholeWorkPlacementRequest,
 };
 
 pub(crate) struct ExactHostUpload<'a> {
@@ -131,6 +131,23 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
     )?;
     let total_host_scratch =
         combine_host_scratch(request.host_compute_scratch, readback_host_workspace)?;
+    // The gathers complete sequentially. Per owner, their peak staging and
+    // occupied queue slot are therefore maxima, not a sum of unrelated
+    // simultaneously live submissions. Unknown provider staging stays unknown.
+    let readback_demands =
+        ProviderReadbackDemands::sequential(readbacks.iter().zip(&source_providers).map(
+            |(source, source_provider)| ProviderReadbackDemand {
+                device_id: source_provider.device_id(),
+                provider_scratch_bytes:
+                    source_provider.download_numeric_provider_scratch_bound(source),
+                queue_slots: 1,
+            },
+        ))
+        .ok_or_else(|| {
+            build_runtime_error("host readback exceeds the provider resource set")
+                .with_identifier("RunMat:Placement:TooManyProviders")
+                .build()
+        })?;
     let device_id = provider.device_id();
     // The reusable decision must invalidate when any readback owner's
     // capability changes, not just when the upload owner's capability does.
@@ -161,6 +178,7 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
                 request.domain_facts,
                 &upload,
                 readback_host_workspace,
+                readback_demands,
                 readbacks
                     .iter()
                     .zip(&source_providers)
@@ -169,6 +187,7 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
                             source_provider.device_id(),
                             source.shape(),
                             source.physical().element_type(),
+                            source.physical().requested_bytes(),
                             source.view().layout(),
                             runmat_accelerate_api::handle_provenance(source),
                         )
@@ -188,6 +207,7 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
         total_host_scratch,
         u32::try_from(upload.outputs.len()).unwrap_or(u32::MAX),
         Digest::sha256(serde_json::to_vec(&upload).expect("typed route serializes")),
+        Some(readback_demands),
     );
     let parallel = runtime
         .service_ports()
@@ -275,13 +295,22 @@ fn upload_candidate(
     host_compute_scratch: ResourceByteBound,
     queue_slots: u32,
     route_facts: Digest,
+    readbacks: Option<ProviderReadbackDemands>,
 ) -> WholeWorkCandidate {
-    WholeWorkCandidate {
-        kind: ExecutionCandidateKind::SharedRuntime,
-        execution_location: CandidateExecutionLocation::Host,
-        preparation: CandidatePreparationState::Ready,
-        output_residency: CandidateOutputResidency::Provider { device_id },
-        presentation: CandidateOutputPresentation::ProviderUpload {
+    let presentation = match readbacks {
+        Some(readbacks) => CandidateOutputPresentation::ProviderReadbackUpload {
+            device_id,
+            transfer_bytes: Some(transfer_bytes),
+            host_result_bytes: Some(ResourceByteBound::Known(transfer_bytes)),
+            host_scratch_bytes: ResourceByteBound::Known(transfer_bytes),
+            provider_scratch_bytes: ResourceByteBound::Unavailable(
+                ResourceBoundUnavailable::NoScratchBound,
+            ),
+            queue_slots,
+            preparation: CandidatePreparationState::Ready,
+            readbacks,
+        },
+        None => CandidateOutputPresentation::ProviderUpload {
             device_id,
             transfer_bytes: Some(transfer_bytes),
             host_result_bytes: Some(ResourceByteBound::Known(transfer_bytes)),
@@ -292,6 +321,13 @@ fn upload_candidate(
             queue_slots,
             preparation: CandidatePreparationState::Ready,
         },
+    };
+    WholeWorkCandidate {
+        kind: ExecutionCandidateKind::SharedRuntime,
+        execution_location: CandidateExecutionLocation::Host,
+        preparation: CandidatePreparationState::Ready,
+        output_residency: CandidateOutputResidency::Provider { device_id },
+        presentation,
         route_facts,
         cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
         resources: CandidateResourceDemand {
@@ -330,6 +366,7 @@ mod tests {
             ResourceByteBound::Known(0),
             1,
             digest,
+            None,
         );
         // This synthetic route isolates retained-provider and host-workspace
         // budgets. Unknown provider scratch would independently prevent its

@@ -8,6 +8,7 @@ mod whole_work;
 pub use candidate::{
     CandidateExecutionLocation, CandidateOutputPresentation, CandidateOutputResidency,
     CandidatePreparationState, ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    ProviderReadbackDemand, ProviderReadbackDemands,
 };
 pub use cost::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateObservationEvidence,

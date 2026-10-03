@@ -3,6 +3,132 @@ use serde::{Deserialize, Serialize};
 
 use super::{ExecutionCostEstimate, ResourceByteBound};
 
+/// One source owner's peak staging while a host route gathers its operands.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderReadbackDemand {
+    pub device_id: u32,
+    pub provider_scratch_bytes: ResourceByteBound,
+    pub queue_slots: u32,
+}
+
+/// Placement snapshots admit at most sixteen provider namespaces. A fixed
+/// inline set retains the candidate's Copy ABI and rejects excess owners,
+/// never truncating an otherwise unbudgeted readback route.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderReadbackDemands {
+    entries: [Option<ProviderReadbackDemand>; 16],
+}
+
+impl ProviderReadbackDemands {
+    pub fn sequential(readbacks: impl IntoIterator<Item = ProviderReadbackDemand>) -> Option<Self> {
+        let mut by_device = std::collections::BTreeMap::new();
+        for readback in readbacks {
+            if readback.queue_slots == 0 {
+                return None;
+            }
+            let current: &mut ProviderReadbackDemand =
+                by_device.entry(readback.device_id).or_insert(readback);
+            current.queue_slots = current.queue_slots.max(readback.queue_slots);
+            current.provider_scratch_bytes = match (
+                current.provider_scratch_bytes,
+                readback.provider_scratch_bytes,
+            ) {
+                (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => {
+                    ResourceByteBound::Known(left.max(right))
+                }
+                (ResourceByteBound::Unavailable(reason), _)
+                | (_, ResourceByteBound::Unavailable(reason)) => {
+                    ResourceByteBound::Unavailable(reason)
+                }
+            };
+        }
+        if by_device.len() > 16 {
+            return None;
+        }
+        let mut set = Self::default();
+        for (slot, demand) in set.entries.iter_mut().zip(by_device.into_values()) {
+            *slot = Some(demand);
+        }
+        Some(set)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = ProviderReadbackDemand> + '_ {
+        self.entries.iter().flatten().copied()
+    }
+
+    pub fn is_canonical(&self) -> bool {
+        let mut previous = None;
+        let mut empty = false;
+        for entry in self.entries {
+            match entry {
+                Some(demand)
+                    if empty
+                        || demand.queue_slots == 0
+                        || previous.is_some_and(|device| demand.device_id <= device) =>
+                {
+                    return false
+                }
+                Some(demand) => previous = Some(demand.device_id),
+                None => empty = true,
+            }
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod readback_demand_tests {
+    use super::*;
+
+    #[test]
+    fn sequential_readbacks_keep_each_owner_and_peak_same_owner_staging() {
+        let demands = ProviderReadbackDemands::sequential([
+            ProviderReadbackDemand {
+                device_id: 8,
+                provider_scratch_bytes: ResourceByteBound::Known(16),
+                queue_slots: 1,
+            },
+            ProviderReadbackDemand {
+                device_id: 7,
+                provider_scratch_bytes: ResourceByteBound::Known(8),
+                queue_slots: 1,
+            },
+            ProviderReadbackDemand {
+                device_id: 8,
+                provider_scratch_bytes: ResourceByteBound::Known(24),
+                queue_slots: 1,
+            },
+        ])
+        .unwrap();
+        assert!(demands.is_canonical());
+        assert_eq!(
+            demands.iter().collect::<Vec<_>>(),
+            vec![
+                ProviderReadbackDemand {
+                    device_id: 7,
+                    provider_scratch_bytes: ResourceByteBound::Known(8),
+                    queue_slots: 1,
+                },
+                ProviderReadbackDemand {
+                    device_id: 8,
+                    provider_scratch_bytes: ResourceByteBound::Known(24),
+                    queue_slots: 1,
+                },
+            ]
+        );
+        assert!(
+            ProviderReadbackDemands::sequential([ProviderReadbackDemand {
+                device_id: 7,
+                provider_scratch_bytes: ResourceByteBound::Known(0),
+                queue_slots: 0,
+            }])
+            .is_none()
+        );
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionCandidateKind {
@@ -81,13 +207,26 @@ pub enum CandidateOutputPresentation {
         host_result_bytes: Option<ResourceByteBound>,
         /// Temporary host storage beyond the host-produced output itself.
         host_scratch_bytes: ResourceByteBound,
-        /// Provider-owned scratch across the complete route. A host route that
-        /// first reads back must include mapped or staged download buffers as
-        /// well as upload scratch. Unknown is not zero even when the provider
-        /// can separately bound its host workspace.
+        /// Provider-owned scratch for this upload stage. Callers with resident
+        /// gathered inputs must use `ProviderReadbackUpload` to budget each
+        /// source owner's staging independently.
         provider_scratch_bytes: ResourceByteBound,
         queue_slots: u32,
         preparation: CandidatePreparationState,
+    },
+    /// One complete host gather/compute/upload route. Input providers may be
+    /// different from the output owner and have independent staging quotas.
+    /// Readback stages must complete sequentially before output publication;
+    /// `ProviderReadbackDemands::sequential` records their per-owner peak.
+    ProviderReadbackUpload {
+        device_id: u32,
+        transfer_bytes: Option<u64>,
+        host_result_bytes: Option<ResourceByteBound>,
+        host_scratch_bytes: ResourceByteBound,
+        provider_scratch_bytes: ResourceByteBound,
+        queue_slots: u32,
+        preparation: CandidatePreparationState,
+        readbacks: ProviderReadbackDemands,
     },
 }
 
@@ -131,8 +270,25 @@ impl CandidateOutputPresentation {
                     preparation,
                     CandidatePreparationState::Preparing | CandidatePreparationState::Unknown
                 ) => Ok(()),
+            (
+                Self::ProviderReadbackUpload {
+                    device_id: upload,
+                    queue_slots,
+                    preparation,
+                    readbacks,
+                    ..
+                },
+                CandidateExecutionLocation::Host,
+                CandidateOutputResidency::Provider { device_id: output }
+                | CandidateOutputResidency::Mirrored { device_id: output },
+            ) if upload == output && queue_slots > 0
+                && !matches!(preparation, CandidatePreparationState::Preparing | CandidatePreparationState::Unknown)
+                && readbacks.is_canonical() && readbacks.iter().next().is_some() => Ok(()),
             (Self::ProviderUpload { .. }, _, _) => {
                 Err("provider upload presentation needs a ready stage, queue slot, and matching host route and output device")
+            }
+            (Self::ProviderReadbackUpload { .. }, _, _) => {
+                Err("provider readback/upload needs canonical input stages and a ready matching host-to-provider output")
             }
             (Self::Direct, _, _) => Ok(()),
         }

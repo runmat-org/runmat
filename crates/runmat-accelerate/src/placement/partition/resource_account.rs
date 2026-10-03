@@ -50,6 +50,21 @@ impl UnavailableCounts {
 }
 
 impl ResourceAccount {
+    /// Alternative stages do not overlap: readback completes before output
+    /// upload. Keep the larger proven peak, or an unavailable bound when
+    /// either stage cannot prove its peak under a finite provider quota.
+    pub(super) fn peak(self, other: Self) -> Self {
+        if !self.unavailable_bounds.is_empty() {
+            self
+        } else if !other.unavailable_bounds.is_empty() {
+            other
+        } else if self.known_bytes >= other.known_bytes {
+            self
+        } else {
+            other
+        }
+    }
+
     pub(super) fn combine(self, other: Self) -> Option<Self> {
         Some(Self {
             known_bytes: self.known_bytes.checked_add(other.known_bytes)?,

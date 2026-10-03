@@ -3,12 +3,14 @@
 use futures::executor::block_on;
 use runmat_accelerate::{placement::PlacementSession, simple_provider::InProcessProvider};
 use runmat_accelerate_api::{
-    handle_precision, provider_for_handle, same_provider_instance, AccelProvider,
-    GpuHandleProvenance, ProviderPrecision, ThreadProviderGuard,
+    handle_precision, provider_for_handle, same_provider_instance, AccelDownloadFuture,
+    AccelProvider, GpuHandleProvenance, GpuTensorHandle, HostNumericTensorView, HostTensorView,
+    ProviderPrecision, ThreadProviderGuard,
 };
 use runmat_execution::{
     Digest, PlacementDecision, PlacementFeedback, PlacementInvalidation, PlacementPlanRequest,
-    PlacementRevision, WholeWorkDecision, WholeWorkDecisionKind, WholeWorkPlacementRequest,
+    PlacementRevision, ProviderResourceSnapshot, ResourceByteBound, WholeWorkDecision,
+    WholeWorkDecisionKind, WholeWorkPlacementRequest,
 };
 use runmat_runtime::{
     builtins::common::gpu_helpers,
@@ -148,8 +150,60 @@ fn base_context() -> RuntimeContext {
 
 fn provider() -> (&'static InProcessProvider, ThreadProviderGuard) {
     let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    // Distinct resident owners remain addressable after thread selection
+    // switches to the output provider. Each leaked fixture has a unique id.
+    unsafe { runmat_accelerate_api::register_device_provider(provider) };
     let guard = ThreadProviderGuard::set(Some(provider));
     (provider, guard)
+}
+
+/// A real in-process source with a finite, nonzero download staging demand.
+/// Its output-owner peer remains independently budgeted.
+struct FiniteReadbackOwner(InProcessProvider);
+
+impl AccelProvider for FiniteReadbackOwner {
+    fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        self.0.upload(host)
+    }
+    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+        self.0.upload_numeric_raw(host)
+    }
+    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.0.download(handle)
+    }
+    fn device_id(&self) -> u32 {
+        self.0.device_id()
+    }
+    fn device_info(&self) -> String {
+        self.0.device_info()
+    }
+    fn precision(&self) -> ProviderPrecision {
+        self.0.precision()
+    }
+    fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
+        self.0.capability_snapshot()
+    }
+    fn query_feasibility(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        self.0.query_feasibility(query)
+    }
+    fn download_numeric_host_workspace_bound(&self, handle: &GpuTensorHandle) -> ResourceByteBound {
+        self.0.download_numeric_host_workspace_bound(handle)
+    }
+    fn download_numeric_provider_scratch_bound(&self, _: &GpuTensorHandle) -> ResourceByteBound {
+        ResourceByteBound::Known(8)
+    }
+    fn placement_resources(&self) -> ProviderResourceSnapshot {
+        ProviderResourceSnapshot {
+            device_id: self.device_id(),
+            scratch_available_bytes: Some(0),
+            queue_depth: Some(0),
+            queue_limit: Some(1),
+            ..Default::default()
+        }
+    }
 }
 
 fn resident_u8(provider: &'static InProcessProvider) -> runmat_accelerate_api::GpuTensorHandle {
@@ -434,6 +488,56 @@ fn indexed_color_gathers_two_providers_and_restores_only_to_explicit_map_owner()
     assert_eq!(witness.selections.get(), 1);
     witness.drain();
     assert_eq!(witness.feedback.borrow().len(), 1);
+    assert!(indexed.allocation_lease().validate_live().is_ok());
+    assert!(map.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
+fn cross_owner_readback_staging_quota_rejects_before_either_provider_effect() {
+    let index_provider: &'static FiniteReadbackOwner =
+        Box::leak(Box::new(FiniteReadbackOwner(InProcessProvider::new())));
+    // The leaked facade is the sole registered owner of its unique namespace.
+    unsafe { runmat_accelerate_api::register_device_provider(index_provider) };
+    let _index_guard = ThreadProviderGuard::set(Some(index_provider));
+    let indexed = gpu_helpers::upload_tensor(
+        index_provider,
+        &Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap(),
+    )
+    .unwrap();
+    let (map_provider, _map_guard) = provider();
+    let map = gpu_helpers::upload_tensor(
+        map_provider,
+        &Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap(),
+    )
+    .unwrap()
+    .with_provenance(GpuHandleProvenance::Explicit)
+    .unwrap();
+    assert_ne!(indexed.device_id(), map.device_id());
+
+    let runtime = base_context().with_service_ports(
+        RuntimeServicePorts::default()
+            .with_placement(Rc::new(PlacementSession::new(Default::default()))),
+    );
+    let runtime = runmat_accelerate::native_auto::install_preparation_service(runtime);
+    index_provider.0.reset_telemetry();
+    map_provider.reset_telemetry();
+    let error = block_on(call_builtin_async_in_context(
+        &runtime,
+        "ind2rgb",
+        &[
+            Value::GpuTensor(indexed.clone()),
+            Value::GpuTensor(map.clone()),
+        ],
+    ))
+    .expect_err("source staging quota must reject the complete route");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:NoLegalCandidate")
+    );
+    assert_eq!(index_provider.0.telemetry_snapshot().download_bytes, 0);
+    assert_eq!(index_provider.0.telemetry_snapshot().upload_bytes, 0);
+    assert_eq!(map_provider.telemetry_snapshot().download_bytes, 0);
+    assert_eq!(map_provider.telemetry_snapshot().upload_bytes, 0);
     assert!(indexed.allocation_lease().validate_live().is_ok());
     assert!(map.allocation_lease().validate_live().is_ok());
 }

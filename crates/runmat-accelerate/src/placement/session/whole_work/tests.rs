@@ -1,8 +1,8 @@
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, PlacementFeedback, PlacementResourceSnapshot, PlacementRevision,
-    PlacementSignature, ProviderResourceSnapshot, WholeWorkObservation,
-    WholeWorkObservationOutcome,
+    PlacementSignature, ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
+    WholeWorkObservation, WholeWorkObservationOutcome,
 };
 use runmat_runtime::context::RuntimePlacementService;
 
@@ -72,6 +72,62 @@ fn host_with_provider_presentation() -> WholeWorkCandidate {
         preparation: CandidatePreparationState::Ready,
     };
     host
+}
+
+fn host_with_cross_owner_readback(scratch: ResourceByteBound) -> WholeWorkCandidate {
+    let mut host = host_with_provider_presentation();
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderReadbackUpload {
+        device_id: 7,
+        transfer_bytes: Some(16),
+        host_result_bytes: Some(ResourceByteBound::Known(16)),
+        host_scratch_bytes: ResourceByteBound::Known(0),
+        provider_scratch_bytes: ResourceByteBound::Known(8),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+        readbacks: ProviderReadbackDemands::sequential([ProviderReadbackDemand {
+            device_id: 8,
+            provider_scratch_bytes: scratch,
+            queue_slots: 1,
+        }])
+        .unwrap(),
+    };
+    host
+}
+
+#[test]
+fn cross_owner_readback_source_staging_and_queue_are_admitted_before_upload() {
+    let session = PlacementSession::default();
+    let mut route = request(vec![host_with_cross_owner_readback(
+        ResourceByteBound::Known(8),
+    )]);
+    route.resources.providers.push(ProviderResourceSnapshot {
+        device_id: 8,
+        scratch_available_bytes: Some(8),
+        queue_depth: Some(0),
+        queue_limit: Some(1),
+        ..Default::default()
+    });
+    assert!(session.select_whole_work(route.clone()).is_ok());
+
+    route.resources.providers[1].scratch_available_bytes = Some(7);
+    assert_eq!(
+        session.select_whole_work(route.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    route.resources.providers[1].scratch_available_bytes = Some(8);
+    route.resources.providers[1].queue_depth = Some(1);
+    assert_eq!(
+        session.select_whole_work(route.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    route.resources.providers[1].queue_depth = Some(0);
+    route.candidates = vec![host_with_cross_owner_readback(
+        ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound),
+    )];
+    assert_eq!(
+        session.select_whole_work(route).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
 }
 
 #[test]
