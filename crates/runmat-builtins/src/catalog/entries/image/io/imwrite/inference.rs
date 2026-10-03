@@ -229,7 +229,7 @@ fn infer_known_tail(
                 index,
             ));
         }
-        let Some(_value) = request.arguments.get(index + 1) else {
+        let Some(value) = request.arguments.get(index + 1) else {
             diagnostics.push(argument_error(
                 "RM-CATALOG-IMWRITE-OPTION",
                 "writer option requires a value",
@@ -240,11 +240,54 @@ fn infer_known_tail(
         };
         if option == ImwriteOption::Alpha {
             alpha = true;
+            let class_possible = matches!(
+                value.kind,
+                ValueKindFact::Unknown
+                    | ValueKindFact::Numeric(runmat_types::NumericFact {
+                        class: NumericClass::Double
+                            | NumericClass::Single
+                            | NumericClass::UInt8
+                            | NumericClass::UInt16,
+                        ..
+                    })
+            );
+            if !class_possible {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-IMWRITE-OPTION",
+                    "Alpha class must be double, single, uint8, or uint16",
+                    index + 1,
+                ));
+            }
+            if value
+                .shape
+                .rank()
+                .is_some_and(|rank| rank != 0 && rank != 2)
+            {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-IMWRITE-OPTION",
+                    "Alpha must be an MxN array matching the image dimensions",
+                    index + 1,
+                ));
+            }
         }
         if matches!(
             option,
             ImwriteOption::Quality | ImwriteOption::DelayTime | ImwriteOption::LoopCount
         ) {
+            if !matches!(
+                value.kind,
+                ValueKindFact::Unknown | ValueKindFact::Numeric(_) | ValueKindFact::Logical
+            ) || value
+                .shape
+                .known_dims()
+                .is_some_and(|dims| dims.iter().any(|extent| extent.is_some_and(|n| n != 1)))
+            {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-IMWRITE-OPTION",
+                    "writer control must be a numeric scalar",
+                    index + 1,
+                ));
+            }
             let known = match request.literals.literal_args.get(index + 1) {
                 Some(LiteralValue::Number(number)) => Some(*number),
                 Some(LiteralValue::Real { text, .. }) => text.parse::<f64>().ok(),
@@ -261,6 +304,13 @@ fn infer_known_tail(
             }
         }
         if option == ImwriteOption::WriteMode {
+            if !super::super::text::could_be_scalar_text(value) {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-IMWRITE-OPTION",
+                    "WriteMode must be a string scalar or char vector",
+                    index + 1,
+                ));
+            }
             if let Some(mode) = request.literals.literal_string_at(index + 1) {
                 match ImwriteWriteMode::from_name(&mode) {
                     Some(ImwriteWriteMode::Append) => append = true,

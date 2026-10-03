@@ -225,6 +225,23 @@ fn every_proven_option_pair_and_format_channel_rule_is_checked() {
         .iter()
         .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(3)));
 
+    request.arguments[3] = text();
+    request.literals.literal_args[3] = LiteralValue::String("bad".into());
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(3)));
+
+    request.literals.literal_args[2] = LiteralValue::String("WriteMode".into());
+    request.arguments[3] = image(NumericClass::Double, vec![Some(1), Some(1)]);
+    request.literals.literal_args[3] = LiteralValue::Number(1.0);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(3)));
+
     // The second value might instead be an indexed colormap. No guessed
     // filename or option positions are allowed from that unresolved shape.
     request.arguments[1] = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
