@@ -28,14 +28,14 @@ pub const WEBSAVE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::Network,
             EffectKind::FilesystemWrite,
+            EffectKind::Network,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],
         capabilities: &[
-            CapabilityRequirement::Network,
             CapabilityRequirement::Filesystem,
+            CapabilityRequirement::Network,
         ],
     },
     placement: BuiltinPlacementContract {
