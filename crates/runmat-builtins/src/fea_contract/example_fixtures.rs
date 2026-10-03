@@ -12,6 +12,12 @@ pub const CLOSED_CUBE_STUDY: BuiltinExampleFixture =
         root: BuiltinFilesystemRoot::IsolatedWorkspace,
         entries: &[
             BuiltinFilesystemEntry::File {
+                relative_path: "cube.fea",
+                content: BuiltinFixtureContent::Utf8(
+                    "version: 1\nkind: study\nid: closed_cube_static\ngeometry:\n  path: cube.stl\n  units: meter\nmodel:\n  profile: linear_static_structural\nrun:\n  backend: cpu\n",
+                ),
+            },
+            BuiltinFilesystemEntry::File {
                 relative_path: "cube.stl",
                 content: BuiltinFixtureContent::Utf8(concat!(
                     "solid cube\n",
@@ -29,12 +35,6 @@ pub const CLOSED_CUBE_STUDY: BuiltinExampleFixture =
                     "facet normal -1 0 0\nouter loop\nvertex 0 1 0\nvertex 0 0 1\nvertex 0 1 1\nendloop\nendfacet\n",
                     "endsolid cube\n"
                 )),
-            },
-            BuiltinFilesystemEntry::File {
-                relative_path: "cube.fea",
-                content: BuiltinFixtureContent::Utf8(
-                    "version: 1\nkind: study\nid: closed_cube_static\ngeometry:\n  path: cube.stl\n  units: meter\nmodel:\n  profile: linear_static_structural\nrun:\n  backend: cpu\n",
-                ),
             },
         ],
     });
