@@ -1202,8 +1202,7 @@ pub(crate) mod tests {
     fn whos_reports_gpu_bytes_with_wgpu_provider() {
         let _guard = workspace_guard();
         ensure_test_resolver();
-        use runmat_accelerate_api::AccelProvider;
-        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
         .expect("wgpu provider");
@@ -1213,17 +1212,21 @@ pub(crate) mod tests {
             &[Value::Tensor(tensor.clone())],
         ))
         .expect("gpuArray");
+        let Value::GpuTensor(handle) = &gpu_value else {
+            panic!("gpuArray must retain a resident handle")
+        };
+        assert_eq!(handle.shape(), tensor.shape);
+        assert_eq!(
+            handle.physical().element_type(),
+            runmat_accelerate_api::NumericElementType::F64
+        );
         set_workspace(&[("WG", gpu_value)], &[]);
 
         let value = whos_builtin(vec![Value::from("WG")]).expect("whos");
         let entries = structs_from_value(value);
         assert_eq!(entries.len(), 1);
         let bytes = field_bytes(&entries[0]).unwrap();
-        let elem = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F32 => 4.0,
-            runmat_accelerate_api::ProviderPrecision::F64 => 8.0,
-        };
-        let expected = elem * tensor.materialize_f64().len() as f64;
+        let expected = (std::mem::size_of::<f64>() * tensor.materialize_f64().len()) as f64;
         assert!((bytes - expected).abs() < 1e-6);
     }
 

@@ -69,10 +69,24 @@ fn gathers_cell_contents_from_an_actual_wgpu_provider() {
             shape: &value.shape,
         })
         .unwrap();
+    let precision = runmat_accelerate_api::handle_precision(&handle).expect("floating upload");
+    let retained_input = handle.clone();
     let result = call(
         Value::FunctionHandle("sin".into()),
         vec![cell(vec![Value::GpuTensor(handle)], &[1, 1])],
     )
     .unwrap();
-    assert!((tensor_values(result)[0] - 0.25f64.sin()).abs() < 1e-12);
+    let (expected, tolerance) = match precision {
+        runmat_accelerate_api::ProviderPrecision::F32 => {
+            (f64::from(0.25f32.sin()), 4.0 * f32::EPSILON as f64)
+        }
+        runmat_accelerate_api::ProviderPrecision::F64 => (0.25f64.sin(), 1e-12),
+    };
+    let values = tensor_values(result);
+    assert_eq!(values.len(), 1);
+    assert!(values[0] > 0.0);
+    assert!((values[0] - expected).abs() <= tolerance);
+    let input = crate::builtins::common::test_support::gather(Value::GpuTensor(retained_input))
+        .expect("borrowed input remains readable");
+    assert_eq!(input.materialize_f64(), vec![0.25]);
 }

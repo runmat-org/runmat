@@ -656,12 +656,16 @@ fn cov_wgpu_matches_cpu() {
         return;
     };
 
-    let tensor = Tensor::new(
+    // Centered binary fractions are exactly representable in F32. This
+    // compares the supported single-precision route without making a broad
+    // tolerance allowance for cancellation around an F64-sized mean.
+    let tensor = Tensor::new_with_dtype(
         vec![
-            4.0, 4.2, 3.9, 4.3, 4.1, //
-            2.0, 2.1, 2.0, 2.1, 2.2,
+            -0.5, -0.25, 0.0, 0.25, 0.5, //
+            0.25, 0.0, -0.25, 0.5, -0.5,
         ],
         vec![5, 2],
+        runmat_value::NumericDType::F32,
     )
     .unwrap();
 
@@ -670,17 +674,21 @@ fn cov_wgpu_matches_cpu() {
         Value::Tensor(t) => t,
         other => panic!("expected tensor result, got {other:?}"),
     };
+    assert_eq!(cpu_tensor.numeric_dtype(), runmat_value::NumericDType::F32);
+    let expected = [0.15625, -0.0625, -0.0625, 0.15625];
+    assert_tensor_close(&cpu_tensor, &expected, 0.0);
 
-    let view = runmat_accelerate_api::HostTensorView {
-        data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
-    };
-    let handle = provider.upload(&view).expect("upload");
+    let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("typed single upload");
+    assert_eq!(
+        runmat_accelerate_api::handle_precision(&handle),
+        Some(runmat_accelerate_api::ProviderPrecision::F32)
+    );
 
     let gpu_value = cov_builtin_sync(Value::GpuTensor(handle), Vec::new()).expect("cov");
+    assert!(matches!(&gpu_value, Value::GpuTensor(_)));
     let gathered = test_support::gather(gpu_value).expect("gather");
-
-    assert_tensor_close(&gathered, &cpu_tensor.materialize_f64(), 1.0e-6);
+    assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_tensor_close(&gathered, &expected, 4.0 * f32::EPSILON as f64);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
