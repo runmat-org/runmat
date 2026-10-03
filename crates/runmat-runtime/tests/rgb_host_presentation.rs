@@ -78,7 +78,7 @@ impl RuntimePlacementService for Witness {
             program,
             catalog: digest,
             compiler: digest,
-            provider,
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(provider),
             policy: digest,
         })
     }
