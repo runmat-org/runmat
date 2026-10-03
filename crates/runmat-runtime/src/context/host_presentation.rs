@@ -57,7 +57,7 @@ impl HostPresentationReceipt {
         }
     }
 
-    pub(super) fn with_admitted_upload_outputs(
+    fn with_admitted_upload_outputs(
         mut self,
         admitted: AdmittedHostUploadOutputs,
     ) -> Self {
