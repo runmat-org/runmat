@@ -1,3 +1,4 @@
+use super::super::AudioReadDataType;
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::*;
 
@@ -59,9 +60,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let literal_mode = mode_index.and_then(|index| request.literals.literal_string_at(index));
     if let Some(mode) = literal_mode {
-        if !mode.trim().eq_ignore_ascii_case("double")
-            && !mode.trim().eq_ignore_ascii_case("native")
-        {
+        if AudioReadDataType::parse(mode).is_none() {
             diagnostics.push(argument_error(
                 "RM-CATALOG-AUDIOREAD-MODE",
                 "datatype must be native or double",
@@ -70,7 +69,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     let known_double = request.arguments.len() == 1
-        || literal_mode.is_some_and(|mode| mode.trim().eq_ignore_ascii_case("double"))
+        || literal_mode
+            .is_some_and(|mode| AudioReadDataType::parse(mode) == Some(AudioReadDataType::Double))
         || (request.arguments.len() == 2
             && mode_index.is_none()
             && is_known_range(&request.arguments[1]));

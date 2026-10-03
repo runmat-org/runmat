@@ -51,7 +51,7 @@ pub(super) async fn audioread_builtin(filename: Value, args: Vec<Value>) -> Buil
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct AudioreadOptions {
     pub(super) range: Option<AudioSampleRange>,
-    pub(super) native: bool,
+    pub(super) datatype: AudioReadDataType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,12 +68,12 @@ pub(super) struct DecodedAudio {
 
 pub(super) fn parse_audioread_options(args: &[Value]) -> BuiltinResult<AudioreadOptions> {
     let mut range = None;
-    let mut native = false;
+    let mut datatype = AudioReadDataType::Double;
     match args {
         [] => {}
         [single] => {
             if let Some(text) = scalar_text(single) {
-                native = parse_audioread_datatype(&text)?;
+                datatype = parse_audioread_datatype(&text)?;
             } else {
                 range = Some(parse_sample_range(single)?);
             }
@@ -86,7 +86,7 @@ pub(super) fn parse_audioread_options(args: &[Value]) -> BuiltinResult<Audioread
                     "audioread: datatype must be \"native\" or \"double\"",
                 )
             })?;
-            native = parse_audioread_datatype(&text)?;
+            datatype = parse_audioread_datatype(&text)?;
         }
         _ => {
             return Err(audioread_error_with(
@@ -95,18 +95,16 @@ pub(super) fn parse_audioread_options(args: &[Value]) -> BuiltinResult<Audioread
             ));
         }
     }
-    Ok(AudioreadOptions { range, native })
+    Ok(AudioreadOptions { range, datatype })
 }
 
-pub(super) fn parse_audioread_datatype(value: &str) -> BuiltinResult<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "double" => Ok(false),
-        "native" => Ok(true),
-        _ => Err(audioread_error_with(
+pub(super) fn parse_audioread_datatype(value: &str) -> BuiltinResult<AudioReadDataType> {
+    AudioReadDataType::parse(value).ok_or_else(|| {
+        audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
             "audioread: datatype must be \"native\" or \"double\"",
-        )),
-    }
+        )
+    })
 }
 
 pub(super) fn parse_sample_range(value: &Value) -> BuiltinResult<AudioSampleRange> {
@@ -215,7 +213,7 @@ pub(super) fn decode_wave_samples(
     let frame_count = end_frame_exclusive - start_frame;
     let data = &bytes[parsed.data_offset..parsed.data_offset + parsed.data_len];
     let shape = vec![frame_count, channels];
-    let samples = if options.native {
+    let samples = if options.datatype == AudioReadDataType::Native {
         if let Some(storage) = native_pcm_storage(
             fmt,
             data,
