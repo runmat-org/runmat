@@ -289,6 +289,32 @@ mod tests {
     };
     use runmat_value::Tensor;
 
+    struct ForeignFacade(&'static InProcessProvider);
+
+    impl AccelProvider for ForeignFacade {
+        fn upload(
+            &self,
+            host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.0.upload(host)
+        }
+
+        fn download<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.0.download(handle)
+        }
+
+        fn device_info(&self) -> String {
+            self.0.device_info()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.0.device_id()
+        }
+    }
+
     #[test]
     fn conditional_physical_publication_needs_exact_witness_and_rejection_is_terminal() {
         let mut pending = ConditionalUploadPublication::new(Some(8));
@@ -313,7 +339,7 @@ mod tests {
     #[test]
     fn same_device_foreign_facade_is_not_a_conditional_output_owner() {
         let owner: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
-        let foreign: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+        let foreign: &'static ForeignFacade = Box::leak(Box::new(ForeignFacade(owner)));
         assert_eq!(owner.device_id(), foreign.device_id());
         assert!(!same_provider_instance(owner, foreign));
         let _selected_owner = ThreadProviderGuard::set(Some(owner));

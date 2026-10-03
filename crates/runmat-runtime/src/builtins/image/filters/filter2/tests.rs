@@ -491,6 +491,10 @@ fn explicit_resident_image_provenance_survives_provider_filter() {
         Vec::new(),
     ))
     .expect("resident filter2");
+    assert!(runmat_accelerate_api::same_provider_instance(
+        provider,
+        runmat_accelerate_api::provider().expect("selected provider remains installed"),
+    ));
     let Value::GpuTensor(output) = output else {
         panic!("provider result must remain resident");
     };
@@ -702,8 +706,8 @@ fn filter2_wgpu_full_conv_matches_cpu() {
 
 #[test]
 fn filter2_descriptor_signatures_cover_surface() {
-    let builtin =
-        runmat_builtins::builtin_catalog_entry_by_name(FILTER2_BUILTIN).expect("filter2 catalog entry");
+    let builtin = runmat_builtins::builtin_catalog_entry_by_name(FILTER2_BUILTIN)
+        .expect("filter2 catalog entry");
     let labels: Vec<&str> = FILTER2_DESCRIPTOR
         .signatures
         .iter()

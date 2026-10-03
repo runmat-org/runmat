@@ -17,15 +17,6 @@ pub(super) async fn imfilter_gpu(
     kernel_value: Value,
     options: ImfilterOptions,
 ) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        let kernel_is_wgpu = matches!(kernel_value, Value::GpuTensor(ref h) if h.device_id() != 0);
-        if kernel_is_wgpu || image_handle.device_id() != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     preflight_resident_input(&image_handle, "A")?;
     if let Value::GpuTensor(kernel) = &kernel_value {
         preflight_resident_input(kernel, "H")?;

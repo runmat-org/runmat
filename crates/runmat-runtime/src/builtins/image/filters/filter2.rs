@@ -342,15 +342,6 @@ async fn filter2_gpu(
     options: &ImfilterOptions,
 ) -> BuiltinResult<Value> {
     let kernel_clone = kernel_value.clone();
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        let kernel_is_wgpu = matches!(kernel_clone, Value::GpuTensor(ref h) if h.device_id() != 0);
-        if kernel_is_wgpu || image_handle.device_id() != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     image_handle
         .allocation_lease()
         .validate_live()

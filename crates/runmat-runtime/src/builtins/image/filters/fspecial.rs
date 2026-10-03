@@ -430,14 +430,6 @@ fn finalize_output_with_observation(
         });
     }
 
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if admitted_provider.is_none() && runmat_accelerate_api::provider().is_none() {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     let mut unsupported_fallback = false;
     if let Some(provider) = admitted_provider.or_else(runmat_accelerate_api::provider) {
         match spec.to_request() {
