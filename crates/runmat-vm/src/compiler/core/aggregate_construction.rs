@@ -205,14 +205,10 @@ impl ProofIndex {
 fn rvalue_operands(value: &MirRvalue) -> Option<[Option<&MirOperand>; 2]> {
     match value {
         MirRvalue::Use(operand) => Some([Some(operand), None]),
-        MirRvalue::Unary(operator, operand)
-            if matches!(
-                operator,
-                OperatorKind::UnaryPlus | OperatorKind::UnaryMinus | OperatorKind::Not
-            ) =>
-        {
-            Some([Some(operand), None])
-        }
+        MirRvalue::Unary(
+            OperatorKind::UnaryPlus | OperatorKind::UnaryMinus | OperatorKind::Not,
+            operand,
+        ) => Some([Some(operand), None]),
         MirRvalue::Binary(left, operator, right) if scalar_binary(*operator) => {
             Some([Some(left), Some(right)])
         }
