@@ -206,7 +206,7 @@ async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> Built
     Ok(bytes)
 }
 
-fn gif_repeat_from_bytes(bytes: &[u8]) -> Option<Repeat> {
+pub(super) fn gif_repeat_from_bytes(bytes: &[u8]) -> Option<Repeat> {
     const APP_EXT_PREFIX: &[u8] = b"\x21\xFF\x0BNETSCAPE2.0\x03\x01";
     bytes.windows(APP_EXT_PREFIX.len() + 3).find_map(|window| {
         if !window.starts_with(APP_EXT_PREFIX) || window[APP_EXT_PREFIX.len() + 2] != 0 {

@@ -1,5 +1,7 @@
+use super::super::encode::gif_repeat_from_bytes;
 use super::super::materialize::{map_index, value_to_u16, value_to_u8};
 use super::*;
+use runmat_builtins::IMWRITE_DESCRIPTOR;
 
 #[test]
 fn writes_png_rgb_and_round_trips_layout() {

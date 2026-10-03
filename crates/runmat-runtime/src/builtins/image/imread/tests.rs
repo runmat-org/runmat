@@ -1,5 +1,6 @@
 use super::*;
 use image::{ImageBuffer, ImageOutputFormat, Luma, Rgb, RgbImage, Rgba, RgbaImage};
+use runmat_builtins::IMREAD_DESCRIPTOR;
 use runmat_value::IntegerStorage;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
