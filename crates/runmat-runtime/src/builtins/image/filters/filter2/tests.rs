@@ -703,7 +703,7 @@ fn filter2_wgpu_full_conv_matches_cpu() {
 #[test]
 fn filter2_descriptor_signatures_cover_surface() {
     let builtin =
-        runmat_builtins::builtin_function_by_name(FILTER2_BUILTIN).expect("filter2 builtin");
+        runmat_builtins::builtin_catalog_entry_by_name(FILTER2_BUILTIN).expect("filter2 catalog entry");
     let labels: Vec<&str> = FILTER2_DESCRIPTOR
         .signatures
         .iter()
