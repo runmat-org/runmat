@@ -176,6 +176,7 @@ async fn worker_pending_body_drop_aborts_and_releases_reader() {
         *signal_for_fetch.borrow_mut() = Some(request.signal());
         let response = Response::new_with_opt_readable_stream(Some(&stream_for_fetch))
             .expect("pending Worker response");
+        let response: JsValue = response.into();
         Promise::resolve(&response)
     }));
     let mut body = BrowserHttpService::new()
