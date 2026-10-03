@@ -1,8 +1,10 @@
 use super::super::placement;
 use super::kernel::fallback_accumulation;
 use super::*;
+#[path = "provider/route.rs"]
 mod route;
 use route::{select_provider_route, valid_public_kernel};
+#[path = "provider/publication.rs"]
 mod publication;
 use publication::{
     imfilter_gpu_host_fallback, preflight_resident_input, upload_kernel, valid_host_only_restore,

@@ -520,7 +520,7 @@ impl CandidateOutputPresentation {
                 Self::ConditionalProviderUpload { device_id: upload, queue_slots, host_result_bytes: Some(_), .. },
                 CandidateExecutionLocation::Provider { device_id: execution },
                 CandidateOutputResidency::Provider { device_id: output },
-            ) if upload == execution && upload == output && queue_slots > 0 => Ok(()),
+            ) if *upload == execution && *upload == output && *queue_slots > 0 => Ok(()),
             (Self::ProviderUpload { .. }, _, _) => {
                 Err("provider upload presentation needs a ready stage, queue slot, and matching host route and output device")
             }

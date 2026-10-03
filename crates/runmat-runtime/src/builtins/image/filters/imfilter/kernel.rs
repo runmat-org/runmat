@@ -8,6 +8,7 @@ use super::super::geometry::{extend_shape, normalize_shape, validate_kernel_shap
 use super::{
     filter_error, BuiltinResult, ImageOutputClass, ImfilterKernelError, ImfilterKernelResult,
 };
+#[path = "kernel/evaluation.rs"]
 mod evaluation;
 #[cfg(test)]
 pub(super) use evaluation::reflect_index;
