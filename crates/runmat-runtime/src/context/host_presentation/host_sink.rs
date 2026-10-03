@@ -201,7 +201,7 @@ pub(crate) fn select_exact_host_sink_with_readbacks(
             }
         } else {
             CandidateOutputPresentation::ProviderReadbacksHost {
-                readbacks: readback_demands,
+                readbacks: Box::new(readback_demands),
             }
         },
         route_facts: Digest::sha256(

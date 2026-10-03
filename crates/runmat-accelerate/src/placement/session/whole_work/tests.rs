@@ -989,19 +989,21 @@ fn multi_owner_host_sink_admits_each_readback_before_host_publication() {
     let session = PlacementSession::default();
     let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
     host.presentation = runmat_execution::CandidateOutputPresentation::ProviderReadbacksHost {
-        readbacks: ProviderReadbackDemands::sequential([
-            ProviderReadbackDemand {
-                device_id: 7,
-                provider_scratch_bytes: 4.into(),
-                queue_slots: 1,
-            },
-            ProviderReadbackDemand {
-                device_id: 8,
-                provider_scratch_bytes: 8.into(),
-                queue_slots: 1,
-            },
-        ])
-        .unwrap(),
+        readbacks: Box::new(
+            ProviderReadbackDemands::sequential([
+                ProviderReadbackDemand {
+                    device_id: 7,
+                    provider_scratch_bytes: 4.into(),
+                    queue_slots: 1,
+                },
+                ProviderReadbackDemand {
+                    device_id: 8,
+                    provider_scratch_bytes: 8.into(),
+                    queue_slots: 1,
+                },
+            ])
+            .unwrap(),
+        ),
     };
     let mut bounded = request(vec![host]);
     bounded.resources.providers[0].scratch_available_bytes = Some(4);

@@ -252,6 +252,15 @@ mod readback_demand_tests {
             serde_json::from_value::<CandidateOutputPresentation>(encoded).unwrap(),
             presentation,
         );
+        let host = CandidateOutputPresentation::ProviderReadbacksHost {
+            readbacks: Box::new(demands),
+        };
+        let encoded = serde_json::to_value(&host).unwrap();
+        assert_eq!(encoded["readbacks"], serde_json::to_value(demands).unwrap());
+        assert_eq!(
+            serde_json::from_value::<CandidateOutputPresentation>(encoded).unwrap(),
+            host,
+        );
         let owner = |device_id| ProviderReadbackDemand {
             device_id,
             provider_scratch_bytes: ResourceByteBound::Known(8),
@@ -405,7 +414,7 @@ pub enum CandidateOutputPresentation {
     /// followed by host computation and host publication. This does not
     /// imply a provider upload or a provider-executed kernel.
     ProviderReadbacksHost {
-        readbacks: ProviderReadbackDemands,
+        readbacks: Box<ProviderReadbackDemands>,
     },
     ProviderUpload {
         device_id: u32,
