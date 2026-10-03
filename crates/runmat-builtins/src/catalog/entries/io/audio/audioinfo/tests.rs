@@ -40,6 +40,31 @@ fn metadata_fields_and_effects_are_typed() {
 }
 
 #[test]
+fn discarded_metadata_retains_filesystem_effect_and_validation() {
+    let text = ValueFact::scalar(ValueKindFact::String);
+    let inferred = inference::infer(
+        &request(text.clone(), Some("sample.wav"), 0),
+        &AUDIOINFO_CATALOG_ENTRY,
+    );
+    assert!(
+        inferred.diagnostics.is_empty(),
+        "{:?}",
+        inferred.diagnostics
+    );
+    assert!(inferred.outputs.is_empty());
+    assert!(inferred.effects.0.contains(&EffectKind::FilesystemRead));
+    assert!(inferred
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
+    assert!(
+        !inference::infer(&request(text, Some(" "), 0), &AUDIOINFO_CATALOG_ENTRY)
+            .diagnostics
+            .is_empty()
+    );
+}
+
+#[test]
 fn invalid_scalar_text_and_output_count_are_diagnosed() {
     let numeric = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
