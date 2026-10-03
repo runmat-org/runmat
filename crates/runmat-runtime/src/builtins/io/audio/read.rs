@@ -47,7 +47,7 @@ pub(super) async fn audioread_builtin(
         })
     }
     .await;
-    finish_receipt(receipt, &result);
+    finish_receipt(receipt, &result, cooperation.was_cancelled());
     result
 }
 

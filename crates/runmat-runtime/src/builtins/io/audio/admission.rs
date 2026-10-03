@@ -77,9 +77,15 @@ pub(super) fn select_metadata(
     )
 }
 
-pub(super) fn finish_receipt<T>(receipt: Option<HostEffectReceipt>, result: &BuiltinResult<T>) {
+pub(super) fn finish_receipt<T>(
+    receipt: Option<HostEffectReceipt>,
+    result: &BuiltinResult<T>,
+    cancelled: bool,
+) {
     if let Some(receipt) = receipt {
-        receipt.finish(if result.is_ok() {
+        receipt.finish(if cancelled {
+            WholeWorkObservationOutcome::Cancelled
+        } else if result.is_ok() {
             WholeWorkObservationOutcome::Success
         } else {
             WholeWorkObservationOutcome::OperationalFailure
