@@ -387,3 +387,80 @@ fn actual_provider_host_mediated_route_has_one_completed_whole_call() {
         "whole-call feedback requires the provider's final upload fence"
     );
 }
+
+#[test]
+#[ignore = "requires actual WGPU adapter; run in native image-filter qualification"]
+fn automatic_integer_two_readbacks_obey_finite_host_quota_before_effects() {
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+    use runmat_value::IntegerStorage;
+    assert!(std::env::var("RUNMAT_WGPU_DISABLE_IMFILTER").is_err());
+    let backend: &'static WgpuProvider = Box::leak(Box::new(
+        WgpuProvider::new(Default::default()).expect("actual WGPU adapter required"),
+    ));
+    let _owner = ThreadProviderGuard::set(Some(backend));
+    let image = backend
+        .upload_integer(&HostIntegerTensorView {
+            data: HostIntegerDataView::U8(&[1, 2, 3, 4]),
+            shape: &[2, 2],
+        })
+        .expect("native integer image");
+    let kernel = backend
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.0]),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("resident double H");
+    let args = [
+        Value::GpuTensor(image.clone()),
+        Value::GpuTensor(kernel.clone()),
+    ];
+    let before = backend.telemetry_snapshot();
+    let error = block_on(call_builtin_async_in_context(
+        &context(Rc::new(PlacementSession::new(Default::default())), 0),
+        "imfilter",
+        &args,
+    ))
+    .expect_err("finite zero host quota must reject before either readback");
+    assert!(error
+        .identifier()
+        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    let after = backend.telemetry_snapshot();
+    assert_eq!(after.download_bytes, before.download_bytes);
+    assert_eq!(after.upload_bytes, before.upload_bytes);
+    image.allocation_lease().validate_live().unwrap();
+    kernel.allocation_lease().validate_live().unwrap();
+
+    let session = Rc::new(PlacementSession::new(Default::default()));
+    let result = block_on(call_builtin_async_in_context(
+        &context(session.clone(), 4096),
+        "imfilter",
+        &args,
+    ))
+    .expect("admitted integer host result");
+    let Value::Tensor(output) = result else {
+        panic!("automatic integer result stays host-side")
+    };
+    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(
+        output.integer_storage(),
+        Some(&IntegerStorage::U8(vec![1, 2, 3, 4]))
+    );
+    assert!(
+        (0..1000).any(|_| {
+            if session.profile_snapshot().feedback.iter().any(|sample| {
+                sample.signature.operation == "imfilter"
+                    && sample.samples == 1
+                    && sample.failures == 0
+            }) {
+                true
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                false
+            }
+        }),
+        "one whole-call host-sink feedback sample"
+    );
+    image.allocation_lease().validate_live().unwrap();
+    kernel.allocation_lease().validate_live().unwrap();
+}

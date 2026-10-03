@@ -25,6 +25,31 @@ pub(super) async fn imfilter_gpu(
     let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")
     })?;
+    let host_sink = if output_class.provider_precision().is_none()
+        && !runmat_accelerate_api::handle_is_explicit(&image_handle)
+        && valid_public_kernel(&kernel_value)
+    {
+        let kernel_shape =
+            imfilter_value_shape(&kernel_value).expect("admitted public H has numeric geometry");
+        let readbacks = std::iter::once(image_handle.clone())
+            .chain(match &kernel_value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        placement::select_host_only_sink(
+            runtime,
+            IMFILTER_BUILTIN,
+            &image_handle,
+            &kernel_shape,
+            &options,
+            &readbacks,
+            u64::try_from(image_handle.physical().element_type().element_size())
+                .expect("element byte width fits u64"),
+        )?
+    } else {
+        None
+    };
     let (mut selected, planned_query) = select_provider_route(
         runtime,
         &image_handle,
@@ -56,7 +81,7 @@ pub(super) async fn imfilter_gpu(
     // logical images take an exact owner-aware host path, then explicit inputs
     // are restored to their owner with their original class metadata.
     let Some(expected_precision) = output_class.provider_precision() else {
-        return imfilter_gpu_host_fallback(
+        let result = imfilter_gpu_host_fallback(
             provider,
             &image_handle,
             &kernel_tensor,
@@ -64,6 +89,10 @@ pub(super) async fn imfilter_gpu(
             resident_kernel.as_ref(),
         )
         .await;
+        if let Some(receipt) = host_sink {
+            receipt.finish(result.is_ok());
+        }
+        return result;
     };
     let kernel_precision = match floating_accumulation(
         expected_precision,
@@ -330,23 +359,7 @@ fn select_provider_route(
         FilterAccumulation::HostDouble => ProviderPrecision::F64,
         FilterAccumulation::GpuSingle => ProviderPrecision::F32,
     };
-    let valid_public_kernel = match kernel {
-        Value::Num(_) => true,
-        Value::Tensor(tensor) => tensor.numeric_dtype() == NumericDType::F64,
-        Value::GpuTensor(handle) => {
-            runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F64)
-                && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
-                && !runmat_accelerate_api::handle_is_logical(handle)
-                && runmat_accelerate_api::handle_integer_type(handle).is_none()
-                && gpu_helpers::gpu_class_metadata_matches(
-                    handle,
-                    Some(ProviderPrecision::F64),
-                    None,
-                    false,
-                )
-        }
-        _ => false,
-    };
+    let valid_public_kernel = valid_public_kernel(kernel);
     if !valid_public_kernel {
         return Ok((None, None));
     }
@@ -453,6 +466,26 @@ fn select_provider_route(
             None => (None, None),
         },
     )
+}
+
+fn valid_public_kernel(kernel: &Value) -> bool {
+    match kernel {
+        Value::Num(_) => true,
+        Value::Tensor(tensor) => tensor.numeric_dtype() == NumericDType::F64,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F64)
+                && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && gpu_helpers::gpu_class_metadata_matches(
+                    handle,
+                    Some(ProviderPrecision::F64),
+                    None,
+                    false,
+                )
+        }
+        _ => false,
+    }
 }
 
 fn upload_kernel(

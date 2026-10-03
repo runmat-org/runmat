@@ -22,7 +22,9 @@ pub(crate) use admission::combine_host_scratch;
 pub(crate) use admission::{
     select_exact_host_upload, select_exact_host_upload_with_readbacks, ExactHostUpload,
 };
-pub(crate) use host_sink::{select_exact_host_sink, ExactHostSink, HostSinkReceipt};
+pub(crate) use host_sink::{
+    select_exact_host_sink, select_exact_host_sink_with_readbacks, ExactHostSink, HostSinkReceipt,
+};
 
 #[cfg(test)]
 #[path = "host_presentation/tests.rs"]

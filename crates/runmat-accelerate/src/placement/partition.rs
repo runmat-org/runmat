@@ -500,7 +500,9 @@ fn candidate_resource_adjustment_ns(
         }
     }
     let mut readback_stage_demands = BTreeMap::new();
-    if let CandidateOutputPresentation::ProviderReadbackUpload { readbacks, .. } = presentation {
+    if let CandidateOutputPresentation::ProviderReadbackUpload { readbacks, .. }
+    | CandidateOutputPresentation::ProviderReadbacksHost { readbacks } = presentation
+    {
         for readback in readbacks.iter() {
             let provider = resources
                 .provider(readback.device_id)
@@ -591,7 +593,8 @@ fn candidate_resource_adjustment_ns(
             host_result_bytes, ..
         } => host_result_bytes.unwrap_or(demand.retained_bytes),
         CandidateOutputPresentation::Direct
-        | CandidateOutputPresentation::ProviderDownload { .. } => demand.retained_bytes,
+        | CandidateOutputPresentation::ProviderDownload { .. }
+        | CandidateOutputPresentation::ProviderReadbacksHost { .. } => demand.retained_bytes,
     };
     match output_residency {
         CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {

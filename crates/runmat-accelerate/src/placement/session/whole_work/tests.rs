@@ -894,6 +894,50 @@ fn host_sink_download_stage_obeys_provider_staging_and_host_payload_budgets() {
 }
 
 #[test]
+fn multi_owner_host_sink_admits_each_readback_before_host_publication() {
+    let session = PlacementSession::default();
+    let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderReadbacksHost {
+        readbacks: ProviderReadbackDemands::sequential([
+            ProviderReadbackDemand {
+                device_id: 7,
+                provider_scratch_bytes: 4.into(),
+                queue_slots: 1,
+            },
+            ProviderReadbackDemand {
+                device_id: 8,
+                provider_scratch_bytes: 8.into(),
+                queue_slots: 1,
+            },
+        ])
+        .unwrap(),
+    };
+    let mut bounded = request(vec![host]);
+    bounded.resources.providers[0].scratch_available_bytes = Some(4);
+    bounded.resources.providers[0].queue_depth = Some(0);
+    bounded.resources.providers[0].queue_limit = Some(1);
+    bounded.resources.providers.push(ProviderResourceSnapshot {
+        device_id: 8,
+        scratch_available_bytes: Some(8),
+        queue_depth: Some(0),
+        queue_limit: Some(1),
+        ..Default::default()
+    });
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+    bounded.resources.providers[1].scratch_available_bytes = Some(7);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    bounded.resources.providers[1].scratch_available_bytes = Some(8);
+    bounded.resources.providers[1].queue_depth = Some(1);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
 fn provider_required_does_not_admit_a_host_upload_route() {
     let session = PlacementSession::default();
     let mut only_host_upload = request(vec![host_with_provider_presentation()]);

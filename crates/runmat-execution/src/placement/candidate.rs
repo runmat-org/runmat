@@ -361,6 +361,12 @@ pub enum CandidateOutputPresentation {
         provider_scratch_bytes: ResourceByteBound,
         queue_slots: u32,
     },
+    /// Sequential gathers from one or more independently owned devices,
+    /// followed by host computation and host publication. This does not
+    /// imply a provider upload or a provider-executed kernel.
+    ProviderReadbacksHost {
+        readbacks: ProviderReadbackDemands,
+    },
     ProviderUpload {
         device_id: u32,
         /// Bytes moved by the presentation stage, if physically established.
@@ -427,6 +433,14 @@ impl CandidateOutputPresentation {
             ) if queue_slots > 0 || provider_scratch_bytes == ResourceByteBound::Known(0) => Ok(()),
             (Self::ProviderDownload { .. }, _, _) => {
                 Err("provider download presentation needs a host route, host output, and a queue slot unless zero staging is proven")
+            }
+            (
+                Self::ProviderReadbacksHost { readbacks },
+                CandidateExecutionLocation::Host,
+                CandidateOutputResidency::Host,
+            ) if readbacks.is_canonical() && readbacks.iter().next().is_some() => Ok(()),
+            (Self::ProviderReadbacksHost { .. }, _, _) => {
+                Err("provider readbacks need canonical input stages and a host result")
             }
             (Self::Direct, CandidateExecutionLocation::Host, CandidateOutputResidency::Provider { .. }
                 | CandidateOutputResidency::Mirrored { .. }
