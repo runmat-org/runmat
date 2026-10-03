@@ -29,6 +29,7 @@ mod generation;
 use generation::*;
 mod parsing;
 use parsing::*;
+mod placement;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::fspecial")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -246,9 +247,14 @@ pub fn spec_from_request(filter: &FspecialFilter) -> FspecialFilterSpec {
 #[runtime_builtin(
     name = "fspecial",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::filters::fspecial"
 )]
-async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fspecial_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    kind: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     ensure_fspecial_extensions_enabled(&kind, &rest)?;
     if should_materialize_on_gpu() {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -257,8 +263,27 @@ async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult
         )?;
     }
     let spec = build_filter_spec(&kind, &rest)?;
+    let materialize_on_gpu = should_materialize_on_gpu();
+    let selected = placement::select(runtime.as_ref(), &spec, materialize_on_gpu)?;
     let tensor = spec.generate_tensor()?;
-    finalize_output(&spec, tensor)
+    let recorder = selected.as_ref().map(|selection| selection.recorder());
+    let provider = selected.as_ref().map(|selection| selection.provider());
+    let result =
+        finalize_output_with_observation(&spec, tensor, materialize_on_gpu, provider, recorder);
+    if let Some(selection) = selected {
+        let published = match &result {
+            Ok(Value::GpuTensor(_)) => Ok(true),
+            Ok(_) => Ok(false),
+            Err(error) if error.identifier() == Some("RunMat:Cancelled") => {
+                Err(runmat_accelerate_api::observation::ProviderObservationFailure::Cancelled)
+            }
+            Err(_) => {
+                Err(runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed)
+            }
+        };
+        selection.finish(published);
+    }
+    result
 }
 
 fn ensure_fspecial_extensions_enabled(kind: &Value, rest: &[Value]) -> BuiltinResult<()> {
@@ -354,14 +379,21 @@ fn build_filter_spec(kind: &Value, rest: &[Value]) -> BuiltinResult<FspecialFilt
     }
 }
 
-fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> BuiltinResult<Value> {
-    finalize_output_with_gpu_policy(spec, tensor, should_materialize_on_gpu())
-}
-
+#[cfg(test)]
 fn finalize_output_with_gpu_policy(
     spec: &FspecialFilterSpec,
     tensor: Tensor,
     materialize_on_gpu: bool,
+) -> BuiltinResult<Value> {
+    finalize_output_with_observation(spec, tensor, materialize_on_gpu, None, None)
+}
+
+fn finalize_output_with_observation(
+    spec: &FspecialFilterSpec,
+    tensor: Tensor,
+    materialize_on_gpu: bool,
+    admitted_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    recorder: Option<runmat_accelerate_api::observation::ProviderOperationRecorder>,
 ) -> BuiltinResult<Value> {
     if !materialize_on_gpu || !spec.is_gpu_supported() {
         return Ok(Value::Tensor(tensor));
@@ -369,15 +401,18 @@ fn finalize_output_with_gpu_policy(
 
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if runmat_accelerate_api::provider().is_none() {
+        if admitted_provider.is_none() && runmat_accelerate_api::provider().is_none() {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = admitted_provider.or_else(runmat_accelerate_api::provider) {
         match spec.to_request() {
-            Ok(request) => match provider.fspecial(&request) {
+            Ok(request) => match runmat_accelerate_api::observation::with_provider_observation(
+                recorder,
+                || provider.fspecial(&request),
+            ) {
                 Ok(handle) => {
                     let expected_precision = provider.precision();
                     let valid = handle.shape() == tensor.shape

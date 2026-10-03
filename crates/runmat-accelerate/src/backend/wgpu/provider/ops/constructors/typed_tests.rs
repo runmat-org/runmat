@@ -120,3 +120,76 @@ fn constructor_shape_counts_are_zero_first_and_checked() {
     assert_eq!(constructor_elements(&[usize::MAX, 2]), None);
     assert_eq!(constructor_elements(&[2, 3, 4]), Some(24));
 }
+
+#[test]
+#[ignore = "requires actual WGPU adapter and completion worker; run in the image-filter hardware gate"]
+fn fspecial_exact_admission_observes_completed_average_dispatch() {
+    use runmat_accelerate_api::observation::{
+        with_provider_observation, ProviderObservationStatus, ProviderObservationSupport,
+    };
+    use runmat_accelerate_api::{
+        FspecialFilter, FspecialRequest, ProviderElementType, ProviderFeasibilityQuery,
+        ProviderFspecialFilter, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
+        ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
+    };
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU adapter required");
+    let request = FspecialRequest {
+        filter: FspecialFilter::Average { rows: 2, cols: 3 },
+    };
+    let query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new("fspecial"),
+        family: ProviderOperationFamily::Library,
+        inputs: Vec::new(),
+        outputs: vec![ProviderRepresentation {
+            element_type: ProviderElementType::from(provider.precision()),
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![2, 3],
+            residency: ProviderResidency::Device,
+        }],
+        workload: ProviderWorkload {
+            fspecial: Some(ProviderFspecialFilter::from(&request)),
+            requested_outputs: Some(1),
+            ..Default::default()
+        },
+    };
+    let runmat_accelerate_api::ProviderFeasibility::Supported { estimate } =
+        provider.query_feasibility(&query)
+    else {
+        panic!("actual WGPU average constructor must have exact admission")
+    };
+    assert_eq!(estimate.dispatches, Some(1));
+    let ProviderObservationSupport::Observed(mut receipt) =
+        provider.begin_operation_observation(&query)
+    else {
+        panic!("actual WGPU average constructor must have a completion fence")
+    };
+    receipt.require_provider_execution(provider.device_id(), query.operation.clone());
+    let output =
+        with_provider_observation(Some(receipt.recorder()), || provider.fspecial(&request))
+            .expect("observed average constructor");
+    assert_eq!(output.shape(), &[2, 3]);
+    assert_eq!(output.device_id(), provider.device_id());
+    receipt.publish().expect("validated provider publication");
+    let native = block_on(provider.download_numeric(&output)).expect("actual readback");
+    let values = match native.data {
+        HostNumericDataOwned::F32(values) => values.into_iter().map(f64::from).collect::<Vec<_>>(),
+        HostNumericDataOwned::F64(values) => values,
+        other => panic!("unexpected constructor payload: {other:?}"),
+    };
+    assert_eq!(values.len(), 6);
+    assert!(values.iter().all(|value| (*value - 1.0 / 6.0).abs() < 1e-6));
+    let completed = (0..1000)
+        .find_map(|_| {
+            let observation = receipt.take_completed();
+            if observation.is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            observation
+        })
+        .expect("provider completion fence must resolve");
+    assert!(matches!(
+        completed.status,
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+}

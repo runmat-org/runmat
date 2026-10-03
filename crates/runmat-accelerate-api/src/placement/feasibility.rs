@@ -71,6 +71,10 @@ pub struct ProviderWorkload {
     /// Physical convolution hook and public shape mode admitted by its owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub convolution: Option<super::ProviderConvolutionWorkload>,
+    /// Exact `fspecial` constructor and scalar controls; no value-bearing
+    /// host payload is inferred from an output shape alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fspecial: Option<super::ProviderFspecialFilter>,
     /// Typed IIR execution route. Its absence cannot establish an IIR hook.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iir: Option<super::ProviderIirWorkload>,

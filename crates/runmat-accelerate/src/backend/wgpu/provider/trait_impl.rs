@@ -177,7 +177,13 @@ impl AccelProvider for WgpuProvider {
                     sum,
                     runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
                 ) {
-                    crate::placement::convolution_observation_capability(self, query)
+                    let convolution =
+                        crate::placement::convolution_observation_capability(self, query);
+                    if matches!(convolution, runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported) {
+                        crate::placement::fspecial_observation_capability(self, query)
+                    } else {
+                        convolution
+                    }
                 } else {
                     sum
                 }
@@ -333,6 +339,7 @@ impl AccelProvider for WgpuProvider {
         if query.preparation == runmat_execution::CandidatePreparationState::Unknown
             || crate::placement::floating_cast_unresolved_adaptation(&query.operation)
             || query.operation.workload.iir.is_some()
+            || query.operation.workload.fspecial.is_some()
             || matches!(
                 query.operation.operation.0.as_str(),
                 runmat_accelerate_api::PROVIDER_IIR_CAUSAL_PASS_OPERATION

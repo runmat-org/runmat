@@ -355,6 +355,14 @@ fn candidate_resource_adjustment_ns(
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
         CandidateExecutionLocation::Provider { device_id } => {
+            if demand.cpu_millicores > resources.cpu_millicores_available {
+                return Err(ResourceAdmissionError::OverBudget);
+            }
+            if let Some(host_workspace) = demand.provider_host_workspace {
+                host_peak = host_peak
+                    .add(host_workspace)
+                    .ok_or(ResourceAdmissionError::Overflow)?;
+            }
             let provider = resources
                 .provider(device_id)
                 .ok_or(ResourceAdmissionError::UnavailableProvider)?;

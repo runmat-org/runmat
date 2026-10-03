@@ -340,6 +340,7 @@ fn upload_candidate(
             // unknown under a finite provider memory budget.
             retained_bytes: physical_retained_bound(physical_retained_bytes),
             scratch_bytes: host_compute_scratch,
+            provider_host_workspace: None,
             queue_slots: 0,
             peak_live: None,
         },

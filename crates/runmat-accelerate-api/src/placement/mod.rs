@@ -14,6 +14,8 @@ pub use convolution::{
 mod cost;
 mod execution_inventory;
 mod feasibility;
+mod fspecial;
+pub use fspecial::ProviderFspecialFilter;
 mod iir;
 pub use iir::{
     ProviderIirRoute, ProviderIirWorkload, PROVIDER_IIR_CAUSAL_PASS_OPERATION,

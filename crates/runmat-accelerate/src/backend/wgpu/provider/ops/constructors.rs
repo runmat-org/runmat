@@ -645,6 +645,12 @@ impl WgpuProvider {
     }
 
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
+        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("fspecial");
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        let checkpoint = observed.as_ref().map(
+            runmat_accelerate_api::observation::ProviderOperationRecorder::submission_checkpoint,
+        );
         let spec = runtime_fspecial_spec_from_request(&request.filter);
 
         let (rows, cols, kind, sigma, alpha, norm, center_x, center_y) = match &spec {
@@ -778,7 +784,15 @@ impl WgpuProvider {
             Ok(out_buffer)
         })??;
 
-        self.register_existing_buffer(out_buffer, shape_vec, total_len)
+        let output = self.register_existing_buffer(out_buffer, shape_vec, total_len)?;
+        if let (Some(recorder), Some(checkpoint)) = (observed, checkpoint) {
+            recorder.confirm_submitted_provider_execution_after(
+                self.device_id(),
+                &operation,
+                checkpoint,
+            );
+        }
+        Ok(output)
     }
 
     pub(crate) fn peaks_exec(&self, n: usize) -> Result<GpuTensorHandle> {

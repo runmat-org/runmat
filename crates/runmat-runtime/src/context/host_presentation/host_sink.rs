@@ -197,6 +197,7 @@ pub(crate) fn select_exact_host_sink(
             cpu_millicores: 1_000,
             retained_bytes: request.output_bytes,
             scratch_bytes: host_scratch,
+            provider_host_workspace: None,
             queue_slots: 0,
             peak_live: None,
         },

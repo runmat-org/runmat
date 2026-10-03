@@ -25,6 +25,8 @@ pub(crate) use provider_contract::floating_conversion::{
     unresolved_adaptation as floating_cast_unresolved_adaptation,
 };
 #[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::fspecial::observation_capability as fspecial_observation_capability;
+#[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::observation_capability as provider_observation_capability;
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::physical_work as fusion_physical_work;

@@ -909,6 +909,7 @@ mod tests {
                 cpu_millicores: 1_000,
                 retained_bytes: ResourceByteBound::Known(0),
                 scratch_bytes: provider.download_numeric_host_workspace_bound(handle),
+                provider_host_workspace: None,
                 queue_slots: 0,
                 peak_live: None,
             },

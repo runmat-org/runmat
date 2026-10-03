@@ -113,6 +113,7 @@ pub(crate) fn choose_region(
                             cpu_millicores: 1_000,
                             retained_bytes: retained_output,
                             scratch_bytes: output_bytes.into(),
+                            provider_host_workspace: None,
                             queue_slots: 0,
                             peak_live: None,
                         },

@@ -48,6 +48,11 @@ pub struct CandidateResourceDemand {
     pub cpu_millicores: u32,
     pub retained_bytes: ResourceByteBound,
     pub scratch_bytes: ResourceByteBound,
+    /// Additional host workspace that coexists with a provider operation's
+    /// physical peak. `None` means this older candidate did not declare the
+    /// domain, not that a zero-byte bound was proved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_host_workspace: Option<ResourceByteBound>,
     pub queue_slots: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peak_live: Option<CandidatePeakLiveDemand>,
@@ -61,6 +66,7 @@ impl Default for CandidateResourceDemand {
                 ResourceBoundUnavailable::NoRetainedValueBound,
             ),
             scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
+            provider_host_workspace: None,
             queue_slots: 0,
             peak_live: None,
         }

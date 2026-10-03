@@ -52,6 +52,7 @@ fn candidate(kind: ExecutionCandidateKind) -> WholeWorkCandidate {
             cpu_millicores: if provider { 0 } else { 1_000 },
             retained_bytes: 16.into(),
             scratch_bytes: 8.into(),
+            provider_host_workspace: None,
             queue_slots: if provider { 1 } else { 0 },
             peak_live: None,
         },
@@ -587,6 +588,55 @@ fn bounded_host_compute_and_upload_admit_under_finite_memory() {
             .expect("one byte short")
             .code,
         "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn provider_hook_host_workspace_coexists_with_physical_output_peak() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.resources.retained_bytes = 16.into();
+    provider.resources.scratch_bytes =
+        ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound);
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 24,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_host_workspace = Some(64.into());
+    let mut bounded = request(vec![provider.clone()]);
+    bounded.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    bounded.resources.memory_available_bytes = Some(64);
+    bounded.resources.providers[0].scratch_available_bytes = Some(24);
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+
+    bounded.resources.memory_available_bytes = Some(63);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    bounded.resources.memory_available_bytes = Some(64);
+    bounded.resources.providers[0].scratch_available_bytes = Some(23);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+
+    bounded.resources.providers[0].scratch_available_bytes = Some(24);
+    bounded.candidates[0].resources.cpu_millicores = 1_000;
+    bounded.resources.cpu_millicores_available = 999;
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+
+    provider.resources.provider_host_workspace = Some(ResourceByteBound::Unavailable(
+        runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+    ));
+    let mut unknown = request(vec![provider]);
+    unknown.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    assert_eq!(
+        session.select_whole_work(unknown).unwrap_err().code,
+        "RunMat:Placement:InsufficientResourceEvidence"
     );
 }
 

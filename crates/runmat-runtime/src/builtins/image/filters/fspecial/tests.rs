@@ -6,6 +6,10 @@ use runmat_value::IntegerStorage;
 use std::ffi::OsString;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    super::fspecial_builtin(None, kind, rest).await
+}
+
 struct FspecialFailureProvider {
     device_id: u32,
     unsupported: bool,

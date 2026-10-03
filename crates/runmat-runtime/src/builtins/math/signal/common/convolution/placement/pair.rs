@@ -190,6 +190,7 @@ pub(crate) fn select_pair(
                     ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
                 ),
                 scratch_bytes: host_compute_scratch,
+                provider_host_workspace: None,
                 queue_slots: 0,
                 peak_live: None,
             },
@@ -234,6 +235,7 @@ pub(crate) fn select_pair(
                     )),
                 // A peak-live bound is not a transient-scratch bound.
                 scratch_bytes: unknown_scratch(),
+                provider_host_workspace: None,
                 queue_slots: estimate.dispatches.unwrap_or(1),
                 peak_live,
             },

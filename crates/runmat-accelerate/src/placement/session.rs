@@ -784,6 +784,7 @@ mod tests {
                 cpu_millicores: if kind.is_provider() { 0 } else { 1_000 },
                 retained_bytes: retained_bytes.into(),
                 scratch_bytes: 0.into(),
+                provider_host_workspace: None,
                 queue_slots: if kind.is_provider() { 1 } else { 0 },
                 peak_live: None,
             },
