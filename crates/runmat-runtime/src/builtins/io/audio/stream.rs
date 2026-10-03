@@ -4,10 +4,16 @@
 use super::*;
 
 const INPUT_CHUNK_BYTES: usize = 64 * 1024;
+const AUDIO_WORK_CHUNK: usize = 4096;
+
+mod classify;
 
 #[cfg(test)]
 #[path = "stream/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "stream/fallback_tests.rs"]
+mod fallback_tests;
 
 #[derive(Clone, Copy)]
 struct WaveStream {
@@ -60,6 +66,7 @@ pub(super) async fn decode_wave_stream(
     let file_size = match file.seek(SeekFrom::End(0)) {
         Ok(size) => size,
         Err(source) if source.kind() == std::io::ErrorKind::Unsupported => {
+            drop(file);
             return decode_whole_on_provider(input, options, cooperation).await;
         }
         Err(source) => return Err(io_error(&input.path, source)),
@@ -73,25 +80,9 @@ pub(super) async fn decode_wave_stream(
     file.read_exact(&mut magic)
         .map_err(|source| io_error(&input.path, source))?;
     if &magic != b"RIFF" && &magic != b"RF64" {
-        file.seek(SeekFrom::Start(0))
-            .map_err(|source| io_error(&input.path, source))?;
-        let mut bytes = Vec::new();
-        let mut chunk = [0u8; INPUT_CHUNK_BYTES];
-        loop {
-            cooperation.completed(0).await?;
-            let read = file
-                .read(&mut chunk)
-                .map_err(|source| io_error(&input.path, source))?;
-            if read == 0 {
-                break;
-            }
-            bytes
-                .try_reserve(read)
-                .map_err(|err| format_error(format!("audio input allocation failed: {err}")))?;
-            bytes.extend_from_slice(&chunk[..read]);
-            cooperation.completed(read).await?;
-        }
-        return Err(format_error(unsupported_sample_coding(&bytes)));
+        let classification =
+            classify::non_wave(&mut file, &input.path, file_size, magic, cooperation).await?;
+        return Err(format_error(classification));
     }
     decode_seekable_wave(&mut file, &input.path, options, cooperation).await
 }
@@ -222,11 +213,23 @@ async fn decode_whole_on_provider(
         .await
         .map_err(|source| io_error(&input.path, source))?;
     cooperation.completed(0).await?;
+    let mut cursor = std::io::Cursor::new(bytes.as_slice());
     let decoded = if bytes.starts_with(b"RIFF") || bytes.starts_with(b"RF64") {
-        let mut cursor = std::io::Cursor::new(bytes.as_slice());
         decode_seekable_wave(&mut cursor, &input.path, options, cooperation).await?
     } else {
-        return Err(format_error(unsupported_sample_coding(&bytes)));
+        if bytes.len() < 4 {
+            return Err(format_error(UNSUPPORTED_AUDIO_ERROR));
+        }
+        let magic: [u8; 4] = bytes[..4].try_into().expect("four-byte slice");
+        let classification = classify::non_wave(
+            &mut cursor,
+            &input.path,
+            bytes.len() as u64,
+            magic,
+            cooperation,
+        )
+        .await?;
+        return Err(format_error(classification));
     };
     cooperation.completed(0).await?;
     Ok(decoded)
@@ -340,7 +343,9 @@ async fn collect_stream_samples<T, R: Read + Seek>(
         .try_reserve_exact(sample_count)
         .map_err(|err| format_error(format!("decoded audio allocation failed: {err}")))?;
     let frames_per_chunk = if block_align <= INPUT_CHUNK_BYTES {
-        (INPUT_CHUNK_BYTES / block_align).max(1)
+        (INPUT_CHUNK_BYTES / block_align)
+            .max(1)
+            .min(AUDIO_WORK_CHUNK)
     } else {
         1
     };

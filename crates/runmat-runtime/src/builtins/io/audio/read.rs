@@ -160,17 +160,8 @@ pub(super) fn scalar_text(value: &Value) -> Option<String> {
     }
 }
 
-pub(super) fn unsupported_sample_coding(bytes: &[u8]) -> String {
-    if bytes.starts_with(b"fLaC")
-        || bytes.starts_with(b"FORM")
-        || bytes.starts_with(b"OggS")
-        || parse_mp3(bytes, bytes.len() as u64).is_some()
-    {
-        "sample decoding is currently implemented for WAV/RF64 PCM and IEEE-float audio; compressed containers are metadata-only".to_string()
-    } else {
-        "unsupported audio format".to_string()
-    }
-}
+pub(super) const COMPRESSED_AUDIO_ERROR: &str = "sample decoding is currently implemented for WAV/RF64 PCM and IEEE-float audio; compressed containers are metadata-only";
+pub(super) const UNSUPPORTED_AUDIO_ERROR: &str = "unsupported audio format";
 
 pub(super) fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {
     match (fmt.effective_format_tag(), fmt.effective_bits_per_sample()) {
