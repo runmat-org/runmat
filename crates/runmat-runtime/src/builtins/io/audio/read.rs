@@ -77,9 +77,9 @@ pub(super) fn parse_audioread_options(args: &[Value]) -> BuiltinResult<Audioread
                 range = Some(parse_sample_range(single)?);
             }
         }
-        [samples, datatype] => {
+        [samples, datatype_value] => {
             range = Some(parse_sample_range(samples)?);
-            let text = scalar_text(datatype).ok_or_else(|| {
+            let text = scalar_text(datatype_value).ok_or_else(|| {
                 audioread_error_with(
                     &AUDIOREAD_ERROR_ARGUMENT,
                     "audioread: datatype must be \"native\" or \"double\"",

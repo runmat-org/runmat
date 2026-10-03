@@ -1,5 +1,3 @@
-use super::*;
-
 pub(super) fn read_ieee_extended_80(bytes: &[u8]) -> Result<f64, String> {
     if bytes.len() != 10 {
         return Err("AIFF sample rate field must be 80 bits".to_string());
