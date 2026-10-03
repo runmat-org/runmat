@@ -7,7 +7,10 @@ use runmat_runtime::context::RuntimeServiceFuture;
 use runmat_runtime::http::{HttpRequest, HttpResponse, TransportError};
 
 #[cfg(not(target_arch = "wasm32"))]
-struct LazyNativeHttpService;
+#[derive(Default)]
+struct LazyNativeHttpService {
+    service: Rc<std::cell::OnceCell<runmat_runtime::http::NativeHttpService>>,
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 impl RuntimeHttpService for LazyNativeHttpService {
@@ -15,39 +18,109 @@ impl RuntimeHttpService for LazyNativeHttpService {
         &self,
         request: HttpRequest,
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
+        let service = self.service.clone();
         Box::pin(async move {
-            let driver = host_driver()
-                .map_err(|detail| TransportError::host_service_unavailable(&request.url, detail))?;
-            runmat_runtime::http::NativeHttpService::new(driver.handle().clone())
-                .send(request)
-                .await
+            let transport = match service.get() {
+                Some(transport) => transport.clone(),
+                None => {
+                    let driver = host_driver().map_err(|source| {
+                        TransportError::host_service_unavailable(&request.url, source)
+                    })?;
+                    // Session creation and an unpolled request do not start the
+                    // driver. Once polled, this session retains its connection pool.
+                    service
+                        .get_or_init(|| {
+                            runmat_runtime::http::NativeHttpService::new(driver.handle().clone())
+                        })
+                        .clone()
+                }
+            };
+            transport.send(request).await
         })
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn host_driver() -> Result<&'static tokio::runtime::Runtime, String> {
+fn host_driver() -> Result<&'static tokio::runtime::Runtime, HostDriverInitError> {
     use std::sync::OnceLock;
 
-    static DRIVER: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
+    static DRIVER: OnceLock<Result<tokio::runtime::Runtime, HostDriverInitError>> = OnceLock::new();
     DRIVER
         .get_or_init(|| {
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .enable_all()
                 .build()
-                .map_err(|error| error.to_string())
+                .map_err(|error| HostDriverInitError(std::sync::Arc::new(error)))
         })
         .as_ref()
         .map_err(Clone::clone)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+struct HostDriverInitError(std::sync::Arc<std::io::Error>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::fmt::Display for HostDriverInitError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self.0.as_ref(), formatter)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::error::Error for HostDriverInitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn default_http_service() -> Rc<dyn RuntimeHttpService> {
-    Rc::new(LazyNativeHttpService)
+    Rc::new(LazyNativeHttpService::default())
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn default_http_service() -> Rc<dyn RuntimeHttpService> {
     Rc::new(runmat_runtime::http::BrowserHttpService::new())
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use runmat_runtime::http::HttpMethod;
+
+    #[test]
+    fn unpolled_host_request_does_not_initialize_session_transport() {
+        let service = LazyNativeHttpService::default();
+        let request = HttpRequest {
+            url: "http://127.0.0.1:1/".parse().unwrap(),
+            method: HttpMethod::Get,
+            headers: Vec::new(),
+            body: None,
+            timeout: std::time::Duration::from_secs(1),
+            user_agent: "RunMat test".into(),
+        };
+        drop(service.send(request));
+        assert!(service.service.get().is_none());
+    }
+
+    #[test]
+    fn driver_initialization_error_retains_original_io_cause() {
+        use std::error::Error;
+        let source = HostDriverInitError(std::sync::Arc::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "driver initialization denied",
+        )));
+        let url = "http://127.0.0.1/".parse().unwrap();
+        let error = TransportError::host_service_unavailable(&url, source);
+        let original = error
+            .source()
+            .unwrap()
+            .source()
+            .unwrap()
+            .downcast_ref::<std::io::Error>()
+            .unwrap();
+        assert_eq!(original.kind(), std::io::ErrorKind::PermissionDenied);
+    }
 }

@@ -70,8 +70,8 @@ pub struct TransportError {
 
 impl TransportError {
     /// The host could not start its reusable HTTP service. No request was sent.
-    pub fn host_service_unavailable(url: &Url, detail: impl Into<String>) -> Self {
-        Self::new(TransportErrorKind::Other, url, detail)
+    pub fn host_service_unavailable(url: &Url, source: impl RuntimeErrorSourceBound) -> Self {
+        Self::new(TransportErrorKind::Other, url, source.to_string()).with_source(source)
     }
 
     pub(super) fn new(kind: TransportErrorKind, url: &Url, detail: impl Into<String>) -> Self {
