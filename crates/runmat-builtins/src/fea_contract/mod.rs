@@ -12,3 +12,4 @@ pub mod operation_entry;
 pub mod operation_inference;
 pub mod parameters;
 pub mod result_inference;
+pub mod results_option;

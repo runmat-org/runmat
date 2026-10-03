@@ -5,6 +5,7 @@ use super::constructor_inference::host_text;
 use super::identities::{
     FEA_COMPARE_CLASS, FEA_FIELD_CLASS, FEA_RESULTS_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
 };
+use super::results_option::ResultsOption;
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
@@ -14,7 +15,7 @@ use runmat_types::{
     ObjectFact, ResidencyFact, ShapeFact, StaticClassIdentity, StorageFact, ValueFact,
     ValueKindFact,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeaResultKind {
@@ -105,13 +106,6 @@ fn possible_text_list(value: &ValueFact) -> bool {
     }
 }
 
-fn normalized_option(name: &str) -> String {
-    name.chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
 pub fn infer_result(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
@@ -145,6 +139,7 @@ pub fn infer_result(
                     ));
                 }
             }
+            let mut seen = BTreeSet::new();
             for index in (1..request.arguments.len()).step_by(2) {
                 if !host_text(&request.arguments[index]) {
                     diagnostics.push(argument_error(
@@ -155,25 +150,37 @@ pub fn infer_result(
                 }
                 if let Some(value) = request.arguments.get(index + 1) {
                     if let Some(name) = request.literals.literal_string_at(index) {
-                        let key = normalized_option(&name);
-                        let (valid, detail) = match key.as_str() {
-                            "fields" | "includefields" | "diagnosticcodes" => {
+                        let normalized = ResultsOption::normalized_key(&name);
+                        let option = ResultsOption::from_normalized(&normalized);
+                        let canonical =
+                            option.map_or(normalized.as_str(), ResultsOption::canonical_name);
+                        if !seen.insert(canonical.to_owned()) {
+                            diagnostics.push(argument_error(
+                                "RM-CATALOG-FEA-DUPLICATE",
+                                "duplicate fea.results option",
+                                index,
+                            ));
+                        }
+                        let (valid, detail) = match option {
+                            Some(ResultsOption::IncludeFields | ResultsOption::DiagnosticCodes) => {
                                 (possible_text_list(value), "text selector list")
                             }
-                            "modeindices" | "transientsnapshotindices" => (
+                            Some(
+                                ResultsOption::ModeIndices
+                                | ResultsOption::TransientSnapshotIndices,
+                            ) => (
                                 possible_index_vector(value),
                                 "exact one-based numeric vector",
                             ),
-                            "includefieldvalues"
-                            | "fieldvalues"
-                            | "includediagnostics"
-                            | "includemodalresults"
-                            | "includetransientresults"
-                            | "includenonlinearresults"
-                            | "includeelectromagneticresults" => {
-                                (possible_flag(value), "logical or exact zero/one scalar")
-                            }
-                            _ => (false, "supported option name"),
+                            Some(
+                                ResultsOption::IncludeFieldValues
+                                | ResultsOption::IncludeDiagnostics
+                                | ResultsOption::IncludeModalResults
+                                | ResultsOption::IncludeTransientResults
+                                | ResultsOption::IncludeNonlinearResults
+                                | ResultsOption::IncludeElectromagneticResults,
+                            ) => (possible_flag(value), "logical or exact zero/one scalar"),
+                            None => (false, "supported option name"),
                         };
                         if !valid {
                             diagnostics.push(argument_error(
@@ -282,7 +289,7 @@ pub fn infer_result(
 mod tests {
     use super::*;
     use crate::fea_contract::{
-        integer::FEA_FIELD_DESCRIPTOR,
+        integer::{FEA_FIELD_DESCRIPTOR, FEA_RESULTS_DESCRIPTOR},
         operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     };
     use crate::{
@@ -353,5 +360,45 @@ mod tests {
         assert!(!possible_index_vector(&selector));
         selector.shape = ShapeFact::from(vec![Some(1), Some(4)]);
         assert!(possible_index_vector(&selector));
+    }
+
+    #[test]
+    fn result_aliases_share_typed_selector_and_duplicate_diagnostic() {
+        let results_entry = operation_entry::entry(OperationEntryDefinition {
+            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+            name: "fea.results",
+            documentation: BuiltinDocumentation::EMPTY,
+            descriptor: &FEA_RESULTS_DESCRIPTOR,
+            inference: |request, entry| infer_result(request, entry, FeaResultKind::Results),
+            integer_capabilities: &[],
+            integer_audit: None,
+            effects: OperationEffectProfile::ArtifactRead,
+            accelerator: BuiltinAcceleratorPolicy::Forbidden,
+            distributed: BuiltinDistributedPolicy::Unsupported,
+        });
+        let text = ValueFact::scalar(ValueKindFact::String);
+        let inferred = infer_result(
+            &CallRequest {
+                arguments: vec![text; 5],
+                literals: LiteralContext::new(vec![
+                    LiteralValue::String("run".into()),
+                    LiteralValue::String("FIELDS".into()),
+                    LiteralValue::String("stress".into()),
+                    LiteralValue::String("Include-Fields".into()),
+                    LiteralValue::String("strain".into()),
+                ]),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+            },
+            &results_entry,
+            FeaResultKind::Results,
+        );
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-DUPLICATE"));
+        assert!(!inferred
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-SELECTOR"));
     }
 }

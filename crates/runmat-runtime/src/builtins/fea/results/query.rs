@@ -17,6 +17,7 @@ use crate::builtins::fea::value_decode::{
 use crate::operations::OperationContext;
 use crate::BuiltinResult;
 use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
+use runmat_builtins::fea_contract::results_option::ResultsOption;
 use runmat_value::ObjectInstance;
 use runmat_value::Value;
 use std::collections::HashSet;
@@ -27,11 +28,8 @@ pub(in crate::builtins::fea) fn results_query_from_args(
     let mut query = AnalysisResultsQuery::default();
     let mut seen = HashSet::new();
     for pair in expect_name_value_tail(RESULTS_NAME, args)? {
-        let canonical = match pair.key.as_str() {
-            "includefields" | "fields" => "includefields",
-            "includefieldvalues" | "fieldvalues" => "includefieldvalues",
-            other => other,
-        };
+        let option = ResultsOption::from_normalized(&pair.key);
+        let canonical = option.map_or(pair.key.as_str(), ResultsOption::canonical_name);
         if !seen.insert(canonical.to_string()) {
             return Err(builtin_error(
                 RESULTS_NAME,
@@ -39,49 +37,89 @@ pub(in crate::builtins::fea) fn results_query_from_args(
                 format!("duplicate fea.results option `{canonical}`"),
             ));
         }
-        match pair.key.as_str() {
-            "includefields" | "fields" => {
+        match option {
+            Some(ResultsOption::IncludeFields) => {
                 query.include_fields = string_vec_from_value(RESULTS_NAME, pair.value)?;
             }
-            "includefieldvalues" | "fieldvalues" => {
+            Some(ResultsOption::IncludeFieldValues) => {
                 query.include_field_values = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
-            "includediagnostics" => {
+            Some(ResultsOption::IncludeDiagnostics) => {
                 query.include_diagnostics = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
-            "diagnosticcodes" => {
+            Some(ResultsOption::DiagnosticCodes) => {
                 query.diagnostic_codes = string_vec_from_value(RESULTS_NAME, pair.value)?;
             }
-            "includemodalresults" => {
+            Some(ResultsOption::IncludeModalResults) => {
                 query.include_modal_results = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
-            "modeindices" => {
+            Some(ResultsOption::ModeIndices) => {
                 query.mode_indices = one_based_usize_vec_from_value(RESULTS_NAME, pair.value)?;
             }
-            "includetransientresults" => {
+            Some(ResultsOption::IncludeTransientResults) => {
                 query.include_transient_results = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
-            "transientsnapshotindices" => {
+            Some(ResultsOption::TransientSnapshotIndices) => {
                 query.transient_snapshot_indices =
                     one_based_usize_vec_from_value(RESULTS_NAME, pair.value)?;
             }
-            "includenonlinearresults" => {
+            Some(ResultsOption::IncludeNonlinearResults) => {
                 query.include_nonlinear_results = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
-            "includeelectromagneticresults" => {
+            Some(ResultsOption::IncludeElectromagneticResults) => {
                 query.include_electromagnetic_results =
                     exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
-            other => {
+            None => {
                 return Err(builtin_error(
                     RESULTS_NAME,
                     &ERROR_INPUT,
-                    format!("unsupported fea.results option `{other}`"),
+                    format!("unsupported fea.results option `{}`", pair.key),
                 ));
             }
         }
     }
     Ok(query)
+}
+
+#[cfg(test)]
+mod option_tests {
+    use super::*;
+
+    #[test]
+    fn aliases_and_punctuation_decode_to_one_typed_selector() {
+        let query = results_query_from_args(&[
+            Value::String("FIELDS".into()),
+            Value::String("stress".into()),
+            Value::String("Field-Values".into()),
+            Value::Bool(false),
+        ])
+        .expect("known aliases");
+        assert_eq!(query.include_fields, vec!["stress"]);
+        assert!(!query.include_field_values);
+
+        let error = results_query_from_args(&[
+            Value::String("fields".into()),
+            Value::String("stress".into()),
+            Value::String("Include_Fields".into()),
+            Value::String("strain".into()),
+        ])
+        .expect_err("canonical duplicate");
+        assert_eq!(error.identifier(), ERROR_INPUT.identifier);
+        assert!(error
+            .message()
+            .contains("duplicate fea.results option `includefields`"));
+    }
+
+    #[test]
+    fn unknown_option_error_and_duplicate_order_are_retained() {
+        let error =
+            results_query_from_args(&[Value::String("not.option".into()), Value::Bool(true)])
+                .expect_err("unknown selector");
+        assert!(error
+            .message()
+            .contains("unsupported fea.results option `notoption`"));
+    }
 }
 
 pub(in crate::builtins::fea) fn run_id_from_value(
