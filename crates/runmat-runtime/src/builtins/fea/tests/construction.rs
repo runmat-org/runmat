@@ -2,6 +2,41 @@ use super::support::assert_object_class;
 use super::*;
 
 #[test]
+fn fea_load_rejects_numeric_and_logical_paths_before_filesystem_access() {
+    for value in [
+        Value::Num(42.0),
+        Value::Int(runmat_value::IntValue::U8(7)),
+        Value::Bool(true),
+    ] {
+        let error = block_on(fea_load_builtin(value)).expect_err("path must be host text");
+        assert_eq!(error.identifier(), ERROR_INPUT.identifier);
+        assert!(error.message().contains("expected a text scalar"));
+    }
+}
+
+#[test]
+fn profile_alias_and_ranked_character_path_match_runtime_admission() {
+    let options = super::super::model::constructors::parse_model_constructor_options(
+        MODEL_NAME,
+        &[
+            Value::String("P_rofile".into()),
+            Value::String("linear_static_structural".into()),
+        ],
+    )
+    .expect("normalized profile spelling");
+    assert!(options.profile.is_some());
+
+    let ranked =
+        runmat_value::CharArray::new_with_shape("fixture".chars().collect(), vec![1, 7, 1])
+            .expect("ranked character row");
+    assert_eq!(
+        super::super::geometry::scalar_string(&Value::CharArray(ranked), LOAD_NAME, &ERROR_INPUT,)
+            .unwrap(),
+        "fixture"
+    );
+}
+
+#[test]
 fn fea_study_requires_geometry_asset() {
     let err = block_on(fea_study_builtin(vec![
         Value::String("demo".to_string()),
@@ -72,8 +107,10 @@ run:
     )
     .expect("FEA fixture should write");
 
-    let study = block_on(fea_load_builtin(fea_path.to_string_lossy().to_string()))
-        .expect("FEA document should load");
+    let study = block_on(fea_load_builtin(Value::String(
+        fea_path.to_string_lossy().to_string(),
+    )))
+    .expect("FEA document should load");
     let Value::Object(study_object) = study.clone() else {
         panic!("expected loaded FEA study object");
     };
@@ -386,7 +423,7 @@ fn typed_constructors_build_full_study_and_sweep_objects() {
         geometry.clone(),
         Value::String("Defaults".to_string()),
         Value::String("none".to_string()),
-        Value::String("Profile".to_string()),
+        Value::String("P_rofile".to_string()),
         Value::String("linear_static_structural".to_string()),
         Value::String("Materials".to_string()),
         cell(vec![material]),
@@ -431,7 +468,7 @@ fn typed_constructors_build_full_study_and_sweep_objects() {
     let study = block_on(fea_study_builtin(vec![
         Value::String("bracket_static".to_string()),
         geometry,
-        Value::String("Profile".to_string()),
+        Value::String("P_rofile".to_string()),
         Value::String("linear_static_structural".to_string()),
         Value::String("Backend".to_string()),
         Value::String("cpu".to_string()),
@@ -446,7 +483,7 @@ fn typed_constructors_build_full_study_and_sweep_objects() {
     let sweep = block_on(fea_sweep_builtin(vec![
         Value::String("bracket_sweep".to_string()),
         cell(vec![study]),
-        Value::String("FailFast".to_string()),
+        Value::String("FAIL_FAST".to_string()),
         Value::Bool(false),
     ]))
     .expect("sweep should build");

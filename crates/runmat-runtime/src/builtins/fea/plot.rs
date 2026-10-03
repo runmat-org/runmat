@@ -26,6 +26,8 @@ use runmat_analysis_core::AnalysisFieldValues;
 #[cfg(feature = "plot-core")]
 use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_builtins::fea_contract::descriptors::ERROR_OPERATION;
+#[cfg(feature = "plot-core")]
+use runmat_builtins::fea_contract::options::FeaPlotOption;
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -168,22 +170,22 @@ pub(in crate::builtins::fea) fn split_plot_options(
     let mut options = FeaPlotOptions::default();
     let mut end = args.len();
     while end >= 2 && is_plot_option_name(&args[end - 2]) {
-        let key = scalar_string(&args[end - 2], PLOT_NAME, &ERROR_INPUT)?.to_ascii_lowercase();
-        match key.as_str() {
-            "field" | "fieldid" | "field_id" => {
+        let key = scalar_string(&args[end - 2], PLOT_NAME, &ERROR_INPUT)?;
+        match FeaPlotOption::decode(&key) {
+            Some(FeaPlotOption::Field) => {
                 options.field_id = Some(scalar_string(&args[end - 1], PLOT_NAME, &ERROR_INPUT)?);
             }
-            "mesh" => {
+            Some(FeaPlotOption::Mesh) => {
                 options.show_solver_mesh_edges =
                     plot_mesh_option_shows_solver_edges(&args[end - 1])?;
             }
-            "overlay" => {
+            Some(FeaPlotOption::Overlay) => {
                 options.mesh_source = plot_overlay_option_mesh_source(&args[end - 1])?;
             }
-            "deformed" => {
+            Some(FeaPlotOption::Deformed) => {
                 options.apply_deformation_overlay = bool_from_value(PLOT_NAME, &args[end - 1])?;
             }
-            _ => unreachable!("is_plot_option_name only accepts supported plot option names"),
+            None => unreachable!("is_plot_option_name only accepts supported plot option names"),
         }
         end -= 2;
     }
@@ -193,13 +195,9 @@ pub(in crate::builtins::fea) fn split_plot_options(
 #[cfg(feature = "plot-core")]
 pub(in crate::builtins::fea) fn is_plot_option_name(value: &Value) -> bool {
     scalar_string(value, PLOT_NAME, &ERROR_INPUT)
-        .map(|name| {
-            matches!(
-                name.to_ascii_lowercase().as_str(),
-                "field" | "fieldid" | "field_id" | "mesh" | "overlay" | "deformed"
-            )
-        })
-        .unwrap_or(false)
+        .ok()
+        .and_then(|name| FeaPlotOption::decode(&name))
+        .is_some()
 }
 
 #[cfg(feature = "plot-core")]

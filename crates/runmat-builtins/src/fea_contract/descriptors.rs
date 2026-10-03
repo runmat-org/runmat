@@ -147,7 +147,17 @@ pub const FIELD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     inputs: &FIELD_INPUTS,
     outputs: &OUT_ANY,
 }];
-pub const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+pub const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "fea.plot(runOrResultsOrField, [fieldId], Name, Value, ...)",
+        inputs: &PLOT_CONTEXT_INPUTS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "fea.plot(study, runId, [fieldId], Name, Value, ...)",
+        inputs: &PLOT_STUDY_INPUTS,
+        outputs: &[],
+    },
     BuiltinSignatureDescriptor {
         label: "figure = fea.plot(runOrResultsOrField, [fieldId], Name, Value, ...)",
         inputs: &PLOT_CONTEXT_INPUTS,

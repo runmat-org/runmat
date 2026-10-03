@@ -22,10 +22,7 @@ impl ResultsOption {
     }
 
     pub fn normalized_key(name: &str) -> String {
-        name.chars()
-            .filter(|ch| ch.is_ascii_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect()
+        super::options::normalize_option_key(name)
     }
 
     /// Use when the caller already applied the shared FEA option-key parser.

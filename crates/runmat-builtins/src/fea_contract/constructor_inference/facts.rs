@@ -19,7 +19,7 @@ pub(crate) fn host_text(fact: &ValueFact) -> bool {
             ShapeFact::Shaped { dims } => {
                 !matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1)
             }
-            ShapeFact::Scalar | ShapeFact::Ranked { rank: 2 } | ShapeFact::Unknown => true,
+            ShapeFact::Scalar | ShapeFact::Ranked { rank: 2.. } | ShapeFact::Unknown => true,
             _ => false,
         },
         _ => false,

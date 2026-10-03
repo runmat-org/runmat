@@ -60,7 +60,12 @@ pub(in crate::builtins::fea) fn create_trends_object_from_args(
     let mut window_size_seen = false;
     for pair in expect_name_value_tail(TRENDS_NAME, args.as_slice())? {
         match pair.key.as_str() {
-            "windowsize" => {
+            key if runmat_builtins::fea_contract::options::FeaStructuralOption::from_normalized(
+                key,
+            ) == Some(
+                runmat_builtins::fea_contract::options::FeaStructuralOption::WindowSize,
+            ) =>
+            {
                 if window_size_seen {
                     return Err(builtin_error(
                         TRENDS_NAME,

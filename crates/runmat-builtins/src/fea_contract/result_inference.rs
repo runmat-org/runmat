@@ -5,6 +5,7 @@ use super::constructor_inference::host_text;
 use super::identities::{
     FEA_COMPARE_CLASS, FEA_FIELD_CLASS, FEA_RESULTS_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
 };
+use super::options::FeaPlotOption;
 use super::results_option::ResultsOption;
 use crate::{
     catalog::{argument_error, finish_fixed},
@@ -104,6 +105,16 @@ fn possible_text_list(value: &ValueFact) -> bool {
         }
         _ => false,
     }
+}
+
+fn possible_plot_bool(value: &ValueFact) -> bool {
+    !matches!(value.residency, ResidencyFact::Device { .. })
+        && !matches!(value.shape.element_count(), Some(count) if count != 1)
+        && (matches!(&value.kind, ValueKindFact::Unknown | ValueKindFact::Logical)
+            || matches!(&value.kind, ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Real,
+                class,
+            }) if *class != NumericClass::Single))
 }
 
 pub fn infer_result(
@@ -278,6 +289,74 @@ pub fn infer_result(
                     0,
                 ));
             }
+            let mut core_len = request.arguments.len();
+            while core_len >= 2 {
+                let Some(name) = request.literals.literal_string_at(core_len - 2) else {
+                    break;
+                };
+                let Some(option) = FeaPlotOption::decode(&name) else {
+                    break;
+                };
+                if !host_text(&request.arguments[core_len - 2]) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FEA-PLOT-OPTION",
+                        "fea.plot option names must be host text",
+                        core_len - 2,
+                    ));
+                }
+                let value = &request.arguments[core_len - 1];
+                let valid = match option {
+                    FeaPlotOption::Field | FeaPlotOption::Mesh | FeaPlotOption::Overlay => {
+                        host_text(value)
+                    }
+                    FeaPlotOption::Deformed => possible_plot_bool(value),
+                };
+                if !valid {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FEA-PLOT-OPTION",
+                        "fea.plot option value has an incompatible host type",
+                        core_len - 1,
+                    ));
+                }
+                core_len -= 2;
+            }
+            // A nonliteral trailing name can still be a supported plot
+            // option. Do not reinterpret its value as a positional field id.
+            let unresolved_option_tail = core_len >= 3
+                && request.literals.literal_string_at(core_len - 2).is_none()
+                && host_text(&request.arguments[core_len - 2]);
+            if !unresolved_option_tail && !(1..=3).contains(&core_len) {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FEA-ARITY",
+                    "fea.plot requires one context, optional field, or study/run/field operands",
+                    core_len,
+                ));
+            }
+            let definitely_nonstudy = request.arguments.first().is_some_and(|value| {
+                matches!(&value.kind, ValueKindFact::Object(object)
+                    if object.runtime_class.as_ref().is_some_and(|class| !class.is(FEA_STUDY_CLASS)))
+            });
+            if !unresolved_option_tail && core_len == 3 && definitely_nonstudy {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FEA-PLOT-CONTEXT",
+                    "three positional fea.plot operands require a fea.Study first",
+                    0,
+                ));
+            }
+            let positional_end = if unresolved_option_tail {
+                1
+            } else {
+                core_len.min(3)
+            };
+            for index in 1..positional_end {
+                if !host_text(&request.arguments[index]) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FEA-PLOT-FIELD",
+                        "fea.plot run id and field id operands must be host text",
+                        index,
+                    ));
+                }
+            }
             ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,
                 domain: NumericDomain::Real,
@@ -288,119 +367,4 @@ pub fn infer_result(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::fea_contract::{
-        integer::{FEA_FIELD_DESCRIPTOR, FEA_RESULTS_DESCRIPTOR},
-        operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
-    };
-    use crate::{
-        BuiltinAcceleratorPolicy, BuiltinCatalogProvenance, BuiltinDistributedPolicy,
-        BuiltinDocumentation,
-    };
-    use runmat_types::{
-        DynamicReason, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
-    };
-
-    fn entry() -> BuiltinCatalogEntry {
-        operation_entry::entry(OperationEntryDefinition {
-            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-            name: "fea.field",
-            documentation: BuiltinDocumentation::EMPTY,
-            descriptor: &FEA_FIELD_DESCRIPTOR,
-            inference: |request, entry| infer_result(request, entry, FeaResultKind::Field),
-            integer_capabilities: &[],
-            integer_audit: None,
-            effects: OperationEffectProfile::ArtifactRead,
-            accelerator: BuiltinAcceleratorPolicy::Forbidden,
-            distributed: BuiltinDistributedPolicy::Unsupported,
-        })
-    }
-
-    #[test]
-    fn result_references_do_not_accept_numeric_or_resident_values() {
-        let number = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
-            domain: NumericDomain::Real,
-        }));
-        assert!(!possible_run_reference(&number, true));
-        let mut unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
-        assert!(possible_run_reference(&unknown, true));
-        unknown.residency = ResidencyFact::Device { provider: None };
-        assert!(!possible_run_reference(&unknown, true));
-
-        let inferred = infer_result(
-            &CallRequest {
-                arguments: vec![number, ValueFact::scalar(ValueKindFact::String)],
-                literals: LiteralContext::new(vec![LiteralValue::Unknown; 2]),
-                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-            },
-            &entry(),
-            FeaResultKind::Field,
-        );
-        assert!(inferred
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "RM-CATALOG-FEA-RUN"));
-        assert!(
-            matches!(&inferred.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_FIELD_CLASS)))
-        );
-    }
-
-    #[test]
-    fn result_index_selector_requires_exact_class_and_vector_geometry() {
-        let mut selector = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Single,
-            domain: NumericDomain::Real,
-        }));
-        assert!(!possible_index_vector(&selector));
-        selector.kind = ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::UInt64,
-            domain: NumericDomain::Real,
-        });
-        selector.shape = ShapeFact::from(vec![Some(2), Some(2)]);
-        assert!(!possible_index_vector(&selector));
-        selector.shape = ShapeFact::from(vec![Some(1), Some(4)]);
-        assert!(possible_index_vector(&selector));
-    }
-
-    #[test]
-    fn result_aliases_share_typed_selector_and_duplicate_diagnostic() {
-        let results_entry = operation_entry::entry(OperationEntryDefinition {
-            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-            name: "fea.results",
-            documentation: BuiltinDocumentation::EMPTY,
-            descriptor: &FEA_RESULTS_DESCRIPTOR,
-            inference: |request, entry| infer_result(request, entry, FeaResultKind::Results),
-            integer_capabilities: &[],
-            integer_audit: None,
-            effects: OperationEffectProfile::ArtifactRead,
-            accelerator: BuiltinAcceleratorPolicy::Forbidden,
-            distributed: BuiltinDistributedPolicy::Unsupported,
-        });
-        let text = ValueFact::scalar(ValueKindFact::String);
-        let inferred = infer_result(
-            &CallRequest {
-                arguments: vec![text; 5],
-                literals: LiteralContext::new(vec![
-                    LiteralValue::String("run".into()),
-                    LiteralValue::String("FIELDS".into()),
-                    LiteralValue::String("stress".into()),
-                    LiteralValue::String("Include-Fields".into()),
-                    LiteralValue::String("strain".into()),
-                ]),
-                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-            },
-            &results_entry,
-            FeaResultKind::Results,
-        );
-        assert!(inferred
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-DUPLICATE"));
-        assert!(!inferred
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-SELECTOR"));
-    }
-}
+mod tests;

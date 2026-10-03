@@ -205,6 +205,14 @@ fn fea_execution_controls_enforce_exact_structural_boundaries() {
     ]))
     .expect_err("trend window must be positive");
     assert_eq!(zero_window.identifier(), Some("RunMat:fea:InvalidInput"));
+    let normalized_window = block_on(fea_trends_builtin(vec![
+        Value::String("Window_Size".into()),
+        Value::Int(IntValue::U8(0)),
+    ]))
+    .expect_err("normalized trend window must still be validated");
+    assert!(normalized_window
+        .message()
+        .contains("WindowSize must be positive"));
 
     let scalar_double = Tensor::new(vec![4.0], vec![1, 1]).expect("double scalar tensor");
     assert_eq!(

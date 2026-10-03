@@ -339,7 +339,7 @@ pub const PLOT_CONTEXT_INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Optional Field or FieldId selector.",
+        description: "Optional Field/FieldId, Mesh, Overlay, and Deformed controls.",
     },
 ];
 pub const PLOT_STUDY_INPUTS: [BuiltinParamDescriptor; 4] = [
@@ -369,7 +369,7 @@ pub const PLOT_STUDY_INPUTS: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Optional Field or FieldId selector.",
+        description: "Optional Field/FieldId, Mesh, Overlay, and Deformed controls.",
     },
 ];
 pub const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [

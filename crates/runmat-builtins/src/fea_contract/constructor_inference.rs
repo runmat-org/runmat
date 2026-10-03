@@ -1,5 +1,6 @@
 //! Shared, typed static facts for the FEA object-constructor family.
 
+use super::options::FeaStructuralOption;
 use crate::{
     catalog::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
@@ -109,7 +110,7 @@ pub fn infer_constructor(
         for index in (positional..request.arguments.len()).step_by(2) {
             match request.literals.literal_string_at(index) {
                 Some(name) => {
-                    if name.eq_ignore_ascii_case("profile") {
+                    if FeaStructuralOption::decode(&name) == Some(FeaStructuralOption::Profile) {
                         has_profile = true;
                     }
                 }
@@ -131,7 +132,12 @@ pub fn infer_constructor(
                     ));
                 }
                 if kind == FeaConstructorKind::Sweep
-                    && request.literals.literal_string_at(index).as_deref() == Some("failfast")
+                    && request
+                        .literals
+                        .literal_string_at(index)
+                        .as_deref()
+                        .and_then(FeaStructuralOption::decode)
+                        == Some(FeaStructuralOption::FailFast)
                     && (!matches!(value.kind, ValueKindFact::Logical | ValueKindFact::Unknown)
                         || matches!(value.shape.element_count(), Some(count) if count != 1))
                 {

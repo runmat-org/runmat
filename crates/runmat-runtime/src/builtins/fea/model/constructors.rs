@@ -70,7 +70,12 @@ pub(in crate::builtins::fea) fn parse_model_constructor_options(
     let mut options = ModelConstructorOptions::default();
     for pair in expect_name_value_tail(builtin, args)? {
         match pair.key.as_str() {
-            "profile" => {
+            key if runmat_builtins::fea_contract::options::FeaStructuralOption::from_normalized(
+                key,
+            ) == Some(
+                runmat_builtins::fea_contract::options::FeaStructuralOption::Profile,
+            ) =>
+            {
                 let text = scalar_string(pair.value, builtin, &ERROR_INPUT)?;
                 options.profile = Some(parse_scalar_enum(&text, "Profile")?);
             }

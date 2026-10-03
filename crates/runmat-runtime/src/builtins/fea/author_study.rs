@@ -49,7 +49,12 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     for pair in args[3..].chunks(2) {
         let key = option_key(&pair[0], AUTHOR_STUDY_NAME)?;
         match key.as_str() {
-            "profile" => {
+            key if runmat_builtins::fea_contract::options::FeaStructuralOption::from_normalized(
+                key,
+            ) == Some(
+                runmat_builtins::fea_contract::options::FeaStructuralOption::Profile,
+            ) =>
+            {
                 let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
                 profile = Some(parse_scalar_enum(&text, "Profile")?);
             }

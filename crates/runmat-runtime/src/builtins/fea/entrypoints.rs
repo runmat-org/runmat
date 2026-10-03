@@ -10,7 +10,7 @@ use crate::builtins::fea::comparison::{
     create_compare_object_from_args, create_trends_object_from_args,
 };
 use crate::builtins::fea::contracts::identities::{
-    FEA_PLAN_CLASS, FEA_VALIDATION_CLASS, PLAN_NAME, RUN_NAME, STUDY_NAME, VALIDATE_NAME,
+    FEA_PLAN_CLASS, FEA_VALIDATION_CLASS, LOAD_NAME, PLAN_NAME, RUN_NAME, STUDY_NAME, VALIDATE_NAME,
 };
 use crate::builtins::fea::document::{load_document_object, resolve_document_input};
 use crate::builtins::fea::domain_interface::{
@@ -46,7 +46,8 @@ use std::path::PathBuf;
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_load_builtin(path: String) -> BuiltinResult<Value> {
+pub async fn fea_load_builtin(path: Value) -> BuiltinResult<Value> {
+    let path = scalar_string(&path, LOAD_NAME, &ERROR_INPUT)?;
     load_document_object(PathBuf::from(path)).await
 }
 

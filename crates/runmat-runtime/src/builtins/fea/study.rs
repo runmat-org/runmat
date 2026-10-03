@@ -196,7 +196,13 @@ impl StudyConstructorOptions {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
                     options.run_kind = Some(parse_scalar_enum(&text, "RunKind")?);
                 }
-                "profile" => {
+                key if runmat_builtins::fea_contract::options::FeaStructuralOption::from_normalized(
+                    key,
+                )
+                    == Some(
+                        runmat_builtins::fea_contract::options::FeaStructuralOption::Profile,
+                    ) =>
+                {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
                     options.profile = Some(parse_scalar_enum(&text, "Profile")?);
                 }
@@ -310,7 +316,12 @@ pub(in crate::builtins::fea) fn create_sweep_object_from_args(
     let mut fail_fast_seen = false;
     for pair in expect_name_value_tail(SWEEP_NAME, &args[2..])? {
         match pair.key.as_str() {
-            "failfast" => {
+            key if runmat_builtins::fea_contract::options::FeaStructuralOption::from_normalized(
+                key,
+            ) == Some(
+                runmat_builtins::fea_contract::options::FeaStructuralOption::FailFast,
+            ) =>
+            {
                 if fail_fast_seen {
                     return Err(builtin_error(
                         SWEEP_NAME,

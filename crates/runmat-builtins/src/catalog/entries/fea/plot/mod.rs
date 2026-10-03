@@ -18,6 +18,13 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     harness: BuiltinExampleHarness::NativeFilesystem, fixture: CLOSED_CUBE_STUDY,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(figureHandle >= 1);" },
+}, BuiltinExample {
+    id: "solver-mesh-scene", title: "Render a solved field with solver mesh edges",
+    program: "study = fea.load('cube.fea');\nrun = fea.run(study);\nfea.plot(run, 'structural.von_mises', 'Mesh', 'solver');",
+    display_output: None, compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::NativeFilesystem, fixture: CLOSED_CUBE_STUDY,
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isgraphics(gcf()));" },
 }];
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.plot", summary: "Create a RunMat figure from a solved FEA field.",

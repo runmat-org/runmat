@@ -93,7 +93,7 @@ fn model_requires_literal_profile_and_host_geometry_class() {
             vec![
                 LiteralValue::Unknown,
                 LiteralValue::Unknown,
-                LiteralValue::String("Profile".into()),
+                LiteralValue::String("P_rofile".into()),
                 LiteralValue::String("linear_static_structural".into()),
             ],
         ),
@@ -137,6 +137,9 @@ fn document_class_is_dynamic_and_text_arrays_are_rejected() {
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-FEA-TEXT"));
+    let mut possible_ranked_char = ValueFact::scalar(ValueKindFact::Character);
+    possible_ranked_char.shape = ShapeFact::Ranked { rank: 3 };
+    assert!(host_text(&possible_ranked_char));
 
     // fea.study(path) currently delegates to the same loader and may
     // return a sweep. The path spelling cannot prove Study class.
@@ -210,7 +213,7 @@ fn sweep_rejects_known_non_study_cell_and_numeric_failfast() {
             vec![
                 LiteralValue::Unknown,
                 LiteralValue::Unknown,
-                LiteralValue::String("FailFast".into()),
+                LiteralValue::String("FAIL_FAST".into()),
                 LiteralValue::Unknown,
             ],
         ),

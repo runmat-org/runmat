@@ -101,7 +101,9 @@ pub fn infer_evidence(
                 ));
             }
             if let Some(name) = request.literals.literal_string_at(index) {
-                if !name.eq_ignore_ascii_case("windowsize") {
+                if super::options::FeaStructuralOption::decode(&name)
+                    != Some(super::options::FeaStructuralOption::WindowSize)
+                {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-OPTION",
                         "WindowSize is the only fea.trends option",
@@ -156,6 +158,7 @@ mod tests {
     use super::*;
     use crate::fea_contract::{
         descriptors::FEA_VALIDATE_DESCRIPTOR,
+        integer::FEA_TRENDS_DESCRIPTOR,
         operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     };
     use crate::{
@@ -213,5 +216,43 @@ mod tests {
         assert!(
             matches!(&invalid.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_VALIDATION_CLASS)))
         );
+    }
+
+    #[test]
+    fn normalized_window_size_is_a_known_trends_option() {
+        let trends = operation_entry::entry(OperationEntryDefinition {
+            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+            name: "fea.trends",
+            documentation: BuiltinDocumentation::EMPTY,
+            descriptor: &FEA_TRENDS_DESCRIPTOR,
+            inference: |request, entry| infer_evidence(request, entry, FeaEvidenceKind::Trends),
+            integer_capabilities: &[],
+            integer_audit: None,
+            effects: OperationEffectProfile::ArtifactRead,
+            accelerator: BuiltinAcceleratorPolicy::Forbidden,
+            distributed: BuiltinDistributedPolicy::Unsupported,
+        });
+        let inferred = infer_evidence(
+            &CallRequest {
+                arguments: vec![
+                    ValueFact::scalar(ValueKindFact::String),
+                    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                        class: NumericClass::UInt64,
+                        domain: NumericDomain::Real,
+                    })),
+                ],
+                literals: LiteralContext::new(vec![
+                    LiteralValue::String("Window-Size".into()),
+                    LiteralValue::Unknown,
+                ]),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+            },
+            &trends,
+            FeaEvidenceKind::Trends,
+        );
+        assert!(!inferred
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-FEA-OPTION"));
     }
 }

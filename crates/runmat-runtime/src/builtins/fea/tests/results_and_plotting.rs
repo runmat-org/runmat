@@ -123,6 +123,18 @@ fn fea_plot_request_accepts_solver_mesh_edge_option() {
 
 #[cfg(feature = "plot-core")]
 #[test]
+fn fea_plot_rejects_numeric_field_identifier_before_graphics() {
+    let (run_value, _study) = synthetic_plot_run_value();
+    let result = plot_request_from_args(&[run_value, Value::Num(42.0)]);
+    let error = match result {
+        Ok(_) => panic!("numeric field id must be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.identifier(), ERROR_INPUT.identifier);
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
 fn fea_plot_default_prefers_von_mises_scalar_figure() {
     let mut figures = vec![
         generated_test_figure("deformation", vec!["structural.displacement"]),
@@ -244,8 +256,10 @@ run:
 "#,
     )
     .expect("FEA fixture should write");
-    let study = block_on(fea_load_builtin(fea_path.to_string_lossy().to_string()))
-        .expect("study should load");
+    let study = block_on(fea_load_builtin(Value::String(
+        fea_path.to_string_lossy().to_string(),
+    )))
+    .expect("study should load");
     let Value::Object(study_object) = &study else {
         panic!("expected study object");
     };

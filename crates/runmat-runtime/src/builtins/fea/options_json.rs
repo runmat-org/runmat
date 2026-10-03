@@ -77,10 +77,7 @@ pub(in crate::builtins::fea) fn option_key(
 }
 
 pub(in crate::builtins::fea) fn normalize_token(text: &str) -> String {
-    text.chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .flat_map(|ch| ch.to_lowercase())
-        .collect()
+    runmat_builtins::fea_contract::options::normalize_option_key(text)
 }
 
 pub(in crate::builtins::fea) fn canonical_field_name(text: &str) -> String {
