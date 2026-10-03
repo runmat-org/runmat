@@ -8,19 +8,31 @@ use runmat_types::{
 fn vector_length(shape: &ShapeFact) -> Result<Option<usize>, ()> {
     match shape {
         ShapeFact::Scalar => Ok(Some(1)),
-        ShapeFact::Shaped { dims } if dims.len() == 2 => match (&dims[0], &dims[1]) {
-            (DimensionFact::Known(1), DimensionFact::Known(length))
-            | (DimensionFact::Known(length), DimensionFact::Known(1)) => Ok(Some(*length)),
-            (DimensionFact::Known(rows), DimensionFact::Known(cols))
-                if *rows != 1 && *cols != 1 =>
-            {
-                Err(())
-            }
+        ShapeFact::Shaped { dims } if dims.len() == 1 => match &dims[0] {
+            DimensionFact::Known(length) => Ok(Some(*length)),
             _ => Ok(None),
         },
-        ShapeFact::Ranked { rank: 2 } | ShapeFact::Unknown => Ok(None),
+        ShapeFact::Shaped { dims } if dims.len() >= 2 && possible_trailing_singletons(dims) => {
+            match (&dims[0], &dims[1]) {
+                (DimensionFact::Known(1), DimensionFact::Known(length))
+                | (DimensionFact::Known(length), DimensionFact::Known(1)) => Ok(Some(*length)),
+                (DimensionFact::Known(rows), DimensionFact::Known(cols))
+                    if *rows != 1 && *cols != 1 =>
+                {
+                    Err(())
+                }
+                _ => Ok(None),
+            }
+        }
+        ShapeFact::Ranked { rank: 1.. } | ShapeFact::Unknown => Ok(None),
         _ => Err(()),
     }
+}
+
+pub(super) fn possible_trailing_singletons(dims: &[DimensionFact]) -> bool {
+    dims.iter()
+        .skip(2)
+        .all(|dim| !matches!(dim, DimensionFact::Known(n) if *n != 1))
 }
 
 pub(super) fn admit(
@@ -80,7 +92,17 @@ pub(super) fn admit(
     }
     let rows = match request.arguments.get(1..).unwrap_or(&[]) {
         [matrix] => match &matrix.shape {
-            ShapeFact::Shaped { dims } if dims.len() == 2 => {
+            ShapeFact::Shaped { dims } if dims.len() == 1 => {
+                if matches!(dims[0], DimensionFact::Known(columns) if columns != 2) {
+                    diagnostics.push(argument_error(
+                        format!("{code}-SHAPE"),
+                        "query matrix must be N-by-2",
+                        1,
+                    ));
+                }
+                Some(1)
+            }
+            ShapeFact::Shaped { dims } if dims.len() >= 2 && possible_trailing_singletons(dims) => {
                 if matches!(dims[1], DimensionFact::Known(columns) if columns != 2) {
                     diagnostics.push(argument_error(
                         format!("{code}-SHAPE"),
@@ -95,7 +117,7 @@ pub(super) fn admit(
                     }
                 }
             }
-            ShapeFact::Ranked { rank: 2 } | ShapeFact::Unknown => None,
+            ShapeFact::Ranked { rank: 1.. } | ShapeFact::Unknown => None,
             _ => {
                 diagnostics.push(argument_error(
                     format!("{code}-SHAPE"),
@@ -125,4 +147,23 @@ pub(super) fn admit(
         _ => None,
     };
     (rows, diagnostics)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vector_shape_admits_trailing_singletons_but_not_genuine_nd() {
+        assert_eq!(
+            vector_length(&ShapeFact::from(vec![Some(1), Some(2), Some(1)])),
+            Ok(Some(2))
+        );
+        assert_eq!(
+            vector_length(&ShapeFact::from(vec![Some(1), Some(2), Some(2)])),
+            Err(())
+        );
+        assert_eq!(vector_length(&ShapeFact::from(vec![Some(2)])), Ok(Some(2)));
+        assert_eq!(vector_length(&ShapeFact::Ranked { rank: 3 }), Ok(None));
+    }
 }

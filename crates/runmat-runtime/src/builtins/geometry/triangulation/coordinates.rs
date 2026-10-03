@@ -2,6 +2,11 @@ use super::*;
 
 pub(super) fn matrix_points(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<[f64; 2]>> {
     let tensor = numeric_tensor(value, builtin)?;
+    if !has_only_trailing_singletons(&tensor.shape) {
+        return Err(invalid(format!(
+            "{builtin}: points must be an N-by-2 matrix"
+        )));
+    }
     if tensor.cols == 3 {
         return Err(unsupported(
             "3-D DelaunayTri triangulation is not yet supported",
@@ -123,10 +128,14 @@ pub(super) fn looks_like_constraints(value: &Value) -> bool {
 
 pub(super) fn is_vector_value(value: &Value) -> bool {
     matches!(value, Value::Tensor(tensor) if is_vector(tensor))
-        || matches!(value, Value::GpuTensor(handle) if handle.shape().first().copied().unwrap_or(1) == 1 || handle.shape().get(1).copied().unwrap_or(1) == 1)
+        || matches!(value, Value::GpuTensor(handle) if has_only_trailing_singletons(handle.shape()) && (handle.shape().first().copied().unwrap_or(1) == 1 || handle.shape().get(1).copied().unwrap_or(1) == 1))
         || matches!(value, Value::Num(_) | Value::Int(_))
 }
 
 pub(super) fn is_vector(tensor: &Tensor) -> bool {
-    tensor.rows == 1 || tensor.cols == 1
+    has_only_trailing_singletons(&tensor.shape) && (tensor.rows == 1 || tensor.cols == 1)
+}
+
+pub(super) fn has_only_trailing_singletons(shape: &[usize]) -> bool {
+    shape.iter().skip(2).all(|extent| *extent == 1)
 }

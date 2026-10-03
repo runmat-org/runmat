@@ -8,6 +8,7 @@ pub(super) struct ParsedDelaunay {
 }
 
 pub(super) async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<ParsedDelaunay> {
+    preflight::constructor(&args)?;
     let gathered = gather_values(args).await?;
     match gathered.as_slice() {
         [] => Ok(ParsedDelaunay {
@@ -22,7 +23,7 @@ pub(super) async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<Pa
             integer_coordinates: is_typed_integer_numeric_value(points),
             integer_topology: false,
         }),
-        [first, second] if looks_like_point_matrix(first) && !is_vector_value(first) => {
+        [first, second] if constraint_form(first, second) => {
             let constraints = constraints_from_value(second)?;
             if !constraints.is_empty() {
                 return Err(unsupported(
@@ -81,7 +82,7 @@ pub(super) async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>>
 pub(super) fn ensure_resident_constructor_extensions(args: &[Value]) -> BuiltinResult<()> {
     match args {
         [points] => ensure_resident_coordinate_values(std::slice::from_ref(points)),
-        [first, second] if looks_like_point_matrix(first) && !is_vector_value(first) => {
+        [first, second] if constraint_form(first, second) => {
             ensure_resident_coordinate_values(std::slice::from_ref(first))?;
             ensure_resident_topology_values(std::slice::from_ref(second))
         }

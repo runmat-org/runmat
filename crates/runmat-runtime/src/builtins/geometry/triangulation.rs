@@ -20,6 +20,7 @@ mod registration;
 mod constructor;
 mod queries;
 mod coordinates;
+mod preflight;
 mod results;
 mod errors;
 #[cfg(test)]
@@ -30,6 +31,7 @@ pub use contract::*;
 use coordinates::*;
 pub use entrypoints::*;
 use errors::*;
+use preflight::*;
 use queries::*;
 use registration::ensure_registered;
 pub(crate) use registration::register_delaunaytri_class;

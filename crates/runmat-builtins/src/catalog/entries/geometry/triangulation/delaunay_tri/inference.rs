@@ -53,7 +53,20 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         Some(0)
     } else if request.arguments.len() == 1 {
         match &request.arguments[0].shape {
-            ShapeFact::Shaped { dims } if dims.len() == 2 => {
+            ShapeFact::Shaped { dims } if dims.len() == 1 => {
+                if matches!(dims[0], DimensionFact::Known(columns) if columns != 2) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-DELAUNAYTRI-SHAPE",
+                        "point matrix must have two columns",
+                        0,
+                    ));
+                }
+                Some(1)
+            }
+            ShapeFact::Shaped { dims }
+                if dims.len() >= 2
+                    && super::super::query_facts::possible_trailing_singletons(dims) =>
+            {
                 if matches!(dims[1], DimensionFact::Known(value) if value != 2) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-DELAUNAYTRI-SHAPE",
@@ -66,7 +79,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     _ => None,
                 }
             }
-            ShapeFact::Ranked { rank: 2 } | ShapeFact::Unknown => None,
+            ShapeFact::Ranked { rank: 1.. } | ShapeFact::Unknown => None,
             _ => {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-DELAUNAYTRI-SHAPE",

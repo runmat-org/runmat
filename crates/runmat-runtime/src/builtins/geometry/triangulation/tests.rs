@@ -1,6 +1,9 @@
 use super::*;
 use futures::executor::block_on;
 
+#[path = "tests/preflight.rs"]
+mod preflight;
+
 #[test]
 fn free_boundary_aliases_reject_excess_outputs_before_receiver_access() {
     let _outputs = crate::output_count::push_output_count(Some(2));

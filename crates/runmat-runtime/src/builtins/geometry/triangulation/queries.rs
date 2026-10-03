@@ -14,6 +14,7 @@ pub(super) async fn nearest_neighbor_value(dt: Value, rest: Vec<Value>) -> Built
     let object_integer_coordinates = object_coordinates_are_typed_integer(object);
     let points = object_points(object)?;
     ensure_resident_coordinate_values(&rest)?;
+    preflight::query(&rest, "nearestNeighbor")?;
     let gathered = gather_values(rest).await?;
     let query_integer_coordinates = gathered.iter().any(is_typed_integer_numeric_value);
     let queries = parse_query_points(gathered, "nearestNeighbor")?;
@@ -34,6 +35,7 @@ pub(super) async fn point_location_value(dt: Value, rest: Vec<Value>) -> Builtin
     let points = object_points(object)?;
     let triangles = object_triangles(object, Some(points.len()))?;
     ensure_resident_coordinate_values(&rest)?;
+    preflight::query(&rest, "pointLocation")?;
     let gathered = gather_values(rest).await?;
     let query_integer_coordinates = gathered.iter().any(is_typed_integer_numeric_value);
     let queries = parse_query_points(gathered, "pointLocation")?;
