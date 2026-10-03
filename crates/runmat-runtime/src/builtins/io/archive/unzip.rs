@@ -190,7 +190,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::unzip_type),
     descriptor(crate::builtins::io::archive::unzip::UNZIP_DESCRIPTOR),
-    binding_variant = "default",
     context = true,
     builtin_path = "crate::builtins::io::archive::unzip"
 )]
