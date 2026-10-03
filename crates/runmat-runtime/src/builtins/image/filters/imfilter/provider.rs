@@ -74,7 +74,10 @@ pub(super) async fn imfilter_gpu(
     } else {
         (None, None)
     };
-    let (mut selected, planned_query) = select_provider_route(
+    let route::ProviderRouteSelection {
+        mut selected,
+        planned_kernel,
+    } = select_provider_route(
         runtime,
         &image_handle,
         &kernel_value,
@@ -233,13 +236,13 @@ pub(super) async fn imfilter_gpu(
             }
         },
     };
-    if planned_query.as_ref().is_some_and(|(query, bytes)| {
+    if planned_kernel.as_ref().is_some_and(|planned| {
         !placement::prepared_hook_matches_realized(
-            query,
+            &planned.query,
             &image_handle,
             &kernel_handle,
             &options,
-            *bytes,
+            planned.requested_bytes,
         )
     }) {
         if let Some(selection) = selected {

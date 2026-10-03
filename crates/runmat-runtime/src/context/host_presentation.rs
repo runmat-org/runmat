@@ -135,10 +135,7 @@ impl HostPresentationReceipt {
                     .receipt
                     .fail(ProviderObservationFailure::SharedRuntimeFallback),
                 Ok(true) => {
-                    if !self.upload_publication.can_publish() {
-                        self.receipt
-                            .fail(ProviderObservationFailure::PublicationFailed);
-                    } else if self.receipt.publish().is_err() {
+                    if !self.upload_publication.can_publish() || self.receipt.publish().is_err() {
                         self.receipt
                             .fail(ProviderObservationFailure::PublicationFailed);
                     }

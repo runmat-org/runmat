@@ -7,6 +7,17 @@ use super::{
     ProviderPrecision, Value, IMFILTER_BUILTIN,
 };
 
+#[derive(Default)]
+pub(super) struct ProviderRouteSelection {
+    pub selected: Option<crate::context::provider_operation::SelectedProviderOperation>,
+    pub planned_kernel: Option<PlannedKernel>,
+}
+
+pub(super) struct PlannedKernel {
+    pub query: runmat_accelerate_api::ProviderFeasibilityQuery,
+    pub requested_bytes: u64,
+}
+
 fn projected_public_kernel(
     value: &Value,
     precision: ProviderPrecision,
@@ -66,12 +77,9 @@ pub(super) fn select_provider_route(
     options: &ImfilterOptions,
     output_class: ImageOutputClass,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) -> BuiltinResult<(
-    Option<crate::context::provider_operation::SelectedProviderOperation>,
-    Option<(runmat_accelerate_api::ProviderFeasibilityQuery, u64)>,
-)> {
+) -> BuiltinResult<ProviderRouteSelection> {
     let Some(image_precision) = output_class.provider_precision() else {
-        return Ok((None, None));
+        return Ok(ProviderRouteSelection::default());
     };
     let required_kernel_precision = match floating_accumulation(
         image_precision,
@@ -81,7 +89,7 @@ pub(super) fn select_provider_route(
         FilterAccumulation::GpuSingle => ProviderPrecision::F32,
     };
     if !valid_public_kernel(kernel) {
-        return Ok((None, None));
+        return Ok(ProviderRouteSelection::default());
     }
     if let Value::GpuTensor(handle) = kernel {
         if required_kernel_precision == ProviderPrecision::F64
@@ -112,8 +120,8 @@ pub(super) fn select_provider_route(
                     readbacks: &fallback_readbacks,
                 })
             };
-            return Ok((
-                placement::select_direct(
+            return Ok(ProviderRouteSelection {
+                selected: placement::select_direct(
                     placement::FilterRouteRequest {
                         runtime,
                         semantic_operation: IMFILTER_BUILTIN,
@@ -124,13 +132,13 @@ pub(super) fn select_provider_route(
                     handle,
                     true,
                 )?,
-                None,
-            ));
+                planned_kernel: None,
+            });
         }
     }
     let Some((projected, scratch)) = projected_public_kernel(kernel, required_kernel_precision)
     else {
-        return Ok((None, None));
+        return Ok(ProviderRouteSelection::default());
     };
     let original = match kernel {
         Value::GpuTensor(handle) => Some(handle),
@@ -140,7 +148,7 @@ pub(super) fn select_provider_route(
         Value::Num(_) => vec![1, 1],
         Value::Tensor(tensor) => tensor.shape.clone(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
-        _ => return Ok((None, None)),
+        _ => return Ok(ProviderRouteSelection::default()),
     };
     let (fallback_scratch, result_bytes) = placement::conditional_host_bounds(
         IMFILTER_BUILTIN,
@@ -179,11 +187,14 @@ pub(super) fn select_provider_route(
             projected,
             scratch,
         )? {
-            Some(prepared) => (
-                Some(prepared.selection),
-                Some((prepared.query, prepared.expected_kernel_requested_bytes)),
-            ),
-            None => (None, None),
+            Some(prepared) => ProviderRouteSelection {
+                selected: Some(prepared.selection),
+                planned_kernel: Some(PlannedKernel {
+                    query: prepared.query,
+                    requested_bytes: prepared.expected_kernel_requested_bytes,
+                }),
+            },
+            None => ProviderRouteSelection::default(),
         },
     )
 }
