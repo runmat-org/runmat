@@ -115,37 +115,52 @@ pub async fn delaunay_tri_nearest_neighbor_builtin(
 
 #[runtime_builtin(
     name = "pointLocation",
+    binding_variant = "default",
     category = "geometry/triangulation",
     summary = "Locate query points in a DelaunayTri object.",
     keywords = "pointLocation,DelaunayTri,triangulation,barycentric,geometry",
     accel = "cpu",
-    descriptor(crate::builtins::geometry::triangulation::POINT_LOCATION_DESCRIPTOR),
-    extensions(crate::builtins::geometry::triangulation::POINT_LOCATION_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::geometry::triangulation::POINT_LOCATION_INTEGER_CAPABILITIES
-    ),
+    descriptor(runmat_builtins::POINT_LOCATION_DESCRIPTOR),
+    extensions(runmat_builtins::POINT_LOCATION_EXTENSIONS),
+    integer_capabilities(runmat_builtins::POINT_LOCATION_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn point_location_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    validate_point_location_outputs("pointLocation")?;
     point_location_value(dt, rest).await
 }
 
 #[runtime_builtin(
     name = "DelaunayTri.pointLocation",
+    binding_variant = "default",
     category = "geometry/triangulation",
     summary = "Locate query points in a DelaunayTri object.",
     keywords = "pointLocation,DelaunayTri,triangulation,barycentric,geometry",
     accel = "cpu",
-    descriptor(crate::builtins::geometry::triangulation::POINT_LOCATION_DESCRIPTOR),
-    extensions(crate::builtins::geometry::triangulation::POINT_LOCATION_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::geometry::triangulation::POINT_LOCATION_INTEGER_CAPABILITIES
-    ),
+    descriptor(runmat_builtins::DELAUNAY_TRI_POINT_LOCATION_DESCRIPTOR),
+    extensions(runmat_builtins::POINT_LOCATION_EXTENSIONS),
+    integer_capabilities(runmat_builtins::POINT_LOCATION_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_point_location_builtin(
     dt: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    validate_point_location_outputs("DelaunayTri.pointLocation")?;
     point_location_value(dt, rest).await
+}
+
+fn validate_point_location_outputs(name: &'static str) -> BuiltinResult<()> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        let error = &runmat_builtins::POINT_LOCATION_ERROR_TOO_MANY_OUTPUTS;
+        return Err(build_runtime_error(error.message)
+            .with_builtin(name)
+            .with_identifier(
+                error
+                    .identifier
+                    .expect("typed output-count error identifier"),
+            )
+            .build());
+    }
+    Ok(())
 }

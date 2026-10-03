@@ -16,6 +16,82 @@ fn free_boundary_aliases_reject_excess_outputs_before_receiver_access() {
     }
 }
 
+#[test]
+fn constructor_and_nearest_aliases_reject_excess_outputs_before_geometry() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let constructor = block_on(delaunay_tri_builtin(vec![Value::Num(f64::NAN)]))
+        .expect_err("constructor output bound precedes input inspection");
+    assert_eq!(
+        constructor.identifier(),
+        runmat_builtins::DELAUNAY_TRI_ERROR_TOO_MANY_OUTPUTS.identifier
+    );
+    for error in [
+        block_on(nearest_neighbor_builtin(Value::Num(0.0), vec![]))
+            .expect_err("function output bound"),
+        block_on(delaunay_tri_nearest_neighbor_builtin(
+            Value::Num(0.0),
+            vec![],
+        ))
+        .expect_err("method output bound"),
+    ] {
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::NEAREST_NEIGHBOR_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
+    }
+}
+
+#[test]
+fn point_location_aliases_bound_outputs_before_receiver_and_return_barycentric_rows() {
+    {
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        for error in [
+            block_on(point_location_builtin(Value::Num(0.0), vec![]))
+                .expect_err("function output bound"),
+            block_on(delaunay_tri_point_location_builtin(Value::Num(0.0), vec![]))
+                .expect_err("method output bound"),
+        ] {
+            assert_eq!(
+                error.identifier(),
+                runmat_builtins::POINT_LOCATION_ERROR_TOO_MANY_OUTPUTS.identifier
+            );
+        }
+    }
+    let dt = block_on(delaunay_tri_builtin(vec![tensor(
+        &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        3,
+        2,
+    )]))
+    .unwrap();
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    for result in [
+        block_on(point_location_builtin(
+            dt.clone(),
+            vec![tensor(&[0.25, 0.25], 1, 2)],
+        ))
+        .unwrap(),
+        block_on(delaunay_tri_point_location_builtin(
+            dt.clone(),
+            vec![tensor(&[0.25, 0.25], 1, 2)],
+        ))
+        .unwrap(),
+    ] {
+        let Value::OutputList(outputs) = result else {
+            panic!("two selected outputs")
+        };
+        assert_eq!(outputs.len(), 2);
+        let Value::Tensor(ti) = &outputs[0] else {
+            panic!("triangle indices")
+        };
+        let Value::Tensor(bc) = &outputs[1] else {
+            panic!("barycentric coordinates")
+        };
+        assert_eq!(ti.materialize_f64(), vec![1.0]);
+        assert_eq!((bc.rows, bc.cols), (1, 3));
+        assert!((bc.materialize_f64().iter().sum::<f64>() - 1.0).abs() < 1e-12);
+    }
+}
+
 fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new_2d(data.to_vec(), rows, cols).expect("test tensor"))
 }

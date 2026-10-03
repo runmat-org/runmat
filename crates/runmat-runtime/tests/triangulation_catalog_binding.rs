@@ -2,7 +2,8 @@
 use runmat_builtins::{
     builtin_function_by_name, BuiltinFusionPolicy, DELAUNAY_TRI_CATALOG_ENTRY,
     DELAUNAY_TRI_FREE_BOUNDARY_CATALOG_ENTRY, DELAUNAY_TRI_NEAREST_NEIGHBOR_CATALOG_ENTRY,
-    FREE_BOUNDARY_CATALOG_ENTRY, NEAREST_NEIGHBOR_CATALOG_ENTRY,
+    DELAUNAY_TRI_POINT_LOCATION_CATALOG_ENTRY, FREE_BOUNDARY_CATALOG_ENTRY,
+    NEAREST_NEIGHBOR_CATALOG_ENTRY, POINT_LOCATION_CATALOG_ENTRY,
 };
 use runmat_runtime::builtin::migration_inventory::migration_inventory;
 use runmat_runtime::builtins::common::spec::canonical_fusion_declaration;
@@ -16,6 +17,8 @@ fn free_boundary_function_and_object_method_have_distinct_canonical_bindings() {
         &DELAUNAY_TRI_FREE_BOUNDARY_CATALOG_ENTRY,
         &NEAREST_NEIGHBOR_CATALOG_ENTRY,
         &DELAUNAY_TRI_NEAREST_NEIGHBOR_CATALOG_ENTRY,
+        &POINT_LOCATION_CATALOG_ENTRY,
+        &DELAUNAY_TRI_POINT_LOCATION_CATALOG_ENTRY,
     ] {
         let name = entry.identity.name;
         let bindings = runmat_runtime::builtin::runtime_builtin_bindings_by_name(name);
