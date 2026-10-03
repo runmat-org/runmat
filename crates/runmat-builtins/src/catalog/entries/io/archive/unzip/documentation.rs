@@ -83,7 +83,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             }),
             endpoint_substitutions: &[BuiltinEndpointSubstitution::HttpBaseUrl],
         }),
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: BuiltinExampleRequirements {
+            host: BuiltinExampleHostRequirement::NativeOnly,
+            ..BuiltinExampleRequirements::NONE
+        },
         verification: BuiltinExampleVerification::Assertions { source: "assert(iscell(files)); assert(isequal(size(files), [1 1])); assert(strcmp(text, sprintf('alpha\\n')));" },
     }],
     example_exemption: None,
