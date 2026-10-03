@@ -1,5 +1,4 @@
 use crate::analysis::AnalysisStudySpec;
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::{
     FEA_BOUNDARY_CONDITION_CLASS, FEA_DOMAIN_CLASS, FEA_INTERFACE_CLASS, FEA_LOAD_CASE_CLASS,
     FEA_MATERIAL_ASSIGNMENT_CLASS, FEA_MATERIAL_CLASS, FEA_MODEL_CLASS, FEA_PAYLOAD_JSON_PROPERTY,
@@ -16,6 +15,7 @@ use runmat_analysis_core::BoundaryCondition;
 use runmat_analysis_core::LoadCase;
 use runmat_analysis_core::MaterialAssignment;
 use runmat_analysis_core::MaterialModel;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_value::Value;
 use serde::de::DeserializeOwned;
 

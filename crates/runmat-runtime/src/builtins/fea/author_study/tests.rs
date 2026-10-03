@@ -1,7 +1,6 @@
 use futures::executor::block_on;
 use runmat_value::{Tensor, Value};
 
-use runmat_builtins::fea_contract::descriptors::ERROR_INTERNAL;
 use super::super::contracts::identities::{
     FEA_PAYLOAD_JSON_PROPERTY, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_STUDY_SPEC_JSON_PROPERTY,
 };
@@ -9,6 +8,7 @@ use super::super::entrypoints::{fea_run_builtin, fea_validate_builtin};
 use super::super::integer_serialization::serializable_to_object;
 use super::*;
 use crate::builtins::geometry::{GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY};
+use runmat_builtins::fea_contract::descriptors::ERROR_INTERNAL;
 
 fn authoring_summary_value() -> Value {
     crate::builtins::io::json::jsondecode::value_from_json(&serde_json::json!({

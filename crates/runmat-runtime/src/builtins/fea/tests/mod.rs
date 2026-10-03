@@ -1,6 +1,5 @@
 use super::boundary::boundary_integer_to_f64;
 use super::comparison::create_compare_object_from_args;
-use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
 use super::contracts::identities::{
     BOUNDARY_CONDITION_NAME, COMPARE_NAME, DOMAIN_NAME, FEA_BOUNDARY_CONDITION_CLASS,
     FEA_FIELD_CLASS, FEA_LOAD_CASE_CLASS, FEA_MATERIAL_ASSIGNMENT_CLASS, FEA_MATERIAL_CLASS,
@@ -10,7 +9,6 @@ use super::contracts::identities::{
     FEA_SWEEP_CLASS, FEA_VALIDATION_CLASS, FIELD_NAME, INTERFACE_NAME, MATERIAL_NAME, MODEL_NAME,
     PLAN_NAME, RESULTS_NAME, RUN_NAME, RUN_OPTIONS_NAME, STUDY_NAME,
 };
-use runmat_builtins::fea_contract::integer::FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES;
 #[cfg(feature = "plot-core")]
 use super::entrypoints::fea_plot_builtin;
 use super::entrypoints::{
@@ -43,6 +41,8 @@ use runmat_analysis_core::{
     BoundaryCondition, BoundaryConditionKind, LoadCase, LoadKind, MaterialModel,
 };
 use runmat_analysis_fea::ComputeBackend;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
+use runmat_builtins::fea_contract::integer::FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES;
 use runmat_value::{
     CellArray, IntValue, IntegerStorage, ObjectInstance, StructArray, StructValue, Tensor, Value,
 };

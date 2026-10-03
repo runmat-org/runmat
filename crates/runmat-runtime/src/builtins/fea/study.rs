@@ -13,7 +13,6 @@ use crate::analysis::AnalysisStudySpec;
 use crate::analysis::AnalysisStudySweepSpec;
 use crate::analysis::AnalysisThermalRunOptions;
 use crate::analysis::AnalysisTransientRunOptions;
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::{STUDY_NAME, SWEEP_NAME};
 use crate::builtins::fea::errors::{builtin_error, sanitize_id};
 use crate::builtins::fea::geometry::{
@@ -41,6 +40,7 @@ use runmat_analysis_core::MaterialAssignment;
 use runmat_analysis_core::MaterialModel;
 use runmat_analysis_core::ReferenceFrame;
 use runmat_analysis_fea::ComputeBackend;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_value::Value;
 use serde::Deserialize;
 use serde::Serialize;

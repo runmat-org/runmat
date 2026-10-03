@@ -1,7 +1,6 @@
 use crate::analysis::analysis_create_model_op;
 use crate::analysis::AnalysisCreateModelIntentSpec;
 use crate::analysis::AnalysisCreateModelProfile;
-use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     BOUNDARY_CONDITION_NAME, DOMAIN_NAME, FEA_BOUNDARY_CONDITION_CLASS, FEA_DOMAIN_CLASS,
     FEA_INTERFACE_CLASS, FEA_LOAD_CASE_CLASS, FEA_MATERIAL_ASSIGNMENT_CLASS, FEA_MATERIAL_CLASS,
@@ -27,6 +26,7 @@ use runmat_analysis_core::MaterialAssignment;
 use runmat_analysis_core::MaterialModel;
 use runmat_analysis_core::ReferenceFrame;
 use runmat_analysis_core::ThermoMechanicalDomain;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use runmat_geometry_core::GeometryAsset;
 use runmat_value::Value;
 

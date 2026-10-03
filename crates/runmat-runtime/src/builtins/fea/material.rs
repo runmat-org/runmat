@@ -1,4 +1,3 @@
-use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
 use crate::builtins::fea::contracts::identities::{MATERIAL_ASSIGNMENT_NAME, MATERIAL_NAME};
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::{parse_scalar_enum, scalar_string};
@@ -16,6 +15,7 @@ use runmat_analysis_core::MaterialMechanicalModel;
 use runmat_analysis_core::MaterialModel;
 use runmat_analysis_core::MaterialPlasticModel;
 use runmat_analysis_core::MaterialThermalModel;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_material_object_from_args(

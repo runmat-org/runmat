@@ -9,7 +9,6 @@ use crate::analysis::AnalysisRunKind;
 use crate::analysis::AnalysisRunOptions;
 use crate::analysis::AnalysisThermalRunOptions;
 use crate::analysis::AnalysisTransientRunOptions;
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::{FEA_RUN_OPTIONS_CLASS, RUN_OPTIONS_NAME};
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::{parse_scalar_enum, scalar_string};
@@ -22,6 +21,7 @@ use crate::builtins::fea::options_json::{
 use crate::builtins::fea::study::{ResolvedRunOptions, RunOptionsPayload};
 use crate::builtins::fea::value_decode::usize_from_value;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_run_options_object_from_args(

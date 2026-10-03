@@ -1,5 +1,4 @@
 use crate::analysis::AnalysisFieldDescriptor;
-use runmat_builtins::fea_contract::descriptors::ERROR_INTERNAL;
 use crate::builtins::fea::contracts::identities::{
     FEA_FIELD_CLASS, FEA_PAYLOAD_JSON_PROPERTY, FIELD_NAME,
 };
@@ -9,6 +8,7 @@ use crate::builtins::fea::registry::ensure_fea_classes_registered;
 use crate::BuiltinResult;
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_core::AnalysisFieldValues;
+use runmat_builtins::fea_contract::descriptors::ERROR_INTERNAL;
 use runmat_value::IntValue;
 use runmat_value::IntegerStorage;
 use runmat_value::ObjectInstance;

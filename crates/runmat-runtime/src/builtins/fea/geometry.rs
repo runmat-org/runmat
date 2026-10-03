@@ -1,12 +1,12 @@
 use crate::analysis::AnalysisCreateModelProfile;
 use crate::analysis::AnalysisRunKind;
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::STUDY_NAME;
 use crate::builtins::fea::errors::{builtin_error, builtin_error_with_source};
 use crate::builtins::fea::study::StudyConstructorOptions;
 use crate::builtins::geometry::GEOMETRY_ASSET_CLASS;
 use crate::builtins::geometry::GEOMETRY_ASSET_JSON_PROPERTY;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_geometry_core::GeometryAsset;
 use runmat_value::ObjectInstance;

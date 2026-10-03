@@ -4,7 +4,6 @@ use crate::analysis::AnalysisStudySweepFailureEntry;
 use crate::analysis::AnalysisStudySweepPlanData;
 use crate::analysis::AnalysisStudySweepSpec;
 use crate::analysis::FeaResolvedDocument;
-use runmat_builtins::fea_contract::descriptors::{ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     FEA_PAYLOAD_JSON_PROPERTY, FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
     FEA_STUDY_SPEC_JSON_PROPERTY, FEA_SWEEP_CLASS, FEA_SWEEP_SPEC_JSON_PROPERTY, PLAN_NAME,
@@ -17,6 +16,7 @@ use crate::builtins::fea::integer_serialization::{
 use crate::operations::OperationEnvelope;
 use crate::operations::OperationErrorEnvelope;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INTERNAL, ERROR_OPERATION};
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_value::Value;
 use serde::Serialize;

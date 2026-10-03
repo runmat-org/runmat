@@ -1,8 +1,5 @@
 #[cfg(feature = "plot-core")]
 use crate::analysis::{analysis_results_by_run_id_op, AnalysisResultsQuery, AnalysisStudySpec};
-#[cfg(feature = "plot-core")]
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
-use runmat_builtins::fea_contract::descriptors::ERROR_OPERATION;
 use crate::builtins::fea::contracts::identities::PLOT_NAME;
 #[cfg(feature = "plot-core")]
 use crate::builtins::fea::contracts::identities::{FEA_FIELD_CLASS, FEA_STUDY_CLASS};
@@ -26,6 +23,9 @@ use crate::operations::OperationContext;
 use crate::BuiltinResult;
 #[cfg(feature = "plot-core")]
 use runmat_analysis_core::AnalysisFieldValues;
+#[cfg(feature = "plot-core")]
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
+use runmat_builtins::fea_contract::descriptors::ERROR_OPERATION;
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {

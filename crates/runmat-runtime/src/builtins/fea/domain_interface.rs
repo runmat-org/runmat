@@ -1,4 +1,3 @@
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::{DOMAIN_NAME, INTERFACE_NAME};
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::scalar_string;
@@ -15,6 +14,7 @@ use runmat_analysis_core::CfdDomain;
 use runmat_analysis_core::ElectroThermalDomain;
 use runmat_analysis_core::ElectromagneticDomain;
 use runmat_analysis_core::ThermoMechanicalDomain;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_domain_object_from_args(

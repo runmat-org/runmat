@@ -1,5 +1,4 @@
 use crate::builtins::common::tensor as tensor_utils;
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::BOUNDARY_CONDITION_NAME;
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::{parse_scalar_enum_for_builtin, scalar_string};
@@ -10,6 +9,7 @@ use crate::builtins::fea::options_json::{
 use crate::BuiltinResult;
 use runmat_analysis_core::BoundaryCondition;
 use runmat_analysis_core::BoundaryConditionKind;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_value::IntValue;
 use runmat_value::NumericScalar;
 use runmat_value::Value;

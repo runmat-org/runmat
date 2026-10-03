@@ -1,11 +1,11 @@
 use crate::builtins::common::tensor as tensor_utils;
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::MODEL_NAME;
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::scalar_string;
 use crate::builtins::fea::options_json::normalize_token;
 use crate::builtins::fea::study::ModelDefaultsMode;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn logical_from_value(

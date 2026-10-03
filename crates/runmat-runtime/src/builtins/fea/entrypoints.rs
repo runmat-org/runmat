@@ -9,7 +9,6 @@ use crate::builtins::fea::boundary::create_boundary_condition_object_from_args;
 use crate::builtins::fea::comparison::{
     create_compare_object_from_args, create_trends_object_from_args,
 };
-use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     FEA_PLAN_CLASS, FEA_VALIDATION_CLASS, PLAN_NAME, RUN_NAME, STUDY_NAME, VALIDATE_NAME,
 };
@@ -37,6 +36,7 @@ use crate::builtins::fea::run_options::create_run_options_object_from_args;
 use crate::builtins::fea::study::{create_study_object_from_args, create_sweep_object_from_args};
 use crate::operations::OperationContext;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 use std::path::PathBuf;

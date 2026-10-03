@@ -12,6 +12,7 @@ mod containers;
 mod control;
 mod datetime;
 mod deep_learning;
+mod fea;
 mod finance;
 mod graph;
 mod image;
@@ -58,6 +59,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     table::extend_entries(values);
     testing::extend_entries(values);
     value_distribution::extend_entries(values);
+    fea::extend_entries(values);
 }
 
 pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {

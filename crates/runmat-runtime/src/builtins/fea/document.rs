@@ -2,7 +2,6 @@ use crate::analysis::load_fea_document_from_path_async;
 use crate::analysis::AnalysisStudySpec;
 use crate::analysis::AnalysisStudySweepSpec;
 use crate::analysis::FeaResolvedDocument;
-use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_LOAD};
 use crate::builtins::fea::contracts::identities::{
     FEA_STUDY_CLASS, FEA_STUDY_SPEC_JSON_PROPERTY, FEA_SWEEP_CLASS, FEA_SWEEP_SPEC_JSON_PROPERTY,
     LOAD_NAME,
@@ -11,6 +10,7 @@ use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::object_json_property;
 use crate::builtins::fea::output::resolved_document_to_object;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_LOAD};
 use runmat_value::Value;
 use std::path::PathBuf;
 

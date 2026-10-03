@@ -1,4 +1,3 @@
-use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use crate::builtins::fea::contracts::identities::{LOAD_CASE_NAME, STEP_NAME};
 use crate::builtins::fea::errors::builtin_error;
 use crate::builtins::fea::geometry::{parse_scalar_enum, scalar_string};
@@ -12,6 +11,7 @@ use runmat_analysis_core::AnalysisStep;
 use runmat_analysis_core::AnalysisStepKind;
 use runmat_analysis_core::LoadCase;
 use runmat_analysis_core::LoadKind;
+use runmat_builtins::fea_contract::descriptors::ERROR_INPUT;
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_load_case_object_from_args(

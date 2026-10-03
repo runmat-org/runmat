@@ -2,7 +2,6 @@ use crate::analysis::analysis_results_compare_op;
 use crate::analysis::analysis_trends_op;
 use crate::analysis::AnalysisResultsCompareQuery;
 use crate::analysis::AnalysisTrendsQuery;
-use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     COMPARE_NAME, FEA_COMPARE_CLASS, FEA_PAYLOAD_JSON_PROPERTY, FEA_TRENDS_CLASS, TRENDS_NAME,
 };
@@ -15,6 +14,7 @@ use crate::builtins::fea::output::{
 use crate::builtins::fea::value_decode::usize_from_value;
 use crate::operations::OperationContext;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_compare_object_from_args(

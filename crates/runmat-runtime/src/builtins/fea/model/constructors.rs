@@ -1,4 +1,3 @@
-use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
 use crate::builtins::fea::contracts::identities::{
     FEA_MODEL_CLASS, FEA_PAYLOAD_JSON_PROPERTY, MODEL_NAME,
 };
@@ -15,6 +14,7 @@ use crate::builtins::fea::options_json::expect_name_value_tail;
 use crate::builtins::fea::study::ModelConstructorOptions;
 use crate::builtins::fea::value_decode::parse_model_defaults_mode;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_model_object_from_args(

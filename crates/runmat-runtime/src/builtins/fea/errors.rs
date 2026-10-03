@@ -1,7 +1,7 @@
 use crate::build_runtime_error;
-use runmat_builtins::fea_contract::descriptors::{ERROR_INTERNAL, ERROR_OPERATION};
 use crate::operations::OperationErrorEnvelope;
 use crate::RuntimeError;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INTERNAL, ERROR_OPERATION};
 use runmat_builtins::BuiltinErrorDescriptor;
 
 pub(in crate::builtins::fea) fn operation_error(

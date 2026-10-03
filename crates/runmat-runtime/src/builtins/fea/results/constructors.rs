@@ -1,6 +1,5 @@
 use crate::analysis::analysis_results_by_run_id_op;
 use crate::analysis::AnalysisFieldDescriptor;
-use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use crate::builtins::fea::contracts::identities::{
     FEA_PAYLOAD_JSON_PROPERTY, FEA_RESULTS_CLASS, FEA_RUN_ID_CONTEXT_PROPERTY, FIELD_NAME,
     RESULTS_NAME,
@@ -15,6 +14,7 @@ use crate::builtins::fea::results::query::{
 };
 use crate::operations::OperationContext;
 use crate::BuiltinResult;
+use runmat_builtins::fea_contract::descriptors::{ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION};
 use runmat_value::Value;
 
 pub(in crate::builtins::fea) fn create_results_object_from_args(
