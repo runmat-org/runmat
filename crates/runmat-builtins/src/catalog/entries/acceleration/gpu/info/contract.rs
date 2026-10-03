@@ -19,7 +19,13 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor 
     inputs: &INPUTS,
     outputs: &OUTPUT,
 }];
-const ERRORS: [BuiltinErrorDescriptor; 0] = [];
+pub const GPU_INFO_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPU_INFO.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:gpuInfo:TooManyInputs"),
+    when: "An input argument was supplied to gpuInfo().",
+    message: "gpuInfo: too many input arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 1] = [GPU_INFO_ERROR_TOO_MANY_INPUTS];
 pub const GPU_INFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

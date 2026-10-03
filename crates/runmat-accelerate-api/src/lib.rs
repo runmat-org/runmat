@@ -2032,7 +2032,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// Structured device information (optional to override). Default adapts from `device_info()`.
     fn device_info_struct(&self) -> ApiDeviceInfo {
         ApiDeviceInfo {
-            device_id: 0,
+            device_id: self.device_id(),
             name: self.device_info(),
             vendor: String::new(),
             memory_bytes: None,
@@ -5360,6 +5360,14 @@ mod tests {
         fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
             self.spawn_concurrency
         }
+    }
+
+    #[test]
+    fn default_device_info_uses_the_provider_owner_id() {
+        let info = PROVIDER_A.device_info_struct();
+        assert_eq!(info.device_id, PROVIDER_A.device_id());
+        assert_eq!(info.device_id, 101);
+        assert_eq!(info.name, "provider-a");
     }
 
     static PROVIDER_TEST_LOCK: Lazy<std::sync::Mutex<()>> = Lazy::new(|| std::sync::Mutex::new(()));

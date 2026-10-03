@@ -67,6 +67,17 @@ fn device_static_arity_and_nonscalar_selector_are_rejected() {
 }
 
 #[test]
+fn logical_first_selector_still_has_semantic_arity_diagnostic() {
+    let logical = ValueFact::scalar(ValueKindFact::Logical);
+    let extra = ValueFact::scalar(ValueKindFact::Unknown);
+    let result = inference::infer(&request(vec![logical, extra]), &GPU_DEVICE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == GPU_DEVICE_ERROR_TOO_MANY_INPUTS.code));
+}
+
+#[test]
 fn selector_known_empty_invalid_and_unavailable_have_stable_diagnostics() {
     let numeric = ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,

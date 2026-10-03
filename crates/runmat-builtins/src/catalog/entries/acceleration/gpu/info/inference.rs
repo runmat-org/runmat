@@ -6,6 +6,8 @@ use runmat_types::{
     CallInference, CallRequest, ResidencyFact, StorageFact, ValueFact, ValueKindFact,
 };
 
+use super::contract::GPU_INFO_ERROR_TOO_MANY_INPUTS;
+
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut output = ValueFact::scalar(ValueKindFact::String);
     output.storage = StorageFact::Dense;
@@ -14,7 +16,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         Vec::new()
     } else {
         vec![argument_error(
-            "RM.GPU_INFO.TOO_MANY_INPUTS",
+            GPU_INFO_ERROR_TOO_MANY_INPUTS.code,
             "gpuInfo accepts no inputs",
             0,
         )]

@@ -29,6 +29,18 @@ fn gpu_device_provider_info_facade_is_gated() {
     });
 }
 
+#[test]
+fn logical_extension_gate_keeps_runtime_precedence_over_arity() {
+    let _guard = test_support::accel_test_lock();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(gpu_device_builtin(vec![Value::Bool(true), Value::Num(1.0)]))
+        .expect_err("logical selector extension must be checked first");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:GpuDeviceLogicalSelectorExtension")
+    );
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn gpu_device_returns_struct() {

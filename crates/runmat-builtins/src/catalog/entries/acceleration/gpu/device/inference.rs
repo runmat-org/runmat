@@ -36,6 +36,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     output.residency = ResidencyFact::Host;
     let mut diagnostics = Vec::new();
     if request.arguments.len() > 1 {
+        // This is a semantic arity diagnosis, not a promise about runtime error
+        // precedence: compatibility gating of a logical first selector runs first.
         diagnostics.push(argument_error(
             "RM.GPU_DEVICE.TOO_MANY_INPUTS",
             "gpuDevice accepts at most one selector",

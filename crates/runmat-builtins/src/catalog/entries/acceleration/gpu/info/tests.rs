@@ -25,7 +25,11 @@ fn info_is_host_string_even_when_provider_is_absent() {
     assert!(extra
         .diagnostics
         .iter()
-        .any(|d| d.code == "RM.GPU_INFO.TOO_MANY_INPUTS"));
+        .any(|d| d.code == GPU_INFO_ERROR_TOO_MANY_INPUTS.code));
+    assert!(GPU_INFO_DESCRIPTOR
+        .errors
+        .iter()
+        .any(|error| error.code == GPU_INFO_ERROR_TOO_MANY_INPUTS.code));
 }
 
 #[test]

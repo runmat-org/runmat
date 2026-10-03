@@ -6,8 +6,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
+use runmat_builtins::GPU_INFO_ERROR_TOO_MANY_INPUTS;
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, StructValue, Value};
+
+use crate::build_runtime_error;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuinfo")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -41,7 +44,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gpuinfo"
 )]
-async fn gpu_info_builtin() -> crate::BuiltinResult<Value> {
+async fn gpu_info_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if !args.is_empty() {
+        return Err(build_runtime_error(GPU_INFO_ERROR_TOO_MANY_INPUTS.message)
+            .with_builtin("gpuInfo")
+            .with_identifier(
+                GPU_INFO_ERROR_TOO_MANY_INPUTS
+                    .identifier
+                    .expect("gpuInfo arity error has a public identifier"),
+            )
+            .build()
+            .into());
+    }
     let info = active_device_metadata().map(|metadata| metadata.into_struct());
     Ok(Value::String(format_summary(info.as_ref())))
 }

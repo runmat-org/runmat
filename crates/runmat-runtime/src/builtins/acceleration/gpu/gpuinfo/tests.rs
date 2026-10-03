@@ -1,11 +1,68 @@
 use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
-#[cfg(feature = "wgpu")]
-use runmat_accelerate_api::AccelProvider;
+use runmat_accelerate_api::{
+    AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorView,
+    ThreadProviderGuard,
+};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn call() -> crate::BuiltinResult<Value> {
-    block_on(gpu_info_builtin())
+    block_on(gpu_info_builtin(Vec::new()))
+}
+
+struct MetadataProbeProvider {
+    reads: AtomicUsize,
+}
+
+static METADATA_PROBE: MetadataProbeProvider = MetadataProbeProvider {
+    reads: AtomicUsize::new(0),
+};
+
+impl AccelProvider for MetadataProbeProvider {
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unexpected upload")
+    }
+
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("unexpected download") })
+    }
+
+    fn device_info(&self) -> String {
+        "metadata-probe".into()
+    }
+
+    fn device_id(&self) -> u32 {
+        97
+    }
+
+    fn device_info_struct(&self) -> ApiDeviceInfo {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        ApiDeviceInfo {
+            device_id: self.device_id(),
+            name: self.device_info(),
+            vendor: "fixture".into(),
+            backend: None,
+            memory_bytes: None,
+        }
+    }
+}
+
+#[test]
+fn extra_argument_has_own_error_before_provider_metadata_access() {
+    let _guard = test_support::accel_test_lock();
+    METADATA_PROBE.reads.store(0, Ordering::SeqCst);
+    let _selected = ThreadProviderGuard::set(Some(&METADATA_PROBE));
+    let error = block_on(gpu_info_builtin(vec![Value::Num(1.0)]))
+        .expect_err("gpuInfo accepts no input arguments");
+    assert_eq!(
+        error.identifier(),
+        GPU_INFO_ERROR_TOO_MANY_INPUTS.identifier
+    );
+    assert_eq!(error.to_string(), GPU_INFO_ERROR_TOO_MANY_INPUTS.message);
+    assert_eq!(METADATA_PROBE.reads.load(Ordering::SeqCst), 0);
+    assert!(matches!(call(), Ok(Value::String(text)) if text.contains("metadata-probe")));
+    assert_eq!(METADATA_PROBE.reads.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -110,12 +167,8 @@ fn gpu_info_format_summary_handles_core_value_types() {
 fn gpu_info_wgpu_provider_reports_backend() {
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
 
-    let options = WgpuProviderOptions {
-        force_fallback_adapter: true,
-        ..Default::default()
-    };
-
-    let provider = register_wgpu_provider(options).expect("required WGPU adapter");
+    let provider =
+        register_wgpu_provider(WgpuProviderOptions::default()).expect("required WGPU adapter");
 
     let value = call().expect("gpuInfo");
     match value {
