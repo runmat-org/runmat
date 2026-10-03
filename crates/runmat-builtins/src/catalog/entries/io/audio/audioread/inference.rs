@@ -59,18 +59,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     let literal_mode = mode_index.and_then(|index| request.literals.literal_string_at(index));
-    if let Some(mode) = literal_mode {
-        if AudioReadDataType::parse(mode).is_none() {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-AUDIOREAD-MODE",
-                "datatype must be native or double",
-                mode_index.unwrap_or(1),
-            ));
-        }
+    let parsed_mode = literal_mode.as_deref().and_then(AudioReadDataType::parse);
+    if literal_mode.is_some() && parsed_mode.is_none() {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-AUDIOREAD-MODE",
+            "datatype must be native or double",
+            mode_index.unwrap_or(1),
+        ));
     }
     let known_double = request.arguments.len() == 1
-        || literal_mode
-            .is_some_and(|mode| AudioReadDataType::parse(mode) == Some(AudioReadDataType::Double))
+        || parsed_mode == Some(AudioReadDataType::Double)
         || (request.arguments.len() == 2
             && mode_index.is_none()
             && is_known_range(&request.arguments[1]));

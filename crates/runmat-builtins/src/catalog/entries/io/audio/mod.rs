@@ -6,9 +6,9 @@ mod contract;
 mod datatype;
 mod fixtures;
 
-pub use datatype::AudioReadDataType;
 pub use audioinfo::AUDIOINFO_CATALOG_ENTRY;
 pub use audioread::AUDIOREAD_CATALOG_ENTRY;
+pub use datatype::AudioReadDataType;
 
 pub use contract::{
     AUDIOINFO_DESCRIPTOR, AUDIOINFO_ERROR_ARGUMENT, AUDIOINFO_ERROR_FORMAT, AUDIOINFO_ERROR_IO,
