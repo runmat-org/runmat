@@ -59,7 +59,7 @@ pub fn literal_response_mode(
                 mode = request
                     .literals
                     .literal_string_at(index + 1)
-                    .and_then(|value| HttpResponseMode::decode(value, dialect));
+                    .and_then(|value| HttpResponseMode::decode(&value, dialect));
             }
             None => mode = None,
             _ => {}
