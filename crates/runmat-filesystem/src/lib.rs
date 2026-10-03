@@ -324,6 +324,8 @@ pub trait FsProvider: Send + Sync + 'static {
     /// Whether this installed provider can service ordinary file reads.
     /// Hosts use this metadata for capability admission; it does not promise
     /// that a particular path exists or that a subsequent read will succeed.
+    /// Providers whose read operation is unconditionally Unsupported must
+    /// override this to return false.
     fn supports_read(&self) -> bool {
         true
     }
@@ -624,11 +626,9 @@ pub fn current_provider() -> Arc<dyn FsProvider> {
 }
 
 pub fn current_provider_supports_read() -> bool {
-    provider_state_lock()
-        .read()
-        .expect("filesystem provider lock poisoned")
-        .provider
-        .supports_read()
+    // Provider metadata is implementation code and may reenter the registry.
+    // Clone its current owner while locked, then invoke outside the lock.
+    current_provider().supports_read()
 }
 
 pub fn current_dir() -> io::Result<PathBuf> {
@@ -986,6 +986,13 @@ mod tests {
     struct UnsupportedProvider;
 
     #[test]
+    fn read_capability_metadata_is_queried_outside_the_provider_lock() {
+        let _guard = test_lock();
+        let _provider = replace_provider(Arc::new(UnsupportedProvider));
+        assert!(!current_provider_supports_read());
+    }
+
+    #[test]
     fn unimplemented_replacement_fails_before_any_provider_operation() {
         let result = futures::executor::block_on(
             UnsupportedProvider.rename_replace(Path::new("/source"), Path::new("/target")),
@@ -1133,6 +1140,13 @@ mod tests {
 
     #[async_trait(?Send)]
     impl FsProvider for UnsupportedProvider {
+        fn supports_read(&self) -> bool {
+            // A metadata callback may inspect the provider registry. A write
+            // lock must be available here, without recursively blocking.
+            assert!(provider_state_lock().try_write().is_ok());
+            false
+        }
+
         fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
             Err(unsupported())
         }
