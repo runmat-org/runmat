@@ -38,7 +38,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "gpuInfo",
-    category = "acceleration/gpu",
     binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gpuinfo"
 )]

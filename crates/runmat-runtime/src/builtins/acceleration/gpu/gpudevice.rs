@@ -70,7 +70,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 /// Query the active provider and return a metadata struct describing the GPU device.
 #[runtime_builtin(
     name = "gpuDevice",
-    category = "acceleration/gpu",
     binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
 )]
