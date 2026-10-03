@@ -27,7 +27,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.loadCase", summary: "Create a typed RunMat FEA load or source.",
     description: "`fea.loadCase(id, region, kind, Name, Value, ...)` creates a force, moment, pressure, body-force, current-density, coil-current, or heat-source load.",
-    keywords: &["fea", "load", "force", "moment", "pressure"], related: &["fea.model", "fea.boundaryCondition"],
+    keywords: &["fea", "load", "force", "moment", "torque", "pressure"], related: &["fea.model", "fea.boundaryCondition"],
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["Load id, region selector, and kind remain exact text. `torque` is an alias of canonical `moment`.", "Required vectors have exactly three finite real elements; scalar fields must be finite real numeric scalars. Kind-specific fields and shape are validated before construction; resident numeric fields are rejected.", "All eight integer classes remain exact until a single host-only binary64 model-storage conversion, so wide values can round."] },
         BuiltinDocumentationSection { heading: "Integer fields", paragraphs: &["Force, moment/torque, body-force, and current-density vectors; pressure magnitude; current-density phase and amplitude; coil current phase and amplitude; volumetric heat-source magnitude."] },

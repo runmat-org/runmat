@@ -136,16 +136,13 @@ fn fea_load_case_accepts_moment_and_torque_alias() {
 
 #[test]
 fn fea_load_case_doc_keywords_include_moment_and_torque() {
-    let doc = runmat_builtins::builtin_docs()
-        .into_iter()
-        .find(|doc| doc.name == "fea.loadCase")
-        .expect("fea.loadCase doc metadata should be registered");
-    let keywords = doc
+    let entry = runmat_builtins::builtin_catalog_primary_entry_by_name("fea.loadCase")
+        .expect("fea.loadCase should have canonical documentation");
+    let keyword_set = entry
+        .documentation
         .keywords
-        .expect("fea.loadCase should advertise keywords");
-    let keyword_set = keywords
-        .split(',')
-        .map(str::trim)
+        .iter()
+        .copied()
         .collect::<std::collections::BTreeSet<_>>();
 
     assert!(keyword_set.contains("moment"));
