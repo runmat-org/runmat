@@ -24,7 +24,7 @@ pub(super) async fn audioinfo_builtin(
     let receipt = select_metadata(runtime.as_ref(), &input)?;
     let result = async {
         cooperation.completed(0).await?;
-        let scan = read_audioinfo_scan(&input).await?;
+        let scan = read_audioinfo_scan(&input, &mut cooperation).await?;
         let metadata = AudioMetadata::parse(&scan).map_err(|message| {
             audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
         })?;
@@ -43,19 +43,24 @@ pub(super) struct AudioInfoScan {
     pub(super) file_size: u64,
 }
 
-pub(super) async fn read_audioinfo_scan(input: &FsInputLease) -> BuiltinResult<AudioInfoScan> {
+pub(super) async fn read_audioinfo_scan(
+    input: &FsInputLease,
+    cooperation: &mut AudioCooperation,
+) -> BuiltinResult<AudioInfoScan> {
     let path = input.path.as_path();
-    let mut file = input.open().await.map_err(|err| {
+    let mut file = cooperation.await_io(input.open()).await?.map_err(|err| {
         audioinfo_error_with_source(
             &AUDIOINFO_ERROR_IO,
             format!("audioinfo: unable to read \"{}\" ({err})", path.display()),
             err,
         )
     })?;
-    let metadata = match file.metadata_async().await {
+    let metadata = match cooperation.await_io(file.metadata_async()).await? {
         Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::Unsupported => {
-            input.provider.metadata(path).await.map_err(|err| {
+        Err(err) if err.kind() == std::io::ErrorKind::Unsupported => cooperation
+            .await_io(input.provider.metadata(path))
+            .await?
+            .map_err(|err| {
                 audioinfo_error_with_source(
                     &AUDIOINFO_ERROR_IO,
                     format!(
@@ -64,8 +69,7 @@ pub(super) async fn read_audioinfo_scan(input: &FsInputLease) -> BuiltinResult<A
                     ),
                     err,
                 )
-            })?
-        }
+            })?,
         Err(err) => {
             return Err(audioinfo_error_with_source(
                 &AUDIOINFO_ERROR_IO,

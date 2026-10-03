@@ -201,7 +201,8 @@ fn audioinfo_large_non_ogg_scan_skips_tail_window() {
 
     let input = FsInputLease::capture(path, &AUDIOINFO_ERROR_IO, AUDIOINFO_BUILTIN_NAME)
         .expect("captured input");
-    let scan = block_on(read_audioinfo_scan(&input)).expect("audio scan");
+    let mut cooperation = AudioCooperation::new(None, AUDIOINFO_BUILTIN_NAME);
+    let scan = block_on(read_audioinfo_scan(&input, &mut cooperation)).expect("audio scan");
     assert_eq!(scan.file_size, bytes.len() as u64);
     assert_eq!(scan.prefix.len() as u64, MAX_AUDIOINFO_PREFIX_BYTES);
     assert!(scan.tail.is_none());

@@ -62,7 +62,7 @@ pub(super) async fn decode_wave_stream(
     cooperation: &mut AudioCooperation,
 ) -> BuiltinResult<DecodedAudio> {
     cooperation.completed(0).await?;
-    let mut file = match input.open().await {
+    let mut file = match cooperation.await_io(input.open()).await? {
         Ok(file) => file,
         Err(source) if source.kind() == std::io::ErrorKind::Unsupported => {
             return decode_whole_on_provider(input, options, cooperation).await;
@@ -209,10 +209,9 @@ async fn decode_whole_on_provider(
     cooperation: &mut AudioCooperation,
 ) -> BuiltinResult<DecodedAudio> {
     cooperation.completed(0).await?;
-    let bytes = input
-        .provider
-        .read(&input.path)
-        .await
+    let bytes = cooperation
+        .await_io(input.provider.read(&input.path))
+        .await?
         .map_err(|source| io_error(&input.path, source))?;
     cooperation.completed(0).await?;
     let mut cursor = std::io::Cursor::new(bytes.as_slice());

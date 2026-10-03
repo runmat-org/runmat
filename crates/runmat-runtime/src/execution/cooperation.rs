@@ -10,6 +10,9 @@ use crate::context::RuntimeServiceFuture;
 
 use super::{ExecutionServiceError, RuntimeExecutionServices};
 
+#[path = "cooperation/cancellable_await.rs"]
+mod cancellable_await;
+
 type CpuTurn = dyn Fn() -> RuntimeServiceFuture<Result<(), ExecutionServiceError>>;
 
 /// The execution adapter, not an individual builtin, chooses whether CPU work
@@ -28,6 +31,15 @@ pub struct CpuCooperationBudget {
 }
 
 impl CpuCooperationBudget {
+    /// Await an invocation-owned operation, dropping it when cancellation
+    /// wins. This is an execution boundary, not a second scheduling policy.
+    pub async fn await_cancellable<F: std::future::Future>(
+        &self,
+        future: F,
+    ) -> Result<F::Output, ExecutionServiceError> {
+        cancellable_await::run(&self.cancellation, future).await
+    }
+
     pub(crate) fn new(
         service: Rc<dyn RuntimeExecutionServices>,
         cancellation: CancellationToken,

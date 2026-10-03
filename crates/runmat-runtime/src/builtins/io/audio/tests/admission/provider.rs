@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
-use std::io;
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 pub(super) struct CountedFs {
     pub(super) inner: runmat_filesystem::MemoryFsProvider,
@@ -10,6 +11,10 @@ pub(super) struct CountedFs {
     pub(super) reads: AtomicUsize,
     pub(super) metadata: AtomicUsize,
     pub(super) pending_open: AtomicBool,
+    pub(super) pending_read: AtomicBool,
+    pub(super) pending_metadata: Arc<AtomicBool>,
+    pub(super) pending_provider_metadata: AtomicBool,
+    pub(super) unsupported_open: AtomicBool,
     cwd: PathBuf,
 }
 
@@ -21,6 +26,10 @@ impl CountedFs {
             reads: AtomicUsize::new(0),
             metadata: AtomicUsize::new(0),
             pending_open: AtomicBool::new(false),
+            pending_read: AtomicBool::new(false),
+            pending_metadata: Arc::new(AtomicBool::new(false)),
+            pending_provider_metadata: AtomicBool::new(false),
+            unsupported_open: AtomicBool::new(false),
             cwd: PathBuf::from(cwd),
         }
     }
@@ -31,6 +40,44 @@ impl CountedFs {
             self.reads.load(Ordering::SeqCst),
             self.metadata.load(Ordering::SeqCst),
         )
+    }
+}
+
+struct MetadataHandle {
+    inner: Box<dyn FileHandle>,
+    pending: Arc<AtomicBool>,
+}
+
+impl Read for MetadataHandle {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buffer)
+    }
+}
+
+impl Write for MetadataHandle {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.inner.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl Seek for MetadataHandle {
+    fn seek(&mut self, position: io::SeekFrom) -> io::Result<u64> {
+        self.inner.seek(position)
+    }
+}
+
+#[async_trait(?Send)]
+impl FileHandle for MetadataHandle {
+    async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        if self.pending.load(Ordering::SeqCst) {
+            std::future::pending().await
+        } else {
+            self.inner.metadata_async().await
+        }
     }
 }
 
@@ -48,7 +95,13 @@ impl FsProvider for CountedFs {
     }
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         self.opens.fetch_add(1, Ordering::SeqCst);
-        self.inner.open(path, flags)
+        if self.unsupported_open.load(Ordering::SeqCst) {
+            return Err(unsupported());
+        }
+        Ok(Box::new(MetadataHandle {
+            inner: self.inner.open(path, flags)?,
+            pending: self.pending_metadata.clone(),
+        }))
     }
     async fn open_async(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         if self.pending_open.load(Ordering::SeqCst) {
@@ -60,6 +113,9 @@ impl FsProvider for CountedFs {
     }
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        if self.pending_read.load(Ordering::SeqCst) {
+            return std::future::pending().await;
+        }
         self.inner.read(path).await
     }
     async fn write(&self, _: &Path, _: &[u8]) -> io::Result<()> {
@@ -70,6 +126,9 @@ impl FsProvider for CountedFs {
     }
     async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         self.metadata.fetch_add(1, Ordering::SeqCst);
+        if self.pending_provider_metadata.load(Ordering::SeqCst) {
+            return std::future::pending().await;
+        }
         self.inner.metadata(path).await
     }
     async fn symlink_metadata(&self, _: &Path) -> io::Result<FsMetadata> {
