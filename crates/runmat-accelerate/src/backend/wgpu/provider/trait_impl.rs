@@ -2557,6 +2557,11 @@ impl AccelProvider for WgpuProvider {
             handle.physical().requested_bytes()
         })
     }
+    fn download_numeric_queue_slots(&self, handle: &GpuTensorHandle) -> u32 {
+        // download_numeric_exec returns directly for the provider's genuine
+        // empty payload; no staging, encoder, or submission is created.
+        u32::from(handle.physical().payload_bytes() != 0)
+    }
     fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
         let output = self.upload_integer_exec(host)?;
         complete_observed_upload(self)?;

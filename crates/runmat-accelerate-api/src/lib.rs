@@ -1712,6 +1712,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
         )
     }
 
+    /// Queue slots occupied by one native numeric download. The conservative
+    /// default reserves one slot even when staging bytes are zero: zero
+    /// scratch does not by itself prove that no command is submitted.
+    fn download_numeric_queue_slots(&self, _handle: &GpuTensorHandle) -> u32 {
+        1
+    }
+
     /// Upload exact native integer storage without converting through f64.
     /// Providers that do not expose native integer buffers must reject this
     /// operation rather than silently changing the value class or precision.

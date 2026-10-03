@@ -901,7 +901,7 @@ mod tests {
             presentation: CandidateOutputPresentation::ProviderDownload {
                 device_id: provider.device_id(),
                 provider_scratch_bytes: provider.download_numeric_provider_scratch_bound(handle),
-                queue_slots: 0,
+                queue_slots: provider.download_numeric_queue_slots(handle),
             },
             route_facts: digest,
             cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
@@ -918,6 +918,7 @@ mod tests {
         owner.scratch_available_bytes = Some(0);
         owner.queue_depth = Some(0);
         owner.queue_limit = Some(0);
+        assert_eq!(provider.download_numeric_queue_slots(handle), 0);
         let request = WholeWorkPlacementRequest {
             signature: PlacementSignature {
                 region: None,

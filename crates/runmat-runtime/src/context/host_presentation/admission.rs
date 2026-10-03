@@ -142,10 +142,7 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
                 ProviderReadbackDemand {
                     device_id: source_provider.device_id(),
                     provider_scratch_bytes,
-                    queue_slots: u32::from(
-                        !source.shape().contains(&0)
-                            || provider_scratch_bytes != ResourceByteBound::Known(0),
-                    ),
+                    queue_slots: source_provider.download_numeric_queue_slots(source),
                 }
             },
         ))

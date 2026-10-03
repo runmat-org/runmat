@@ -225,6 +225,9 @@ impl AccelProvider for FiniteReadbackOwner {
     fn download_numeric_provider_scratch_bound(&self, _: &GpuTensorHandle) -> ResourceByteBound {
         ResourceByteBound::Known(8)
     }
+    fn download_numeric_queue_slots(&self, _: &GpuTensorHandle) -> u32 {
+        1
+    }
     fn placement_resources(&self) -> ProviderResourceSnapshot {
         ProviderResourceSnapshot {
             device_id: self.device_id(),

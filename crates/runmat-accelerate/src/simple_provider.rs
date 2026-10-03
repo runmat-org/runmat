@@ -4200,6 +4200,11 @@ impl AccelProvider for InProcessProvider {
         runmat_execution::ResourceByteBound::Known(0)
     }
 
+    fn download_numeric_queue_slots(&self, _handle: &GpuTensorHandle) -> u32 {
+        // Registry cloning is synchronous and submits no provider queue work.
+        0
+    }
+
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         self.upload_numeric_raw(&HostNumericTensorView {
             data: HostNumericDataView::F64(host.data),
