@@ -106,11 +106,20 @@ fn preflight_option_text(args: &[Value], mut index: usize) -> BuiltinResult<()> 
     }
     while index < args.len() {
         let name = string_arg("option name", &args[index], &IMWRITE_ERROR_INVALID_OPTION)?;
-        if ImwriteOption::from_name(&name).is_none() {
-            return Err(imwrite_error_with_detail(
-                &IMWRITE_ERROR_INVALID_OPTION,
-                format!("unsupported option '{name}'"),
-            ));
+        match ImwriteOption::from_name(&name) {
+            None => {
+                return Err(imwrite_error_with_detail(
+                    &IMWRITE_ERROR_INVALID_OPTION,
+                    format!("unsupported option '{name}'"),
+                ));
+            }
+            Some(ImwriteOption::UnsupportedAdvanced) => {
+                return Err(imwrite_error_with_detail(
+                    &IMWRITE_ERROR_INVALID_OPTION,
+                    format!("option '{name}' is not supported yet"),
+                ));
+            }
+            Some(_) => {}
         }
         if index + 1 >= args.len() {
             return Err(imwrite_error_with_detail(
@@ -1445,6 +1454,22 @@ mod tests {
         ])
         .unwrap_err();
         assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_FORMAT.identifier);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn recognized_but_unsupported_option_fails_before_writing() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("unsupported.png");
+        let image = Value::Tensor(tensor(vec![0.0], vec![1, 1], NumericDType::F64));
+        let error = call(vec![
+            image,
+            Value::String(path.to_string_lossy().into_owned()),
+            Value::String("Bit_Depth".into()),
+            Value::Num(8.0),
+        ])
+        .unwrap_err();
+        assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_OPTION.identifier);
         assert!(!path.exists());
     }
 
