@@ -291,3 +291,72 @@ fn cancellation_after_first_chunk_discards_initialized_output() {
     );
     assert_eq!(reader.transferred, AUDIO_WORK_CHUNK * 4);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn wide_pcm8_frame_checkpoints_within_channels_without_rereading() {
+    const CHANNELS: usize = 5000;
+    let payload: Vec<u8> = (0..CHANNELS).map(|channel| channel as u8).collect();
+    let geometry = StreamGeometry {
+        data_offset: 0,
+        channels: CHANNELS,
+        start: 0,
+        end: 1,
+        block_align: CHANNELS,
+        bytes_per_channel: 1,
+    };
+    let mut complete_reader = CountedReader::new(payload.clone(), CHANNELS);
+    let mut unmetered = AudioCooperation::new(None, AUDIOREAD_BUILTIN_NAME);
+    let complete = block_on(collect_stream_samples(
+        &mut complete_reader,
+        Path::new("/audio/wide.wav"),
+        geometry,
+        &mut unmetered,
+        |sample| sample[0],
+    ))
+    .expect("one complete wide frame");
+    assert_eq!(complete, payload);
+    assert_eq!(complete_reader.transferred, CHANNELS);
+    assert_eq!(complete_reader.seeks, 1);
+
+    let source = Rc::new(CancellationSource::new());
+    let decoded = Rc::new(Cell::new(0));
+    let counted = decoded.clone();
+    let cancel = source.clone();
+    let turns = Rc::new(Cell::new(0));
+    let observed_turns = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || {
+            observed_turns.set(observed_turns.get() + 1);
+            if counted.get() == AUDIO_WORK_CHUNK {
+                cancel.cancel(CancellationReason::User);
+            }
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let mut cooperation = AudioCooperation::with_budget(budget, AUDIOREAD_BUILTIN_NAME);
+    let mut reader = CountedReader::new(payload, CHANNELS);
+    let decoded_samples = decoded.clone();
+    let error = block_on(collect_stream_samples(
+        &mut reader,
+        Path::new("/audio/wide.wav"),
+        geometry,
+        &mut cooperation,
+        move |sample| {
+            decoded_samples.set(decoded_samples.get() + 1);
+            sample[0]
+        },
+    ))
+    .expect_err("cancellation inside the wide frame cannot publish a partial vector");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(decoded.get(), AUDIO_WORK_CHUNK);
+    assert_eq!(
+        turns.get(),
+        3,
+        "two initialization turns and one channel turn"
+    );
+    assert_eq!(reader.transferred, CHANNELS);
+    assert_eq!(reader.seeks, 1);
+}

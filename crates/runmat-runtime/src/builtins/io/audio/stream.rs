@@ -401,16 +401,34 @@ async fn collect_stream_samples<T: Copy + Default, R: Read + Seek>(
             .ok_or_else(|| format_error("audio input chunk overflows platform limits"))?;
         file.read_exact(&mut buffer[..size])
             .map_err(|source| io_error(path, source))?;
-        for local_frame in 0..frames {
+        let mut scatter = |local_frame: usize, channel: usize| {
             let at = local_frame * block_align;
-            for channel in 0..channels {
-                let sample_at = at + channel * bytes_per_channel;
-                let output_at = channel * selected_frames + (frame - start) + local_frame;
-                output[output_at] = decode(&buffer[sample_at..sample_at + bytes_per_channel]);
+            let sample_at = at + channel * bytes_per_channel;
+            let output_at = channel * selected_frames + (frame - start) + local_frame;
+            output[output_at] = decode(&buffer[sample_at..sample_at + bytes_per_channel]);
+        };
+        if channels <= AUDIO_WORK_CHUNK {
+            for local_frame in 0..frames {
+                for channel in 0..channels {
+                    scatter(local_frame, channel);
+                }
+            }
+            cooperation.completed(frames * channels).await?;
+        } else {
+            // A single legal PCM8 frame can have more channels than one work
+            // quantum. Keep the frame read once, but yield between channel
+            // groups so cancellation never waits for the entire wide frame.
+            for local_frame in 0..frames {
+                for first_channel in (0..channels).step_by(AUDIO_WORK_CHUNK) {
+                    let next_channel = (first_channel + AUDIO_WORK_CHUNK).min(channels);
+                    for channel in first_channel..next_channel {
+                        scatter(local_frame, channel);
+                    }
+                    cooperation.completed(next_channel - first_channel).await?;
+                }
             }
         }
         frame += frames;
-        cooperation.completed(frames * channels).await?;
     }
     Ok(output)
 }
