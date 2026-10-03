@@ -3,7 +3,7 @@
 //! its readback host workspace and actual upload route, then submits one
 //! whole-work candidate to policy.
 
-use super::HostPresentationReceipt;
+use super::{AdmittedHostUploadOutputs, HostPresentationReceipt};
 use crate::context::RuntimeContext;
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::observation::{
@@ -93,6 +93,7 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
         return Ok(None);
     };
     let requested_outputs = u32::try_from(request.outputs.len()).ok();
+    let admitted_outputs = request.outputs.clone();
     let upload = ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new("transfer.upload"),
         family: ProviderOperationFamily::Upload,
@@ -115,6 +116,34 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
         return Ok(None);
     };
     let upload_physical = provider.upload_physical_evidence(&upload);
+    if upload_physical.is_some_and(|physical| {
+        upload.outputs.len() != 1 || estimate.output_bytes != Some(physical.output_requested_bytes)
+    }) {
+        return Err(build_runtime_error(
+            "host upload physical evidence contradicts its exact one-output estimate",
+        )
+        .with_identifier("RunMat:Placement:InvalidPhysicalEvidence")
+        .build());
+    }
+    let owner_resources = provider.placement_resources();
+    let finite_host_quota = runtime.service_ports().parallel().is_some_and(|parallel| {
+        parallel
+            .placement_resources()
+            .memory_available_bytes
+            .is_some()
+    });
+    if upload_physical.is_none()
+        && (finite_host_quota
+            || owner_resources.capacity_bytes.is_some()
+            || owner_resources.scratch_available_bytes.is_some()
+            || owner_resources.queue_limit.is_some())
+    {
+        return Err(build_runtime_error(
+            "host upload has no provider-certified physical publication under a finite resource budget",
+        )
+        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+        .build());
+    }
     if !matches!(
         provider.operation_observation_capability(&upload),
         ProviderObservationCapability::Supported(_)
@@ -278,11 +307,15 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
         return Ok(None);
     };
     receipt.require_provider_execution(device_id, upload.operation);
-    Ok(Some(HostPresentationReceipt::new(
-        runtime.clone(),
-        selected,
-        receipt,
-    )))
+    Ok(Some(
+        HostPresentationReceipt::new(runtime.clone(), selected, receipt)
+            .with_admitted_upload_outputs(AdmittedHostUploadOutputs {
+                provider,
+                outputs: admitted_outputs,
+                one_output_requested_bytes: upload_physical
+                    .map(|physical| physical.output_requested_bytes),
+            }),
+    ))
 }
 
 /// The caller's scratch excludes the provider's native readback payload and

@@ -18,6 +18,7 @@ use runmat_time::duration_ns_saturating;
 
 mod admission;
 mod host_sink;
+mod publication;
 pub(crate) use admission::combine_host_scratch;
 pub(crate) use admission::{
     select_exact_host_upload, select_exact_host_upload_with_readbacks, ExactHostUpload,
@@ -25,6 +26,7 @@ pub(crate) use admission::{
 pub(crate) use host_sink::{
     select_exact_host_sink, select_exact_host_sink_with_readbacks, ExactHostSink, HostSinkReceipt,
 };
+use publication::AdmittedHostUploadOutputs;
 
 #[cfg(test)]
 #[path = "host_presentation/tests.rs"]
@@ -37,6 +39,7 @@ pub(crate) struct HostPresentationReceipt {
     runtime: RuntimeContext,
     selected: RuntimeWholeWorkSelection,
     receipt: ProviderOperationReceipt,
+    admitted_upload_outputs: Option<AdmittedHostUploadOutputs>,
 }
 
 impl HostPresentationReceipt {
@@ -49,7 +52,28 @@ impl HostPresentationReceipt {
             runtime,
             selected,
             receipt,
+            admitted_upload_outputs: None,
         }
+    }
+
+    pub(super) fn with_admitted_upload_outputs(
+        mut self,
+        admitted: AdmittedHostUploadOutputs,
+    ) -> Self {
+        self.admitted_upload_outputs = Some(admitted);
+        self
+    }
+
+    /// Validate the realized output against the same typed owner and exact
+    /// physical request used by selection. This is a publication check, not
+    /// a substitute for the caller's semantic class/provenance rules.
+    pub(crate) fn admits_published_outputs(
+        &self,
+        outputs: &[&runmat_accelerate_api::GpuTensorHandle],
+    ) -> bool {
+        self.admitted_upload_outputs
+            .as_ref()
+            .is_some_and(|admitted| admitted.admits(outputs))
     }
 
     pub(crate) fn recorder(&self) -> ProviderOperationRecorder {

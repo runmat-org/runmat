@@ -136,11 +136,14 @@ pub(super) async fn imfilter_gpu(
                     &expected_shape,
                     output_class,
                     provider,
-                )
+                ) || host_upload.as_ref().is_some_and(|receipt| match value {
+                    Value::GpuTensor(output) => !receipt.admits_published_outputs(&[output]),
+                    _ => true,
+                })
             }) {
             let mut error = imfilter_error_with_detail(
                 &IMFILTER_ERROR_INTERNAL,
-                "host-filter result did not match exact owner, class and shape",
+                "host-filter result did not match admitted owner, class, shape or physical allocation",
             );
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
             Err(error)

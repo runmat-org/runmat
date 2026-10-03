@@ -202,7 +202,7 @@ pub(super) fn valid_provider_output(
 mod tests {
     use super::*;
     use runmat_accelerate::simple_provider::InProcessProvider;
-    use runmat_accelerate_api::{AccelProvider, GpuHandleProvenance, ThreadProviderGuard};
+    use runmat_accelerate_api::{GpuHandleProvenance, ThreadProviderGuard};
     use runmat_value::NumericDType;
 
     #[test]
@@ -214,10 +214,12 @@ mod tests {
             Tensor::new_with_dtype(vec![7.0], vec![1, 1], NumericDType::U8).expect("uint8 fixture");
         let image = gpu_helpers::upload_tensor(owner, &byte)
             .expect("original A")
-            .with_provenance(GpuHandleProvenance::Explicit);
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .expect("explicit original A");
         let valid = gpu_helpers::upload_tensor(owner, &byte)
             .expect("new output")
-            .with_provenance(GpuHandleProvenance::Explicit);
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .expect("explicit new output");
         assert!(valid_host_only_restore(
             &Value::GpuTensor(valid.clone()),
             &image,
@@ -252,7 +254,8 @@ mod tests {
         ));
         let foreign_output = gpu_helpers::upload_tensor(foreign, &byte)
             .expect("foreign output")
-            .with_provenance(GpuHandleProvenance::Explicit);
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .expect("explicit foreign output");
         assert!(!valid_host_only_restore(
             &Value::GpuTensor(foreign_output),
             &image,
