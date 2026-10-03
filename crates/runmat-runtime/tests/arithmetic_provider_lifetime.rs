@@ -7,7 +7,7 @@ use runmat_accelerate_api::{
 };
 use runmat_value::Value;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 struct Provider {
     inner: InProcessProvider,
@@ -123,15 +123,17 @@ impl AccelProvider for Provider {
 
 #[test]
 fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporaries() {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
+    // The runtime retains provider facades for the worker lifetime. A leaked
+    // test-local facade supplies that lifetime without requiring browser-local
+    // allocation leases to implement Send or Sync for a process-wide static.
+    let provider: &'static Provider = Box::leak(Box::new(Provider {
         inner: InProcessProvider::new(),
         mode: AtomicUsize::new(0),
         repmats: AtomicUsize::new(0),
         right: Mutex::new(None),
         first: Mutex::new(None),
         outputs: Mutex::new(vec![]),
-    });
+    }));
     let _provider = ThreadProviderGuard::set(Some(provider));
     for (name, mode) in ["plus"]
         .into_iter()
