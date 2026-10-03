@@ -4,12 +4,27 @@ use runmat_runtime::context::RuntimeHttpService;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_runtime::context::RuntimeServiceFuture;
 #[cfg(not(target_arch = "wasm32"))]
-use runmat_runtime::http::{HttpRequest, HttpResponse, TransportError};
+use runmat_runtime::http::{HttpBodyStream, HttpRequest, HttpResponse, TransportError};
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct LazyNativeHttpService {
     service: Rc<std::cell::OnceCell<runmat_runtime::http::NativeHttpService>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn session_transport(
+    service: &std::cell::OnceCell<runmat_runtime::http::NativeHttpService>,
+    request: &HttpRequest,
+) -> Result<runmat_runtime::http::NativeHttpService, TransportError> {
+    if let Some(transport) = service.get() {
+        return Ok(transport.clone());
+    }
+    let driver = host_driver()
+        .map_err(|source| TransportError::host_service_unavailable(&request.url, source))?;
+    Ok(service
+        .get_or_init(|| runmat_runtime::http::NativeHttpService::new(driver.handle().clone()))
+        .clone())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,22 +35,20 @@ impl RuntimeHttpService for LazyNativeHttpService {
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         let service = self.service.clone();
         Box::pin(async move {
-            let transport = match service.get() {
-                Some(transport) => transport.clone(),
-                None => {
-                    let driver = host_driver().map_err(|source| {
-                        TransportError::host_service_unavailable(&request.url, source)
-                    })?;
-                    // Session creation and an unpolled request do not start the
-                    // driver. Once polled, this session retains its connection pool.
-                    service
-                        .get_or_init(|| {
-                            runmat_runtime::http::NativeHttpService::new(driver.handle().clone())
-                        })
-                        .clone()
-                }
-            };
+            let transport = session_transport(&service, &request)?;
             transport.send(request).await
+        })
+    }
+
+    fn open_bounded(
+        &self,
+        request: HttpRequest,
+        accepted_limit: u64,
+    ) -> RuntimeServiceFuture<Result<HttpBodyStream, TransportError>> {
+        let service = self.service.clone();
+        Box::pin(async move {
+            let transport = session_transport(&service, &request)?;
+            transport.open_bounded(request, accepted_limit).await
         })
     }
 }
@@ -102,6 +115,21 @@ mod tests {
             user_agent: "RunMat test".into(),
         };
         drop(service.send(request));
+        assert!(service.service.get().is_none());
+    }
+
+    #[test]
+    fn unpolled_stream_does_not_initialize_session_transport() {
+        let service = LazyNativeHttpService::default();
+        let request = HttpRequest {
+            url: "http://127.0.0.1:1/".parse().unwrap(),
+            method: HttpMethod::Get,
+            headers: Vec::new(),
+            body: None,
+            timeout: std::time::Duration::from_secs(1),
+            user_agent: "RunMat test".into(),
+        };
+        drop(service.open_bounded(request, 1024));
         assert!(service.service.get().is_none());
     }
 

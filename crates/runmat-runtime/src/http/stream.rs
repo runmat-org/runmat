@@ -27,4 +27,8 @@ impl HttpBodyStream {
     pub async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, TransportError> {
         self.body.next().await.transpose()
     }
+
+    pub(crate) fn abort(&mut self) {
+        self.body = Box::pin(futures::stream::empty());
+    }
 }

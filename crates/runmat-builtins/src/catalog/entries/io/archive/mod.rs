@@ -3,11 +3,14 @@
 
 mod gunzip;
 mod gzip;
+mod unzip;
 
-pub use gunzip::*;
-pub use gzip::*;
+pub use self::gunzip::*;
+pub use self::gzip::*;
+pub use self::unzip::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(gunzip::ENTRIES.iter().copied());
     values.extend(gzip::ENTRIES.iter().copied());
+    values.extend(unzip::ENTRIES.iter().copied());
 }

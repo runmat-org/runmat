@@ -2,15 +2,19 @@
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod stream_tests;
 
 use encoding_rs::Encoding;
 use futures::future::{select, Either};
+use std::future::Future;
 
 use crate::context::RuntimeContext;
 use crate::{runtime_error, RuntimeError};
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::http::BrowserHttpService;
+use crate::http::HttpBodyStream;
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::http::NativeHttpService;
 pub use crate::http::{HttpMethod, HttpRequest, HttpResponse, TransportError, TransportErrorKind};
@@ -30,6 +34,43 @@ pub(crate) async fn send_request(
     request: HttpRequest,
     runtime: Option<&RuntimeContext>,
 ) -> Result<HttpResponse, TransportCallError> {
+    let runtime = require_runtime(runtime)?;
+    let service = http_service(runtime)?;
+    await_http(service.send(request), runtime).await
+}
+
+pub(crate) async fn open_bounded_request(
+    request: HttpRequest,
+    accepted_limit: u64,
+    runtime: Option<&RuntimeContext>,
+) -> Result<HttpBodyStream, TransportCallError> {
+    let runtime = require_runtime(runtime)?;
+    let service = http_service(runtime)?;
+    await_http(service.open_bounded(request, accepted_limit), runtime).await
+}
+
+/// Cancellation drops the body owner, not just the borrowed chunk future.
+pub(crate) async fn next_body_chunk(
+    body: &mut HttpBodyStream,
+    runtime: Option<&RuntimeContext>,
+) -> Result<Option<Vec<u8>>, TransportCallError> {
+    let runtime = match require_runtime(runtime) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            body.abort();
+            return Err(error);
+        }
+    };
+    let result = await_http(body.next_chunk(), runtime).await;
+    if matches!(&result, Err(TransportCallError::Runtime(_))) {
+        body.abort();
+    }
+    result
+}
+
+fn require_runtime(
+    runtime: Option<&RuntimeContext>,
+) -> Result<&RuntimeContext, TransportCallError> {
     let runtime = runtime.ok_or_else(|| {
         TransportCallError::Runtime(
             crate::context::RuntimeCapabilityError::new(
@@ -39,16 +80,31 @@ pub(crate) async fn send_request(
             .into_runtime_error(),
         )
     })?;
-    let service = runtime
+    Ok(runtime)
+}
+
+fn http_service(
+    runtime: &RuntimeContext,
+) -> Result<std::rc::Rc<dyn crate::context::RuntimeHttpService>, TransportCallError> {
+    if runtime.is_cancelled() {
+        return Err(TransportCallError::Runtime(cancelled()));
+    }
+    runtime
         .service_ports()
         .require_http("HTTP request")
-        .map_err(|error| TransportCallError::Runtime(error.into_runtime_error()))?
-        .clone();
+        .map(Clone::clone)
+        .map_err(|error| TransportCallError::Runtime(error.into_runtime_error()))
+}
+
+async fn await_http<T>(
+    future: impl Future<Output = Result<T, TransportError>>,
+    runtime: &RuntimeContext,
+) -> Result<T, TransportCallError> {
     let cancellation = runtime.cancellation();
     if cancellation.is_cancelled() {
         return Err(TransportCallError::Runtime(cancelled()));
     }
-    let response = match select(service.send(request), cancellation.cancelled()).await {
+    let response = match select(Box::pin(future), cancellation.cancelled()).await {
         Either::Left((result, _listener)) => result.map_err(TransportCallError::Transport)?,
         Either::Right((_reason, _request)) => {
             return Err(TransportCallError::Runtime(cancelled()));

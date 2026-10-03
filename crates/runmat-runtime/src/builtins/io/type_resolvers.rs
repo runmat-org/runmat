@@ -188,11 +188,6 @@ pub fn getpref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn unzip_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::cell_of(Type::String)
-}
-
 pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::tensor(), Type::logical()])
@@ -305,13 +300,6 @@ mod tests {
         Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
     );
     assert_resolver!(fwrite_type_resolver, fwrite_type, &[], Type::Num);
-    assert_resolver!(
-        unzip_type_resolver,
-        unzip_type,
-        &[],
-        Type::cell_of(Type::String)
-    );
-
     assert_resolver!(
         weboptions_type_resolver,
         weboptions_type,

@@ -170,7 +170,9 @@ fn imread_transport_error(err: TransportError) -> RuntimeError {
         TransportErrorKind::Connect => &IMREAD_ERROR_NETWORK,
         TransportErrorKind::Status(_) => &IMREAD_ERROR_HTTP_STATUS,
         TransportErrorKind::InvalidHeader(_) => &IMREAD_ERROR_INVALID_HEADER,
-        TransportErrorKind::Other => &IMREAD_ERROR_NETWORK,
+        TransportErrorKind::UnsupportedStreaming
+        | TransportErrorKind::BodyLimitExceeded(_)
+        | TransportErrorKind::Other => &IMREAD_ERROR_NETWORK,
     };
     let message = err.message_with_prefix(BUILTIN_NAME);
     let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
