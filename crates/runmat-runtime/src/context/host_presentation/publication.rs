@@ -156,35 +156,25 @@ fn matches_element(expected: ProviderElementType, handle: &GpuTensorHandle) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::common::gpu_helpers;
-    use runmat_accelerate::simple_provider::InProcessProvider;
-    use runmat_accelerate_api::{GpuTensorView, ThreadProviderGuard};
-    use runmat_value::Tensor;
+    use crate::context::physical_test_support::OwnedPhysicalProvider;
+    use runmat_accelerate_api::ThreadProviderGuard;
 
     #[test]
     fn selected_physical_extent_rejects_larger_owner_valid_view_without_retiring_inputs() {
-        let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+        let provider: &'static OwnedPhysicalProvider =
+            Box::leak(Box::new(OwnedPhysicalProvider::new()));
         let _owner = ThreadProviderGuard::set(Some(provider));
-        let input = gpu_helpers::upload_tensor(
-            provider,
-            &Tensor::new(vec![3.0], vec![1, 1]).expect("input"),
-        )
-        .expect("resident input");
-        let exact = gpu_helpers::upload_tensor(
-            provider,
-            &Tensor::new(vec![6.0], vec![1, 1]).expect("exact output"),
-        )
-        .expect("one-element output");
-        let larger = gpu_helpers::upload_tensor(
-            provider,
-            &Tensor::new(vec![6.0; 4], vec![2, 2]).expect("large output"),
-        )
-        .expect("four-element output");
-        let larger_view = larger
-            .with_view(GpuTensorView::contiguous(vec![1, 1]))
-            .expect("smaller view retains the larger physical allocation");
-        assert_eq!(exact.shape(), larger_view.shape());
-        assert!(larger_view.physical().requested_bytes() > exact.physical().requested_bytes());
+        let input = provider.allocate_f64(&[1, 1]);
+        let exact = provider.allocate_f64(&[1, 1]);
+        let (larger, larger_view) = provider.allocate_padded_f64_view(&[2, 2], &[1, 1]);
+        assert_eq!(exact.handle.shape(), larger_view.shape());
+        assert_eq!(
+            exact.handle.physical().element_type(),
+            larger_view.physical().element_type()
+        );
+        assert!(
+            larger_view.physical().requested_bytes() > exact.handle.physical().requested_bytes()
+        );
         let admitted = AdmittedHostUploadOutputs {
             provider,
             outputs: vec![ProviderRepresentation {
@@ -194,14 +184,16 @@ mod tests {
                 shape: vec![1, 1],
                 residency: ProviderResidency::Device,
             }],
-            one_output_requested_bytes: Some(exact.physical().requested_bytes()),
+            one_output_requested_bytes: Some(exact.handle.physical().requested_bytes()),
         };
-        assert!(admitted.admits(&[&exact]));
+        assert!(admitted.admits(&[&exact.handle]));
         assert!(!admitted.admits(&[&larger_view]));
-        assert!(!admitted.admits(&[&input, &exact]));
+        assert!(!admitted.admits(&[&input.handle, &exact.handle]));
         drop(larger_view);
         drop(larger);
-        assert!(input.allocation_lease().validate_live().is_ok());
-        assert!(exact.allocation_lease().validate_live().is_ok());
+        assert!(input.handle.allocation_lease().validate_live().is_ok());
+        assert!(exact.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(input.probe.retirements(), 0);
+        assert_eq!(exact.probe.retirements(), 0);
     }
 }
