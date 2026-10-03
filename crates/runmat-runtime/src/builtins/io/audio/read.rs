@@ -3,9 +3,14 @@ use super::*;
 #[runtime_builtin(
     name = "audioread",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::audio"
 )]
-pub(super) async fn audioread_builtin(filename: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn audioread_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    filename: Value,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
@@ -22,16 +27,10 @@ pub(super) async fn audioread_builtin(filename: Value, args: Vec<Value>) -> Buil
     }
     let options = parse_audioread_options(&args)?;
     let path = resolve_audioread_path(&filename)?;
-    let bytes = fs::read_async(&path).await.map_err(|err| {
-        audioread_error_with_source(
-            &AUDIOREAD_ERROR_IO,
-            format!("audioread: unable to read \"{}\" ({err})", path.display()),
-            err,
-        )
-    })?;
-    let decoded = decode_audio_samples(&bytes, options).map_err(|message| {
-        audioread_error_with(&AUDIOREAD_ERROR_FORMAT, format!("audioread: {message}"))
-    })?;
+    let input = FsInputLease::capture(path, &AUDIOREAD_ERROR_IO, AUDIOREAD_BUILTIN_NAME)?;
+    let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOREAD_BUILTIN_NAME);
+    cooperation.completed(0).await?;
+    let decoded = decode_wave_stream(&input, options, &mut cooperation).await?;
 
     match crate::output_count::current_output_count() {
         None => Ok(Value::Tensor(decoded.samples)),
@@ -161,189 +160,16 @@ pub(super) fn scalar_text(value: &Value) -> Option<String> {
     }
 }
 
-pub(super) fn decode_audio_samples(
-    bytes: &[u8],
-    options: AudioreadOptions,
-) -> Result<DecodedAudio, String> {
-    if bytes.starts_with(b"RIFF") || bytes.starts_with(b"RF64") {
-        decode_wave_samples(bytes, options)
-    } else if bytes.starts_with(b"fLaC")
+pub(super) fn unsupported_sample_coding(bytes: &[u8]) -> String {
+    if bytes.starts_with(b"fLaC")
         || bytes.starts_with(b"FORM")
         || bytes.starts_with(b"OggS")
         || parse_mp3(bytes, bytes.len() as u64).is_some()
     {
-        Err("sample decoding is currently implemented for WAV/RF64 PCM and IEEE-float audio; compressed containers are metadata-only".to_string())
+        "sample decoding is currently implemented for WAV/RF64 PCM and IEEE-float audio; compressed containers are metadata-only".to_string()
     } else {
-        Err("unsupported audio format".to_string())
+        "unsupported audio format".to_string()
     }
-}
-
-pub(super) fn decode_wave_samples(
-    bytes: &[u8],
-    options: AudioreadOptions,
-) -> Result<DecodedAudio, String> {
-    let parsed = parse_wave_container(bytes)?;
-    let fmt = parsed.format;
-    let channels = fmt.channels as usize;
-    let block_align = fmt.block_align as usize;
-    let bytes_per_channel = usize::from(fmt.bits_per_sample.div_ceil(8));
-    if channels == 0 || block_align == 0 || bytes_per_channel == 0 {
-        return Err("WAVE fmt chunk has invalid sample layout".to_string());
-    }
-    let minimum_block_align = channels
-        .checked_mul(bytes_per_channel)
-        .ok_or_else(|| "WAVE channel layout overflows platform limits".to_string())?;
-    if block_align < minimum_block_align {
-        return Err("WAVE block alignment is smaller than the channel sample width".to_string());
-    }
-    if parsed.data_len % block_align != 0 {
-        return Err("WAVE data chunk is not aligned to whole sample frames".to_string());
-    }
-    let total_frames = parsed.data_len / block_align;
-    let (start_frame, end_frame_exclusive) = match options.range {
-        Some(AudioSampleRange { first, last }) => {
-            let last = last.unwrap_or(total_frames);
-            if first > total_frames || last > total_frames {
-                return Err("sample range exceeds the available audio frames".to_string());
-            }
-            (first - 1, last)
-        }
-        None => (0, total_frames),
-    };
-    let frame_count = end_frame_exclusive - start_frame;
-    let data = &bytes[parsed.data_offset..parsed.data_offset + parsed.data_len];
-    let shape = vec![frame_count, channels];
-    let samples = if options.datatype == AudioReadDataType::Native {
-        if let Some(storage) = native_pcm_storage(
-            fmt,
-            data,
-            channels,
-            start_frame,
-            end_frame_exclusive,
-            block_align,
-            bytes_per_channel,
-        )? {
-            Tensor::new_integer(storage, shape)
-                .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
-        } else {
-            let out = collect_wave_samples(
-                data,
-                channels,
-                start_frame,
-                end_frame_exclusive,
-                block_align,
-                bytes_per_channel,
-                |sample_bytes| decode_wave_sample(sample_bytes, fmt, true),
-            )?;
-            Tensor::new_with_dtype(out, shape, native_wave_dtype(fmt))
-                .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
-        }
-    } else {
-        let out = collect_wave_samples(
-            data,
-            channels,
-            start_frame,
-            end_frame_exclusive,
-            block_align,
-            bytes_per_channel,
-            |sample_bytes| decode_wave_sample(sample_bytes, fmt, false),
-        )?;
-        Tensor::new_with_dtype(out, shape, NumericDType::F64)
-            .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?
-    };
-    Ok(DecodedAudio {
-        samples,
-        sample_rate: fmt.sample_rate as f64,
-    })
-}
-
-pub(super) fn collect_wave_samples<T>(
-    data: &[u8],
-    channels: usize,
-    start_frame: usize,
-    end_frame_exclusive: usize,
-    block_align: usize,
-    bytes_per_channel: usize,
-    mut decode: impl FnMut(&[u8]) -> Result<T, String>,
-) -> Result<Vec<T>, String> {
-    let frame_count = end_frame_exclusive - start_frame;
-    let sample_count = frame_count
-        .checked_mul(channels)
-        .ok_or_else(|| "decoded audio dimensions overflow platform limits".to_string())?;
-    let mut out = Vec::new();
-    out.try_reserve_exact(sample_count)
-        .map_err(|err| format!("decoded audio allocation failed: {err}"))?;
-    for channel in 0..channels {
-        for frame in start_frame..end_frame_exclusive {
-            let sample_offset = frame
-                .checked_mul(block_align)
-                .and_then(|base| base.checked_add(channel * bytes_per_channel))
-                .ok_or_else(|| "sample offset overflows platform limits".to_string())?;
-            out.push(decode(
-                &data[sample_offset..sample_offset + bytes_per_channel],
-            )?);
-        }
-    }
-    Ok(out)
-}
-
-pub(super) fn native_pcm_storage(
-    fmt: WaveFormat,
-    data: &[u8],
-    channels: usize,
-    start_frame: usize,
-    end_frame_exclusive: usize,
-    block_align: usize,
-    bytes_per_channel: usize,
-) -> Result<Option<IntegerStorage>, String> {
-    if fmt.effective_format_tag() != 0x0001 {
-        return Ok(None);
-    }
-    let storage = match fmt.effective_bits_per_sample() {
-        8 => IntegerStorage::U8(collect_wave_samples(
-            data,
-            channels,
-            start_frame,
-            end_frame_exclusive,
-            block_align,
-            bytes_per_channel,
-            |sample| Ok(sample[0]),
-        )?),
-        16 => IntegerStorage::I16(collect_wave_samples(
-            data,
-            channels,
-            start_frame,
-            end_frame_exclusive,
-            block_align,
-            bytes_per_channel,
-            |sample| Ok(i16::from_le_bytes([sample[0], sample[1]])),
-        )?),
-        // MATLAB returns 24-bit PCM as an int32 whose valid bits are left-aligned.
-        24 => IntegerStorage::I32(collect_wave_samples(
-            data,
-            channels,
-            start_frame,
-            end_frame_exclusive,
-            block_align,
-            bytes_per_channel,
-            |sample| Ok(sign_extend_24(sample) << 8),
-        )?),
-        32 => IntegerStorage::I32(collect_wave_samples(
-            data,
-            channels,
-            start_frame,
-            end_frame_exclusive,
-            block_align,
-            bytes_per_channel,
-            |sample| {
-                Ok(i32::from_le_bytes([
-                    sample[0], sample[1], sample[2], sample[3],
-                ]))
-            },
-        )?),
-        _ => return Ok(None),
-    };
-    Ok(Some(storage))
 }
 
 pub(super) fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {

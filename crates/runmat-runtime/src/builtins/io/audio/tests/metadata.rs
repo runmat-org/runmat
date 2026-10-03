@@ -19,6 +19,26 @@ fn audioinfo_invalid_control_rejects_before_filesystem_read() {
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn audioinfo_relative_filename_keeps_public_spelling_with_captured_owner() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/audio",
+    ));
+    provider
+        .write_project_path("/audio/sample.wav", &wav_fixture(8000, 1, 16, 2))
+        .expect("fixture");
+    let _owner = runmat_filesystem::replace_provider(provider);
+    runmat_filesystem::set_current_dir("/audio").expect("cwd");
+    let info = block_on(audioinfo_builtin(Value::from("sample.wav"))).expect("metadata");
+    assert_eq!(
+        field(&info, "Filename"),
+        &Value::String("sample.wav".into())
+    );
+    assert_eq!(field(&info, "SampleRate"), &Value::Num(8000.0));
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioinfo_rejects_numeric_resident_path_without_gather() {
@@ -147,11 +167,13 @@ fn audioinfo_large_non_ogg_scan_skips_tail_window() {
     let bytes = wav_fixture(44_100, 1, 16, 600_000);
     fs::write(&path, &bytes).expect("write fixture");
 
-    let scan = block_on(read_audioinfo_scan(&path)).expect("audio scan");
+    let input = FsInputLease::capture(path, &AUDIOINFO_ERROR_IO, AUDIOINFO_BUILTIN_NAME)
+        .expect("captured input");
+    let scan = block_on(read_audioinfo_scan(&input)).expect("audio scan");
     assert_eq!(scan.file_size, bytes.len() as u64);
     assert!(scan.tail.is_none());
 
-    let _ = fs::remove_file(path);
+    let _ = fs::remove_file(&input.path);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

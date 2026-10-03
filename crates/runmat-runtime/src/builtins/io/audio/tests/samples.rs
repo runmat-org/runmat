@@ -25,22 +25,35 @@ fn audioread_descriptor_covers_core_forms() {
 #[test]
 fn audioread_invalid_output_count_and_controls_precede_file_read() {
     let _count = crate::output_count::push_output_count(Some(3));
-    let err = block_on(audioread_builtin(Value::from("missing.wav"), vec![]))
+    let err = block_on(audioread_builtin(None, Value::from("missing.wav"), vec![]))
         .expect_err("invalid output count");
     assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
     drop(_count);
-    let err = block_on(audioread_builtin(Value::Num(1.0), vec![])).expect_err("numeric path");
+    let err = block_on(audioread_builtin(None, Value::Num(1.0), vec![])).expect_err("numeric path");
     assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioread_open_ended_range_after_last_frame_reports_format_error() {
-    let data = pcm16_wav(8_000, 1, &[0]);
+    let _lock = runmat_filesystem::provider_override_lock();
+    let path = temp_path("wav");
+    fs::write(&path, pcm16_wav(8_000, 1, &[0])).expect("fixture");
     let range = Value::Tensor(Tensor::new(vec![2.0, f64::INFINITY], vec![1, 2]).expect("range"));
-    let options = parse_audioread_options(&[range]).expect("valid control");
-    let error = decode_audio_samples(&data, options).expect_err("range beyond file");
-    assert!(error.contains("exceeds the available audio frames"));
+    let error = block_on(audioread_builtin(
+        None,
+        Value::from(path.to_string_lossy().into_owned()),
+        vec![range],
+    ))
+    .expect_err("range beyond file");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:audioread:UnsupportedFormat")
+    );
+    assert!(error
+        .message()
+        .contains("exceeds the available audio frames"));
+    let _ = fs::remove_file(path);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -52,6 +65,7 @@ fn audioread_reads_mono_pcm16_as_normalized_double() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             Vec::new(),
         ))
@@ -86,6 +100,7 @@ fn audioread_stereo_output_is_column_major_by_channel() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             Vec::new(),
         ))
@@ -110,6 +125,7 @@ fn audioread_sample_range_is_one_based_inclusive_and_returns_fs() {
 
     let outputs = output_list(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![Value::Tensor(
                 Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("range"),
@@ -175,8 +191,12 @@ fn audioread_rejects_resident_inputs_before_provider_access() {
             .is_none()
     );
     let resident = Value::GpuTensor(allocation.handle.clone());
-    let error = block_on(audioread_builtin(Value::from("unused.wav"), vec![resident]))
-        .expect_err("resident sample range must reject");
+    let error = block_on(audioread_builtin(
+        None,
+        Value::from("unused.wav"),
+        vec![resident],
+    ))
+    .expect_err("resident sample range must reject");
     assert_eq!(error.identifier(), Some("RunMat:audioread:InvalidArgument"));
     assert!(error
         .message()
@@ -197,6 +217,7 @@ fn audioread_infinite_endpoint_reads_through_last_frame() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![Value::Tensor(range), Value::from("native")],
         ))
@@ -220,6 +241,7 @@ fn audioread_native_pcm8_uses_exact_uint8_storage() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![Value::from("native")],
         ))
@@ -243,6 +265,7 @@ fn audioread_native_pcm16_preserves_exact_storage_and_channel_order() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![Value::from("native")],
         ))
@@ -266,6 +289,7 @@ fn audioread_native_pcm16_preserves_exact_storage_for_sample_ranges() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![
                 Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("range")),
@@ -289,6 +313,7 @@ fn audioread_native_pcm24_left_aligns_into_exact_int32_storage() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![Value::from("native")],
         ))
@@ -311,6 +336,7 @@ fn audioread_native_pcm32_preserves_int32_extrema() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![Value::from("native")],
         ))
@@ -333,6 +359,7 @@ fn audioread_reads_float32_wave() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             Vec::new(),
         ))
@@ -353,6 +380,7 @@ fn audioread_native_float32_wave_remains_single() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![Value::from("native")],
         ))
@@ -374,6 +402,7 @@ fn audioread_native_float64_wave_remains_double() {
 
     let y = tensor(
         block_on(audioread_builtin(
+            None,
             Value::from(path.to_string_lossy().into_owned()),
             vec![Value::from("native")],
         ))
@@ -397,6 +426,7 @@ fn audioread_reads_rf64_data_size_from_ds64() {
         let _guard = crate::output_count::push_output_count(Some(2));
         output_list(
             block_on(audioread_builtin(
+                None,
                 Value::from(path.to_string_lossy().into_owned()),
                 Vec::new(),
             ))
@@ -428,7 +458,12 @@ fn audioread_reads_via_active_filesystem_provider() {
     let outputs = {
         let _out_guard = crate::output_count::push_output_count(Some(2));
         output_list(
-            block_on(audioread_builtin(Value::from("/audio.wav"), Vec::new())).expect("audioread"),
+            block_on(audioread_builtin(
+                None,
+                Value::from("/audio.wav"),
+                Vec::new(),
+            ))
+            .expect("audioread"),
         )
     };
 

@@ -25,6 +25,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
             "Filesystem I/O and decoding execute on the host, terminate fusion, and create host-resident tensors. No provider kernel runs; GPU-resident arguments reject before provider access. Use `gpuArray` explicitly after reading if subsequent computation should reside on a device.",
             "The active native, browser, sandbox, or remote filesystem provider must supply the input bytes. A filename is not a transferable file snapshot, so distributed workers require their own accessible file and filesystem capability.",
+            "With a seekable filesystem handle, WAV/RF64 sample ranges are read from selected frames in bounded input chunks. Providers that support whole-file reads but not seekable handles use the read fallback. The returned tensor occupies memory proportional to requested frames and channels; providers may have additional internal buffering costs.",
         ] },
     ],
     examples: &[

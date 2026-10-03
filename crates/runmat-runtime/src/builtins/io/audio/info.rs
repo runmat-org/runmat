@@ -13,7 +13,8 @@ pub(super) async fn audioinfo_builtin(filename: Value) -> BuiltinResult<Value> {
         ));
     }
     let path = resolve_audioinfo_path(&filename)?;
-    let scan = read_audioinfo_scan(&path).await?;
+    let input = FsInputLease::capture(path.clone(), &AUDIOINFO_ERROR_IO, AUDIOINFO_BUILTIN_NAME)?;
+    let scan = read_audioinfo_scan(&input).await?;
     let metadata = AudioMetadata::parse(&scan).map_err(|message| {
         audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
     })?;
@@ -28,8 +29,9 @@ pub(super) struct AudioInfoScan {
     pub(super) file_size: u64,
 }
 
-pub(super) async fn read_audioinfo_scan(path: &Path) -> BuiltinResult<AudioInfoScan> {
-    let mut file = fs::File::open_async(path).await.map_err(|err| {
+pub(super) async fn read_audioinfo_scan(input: &FsInputLease) -> BuiltinResult<AudioInfoScan> {
+    let path = input.path.as_path();
+    let mut file = input.open().await.map_err(|err| {
         audioinfo_error_with_source(
             &AUDIOINFO_ERROR_IO,
             format!("audioinfo: unable to read \"{}\" ({err})", path.display()),
@@ -39,7 +41,7 @@ pub(super) async fn read_audioinfo_scan(path: &Path) -> BuiltinResult<AudioInfoS
     let metadata = match file.metadata_async().await {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == std::io::ErrorKind::Unsupported => {
-            fs::metadata_async(path).await.map_err(|err| {
+            input.provider.metadata(path).await.map_err(|err| {
                 audioinfo_error_with_source(
                     &AUDIOINFO_ERROR_IO,
                     format!(
