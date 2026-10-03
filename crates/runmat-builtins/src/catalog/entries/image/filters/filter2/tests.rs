@@ -88,3 +88,22 @@ fn unknown_option_does_not_invent_geometry_and_invalid_option_reports() {
         .iter()
         .any(|item| item.code == "RM-CATALOG-FILTER2-OPTION"));
 }
+
+#[test]
+fn unknown_operand_does_not_prove_double_and_empty_kernel_is_diagnosed() {
+    let unknown = call(
+        ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+        numeric(NumericClass::Double, 4, 5),
+        &[],
+    );
+    assert_eq!(unknown.outputs[0].kind, ValueKindFact::Unknown);
+    let empty = call(
+        numeric(NumericClass::Double, 0, 2),
+        numeric(NumericClass::Double, 4, 5),
+        &[],
+    );
+    assert!(empty
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-CATALOG-FILTER2-EMPTY"));
+}

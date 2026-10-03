@@ -9,13 +9,12 @@ use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, ImfilterMode, ImfilterOptions, ImfilterPadding,
     ImfilterShape, IntegerElementType, ProviderPrecision,
 };
+#[cfg(test)]
+use runmat_builtins::IMFILTER_INTEGER_CAPABILITIES;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ImfilterOption, IMFILTER_DESCRIPTOR, IMFILTER_ERROR_INTERNAL,
+    IMFILTER_ERROR_INVALID_INPUT, IMFILTER_ERROR_INVALID_OPTION, IMFILTER_FILL_EXTENSION,
+    IMFILTER_VALID_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, LogicalArray, NumericDType, NumericStorage};
@@ -26,7 +25,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::image::filters::type_resolvers::imfilter_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
@@ -57,142 +55,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const IMFILTER_BUILTIN: &str = "imfilter";
-
-const IMFILTER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Filtered image output.",
-}];
-
-const IMFILTER_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input image/array.",
-    },
-    BuiltinParamDescriptor {
-        name: "H",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Filter kernel.",
-    },
-];
-
-const IMFILTER_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input image/array.",
-    },
-    BuiltinParamDescriptor {
-        name: "H",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Filter kernel.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Optional mode/shape/padding flags and fill values (e.g. 'same', 'full', 'valid', 'replicate', 'symmetric', 'circular', 'fill', padval, 'conv', 'corr').",
-    },
-];
-
-const IMFILTER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = imfilter(A, H)",
-        inputs: &IMFILTER_INPUTS_CORE,
-        outputs: &IMFILTER_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = imfilter(A, H, options...)",
-        inputs: &IMFILTER_INPUTS_WITH_OPTIONS,
-        outputs: &IMFILTER_OUTPUT,
-    },
-];
-
-const IMFILTER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMFILTER.INVALID_INPUT",
-    identifier: Some("RunMat:imfilter:InvalidInput"),
-    when: "Input/kernel tensors are invalid or cannot be converted.",
-    message: "imfilter: invalid input",
-};
-
-const IMFILTER_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMFILTER.INVALID_OPTION",
-    identifier: Some("RunMat:imfilter:InvalidOption"),
-    when: "One or more option flags or option values are invalid.",
-    message: "imfilter: invalid option",
-};
-
-const IMFILTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMFILTER.INTERNAL",
-    identifier: Some("RunMat:imfilter:Internal"),
-    when: "Internal filtering operation fails.",
-    message: "imfilter: internal operation failed",
-};
-
-const IMFILTER_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    IMFILTER_ERROR_INVALID_INPUT,
-    IMFILTER_ERROR_INVALID_OPTION,
-    IMFILTER_ERROR_INTERNAL,
-];
-
-pub const IMFILTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IMFILTER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IMFILTER_ERRORS,
-};
-
-const IMFILTER_VALID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "imfilter-valid-output-shape",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "imfilter(..., 'valid') is a RunMat-only output-shape extension",
-    error_identifier: Some("RunMat:compatibility:ImfilterValidExtension"),
-};
-
-const IMFILTER_FILL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "imfilter-fill-keyword",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "imfilter(..., 'fill', padval) is a RunMat-only spelling; MATLAB accepts padval directly",
-    error_identifier: Some("RunMat:compatibility:ImfilterFillExtension"),
-};
-
-pub const IMFILTER_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [IMFILTER_VALID_EXTENSION, IMFILTER_FILL_EXTENSION];
-
-const IMFILTER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Documented int8, int16, int32, uint8, uint16, and uint32 images retain their authoritative class. Host and automatic-fallback calls accumulate in binary64; explicit gpuArray calls accumulate in binary64 for uint32 and binary32 for the other documented integer classes.",
-    }];
-
-pub const IMFILTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = imfilter(integer_A, double_h, options...)" ,
-        inputs: &IMFILTER_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host and automatic-placement fallback sums use binary64 so planner placement is transparent. Explicit gpuArray uint32 sums use binary64, while the other documented explicit resident integer classes use binary32 multiplication and accumulation. Fractional results round to nearest and out-of-range results saturate before authoritative same-class storage is constructed; owner-aware fallback preserves explicit residency.",
-    }];
 
 fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
@@ -239,14 +101,7 @@ fn imfilter_map_error(
 
 #[runtime_builtin(
     name = "imfilter",
-    category = "image/filters",
-    summary = "Apply linear image filters.",
-    keywords = "imfilter,image,filter,convolution,correlation,padding",
-    accel = "custom-imfilter",
-    type_resolver(imfilter_type),
-    descriptor(crate::builtins::image::filters::imfilter::IMFILTER_DESCRIPTOR),
-    extensions(crate::builtins::image::filters::imfilter::IMFILTER_EXTENSIONS),
-    integer_capabilities(crate::builtins::image::filters::imfilter::IMFILTER_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::image::filters::imfilter"
 )]
 async fn imfilter_builtin(
@@ -255,6 +110,7 @@ async fn imfilter_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let options = parse_imfilter_options(&rest)?;
+    preflight_imfilter_geometry(&image, &kernel, options.shape)?;
     match (image, kernel) {
         (Value::GpuTensor(image_handle), Value::GpuTensor(filter_handle)) => {
             imfilter_gpu(image_handle, Value::GpuTensor(filter_handle), options).await
@@ -271,6 +127,31 @@ async fn imfilter_builtin(
             imfilter_host_value(image_value, filter_tensor, options)
         }
     }
+}
+
+fn imfilter_value_shape(value: &Value) -> Option<Vec<usize>> {
+    match value {
+        Value::Tensor(value) => Some(value.shape.clone()),
+        Value::LogicalArray(value) => Some(value.shape.clone()),
+        Value::GpuTensor(value) => Some(value.shape().to_vec()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(vec![1, 1]),
+        _ => None,
+    }
+}
+
+fn preflight_imfilter_geometry(
+    image: &Value,
+    kernel: &Value,
+    shape: ImfilterShape,
+) -> BuiltinResult<()> {
+    if let Some(kernel_shape) = imfilter_value_shape(kernel) {
+        validate_public_kernel_shape(&kernel_shape)?;
+        if let Some(image_shape) = imfilter_value_shape(image) {
+            filter_output_shape(&image_shape, &kernel_shape, shape, IMFILTER_BUILTIN)
+                .map_err(|error| imfilter_map_error(error.into(), &IMFILTER_ERROR_INVALID_INPUT))?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -412,13 +293,17 @@ fn host_kernel_tensor(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn validate_public_kernel_tensor(tensor: &Tensor) -> BuiltinResult<()> {
-    if tensor.is_empty() || tensor.shape.contains(&0) {
+    validate_public_kernel_shape(&tensor.shape)
+}
+
+fn validate_public_kernel_shape(shape: &[usize]) -> BuiltinResult<()> {
+    if shape.contains(&0) {
         return Err(imfilter_error_with_detail(
             &IMFILTER_ERROR_INVALID_INPUT,
             "H must be non-empty",
         ));
     }
-    if tensor.shape.len() > 2 {
+    if shape.len() > 2 {
         return Err(imfilter_error_with_detail(
             &IMFILTER_ERROR_INVALID_INPUT,
             "H must be a double vector or matrix",
@@ -428,6 +313,7 @@ fn validate_public_kernel_tensor(tensor: &Tensor) -> BuiltinResult<()> {
 }
 
 async fn download_kernel_tensor(handle: &GpuTensorHandle) -> BuiltinResult<Tensor> {
+    validate_public_kernel_shape(handle.shape())?;
     if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
         || runmat_accelerate_api::handle_is_logical(handle)
         || runmat_accelerate_api::handle_integer_type(handle).is_some()
@@ -779,12 +665,11 @@ fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
             options.padding = ImfilterPadding::Constant;
             options.constant_value = scalar;
         } else if let Some(text) = tensor::value_to_string(&args[idx]) {
-            let lowered = text.trim().to_ascii_lowercase();
-            match lowered.as_str() {
-                "replicate" => options.padding = ImfilterPadding::Replicate,
-                "symmetric" => options.padding = ImfilterPadding::Symmetric,
-                "circular" => options.padding = ImfilterPadding::Circular,
-                "fill" => {
+            match ImfilterOption::from_name(&text) {
+                Some(ImfilterOption::Replicate) => options.padding = ImfilterPadding::Replicate,
+                Some(ImfilterOption::Symmetric) => options.padding = ImfilterPadding::Symmetric,
+                Some(ImfilterOption::Circular) => options.padding = ImfilterPadding::Circular,
+                Some(ImfilterOption::Fill) => {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &IMFILTER_FILL_EXTENSION,
                         IMFILTER_BUILTIN,
@@ -808,23 +693,23 @@ fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
                         options.constant_value = 0.0;
                     }
                 }
-                "same" => options.shape = ImfilterShape::Same,
-                "full" => options.shape = ImfilterShape::Full,
-                "valid" => {
+                Some(ImfilterOption::Same) => options.shape = ImfilterShape::Same,
+                Some(ImfilterOption::Full) => options.shape = ImfilterShape::Full,
+                Some(ImfilterOption::Valid) => {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &IMFILTER_VALID_EXTENSION,
                         IMFILTER_BUILTIN,
                     )?;
                     options.shape = ImfilterShape::Valid;
                 }
-                "conv" => options.mode = ImfilterMode::Convolution,
-                "corr" => options.mode = ImfilterMode::Correlation,
-                other => {
+                Some(ImfilterOption::Convolution) => options.mode = ImfilterMode::Convolution,
+                Some(ImfilterOption::Correlation) => options.mode = ImfilterMode::Correlation,
+                None => {
                     return Err(imfilter_error_with_detail(
                         &IMFILTER_ERROR_INVALID_OPTION,
                         format!(
                             "unknown option '{}' (supported: 'same', 'full', 'valid', 'replicate', 'symmetric', 'circular', 'fill', 'conv', 'corr')",
-                            other
+                            text.trim().to_ascii_lowercase()
                         ),
                     ))
                 }
@@ -1534,6 +1419,39 @@ pub(crate) mod tests {
 
     fn error_message(err: &crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn resident_kernel_shape_rejects_before_download_or_upload() {
+        let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let image = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[2, 2],
+            })
+            .expect("resident image");
+        let kernel = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 1, 2],
+            })
+            .expect("resident higher-rank kernel");
+        provider.reset_telemetry();
+        let error = block_on(imfilter_builtin(
+            Value::GpuTensor(image.clone()),
+            Value::GpuTensor(kernel.clone()),
+            Vec::new(),
+        ))
+        .expect_err("unsupported public kernel shape");
+        assert_eq!(error.identifier(), IMFILTER_ERROR_INVALID_INPUT.identifier);
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.download_bytes, 0);
+        assert_eq!(telemetry.upload_bytes, 0);
+        assert!(image.allocation_lease().validate_live().is_ok());
+        assert!(kernel.allocation_lease().validate_live().is_ok());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

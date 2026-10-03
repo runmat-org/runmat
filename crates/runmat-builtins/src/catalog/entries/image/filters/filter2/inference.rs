@@ -45,6 +45,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 index,
             ));
         }
+        if let ShapeFact::Shaped { dims } = &value.shape {
+            if dims
+                .iter()
+                .any(|dim| matches!(dim, DimensionFact::Known(0)))
+            {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FILTER2-EMPTY",
+                    "H and X must not contain zero-length dimensions",
+                    index,
+                ));
+            }
+        }
     }
     let mut shape_mode = Some(Filter2Option::Same);
     for index in 2..request.arguments.len() {
@@ -85,7 +97,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ),
         _ => ShapeFact::Unknown,
     };
-    let class = [kernel, image]
+    let known_classes = [kernel, image]
         .into_iter()
         .flatten()
         .filter_map(|value| match value.kind {
@@ -97,9 +109,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             _ => None,
         })
         .collect::<Vec<_>>();
-    let result_class = if class.contains(&NumericClass::Single) {
+    // A dynamic operand may be single. Only a known single forces single;
+    // double is proven only when both operand classes are known.
+    let result_class = if known_classes.contains(&NumericClass::Single) {
         Some(NumericClass::Single)
-    } else if class.len() == 2 {
+    } else if known_classes.len() == 2 {
         Some(NumericClass::Double)
     } else {
         None
