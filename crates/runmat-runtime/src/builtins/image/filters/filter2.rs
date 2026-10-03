@@ -17,7 +17,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
-use super::imfilter::apply_imfilter_tensor;
+use super::imfilter::{apply_imfilter_tensor, filter_output_shape};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -273,6 +273,9 @@ async fn filter2_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     ensure_filter2_extensions(&kernel, &image, &rest)?;
+    // Invalid controls must fail before a resident integer/logical operand is
+    // gathered, or a floating kernel is uploaded to the image owner.
+    let options = parse_filter2_options(&rest)?;
     let output_single = value_is_single(&kernel) || value_is_single(&image);
     let image_precision_mismatch = matches!(&image, Value::GpuTensor(handle)
     if output_single
@@ -282,10 +285,8 @@ async fn filter2_builtin(
     if is_nonfloating_gpu(&kernel) || is_nonfloating_gpu(&image) || image_precision_mismatch {
         let kernel = gather_filter2_value(kernel).await?;
         let image = gather_filter2_value(image).await?;
-        let options = parse_filter2_options(&rest)?;
         return filter2_host(kernel, image, &options);
     }
-    let options = parse_filter2_options(&rest)?;
     match (kernel, image) {
         (Value::GpuTensor(kernel_handle), Value::GpuTensor(image_handle)) => {
             filter2_gpu(Value::GpuTensor(kernel_handle), image_handle, &options).await
@@ -421,7 +422,19 @@ async fn filter2_gpu(
             );
         }
     }
-    let provider = match runmat_accelerate_api::provider_for_handle(&image_handle) {
+    image_handle
+        .allocation_lease()
+        .validate_live()
+        .map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                filter2_error_with_detail(
+                    &FILTER2_ERROR_INVALID_INPUT,
+                    "X allocation is unavailable",
+                ),
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?;
+    let provider = match gpu_helpers::exact_provider_for_handle(&image_handle) {
         Some(p) => p,
         None => {
             let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
@@ -436,7 +449,16 @@ async fn filter2_gpu(
 
     let kernel_handle = match kernel_value {
         Value::GpuTensor(handle) => {
-            if runmat_accelerate_api::provider_for_handle(&handle)
+            handle.allocation_lease().validate_live().map_err(|error| {
+                crate::runtime_error::with_provider_execution_source(
+                    filter2_error_with_detail(
+                        &FILTER2_ERROR_INVALID_INPUT,
+                        "H allocation is unavailable",
+                    ),
+                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                )
+            })?;
+            if gpu_helpers::exact_provider_for_handle(&handle)
                 .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
             {
                 handle
@@ -444,13 +466,13 @@ async fn filter2_gpu(
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
                     .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-                match gpu_helpers::upload_tensor(provider, &tensor) {
-                    Ok(uploaded) => {
+                match upload_filter2_kernel(provider, &tensor, &image_handle, Some(&handle))? {
+                    Some(uploaded) => {
                         kernel_tensor_cache = Some(tensor);
                         uploaded_kernel = Some(uploaded.clone());
                         uploaded
                     }
-                    Err(_) => {
+                    None => {
                         let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
                             .await
                             .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
@@ -466,13 +488,13 @@ async fn filter2_gpu(
         other => {
             let tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, other)
                 .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
-            match gpu_helpers::upload_tensor(provider, &tensor) {
-                Ok(uploaded) => {
+            match upload_filter2_kernel(provider, &tensor, &image_handle, None)? {
+                Some(uploaded) => {
                     kernel_tensor_cache = Some(tensor);
                     uploaded_kernel = Some(uploaded.clone());
                     uploaded
                 }
-                Err(_) => {
+                None => {
                     let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
                         .await
                         .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
@@ -487,6 +509,13 @@ async fn filter2_gpu(
     };
 
     let kernel_handle_clone = kernel_handle.clone();
+    let expected_shape = filter_output_shape(
+        image_handle.shape(),
+        kernel_handle.shape(),
+        options.shape,
+        FILTER2_BUILTIN,
+    )
+    .map_err(|error| filter2_map_error(error.into(), &FILTER2_ERROR_INVALID_INPUT))?;
 
     match provider
         .imfilter(&image_handle, &kernel_handle, options)
@@ -494,9 +523,36 @@ async fn filter2_gpu(
     {
         Ok(output) => {
             drop(uploaded_kernel);
+            let valid = output.shape() == expected_shape
+                && output.device_id() == image_handle.device_id()
+                && output.allocation_lease().validate_live().is_ok()
+                && gpu_helpers::exact_provider_for_handle(&output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+                && !output.shares_allocation_with(&image_handle)
+                && !output.shares_allocation_with(&kernel_handle)
+                && runmat_accelerate_api::handle_storage(&output)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_integer_type(&output).is_none()
+                && !runmat_accelerate_api::handle_is_logical(&output)
+                && runmat_accelerate_api::handle_precision(&output) == Some(provider.precision())
+                && gpu_helpers::gpu_class_metadata_matches(
+                    &output,
+                    Some(provider.precision()),
+                    None,
+                    false,
+                );
+            if !valid {
+                let mut error = filter2_error_with_detail(
+                    &FILTER2_ERROR_INTERNAL,
+                    "provider returned an invalid filter2 result",
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(output, error));
+            }
             Ok(Value::GpuTensor(output))
         }
-        Err(_) => {
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             drop(uploaded_kernel);
             let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
                 .await
@@ -514,6 +570,40 @@ async fn filter2_gpu(
                 options,
             )
         }
+        Err(error) => Err(crate::runtime_error::with_provider_execution_source(
+            filter2_error_with_detail(
+                &FILTER2_ERROR_INTERNAL,
+                format!("provider execution failed: {error}"),
+            ),
+            error.into(),
+        )),
+    }
+}
+
+fn upload_filter2_kernel(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    tensor: &Tensor,
+    image: &GpuTensorHandle,
+    resident_kernel: Option<&GpuTensorHandle>,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    use runmat_accelerate_api::NumericUploadError;
+    let protected = std::iter::once(image)
+        .chain(resident_kernel)
+        .collect::<Vec<_>>();
+    match gpu_helpers::upload_tensor_protecting_typed(provider, tensor, &protected) {
+        Ok(handle) => Ok(Some(handle)),
+        Err(NumericUploadError::Provider(error))
+            if gpu_helpers::provider_hook_is_unsupported(&error) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(crate::runtime_error::with_provider_execution_source(
+            filter2_error_with_detail(
+                &FILTER2_ERROR_INTERNAL,
+                format!("failed to upload H to X's provider: {error}"),
+            ),
+            runmat_accelerate_api::ProviderExecutionError::from_source(error),
+        )),
     }
 }
 
@@ -863,6 +953,32 @@ pub(crate) mod tests {
             "expected error mentioning builtin, got {message}"
         );
         assert_eq!(err.identifier(), FILTER2_ERROR_INVALID_OPTION.identifier);
+    }
+
+    #[test]
+    fn invalid_option_rejects_before_resident_download_or_upload() {
+        use runmat_accelerate_api::AccelProvider;
+        let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let image = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[2, 2],
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let error = block_on(filter2_builtin(
+            Value::Num(1.0),
+            Value::GpuTensor(image.clone()),
+            vec![Value::from("invalid-padding")],
+        ))
+        .expect_err("invalid option");
+        assert_eq!(error.identifier(), FILTER2_ERROR_INVALID_OPTION.identifier);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+        assert!(image.allocation_lease().validate_live().is_ok());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

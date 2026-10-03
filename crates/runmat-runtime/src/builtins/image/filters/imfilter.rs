@@ -966,6 +966,7 @@ pub fn build_imfilter_plan(
         ));
     }
 
+    let final_shape = filter_output_shape(image_shape, &kernel.shape, options.shape, builtin)?;
     let image_shape_norm = normalize_shape(image_shape);
     let kernel_shape_norm = normalize_shape(&kernel.shape);
     let rank = image_shape_norm.len().max(kernel_shape_norm.len());
@@ -984,8 +985,12 @@ pub fn build_imfilter_plan(
     let full_shape: Vec<usize> = image_ext
         .iter()
         .zip(kernel_ext.iter())
-        .map(|(&img, &ker)| img + ker - 1)
-        .collect();
+        .map(|(&img, &ker)| {
+            img.checked_add(ker.saturating_sub(1)).ok_or_else(|| {
+                ImfilterKernelError::new(builtin, format!("{builtin}: output shape overflows"))
+            })
+        })
+        .collect::<ImfilterKernelResult<_>>()?;
 
     let kernel_points = build_kernel_points(kernel, &kernel_ext, &origin, options.mode);
     let zero_offset = vec![0isize; rank];
@@ -1009,14 +1014,6 @@ pub fn build_imfilter_plan(
         }
     };
 
-    let mut final_shape = target_shape_ext.clone();
-    while final_shape.len() > image_shape_norm.len() && final_shape.last() == Some(&1) {
-        final_shape.pop();
-    }
-    if final_shape.is_empty() {
-        final_shape.push(1);
-    }
-
     let image_strides = compute_strides(&image_ext);
 
     Ok(ImfilterPlan {
@@ -1028,6 +1025,73 @@ pub fn build_imfilter_plan(
         base_offset,
         kernel_points,
     })
+}
+
+/// Output geometry is needed before a provider result can be adopted. This
+/// projection performs the same image/kernel rank and shape admission as the
+/// host plan without materializing a dummy kernel or touching resident data.
+pub(crate) fn filter_output_shape(
+    image_shape: &[usize],
+    kernel_shape: &[usize],
+    shape_mode: ImfilterShape,
+    builtin: &str,
+) -> ImfilterKernelResult<Vec<usize>> {
+    if kernel_shape.contains(&0) {
+        return Err(ImfilterKernelError::new(
+            builtin,
+            format!("{builtin}: filter must be non-empty along every dimension"),
+        ));
+    }
+    let image_norm = normalize_shape(image_shape);
+    let kernel_norm = normalize_shape(kernel_shape);
+    let rank = image_norm.len().max(kernel_norm.len());
+    let image_ext = extend_shape(&image_norm, rank);
+    let kernel_ext = extend_shape(&kernel_norm, rank);
+    validate_kernel_shape(&image_norm, &kernel_ext, builtin)?;
+    let mut output = image_ext
+        .iter()
+        .zip(&kernel_ext)
+        .map(|(&img, &ker)| match shape_mode {
+            ImfilterShape::Same => Ok(img),
+            ImfilterShape::Full => img.checked_add(ker.saturating_sub(1)).ok_or_else(|| {
+                ImfilterKernelError::new(builtin, format!("{builtin}: output shape overflows"))
+            }),
+            ImfilterShape::Valid => Ok(if img >= ker { img - ker + 1 } else { 0 }),
+        })
+        .collect::<ImfilterKernelResult<Vec<_>>>()?;
+    while output.len() > image_norm.len() && output.last() == Some(&1) {
+        output.pop();
+    }
+    if output.is_empty() {
+        output.push(1);
+    }
+    Ok(output)
+}
+
+#[cfg(test)]
+mod output_shape_tests {
+    use super::*;
+
+    #[test]
+    fn shape_only_provider_admission_matches_host_plan_for_all_modes() {
+        let kernel = Tensor::new(vec![1.0; 6], vec![2, 3]).unwrap();
+        for shape in [
+            ImfilterShape::Same,
+            ImfilterShape::Full,
+            ImfilterShape::Valid,
+        ] {
+            let options = ImfilterOptions {
+                shape,
+                ..Default::default()
+            };
+            let plan = build_imfilter_plan(&[4, 5], &kernel, &options, "imfilter").unwrap();
+            assert_eq!(
+                filter_output_shape(&[4, 5], &kernel.shape, shape, "imfilter").unwrap(),
+                plan.final_shape,
+            );
+        }
+        assert!(filter_output_shape(&[4, 5], &[0, 3], ImfilterShape::Same, "imfilter").is_err());
+    }
 }
 
 pub fn apply_imfilter_tensor(
