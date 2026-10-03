@@ -7,4 +7,4 @@ pub mod imfinfo;
 pub mod imhist;
 pub mod imread;
 pub mod imwrite;
-pub(crate) mod type_resolvers;
+pub(crate) mod checked_text;

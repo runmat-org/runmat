@@ -36,6 +36,7 @@ const PAIRED_PRODUCT_CONFIGURATIONS = deepImmutable(validatePairedConfigurations
   paired("image"),
   paired("image/analysis"),
   paired("image/color"),
+  paired("image/io"),
   paired("interop"),
   paired("introspection"),
   paired("io"),

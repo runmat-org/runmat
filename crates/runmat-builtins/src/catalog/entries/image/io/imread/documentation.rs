@@ -7,11 +7,11 @@ const PPM: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFile
     root: BuiltinFilesystemRoot::IsolatedWorkspace,
     entries: &[
         BuiltinFilesystemEntry::File {
-            relative_path: "pixels.ppm",
+            relative_path: "pixels.dat",
             content: BuiltinFixtureContent::Utf8("P3\n2 1\n255\n255 0 0 0 255 0\n"),
         },
         BuiltinFilesystemEntry::File {
-            relative_path: "pixels.dat",
+            relative_path: "pixels.ppm",
             content: BuiltinFixtureContent::Utf8("P3\n2 1\n255\n255 0 0 0 255 0\n"),
         },
     ],
