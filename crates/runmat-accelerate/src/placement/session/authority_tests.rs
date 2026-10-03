@@ -28,15 +28,19 @@ fn provider_and_host_service_samples_and_invalidation_remain_separate() {
     let mut host = provider.clone();
     host.revision.authority = PlacementExecutionAuthorityRevision::HostService(digest);
     for signature in [&provider, &host] {
-        session
-            .observe(PlacementFeedback {
-                signature: signature.clone(),
-                candidate: "same-route".into(),
-                kind: ExecutionCandidateKind::SharedRuntime,
-                total_elapsed_ns: 12,
-                succeeded: true,
-            })
-            .unwrap();
+        // The shared estimator requires two successful observations; namespace
+        // isolation must not bypass that confidence requirement.
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: "same-route".into(),
+                    kind: ExecutionCandidateKind::SharedRuntime,
+                    total_elapsed_ns: 12,
+                    succeeded: true,
+                })
+                .unwrap();
+        }
     }
     assert_eq!(session.profile_snapshot().feedback.len(), 2);
     session.invalidate(PlacementInvalidation::Provider { digest });
