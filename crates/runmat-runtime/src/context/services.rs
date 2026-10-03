@@ -270,7 +270,8 @@ impl RuntimeWholeWorkSelection {
 pub trait RuntimeHostEffectResourceService {
     fn admission(
         &self,
-        request: &super::host_effect::HostEffectRequest,
+        request: &super::host_effect::HostEffectRequest<'_>,
+        runtime: &super::RuntimeContext,
     ) -> Option<super::host_effect::HostEffectResourceEvidence>;
 }
 

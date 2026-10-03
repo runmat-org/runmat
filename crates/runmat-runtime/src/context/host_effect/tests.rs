@@ -14,13 +14,26 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc,
+    Arc, OnceLock,
 };
 
 struct Resources(Option<HostEffectResourceEvidence>);
 impl RuntimeHostEffectResourceService for Resources {
-    fn admission(&self, request: &HostEffectRequest) -> Option<HostEffectResourceEvidence> {
+    fn admission(
+        &self,
+        request: &HostEffectRequest<'_>,
+        _runtime: &RuntimeContext,
+    ) -> Option<HostEffectResourceEvidence> {
         (request.operation == "unzip"
+            && matches!(
+                request.workload,
+                HostEffectWorkload::ArchiveExtract {
+                    source: HostEffectSource::LocalArchive("/fixture.zip"),
+                    destination: Some("/out"),
+                    ..
+                }
+            )
+            && Arc::ptr_eq(request.filesystem, fixture_fs())
             && request.domain_facts == Digest::sha256(b"source-and-destination"))
         .then_some(self.0)
         .flatten()
@@ -125,14 +138,21 @@ impl RuntimePlacementService for Placement {
     fn invalidate(&self, _: PlacementInvalidation) {}
 }
 
-fn request(output: HostEffectOutput) -> HostEffectRequest {
+fn fixture_fs() -> &'static Arc<dyn runmat_filesystem::FsProvider> {
+    static FS: OnceLock<Arc<dyn runmat_filesystem::FsProvider>> = OnceLock::new();
+    FS.get_or_init(|| Arc::new(runmat_filesystem::MemoryFsProvider::new()))
+}
+
+fn request(output: HostEffectOutput) -> HostEffectRequest<'static> {
     HostEffectRequest {
         operation: "unzip",
         workload: HostEffectWorkload::ArchiveExtract {
-            source: HostEffectSource::LocalArchive,
+            source: HostEffectSource::LocalArchive("/fixture.zip"),
+            destination: Some("/out"),
             output,
         },
         domain_facts: Digest::sha256(b"source-and-destination"),
+        filesystem: fixture_fs(),
     }
 }
 
@@ -179,6 +199,29 @@ fn finite_missing_or_unknown_bound_rejects_before_selection() {
             .expect("finite unknown must reject");
         assert_eq!(error.code, "RunMat:Placement:InsufficientResourceEvidence");
     }
+    assert_eq!(placement.selections.get(), 0);
+
+    let runtime = runtime(
+        placement.clone(),
+        Some(bounds(
+            ResourceByteBound::Known(4),
+            ResourceByteBound::Known(4),
+        )),
+        Some(32),
+    );
+    let mut foreign_source = request(HostEffectOutput::ReturnedValue);
+    foreign_source.workload = HostEffectWorkload::ArchiveExtract {
+        source: HostEffectSource::LocalArchive("/other.zip"),
+        destination: Some("/out"),
+        output: HostEffectOutput::ReturnedValue,
+    };
+    assert!(select_host_effect(Some(&runtime), foreign_source).is_err());
+    assert_eq!(placement.selections.get(), 0);
+    let other_fs: Arc<dyn runmat_filesystem::FsProvider> =
+        Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    let mut foreign_owner = request(HostEffectOutput::ReturnedValue);
+    foreign_owner.filesystem = &other_fs;
+    assert!(select_host_effect(Some(&runtime), foreign_owner).is_err());
     assert_eq!(placement.selections.get(), 0);
 
     let runtime = runtime(

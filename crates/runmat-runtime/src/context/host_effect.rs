@@ -12,6 +12,7 @@ use runmat_execution::{
     WholeWorkConstraint, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
 };
 use runmat_time::{duration_ns_saturating, Instant};
+use std::sync::Arc;
 
 /// The requested result is distinct from the committed side effects. No
 /// output still needs a bound for the temporary filename list and codec work.
@@ -22,17 +23,18 @@ pub enum HostEffectOutput {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
-pub enum HostEffectSource {
-    LocalArchive,
-    HttpArchive,
+pub enum HostEffectSource<'a> {
+    LocalArchive(&'a str),
+    HttpArchive(&'a str),
 }
 
 /// Typed operation identity at the service evidence boundary; no builtin
 /// spelling switch or secondary scheduler is introduced here.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
-pub enum HostEffectWorkload {
+pub enum HostEffectWorkload<'a> {
     ArchiveExtract {
-        source: HostEffectSource,
+        source: HostEffectSource<'a>,
+        destination: Option<&'a str>,
         output: HostEffectOutput,
     },
 }
@@ -48,10 +50,13 @@ pub struct HostEffectResourceEvidence {
     pub returned_value_bytes: ResourceByteBound,
 }
 
-pub struct HostEffectRequest {
+pub struct HostEffectRequest<'a> {
     pub operation: &'static str,
-    pub workload: HostEffectWorkload,
+    pub workload: HostEffectWorkload<'a>,
     pub domain_facts: Digest,
+    /// Exact filesystem authority later used by the effect; a digest of path
+    /// text cannot prove that a different active provider has the same bounds.
+    pub filesystem: &'a Arc<dyn runmat_filesystem::FsProvider>,
 }
 
 /// The caller must invoke this after pure semantic admission but before any
@@ -59,7 +64,7 @@ pub struct HostEffectRequest {
 /// selected; a finite budget without service/revision evidence is an error.
 pub fn select_host_effect(
     runtime: Option<&RuntimeContext>,
-    request: HostEffectRequest,
+    request: HostEffectRequest<'_>,
 ) -> BuiltinResult<Option<HostEffectReceipt>> {
     let Some(runtime) = runtime else {
         return Ok(None);
@@ -80,7 +85,7 @@ pub fn select_host_effect(
     let Some(evidence) = runtime
         .service_ports()
         .host_effect_resources()
-        .and_then(|port| port.admission(&request))
+        .and_then(|port| port.admission(&request, runtime))
     else {
         return if finite {
             Err(insufficient(
@@ -169,6 +174,8 @@ pub fn select_host_effect(
         constraint: WholeWorkConstraint::AnyLegal,
         candidates: vec![candidate.clone()],
         resources,
+        // Planner alternates are disabled for a side-effecting single route;
+        // this is not a claim that filesystem or HTTP payloads repeat.
         deterministic: true,
         require_transactional_results: false,
     })?;

@@ -83,25 +83,28 @@ async fn evaluate_with_output(
     let request = parse_arguments(args)?;
     check_cancelled(runtime)?;
     let source = match &request.archive {
-        runmat_builtins::UnzipSourceRoute::Http(_) => HostEffectSource::HttpArchive,
-        runmat_builtins::UnzipSourceRoute::LocalPath(_) => HostEffectSource::LocalArchive,
+        runmat_builtins::UnzipSourceRoute::Http(url) => HostEffectSource::HttpArchive(url.as_str()),
+        runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
+            HostEffectSource::LocalArchive(path.as_str())
+        }
     };
-    let source_text = match &request.archive {
-        runmat_builtins::UnzipSourceRoute::Http(url) => url.as_str(),
-        runmat_builtins::UnzipSourceRoute::LocalPath(path) => path.as_str(),
+    let workload = HostEffectWorkload::ArchiveExtract {
+        source,
+        destination: request.output_folder.as_deref(),
+        output,
     };
+    let output_provider = vfs::current_provider();
     let receipt = select_host_effect(
         runtime,
         HostEffectRequest {
             operation: BUILTIN_NAME,
-            workload: HostEffectWorkload::ArchiveExtract { source, output },
+            workload,
             domain_facts: Digest::sha256(
-                serde_json::to_vec(&(source_text, &request.output_folder))
-                    .expect("archive source and destination serialize"),
+                serde_json::to_vec(&workload).expect("archive source and destination serialize"),
             ),
+            filesystem: &output_provider,
         },
     )?;
-    let output_provider = vfs::current_provider();
     let execution = async {
         let output_folder = resolve_output_folder(request.output_folder.as_deref()).await?;
         let filenames = match request.archive {
