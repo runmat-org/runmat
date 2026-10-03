@@ -82,20 +82,33 @@ async fn imfinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             let hint = scalar_text(value, "fmt")?;
             let normalized = hint.trim().trim_start_matches('.').to_ascii_lowercase();
             image::ImageFormat::from_extension(&normalized)
+                .map(|format| (format, normalized))
                 .ok_or_else(|| info_error(&IMFINFO_ERROR_FORMAT, "unsupported image format hint"))
         })
         .transpose()?;
-    let path = PathBuf::from(
+    let requested_path = PathBuf::from(
         expand_user_path(filename.trim(), "imfinfo")
             .map_err(|error| info_error(&IMFINFO_ERROR_ARGUMENT, error))?,
     );
-    let bytes = vfs::read_async(&path)
-        .await
-        .map_err(|err| info_error_with_source(&IMFINFO_ERROR_IO, err))?;
+    let (path, bytes) = match vfs::read_async(&requested_path).await {
+        Ok(bytes) => (requested_path, bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && explicit_format.is_some() => {
+            let suffix = &explicit_format.as_ref().expect("checked above").1;
+            let mut candidate = requested_path.as_os_str().to_os_string();
+            candidate.push(".");
+            candidate.push(suffix);
+            let candidate = PathBuf::from(candidate);
+            let bytes = vfs::read_async(&candidate)
+                .await
+                .map_err(|err| info_error_with_source(&IMFINFO_ERROR_IO, err))?;
+            (candidate, bytes)
+        }
+        Err(error) => return Err(info_error_with_source(&IMFINFO_ERROR_IO, error)),
+    };
     let mut reader = ImageReader::new(Cursor::new(bytes.as_slice()))
         .with_guessed_format()
         .map_err(|err| info_error_with_source(&IMFINFO_ERROR_DECODE, err))?;
-    if let Some(format) = explicit_format {
+    if let Some((format, _)) = explicit_format {
         reader.set_format(format);
     }
     let format = reader.format();
@@ -175,6 +188,43 @@ mod tests {
             }
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn supported_format_adds_extension_only_when_original_path_is_missing() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let root = tempfile::TempDir::new().unwrap();
+        let bare = root.path().join("sample");
+        let with_extension = root.path().join("sample.png");
+        let image = image::RgbImage::from_pixel(3, 2, image::Rgb([1, 2, 3]));
+        image.save(&with_extension).unwrap();
+        let info = run(imfinfo_builtin(vec![
+            Value::String(path_to_string(&bare)),
+            Value::String("png".into()),
+        ]))
+        .unwrap();
+        let Value::Struct(fields) = info else {
+            panic!("expected metadata struct")
+        };
+        assert_eq!(
+            fields.fields.get("Filename"),
+            Some(&char_value(&path_to_string(&with_extension)))
+        );
+        assert_eq!(fields.fields.get("Width"), Some(&Value::Num(3.0)));
+
+        std::fs::copy(&with_extension, &bare).unwrap();
+        let info = run(imfinfo_builtin(vec![
+            Value::String(path_to_string(&bare)),
+            Value::String("png".into()),
+        ]))
+        .unwrap();
+        let Value::Struct(fields) = info else {
+            panic!("expected metadata struct")
+        };
+        assert_eq!(
+            fields.fields.get("Filename"),
+            Some(&char_value(&path_to_string(&bare)))
+        );
     }
 
     #[test]

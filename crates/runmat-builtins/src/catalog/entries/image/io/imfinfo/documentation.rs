@@ -15,12 +15,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("imfinfo"), slug: Some("imfinfo"),
     summary: "Read image file format, dimensions, color type, and byte-size metadata.",
-    description: "`imfinfo(filename)` reads an image through the active filesystem and returns a host metadata struct. `imfinfo(filename, fmt)` applies a supported explicit format hint before decoding.",
+    description: "`imfinfo(filename)` reads an image through the active filesystem and returns a host metadata struct. `imfinfo(filename, fmt)` uses a supported format hint and, if the named file is missing, also tries `filename.fmt`.",
     keywords: &["imfinfo", "image", "metadata", "width", "height", "format"],
     related: &["imread", "imwrite"],
     sections: &[
         BuiltinDocumentationSection { heading: "Inputs and result", paragraphs: &[
-            "The filename and optional format are scalar text. An explicit format hint must name a format recognized by the image decoder. The result is a scalar struct with `Filename`, `FileModDate`, `FileSize`, `Format`, `FormatVersion`, `Width`, `Height`, `BitDepth`, and `ColorType`. The two version/date fields are currently empty character rows; byte counts and dimensions are double-valued metadata.",
+            "The filename and optional format are scalar text. An explicit format hint must name a format recognized by the image decoder. If the original filename is not found, a supported hint also tries the path with that extension appended. The result is a scalar struct with `Filename`, `FileModDate`, `FileSize`, `Format`, `FormatVersion`, `Width`, `Height`, `BitDepth`, and `ColorType`. The two version/date fields are currently empty character rows; byte counts and dimensions are double-valued metadata.",
             "The decoder reads the image to establish metadata. This is not a header-only query; malformed image bytes can fail. No numeric image array or resident provider handle is accepted as a path or format.",
         ]},
         BuiltinDocumentationSection { heading: "Filesystem and portability", paragraphs: &[
@@ -35,6 +35,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: PPM, requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isstruct(info)); assert(info.Width == 2); assert(info.Height == 1); assert(info.FileSize > 0); assert(strcmp(info.Format,'pnm'));" },
+    }, BuiltinExample {
+        id: "format-extension-fallback", title: "Find a file by its format extension",
+        program: "info = imfinfo('two_pixels','ppm');\ninfo.Width",
+        display_output: Some("ans = 2"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: PPM, requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(info.Width == 2); assert(info.Height == 1); assert(strcmp(info.Format,'pnm'));" },
     }],
     example_exemption: None, faqs: &[],
     links: &[BuiltinDocumentationLink { label: "imread", target: BuiltinDocumentationLinkTarget::Builtin("imread") }],
