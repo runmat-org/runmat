@@ -8,6 +8,7 @@ pub use contract::{
     DESCRIPTOR as GEOMETRY_LOAD_DESCRIPTOR, ERROR_INTERNAL as GEOMETRY_LOAD_ERROR_INTERNAL,
     ERROR_IO as GEOMETRY_LOAD_ERROR_IO, ERROR_OPERATION as GEOMETRY_LOAD_ERROR_OPERATION,
     ERROR_OUTPUTS as GEOMETRY_LOAD_ERROR_OUTPUTS, GEOMETRY_ASSET_CLASS,
+    INTEGER_AUDIT as GEOMETRY_LOAD_INTEGER_AUDIT,
 };
 
 use crate::*;
@@ -56,7 +57,7 @@ pub const GEOMETRY_LOAD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &[],
-    integer_audit: None,
+    integer_audit: Some(&GEOMETRY_LOAD_INTEGER_AUDIT),
     suppress_auto_output: false,
 };
 

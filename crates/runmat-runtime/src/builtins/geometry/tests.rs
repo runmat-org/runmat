@@ -68,6 +68,19 @@ fn asset_queries_reject_nonasset_before_projection() {
 }
 
 #[test]
+fn asset_method_registration_keeps_exact_public_spellings() {
+    let methods = geometry_asset_methods();
+    let regions = methods
+        .get(&runmat_types::StaticMethodName::new("listRegions").into())
+        .expect("listRegions method");
+    assert_eq!(regions.function_name, "geometry.listRegions");
+    let meshes = methods
+        .get(&runmat_types::StaticMethodName::new("meshes").into())
+        .expect("meshes method");
+    assert_eq!(meshes.function_name, "geometry.meshes");
+}
+
+#[test]
 fn geometry_inspect_builtin_returns_object_value() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("part.stl");

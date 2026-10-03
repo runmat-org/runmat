@@ -3,6 +3,12 @@ use crate::*;
 pub const GEOMETRY_ASSET_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("geometry.Asset");
 
+pub const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "geometry.load accepts only a scalar text path; imported numeric geometry is not a direct integer argument.",
+};
+
 const INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "path",
     ty: BuiltinParamType::StringScalar,

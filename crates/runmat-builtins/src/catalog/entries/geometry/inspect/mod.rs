@@ -6,6 +6,12 @@ mod tests;
 
 pub const GEOMETRY_INSPECT_RESULT_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("geometry.InspectResult");
+pub const GEOMETRY_INSPECT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "geometry.inspect accepts only a scalar text path; byte_count is double-valued output metadata.",
+    };
 const INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "path",
     ty: BuiltinParamType::StringScalar,
@@ -125,7 +131,7 @@ pub const GEOMETRY_INSPECT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEn
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &[],
-    integer_audit: None,
+    integer_audit: Some(&GEOMETRY_INSPECT_INTEGER_AUDIT),
     suppress_auto_output: false,
 };
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GEOMETRY_INSPECT_CATALOG_ENTRY];
