@@ -1,9 +1,13 @@
-use runmat_accelerate_api::{ImfilterOptions, ImfilterPadding, ImfilterShape, ProviderPrecision};
+use runmat_accelerate_api::{
+    ImfilterMode, ImfilterOptions, ImfilterPadding, ImfilterShape, ProviderPrecision,
+};
 use runmat_value::{LogicalArray, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::tensor;
 
-use super::{filter_error, ImageOutputClass, ImfilterKernelError, ImfilterKernelResult};
+use super::{
+    filter_error, BuiltinResult, ImageOutputClass, ImfilterKernelError, ImfilterKernelResult,
+};
 
 /// Core host implementation of `imfilter`, shared with the in-process acceleration provider.
 #[derive(Clone, Debug)]
