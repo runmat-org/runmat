@@ -113,3 +113,35 @@ fn invalidated_receipts_cannot_restore_old_profiles() {
         assert_eq!(dropped.load(Ordering::Acquire), 1);
     }
 }
+
+#[test]
+fn same_digest_invalidation_retires_only_matching_authority_receipts() {
+    use runmat_execution::PlacementExecutionAuthorityRevision;
+
+    let queue = PendingFeedback::default();
+    let ready = Arc::new(AtomicBool::new(false));
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let provider = source(ready.clone(), dropped.clone());
+    let mut host = source(ready.clone(), dropped.clone());
+    let digest = match provider.signature.revision.authority {
+        PlacementExecutionAuthorityRevision::Provider(digest) => digest,
+        PlacementExecutionAuthorityRevision::HostService(_) => unreachable!("provider fixture"),
+    };
+    host.signature.revision.authority = PlacementExecutionAuthorityRevision::HostService(digest);
+    assert!(queue.push(provider).is_ok());
+    assert!(queue.push(host).is_ok());
+    queue.invalidate(&PlacementInvalidation::Provider { digest });
+    assert_eq!(dropped.load(Ordering::Acquire), 1);
+    assert_eq!(queue.sources.borrow().len(), 1);
+    ready.store(true, Ordering::Release);
+    assert_eq!(queue.take_ready().len(), 1);
+    assert_eq!(dropped.load(Ordering::Acquire), 2);
+
+    let host = source(Arc::new(AtomicBool::new(false)), dropped.clone());
+    let mut host = host;
+    host.signature.revision.authority = PlacementExecutionAuthorityRevision::HostService(digest);
+    assert!(queue.push(host).is_ok());
+    queue.invalidate(&PlacementInvalidation::HostService { digest });
+    assert!(queue.sources.borrow().is_empty());
+    assert_eq!(dropped.load(Ordering::Acquire), 3);
+}

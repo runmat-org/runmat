@@ -14,6 +14,9 @@ use super::{partition::evaluate_selections, partition::solve_partition, Placemen
 mod evidence;
 mod pending;
 mod whole_work;
+#[cfg(test)]
+#[path = "session/authority_tests.rs"]
+mod authority_tests;
 
 pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 3;
 const MAX_FEEDBACK_OBSERVATIONS: u64 = 1_048_576;
@@ -1257,11 +1260,6 @@ mod tests {
         let restored = PlacementSession::default();
         restored.restore_profile(snapshot.clone()).unwrap();
         assert_eq!(restored.profile_snapshot().feedback.len(), 2);
-        let mut previous_authority_schema = snapshot.clone();
-        previous_authority_schema.schema_version = 2;
-        assert!(PlacementSession::default()
-            .restore_profile(previous_authority_schema)
-            .is_err());
         let mut legacy = serde_json::to_value(snapshot).unwrap();
         legacy["schema_version"] = serde_json::json!(1);
         legacy["feedback"][0]
@@ -1459,54 +1457,6 @@ mod tests {
             ),
             E::Unavailable(Missing::NoObservations)
         );
-    }
-
-    #[test]
-    fn provider_and_host_service_samples_and_invalidation_remain_separate() {
-        use runmat_execution::{
-            CandidateCostUnavailable, CandidateObservationEvidence,
-            PlacementExecutionAuthorityRevision,
-        };
-
-        let session = PlacementSession::default();
-        let provider = signature("same-route-authority");
-        let digest = match provider.revision.authority {
-            PlacementExecutionAuthorityRevision::Provider(digest) => digest,
-            PlacementExecutionAuthorityRevision::HostService(_) => unreachable!("provider fixture"),
-        };
-        let mut host = provider.clone();
-        host.revision.authority = PlacementExecutionAuthorityRevision::HostService(digest);
-        for signature in [&provider, &host] {
-            session
-                .observe(PlacementFeedback {
-                    signature: signature.clone(),
-                    candidate: "same-route".into(),
-                    kind: ExecutionCandidateKind::SharedRuntime,
-                    total_elapsed_ns: 12,
-                    succeeded: true,
-                })
-                .unwrap();
-        }
-        assert_eq!(session.profile_snapshot().feedback.len(), 2);
-        session.invalidate(PlacementInvalidation::Provider { digest });
-        assert!(matches!(
-            session.observed_candidate_duration(
-                &provider,
-                "same-route",
-                ExecutionCandidateKind::SharedRuntime,
-            ),
-            CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations)
-        ));
-        assert!(matches!(
-            session.observed_candidate_duration(
-                &host,
-                "same-route",
-                ExecutionCandidateKind::SharedRuntime,
-            ),
-            CandidateObservationEvidence::Observed(_)
-        ));
-        session.invalidate(PlacementInvalidation::HostService { digest });
-        assert!(session.profile_snapshot().feedback.is_empty());
     }
 
     #[test]
