@@ -1,6 +1,5 @@
 use super::*;
 use futures::executor::block_on;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 mod fixtures;

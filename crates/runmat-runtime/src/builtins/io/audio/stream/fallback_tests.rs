@@ -161,6 +161,7 @@ fn run(
     (result, evidence)
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn unsupported_seek_falls_back_once_after_handle_retirement() {
     let (result, evidence) = run(io::ErrorKind::Unsupported, false);
@@ -172,6 +173,7 @@ fn unsupported_seek_falls_back_once_after_handle_retirement() {
     assert_eq!(evidence.drops.load(Ordering::SeqCst), 1);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fallback_read_operational_failure_keeps_io_cause_without_replay() {
     let (result, evidence) = run(io::ErrorKind::Unsupported, true);
@@ -183,6 +185,7 @@ fn fallback_read_operational_failure_keeps_io_cause_without_replay() {
     assert_eq!(evidence.drops.load(Ordering::SeqCst), 1);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn operational_seek_failure_does_not_trigger_whole_provider_read() {
     let (result, evidence) = run(io::ErrorKind::PermissionDenied, false);

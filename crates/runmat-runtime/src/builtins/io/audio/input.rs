@@ -47,6 +47,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn relative_audio_source_keeps_original_provider_and_cwd() {
         let _lock = fs::provider_override_lock();

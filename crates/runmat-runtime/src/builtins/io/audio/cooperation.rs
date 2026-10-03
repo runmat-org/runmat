@@ -84,6 +84,7 @@ mod tests {
     use runmat_execution::cancellation::CancellationSource;
     use std::num::NonZeroU64;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn service_cancelled_is_typed_even_when_invocation_token_is_not_marked() {
         let source = CancellationSource::new();

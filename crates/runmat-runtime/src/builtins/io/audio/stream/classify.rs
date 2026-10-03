@@ -61,6 +61,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mpeg_header_crossing_input_chunk_is_classified_without_whole_file_buffer() {
         let mut bytes = vec![0u8; AUDIO_WORK_CHUNK - 2];
@@ -78,6 +79,7 @@ mod tests {
         assert_eq!(result, COMPRESSED_AUDIO_ERROR);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn id3_skip_and_unknown_payload_match_legacy_classifier() {
         let mut tagged = b"ID3\x03\x00\x00\x00\x00\x00\x04skip".to_vec();

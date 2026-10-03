@@ -20,7 +20,7 @@ fn audioinfo_invalid_control_rejects_before_filesystem_read() {
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioinfo_relative_filename_keeps_public_spelling_with_captured_owner() {
     let _lock = runmat_filesystem::provider_override_lock();
