@@ -25,7 +25,7 @@ pub(super) async fn imfilter_gpu(
     let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")
     })?;
-    let (selected, planned_query) = select_provider_route(
+    let (mut selected, planned_query) = select_provider_route(
         runtime,
         &image_handle,
         &kernel_value,
@@ -165,16 +165,58 @@ pub(super) async fn imfilter_gpu(
             result
         }
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-            let result = imfilter_gpu_host_fallback(
-                provider,
-                &image_handle,
-                &kernel_tensor,
-                &options,
-                resident_kernel.as_ref(),
+            let explicit = runmat_accelerate_api::handle_is_explicit(&image_handle);
+            if explicit {
+                if let Some(selection) = selected.as_mut() {
+                    selection.begin_conditional_provider_upload();
+                }
+            }
+            let result = runmat_accelerate_api::observation::observe_provider_future(
+                selected.as_ref().map(|selection| selection.recorder()),
+                imfilter_gpu_host_fallback(
+                    provider,
+                    &image_handle,
+                    &kernel_tensor,
+                    &options,
+                    resident_kernel.as_ref(),
+                ),
             )
             .await;
+            let result = match result {
+                Ok(Value::GpuTensor(output))
+                    if selected.as_ref().is_some_and(|selection| {
+                        !valid_provider_output(
+                            &output,
+                            &image_handle,
+                            &kernel_handle,
+                            &expected_shape,
+                            expected_precision,
+                            provider,
+                        ) || !selection.admits_conditional_provider_upload(&output)
+                    }) =>
+                {
+                    let mut error = imfilter_error_with_detail(
+                        &IMFILTER_ERROR_INTERNAL,
+                        "conditional restore returned a result outside its admitted physical route",
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    Err(gpu_helpers::reject_gpu_output(output, error))
+                }
+                other => other,
+            };
             if let Some(selection) = selected {
-                selection.finish(Ok(false));
+                match (&result, explicit) {
+                    (Ok(Value::GpuTensor(_)), true) => {
+                        selection.finish_conditional_provider_upload()
+                    }
+                    (Ok(_), false) => selection.finish_conditional_host_fallback(),
+                    (Ok(_), true) => selection.finish(Err(
+                        runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed,
+                    )),
+                    (Err(_), _) => selection.finish(Err(
+                        runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                    )),
+                }
             }
             result
         }
@@ -291,15 +333,41 @@ fn select_provider_route(
             && gpu_helpers::exact_provider_for_handle(handle)
                 .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         {
+            let (scratch, result_bytes) = placement::conditional_host_bounds(
+                IMFILTER_BUILTIN,
+                image.shape(),
+                handle.shape(),
+                options,
+                image_precision == ProviderPrecision::F32,
+                false,
+                false,
+            );
+            let fallback_readbacks = [image];
+            let explicit = runmat_accelerate_api::handle_is_explicit(image);
+            let upload_scratch = placement::host_scratch_excluding_result(scratch, result_bytes)?;
+            let conditional = if explicit {
+                placement::ConditionalFilterRoute::Provider(placement::ConditionalProviderRoute {
+                    operation_scratch: upload_scratch,
+                    readbacks: &fallback_readbacks,
+                })
+            } else {
+                placement::ConditionalFilterRoute::Host(placement::ConditionalHostRoute {
+                    result_bytes,
+                    operation_scratch: scratch,
+                    readbacks: &fallback_readbacks,
+                })
+            };
             return Ok((
                 placement::select_direct(
-                    runtime,
-                    IMFILTER_BUILTIN,
-                    image,
+                    placement::FilterRouteRequest {
+                        runtime,
+                        semantic_operation: IMFILTER_BUILTIN,
+                        image,
+                        options,
+                        conditional: Some(conditional),
+                    },
                     handle,
-                    options,
                     true,
-                    None,
                 )?,
                 None,
             ));
@@ -313,16 +381,48 @@ fn select_provider_route(
         Value::GpuTensor(handle) => Some(handle),
         _ => None,
     };
+    let kernel_shape = match kernel {
+        Value::Num(_) => vec![1, 1],
+        Value::Tensor(tensor) => tensor.shape.clone(),
+        Value::GpuTensor(handle) => handle.shape().to_vec(),
+        _ => return Ok((None, None)),
+    };
+    let (fallback_scratch, result_bytes) = placement::conditional_host_bounds(
+        IMFILTER_BUILTIN,
+        image.shape(),
+        &kernel_shape,
+        options,
+        image_precision == ProviderPrecision::F32,
+        false,
+        true,
+    );
+    let fallback_readbacks = [image];
+    let explicit = runmat_accelerate_api::handle_is_explicit(image);
+    let upload_scratch = placement::host_scratch_excluding_result(fallback_scratch, result_bytes)?;
+    let conditional = if explicit {
+        placement::ConditionalFilterRoute::Provider(placement::ConditionalProviderRoute {
+            operation_scratch: upload_scratch,
+            readbacks: &fallback_readbacks,
+        })
+    } else {
+        placement::ConditionalFilterRoute::Host(placement::ConditionalHostRoute {
+            result_bytes,
+            operation_scratch: fallback_scratch,
+            readbacks: &fallback_readbacks,
+        })
+    };
     Ok(
         match placement::select_prepared(
-            runtime,
-            IMFILTER_BUILTIN,
-            image,
+            placement::FilterRouteRequest {
+                runtime,
+                semantic_operation: IMFILTER_BUILTIN,
+                image,
+                options,
+                conditional: Some(conditional),
+            },
             original,
             projected,
-            options,
             scratch,
-            None,
         )? {
             Some(prepared) => (
                 Some(prepared.selection),

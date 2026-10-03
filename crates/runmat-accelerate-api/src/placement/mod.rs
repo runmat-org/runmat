@@ -48,8 +48,9 @@ pub use execution_inventory::{
     RUNMAT_CUDA_PROVIDER_ID, RUNMAT_WGPU_PROVIDER_ID,
 };
 pub use feasibility::{
-    ProviderFeasibility, ProviderFeasibilityQuery, ProviderOperationIdentity, ProviderRejection,
-    ProviderRejectionCode, ProviderResourceEstimate, ProviderTransferOutputBound, ProviderWorkload,
+    ProviderFeasibility, ProviderFeasibilityQuery, ProviderNumericUploadPhysicalEvidence,
+    ProviderOperationIdentity, ProviderRejection, ProviderRejectionCode, ProviderResourceEstimate,
+    ProviderTransferOutputBound, ProviderWorkload,
 };
 pub use representation::{
     ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderStorage,

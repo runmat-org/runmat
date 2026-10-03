@@ -125,6 +125,19 @@ pub struct ProviderResourceEstimate {
     pub dispatches: Option<u32>,
 }
 
+/// Provider-owned physical evidence for one exact numeric host-to-device
+/// upload used inside a selected operation's conditional continuation.
+/// `provider_scratch_bytes` excludes the newly retained output but includes
+/// completion instrumentation that coexists with it. Unknown implementations
+/// return no evidence instead of fabricating zero staging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderNumericUploadPhysicalEvidence {
+    pub output_requested_bytes: u64,
+    pub provider_scratch_bytes: runmat_execution::ResourceByteBound,
+    pub completion_queue_slots: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderRejectionCode {

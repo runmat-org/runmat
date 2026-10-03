@@ -740,6 +740,47 @@ fn conditional_provider_upload_peaks_sequential_host_and_device_stages() {
 }
 
 #[test]
+fn conditional_upload_retains_prepared_input_during_fallback_publication() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.preparation = CandidatePreparationState::Ready;
+    provider.resources.retained_bytes = 16.into();
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 32,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_host_workspace = Some(0.into());
+    provider.resources.provider_input_stages = Some(
+        ProviderInputStageDemands::sequential([ProviderInputStageDemand {
+            device_id: 7,
+            incremental_peak_bytes: 24.into(),
+            queue_slots: 1,
+        }])
+        .unwrap(),
+    );
+    provider.presentation =
+        runmat_execution::CandidateOutputPresentation::ConditionalProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_result_bytes: Some(16.into()),
+            host_scratch_bytes: 0.into(),
+            // The prepared 16-byte H remains live with the 8-byte completion
+            // fence; the partition adds the new 16-byte output separately.
+            provider_scratch_bytes: 24.into(),
+            queue_slots: 1,
+        };
+    let mut route = request(vec![provider]);
+    route.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    route.resources.providers[0].scratch_available_bytes = Some(40);
+    assert!(session.select_whole_work(route.clone()).is_ok());
+    route.resources.providers[0].scratch_available_bytes = Some(39);
+    assert_eq!(
+        session.select_whole_work(route).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
 fn provider_input_stages_include_live_preparation_and_peak_against_execution() {
     let session = PlacementSession::default();
     let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);

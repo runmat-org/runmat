@@ -305,6 +305,49 @@ impl AccelProvider for WgpuProvider {
         crate::placement::imfilter_physical_evidence(self, query)
     }
 
+    fn numeric_upload_physical_evidence(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence> {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderFeasibility, ProviderLayout, ProviderOperationFamily,
+            ProviderResidency, ProviderStorage,
+        };
+        if query.operation.0 != "transfer.upload"
+            || query.family != ProviderOperationFamily::Upload
+            || query.inputs.len() != 1
+            || query.outputs.len() != 1
+            || query.workload.requested_outputs != Some(1)
+        {
+            return None;
+        }
+        let output = &query.outputs[0];
+        if !matches!(
+            output.element_type,
+            ProviderElementType::F32 | ProviderElementType::F64
+        ) || output.storage != ProviderStorage::DenseReal
+            || output.layout != ProviderLayout::ColumnMajorContiguous
+            || output.residency != ProviderResidency::Device
+        {
+            return None;
+        }
+        let ProviderFeasibility::Supported { estimate } = self.query_feasibility(query) else {
+            return None;
+        };
+        Some(
+            runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence {
+                output_requested_bytes: estimate.output_bytes?,
+                // create_buffer_init owns the output directly. The only extra
+                // requested buffer is the observed completion fence submitted
+                // after publication, including empty logical payloads.
+                provider_scratch_bytes: runmat_execution::ResourceByteBound::Known(
+                    crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
+                ),
+                completion_queue_slots: 1,
+            },
+        )
+    }
+
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
         self.export_context_exec(kind)
     }

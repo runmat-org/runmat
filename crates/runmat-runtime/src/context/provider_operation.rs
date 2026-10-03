@@ -32,6 +32,18 @@ pub(crate) struct ExactProviderReadback<'a> {
     pub(crate) prior_created_bytes: ResourceByteBound,
 }
 
+/// Physical continuation admitted only for an Unsupported provider hook that
+/// computes on host and restores to this same original provider owner.
+#[derive(Clone, Copy)]
+pub(crate) struct ExactConditionalProviderUpload {
+    pub(crate) provider_output_requested_bytes: u64,
+    pub(crate) transfer_bytes: Option<u64>,
+    pub(crate) host_result_bytes: ResourceByteBound,
+    pub(crate) host_scratch_bytes: ResourceByteBound,
+    pub(crate) provider_scratch_bytes: ResourceByteBound,
+    pub(crate) queue_slots: u32,
+}
+
 pub(crate) struct ExactProviderOperation<'a> {
     pub(crate) provider: &'static dyn AccelProvider,
     pub(crate) query: &'a ProviderFeasibilityQuery,
@@ -60,20 +72,33 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// returns Unsupported. This is one conditional route, not an equivalent
     /// host alternative offered to placement policy.
     pub(crate) conditional_host_fallback: Option<ResourceByteBound>,
+    pub(crate) conditional_provider_upload: Option<ExactConditionalProviderUpload>,
 }
 
 pub(crate) struct SelectedProviderOperation {
     provider: &'static dyn AccelProvider,
     receipt: HostPresentationReceipt,
+    conditional_output_requested_bytes: Option<u64>,
 }
 
 impl SelectedProviderOperation {
+    pub(crate) fn begin_conditional_provider_upload(&mut self) {
+        self.receipt.begin_conditional_provider_upload();
+    }
+
     pub(crate) fn recorder(&self) -> ProviderOperationRecorder {
         self.receipt.recorder()
     }
 
     pub(crate) fn provider(&self) -> &'static dyn AccelProvider {
         self.provider
+    }
+
+    pub(crate) fn admits_conditional_provider_upload(&self, output: &GpuTensorHandle) -> bool {
+        self.conditional_output_requested_bytes
+            .is_some_and(|bytes| output.physical().requested_bytes() == bytes)
+            && output.device_id() == self.provider.device_id()
+            && output.allocation_lease().validate_live().is_ok()
     }
 
     pub(crate) fn finish(
@@ -85,6 +110,10 @@ impl SelectedProviderOperation {
 
     pub(crate) fn finish_conditional_host_fallback(self) {
         self.receipt.finish_conditional_host_fallback();
+    }
+
+    pub(crate) fn finish_conditional_provider_upload(self) {
+        self.receipt.finish_conditional_provider_upload();
     }
 }
 
@@ -100,9 +129,28 @@ pub(crate) fn select_exact_provider_operation(
     };
     let provider = request.provider;
     let query = request.query;
+    if request.conditional_host_fallback.is_some() && request.conditional_provider_upload.is_some()
+    {
+        return Err(build_runtime_error(
+            "provider operation has conflicting conditional publications",
+        )
+        .with_identifier("RunMat:Placement:InvalidConditionalPresentation")
+        .build());
+    }
     let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(query) else {
         return Ok(None);
     };
+    if request
+        .conditional_provider_upload
+        .as_ref()
+        .is_some_and(|upload| estimate.output_bytes != Some(upload.provider_output_requested_bytes))
+    {
+        return Err(build_runtime_error(
+            "conditional provider upload has a different physical output bound",
+        )
+        .with_identifier("RunMat:Placement:InvalidConditionalPresentation")
+        .build());
+    }
     let ProviderObservationCapability::Supported(observation) =
         provider.operation_observation_capability(query)
     else {
@@ -119,6 +167,7 @@ pub(crate) fn select_exact_provider_operation(
     let mut input_stages = Vec::new();
     let mut host_scratch =
         combine_host_scratch(request.host_scratch, request.provider_host_scratch)?;
+    let mut readback_host_workspace = ResourceByteBound::Known(0);
     for readback in request.readbacks {
         let source = readback.source;
         let Some(source_provider) = provider_for_handle(source) else {
@@ -173,10 +222,9 @@ pub(crate) fn select_exact_provider_operation(
             }
             return Ok(None);
         }
-        host_scratch = combine_host_scratch(
-            host_scratch,
-            source_provider.download_numeric_host_workspace_bound(source),
-        )?;
+        let workspace = source_provider.download_numeric_host_workspace_bound(source);
+        readback_host_workspace = combine_host_scratch(readback_host_workspace, workspace)?;
+        host_scratch = combine_host_scratch(host_scratch, workspace)?;
         let stage_peak = sum_resource_bounds(
             readback.prior_created_bytes,
             source_provider.download_numeric_provider_scratch_bound(source),
@@ -234,6 +282,17 @@ pub(crate) fn select_exact_provider_operation(
             })?,
         )
     };
+    let conditional_provider_upload = if let Some(upload) = request.conditional_provider_upload {
+        Some(ExactConditionalProviderUpload {
+            host_scratch_bytes: combine_host_scratch(
+                combine_host_scratch(request.host_scratch, readback_host_workspace)?,
+                upload.host_scratch_bytes,
+            )?,
+            ..upload
+        })
+    } else {
+        None
+    };
     let provider_digest = Digest::sha256(
         serde_json::to_vec(&(provider.capability_snapshot(), &source_capabilities))
             .expect("capability snapshot serializes"),
@@ -256,6 +315,17 @@ pub(crate) fn select_exact_provider_operation(
                 input_stages,
                 host_scratch,
                 request.output_queue_slots,
+                request.conditional_host_fallback,
+                conditional_provider_upload.as_ref().map(|upload| {
+                    (
+                        upload.transfer_bytes,
+                        upload.provider_output_requested_bytes,
+                        upload.host_result_bytes,
+                        upload.host_scratch_bytes,
+                        upload.provider_scratch_bytes,
+                        upload.queue_slots,
+                    )
+                }),
                 provider.device_id(),
             ))
             .expect("typed provider operation serializes"),
@@ -287,12 +357,32 @@ pub(crate) fn select_exact_provider_operation(
                 device_id: provider.device_id(),
             }
         },
-        presentation: CandidateOutputPresentation::Direct,
+        presentation: conditional_provider_upload.as_ref().map_or(
+            CandidateOutputPresentation::Direct,
+            |upload| CandidateOutputPresentation::ConditionalProviderUpload {
+                device_id: provider.device_id(),
+                transfer_bytes: upload.transfer_bytes,
+                host_result_bytes: Some(upload.host_result_bytes),
+                host_scratch_bytes: upload.host_scratch_bytes,
+                provider_scratch_bytes: upload.provider_scratch_bytes,
+                queue_slots: upload.queue_slots,
+            },
+        ),
         route_facts: Digest::sha256(
             serde_json::to_vec(&(
                 query,
                 &estimate,
                 request.conditional_host_fallback,
+                conditional_provider_upload.as_ref().map(|upload| {
+                    (
+                        upload.transfer_bytes,
+                        upload.provider_output_requested_bytes,
+                        upload.host_result_bytes,
+                        upload.host_scratch_bytes,
+                        upload.provider_scratch_bytes,
+                        upload.queue_slots,
+                    )
+                }),
                 input_stages,
                 request.output_queue_slots,
             ))
@@ -360,9 +450,14 @@ pub(crate) fn select_exact_provider_operation(
     if request.conditional_host_fallback.is_some() {
         receipt.allow_conditional_host_fallback();
     }
+    if conditional_provider_upload.is_some() {
+        receipt.allow_conditional_provider_upload();
+    }
     Ok(Some(SelectedProviderOperation {
         provider,
         receipt: HostPresentationReceipt::new(runtime.clone(), selected, receipt),
+        conditional_output_requested_bytes: conditional_provider_upload
+            .map(|upload| upload.provider_output_requested_bytes),
     }))
 }
 

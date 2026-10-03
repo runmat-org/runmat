@@ -34,6 +34,50 @@ fn single_input(
 
 #[test]
 #[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+fn actual_conditional_imfilter_upload_has_physical_empty_floor_and_fence() {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
+        ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderStorage,
+        ProviderWorkload,
+    };
+    let provider = provider();
+    for (shape, physical_bytes) in [(vec![2, 2], 16), (vec![0, 2], 4)] {
+        let output = ProviderRepresentation {
+            element_type: ProviderElementType::F32,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape,
+            residency: ProviderResidency::Device,
+        };
+        let query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("transfer.upload"),
+            family: ProviderOperationFamily::Upload,
+            inputs: vec![ProviderRepresentation {
+                residency: ProviderResidency::Host,
+                ..output.clone()
+            }],
+            outputs: vec![output],
+            workload: ProviderWorkload {
+                requested_outputs: Some(1),
+                ..ProviderWorkload::default()
+            },
+        };
+        let physical = provider
+            .numeric_upload_physical_evidence(&query)
+            .expect("exact native upload physical evidence");
+        assert_eq!(physical.output_requested_bytes, physical_bytes);
+        assert_eq!(physical.provider_scratch_bytes, 8.into());
+        assert_eq!(physical.completion_queue_slots, 1);
+        let mut malformed = query.clone();
+        malformed.inputs[0].shape = vec![1, 4];
+        assert!(provider
+            .numeric_upload_physical_evidence(&malformed)
+            .is_none());
+    }
+}
+
+#[test]
+#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
 fn actual_imfilter_typed_direct_route_is_bound_to_both_live_inputs() {
     let provider = provider();
     let image = single_input(&provider, true, &[1.0, 2.0, 3.0, 4.0], &[2, 2]);

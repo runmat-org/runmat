@@ -194,98 +194,6 @@ fn projected_filter2_kernel(
     })
 }
 
-/// Upper bound of the operation-owned plan, evaluation and Single conversion
-/// vectors in `filter2_host`. Native readback payloads are budgeted by the
-/// source-owner hooks; the caller's preexisting host H is not copied here.
-fn conditional_host_bounds(
-    image_shape: &[usize],
-    kernel_shape: &[usize],
-    options: &ImfilterOptions,
-    image_single: bool,
-    kernel_single: bool,
-    prepared_kernel: bool,
-) -> (
-    runmat_execution::ResourceByteBound,
-    runmat_execution::ResourceByteBound,
-) {
-    use runmat_execution::{ResourceBoundUnavailable, ResourceByteBound};
-    let counts = (|| {
-        let output_shape =
-            filter_output_shape(image_shape, kernel_shape, options.shape, FILTER2_BUILTIN).ok()?;
-        let count = |shape: &[usize]| {
-            shape.iter().try_fold(1_u64, |total, &extent| {
-                total.checked_mul(u64::try_from(extent).ok()?)
-            })
-        };
-        Some((
-            count(image_shape)?,
-            count(kernel_shape)?,
-            count(&output_shape)?,
-            u64::try_from(image_shape.len().max(kernel_shape.len()).max(2)).ok()?,
-        ))
-    })();
-    let Some((image_len, kernel_len, output_len, rank)) = counts else {
-        return (
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
-        );
-    };
-    let output_single = image_single || kernel_single;
-    let result = (|| {
-        let point_width =
-            u64::try_from(std::mem::size_of::<super::imfilter::ImfilterKernelPoint>())
-                .ok()?
-                .checked_add(rank.checked_mul(8)?)?;
-        // The host plan names rank-sized shape, stride, origin, offset and
-        // index vectors; sixteen such vectors bounds their simultaneous sum.
-        let rank_vectors = rank.checked_mul(16)?.checked_mul(8)?;
-        let bytes = [
-            kernel_len.checked_mul(point_width)?,
-            rank_vectors,
-            if image_single {
-                image_len.checked_mul(8)?
-            } else {
-                0
-            },
-            if kernel_single {
-                kernel_len.checked_mul(8)?
-            } else {
-                0
-            },
-            output_len.checked_mul(8)?,
-            if output_single {
-                // materialize_f64 clones the f64 result before F32 collection.
-                output_len.checked_mul(12)?
-            } else {
-                0
-            },
-            if prepared_kernel {
-                // Scalar preparation constructs H and the cached tensor may
-                // be cloned for the Unsupported branch; both can coexist.
-                kernel_len
-                    .checked_mul(if kernel_single { 4 } else { 8 })?
-                    .checked_mul(2)?
-            } else {
-                0
-            },
-        ]
-        .into_iter()
-        .try_fold(0_u64, |total, bytes| total.checked_add(bytes))?;
-        let output = output_len.checked_mul(if output_single { 4 } else { 8 })?;
-        Some((bytes, output))
-    })();
-    match result {
-        Some((scratch, output)) => (
-            ResourceByteBound::Known(scratch),
-            ResourceByteBound::Known(output),
-        ),
-        None => (
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
-        ),
-    }
-}
-
 fn preflight_filter2_geometry(
     kernel: &Value,
     image: &Value,
@@ -440,7 +348,8 @@ async fn filter2_gpu(
         gpu_helpers::exact_provider_for_handle(handle)
             .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
     });
-    let (prepared_host_scratch, prepared_host_result) = conditional_host_bounds(
+    let (prepared_host_scratch, prepared_host_result) = placement::conditional_host_bounds(
+        FILTER2_BUILTIN,
         image_handle.shape(),
         &filter2_value_shape(&kernel_value).unwrap_or_default(),
         options,
@@ -453,18 +362,22 @@ async fn filter2_gpu(
         None
     } else if let Some(projected) = projected_filter2_kernel(&kernel_value) {
         placement::select_prepared(
-            runtime,
-            FILTER2_BUILTIN,
-            &image_handle,
+            placement::FilterRouteRequest {
+                runtime,
+                semantic_operation: FILTER2_BUILTIN,
+                image: &image_handle,
+                options,
+                conditional: Some(placement::ConditionalFilterRoute::Host(
+                    placement::ConditionalHostRoute {
+                        result_bytes: prepared_host_result,
+                        operation_scratch: prepared_host_scratch,
+                        readbacks: &prepared_fallback_readbacks,
+                    },
+                )),
+            },
             original_kernel,
             projected,
-            options,
             runmat_execution::ResourceByteBound::Known(0),
-            Some(placement::ConditionalHostRoute {
-                result_bytes: prepared_host_result,
-                operation_scratch: prepared_host_scratch,
-                readbacks: &prepared_fallback_readbacks,
-            }),
         )?
     } else {
         None
@@ -599,7 +512,8 @@ async fn filter2_gpu(
         }
     }
     let direct_fallback_readbacks = [&image_handle, &kernel_handle];
-    let (direct_host_scratch, direct_host_result) = conditional_host_bounds(
+    let (direct_host_scratch, direct_host_result) = placement::conditional_host_bounds(
+        FILTER2_BUILTIN,
         image_handle.shape(),
         kernel_handle.shape(),
         options,
@@ -611,17 +525,21 @@ async fn filter2_gpu(
         Some(prepared.selection)
     } else if uploaded_kernel.is_none() {
         placement::select_direct(
-            runtime,
-            FILTER2_BUILTIN,
-            &image_handle,
+            placement::FilterRouteRequest {
+                runtime,
+                semantic_operation: FILTER2_BUILTIN,
+                image: &image_handle,
+                options,
+                conditional: Some(placement::ConditionalFilterRoute::Host(
+                    placement::ConditionalHostRoute {
+                        result_bytes: direct_host_result,
+                        operation_scratch: direct_host_scratch,
+                        readbacks: &direct_fallback_readbacks,
+                    },
+                )),
+            },
             &kernel_handle,
-            options,
             false,
-            Some(placement::ConditionalHostRoute {
-                result_bytes: direct_host_result,
-                operation_scratch: direct_host_scratch,
-                readbacks: &direct_fallback_readbacks,
-            }),
         )?
     } else {
         None

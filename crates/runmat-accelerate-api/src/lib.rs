@@ -1903,6 +1903,16 @@ pub trait AccelProvider: AcceleratorThreadBound {
         query.conservative_transfer_feasibility(self.precision())
     }
 
+    /// Exact physical publication stage for a conditional host computation
+    /// restoring one numeric result to this provider. Default unavailable:
+    /// generic transfer feasibility alone does not prove staging or a fence.
+    fn numeric_upload_physical_evidence(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+    ) -> Option<ProviderNumericUploadPhysicalEvidence> {
+        None
+    }
+
     /// Exact native numeric readback admission for a live source handle.
     /// Generic dense feasibility cannot certify a lazy view's owner-specific
     /// transpose/readback path. The default keeps that route unsupported.

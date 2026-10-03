@@ -15,7 +15,8 @@ async fn filter2_builtin(
 #[test]
 fn conditional_host_workspace_is_typed_and_overflow_is_not_zero() {
     use runmat_execution::{ResourceBoundUnavailable, ResourceByteBound};
-    let (scratch, output) = conditional_host_bounds(
+    let (scratch, output) = placement::conditional_host_bounds(
+        FILTER2_BUILTIN,
         &[2, 2],
         &[1, 1],
         &ImfilterOptions::default(),
@@ -25,7 +26,15 @@ fn conditional_host_workspace_is_typed_and_overflow_is_not_zero() {
     );
     assert!(matches!(scratch, ResourceByteBound::Known(bytes) if bytes > 4 * 4));
     assert_eq!(output, ResourceByteBound::Known(16));
-    let (scratch, output) = conditional_host_bounds(
+    assert_eq!(
+        placement::host_scratch_excluding_result(scratch, output).unwrap(),
+        ResourceByteBound::Known(match scratch {
+            ResourceByteBound::Known(bytes) => bytes - 16,
+            _ => unreachable!("first bound is known"),
+        })
+    );
+    let (scratch, output) = placement::conditional_host_bounds(
+        FILTER2_BUILTIN,
         &[usize::MAX, 2],
         &[1, 1],
         &ImfilterOptions::default(),

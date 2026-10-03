@@ -62,6 +62,18 @@ impl HostPresentationReceipt {
         self.finish(Ok(true));
     }
 
+    /// An Unsupported hook may instead publish the admitted host result on
+    /// its exact provider owner. The upload must have completed publication
+    /// validation before this terminal witness is supplied.
+    pub(crate) fn finish_conditional_provider_upload(mut self) {
+        self.receipt.confirm_conditional_provider_upload();
+        self.finish(Ok(true));
+    }
+
+    pub(crate) fn begin_conditional_provider_upload(&mut self) {
+        self.receipt.begin_conditional_provider_upload();
+    }
+
     /// `published` means every requested output was validated as owned by the
     /// admitted provider and matched its admitted representation or bound.
     pub(crate) fn finish(mut self, published: Result<bool, ProviderObservationFailure>) {
