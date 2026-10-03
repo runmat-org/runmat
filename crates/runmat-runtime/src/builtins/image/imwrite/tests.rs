@@ -3,7 +3,8 @@ use futures::executor::block_on;
 use image::io::Reader as ImageReader;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
-    HostNumericTensorView, HostTensorView, ProviderPrecision, ThreadProviderGuard,
+    HostLogicalTensorView, HostNumericTensorView, HostTensorView, ProviderPrecision,
+    ThreadProviderGuard,
 };
 use runmat_value::IntegerStorage;
 use std::fs;
@@ -31,6 +32,12 @@ impl AccelProvider for CountingDownloadProvider {
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload_numeric_raw(host)
+    }
+    fn upload_logical_raw(
+        &self,
+        host: &HostLogicalTensorView<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload_logical_raw(host)
     }
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
@@ -196,6 +203,36 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
         IMWRITE_ERROR_INVALID_COLORMAP.identifier
     );
     assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
+    let resident_map = tensor(vec![0.0; 6], vec![2, 3], NumericDType::F64);
+    let resident_map =
+        crate::builtins::common::gpu_helpers::upload_tensor(owner, &resident_map).unwrap();
+    for bad_index in [f64::NAN, -1.0, 3.0] {
+        let indexed = Value::Tensor(tensor(vec![bad_index], vec![1, 1], NumericDType::F64));
+        let error = call(vec![
+            indexed,
+            Value::GpuTensor(resident_map.clone()),
+            path.clone(),
+        ])
+        .unwrap_err();
+        assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
+        assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
+    }
+    let logical_alpha = owner
+        .upload_logical(&HostLogicalTensorView {
+            data: &[1, 0, 0, 1],
+            shape: &[2, 2],
+        })
+        .unwrap();
+    let error = call(vec![
+        Value::GpuTensor(resident.clone()),
+        path.clone(),
+        Value::String("Alpha".into()),
+        Value::GpuTensor(logical_alpha.clone()),
+    ])
+    .unwrap_err();
+    assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_OPTION.identifier);
+    assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
+    assert!(block_on(owner.download_numeric(&logical_alpha)).is_ok());
     let rgb = tensor(vec![0.0; 12], vec![2, 2, 3], NumericDType::F64);
     let rgb = crate::builtins::common::gpu_helpers::upload_tensor(owner, &rgb).unwrap();
     let error = call(vec![

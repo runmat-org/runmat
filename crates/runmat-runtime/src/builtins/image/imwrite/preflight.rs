@@ -112,6 +112,21 @@ fn preflight_known_option_value(
         ImwriteOption::Alpha => {
             let shape = match value {
                 Value::GpuTensor(handle) => {
+                    if runmat_accelerate_api::handle_is_logical(handle)
+                        || (runmat_accelerate_api::handle_integer_type(handle).is_none()
+                            && !matches!(
+                                runmat_accelerate_api::handle_precision(handle),
+                                Some(
+                                    runmat_accelerate_api::ProviderPrecision::F32
+                                        | runmat_accelerate_api::ProviderPrecision::F64
+                                )
+                            ))
+                    {
+                        return Err(imwrite_error_with_detail(
+                            &IMWRITE_ERROR_INVALID_OPTION,
+                            "Alpha class must be double, single, uint8, or uint16",
+                        ));
+                    }
                     if runmat_accelerate_api::handle_integer_type(handle).is_some_and(|integer| {
                         !matches!(
                             integer,
@@ -226,6 +241,27 @@ pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult
                 &IMWRITE_ERROR_INVALID_COLORMAP,
                 "map must be an Nx3 colormap",
             ));
+        }
+        // Host X values and the resident map's row count are both known now.
+        // Use the same conversion/range rule as materialization before any map readback.
+        if !matches!(image, Value::GpuTensor(_)) {
+            let owned;
+            let indexed = match image {
+                Value::Tensor(tensor) => tensor,
+                _ => {
+                    owned = tensor_from_numeric_like(image, "image")?;
+                    &owned
+                }
+            };
+            for index in 0..indexed.len() {
+                let value = indexed.numeric_value_at(index).ok_or_else(|| {
+                    imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_IMAGE,
+                        format!("indexed image storage is unavailable at element {index}"),
+                    )
+                })?;
+                super::materialize::map_index(value, shape[0])?;
+            }
         }
     }
     Ok(())
