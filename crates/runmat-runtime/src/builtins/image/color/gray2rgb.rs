@@ -23,6 +23,7 @@ const NAME: &str = "gray2rgb";
 
 struct SelectedGrayHostSink {
     receipt: HostSinkReceipt,
+    source: runmat_accelerate_api::GpuTensorHandle,
     output_shape: Vec<usize>,
     output_dtype: Option<NumericDType>,
 }
@@ -127,6 +128,7 @@ async fn gray2rgb_builtin(
             )?
             .map(|receipt| SelectedGrayHostSink {
                 receipt,
+                source: handle.clone(),
                 output_shape: vec![handle.shape()[0], handle.shape()[1], 3],
                 output_dtype: if logical {
                     None
@@ -210,13 +212,14 @@ async fn gray2rgb_execute(
         gathered => gray2rgb_numeric(gathered),
     };
     if let Some(selected) = selected {
-        let published = match (&result, selected.output_dtype) {
-            (Ok(Value::LogicalArray(output)), None) => output.shape == selected.output_shape,
-            (Ok(Value::Tensor(output)), Some(dtype)) => {
-                output.shape == selected.output_shape && output.numeric_dtype() == dtype
-            }
-            _ => false,
-        };
+        let published = selected.source.allocation_lease().validate_live().is_ok()
+            && match (&result, selected.output_dtype) {
+                (Ok(Value::LogicalArray(output)), None) => output.shape == selected.output_shape,
+                (Ok(Value::Tensor(output)), Some(dtype)) => {
+                    output.shape == selected.output_shape && output.numeric_dtype() == dtype
+                }
+                _ => false,
+            };
         selected.receipt.finish(published);
     }
     result
