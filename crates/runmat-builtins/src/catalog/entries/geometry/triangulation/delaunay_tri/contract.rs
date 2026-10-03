@@ -132,14 +132,14 @@ pub const CONSTRUCTOR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
 const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "coordinates",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Typed-integer points and coordinate vectors enter the double geometry domain only in RunMat mode.",
     },
     BuiltinIntegerInputCapability {
         name: "constraints",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Typed-integer connectivity is parsed exactly through platform bounds and gated before gathering.",

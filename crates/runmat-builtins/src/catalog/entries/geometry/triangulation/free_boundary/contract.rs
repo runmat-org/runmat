@@ -67,7 +67,7 @@ pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TOPOLOGY_EXTENSION];
 
 const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "dt.ConnectivityList",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
     notes: "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly.",

@@ -107,8 +107,8 @@ pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
     super::super::free_boundary::DELAUNAY_TRI_INTEGER_TOPOLOGY_EXTENSION,
 ];
 const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "coordinates", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Typed-integer object and query coordinates are gated by delaunaytri-integer-coordinates." },
-    BuiltinIntegerInputCapability { name: "dt.ConnectivityList", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly." },
+    BuiltinIntegerInputCapability { name: "coordinates", classes: &crate::catalog::integer::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Typed-integer object and query coordinates are gated by delaunaytri-integer-coordinates." },
+    BuiltinIntegerInputCapability { name: "dt.ConnectivityList", classes: &crate::catalog::integer::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly." },
 ];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
     form: "[ti,bc] = pointLocation(dt,q)", inputs: &INTEGER_INPUTS,

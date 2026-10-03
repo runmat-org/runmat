@@ -96,7 +96,7 @@ pub const METHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "coordinates",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
     notes:
