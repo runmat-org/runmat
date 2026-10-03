@@ -2,14 +2,52 @@
 //! payload staging in the provider, never the memory used by its caller.
 
 use crate::FsProvider;
+use sha2::{Digest as _, Sha256};
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 /// Revision of the implementation and resource behavior being certified.
 /// A changed claim must use a new revision before placement profiles can be
 /// reused; no archive codec or HTTP revision is implied by this value.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
-pub enum FsResourceRevision {
-    NativeDirectFileHandlesV1,
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct FsResourceRevision([u8; 32]);
+
+impl FsResourceRevision {
+    /// `authority` identifies the provider implementation/configuration owner;
+    /// `revision_material` changes whenever its resource claim changes. The
+    /// length-delimited, domain-separated encoding prevents ambiguous pairs.
+    pub fn for_provider(authority: &str, revision_material: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(b"runmat.filesystem.resource-revision.v1\0");
+        hasher.update((authority.len() as u64).to_le_bytes());
+        hasher.update(authority.as_bytes());
+        hasher.update((revision_material.len() as u64).to_le_bytes());
+        hasher.update(revision_material);
+        Self(hasher.finalize().into())
+    }
+
+    pub const fn bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl Display for FsResourceRevision {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("sha256:")?;
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+impl serde::Serialize for FsResourceRevision {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
 }
 
 /// The provider reads/writes the supplied slice directly, without retaining
@@ -82,6 +120,27 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
+    fn provider_revisions_are_domain_separated_and_extensible() {
+        let native = FsResourceRevision::for_provider("runmat.native", b"direct-files-v1");
+        assert_ne!(
+            native,
+            FsResourceRevision::for_provider("third-party.provider", b"direct-files-v1")
+        );
+        assert_ne!(
+            native,
+            FsResourceRevision::for_provider("runmat.native", b"direct-files-v2")
+        );
+        assert_ne!(
+            FsResourceRevision::for_provider("ab", b"c"),
+            FsResourceRevision::for_provider("a", b"bc")
+        );
+        assert_eq!(
+            serde_json::to_value(native).expect("typed revision serializes"),
+            serde_json::Value::String(native.to_string())
+        );
+    }
+
+    #[test]
     fn memory_provider_does_not_inherit_native_payload_claim() {
         let provider: Arc<dyn FsProvider> = Arc::new(MemoryFsProvider::new());
         assert!(capture_resource_lease(provider).is_none());
@@ -98,7 +157,10 @@ mod tests {
         assert_eq!(
             captured.contract(),
             FsResourceContract {
-                revision: FsResourceRevision::NativeDirectFileHandlesV1,
+                revision: FsResourceRevision::for_provider(
+                    "runmat.filesystem.native",
+                    b"direct-file-handles-v1",
+                ),
                 opened_input_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
                 opened_output_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
             }
@@ -110,7 +172,10 @@ mod tests {
     impl FsResourceLease for RevocableLease {
         fn contract(&self) -> FsResourceContract {
             FsResourceContract {
-                revision: FsResourceRevision::NativeDirectFileHandlesV1,
+                revision: FsResourceRevision::for_provider(
+                    "test.revocable",
+                    b"direct-file-handles-v1",
+                ),
                 opened_input_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
                 opened_output_handle: None,
             }

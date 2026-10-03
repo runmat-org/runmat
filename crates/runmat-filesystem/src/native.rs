@@ -193,7 +193,10 @@ struct NativeDirectFileLease;
 impl FsResourceLease for NativeDirectFileLease {
     fn contract(&self) -> FsResourceContract {
         FsResourceContract {
-            revision: FsResourceRevision::NativeDirectFileHandlesV1,
+            revision: FsResourceRevision::for_provider(
+                "runmat.filesystem.native",
+                b"direct-file-handles-v1",
+            ),
             opened_input_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
             opened_output_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
         }
