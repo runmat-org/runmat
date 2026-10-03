@@ -2,7 +2,10 @@
 
 use super::super::host_presentation::HostPresentationReceipt;
 use runmat_accelerate_api::observation::{ProviderObservationFailure, ProviderOperationRecorder};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderFeasibilityQuery};
+use runmat_accelerate_api::{
+    provider_for_handle, same_provider_instance, AccelProvider, GpuTensorHandle,
+    ProviderFeasibilityQuery,
+};
 use runmat_execution::{Digest, ProviderInputStageDemands, ResourceByteBound};
 
 /// An original resident operand whose native readback occurs during this
@@ -120,6 +123,15 @@ impl ConditionalUploadPublication {
     }
 }
 
+fn conditional_output_owner_valid(
+    provider: &'static dyn AccelProvider,
+    output: &GpuTensorHandle,
+) -> bool {
+    output.device_id() == provider.device_id()
+        && output.allocation_lease().validate_live().is_ok()
+        && provider_for_handle(output).is_some_and(|owner| same_provider_instance(owner, provider))
+}
+
 impl SelectedProviderOperation {
     pub(crate) fn begin_conditional_provider_upload(&mut self) {
         self.conditional_upload.begin();
@@ -142,8 +154,7 @@ impl SelectedProviderOperation {
     pub(crate) fn admits_conditional_provider_upload(&mut self, output: &GpuTensorHandle) -> bool {
         self.conditional_upload.validate(
             output.physical().requested_bytes(),
-            output.device_id() == self.provider.device_id()
-                && output.allocation_lease().validate_live().is_ok(),
+            conditional_output_owner_valid(self.provider, output),
         )
     }
 
@@ -195,7 +206,11 @@ impl SelectedProviderOperation {
 
 #[cfg(test)]
 mod tests {
-    use super::ConditionalUploadPublication;
+    use super::{conditional_output_owner_valid, ConditionalUploadPublication};
+    use crate::builtins::common::gpu_helpers;
+    use runmat_accelerate::simple_provider::InProcessProvider;
+    use runmat_accelerate_api::{same_provider_instance, AccelProvider, ThreadProviderGuard};
+    use runmat_value::Tensor;
 
     #[test]
     fn conditional_physical_publication_needs_exact_witness_and_rejection_is_terminal() {
@@ -216,5 +231,29 @@ mod tests {
         let mut premature = ConditionalUploadPublication::new(Some(8));
         assert!(!premature.validate(8, true));
         assert!(premature.conditional_attempted());
+    }
+
+    #[test]
+    fn same_device_foreign_facade_is_not_a_conditional_output_owner() {
+        let owner: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+        let foreign: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+        assert_eq!(owner.device_id(), foreign.device_id());
+        assert!(!same_provider_instance(owner, foreign));
+        let _selected_owner = ThreadProviderGuard::set(Some(owner));
+        let output = gpu_helpers::upload_tensor(
+            owner,
+            &Tensor::new(vec![1.0], vec![1, 1]).expect("one-element result"),
+        )
+        .expect("owner result");
+        assert!(!conditional_output_owner_valid(foreign, &output));
+        let mut selected =
+            ConditionalUploadPublication::new(Some(output.physical().requested_bytes()));
+        selected.begin();
+        assert!(!selected.validate(
+            output.physical().requested_bytes(),
+            conditional_output_owner_valid(foreign, &output),
+        ));
+        assert!(!selected.validated());
+        assert!(output.allocation_lease().validate_live().is_ok());
     }
 }
