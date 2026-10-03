@@ -34,7 +34,7 @@ pub(super) async fn imfilter_gpu(
     })?;
     let host_only =
         output_class.provider_precision().is_none() && valid_public_kernel(&kernel_value);
-    let (host_sink, host_upload) = if host_only {
+    let (host_sink, mut host_upload) = if host_only {
         let kernel_shape =
             imfilter_value_shape(&kernel_value).expect("admitted public H has numeric geometry");
         let readbacks = std::iter::once(image_handle.clone())
@@ -136,8 +136,10 @@ pub(super) async fn imfilter_gpu(
                     &expected_shape,
                     output_class,
                     provider,
-                ) || host_upload.as_ref().is_some_and(|receipt| match value {
-                    Value::GpuTensor(output) => !receipt.admits_published_outputs(&[output]),
+                ) || host_upload.as_mut().is_some_and(|receipt| match value {
+                    Value::GpuTensor(output) => {
+                        receipt.validate_published_outputs(&[output]).is_err()
+                    }
                     _ => true,
                 })
             }) {
