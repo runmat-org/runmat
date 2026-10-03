@@ -8,6 +8,7 @@ pub(crate) async fn extract_remote_archive(
     url: &Url,
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
+    provider: std::sync::Arc<dyn vfs::FsProvider>,
 ) -> BuiltinResult<Vec<String>> {
     let request = HttpRequest {
         url: url.clone(),
@@ -30,18 +31,23 @@ pub(crate) async fn extract_remote_archive(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let temp = stream_to_temp(&mut body, runtime).await?;
-        super::super::prepare_output_folder(output_folder, runtime).await?;
+        super::super::prepare_output_folder(output_folder, runtime, provider.as_ref()).await?;
         super::super::check_cancelled(runtime)?;
-        super::super::extract_archive_file_on_worker(temp.path.clone(), output_folder.to_path_buf())
-            .await
+        super::super::extract_archive_file_on_worker(
+            temp,
+            output_folder.to_path_buf(),
+            runtime.map(crate::context::RuntimeContext::cancellation),
+            provider,
+        )
+        .await
     }
 
     #[cfg(target_arch = "wasm32")]
     {
         let bytes = stream_to_memory(&mut body, runtime).await?;
-        super::super::prepare_output_folder(output_folder, runtime).await?;
+        super::super::prepare_output_folder(output_folder, runtime, provider.as_ref()).await?;
         super::super::check_cancelled(runtime)?;
-        super::super::extract_archive(Cursor::new(bytes), output_folder).await
+        super::super::extract_archive(Cursor::new(bytes), output_folder, runtime, provider).await
     }
 }
 
@@ -50,9 +56,7 @@ async fn stream_to_temp(
     body: &mut crate::http::HttpBodyStream,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<TempArchive> {
-    let (temp_path, mut out) = create_unique_temp_archive()?;
-    // Construct the cleanup lease immediately after create_new succeeds.
-    let temp = TempArchive { path: temp_path };
+    let mut temp = TempArchive::create()?;
     let mut written = 0u64;
     while let Some(chunk) = transport::next_body_chunk(body, runtime)
         .await
@@ -61,12 +65,12 @@ async fn stream_to_temp(
         written = checked_downloaded_bytes(written, chunk.len())?;
         for part in chunk.chunks(64 * 1024) {
             super::super::check_cancelled(runtime)?;
-            out.write_all(part).map_err(|err| {
+            temp.write_all(part).map_err(|err| {
                 unzip_error_with_source(
                     &UNZIP_ERROR_IO,
                     format!(
                         "unzip: unable to write temporary archive '{}': {err}",
-                        temp.path.display()
+                        temp.path().display()
                     ),
                     err,
                 )
@@ -74,16 +78,17 @@ async fn stream_to_temp(
         }
     }
     super::super::check_cancelled(runtime)?;
-    out.flush().map_err(|err| {
+    temp.flush().map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
             format!(
                 "unzip: unable to flush temporary archive '{}': {err}",
-                temp.path.display()
+                temp.path().display()
             ),
             err,
         )
     })?;
+    temp.close();
     Ok(temp)
 }
 

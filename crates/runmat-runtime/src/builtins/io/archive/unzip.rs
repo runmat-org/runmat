@@ -60,16 +60,17 @@ pub async fn evaluate(
 ) -> BuiltinResult<UnzipResult> {
     let request = parse_arguments(args)?;
     check_cancelled(runtime)?;
+    let output_provider = vfs::current_provider();
     let output_folder = resolve_output_folder(request.output_folder.as_deref()).await?;
 
     let filenames = match request.archive {
         runmat_builtins::UnzipSourceRoute::Http(url) => {
-            extract_remote_archive(&url, &output_folder, runtime).await?
+            extract_remote_archive(&url, &output_folder, runtime, output_provider).await?
         }
         runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
             let path = resolve_archive_path(&path)?;
-            prepare_output_folder(&output_folder, runtime).await?;
-            extract_local_archive(&path, &output_folder).await?
+            prepare_output_folder(&output_folder, runtime, output_provider.as_ref()).await?;
+            extract_local_archive(&path, &output_folder, runtime, output_provider).await?
         }
     };
     check_cancelled(runtime)?;
@@ -80,9 +81,11 @@ pub async fn evaluate(
 async fn prepare_output_folder(
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
+    provider: &dyn vfs::FsProvider,
 ) -> BuiltinResult<()> {
     check_cancelled(runtime)?;
-    vfs::create_dir_all_async(output_folder)
+    provider
+        .create_dir_all(output_folder)
         .await
         .map_err(|err| {
             unzip_error_with_source(
@@ -94,7 +97,7 @@ async fn prepare_output_folder(
                 err,
             )
         })?;
-    reject_symlink_path(output_folder).await?;
+    reject_symlink_path(provider, output_folder).await?;
     check_cancelled(runtime)
 }
 

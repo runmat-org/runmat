@@ -1,24 +1,44 @@
 use super::*;
 
+mod control;
+use self::control::ExtractionControl;
+mod partial;
+use self::partial::PartialEntry;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) async fn extract_archive_file_on_worker(
-    path: PathBuf,
+    input: super::source::TempArchive,
     output_folder: PathBuf,
+    cancellation: Option<runmat_execution::cancellation::CancellationToken>,
+    provider: std::sync::Arc<dyn vfs::FsProvider>,
 ) -> BuiltinResult<Vec<String>> {
     let (tx, rx) = futures::channel::oneshot::channel();
+    let abandonment = control::Abandonment::new();
+    let worker_abandonment = abandonment.worker_flag();
     std::thread::Builder::new()
         .name("runmat-unzip-extract".to_string())
         .spawn(move || {
             let result = (|| {
-                let file = std::fs::File::open(&path).map_err(|err| {
+                let file = std::fs::File::open(input.path()).map_err(|err| {
                     unzip_error_with_source(
                         &UNZIP_ERROR_IO,
-                        format!("unzip: unable to open '{}': {err}", path.display()),
+                        format!("unzip: unable to open '{}': {err}", input.path().display()),
                         err,
                     )
                 })?;
-                futures::executor::block_on(extract_archive_impl(file, &output_folder))
+                let control = ExtractionControl::native(cancellation, worker_abandonment);
+                futures::executor::block_on(extract_archive_impl(
+                    file,
+                    &output_folder,
+                    control,
+                    provider,
+                ))
             })();
+            // The worker, not the dropped caller future, owns the source until
+            // its last read and any partial-output cleanup have completed.
+            drop(input);
             let _ = tx.send(result);
         })
         .map_err(|err| {
@@ -28,27 +48,42 @@ pub(super) async fn extract_archive_file_on_worker(
                 err,
             )
         })?;
-    rx.await.map_err(|err| {
+    let result = rx.await.map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
             format!("unzip: extraction worker did not return a result: {err}"),
             err,
         )
-    })?
+    })?;
+    abandonment.disarm();
+    result
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(super) async fn extract_archive<R>(
     reader: R,
     output_folder: &Path,
+    runtime: Option<&crate::context::RuntimeContext>,
+    provider: std::sync::Arc<dyn vfs::FsProvider>,
 ) -> BuiltinResult<Vec<String>>
 where
     R: Read + Seek,
 {
-    extract_archive_impl(reader, output_folder).await
+    extract_archive_impl(
+        reader,
+        output_folder,
+        ExtractionControl::browser(runtime),
+        provider,
+    )
+    .await
 }
 
-async fn extract_archive_impl<R>(reader: R, output_folder: &Path) -> BuiltinResult<Vec<String>>
+async fn extract_archive_impl<R>(
+    reader: R,
+    output_folder: &Path,
+    mut control: ExtractionControl,
+    provider: std::sync::Arc<dyn vfs::FsProvider>,
+) -> BuiltinResult<Vec<String>>
 where
     R: Read + Seek,
 {
@@ -57,32 +92,31 @@ where
     let mut total_written = 0u64;
 
     for index in 0..archive.len() {
+        control.completed(1).await?;
         let mut entry = archive.by_index(index).map_err(map_zip_error)?;
         let relative = safe_archive_path(entry.name())?;
         if relative.as_os_str().is_empty() {
             continue;
         }
         let output_path = output_folder.join(&relative);
-        reject_symlink_components(output_folder, &relative).await?;
+        reject_symlink_components(provider.as_ref(), output_folder, &relative).await?;
 
         if entry.is_dir() || entry.name().ends_with('/') || entry.name().ends_with('\\') {
-            vfs::create_dir_all_async(&output_path)
-                .await
-                .map_err(|err| {
-                    unzip_error_with_source(
-                        &UNZIP_ERROR_IO,
-                        format!(
-                            "unzip: unable to create folder '{}': {err}",
-                            output_path.display()
-                        ),
-                        err,
-                    )
-                })?;
+            provider.create_dir_all(&output_path).await.map_err(|err| {
+                unzip_error_with_source(
+                    &UNZIP_ERROR_IO,
+                    format!(
+                        "unzip: unable to create folder '{}': {err}",
+                        output_path.display()
+                    ),
+                    err,
+                )
+            })?;
             continue;
         }
 
         if let Some(parent) = output_path.parent() {
-            vfs::create_dir_all_async(parent).await.map_err(|err| {
+            provider.create_dir_all(parent).await.map_err(|err| {
                 unzip_error_with_source(
                     &UNZIP_ERROR_IO,
                     format!(
@@ -93,26 +127,13 @@ where
                 )
             })?;
         }
-        reject_symlink_components(output_folder, &relative).await?;
+        reject_symlink_components(provider.as_ref(), output_folder, &relative).await?;
 
-        let temp_output_path = temporary_output_path(&output_path);
-        let mut open_options = vfs::OpenOptions::new();
-        open_options.write(true).create_new(true);
-        let mut out = open_options
-            .open_async(&temp_output_path)
-            .await
-            .map_err(|err| {
-                unzip_error_with_source(
-                    &UNZIP_ERROR_IO,
-                    format!(
-                        "unzip: unable to create temporary output '{}': {err}",
-                        temp_output_path.display()
-                    ),
-                    err,
-                )
-            })?;
+        let mut partial =
+            PartialEntry::create(temporary_output_path(&output_path), provider.clone()).await?;
         let mut buffer = [0u8; 64 * 1024];
         loop {
+            control.completed(0).await?;
             let read = entry.read(&mut buffer).map_err(|err| {
                 unzip_error_with_source(
                     &UNZIP_ERROR_ZIP,
@@ -135,47 +156,42 @@ where
                     "unzip: total extracted size exceeds RunMat safety limit",
                 ));
             }
-            out.write_all(&buffer[..read]).map_err(|err| {
+            partial.write_all(&buffer[..read]).map_err(|err| {
                 unzip_error_with_source(
                     &UNZIP_ERROR_IO,
                     format!(
                         "unzip: unable to write temporary output '{}': {err}",
-                        temp_output_path.display()
+                        partial.path().display()
                     ),
                     err,
                 )
             })?;
+            control.completed(read as u64).await?;
         }
-        out.flush_async().await.map_err(|err| {
+        partial.flush().await.map_err(|err| {
             unzip_error_with_source(
                 &UNZIP_ERROR_IO,
                 format!(
                     "unzip: unable to flush temporary output '{}': {err}",
-                    temp_output_path.display()
+                    partial.path().display()
                 ),
                 err,
             )
         })?;
-        out.sync_all_async().await.map_err(|err| {
+        partial.sync_all().await.map_err(|err| {
             unzip_error_with_source(
                 &UNZIP_ERROR_IO,
                 format!(
                     "unzip: unable to sync temporary output '{}': {err}",
-                    temp_output_path.display()
+                    partial.path().display()
                 ),
                 err,
             )
         })?;
-        drop(out);
-        reject_symlink_components(output_folder, &relative).await?;
-        if let Err(err) = vfs::rename_async(&temp_output_path, &output_path).await {
-            let _ = vfs::remove_file_async(&temp_output_path).await;
-            return Err(unzip_error_with_source(
-                &UNZIP_ERROR_IO,
-                format!("unzip: unable to create '{}': {err}", output_path.display()),
-                err,
-            ));
-        }
+        partial.close();
+        control.completed(0).await?;
+        reject_symlink_components(provider.as_ref(), output_folder, &relative).await?;
+        partial.commit_to(&output_path).await?;
         filenames.push(path_to_string(&output_path));
     }
 
@@ -198,8 +214,11 @@ fn temporary_output_path(path: &Path) -> PathBuf {
     ))
 }
 
-pub(super) async fn reject_symlink_path(path: &Path) -> BuiltinResult<()> {
-    match vfs::symlink_metadata_async(path).await {
+pub(super) async fn reject_symlink_path(
+    provider: &dyn vfs::FsProvider,
+    path: &Path,
+) -> BuiltinResult<()> {
+    match provider.symlink_metadata(path).await {
         Ok(metadata) if metadata.is_symlink() => Err(unzip_error_with(
             &UNZIP_ERROR_SECURITY,
             format!("unzip: output path '{}' is a symbolic link", path.display()),
@@ -214,12 +233,16 @@ pub(super) async fn reject_symlink_path(path: &Path) -> BuiltinResult<()> {
     }
 }
 
-async fn reject_symlink_components(root: &Path, relative: &Path) -> BuiltinResult<()> {
+async fn reject_symlink_components(
+    provider: &dyn vfs::FsProvider,
+    root: &Path,
+    relative: &Path,
+) -> BuiltinResult<()> {
     let mut current = root.to_path_buf();
-    reject_symlink_path(&current).await?;
+    reject_symlink_path(provider, &current).await?;
     for component in relative.components() {
         current.push(component.as_os_str());
-        reject_symlink_path(&current).await?;
+        reject_symlink_path(provider, &current).await?;
     }
     Ok(())
 }

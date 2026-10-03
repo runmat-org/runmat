@@ -7,15 +7,25 @@ pub(super) use http::extract_remote_archive;
 pub(super) async fn extract_local_archive(
     path: &Path,
     output_folder: &Path,
+    runtime: Option<&crate::context::RuntimeContext>,
+    provider: std::sync::Arc<dyn vfs::FsProvider>,
 ) -> BuiltinResult<Vec<String>> {
-    let temp = local_archive_to_temp_file(path).await?;
-    extract_archive_file_on_worker(temp.path.clone(), output_folder.to_path_buf()).await
+    let temp = local_archive_to_temp_file(path, runtime).await?;
+    extract_archive_file_on_worker(
+        temp,
+        output_folder.to_path_buf(),
+        runtime.map(crate::context::RuntimeContext::cancellation),
+        provider,
+    )
+    .await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(super) async fn extract_local_archive(
     path: &Path,
     output_folder: &Path,
+    runtime: Option<&crate::context::RuntimeContext>,
+    provider: std::sync::Arc<dyn vfs::FsProvider>,
 ) -> BuiltinResult<Vec<String>> {
     let file = File::open(path).map_err(|err| {
         unzip_error_with_source(
@@ -24,11 +34,14 @@ pub(super) async fn extract_local_archive(
             err,
         )
     })?;
-    extract_archive(file, output_folder).await
+    extract_archive(file, output_folder, runtime, provider).await
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn local_archive_to_temp_file(path: &Path) -> BuiltinResult<TempArchive> {
+async fn local_archive_to_temp_file(
+    path: &Path,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<TempArchive> {
     let mut input = File::open_async(path).await.map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
@@ -40,10 +53,11 @@ async fn local_archive_to_temp_file(path: &Path) -> BuiltinResult<TempArchive> {
         ensure_compressed_size_within_limit(metadata.len())?;
     }
 
-    let (temp_path, mut out) = create_unique_temp_archive()?;
+    let mut temp = TempArchive::create()?;
     let mut copied = 0u64;
     let mut buffer = [0u8; 64 * 1024];
     loop {
+        super::check_cancelled(runtime)?;
         let read = input.read(&mut buffer).map_err(|err| {
             unzip_error_with_source(
                 &UNZIP_ERROR_IO,
@@ -58,28 +72,29 @@ async fn local_archive_to_temp_file(path: &Path) -> BuiltinResult<TempArchive> {
             .checked_add(read as u64)
             .ok_or_else(|| unzip_error_with(&UNZIP_ERROR_IO, "unzip: archive is too large"))?;
         ensure_compressed_size_within_limit(copied)?;
-        out.write_all(&buffer[..read]).map_err(|err| {
+        temp.write_all(&buffer[..read]).map_err(|err| {
             unzip_error_with_source(
                 &UNZIP_ERROR_IO,
                 format!(
                     "unzip: unable to write temporary archive '{}': {err}",
-                    temp_path.display()
+                    temp.path().display()
                 ),
                 err,
             )
         })?;
     }
-    out.flush().map_err(|err| {
+    temp.flush().map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
             format!(
                 "unzip: unable to flush temporary archive '{}': {err}",
-                temp_path.display()
+                temp.path().display()
             ),
             err,
         )
     })?;
-    Ok(TempArchive { path: temp_path })
+    temp.close();
+    Ok(temp)
 }
 
 pub(super) fn resolve_archive_path(text: &str) -> BuiltinResult<PathBuf> {
@@ -118,13 +133,45 @@ pub(super) async fn resolve_output_folder(text: Option<&str>) -> BuiltinResult<P
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct TempArchive {
+pub(super) struct TempArchive {
     path: PathBuf,
+    file: Option<std::fs::File>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TempArchive {
+    pub(super) fn create() -> BuiltinResult<Self> {
+        let (path, file) = create_unique_temp_archive()?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
+    }
+
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(super) fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.file
+            .as_mut()
+            .expect("open temporary archive")
+            .write_all(bytes)
+    }
+
+    pub(super) fn flush(&mut self) -> std::io::Result<()> {
+        self.file.as_mut().expect("open temporary archive").flush()
+    }
+
+    pub(super) fn close(&mut self) {
+        self.file.take();
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Drop for TempArchive {
     fn drop(&mut self) {
+        self.close();
         let _ = std::fs::remove_file(&self.path);
     }
 }
