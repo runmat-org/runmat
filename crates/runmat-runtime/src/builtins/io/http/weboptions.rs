@@ -749,7 +749,7 @@ pub(crate) mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use crate::call_builtin_async;
+    use crate::call_builtin_async_in_context;
     use runmat_value::CellArray;
 
     fn spawn_server<F>(handler: F) -> String
@@ -775,7 +775,8 @@ pub(crate) mod tests {
     }
 
     fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<Value> {
-        futures::executor::block_on(call_builtin_async(name, args))
+        let runtime = crate::builtins::io::http::transport::test_runtime_context();
+        futures::executor::block_on(call_builtin_async_in_context(&runtime, name, args))
     }
 
     fn read_request(stream: &mut TcpStream) -> (String, Vec<u8>) {
