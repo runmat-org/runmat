@@ -83,11 +83,11 @@ fn asset_queries_reject_nonasset_before_projection() {
 fn asset_method_registration_keeps_exact_public_spellings() {
     let methods = geometry_asset_methods();
     let regions = methods
-        .get(&runmat_types::StaticMethodName::new("listRegions").into())
+        .get(&runmat_types::StaticMethodName::new("listRegions").owned())
         .expect("listRegions method");
     assert_eq!(regions.function_name, "geometry.listRegions");
     let meshes = methods
-        .get(&runmat_types::StaticMethodName::new("meshes").into())
+        .get(&runmat_types::StaticMethodName::new("meshes").owned())
         .expect("meshes method");
     assert_eq!(meshes.function_name, "geometry.meshes");
 }
