@@ -9,8 +9,11 @@ use runmat_accelerate_api::{
 /// observes queue completion, not merely the return of `create_buffer_init`.
 fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
     let operation = runmat_accelerate_api::ProviderOperationIdentity::new("transfer.upload");
-    let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation()
-        .filter(|recorder| recorder.expects_operation(&operation))
+    let Some(recorder) =
+        runmat_accelerate_api::observation::current_provider_observation().filter(|recorder| {
+            recorder.expects_operation(&operation)
+                || recorder.observes_conditional_provider_upload(provider.device_id())
+        })
     else {
         return Ok(());
     };
@@ -24,11 +27,13 @@ fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
         provider.submit(emission, pending, encoder)?;
         Ok(())
     })??;
-    recorder.confirm_submitted_provider_execution_after(
-        provider.device_id(),
-        &operation,
-        checkpoint,
-    );
+    if recorder.expects_operation(&operation) {
+        recorder.confirm_submitted_provider_execution_after(
+            provider.device_id(),
+            &operation,
+            checkpoint,
+        );
+    }
     Ok(())
 }
 use runmat_accelerate_api::{

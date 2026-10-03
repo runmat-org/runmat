@@ -222,6 +222,55 @@ fn conditional_host_fallback_is_one_completed_route_not_provider_execution() {
 }
 
 #[test]
+fn conditional_provider_upload_needs_its_own_admitted_outcome_and_completion() {
+    let operation = crate::ProviderOperationIdentity::new("imfilter");
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_provider_execution(7, operation.clone());
+    receipt.allow_conditional_provider_upload();
+    assert!(!receipt.recorder().observes_conditional_provider_upload(7));
+    receipt.begin_conditional_provider_upload();
+    assert!(receipt.recorder().observes_conditional_provider_upload(7));
+    assert!(!receipt.recorder().observes_conditional_provider_upload(8));
+    let fence = receipt.recorder().submission().unwrap();
+    receipt.confirm_conditional_provider_upload();
+    receipt.publish().unwrap();
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    fence.complete();
+    let observation = receipt.take_completed().unwrap();
+    assert!(matches!(
+        observation.status,
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+    assert_eq!(
+        observation.route_outcome,
+        Some(ProviderRouteOutcome::ConditionalProviderUpload)
+    );
+    assert!(receipt.take_completed().is_none());
+
+    let mut forbidden = ProviderOperationReceipt::new();
+    forbidden.require_provider_execution(7, operation.clone());
+    forbidden.allow_conditional_provider_upload();
+    forbidden.confirm_conditional_provider_upload();
+    assert_eq!(
+        forbidden.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+
+    let mut selected = ProviderOperationReceipt::new();
+    selected.require_provider_execution(7, operation);
+    selected.allow_conditional_provider_upload();
+    selected.begin_conditional_provider_upload();
+    selected
+        .recorder()
+        .confirm_provider_execution(7, &crate::ProviderOperationIdentity::new("imfilter"));
+    selected.confirm_conditional_provider_upload();
+    assert_eq!(
+        selected.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+}
+
+#[test]
 fn provider_success_cannot_be_relabelled_conditional_fallback() {
     let operation = crate::ProviderOperationIdentity::new("fspecial");
     let mut receipt = ProviderOperationReceipt::new();

@@ -110,6 +110,9 @@ pub enum ProviderObservationStatus {
 pub enum ProviderRouteOutcome {
     SelectedProvider,
     ConditionalHostFallback,
+    /// The selected hook returned Unsupported; the admitted conditional host
+    /// continuation published a validated result on the original provider.
+    ConditionalProviderUpload,
 }
 
 /// Stage measurements are separate from the end-to-end total: intervals may
