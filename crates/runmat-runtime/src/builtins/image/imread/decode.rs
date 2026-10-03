@@ -266,7 +266,7 @@ where
             "decoded sample class does not match image storage",
         ));
     }
-    let mut data = vec![T::default(); output_len];
+    let mut data = native_buffer::<T>(output_len)?;
     for row in 0..rows {
         for col in 0..cols {
             let source_base = (row * cols + col) * input_channels;
@@ -311,7 +311,7 @@ where
             "decoded alpha class does not match image storage",
         ));
     }
-    let mut data = vec![T::default(); pixels];
+    let mut data = native_buffer::<T>(pixels)?;
     for row in 0..rows {
         for col in 0..cols {
             let source_index = (row * cols + col) * input_channels + alpha_channel;
@@ -330,6 +330,12 @@ fn checked_interleaved_geometry(
     output_channels: usize,
     actual_len: usize,
 ) -> BuiltinResult<(usize, usize, usize)> {
+    if input_channels == 0 || output_channels == 0 || output_channels > input_channels {
+        return Err(imread_error_with_detail(
+            &IMREAD_ERROR_SHAPE,
+            "decoded image channel geometry is invalid",
+        ));
+    }
     let lengths = rows
         .checked_mul(cols)
         .and_then(|pixels| {
@@ -349,6 +355,32 @@ fn checked_interleaved_geometry(
         ));
     }
     Ok(lengths)
+}
+
+fn native_buffer<T: DecodedSample>(elements: usize) -> BuiltinResult<Vec<T>> {
+    let bytes = elements
+        .checked_mul(std::mem::size_of::<T>())
+        .ok_or_else(|| {
+            imread_error_with_detail(
+                &IMREAD_ERROR_SHAPE,
+                "decoded image allocation size overflows",
+            )
+        })?;
+    if bytes > isize::MAX as usize {
+        return Err(imread_error_with_detail(
+            &IMREAD_ERROR_SHAPE,
+            "decoded image allocation exceeds addressable storage",
+        ));
+    }
+    let mut values = Vec::new();
+    values.try_reserve_exact(elements).map_err(|_| {
+        imread_error_with_detail(
+            &IMREAD_ERROR_SHAPE,
+            "decoded image allocation is unavailable",
+        )
+    })?;
+    values.resize(elements, T::default());
+    Ok(values)
 }
 
 pub(super) fn empty_tensor_value() -> BuiltinResult<Value> {
@@ -372,6 +404,26 @@ mod tests {
             checked_interleaved_geometry(2, 3, 4, 3, 24).unwrap(),
             (6, 24, 18)
         );
+    }
+
+    #[test]
+    fn decoded_geometry_rejects_zero_or_excess_channels_before_allocation() {
+        for (input, output) in [(0, 1), (1, 0), (1, 2)] {
+            let error = checked_interleaved_geometry(0, 0, input, output, 0)
+                .expect_err("invalid channel contract");
+            assert_eq!(error.identifier(), IMREAD_ERROR_SHAPE.identifier);
+        }
+        let error = tensor_from_interleaved(&[1_u8], 1, 1, 1, 2, NumericDType::U8)
+            .expect_err("output channel exceeds decoded source");
+        assert_eq!(error.identifier(), IMREAD_ERROR_SHAPE.identifier);
+    }
+
+    #[test]
+    fn native_byte_capacity_is_checked_before_reservation() {
+        let elements = (isize::MAX as usize / std::mem::size_of::<u16>()) + 1;
+        let error = native_buffer::<u16>(elements).expect_err("addressable capacity exceeded");
+        assert_eq!(error.identifier(), IMREAD_ERROR_SHAPE.identifier);
+        assert_eq!(native_buffer::<u16>(3).unwrap(), vec![0_u16; 3]);
     }
 
     #[test]
