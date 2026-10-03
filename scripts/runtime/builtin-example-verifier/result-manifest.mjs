@@ -4,8 +4,9 @@ import { compareUtf8, digestObject } from "./identity.mjs";
 import { isExecutionLane, laneProduct } from "./lanes.mjs";
 import { requiredArtifactRoles } from "./plan.mjs";
 import { digest, enumValue, exactKeys, gitRevision, integer } from "./schema.mjs";
+import { validateRuntimeFeatureProbe } from "./runtime-feature-probe.mjs";
 
-export const SHARD_RESULT_SCHEMA = "runmat.builtin-examples.shard-result.v1";
+export const SHARD_RESULT_SCHEMA = "runmat.builtin-examples.shard-result.v2";
 export const RESULT_STATUSES = Object.freeze(["passed", "failed", "unavailable", "infra-error", "timed-out"]);
 
 export function buildShardResult(fields) {
@@ -25,6 +26,7 @@ export function buildShardResult(fields) {
         product: fields.product,
         artifactProfile: fields.artifactProfile,
         artifactManifestDigest: fields.artifactManifestDigest ?? null,
+        runtimeFeatureProbe: fields.runtimeFeatureProbe ?? null,
         environment: fields.environment,
         limits: fields.limits,
         adapter: fields.adapter,
@@ -39,7 +41,7 @@ export function buildShardResult(fields) {
 
 export function validateShardResult(manifest) {
     if (!manifest || manifest.schema !== SHARD_RESULT_SCHEMA) throw new Error("Unsupported builtin example shard result schema");
-    exactKeys(manifest, ["schema", "sourceRevision", "sourceState", "inventoryDigest", "planDigest", "runnerDigest", "lane", "shardIndex", "shardCount", "assignmentDigest", "product", "artifactProfile", "artifactManifestDigest", "environment", "limits", "adapter", "status", "results", "summary", "shardResultDigest"], "shard result");
+    exactKeys(manifest, ["schema", "sourceRevision", "sourceState", "inventoryDigest", "planDigest", "runnerDigest", "lane", "shardIndex", "shardCount", "assignmentDigest", "product", "artifactProfile", "artifactManifestDigest", "runtimeFeatureProbe", "environment", "limits", "adapter", "status", "results", "summary", "shardResultDigest"], "shard result");
     gitRevision(manifest.sourceRevision);
     enumValue(manifest.sourceState, ["clean", "dirty"], "shard source state");
     for (const [value, label] of [[manifest.inventoryDigest, "shard inventory digest"], [manifest.planDigest, "shard plan digest"], [manifest.runnerDigest, "shard runner digest"], [manifest.assignmentDigest, "shard assignment digest"], [manifest.shardResultDigest, "shard result digest"]]) digest(value, label);
@@ -47,6 +49,13 @@ export function validateShardResult(manifest) {
     if (!isExecutionLane(manifest.lane) || laneProduct(manifest.lane) !== manifest.product) throw new Error("Shard lane and product are inconsistent");
     requiredArtifactRoles(manifest.product, manifest.artifactProfile);
     if (manifest.artifactManifestDigest !== null) digest(manifest.artifactManifestDigest, "shard artifact manifest digest");
+    if (manifest.runtimeFeatureProbe !== null) {
+        if (manifest.product !== "native-cli" || manifest.artifactManifestDigest === null) throw new Error("Runtime feature probe is not bound to a native product artifact");
+        validateRuntimeFeatureProbe(manifest.runtimeFeatureProbe, manifest.artifactManifestDigest);
+    }
+    if (manifest.adapter?.available && manifest.product === "native-cli" && manifest.runtimeFeatureProbe === null) {
+        throw new Error("Available native shard lacks its staged runtime feature probe");
+    }
     integer(manifest.shardIndex, "shard index");
     integer(manifest.shardCount, "shard count", 1);
     if (manifest.shardIndex >= manifest.shardCount) throw new Error("Shard index is outside the shard count");

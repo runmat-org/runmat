@@ -6,7 +6,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { laneAdapterAvailability } from "./lanes.mjs";
 import { buildShardResult } from "./result-manifest.mjs";
-import { resolveArtifactPath } from "./artifacts.mjs";
+import { resolveArtifactPath, validateArtifactManifest } from "./artifacts.mjs";
+import { probeNativeRuntimeFeatures } from "./runtime-feature-probe.mjs";
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 
@@ -25,6 +26,13 @@ export function executeShard({ inventory, plan, lanePlan, shard, artifactManifes
         }, expected.map((unit) => baseResult(unit, "unavailable", { errorText: availability.reason }))));
     }
     if (!artifactManifest) throw new Error(`Lane ${lanePlan.lane} requires a ${lanePlan.product} artifact manifest`);
+    validateArtifactManifest(artifactManifest, { verifyFiles: true, manifestPath: artifactManifestPath });
+    const runtimeFeatureProbe = lanePlan.product === "native-cli"
+        ? probeNativeRuntimeFeatures(
+            resolveArtifactPath(artifactManifest, artifactManifestPath, "runmat-binary"),
+            artifactManifest.artifactManifestDigest
+        )
+        : null;
     const absoluteResult = resolve(resultPath);
     const shardWork = resolve(workDirectory ?? join(dirname(absoluteResult), `.${basename(absoluteResult)}.work`));
     mkdirSync(shardWork, { recursive: true });
@@ -49,6 +57,7 @@ export function executeShard({ inventory, plan, lanePlan, shard, artifactManifes
         RUNMAT_EXAMPLE_SHARD_INDEX: "0",
         RUNMAT_EXAMPLE_SHARD_COUNT: "1"
     };
+    if (runtimeFeatureProbe) env.RUNMAT_EXAMPLE_RUNTIME_FEATURE_PROBE = JSON.stringify(runtimeFeatureProbe);
     if (lanePlan.product === "native-cli") env.RUNMAT_EXAMPLE_NATIVE_BINARY = resolveArtifactPath(artifactManifest, artifactManifestPath, "runmat-binary");
     if (lanePlan.product === "browser-wasm") {
         env.RUNMAT_EXAMPLE_WASM_MODULE = resolveArtifactPath(artifactManifest, artifactManifestPath, "wasm-js");
@@ -62,6 +71,7 @@ export function executeShard({ inventory, plan, lanePlan, shard, artifactManifes
         timeout: lanePlan.limits.shardWallTimeoutMs,
         maxBuffer: lanePlan.limits.maxOutputBytes
     });
+    validateArtifactManifest(artifactManifest, { verifyFiles: true, manifestPath: artifactManifestPath });
     let results;
     if (completed.error || !safeExists(rawPath)) {
         const timedOut = completed.error?.code === "ETIMEDOUT";
@@ -79,7 +89,7 @@ export function executeShard({ inventory, plan, lanePlan, shard, artifactManifes
             }
         }
     }
-    return writeResult(resultPath, shardResult(plan, lanePlan, shard, artifactManifest, { available: true, reason: "" }, results));
+    return writeResult(resultPath, shardResult(plan, lanePlan, shard, artifactManifest, { available: true, reason: "" }, results, runtimeFeatureProbe));
 }
 
 export function normalizeRunnerRecords(expected, raw, shardWork, limits) {
@@ -123,7 +133,7 @@ export function normalizeRunnerRecords(expected, raw, shardWork, limits) {
     });
 }
 
-function shardResult(plan, lanePlan, shard, artifactManifest, adapter, results) {
+function shardResult(plan, lanePlan, shard, artifactManifest, adapter, results, runtimeFeatureProbe = null) {
     const productPlan = plan.products.find((product) => product.kind === lanePlan.product);
     if (!productPlan) throw new Error(`Plan contains no artifact contract for ${lanePlan.product}`);
     return buildShardResult({
@@ -139,6 +149,7 @@ function shardResult(plan, lanePlan, shard, artifactManifest, adapter, results) 
         product: lanePlan.product,
         artifactProfile: productPlan.artifactProfile,
         artifactManifestDigest: artifactManifest?.artifactManifestDigest ?? null,
+        runtimeFeatureProbe,
         environment: { platform: process.platform, architecture: process.arch, node: process.version },
         limits: lanePlan.limits,
         adapter,

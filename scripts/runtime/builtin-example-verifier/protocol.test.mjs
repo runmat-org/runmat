@@ -15,6 +15,7 @@ import { stageNativeProduct } from "./product-staging.mjs";
 import { reconcileShardResults, validateReconciliation } from "./reconcile.mjs";
 import { buildShardResult, validateShardResult } from "./result-manifest.mjs";
 import { executeShard, normalizeRunnerRecords } from "./runner-process.mjs";
+import { probeNativeRuntimeFeatures } from "./runtime-feature-probe.mjs";
 
 const SOURCE = "0123456789abcdef0123456789abcdef01234567";
 const RUNNER = sha256("runner");
@@ -694,6 +695,15 @@ function completeResults(inventory, plan) {
     const units = new Map(inventory.executionUnits.map((unit) => [unit.executionIdentity, unit]));
     return plan.lanes.flatMap((lanePlan) => lanePlan.shards.map((shard) => {
         const unavailable = ["native-loopback-network", "native-foreign-runtime", "interactive-host"].includes(lanePlan.lane);
+        const artifactManifestDigest = unavailable ? null : artifactDefinitions().find((artifact) => artifact.product === lanePlan.product).artifactManifestDigest;
+        const runtimeFeatureProbe = !unavailable && lanePlan.product === "native-cli"
+            ? probeNativeRuntimeFeatures("/staged/runmat", artifactManifestDigest, () => ({
+                status: 0, stderr: "", stdout: JSON.stringify({
+                    schema: "runmat.runtime-features.v1",
+                    runtime: { crate_name: "runmat-runtime", schema_version: 1, known_features: ["plot-core"], enabled_features: ["plot-core"] }
+                })
+            }))
+            : null;
         return buildShardResult({
             sourceRevision: plan.sourceRevision,
             sourceState: plan.sourceState,
@@ -706,7 +716,8 @@ function completeResults(inventory, plan) {
             assignmentDigest: shard.assignmentDigest,
             product: lanePlan.product,
             artifactProfile: plan.products.find((product) => product.kind === lanePlan.product).artifactProfile,
-            artifactManifestDigest: unavailable ? null : artifactDefinitions().find((artifact) => artifact.product === lanePlan.product).artifactManifestDigest,
+            artifactManifestDigest,
+            runtimeFeatureProbe,
             environment: { platform: "test", architecture: "test", node: "test" },
             limits: lanePlan.limits,
             adapter: { available: !unavailable, reason: unavailable ? "adapter is not implemented" : "" },

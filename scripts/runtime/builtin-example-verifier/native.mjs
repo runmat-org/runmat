@@ -10,13 +10,25 @@ import { prepareForeignFixture } from "./adapters/foreign.mjs";
 import { runInteraction } from "./adapters/interaction.mjs";
 import { withLoopbackFixture } from "./adapters/loopback.mjs";
 import { runBoundedProcess } from "./adapters/process.mjs";
+import {
+    probeNativeRuntimeFeatures, runtimeRequirementAvailability, validateRuntimeFeatureProbe
+} from "./runtime-feature-probe.mjs";
 
 export async function runNativeCases(repository, cases, timeoutMs) {
     const binary = resolveNativeBinary(repository);
+    const artifactDigest = process.env.RUNMAT_EXAMPLE_ARTIFACT ?? null;
+    const probe = process.env.RUNMAT_EXAMPLE_RUNTIME_FEATURE_PROBE
+        ? validateRuntimeFeatureProbe(JSON.parse(process.env.RUNMAT_EXAMPLE_RUNTIME_FEATURE_PROBE), artifactDigest)
+        : probeNativeRuntimeFeatures(binary, artifactDigest);
     const root = mkdtempSync(join(tmpdir(), "runmat-documentation-examples-"));
     try {
         const results = [];
-        for (const testCase of cases) results.push(await runCase(binary, root, testCase, timeoutMs));
+        for (const testCase of cases) {
+            const availability = runtimeRequirementAvailability(testCase.requirements, testCase.fixture, probe);
+            results.push(availability.available
+                ? await runCase(binary, root, testCase, timeoutMs)
+                : unavailable(testCase.id, availability.reason));
+        }
         return results;
     } finally {
         rmSync(root, { recursive: true, force: true });
