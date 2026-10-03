@@ -187,7 +187,7 @@ export interface BuiltinExampleRequirements {
   host: "Any" | "NativeOnly" | "DesktopHostOnly";
   engine: "Default" | "Interpreter" | "Jit" | "Aot";
   compiler: Array<"C" | "Cxx" | "Fortran" | "Cuda" | "JavaBytecode" | "PythonExtension">;
-  runtime: Array<"NativeDynamicLoader" | "Mex" | "NativeFfi" | "JavaVirtualMachine" | "Python" | "NumPy">;
+  runtime: Array<"NativeDynamicLoader" | "Mex" | "NativeFfi" | "JavaVirtualMachine" | "Python" | "NumPy" | "PlotCore">;
   toolchain: Array<"CCompiler" | "CxxCompiler" | "FortranCompiler" | "CudaToolkit" | "JavaDevelopmentKit" | "PythonInterpreter" | "PythonDevelopmentHeaders">;
 }
 

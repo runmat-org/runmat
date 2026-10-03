@@ -320,12 +320,21 @@ pub fn infer_result(
                 }
                 core_len -= 2;
             }
-            // A nonliteral trailing name can still be a supported plot
-            // option. Do not reinterpret its value as a positional field id.
-            let unresolved_option_tail = core_len >= 3
-                && request.literals.literal_string_at(core_len - 2).is_none()
-                && host_text(&request.arguments[core_len - 2]);
-            if !unresolved_option_tail && !(1..=3).contains(&core_len) {
+            // Peel every possible nonliteral trailing option pair only to
+            // establish the smallest positional prefix. Its value must not
+            // be diagnosed as a field id, but earlier operands remain
+            // positional under every possible interpretation of the tail.
+            let mut minimum_core_len = core_len;
+            while minimum_core_len >= 3
+                && request
+                    .literals
+                    .literal_string_at(minimum_core_len - 2)
+                    .is_none()
+                && host_text(&request.arguments[minimum_core_len - 2])
+            {
+                minimum_core_len -= 2;
+            }
+            if minimum_core_len > 3 {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-ARITY",
                     "fea.plot requires one context, optional field, or study/run/field operands",
@@ -336,19 +345,14 @@ pub fn infer_result(
                 matches!(&value.kind, ValueKindFact::Object(object)
                     if object.runtime_class.as_ref().is_some_and(|class| !class.is(FEA_STUDY_CLASS)))
             });
-            if !unresolved_option_tail && core_len == 3 && definitely_nonstudy {
+            if minimum_core_len == 3 && definitely_nonstudy {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-PLOT-CONTEXT",
                     "three positional fea.plot operands require a fea.Study first",
                     0,
                 ));
             }
-            let positional_end = if unresolved_option_tail {
-                1
-            } else {
-                core_len.min(3)
-            };
-            for index in 1..positional_end {
+            for index in 1..minimum_core_len.min(3) {
                 if !host_text(&request.arguments[index]) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-PLOT-FIELD",

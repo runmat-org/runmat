@@ -52,6 +52,7 @@ pub enum BuiltinRuntimeCapability {
     JavaVirtualMachine,
     Python,
     NumPy,
+    PlotCore,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]

@@ -183,4 +183,27 @@ fn plot_rejects_known_numeric_field_and_invalid_option_value() {
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-FEA-PLOT-CONTEXT" || d.code == "RM-CATALOG-FEA-PLOT-FIELD"));
+
+    for context in [FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS] {
+        let invalid_prefix = infer_result(
+            &CallRequest {
+                arguments: vec![
+                    object_result(context),
+                    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                        class: NumericClass::Double,
+                        domain: NumericDomain::Real,
+                    })),
+                    ValueFact::scalar(ValueKindFact::String),
+                    ValueFact::scalar(ValueKindFact::String),
+                ],
+                literals: LiteralContext::new(vec![LiteralValue::Unknown; 4]),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+            },
+            &plot_entry,
+            FeaResultKind::Plot,
+        );
+        assert!(invalid_prefix.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RM-CATALOG-FEA-PLOT-FIELD" && diagnostic.argument == Some(1)
+        }));
+    }
 }
