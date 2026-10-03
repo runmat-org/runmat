@@ -49,7 +49,7 @@ pub(super) fn preflight_option_text(
             alpha_applied = true;
         }
         if option == Some(ImwriteOption::WriteMode)
-            && super::checked_text::scalar_text(&args[index + 1])
+            && crate::builtins::image::checked_text::scalar_text(&args[index + 1])
                 .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("append"))
         {
             append = true;

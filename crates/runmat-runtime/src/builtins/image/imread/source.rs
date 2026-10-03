@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn string_arg(label: &str, value: &Value) -> BuiltinResult<String> {
-    super::checked_text::scalar_text(value).ok_or_else(|| {
+    crate::builtins::image::checked_text::scalar_text(value).ok_or_else(|| {
         imread_error_with_detail(
             &IMREAD_ERROR_INVALID_ARGUMENT,
             format!("{label} must be a string scalar or character vector"),
