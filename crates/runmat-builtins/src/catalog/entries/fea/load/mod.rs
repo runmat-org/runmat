@@ -1,7 +1,7 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition, ConstructorEntryDefinition},
-    descriptors::FEA_LOAD_DESCRIPTOR,
     constructor_inference::{infer_constructor, FeaConstructorKind},
+    descriptors::FEA_LOAD_DESCRIPTOR,
 };
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
