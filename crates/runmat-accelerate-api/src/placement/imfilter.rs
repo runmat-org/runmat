@@ -31,6 +31,8 @@ pub struct ProviderImfilterPhysicalEvidence {
     pub host_workspace: runmat_execution::ResourceByteBound,
     pub input_stages: runmat_execution::ProviderInputStageDemands,
     pub output_queue_slots: u32,
+    /// Actual upload allocation expected for an H prepared after admission.
+    pub prepared_kernel_requested_bytes: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -43,6 +45,10 @@ pub struct ProviderImfilterWorkload {
     pub explicit_image: bool,
     /// A wire-decoded workload cannot claim process-local input ownership.
     pub input_backings: Option<ProviderImfilterInputBackings>,
+    /// A pre-effect route may have an authenticated live A but must still
+    /// materialize H. This projected H is not a forged live allocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared_kernel: Option<ProviderImfilterPreparedKernel>,
 }
 
 impl ProviderImfilterWorkload {
@@ -58,6 +64,7 @@ impl ProviderImfilterWorkload {
             constant_value_bits: options.constant_value.to_bits(),
             explicit_image,
             input_backings,
+            prepared_kernel: None,
         }
     }
 
@@ -67,6 +74,116 @@ impl ProviderImfilterWorkload {
             && self.padding == options.padding
             && self.constant_value_bits == options.constant_value.to_bits()
             && self.explicit_image == explicit_image
+    }
+}
+
+/// Authenticated original A with a proposed provider-owned H upload. The
+/// projection binds class/shape and physical allocation width, but can only
+/// become an executable hook operand after a post-upload exact match.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderImfilterPreparedKernel {
+    image_device_id: u32,
+    image_requested_bytes: u64,
+    image_representation: ProviderRepresentation,
+    kernel_representation: ProviderRepresentation,
+    #[serde(skip)]
+    live_image_view: Option<TensorViewIdentity>,
+}
+
+impl ProviderImfilterPreparedKernel {
+    pub fn from_live_image(
+        image: &GpuTensorHandle,
+        kernel_representation: ProviderRepresentation,
+    ) -> Result<Option<Self>, AllocationAcquisitionError> {
+        image.allocation_lease().validate_live()?;
+        image
+            .view()
+            .validate(image.physical())
+            .map_err(AllocationAcquisitionError::InvalidView)?;
+        let Some(image_representation) = Self::representation(image) else {
+            return Ok(None);
+        };
+        if kernel_representation.residency != ProviderResidency::Device
+            || kernel_representation.storage != ProviderStorage::DenseReal
+            || kernel_representation.layout != ProviderLayout::ColumnMajorContiguous
+            || !matches!(
+                kernel_representation.element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+            || kernel_representation.checked_element_count().is_none()
+        {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            image_device_id: image.device_id(),
+            image_requested_bytes: image.physical().requested_bytes(),
+            image_representation,
+            kernel_representation,
+            live_image_view: Some(image.view_identity()),
+        }))
+    }
+
+    fn representation(handle: &GpuTensorHandle) -> Option<ProviderRepresentation> {
+        if handle.physical().storage() != GpuTensorStorage::Real || handle_is_logical(handle) {
+            return None;
+        }
+        let element_type = match handle.physical().element_type() {
+            NumericElementType::F32 => ProviderElementType::F32,
+            NumericElementType::F64 => ProviderElementType::F64,
+            _ => return None,
+        };
+        Some(ProviderRepresentation {
+            element_type,
+            storage: ProviderStorage::DenseReal,
+            layout: if handle_is_transposed(handle) {
+                ProviderLayout::Strided
+            } else {
+                ProviderLayout::ColumnMajorContiguous
+            },
+            shape: handle
+                .shape()
+                .iter()
+                .map(|&extent| u64::try_from(extent).ok())
+                .collect::<Option<Vec<_>>>()?,
+            residency: ProviderResidency::Device,
+        })
+    }
+
+    pub fn live_image_requested_bytes(&self) -> Option<u64> {
+        self.live_image_view.map(|_| self.image_requested_bytes)
+    }
+
+    pub fn live_device_id(&self) -> Option<u32> {
+        self.live_image_view.map(|_| self.image_device_id)
+    }
+
+    pub fn live_representations(&self) -> Option<[ProviderRepresentation; 2]> {
+        self.live_image_view?;
+        Some([
+            self.image_representation.clone(),
+            self.kernel_representation.clone(),
+        ])
+    }
+
+    pub fn admits_realized(
+        &self,
+        image: &GpuTensorHandle,
+        kernel: &GpuTensorHandle,
+        expected_kernel_requested_bytes: u64,
+    ) -> Result<bool, AllocationAcquisitionError> {
+        let Some(expected_image_view) = self.live_image_view else {
+            return Ok(false);
+        };
+        image.allocation_lease().validate_live()?;
+        kernel.allocation_lease().validate_live()?;
+        Ok(image.view_identity() == expected_image_view
+            && image.device_id() == self.image_device_id
+            && image.physical().requested_bytes() == self.image_requested_bytes
+            && Self::representation(image) == Some(self.image_representation.clone())
+            && Self::representation(kernel) == Some(self.kernel_representation.clone())
+            && kernel.physical().requested_bytes() == expected_kernel_requested_bytes
+            && kernel.device_id() == image.device_id())
     }
 }
 

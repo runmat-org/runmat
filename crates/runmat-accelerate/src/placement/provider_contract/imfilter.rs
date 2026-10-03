@@ -109,14 +109,24 @@ fn direct_plan(
     if query.workload != expected_workload {
         return None;
     }
-    let backings = workload.input_backings.as_ref()?;
-    if backings.live_device_ids()? != [provider.device_id(); 2] {
-        return None;
-    }
-    if backings.live_representations()?.as_slice() != query.inputs.as_slice() {
-        return None;
-    }
-    let borrowed_bytes = backings.live_unique_requested_bytes()?;
+    let (borrowed_bytes, planned_kernel) = match (
+        workload.input_backings.as_ref(),
+        workload.prepared_kernel.as_ref(),
+    ) {
+        (Some(backings), None)
+            if backings.live_device_ids()? == [provider.device_id(); 2]
+                && backings.live_representations()?.as_slice() == query.inputs.as_slice() =>
+        {
+            (backings.live_unique_requested_bytes()?, false)
+        }
+        (None, Some(prepared))
+            if prepared.live_device_id()? == provider.device_id()
+                && prepared.live_representations()?.as_slice() == query.inputs.as_slice() =>
+        {
+            (prepared.live_image_requested_bytes()?, true)
+        }
+        _ => return None,
+    };
     let [image, kernel] = query.inputs.as_slice() else {
         return None;
     };
@@ -182,6 +192,13 @@ fn direct_plan(
     let image_len = image.checked_element_count()?;
     let kernel_len = kernel.checked_element_count()?;
     let output_len = output.checked_element_count()?;
+    let prepared_kernel_bytes = if planned_kernel {
+        kernel_len
+            .max(1)
+            .checked_mul(kernel.element_type.byte_width())?
+    } else {
+        0
+    };
     if rank > geometry.max_rank
         || image_len > u64::from(u32::MAX)
         || kernel_len > u64::from(u32::MAX)
@@ -205,9 +222,19 @@ fn direct_plan(
         .checked_mul(u64::try_from(rank).ok()?)?
         .checked_mul(4)?;
     let values_bytes = kernel_len.max(1).checked_mul(accumulation_width)?;
-    let kernel_readback_bytes = backings.live_requested_bytes()?[1];
+    let kernel_readback_bytes = if planned_kernel {
+        prepared_kernel_bytes
+    } else {
+        workload.input_backings.as_ref()?.live_requested_bytes()?[1]
+    };
     let lazy_image_bytes = if image.layout == ProviderLayout::Strided {
-        backings.live_requested_bytes()?[0]
+        match workload.input_backings.as_ref() {
+            Some(backings) => backings.live_requested_bytes()?[0],
+            None => workload
+                .prepared_kernel
+                .as_ref()?
+                .live_image_requested_bytes()?,
+        }
     } else {
         0
     };
@@ -224,7 +251,13 @@ fn direct_plan(
         std::mem::size_of::<crate::backend::wgpu::params::ImfilterParamsF32>() as u64
     };
     let uniform_bytes = chunks.checked_mul(uniform_width)?;
-    for bytes in [output_bytes, offsets_bytes, values_bytes, uniform_width] {
+    for bytes in [
+        output_bytes,
+        offsets_bytes,
+        values_bytes,
+        uniform_width,
+        prepared_kernel_bytes,
+    ] {
         if bytes > geometry.max_buffer_bytes {
             return None;
         }
@@ -236,6 +269,7 @@ fn direct_plan(
     }
     let peak = [
         borrowed_bytes,
+        prepared_kernel_bytes,
         output_bytes,
         offsets_bytes,
         values_bytes,
@@ -278,9 +312,10 @@ fn direct_plan(
     ]
     .into_iter()
     .try_fold(0_u64, |total, bytes| total.checked_add(bytes))?;
+    let readback_peak = prepared_kernel_bytes.checked_add(kernel_readback_bytes)?;
     let input_stages = ProviderInputStageDemands::sequential([ProviderInputStageDemand {
         device_id: provider.device_id(),
-        incremental_peak_bytes: ResourceByteBound::Known(kernel_readback_bytes),
+        incremental_peak_bytes: ResourceByteBound::Known(readback_peak),
         queue_slots: 1,
     }])?;
     let output_queue_slots =
@@ -297,6 +332,7 @@ fn direct_plan(
             host_workspace: ResourceByteBound::Known(host_workspace),
             input_stages,
             output_queue_slots,
+            prepared_kernel_requested_bytes: planned_kernel.then_some(prepared_kernel_bytes),
         },
         submissions,
     })

@@ -47,7 +47,7 @@ impl WgpuProvider {
         // views. The owner witness is only confirmed after the actual direct
         // filter dispatch, never by the preceding H readback/reshape alone.
         let admitted_direct =
-            runmat_runtime::builtins::image::filters::imfilter::placement::exact_hook_query(
+            runmat_runtime::builtins::image::filters::placement::exact_hook_query(
                 image, kernel, options,
             )
             .is_some_and(|query| self.query_feasibility(&query).is_supported());

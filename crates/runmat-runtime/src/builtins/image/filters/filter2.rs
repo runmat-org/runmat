@@ -15,7 +15,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
-use super::imfilter::{apply_imfilter_tensor, filter_output_shape, placement};
+use super::imfilter::{apply_imfilter_tensor, filter_output_shape};
+use super::placement;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -152,6 +153,45 @@ fn filter2_value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(vec![1, 1]),
         _ => None,
     }
+}
+
+fn projected_filter2_kernel(
+    value: &Value,
+) -> Option<runmat_accelerate_api::ProviderRepresentation> {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency,
+        ProviderStorage,
+    };
+    let element_type = match value {
+        Value::Num(_) => ProviderElementType::F64,
+        Value::Tensor(tensor) => match tensor.numeric_dtype() {
+            NumericDType::F32 => ProviderElementType::F32,
+            NumericDType::F64 => ProviderElementType::F64,
+            _ => return None,
+        },
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_integer_type(handle).is_none() =>
+        {
+            match runmat_accelerate_api::handle_precision(handle)? {
+                runmat_accelerate_api::ProviderPrecision::F32 => ProviderElementType::F32,
+                runmat_accelerate_api::ProviderPrecision::F64 => ProviderElementType::F64,
+            }
+        }
+        _ => return None,
+    };
+    Some(ProviderRepresentation {
+        element_type,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: filter2_value_shape(value)?
+            .into_iter()
+            .map(|extent| u64::try_from(extent).ok())
+            .collect::<Option<Vec<_>>>()?,
+        residency: ProviderResidency::Device,
+    })
 }
 
 fn preflight_filter2_geometry(
@@ -300,6 +340,30 @@ async fn filter2_gpu(
         }
     };
 
+    let original_kernel = match &kernel_value {
+        Value::GpuTensor(handle) => Some(handle),
+        _ => None,
+    };
+    let borrowed_kernel = original_kernel.is_some_and(|handle| {
+        gpu_helpers::exact_provider_for_handle(handle)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+    });
+    let prepared_selection = if borrowed_kernel {
+        None
+    } else if let Some(projected) = projected_filter2_kernel(&kernel_value) {
+        placement::select_prepared(
+            runtime,
+            FILTER2_BUILTIN,
+            &image_handle,
+            original_kernel,
+            projected,
+            options,
+            runmat_execution::ResourceByteBound::Known(0),
+        )?
+    } else {
+        None
+    };
+
     let mut uploaded_kernel: Option<GpuTensorHandle> = None;
     let mut kernel_tensor_cache: Option<Tensor> = None;
 
@@ -319,10 +383,21 @@ async fn filter2_gpu(
             {
                 handle
             } else {
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-                match upload_filter2_kernel(provider, &tensor, &image_handle, Some(&handle))? {
+                let tensor = runmat_accelerate_api::observation::observe_provider_future(
+                    prepared_selection
+                        .as_ref()
+                        .map(|selected| selected.selection.recorder()),
+                    gpu_helpers::gather_tensor_async(&handle),
+                )
+                .await
+                .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
+                let upload = runmat_accelerate_api::observation::with_provider_observation(
+                    prepared_selection
+                        .as_ref()
+                        .map(|selected| selected.selection.recorder()),
+                    || upload_filter2_kernel(provider, &tensor, &image_handle, Some(&handle)),
+                )?;
+                match upload {
                     Some(uploaded) => {
                         kernel_tensor_cache = Some(tensor);
                         uploaded_kernel = Some(uploaded.clone());
@@ -344,7 +419,13 @@ async fn filter2_gpu(
         other => {
             let tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, other)
                 .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
-            match upload_filter2_kernel(provider, &tensor, &image_handle, None)? {
+            let upload = runmat_accelerate_api::observation::with_provider_observation(
+                prepared_selection
+                    .as_ref()
+                    .map(|selected| selected.selection.recorder()),
+                || upload_filter2_kernel(provider, &tensor, &image_handle, None),
+            )?;
+            match upload {
                 Some(uploaded) => {
                     kernel_tensor_cache = Some(tensor);
                     uploaded_kernel = Some(uploaded.clone());
@@ -373,7 +454,23 @@ async fn filter2_gpu(
     )
     .map_err(|error| filter2_map_error(error.into(), &FILTER2_ERROR_INVALID_INPUT))?;
 
-    let selected = if uploaded_kernel.is_none() {
+    if let Some(prepared) = prepared_selection.as_ref() {
+        if !placement::prepared_hook_matches_realized(
+            &prepared.query,
+            &image_handle,
+            &kernel_handle,
+            options,
+            prepared.expected_kernel_requested_bytes,
+        ) {
+            return Err(filter2_error_with_detail(
+                &FILTER2_ERROR_INTERNAL,
+                "prepared H did not match the admitted provider representation",
+            ));
+        }
+    }
+    let selected = if let Some(prepared) = prepared_selection {
+        Some(prepared.selection)
+    } else if uploaded_kernel.is_none() {
         placement::select_direct(
             runtime,
             FILTER2_BUILTIN,

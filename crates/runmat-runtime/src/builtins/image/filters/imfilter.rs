@@ -40,8 +40,6 @@ pub use kernel::{
 #[path = "imfilter/provider.rs"]
 mod provider;
 use provider::imfilter_gpu;
-#[path = "imfilter/placement.rs"]
-pub mod placement;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

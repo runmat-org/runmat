@@ -39,7 +39,7 @@ fn actual_imfilter_typed_direct_route_is_bound_to_both_live_inputs() {
     let image = single_input(&provider, true, &[1.0, 2.0, 3.0, 4.0], &[2, 2]);
     let kernel = single_input(&provider, false, &[1.0], &[1, 1]);
     let options = ImfilterOptions::default();
-    let query = runmat_runtime::builtins::image::filters::imfilter::placement::exact_hook_query(
+    let query = runmat_runtime::builtins::image::filters::placement::exact_hook_query(
         &image, &kernel, &options,
     )
     .expect("live exact hook query");
@@ -70,6 +70,66 @@ fn actual_imfilter_typed_direct_route_is_bound_to_both_live_inputs() {
             .data,
         HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
     );
+}
+
+#[test]
+#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+fn actual_imfilter_prepared_kernel_plan_is_not_a_forged_live_handle() {
+    let provider = provider();
+    let image = single_input(&provider, true, &[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+    let projected = runmat_accelerate_api::ProviderRepresentation {
+        element_type: runmat_accelerate_api::ProviderElementType::F32,
+        storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+        layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+        shape: vec![1, 1],
+        residency: runmat_accelerate_api::ProviderResidency::Device,
+    };
+    let options = ImfilterOptions::default();
+    let query = runmat_runtime::builtins::image::filters::placement::prepared_hook_query(
+        &image,
+        projected.clone(),
+        &options,
+    )
+    .unwrap();
+    assert!(provider.query_feasibility(&query).is_supported());
+    let planned = query
+        .workload
+        .imfilter
+        .as_ref()
+        .unwrap()
+        .prepared_kernel
+        .as_ref()
+        .unwrap();
+    let expected_bytes = provider
+        .imfilter_physical_evidence(&query)
+        .unwrap()
+        .prepared_kernel_requested_bytes
+        .unwrap();
+    assert_eq!(expected_bytes, 4);
+    assert_eq!(
+        provider
+            .imfilter_physical_evidence(&query)
+            .unwrap()
+            .input_stages
+            .iter()
+            .next()
+            .unwrap()
+            .incremental_peak_bytes,
+        runmat_execution::ResourceByteBound::Known(8),
+        "the prepared H allocation coexists with its provider readback staging"
+    );
+    let kernel = single_input(&provider, false, &[1.0], &[1, 1]);
+    assert!(planned
+        .admits_realized(&image, &kernel, expected_bytes)
+        .unwrap());
+    let wrong_kernel = single_input(&provider, false, &[1.0, 1.0], &[2, 1]);
+    assert!(!planned
+        .admits_realized(&image, &wrong_kernel, expected_bytes)
+        .unwrap());
+    let decoded: runmat_accelerate_api::ProviderFeasibilityQuery =
+        serde_json::from_slice(&serde_json::to_vec(&query).unwrap()).unwrap();
+    assert!(!provider.query_feasibility(&decoded).is_supported());
+    assert!(!provider.imfilter_physical_evidence(&decoded).is_some());
 }
 
 #[test]

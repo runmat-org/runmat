@@ -1,3 +1,4 @@
+use super::super::placement;
 use super::kernel::fallback_accumulation;
 use super::*;
 
@@ -24,42 +25,14 @@ pub(super) async fn imfilter_gpu(
     let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")
     })?;
-    let selected = if let (Some(image_precision), Value::GpuTensor(kernel)) =
-        (output_class.provider_precision(), &kernel_value)
-    {
-        let required_kernel_precision = match floating_accumulation(
-            image_precision,
-            runmat_accelerate_api::handle_is_explicit(&image_handle),
-        ) {
-            FilterAccumulation::HostDouble => ProviderPrecision::F64,
-            FilterAccumulation::GpuSingle => ProviderPrecision::F32,
-        };
-        if runmat_accelerate_api::handle_precision(kernel) == Some(ProviderPrecision::F64)
-            && runmat_accelerate_api::handle_precision(kernel) == Some(required_kernel_precision)
-            && runmat_accelerate_api::handle_storage(kernel) == GpuTensorStorage::Real
-            && !runmat_accelerate_api::handle_is_logical(kernel)
-            && runmat_accelerate_api::handle_integer_type(kernel).is_none()
-            && gpu_helpers::gpu_class_metadata_matches(
-                kernel,
-                Some(ProviderPrecision::F64),
-                None,
-                false,
-            )
-        {
-            placement::select_direct(
-                runtime,
-                IMFILTER_BUILTIN,
-                &image_handle,
-                kernel,
-                &options,
-                true,
-            )?
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let (selected, planned_query) = select_provider_route(
+        runtime,
+        &image_handle,
+        &kernel_value,
+        &options,
+        output_class,
+        provider,
+    )?;
     let (kernel_tensor, resident_kernel) = match kernel_value {
         Value::GpuTensor(handle) => {
             let downloaded = runmat_accelerate_api::observation::observe_provider_future(
@@ -111,12 +84,17 @@ pub(super) async fn imfilter_gpu(
     });
     let kernel_handle = match same_owner_kernel {
         Some(handle) => handle.clone(),
-        None => match upload_kernel(
-            provider,
-            &kernel_tensor,
-            &image_handle,
-            resident_kernel.as_ref(),
-            kernel_precision,
+        None => match runmat_accelerate_api::observation::with_provider_observation(
+            selected.as_ref().map(|selection| selection.recorder()),
+            || {
+                upload_kernel(
+                    provider,
+                    &kernel_tensor,
+                    &image_handle,
+                    resident_kernel.as_ref(),
+                    kernel_precision,
+                )
+            },
         )? {
             Some(uploaded) => uploaded,
             None => {
@@ -131,6 +109,25 @@ pub(super) async fn imfilter_gpu(
             }
         },
     };
+    if planned_query.as_ref().is_some_and(|(query, bytes)| {
+        !placement::prepared_hook_matches_realized(
+            query,
+            &image_handle,
+            &kernel_handle,
+            &options,
+            *bytes,
+        )
+    }) {
+        if let Some(selection) = selected {
+            selection.finish(Err(
+                runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed,
+            ));
+        }
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INTERNAL,
+            "prepared H did not match the admitted provider representation",
+        ));
+    }
     let provider_result = runmat_accelerate_api::observation::observe_provider_future(
         selected.as_ref().map(|selection| selection.recorder()),
         provider.imfilter(&image_handle, &kernel_handle, &options),
@@ -196,6 +193,135 @@ pub(super) async fn imfilter_gpu(
             ))
         }
     }
+}
+
+fn projected_public_kernel(
+    value: &Value,
+    precision: ProviderPrecision,
+) -> Option<(
+    runmat_accelerate_api::ProviderRepresentation,
+    runmat_execution::ResourceByteBound,
+)> {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency,
+        ProviderStorage,
+    };
+    let shape = match value {
+        Value::Num(_) => vec![1, 1],
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64 => {
+            tensor.shape.clone()
+        }
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F64) =>
+        {
+            handle.shape().to_vec()
+        }
+        _ => return None,
+    };
+    let len = shape.iter().try_fold(1_u64, |count, &extent| {
+        count.checked_mul(u64::try_from(extent).ok()?)
+    })?;
+    let scratch = if precision == ProviderPrecision::F32 {
+        len.checked_mul(4)
+            .map(runmat_execution::ResourceByteBound::Known)
+            .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+            ))
+    } else {
+        runmat_execution::ResourceByteBound::Known(0)
+    };
+    Some((
+        ProviderRepresentation {
+            element_type: ProviderElementType::from(precision),
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: shape
+                .into_iter()
+                .map(|extent| u64::try_from(extent).ok())
+                .collect::<Option<Vec<_>>>()?,
+            residency: ProviderResidency::Device,
+        },
+        scratch,
+    ))
+}
+
+fn select_provider_route(
+    runtime: Option<&crate::context::RuntimeContext>,
+    image: &GpuTensorHandle,
+    kernel: &Value,
+    options: &ImfilterOptions,
+    output_class: ImageOutputClass,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> BuiltinResult<(
+    Option<crate::context::provider_operation::SelectedProviderOperation>,
+    Option<(runmat_accelerate_api::ProviderFeasibilityQuery, u64)>,
+)> {
+    let Some(image_precision) = output_class.provider_precision() else {
+        return Ok((None, None));
+    };
+    let required_kernel_precision = match floating_accumulation(
+        image_precision,
+        runmat_accelerate_api::handle_is_explicit(image),
+    ) {
+        FilterAccumulation::HostDouble => ProviderPrecision::F64,
+        FilterAccumulation::GpuSingle => ProviderPrecision::F32,
+    };
+    let valid_public_kernel = match kernel {
+        Value::Num(_) => true,
+        Value::Tensor(tensor) => tensor.numeric_dtype() == NumericDType::F64,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F64)
+                && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && gpu_helpers::gpu_class_metadata_matches(
+                    handle,
+                    Some(ProviderPrecision::F64),
+                    None,
+                    false,
+                )
+        }
+        _ => false,
+    };
+    if !valid_public_kernel {
+        return Ok((None, None));
+    }
+    if let Value::GpuTensor(handle) = kernel {
+        if required_kernel_precision == ProviderPrecision::F64
+            && gpu_helpers::exact_provider_for_handle(handle)
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+        {
+            return Ok((
+                placement::select_direct(runtime, IMFILTER_BUILTIN, image, handle, options, true)?,
+                None,
+            ));
+        }
+    }
+    let Some((projected, scratch)) = projected_public_kernel(kernel, required_kernel_precision)
+    else {
+        return Ok((None, None));
+    };
+    let original = match kernel {
+        Value::GpuTensor(handle) => Some(handle),
+        _ => None,
+    };
+    Ok(
+        match placement::select_prepared(
+            runtime,
+            IMFILTER_BUILTIN,
+            image,
+            original,
+            projected,
+            options,
+            scratch,
+        )? {
+            Some(prepared) => (
+                Some(prepared.selection),
+                Some((prepared.query, prepared.expected_kernel_requested_bytes)),
+            ),
+            None => (None, None),
+        },
+    )
 }
 
 fn upload_kernel(
