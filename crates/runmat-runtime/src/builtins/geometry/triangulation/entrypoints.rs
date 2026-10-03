@@ -3,13 +3,6 @@ use super::*;
 #[runtime_builtin(
     name = "DelaunayTri",
     binding_variant = "default",
-    category = "geometry/triangulation",
-    summary = "Create a legacy 2-D Delaunay triangulation object.",
-    keywords = "DelaunayTri,delaunay,triangulation,geometry,mesh",
-    accel = "cpu",
-    descriptor(runmat_builtins::DELAUNAY_TRI_DESCRIPTOR),
-    extensions(runmat_builtins::DELAUNAY_TRI_CONSTRUCTOR_EXTENSIONS),
-    integer_capabilities(runmat_builtins::DELAUNAY_TRI_CONSTRUCTOR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -29,13 +22,6 @@ pub async fn delaunay_tri_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "freeBoundary",
     binding_variant = "default",
-    category = "geometry/triangulation",
-    summary = "Return the boundary edges of a DelaunayTri object.",
-    keywords = "freeBoundary,DelaunayTri,triangulation,boundary,mesh",
-    accel = "cpu",
-    descriptor(runmat_builtins::FREE_BOUNDARY_DESCRIPTOR),
-    extensions(runmat_builtins::FREE_BOUNDARY_EXTENSIONS),
-    integer_capabilities(runmat_builtins::FREE_BOUNDARY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
@@ -50,13 +36,6 @@ pub async fn free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "DelaunayTri.freeBoundary",
     binding_variant = "default",
-    category = "geometry/triangulation",
-    summary = "Return the boundary edges of a DelaunayTri object.",
-    keywords = "freeBoundary,DelaunayTri,triangulation,boundary,mesh",
-    accel = "cpu",
-    descriptor(runmat_builtins::DELAUNAY_TRI_FREE_BOUNDARY_DESCRIPTOR),
-    extensions(runmat_builtins::FREE_BOUNDARY_EXTENSIONS),
-    integer_capabilities(runmat_builtins::FREE_BOUNDARY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
@@ -71,13 +50,6 @@ pub async fn delaunay_tri_free_boundary_builtin(dt: Value) -> BuiltinResult<Valu
 #[runtime_builtin(
     name = "nearestNeighbor",
     binding_variant = "default",
-    category = "geometry/triangulation",
-    summary = "Find nearest DelaunayTri vertices for query points.",
-    keywords = "nearestNeighbor,DelaunayTri,triangulation,geometry",
-    accel = "cpu",
-    descriptor(runmat_builtins::NEAREST_NEIGHBOR_DESCRIPTOR),
-    extensions(runmat_builtins::DELAUNAY_TRI_COORDINATE_EXTENSIONS),
-    integer_capabilities(runmat_builtins::NEAREST_NEIGHBOR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn nearest_neighbor_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -92,13 +64,6 @@ pub async fn nearest_neighbor_builtin(dt: Value, rest: Vec<Value>) -> BuiltinRes
 #[runtime_builtin(
     name = "DelaunayTri.nearestNeighbor",
     binding_variant = "default",
-    category = "geometry/triangulation",
-    summary = "Find nearest DelaunayTri vertices for query points.",
-    keywords = "nearestNeighbor,DelaunayTri,triangulation,geometry",
-    accel = "cpu",
-    descriptor(runmat_builtins::DELAUNAY_TRI_NEAREST_NEIGHBOR_DESCRIPTOR),
-    extensions(runmat_builtins::DELAUNAY_TRI_COORDINATE_EXTENSIONS),
-    integer_capabilities(runmat_builtins::NEAREST_NEIGHBOR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_nearest_neighbor_builtin(
@@ -116,13 +81,6 @@ pub async fn delaunay_tri_nearest_neighbor_builtin(
 #[runtime_builtin(
     name = "pointLocation",
     binding_variant = "default",
-    category = "geometry/triangulation",
-    summary = "Locate query points in a DelaunayTri object.",
-    keywords = "pointLocation,DelaunayTri,triangulation,barycentric,geometry",
-    accel = "cpu",
-    descriptor(runmat_builtins::POINT_LOCATION_DESCRIPTOR),
-    extensions(runmat_builtins::POINT_LOCATION_EXTENSIONS),
-    integer_capabilities(runmat_builtins::POINT_LOCATION_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn point_location_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -133,13 +91,6 @@ pub async fn point_location_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResul
 #[runtime_builtin(
     name = "DelaunayTri.pointLocation",
     binding_variant = "default",
-    category = "geometry/triangulation",
-    summary = "Locate query points in a DelaunayTri object.",
-    keywords = "pointLocation,DelaunayTri,triangulation,barycentric,geometry",
-    accel = "cpu",
-    descriptor(runmat_builtins::DELAUNAY_TRI_POINT_LOCATION_DESCRIPTOR),
-    extensions(runmat_builtins::POINT_LOCATION_EXTENSIONS),
-    integer_capabilities(runmat_builtins::POINT_LOCATION_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_point_location_builtin(
