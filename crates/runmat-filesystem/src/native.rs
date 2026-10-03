@@ -1,13 +1,17 @@
 use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
-use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use crate::{
+    DirEntry, FileHandle, FsFilePayloadContract, FsFileType, FsMetadata, FsProvider,
+    FsResourceContract, FsResourceLease, FsResourceRevision, OpenFlags,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use url::Url;
 
 #[derive(Default)]
@@ -15,6 +19,10 @@ pub struct NativeFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
+    fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
+        Some(Arc::new(NativeDirectFileLease))
+    }
+
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut opts = fs::OpenOptions::new();
         opts.read(flags.read);
@@ -177,6 +185,22 @@ impl FsProvider for NativeFsProvider {
             fs::create_dir_all(parent)?;
         }
         fs::write(path, data)
+    }
+}
+
+struct NativeDirectFileLease;
+
+impl FsResourceLease for NativeDirectFileLease {
+    fn contract(&self) -> FsResourceContract {
+        FsResourceContract {
+            revision: FsResourceRevision::NativeDirectFileHandlesV1,
+            opened_input_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
+            opened_output_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        true // NativeFsProvider has no mutable configuration.
     }
 }
 

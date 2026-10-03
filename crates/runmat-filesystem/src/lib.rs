@@ -10,6 +10,7 @@ use std::time::SystemTime;
 
 mod dialog;
 mod memory;
+mod resource;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
@@ -21,6 +22,10 @@ mod wasm;
 
 pub use dialog::*;
 pub use memory::MemoryFsProvider;
+pub use resource::{
+    capture_resource_lease, CapturedFsResourceLease, FsFilePayloadContract, FsResourceContract,
+    FsResourceLease, FsResourceRevision,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
@@ -331,6 +336,13 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Opt-in resource authority for this exact provider instance. The lease
+    /// must keep its claims valid while retained by a caller. This does not
+    /// certify codec, path, result, or whole-invocation allocations.
+    fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
+        None
+    }
+
     /// Whether this installed provider can service ordinary file reads.
     /// Hosts use this metadata for capability admission; it does not promise
     /// that a particular path exists or that a subsequent read will succeed.
