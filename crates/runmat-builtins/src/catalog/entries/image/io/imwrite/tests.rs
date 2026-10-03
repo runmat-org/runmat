@@ -251,3 +251,77 @@ fn every_proven_option_pair_and_format_channel_rule_is_checked() {
         .iter()
         .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION"));
 }
+
+#[test]
+fn complex_pixels_colormap_alpha_and_mismatched_alpha_shape_diagnose() {
+    let complex = |shape| {
+        ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Complex,
+            }),
+            ShapeFact::from(shape),
+            StorageFact::Dense,
+        )
+    };
+    let text = || ValueFact::scalar(ValueKindFact::String);
+    let result = inference::infer(
+        &call(
+            vec![complex(vec![Some(2), Some(2)]), text()],
+            RequestedOutputCount::Zero,
+        ),
+        &IMWRITE_CATALOG_ENTRY,
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-IMAGE"));
+    let result = inference::infer(
+        &call(
+            vec![
+                image(NumericClass::UInt8, vec![Some(2), Some(2)]),
+                complex(vec![Some(2), Some(3)]),
+                text(),
+            ],
+            RequestedOutputCount::Zero,
+        ),
+        &IMWRITE_CATALOG_ENTRY,
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-MAP"));
+
+    let mut request = call(
+        vec![
+            image(NumericClass::UInt8, vec![Some(2), Some(2)]),
+            text(),
+            text(),
+            complex(vec![Some(2), Some(2)]),
+        ],
+        RequestedOutputCount::Zero,
+    );
+    request.literals = LiteralContext::new(vec![
+        LiteralValue::Unknown,
+        LiteralValue::String("x.png".into()),
+        LiteralValue::String("Alpha".into()),
+        LiteralValue::Unknown,
+    ]);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(3)));
+    request.arguments[3] = image(NumericClass::Double, vec![Some(1), Some(2)]);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(3)));
+    request.arguments[3] = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(!result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(3)));
+}

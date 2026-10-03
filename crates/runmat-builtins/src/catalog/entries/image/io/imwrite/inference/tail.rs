@@ -2,7 +2,27 @@ use super::super::{
     ImwriteAdmissionFailure, ImwriteEncoderFacts, ImwriteFormat, ImwriteOption, ImwriteWriteMode,
 };
 use crate::catalog::inference::argument_error;
-use runmat_types::{CallRequest, LiteralValue, NumericClass, ValueKindFact};
+use runmat_types::{
+    CallRequest, LiteralValue, NumericClass, NumericDomain, ShapeFact, ValueKindFact,
+};
+
+fn known_image_rows_cols(shape: &ShapeFact) -> Option<(Option<usize>, Option<usize>)> {
+    let dims = shape.known_dims()?;
+    match dims.as_slice() {
+        [] => Some((Some(1), Some(1))),
+        [columns] => Some((Some(1), *columns)),
+        [rows, columns, ..] => Some((*rows, *columns)),
+    }
+}
+
+fn known_alpha_rows_cols(shape: &ShapeFact) -> Option<(Option<usize>, Option<usize>)> {
+    let dims = shape.known_dims()?;
+    match dims.as_slice() {
+        [] => Some((Some(1), Some(1))),
+        [rows, columns] => Some((*rows, *columns)),
+        _ => None,
+    }
+}
 
 pub(super) fn infer_known_tail(
     request: &CallRequest,
@@ -111,7 +131,7 @@ pub(super) fn infer_known_tail(
                             | NumericClass::Single
                             | NumericClass::UInt8
                             | NumericClass::UInt16,
-                        ..
+                        domain: NumericDomain::Real,
                     })
             );
             if !class_possible {
@@ -132,6 +152,23 @@ pub(super) fn infer_known_tail(
                     index + 1,
                 ));
             }
+            if let (Some((image_rows, image_cols)), Some((alpha_rows, alpha_cols))) = (
+                request
+                    .arguments
+                    .first()
+                    .and_then(|image| known_image_rows_cols(&image.shape)),
+                known_alpha_rows_cols(&value.shape),
+            ) {
+                if image_rows.zip(alpha_rows).is_some_and(|(a, b)| a != b)
+                    || image_cols.zip(alpha_cols).is_some_and(|(a, b)| a != b)
+                {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-IMWRITE-OPTION",
+                        "Alpha must be an MxN array matching the image dimensions",
+                        index + 1,
+                    ));
+                }
+            }
         }
         if matches!(
             option,
@@ -139,7 +176,12 @@ pub(super) fn infer_known_tail(
         ) {
             if !matches!(
                 value.kind,
-                ValueKindFact::Unknown | ValueKindFact::Numeric(_) | ValueKindFact::Logical
+                ValueKindFact::Unknown
+                    | ValueKindFact::Logical
+                    | ValueKindFact::Numeric(runmat_types::NumericFact {
+                        domain: NumericDomain::Real,
+                        ..
+                    })
             ) || value
                 .shape
                 .known_dims()

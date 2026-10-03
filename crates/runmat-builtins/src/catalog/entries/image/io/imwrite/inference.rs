@@ -4,7 +4,8 @@ mod tail;
 use crate::catalog::inference::{argument_error, finish_fixed_outputs};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    CallInference, CallRequest, NumericClass, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, NumericClass, NumericDomain, ShapeFact, StorageFact, ValueFact,
+    ValueKindFact,
 };
 
 fn image_class_possible(value: &ValueFact) -> bool {
@@ -17,7 +18,7 @@ fn image_class_possible(value: &ValueFact) -> bool {
                     | NumericClass::Single
                     | NumericClass::UInt8
                     | NumericClass::UInt16,
-                ..
+                domain: NumericDomain::Real,
             })
     )
 }
@@ -42,9 +43,12 @@ fn colormap_possible(value: &ValueFact) -> bool {
         ValueKindFact::Unknown
             | ValueKindFact::Numeric(runmat_types::NumericFact {
                 class: NumericClass::Double,
-                ..
+                domain: NumericDomain::Real,
             })
     ) {
+        return false;
+    }
+    if value.shape.rank().is_some_and(|rank| rank != 2) {
         return false;
     }
     !value.shape.known_dims().is_some_and(|dims| {
