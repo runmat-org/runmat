@@ -14,7 +14,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "The image may have multiple channels or higher dimensions. H must be nonempty real double scalar, vector, or matrix; filtering extends it with singleton trailing axes. Unsupported 64-bit integer image classes and complex/sparse inputs have stable input errors.",
         ]},
         BuiltinDocumentationSection { heading: "Class and residency", paragraphs: &[
-            "Real single/double images preserve their class. Logical images produce double. Documented int8/int16/int32/uint8/uint16/uint32 images round to nearest and saturate into the original class. Host and automatic-placement fallback accumulate in double; explicit resident uint32 uses double and other documented explicit resident integers use single accumulation.",
+            "Real single/double images preserve their class. Logical images round/clamp back to logical output. Documented int8/int16/int32/uint8/uint16/uint32 images round to nearest and saturate into the original class. Host and automatic-placement fallback accumulate in double; explicit resident uint32 uses double and other documented explicit resident integers use single accumulation.",
             "A supported floating provider imfilter hook may return a new resident output. Integer and logical resident inputs use checked owner-aware host reference computation and explicit-input restoration. A typed unsupported provider operation may take the host fallback; operational upload or execution failures retain their cause and are not silently replayed. imfilter is a standalone fusion boundary.",
         ]},
     ],
@@ -71,7 +71,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Does imfilter normalize H?", answer: "No. H is used exactly as supplied; fspecial can generate normalized smoothing kernels." },
         BuiltinDocumentationFaq { question: "What if H is larger than A?", answer: "Same and full use selected padding; valid may return a zero-length axis." },
         BuiltinDocumentationFaq { question: "Can imfilter fuse into elementwise chains?", answer: "No. It is a standalone filtering operation with an optional provider hook." },
-        BuiltinDocumentationFaq { question: "Are logical images supported?", answer: "Yes. Logical image values enter double computation and return a double result." },
+        BuiltinDocumentationFaq { question: "Are logical images supported?", answer: "Yes. Logical values are computed numerically and rounded/clamped back to logical output; the prior editable reference's double-output claim did not match runtime behavior." },
     ],
     links: &[
         BuiltinDocumentationLink { label: "fspecial", target: BuiltinDocumentationLinkTarget::Builtin("fspecial") },
@@ -82,8 +82,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "imfilter runtime and host kernel", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/imfilter.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Class, padding, geometry, resident fallback", location: "crates/runmat-runtime/src/builtins/image/filters/imfilter.rs" }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "imfilter admission and options", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/imfilter.rs") },
+            BuiltinDocumentationLink { label: "Host kernel and geometry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/imfilter/kernel.rs") },
+            BuiltinDocumentationLink { label: "Resident provider route", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/imfilter/provider.rs") },
+        ],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Class, padding, geometry, resident fallback", location: "crates/runmat-runtime/src/builtins/image/filters/imfilter/tests.rs" }],
         notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),

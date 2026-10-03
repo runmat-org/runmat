@@ -29,7 +29,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let image = request.arguments.first();
     let kernel = request.arguments.get(1);
-    let class = image.and_then(|value| match value.kind {
+    let output_kind = image.and_then(|value| match value.kind {
         ValueKindFact::Numeric(NumericFact {
             class,
             domain: NumericDomain::Real,
@@ -42,10 +42,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 ));
                 None
             } else {
-                Some(class)
+                Some(ValueKindFact::Numeric(NumericFact {
+                    class,
+                    domain: NumericDomain::Real,
+                }))
             }
         }
-        ValueKindFact::Logical => Some(NumericClass::Double),
+        ValueKindFact::Logical => Some(ValueKindFact::Logical),
         ValueKindFact::Unknown => None,
         _ => {
             diagnostics.push(argument_error(
@@ -155,12 +158,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         _ => ShapeFact::Unknown,
     };
     let mut output = ValueFact::unknown(DynamicReason::RuntimeValue);
-    output.kind = class.map_or(ValueKindFact::Unknown, |class| {
-        ValueKindFact::Numeric(NumericFact {
-            class,
-            domain: NumericDomain::Real,
-        })
-    });
+    output.kind = output_kind.unwrap_or(ValueKindFact::Unknown);
     output.shape = shape;
     output.storage = StorageFact::Dense;
     output.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);

@@ -81,8 +81,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Kernel generation and provider publication", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/fspecial.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Kernel shapes, values, class controls and provider errors", location: "crates/runmat-runtime/src/builtins/image/filters/fspecial.rs" }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "fspecial admission and provider publication", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/fspecial.rs") },
+            BuiltinDocumentationLink { label: "Kernel generation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/fspecial/generation.rs") },
+            BuiltinDocumentationLink { label: "Parameter decoding", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/fspecial/parsing.rs") },
+        ],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Kernel shapes, values, class controls and provider errors", location: "crates/runmat-runtime/src/builtins/image/filters/fspecial/tests.rs" }],
         notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),

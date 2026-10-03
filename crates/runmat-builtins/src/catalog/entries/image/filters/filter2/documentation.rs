@@ -72,8 +72,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "filter2 runtime and shared imfilter kernel", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/filter2.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Host, resident, option, and preflight behavior", location: "crates/runmat-runtime/src/builtins/image/filters/filter2.rs" }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "filter2 admission and runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/filter2.rs") },
+            BuiltinDocumentationLink { label: "Shared imfilter kernel", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/imfilter/kernel.rs") },
+        ],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Host, resident, option, and preflight behavior", location: "crates/runmat-runtime/src/builtins/image/filters/filter2/tests.rs" }],
         notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),

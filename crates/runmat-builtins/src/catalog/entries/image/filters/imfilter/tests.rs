@@ -56,6 +56,26 @@ fn shape_modes_and_integer_class_follow_image() {
 }
 
 #[test]
+fn logical_image_preserves_logical_output_kind() {
+    let image = ValueFact::proven(
+        ValueKindFact::Logical,
+        ShapeFact::from(vec![Some(3), Some(4)]),
+        StorageFact::Dense,
+    );
+    let inferred = call(image, numeric(NumericClass::Double, &[2, 2]), None);
+    assert!(
+        inferred.diagnostics.is_empty(),
+        "{:?}",
+        inferred.diagnostics
+    );
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Logical);
+    assert_eq!(
+        inferred.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), Some(4)])
+    );
+}
+
+#[test]
 fn invalid_kernel_class_rank_and_image_width_are_diagnosed() {
     let invalid_kernel = call(
         numeric(NumericClass::Single, &[4, 5]),
