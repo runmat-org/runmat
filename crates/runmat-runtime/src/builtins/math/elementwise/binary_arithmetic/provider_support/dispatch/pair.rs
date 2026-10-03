@@ -7,7 +7,11 @@ use crate::BuiltinResult;
 
 #[cfg(test)]
 mod owned_tests;
+#[cfg(test)]
+mod complex_tests;
 
+use super::super::operation::ArithmeticPairRoute;
+use super::super::validation::valid_complex_binary_output;
 use super::super::{
     broadcast_repetitions, device_real_scalar, ArithmeticProviderOperation, ExpandedPair,
 };
@@ -25,8 +29,11 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
     let Some(provider) = common_owner(left, right) else {
         return Ok(None);
     };
-    if !compatible_inputs(left, right) {
+    let Some(route) = operation.pair_route(left, right) else {
         return Ok(None);
+    };
+    if let ArithmeticPairRoute::Complex(precision) = route {
+        return try_complex_pair(operation, precision, provider, left, right).await;
     }
     if left.shape() == right.shape() {
         match operation.apply(provider, left, right).await {
@@ -43,6 +50,34 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
         }
     }
     try_device_scalar(operation, identity, left, right).await
+}
+
+async fn try_complex_pair(
+    operation: ArithmeticProviderOperation,
+    precision: runmat_accelerate_api::ProviderPrecision,
+    provider: &dyn AccelProvider,
+    left: &GpuTensorHandle,
+    right: &GpuTensorHandle,
+) -> BuiltinResult<Option<Value>> {
+    let Some((shape, _, _)) = broadcast_repetitions(left.shape(), right.shape()) else {
+        return Ok(None);
+    };
+    match operation.apply(provider, left, right).await {
+        Ok(output)
+            if valid_complex_binary_output(precision, &output, left, right, provider, &shape) =>
+        {
+            super::super::resident_output_from_sources(output, [left, right]).map(Some)
+        }
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            provider_contract_error(
+                operation,
+                "provider returned invalid complex arithmetic output",
+            ),
+        )),
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Err(error) => Err(provider_error(operation, error)),
+    }
 }
 
 async fn try_broadcast(

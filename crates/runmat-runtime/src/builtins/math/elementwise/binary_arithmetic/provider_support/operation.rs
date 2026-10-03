@@ -1,4 +1,12 @@
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
+
+use super::dispatch::compatible_inputs;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ArithmeticPairRoute {
+    Real,
+    Complex(ProviderPrecision),
+}
 
 #[derive(Clone, Copy)]
 pub(in crate::builtins::math::elementwise::binary_arithmetic) enum ArithmeticProviderOperation {
@@ -8,6 +16,31 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) enum ArithmeticPro
 }
 
 impl ArithmeticProviderOperation {
+    pub(super) fn pair_route(
+        self,
+        left: &GpuTensorHandle,
+        right: &GpuTensorHandle,
+    ) -> Option<ArithmeticPairRoute> {
+        if compatible_inputs(left, right) {
+            return Some(ArithmeticPairRoute::Real);
+        }
+        // This operation type contains only add/subtract/multiply. Division
+        // and power have separate real-only admission owners.
+        let storage = [left, right].map(runmat_accelerate_api::handle_storage);
+        if !storage.contains(&GpuTensorStorage::ComplexInterleaved)
+            || [left, right].iter().any(|handle| {
+                runmat_accelerate_api::handle_integer_type(handle).is_some()
+                    || runmat_accelerate_api::handle_is_logical(handle)
+                    || handle.allocation_lease().validate_live().is_err()
+            })
+        {
+            return None;
+        }
+        let precision = runmat_accelerate_api::handle_precision(left)?;
+        (runmat_accelerate_api::handle_precision(right) == Some(precision))
+            .then_some(ArithmeticPairRoute::Complex(precision))
+    }
+
     pub(super) const fn name(self) -> &'static str {
         match self {
             Self::Add => "plus",

@@ -49,7 +49,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Uses elem_sub for equal-shape gpuArrays, including complex-interleaved handles, attempts provider-side implicit expansion with repmat, and uses scalar_sub / scalar_rsub hooks for real scalar broadcast cases; unsupported shapes fall back to host execution.",
+    notes: "Uses elem_sub for admitted real and complex-interleaved pairs; complex singleton expansion uses the provider broadcast hook directly, while real expansion can use repmat. Real scalar pairs can use scalar_sub / scalar_rsub; unsupported hooks fall back to host execution.",
 };
 
 #[runmat_macros::register_fusion_spec(
