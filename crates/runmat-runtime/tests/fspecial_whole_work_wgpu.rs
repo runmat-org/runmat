@@ -37,14 +37,16 @@ impl RuntimeParallelService for HostBudget {
 }
 
 fn context(session: Rc<PlacementSession>, host_bytes: u64) -> RuntimeContext {
-    RuntimeContext::new(Rc::new(
+    let context = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_service_ports(
         RuntimeServicePorts::default()
             .with_placement(session)
             .with_parallel(Rc::new(HostBudget(host_bytes))),
-    )
+    );
+    context.set_runmat_extensions_enabled(true);
+    context
 }
 
 /// Keep WGPU's actual capability, resource and observation contracts while
@@ -109,7 +111,6 @@ impl Drop for FspecialEnvRestore {
 #[test]
 #[ignore = "requires actual WGPU adapter; run explicitly in F32 and F64 image-filter gates"]
 fn finite_host_workspace_and_completed_fspecial_publication() {
-    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let _restore = FspecialEnvRestore(std::env::var_os("RUNMAT_ACCEL_FSPECIAL_DEVICE"));
     std::env::set_var("RUNMAT_ACCEL_FSPECIAL_DEVICE", "1");
     let provider: &'static WgpuProvider = Box::leak(Box::new(
@@ -183,7 +184,6 @@ fn finite_host_workspace_and_completed_fspecial_publication() {
 #[test]
 #[ignore = "requires actual WGPU adapter; run explicitly in the image-filter hardware gate"]
 fn provider_unsupported_host_fallback_is_one_completed_conditional_route() {
-    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let _restore = FspecialEnvRestore(std::env::var_os("RUNMAT_ACCEL_FSPECIAL_DEVICE"));
     std::env::set_var("RUNMAT_ACCEL_FSPECIAL_DEVICE", "1");
     let backend: &'static WgpuProvider = Box::leak(Box::new(

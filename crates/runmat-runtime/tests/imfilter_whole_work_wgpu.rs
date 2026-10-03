@@ -41,14 +41,16 @@ impl RuntimeParallelService for HostBudget {
 }
 
 fn context(session: Rc<PlacementSession>, host_bytes: u64) -> RuntimeContext {
-    RuntimeContext::new(Rc::new(
+    let context = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_service_ports(
         RuntimeServicePorts::default()
             .with_placement(session)
             .with_parallel(Rc::new(HostBudget(host_bytes))),
-    )
+    );
+    context.set_runmat_extensions_enabled(true);
+    context
 }
 
 struct UnsupportedImfilter(&'static WgpuProvider, AtomicUsize, bool, AtomicBool);
