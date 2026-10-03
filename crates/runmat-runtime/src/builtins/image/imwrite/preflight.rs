@@ -109,7 +109,7 @@ fn preflight_known_option_value(
                 Value::LogicalArray(array) => image_dimensions_from_shape(&array.shape)?,
                 _ => (1, 1, 1),
             };
-            if shape.as_slice() != [image_shape.0, image_shape.1] {
+            if shape.len() != 2 || shape[0] != image_shape.0 || shape[1] != image_shape.1 {
                 return Err(imwrite_error_with_detail(
                     &IMWRITE_ERROR_INVALID_OPTION,
                     "Alpha must be an MxN array matching the image dimensions",
