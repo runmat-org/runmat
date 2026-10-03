@@ -2,18 +2,16 @@ use super::*;
 
 #[runtime_builtin(
     name = "audioinfo",
-    category = "io/audio",
-    summary = "Read metadata from an audio file.",
-    keywords = "audioinfo,audio,wav,flac,aiff,mp3,ogg,metadata,sample rate,channels",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
-    descriptor(crate::builtins::io::audio::AUDIOINFO_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::audio"
 )]
 pub(super) async fn audioinfo_builtin(filename: Value) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(map_audioinfo_control_flow)?;
+    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+        return Err(audioinfo_error_with(
+            &AUDIOINFO_ERROR_ARGUMENT,
+            "audioinfo: too many output arguments",
+        ));
+    }
     let path = resolve_audioinfo_path(&filename)?;
     let scan = read_audioinfo_scan(&path).await?;
     let metadata = AudioMetadata::parse(&scan).map_err(|message| {
@@ -99,6 +97,7 @@ pub(super) async fn read_audioinfo_scan(path: &Path) -> BuiltinResult<AudioInfoS
     })
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct AudioMetadata {
     pub(super) format: &'static str,
     pub(super) compression_method: String,
@@ -189,8 +188,6 @@ pub(super) fn parse_wave(bytes: &[u8]) -> Result<AudioMetadata, String> {
         bit_rate: Some(format.byte_rate as f64 * 8.0),
     })
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 
 pub(super) fn resolve_audioinfo_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {

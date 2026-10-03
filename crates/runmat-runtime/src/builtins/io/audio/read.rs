@@ -2,16 +2,16 @@ use super::*;
 
 #[runtime_builtin(
     name = "audioread",
-    category = "io/audio",
-    summary = "Read audio samples from a file.",
-    keywords = "audioread,audio,wav,rf64,pcm,float,sample rate,channels",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::audioread_type),
-    descriptor(crate::builtins::io::audio::AUDIOREAD_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::audio::AUDIOREAD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::audio"
 )]
 pub(super) async fn audioread_builtin(filename: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: too many output arguments",
+        ));
+    }
     if matches!(&filename, Value::GpuTensor(_))
         || args.iter().any(|arg| matches!(arg, Value::GpuTensor(_)))
     {
@@ -48,8 +48,7 @@ pub(super) async fn audioread_builtin(filename: Value, args: Vec<Value>) -> Buil
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct AudioreadOptions {
     pub(super) range: Option<AudioSampleRange>,
     pub(super) native: bool,
@@ -206,7 +205,7 @@ pub(super) fn decode_wave_samples(
     let (start_frame, end_frame_exclusive) = match options.range {
         Some(AudioSampleRange { first, last }) => {
             let last = last.unwrap_or(total_frames);
-            if last > total_frames {
+            if first > total_frames || last > total_frames {
                 return Err("sample range exceeds the available audio frames".to_string());
             }
             (first - 1, last)
@@ -406,8 +405,6 @@ pub(super) fn sign_extend_24(bytes: &[u8]) -> i32 {
     }
     value
 }
-
-#[derive(Debug, Clone, Copy)]
 
 pub(super) fn resolve_audioread_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {

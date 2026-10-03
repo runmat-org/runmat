@@ -63,15 +63,3 @@ where
     }
     builder.build()
 }
-
-pub(super) fn map_audioinfo_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(|value| value.to_string());
-    let message = err.message().to_string();
-    let mut builder = build_runtime_error(message)
-        .with_builtin(AUDIOINFO_BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}

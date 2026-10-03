@@ -1,9 +1,4 @@
-use super::*;
-
-pub(super) const AUDIOINFO_BUILTIN_NAME: &str = "audioinfo";
-pub(super) const AUDIOREAD_BUILTIN_NAME: &str = "audioread";
-pub(super) const MAX_AUDIOINFO_PREFIX_BYTES: u64 = 1024 * 1024;
-pub(super) const MAX_AUDIOINFO_TAIL_BYTES: u64 = 64 * 1024;
+use crate::*;
 
 pub(super) const AUDIOINFO_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "info",
@@ -26,19 +21,19 @@ pub(super) const AUDIOINFO_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
         outputs: &AUDIOINFO_OUTPUTS,
     }];
 
-pub(super) const AUDIOINFO_ERROR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const AUDIOINFO_ERROR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.AUDIOINFO.ARGUMENT",
     identifier: Some("RunMat:audioinfo:InvalidArgument"),
     when: "Filename is missing or cannot be interpreted as a scalar path.",
     message: "audioinfo: invalid filename",
 };
-pub(super) const AUDIOINFO_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const AUDIOINFO_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.AUDIOINFO.IO",
     identifier: Some("RunMat:audioinfo:Io"),
     when: "The audio file cannot be read.",
     message: "audioinfo: unable to read file",
 };
-pub(super) const AUDIOINFO_ERROR_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const AUDIOINFO_ERROR_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.AUDIOINFO.FORMAT",
     identifier: Some("RunMat:audioinfo:UnsupportedFormat"),
     when: "The file is not a supported audio container or has malformed metadata.",
@@ -55,33 +50,6 @@ pub const AUDIOINFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &AUDIOINFO_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::audio")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "audioinfo",
-    op_kind: GpuOpKind::Custom("io-audioinfo"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Runs on the host; file metadata inspection is not an acceleration operation.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::audio")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "audioinfo",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion; performs host-side file I/O.",
 };
 
 pub(super) const AUDIOREAD_OUTPUTS: [BuiltinParamDescriptor; 2] = [
@@ -177,19 +145,19 @@ pub(super) const AUDIOREAD_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         outputs: &AUDIOREAD_OUTPUTS,
     },
 ];
-pub(super) const AUDIOREAD_ERROR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const AUDIOREAD_ERROR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.AUDIOREAD.ARGUMENT",
     identifier: Some("RunMat:audioread:InvalidArgument"),
     when: "Filename, sample range, datatype, or output count is invalid.",
     message: "audioread: invalid argument",
 };
-pub(super) const AUDIOREAD_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const AUDIOREAD_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.AUDIOREAD.IO",
     identifier: Some("RunMat:audioread:Io"),
     when: "The audio file cannot be read.",
     message: "audioread: unable to read file",
 };
-pub(super) const AUDIOREAD_ERROR_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const AUDIOREAD_ERROR_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.AUDIOREAD.FORMAT",
     identifier: Some("RunMat:audioread:UnsupportedFormat"),
     when: "The file is not a supported audio container, uses unsupported audio coding, or is malformed.",
@@ -251,30 +219,3 @@ pub const AUDIOREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2
         notes: "Typed-integer sample-range controls are not part of the documented double-only range contract and reject before filesystem I/O; audioread has no interactive GPU-array surface.",
     },
 ];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::audio")]
-pub const AUDIOREAD_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "audioread",
-    op_kind: GpuOpKind::Custom("io-audioread"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Runs on the host; file I/O and audio decoding are not acceleration operations.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::audio")]
-pub const AUDIOREAD_FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "audioread",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion; performs host-side file I/O and decoding.",
-};

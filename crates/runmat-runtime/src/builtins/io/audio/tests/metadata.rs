@@ -11,6 +11,16 @@ fn audioinfo_descriptor_covers_core_form() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn audioinfo_invalid_control_rejects_before_filesystem_read() {
+    let err = block_on(audioinfo_builtin(Value::Num(42.0))).expect_err("numeric filename");
+    assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
+    let _count = crate::output_count::push_output_count(Some(2));
+    let err = block_on(audioinfo_builtin(Value::from("missing.wav"))).expect_err("output count");
+    assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn audioinfo_reads_wav_metadata() {
     let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("wav");

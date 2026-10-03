@@ -21,6 +21,28 @@ fn audioread_descriptor_covers_core_forms() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn audioread_invalid_output_count_and_controls_precede_file_read() {
+    let _count = crate::output_count::push_output_count(Some(3));
+    let err = block_on(audioread_builtin(Value::from("missing.wav"), vec![]))
+        .expect_err("invalid output count");
+    assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
+    drop(_count);
+    let err = block_on(audioread_builtin(Value::Num(1.0), vec![])).expect_err("numeric path");
+    assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn audioread_open_ended_range_after_last_frame_reports_format_error() {
+    let data = pcm16_wav(8_000, 1, &[0]);
+    let range = Value::Tensor(Tensor::new(vec![2.0, f64::INFINITY], vec![1, 2]).expect("range"));
+    let options = parse_audioread_options(&[range]).expect("valid control");
+    let error = decode_audio_samples(&data, options).expect_err("range beyond file");
+    assert!(error.contains("exceeds the available audio frames"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn audioread_reads_mono_pcm16_as_normalized_double() {
     let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("wav");

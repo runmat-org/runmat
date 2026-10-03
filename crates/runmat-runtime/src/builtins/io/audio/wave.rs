@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy)]
 pub(super) struct WaveContainer {
     pub(super) format: WaveFormat,
     pub(super) data_offset: usize,
