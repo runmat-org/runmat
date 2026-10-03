@@ -3,11 +3,32 @@
 
 mod readlines;
 mod writelines;
+mod fopen;
+mod fclose;
+mod feof;
+mod frewind;
+mod fgetl;
+mod fgets;
+mod fileread;
 
-pub use readlines::*;
-pub use writelines::*;
+pub use self::fclose::*;
+pub use self::feof::*;
+pub use self::fgetl::*;
+pub use self::fgets::*;
+pub use self::fileread::*;
+pub use self::fopen::*;
+pub use self::frewind::*;
+pub use self::readlines::*;
+pub use self::writelines::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(readlines::ENTRIES.iter().copied());
     values.extend(writelines::ENTRIES.iter().copied());
+    values.extend(fopen::ENTRIES.iter().copied());
+    values.extend(fclose::ENTRIES.iter().copied());
+    values.extend(feof::ENTRIES.iter().copied());
+    values.extend(frewind::ENTRIES.iter().copied());
+    values.extend(fgetl::ENTRIES.iter().copied());
+    values.extend(fgets::ENTRIES.iter().copied());
+    values.extend(fileread::ENTRIES.iter().copied());
 }

@@ -15,6 +15,7 @@ pub use super::finance::*;
 pub use super::geometry::*;
 pub use super::graph::*;
 pub use super::image::*;
+pub use super::interop::*;
 pub use super::introspection::*;
 pub use super::io::*;
 pub use super::logical::*;
