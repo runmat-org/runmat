@@ -136,9 +136,9 @@ fn cross_owner_readback_source_staging_and_queue_are_admitted_before_upload() {
         session
             .select_whole_work(route)
             .err()
-            .expect("resource-constrained route must reject")
+            .expect("unknown source staging cannot satisfy a finite provider budget")
             .code,
-        "RunMat:Placement:NoLegalCandidate"
+        "RunMat:Placement:InsufficientResourceEvidence"
     );
 }
 
