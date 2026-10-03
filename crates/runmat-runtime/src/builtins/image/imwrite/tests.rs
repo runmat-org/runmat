@@ -187,6 +187,19 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
         assert!(!dir.path().join("never.gif").exists());
     }
+    let png_path = dir.path().join("last_append.png");
+    let error = call(vec![
+        Value::GpuTensor(resident.clone()),
+        Value::String(png_path.to_string_lossy().into_owned()),
+        Value::String("WriteMode".into()),
+        Value::String("overwrite".into()),
+        Value::String("WriteMode".into()),
+        Value::String("append".into()),
+    ])
+    .unwrap_err();
+    assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_OPTION.identifier);
+    assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
+    assert!(!png_path.exists());
     let invalid_values = Value::Tensor(tensor(
         vec![f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0],
         vec![2, 3],

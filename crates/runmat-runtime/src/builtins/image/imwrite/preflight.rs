@@ -48,12 +48,10 @@ pub(super) fn preflight_option_text(
         if option == Some(ImwriteOption::Alpha) {
             alpha_applied = true;
         }
-        if option == Some(ImwriteOption::WriteMode)
-            && crate::builtins::image::checked_text::scalar_text(&args[index + 1])
+        if option == Some(ImwriteOption::WriteMode) {
+            append = crate::builtins::image::checked_text::scalar_text(&args[index + 1])
                 .and_then(|mode| WriteMode::from_name(&mode))
-                == Some(WriteMode::Append)
-        {
-            append = true;
+                == Some(WriteMode::Append);
         }
         index += 2;
     }

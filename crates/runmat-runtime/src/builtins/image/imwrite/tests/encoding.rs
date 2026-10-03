@@ -30,6 +30,23 @@ fn writes_png_rgb_and_round_trips_layout() {
 }
 
 #[test]
+fn last_write_mode_overwrite_allows_png_after_earlier_append() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("last_mode.png");
+    let image = Value::Tensor(tensor(vec![0.5], vec![1, 1], NumericDType::F64));
+    call(vec![
+        image,
+        Value::String(path.to_string_lossy().into_owned()),
+        Value::String("WriteMode".into()),
+        Value::String("append".into()),
+        Value::String("WriteMode".into()),
+        Value::String("overwrite".into()),
+    ])
+    .unwrap();
+    assert!(path.exists());
+}
+
+#[test]
 fn direct_rgba_png_preserves_alpha_channel() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("rgba.png");
