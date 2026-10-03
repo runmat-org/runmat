@@ -23,12 +23,16 @@ pub const FSPECIAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             inference::infer,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &[EffectKind::EnvironmentRead, EffectKind::MayThrow],
+        effects: &[
+            EffectKind::EnvironmentRead,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ],
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {

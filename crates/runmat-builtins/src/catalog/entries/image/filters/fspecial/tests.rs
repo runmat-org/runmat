@@ -4,6 +4,26 @@ use runmat_types::{
     RequestedOutputCount, ShapeFact, ValueFact, ValueKindFact,
 };
 
+#[test]
+fn optional_resident_route_declares_its_transitive_suspension_effect() {
+    assert_eq!(
+        FSPECIAL_CATALOG_ENTRY.contract.async_behavior,
+        BuiltinAsyncBehavior::MaySuspend
+    );
+    assert!(FSPECIAL_CATALOG_ENTRY
+        .contract
+        .effects
+        .contains(&EffectKind::EnvironmentRead));
+    assert!(FSPECIAL_CATALOG_ENTRY
+        .contract
+        .effects
+        .contains(&EffectKind::MaySuspend));
+    assert!(FSPECIAL_CATALOG_ENTRY
+        .contract
+        .effects
+        .contains(&EffectKind::MayThrow));
+}
+
 fn call(
     arguments: Vec<LiteralValue>,
     output_count: RequestedOutputCount,

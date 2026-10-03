@@ -2,7 +2,6 @@
 //! provider-side physical preflight. Public filter2/imfilter identity and
 //! preparation routes remain with their respective domain owners.
 
-use super::geometry::filter_output_shape;
 use crate::context::provider_operation::{
     select_exact_provider_operation, ExactConditionalProviderUpload, ExactProviderOperation,
     ExactProviderReadback, ExactProviderReadbackPhase, SelectedProviderOperation,
@@ -11,120 +10,21 @@ use crate::context::RuntimeContext;
 use crate::BuiltinResult;
 use runmat_accelerate_api::{
     GpuTensorHandle, ImfilterOptions, ProviderElementType, ProviderFeasibility,
-    ProviderFeasibilityQuery, ProviderImfilterInputBackings, ProviderImfilterPreparedKernel,
-    ProviderImfilterWorkload, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
+    ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
     ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
 };
-use runmat_execution::{Digest, ResourceBoundUnavailable, ResourceByteBound};
+use runmat_execution::{Digest, ResourceByteBound};
 mod host_only;
 pub(in crate::builtins::image::filters) use host_only::{
     select_host_only_sink, select_host_only_upload,
 };
-
-/// Checked operation-owned plan/evaluation/conversion workspace shared by
-/// filter2 and imfilter's equivalent host continuation. Provider readback
-/// payload and staging are accounted separately by the source-owner hooks.
-pub(in crate::builtins::image::filters) fn conditional_host_bounds(
-    builtin: &str,
-    image_shape: &[usize],
-    kernel_shape: &[usize],
-    options: &ImfilterOptions,
-    image_single: bool,
-    kernel_single: bool,
-    prepared_kernel: bool,
-) -> (ResourceByteBound, ResourceByteBound) {
-    let counts = (|| {
-        let output_shape =
-            filter_output_shape(image_shape, kernel_shape, options.shape, builtin).ok()?;
-        let count = |shape: &[usize]| {
-            shape.iter().try_fold(1_u64, |total, &extent| {
-                total.checked_mul(u64::try_from(extent).ok()?)
-            })
-        };
-        Some((
-            count(image_shape)?,
-            count(kernel_shape)?,
-            count(&output_shape)?,
-            u64::try_from(image_shape.len().max(kernel_shape.len()).max(2)).ok()?,
-        ))
-    })();
-    let Some((image_len, kernel_len, output_len, rank)) = counts else {
-        return (
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
-        );
-    };
-    let output_single = image_single || kernel_single;
-    let result = (|| {
-        let point_width =
-            u64::try_from(std::mem::size_of::<super::geometry::ImfilterKernelPoint>())
-                .ok()?
-                .checked_add(rank.checked_mul(8)?)?;
-        let rank_vectors = rank.checked_mul(16)?.checked_mul(8)?;
-        let bytes = [
-            kernel_len.checked_mul(point_width)?,
-            rank_vectors,
-            if image_single {
-                image_len.checked_mul(8)?
-            } else {
-                0
-            },
-            if kernel_single {
-                kernel_len.checked_mul(8)?
-            } else {
-                0
-            },
-            output_len.checked_mul(8)?,
-            if output_single {
-                output_len.checked_mul(12)?
-            } else {
-                0
-            },
-            if prepared_kernel {
-                kernel_len
-                    .checked_mul(if kernel_single { 4 } else { 8 })?
-                    .checked_mul(2)?
-            } else {
-                0
-            },
-        ]
-        .into_iter()
-        .try_fold(0_u64, |total, bytes| total.checked_add(bytes))?;
-        let output = output_len.checked_mul(if output_single { 4 } else { 8 })?;
-        Some((bytes, output))
-    })();
-    match result {
-        Some((scratch, output)) => (
-            ResourceByteBound::Known(scratch),
-            ResourceByteBound::Known(output),
-        ),
-        None => (
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
-        ),
-    }
-}
-
-/// The bound above includes the final host payload. A conditional provider
-/// upload accounts that payload as a separately retained result, so remove
-/// exactly its bytes before combining the remaining operation workspace.
-pub(in crate::builtins::image::filters) fn host_scratch_excluding_result(
-    scratch: ResourceByteBound,
-    result: ResourceByteBound,
-) -> BuiltinResult<ResourceByteBound> {
-    match (scratch, result) {
-        (ResourceByteBound::Known(scratch), ResourceByteBound::Known(result)) => scratch
-            .checked_sub(result)
-            .map(ResourceByteBound::Known)
-            .ok_or_else(|| {
-                crate::build_runtime_error("conditional host result exceeds its workspace bound")
-                    .with_identifier("RunMat:Placement:InvalidConditionalPresentation")
-                    .build()
-            }),
-        (ResourceByteBound::Unavailable(reason), _)
-        | (_, ResourceByteBound::Unavailable(reason)) => Ok(ResourceByteBound::Unavailable(reason)),
-    }
-}
+mod resource;
+pub(in crate::builtins::image::filters) use resource::{
+    conditional_host_bounds, host_scratch_excluding_result,
+};
+mod query;
+pub(in crate::builtins::image::filters) use query::prepared_hook_matches_realized;
+pub use query::{exact_hook_query, prepared_hook_query};
 
 /// A genuine Unsupported hook may publish a host value only when the caller
 /// has admitted this complete conditional branch before any preparation.
@@ -369,113 +269,6 @@ pub(in crate::builtins::image::filters) fn select_direct(
                 != runmat_accelerate_api::ProviderImfilterPhysicalRoute::Direct,
         },
     )
-}
-
-pub fn exact_hook_query(
-    image: &GpuTensorHandle,
-    kernel: &GpuTensorHandle,
-    options: &ImfilterOptions,
-) -> Option<ProviderFeasibilityQuery> {
-    let backings = ProviderImfilterInputBackings::from_live_handles([image, kernel]).ok()??;
-    let input = backings.live_representations()?.to_vec();
-    let output_shape =
-        filter_output_shape(image.shape(), kernel.shape(), options.shape, "imfilter")
-            .ok()?
-            .into_iter()
-            .map(|extent| u64::try_from(extent).ok())
-            .collect::<Option<Vec<_>>>()?;
-    let output = ProviderRepresentation {
-        element_type: input[0].element_type,
-        storage: ProviderStorage::DenseReal,
-        layout: ProviderLayout::ColumnMajorContiguous,
-        shape: output_shape,
-        residency: ProviderResidency::Device,
-    };
-    Some(ProviderFeasibilityQuery {
-        operation: ProviderOperationIdentity::new("imfilter"),
-        family: ProviderOperationFamily::Library,
-        inputs: input,
-        outputs: vec![output],
-        workload: ProviderWorkload {
-            imfilter: Some(ProviderImfilterWorkload::from_options(
-                options,
-                runmat_accelerate_api::handle_is_explicit(image),
-                Some(backings),
-            )),
-            requested_outputs: Some(1),
-            ..ProviderWorkload::default()
-        },
-    })
-}
-
-/// A projected H is not yet a GPU handle. This query only proves the exact
-/// physical route and may execute only after the realized upload matches it.
-pub fn prepared_hook_query(
-    image: &GpuTensorHandle,
-    projected_kernel: ProviderRepresentation,
-    options: &ImfilterOptions,
-) -> Option<ProviderFeasibilityQuery> {
-    let prepared =
-        ProviderImfilterPreparedKernel::from_live_image(image, projected_kernel).ok()??;
-    let input = prepared.live_representations()?.to_vec();
-    let image_shape = image.shape();
-    let kernel_shape = input[1]
-        .shape
-        .iter()
-        .map(|&extent| usize::try_from(extent).ok())
-        .collect::<Option<Vec<_>>>()?;
-    let output_shape = filter_output_shape(image_shape, &kernel_shape, options.shape, "imfilter")
-        .ok()?
-        .into_iter()
-        .map(|extent| u64::try_from(extent).ok())
-        .collect::<Option<Vec<_>>>()?;
-    let output = ProviderRepresentation {
-        element_type: input[0].element_type,
-        storage: ProviderStorage::DenseReal,
-        layout: ProviderLayout::ColumnMajorContiguous,
-        shape: output_shape,
-        residency: ProviderResidency::Device,
-    };
-    let mut workload = ProviderImfilterWorkload::from_options(
-        options,
-        runmat_accelerate_api::handle_is_explicit(image),
-        None,
-    );
-    workload.prepared_kernel = Some(prepared);
-    Some(ProviderFeasibilityQuery {
-        operation: ProviderOperationIdentity::new("imfilter"),
-        family: ProviderOperationFamily::Library,
-        inputs: input,
-        outputs: vec![output],
-        workload: ProviderWorkload {
-            imfilter: Some(workload),
-            requested_outputs: Some(1),
-            ..ProviderWorkload::default()
-        },
-    })
-}
-
-pub(in crate::builtins::image::filters) fn prepared_hook_matches_realized(
-    query: &ProviderFeasibilityQuery,
-    image: &GpuTensorHandle,
-    kernel: &GpuTensorHandle,
-    options: &ImfilterOptions,
-    expected_kernel_requested_bytes: u64,
-) -> bool {
-    query
-        .workload
-        .imfilter
-        .as_ref()
-        .filter(|workload| {
-            workload.matches_options(options, runmat_accelerate_api::handle_is_explicit(image))
-        })
-        .and_then(|workload| workload.prepared_kernel.as_ref())
-        .is_some_and(|prepared| {
-            prepared
-                .admits_realized(image, kernel, expected_kernel_requested_bytes)
-                .ok()
-                == Some(true)
-        })
 }
 
 pub(in crate::builtins::image::filters) struct SelectedPreparedFilter {

@@ -1,4 +1,16 @@
 use super::*;
+
+#[test]
+fn resident_kernel_and_host_fallback_remain_suspending_contracts() {
+    assert_eq!(
+        IMFILTER_CATALOG_ENTRY.contract.async_behavior,
+        BuiltinAsyncBehavior::MaySuspend
+    );
+    assert!(IMFILTER_CATALOG_ENTRY
+        .contract
+        .effects
+        .contains(&EffectKind::MaySuspend));
+}
 use runmat_types::{
     CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
     OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
