@@ -163,55 +163,46 @@ pub(super) fn scalar_text(value: &Value) -> Option<String> {
 pub(super) const COMPRESSED_AUDIO_ERROR: &str = "sample decoding is currently implemented for WAV/RF64 PCM and IEEE-float audio; compressed containers are metadata-only";
 pub(super) const UNSUPPORTED_AUDIO_ERROR: &str = "unsupported audio format";
 
-pub(super) fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {
-    match (fmt.effective_format_tag(), fmt.storage_bits_per_sample()) {
-        (0x0001, 8) => NumericDType::U8,
-        (0x0003, 32) => NumericDType::F32,
-        _ => NumericDType::F64,
-    }
-}
-
-pub(super) fn decode_wave_sample(
-    bytes: &[u8],
-    fmt: WaveFormat,
-    native: bool,
-) -> Result<f64, String> {
-    match (fmt.effective_format_tag(), fmt.storage_bits_per_sample()) {
-        (0x0001, 8) => {
+pub(super) fn decode_wave_sample(bytes: &[u8], coding: WaveSampleCoding, native: bool) -> f64 {
+    match coding {
+        WaveSampleCoding::Pcm8 => {
             let raw = bytes[0] as f64;
-            Ok(if native { raw } else { (raw - 128.0) / 128.0 })
+            if native {
+                raw
+            } else {
+                (raw - 128.0) / 128.0
+            }
         }
-        (0x0001, 16) => {
+        WaveSampleCoding::Pcm16 => {
             let raw = i16::from_le_bytes([bytes[0], bytes[1]]);
-            Ok(if native {
+            if native {
                 raw as f64
             } else {
                 raw as f64 / 32768.0
-            })
+            }
         }
-        (0x0001, 24) => {
+        WaveSampleCoding::Pcm24 => {
             let raw = sign_extend_24(bytes);
-            Ok(if native {
+            if native {
                 raw as f64
             } else {
                 raw as f64 / 8_388_608.0
-            })
+            }
         }
-        (0x0001, 32) => {
+        WaveSampleCoding::Pcm32 => {
             let raw = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-            Ok(if native {
+            if native {
                 raw as f64
             } else {
                 raw as f64 / 2_147_483_648.0
-            })
+            }
         }
-        (0x0003, 32) => Ok(f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64),
-        (0x0003, 64) => Ok(f64::from_le_bytes([
+        WaveSampleCoding::Float32 => {
+            f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
+        }
+        WaveSampleCoding::Float64 => f64::from_le_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ])),
-        (tag, bits) => Err(format!(
-            "unsupported WAVE sample encoding tag 0x{tag:04x} with {bits} bits per sample"
-        )),
+        ]),
     }
 }
 

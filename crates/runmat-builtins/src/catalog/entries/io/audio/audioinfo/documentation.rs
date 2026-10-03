@@ -12,6 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Inputs and fields", paragraphs: &[
             "The filename is scalar string, singleton string array, or one-row character array. The active filesystem provider supplies the file. The result is a host scalar structure with `Filename`, `CompressionMethod`, `NumChannels`, `SampleRate`, `TotalSamples`, `Duration`, `BitsPerSample`, `BitRate`, `FileSize`, and `Format` fields.",
             "When headers do not establish a field, `TotalSamples`, `Duration`, `BitsPerSample`, or `BitRate` is `NaN`; the field is retained rather than omitted.",
+            "For WAVE_FORMAT_EXTENSIBLE, `BitsPerSample` reports valid sample precision; the encoded container may be wider. `audioread(..., 'native')` chooses its integer storage from the container width.",
         ] },
         BuiltinDocumentationSection { heading: "Containers and limits", paragraphs: &[
             "WAV/RF64 RIFF, FLAC STREAMINFO, AIFF/AIFC COMM, Ogg/Vorbis identification headers, and MPEG audio frame headers are recognized. Malformed or unsupported data raises a format error rather than partial metadata.",

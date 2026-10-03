@@ -20,7 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
         BuiltinDocumentationSection { heading: "Decoding and classes", paragraphs: &[
             "WAV/RF64 PCM 8-bit unsigned, PCM 16/24/32-bit signed, IEEE 32/64-bit float, and WAVE_FORMAT_EXTENSIBLE PCM/float subformats are decoded. FLAC, MP3, Ogg/Vorbis, and AIFF metadata can be inspected by `audioinfo`, but their samples are not decoded here.",
-            "Default PCM output is normalized double: unsigned 8-bit maps around zero and signed PCM divides by signed full scale. Native output retains exact uint8 for PCM8, int16 for PCM16, left-aligned int32 for PCM24, int32 for PCM32, single for IEEE float32, and double for IEEE float64. Sample tensors are column-major N-by-C, including N-by-1 mono.",
+            "Default PCM output is normalized double: unsigned 8-bit maps around zero and signed PCM divides by signed full scale. Native integer storage follows the sample container width: uint8 for 8-bit unsigned PCM, int16 for 16-bit signed PCM, and int32 for 24/32-bit signed PCM; 24-bit containers are left-aligned in int32. Extensible PCM may have fewer valid bits left-aligned inside a wider container, such as 24 valid bits in a 32-bit int32 sample. Native IEEE float32 returns single and float64 returns double. Sample tensors are column-major N-by-C, including N-by-1 mono.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
             "Filesystem I/O and decoding execute on the host, terminate fusion, and create host-resident tensors. No provider kernel runs; GPU-resident arguments reject before provider access. Use `gpuArray` explicitly after reading if subsequent computation should reside on a device.",

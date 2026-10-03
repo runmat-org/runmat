@@ -213,7 +213,7 @@ pub(super) const AUDIOREAD_NATIVE_INTEGER_INPUTS: [BuiltinIntegerInputCapability
         classes: &AUDIOREAD_NATIVE_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "For documented integer-coded files, datatype=\"native\" returns uint8 for 8-bit unsigned PCM, int16 for 16-bit signed PCM, and int32 for 24-bit left-aligned or 32-bit signed PCM.",
+        notes: "For documented integer-coded files, datatype=\"native\" follows the PCM container width: uint8 for 8-bit unsigned, int16 for 16-bit signed, and int32 for 24-bit left-aligned or 32-bit signed containers. Extensible valid-bit precision may be smaller than its container.",
     }];
 pub(super) const AUDIOREAD_REJECTED_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

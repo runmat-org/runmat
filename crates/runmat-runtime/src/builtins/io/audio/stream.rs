@@ -173,17 +173,17 @@ async fn decode_seekable_wave<R: Read + Seek>(
             ),
             shape,
         ),
-        (datatype, _, _) => {
+        (datatype, coding) => {
             let native = datatype == AudioReadDataType::Native;
             let out = collect_stream_samples(file, path, geometry, cooperation, |sample| {
-                decode_wave_sample(sample, fmt, native)
+                Ok(decode_wave_sample(sample, coding, native))
             })
             .await?;
             Tensor::new_with_dtype(
                 out,
                 shape,
-                if native {
-                    native_wave_dtype(fmt)
+                if native && coding == WaveSampleCoding::Float32 {
+                    NumericDType::F32
                 } else {
                     NumericDType::F64
                 },
