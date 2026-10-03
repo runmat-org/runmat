@@ -6,8 +6,9 @@ mod documentation;
 mod gpu_array;
 mod pagefun;
 mod transfer;
+mod gpu;
 
-pub use arrayfun::{
+pub use self::arrayfun::{
     arrayfun_gpu_callback, ArrayfunGpuBinary, ArrayfunGpuCallback, ArrayfunGpuUnary,
     ARRAYFUN_CATALOG_ENTRY, ARRAYFUN_DESCRIPTOR, ARRAYFUN_ERROR_CALLBACK_FAILED,
     ARRAYFUN_ERROR_INTERNAL, ARRAYFUN_ERROR_INVALID_INPUT, ARRAYFUN_ERROR_UNDEFINED_FUNCTION,
@@ -15,13 +16,15 @@ pub use arrayfun::{
     ARRAYFUN_GPU_OPTIONS_EXTENSION, ARRAYFUN_HOST_SCALAR_EXPANSION_EXTENSION,
     ARRAYFUN_INTEGER_CAPABILITIES, ARRAYFUN_TEXT_CALLABLE_EXTENSION,
 };
-pub use gpu_array::*;
-pub use pagefun::*;
-pub use transfer::*;
+pub use self::gpu::*;
+pub use self::gpu_array::*;
+pub use self::pagefun::*;
+pub use self::transfer::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(arrayfun::ENTRIES.iter().copied());
     values.extend(gpu_array::ENTRIES.iter().copied());
     values.extend(pagefun::ENTRIES.iter().copied());
     values.extend(transfer::ENTRIES.iter().copied());
+    values.extend(gpu::ENTRIES.iter().copied());
 }

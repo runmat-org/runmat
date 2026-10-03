@@ -10,4 +10,3 @@ pub mod gpuarray;
 pub mod gpudevice;
 pub mod gpuinfo;
 pub mod pagefun;
-pub(crate) mod type_resolvers;
