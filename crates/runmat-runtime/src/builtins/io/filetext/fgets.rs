@@ -1,10 +1,10 @@
 //! MATLAB-compatible `fgets` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FGETS_ERROR_INTERNAL, FGETS_ERROR_INVALID_IDENTIFIER,
-    FGETS_ERROR_INVALID_INPUT, FGETS_ERROR_IO, FGETS_INTEGER_ID_EXTENSION,
-    FGETS_INTEGER_NCHAR_EXTENSION, FGETS_RESIDENT_ID_EXTENSION, FGETS_RESIDENT_NCHAR_EXTENSION,
-    FGETS_SINGLE_ID_EXTENSION, FGETS_SINGLE_NCHAR_EXTENSION,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, FGETS_ERROR_INTERNAL,
+    FGETS_ERROR_INVALID_IDENTIFIER, FGETS_ERROR_INVALID_INPUT, FGETS_ERROR_IO,
+    FGETS_INTEGER_ID_EXTENSION, FGETS_INTEGER_NCHAR_EXTENSION, FGETS_RESIDENT_ID_EXTENSION,
+    FGETS_RESIDENT_NCHAR_EXTENSION, FGETS_SINGLE_ID_EXTENSION, FGETS_SINGLE_NCHAR_EXTENSION,
 };
 #[cfg(test)]
 use runmat_builtins::{
@@ -374,7 +374,7 @@ fn parse_nchar_host(value: &Value) -> BuiltinResult<Option<usize>> {
                     NCHAR_NONNEGATIVE_INTEGER_DETAIL,
                 ));
             }
-            if n < 0.0 {
+            if *n < 0.0 {
                 return Err(fgets_error_with_detail(
                     &FGETS_ERROR_INVALID_INPUT,
                     NCHAR_NONNEGATIVE_INTEGER_DETAIL,

@@ -17,7 +17,9 @@ use runmat_value::{ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
 
 mod environment;
 mod isolated;
-use environment::{environment_metadata, issued_python_status_value, validate_environment};
+#[cfg(test)]
+use environment::environment_metadata;
+use environment::{issued_python_status_value, validate_environment};
 use isolated::{IsolatedCallGuard, NestedCallLease};
 
 use super::super::{

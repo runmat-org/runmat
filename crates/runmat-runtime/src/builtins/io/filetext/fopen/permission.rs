@@ -5,7 +5,7 @@ use crate::BuiltinResult;
 use super::{fopen_error_with_detail, scalar_string, FOPEN_ERROR_INVALID_PERMISSION};
 
 #[derive(Clone)]
-struct Permission {
+pub(super) struct Permission {
     pub(super) canonical: String,
     pub(super) read: bool,
     pub(super) write: bool,
