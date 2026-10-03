@@ -38,6 +38,7 @@ fn external_pixels_keep_unknown_class_but_empty_map_is_exact() {
         .capabilities
         .0
         .contains(&CapabilityRequirement::Network));
+    assert_eq!(result.capabilities.0.len(), 1);
 }
 
 #[test]
@@ -46,7 +47,7 @@ fn url_and_dynamic_source_capabilities_are_not_confused() {
     let url = inference::infer(
         &request(
             text.clone(),
-            Some("https://example.test/pixels.png"),
+            Some("HTTPS://example.test/pixels.png"),
             RequestedOutputCount::One,
         ),
         &IMREAD_CATALOG_ENTRY,
@@ -56,6 +57,7 @@ fn url_and_dynamic_source_capabilities_are_not_confused() {
         .capabilities
         .0
         .contains(&CapabilityRequirement::Filesystem));
+    assert_eq!(url.capabilities.0.len(), 1);
     let dynamic = inference::infer(
         &request(text, None, RequestedOutputCount::One),
         &IMREAD_CATALOG_ENTRY,
@@ -68,6 +70,7 @@ fn url_and_dynamic_source_capabilities_are_not_confused() {
         .capabilities
         .0
         .contains(&CapabilityRequirement::Filesystem));
+    assert_eq!(dynamic.capabilities.0.len(), 2);
 }
 
 #[test]

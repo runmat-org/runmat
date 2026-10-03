@@ -54,8 +54,19 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
     match request.literals.literal_string_at(0) {
-        Some(source) if source.starts_with("http://") || source.starts_with("https://") => {
+        Some(source)
+            if source
+                .get(..7)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+                || source
+                    .get(..8)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://")) =>
+        {
             contract.effects.0.remove(&EffectKind::FilesystemRead);
+            contract
+                .capabilities
+                .0
+                .remove(&CapabilityRequirement::Filesystem);
             contract
                 .capabilities
                 .0
@@ -63,6 +74,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
         Some(_) => {
             contract.effects.0.remove(&EffectKind::Network);
+            contract
+                .capabilities
+                .0
+                .remove(&CapabilityRequirement::Network);
             contract
                 .capabilities
                 .0
