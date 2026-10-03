@@ -14,8 +14,8 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
 const FIXTURE: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
     id: BuiltinExampleFixtureId { local_name: "validation-study" }, root: BuiltinFilesystemRoot::IsolatedWorkspace,
     entries: &[
-        BuiltinFilesystemEntry::File { relative_path: "part.stl", content: BuiltinFixtureContent::Utf8("solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n") },
         BuiltinFilesystemEntry::File { relative_path: "bracket.fea", content: BuiltinFixtureContent::Utf8("version: 1\nkind: study\nid: bracket_static\ngeometry:\n  path: part.stl\n  units: meter\nmodel:\n  profile: linear_static_structural\nrun:\n  backend: cpu\n") },
+        BuiltinFilesystemEntry::File { relative_path: "part.stl", content: BuiltinFixtureContent::Utf8("solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n") },
     ],
 });
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
