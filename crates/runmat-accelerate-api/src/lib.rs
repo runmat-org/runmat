@@ -1903,6 +1903,26 @@ pub trait AccelProvider: AcceleratorThreadBound {
         query.conservative_transfer_feasibility(self.precision())
     }
 
+    /// Exact physical publication stage for a conditional host computation
+    /// restoring one numeric result to this provider. Default unavailable:
+    /// generic transfer feasibility alone does not prove staging or a fence.
+    fn numeric_upload_physical_evidence(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+    ) -> Option<ProviderNumericUploadPhysicalEvidence> {
+        None
+    }
+
+    /// The same exact one-result upload boundary for class-preserving host
+    /// publication. This includes native integer and logical routes; a
+    /// generic byte estimate is not evidence of staging or completion.
+    fn upload_physical_evidence(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+    ) -> Option<ProviderUploadPhysicalEvidence> {
+        None
+    }
+
     /// Exact native numeric readback admission for a live source handle.
     /// Generic dense feasibility cannot certify a lazy view's owner-specific
     /// transpose/readback path. The default keeps that route unsupported.
@@ -2038,6 +2058,22 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// Limits of this provider's actual one-dimensional convolution shader.
     /// None does not authorize a generic or estimated device recipe.
     fn convolution_geometry(&self) -> Option<ProviderConvolutionGeometry> {
+        None
+    }
+
+    /// Read-only limits of the actual typed imfilter shader. The default
+    /// asserts no direct route and never infers one from generic compute.
+    fn imfilter_geometry(&self) -> Option<ProviderImfilterGeometry> {
+        None
+    }
+
+    /// Exact provider-owned host and input-stage evidence for the same typed
+    /// imfilter hook query returned Supported by query_feasibility. None is
+    /// unproven, never a zero-workspace assumption.
+    fn imfilter_physical_evidence(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+    ) -> Option<ProviderImfilterPhysicalEvidence> {
         None
     }
 
@@ -2412,7 +2448,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Generate a 2-D correlation kernel matching MATLAB's `fspecial` builtin.
     fn fspecial(&self, _request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("fspecial not supported by provider"))
+        Err(unsupported_provider_operation(
+            "fspecial not supported by provider",
+        ))
     }
 
     /// Evaluate the `peaks` test surface on an n×n grid spanning [-3,3]×[-3,3].

@@ -9,8 +9,11 @@ use runmat_accelerate_api::{
 /// observes queue completion, not merely the return of `create_buffer_init`.
 fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
     let operation = runmat_accelerate_api::ProviderOperationIdentity::new("transfer.upload");
-    let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation()
-        .filter(|recorder| recorder.expects_operation(&operation))
+    let Some(recorder) =
+        runmat_accelerate_api::observation::current_provider_observation().filter(|recorder| {
+            recorder.expects_operation(&operation)
+                || recorder.observes_conditional_provider_upload(provider.device_id())
+        })
     else {
         return Ok(());
     };
@@ -24,11 +27,13 @@ fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
         provider.submit(emission, pending, encoder)?;
         Ok(())
     })??;
-    recorder.confirm_submitted_provider_execution_after(
-        provider.device_id(),
-        &operation,
-        checkpoint,
-    );
+    if recorder.expects_operation(&operation) {
+        recorder.confirm_submitted_provider_execution_after(
+            provider.device_id(),
+            &operation,
+            checkpoint,
+        );
+    }
     Ok(())
 }
 use runmat_accelerate_api::{
@@ -177,7 +182,18 @@ impl AccelProvider for WgpuProvider {
                     sum,
                     runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
                 ) {
-                    crate::placement::convolution_observation_capability(self, query)
+                    let convolution =
+                        crate::placement::convolution_observation_capability(self, query);
+                    if matches!(convolution, runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported) {
+                        let fspecial = crate::placement::fspecial_observation_capability(self, query);
+                        if matches!(fspecial, runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported) {
+                            crate::placement::imfilter_observation_capability(self, query)
+                        } else {
+                            fspecial
+                        }
+                    } else {
+                        convolution
+                    }
                 } else {
                     sum
                 }
@@ -271,6 +287,144 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn imfilter_geometry(&self) -> Option<runmat_accelerate_api::ProviderImfilterGeometry> {
+        Some(runmat_accelerate_api::ProviderImfilterGeometry {
+            max_buffer_bytes: self.adapter_limits.max_buffer_size,
+            max_binding_bytes: u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+            max_rank: crate::backend::wgpu::params::IMFILTER_MAX_RANK,
+            max_workgroups_per_dispatch: crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
+            workgroup_size: crate::backend::wgpu::config::WORKGROUP_SIZE,
+            shader_f64: self.adapter.features().contains(wgpu::Features::SHADER_F64),
+        })
+    }
+
+    fn imfilter_physical_evidence(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderImfilterPhysicalEvidence> {
+        crate::placement::imfilter_physical_evidence(self, query)
+    }
+
+    fn numeric_upload_physical_evidence(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence> {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderFeasibility, ProviderLayout, ProviderOperationFamily,
+            ProviderResidency, ProviderStorage,
+        };
+        if query.operation.0 != "transfer.upload"
+            || query.family != ProviderOperationFamily::Upload
+            || query.inputs.len() != 1
+            || query.outputs.len() != 1
+            || query.workload.requested_outputs != Some(1)
+        {
+            return None;
+        }
+        let output = &query.outputs[0];
+        if !matches!(
+            output.element_type,
+            ProviderElementType::F32 | ProviderElementType::F64
+        ) || output.storage != ProviderStorage::DenseReal
+            || output.layout != ProviderLayout::ColumnMajorContiguous
+            || output.residency != ProviderResidency::Device
+        {
+            return None;
+        }
+        let ProviderFeasibility::Supported { estimate } = self.query_feasibility(query) else {
+            return None;
+        };
+        Some(
+            runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence {
+                output_requested_bytes: estimate.output_bytes?,
+                // create_buffer_init owns the output directly. The only extra
+                // requested buffer is the observed completion fence submitted
+                // after publication, including empty logical payloads.
+                provider_scratch_bytes: runmat_execution::ResourceByteBound::Known(
+                    crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
+                ),
+                completion_queue_slots: 1,
+            },
+        )
+    }
+
+    fn upload_physical_evidence(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderUploadPhysicalEvidence> {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderFeasibility, ProviderLayout, ProviderOperationFamily,
+            ProviderResidency, ProviderStorage, ProviderWorkload,
+        };
+        if query.operation.0 != "transfer.upload"
+            || query.family != ProviderOperationFamily::Upload
+            || query.inputs.len() != 1
+            || query.outputs.len() != 1
+        {
+            return None;
+        }
+        let mut expected_workload = ProviderWorkload::default();
+        expected_workload.requested_outputs = Some(1);
+        if query.workload != expected_workload {
+            return None;
+        }
+        let output = &query.outputs[0];
+        if !matches!(
+            output.element_type,
+            ProviderElementType::Logical
+                | ProviderElementType::I8
+                | ProviderElementType::I16
+                | ProviderElementType::I32
+                | ProviderElementType::I64
+                | ProviderElementType::U8
+                | ProviderElementType::U16
+                | ProviderElementType::U32
+                | ProviderElementType::U64
+                | ProviderElementType::F32
+                | ProviderElementType::F64
+        ) || output.storage != ProviderStorage::DenseReal
+            || output.layout != ProviderLayout::ColumnMajorContiguous
+            || output.residency != ProviderResidency::Device
+        {
+            return None;
+        }
+        let ProviderFeasibility::Supported { estimate } = self.query_feasibility(query) else {
+            return None;
+        };
+        let output_requested_bytes = crate::backend::wgpu_storage::checked_upload_allocation_bytes(
+            output,
+            self.precision(),
+        )?;
+        if estimate.output_bytes != Some(output_requested_bytes) {
+            return None;
+        }
+        let host_conversion_width = match output.element_type {
+            ProviderElementType::Logical => {
+                ProviderElementType::from(self.precision()).byte_width()
+            }
+            ProviderElementType::I8
+            | ProviderElementType::I16
+            | ProviderElementType::I32
+            | ProviderElementType::U8
+            | ProviderElementType::U16
+            | ProviderElementType::U32 => 4,
+            ProviderElementType::I64 | ProviderElementType::U64 => 8,
+            ProviderElementType::F32 | ProviderElementType::F64 => 0,
+            ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => return None,
+        };
+        let host_workspace_bytes = output
+            .checked_element_count()?
+            .checked_mul(host_conversion_width)?;
+        Some(runmat_accelerate_api::ProviderUploadPhysicalEvidence {
+            output_requested_bytes,
+            host_workspace_bytes: runmat_execution::ResourceByteBound::Known(host_workspace_bytes),
+            provider_scratch_bytes: runmat_execution::ResourceByteBound::Known(
+                crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
+            ),
+            completion_queue_slots: 1,
+        })
+    }
+
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
         self.export_context_exec(kind)
     }
@@ -333,6 +487,7 @@ impl AccelProvider for WgpuProvider {
         if query.preparation == runmat_execution::CandidatePreparationState::Unknown
             || crate::placement::floating_cast_unresolved_adaptation(&query.operation)
             || query.operation.workload.iir.is_some()
+            || query.operation.workload.fspecial.is_some()
             || matches!(
                 query.operation.operation.0.as_str(),
                 runmat_accelerate_api::PROVIDER_IIR_CAUSAL_PASS_OPERATION

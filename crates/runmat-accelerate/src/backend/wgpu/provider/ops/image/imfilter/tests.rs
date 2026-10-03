@@ -33,6 +33,204 @@ fn single_input(
 }
 
 #[test]
+#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+fn actual_conditional_imfilter_upload_has_physical_empty_floor_and_fence() {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
+        ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderStorage,
+        ProviderWorkload,
+    };
+    let provider = provider();
+    for (shape, physical_bytes) in [(vec![2, 2], 16), (vec![0, 2], 4)] {
+        let output = ProviderRepresentation {
+            element_type: ProviderElementType::F32,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape,
+            residency: ProviderResidency::Device,
+        };
+        let query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("transfer.upload"),
+            family: ProviderOperationFamily::Upload,
+            inputs: vec![ProviderRepresentation {
+                residency: ProviderResidency::Host,
+                ..output.clone()
+            }],
+            outputs: vec![output],
+            workload: ProviderWorkload {
+                requested_outputs: Some(1),
+                ..ProviderWorkload::default()
+            },
+        };
+        let physical = provider
+            .numeric_upload_physical_evidence(&query)
+            .expect("exact native upload physical evidence");
+        assert_eq!(physical.output_requested_bytes, physical_bytes);
+        assert_eq!(physical.provider_scratch_bytes, 8.into());
+        assert_eq!(physical.completion_queue_slots, 1);
+        let mut malformed = query.clone();
+        malformed.inputs[0].shape = vec![1, 4];
+        assert!(provider
+            .numeric_upload_physical_evidence(&malformed)
+            .is_none());
+    }
+}
+
+#[test]
+#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+fn actual_class_preserving_upload_evidence_covers_integer_logical_and_empty() {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
+        ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderStorage,
+        ProviderWorkload,
+    };
+    let provider = provider();
+    assert_eq!(
+        provider.precision(),
+        runmat_accelerate_api::ProviderPrecision::F32
+    );
+    for (element_type, shape, physical, host_workspace) in [
+        (ProviderElementType::Logical, vec![2, 2], 16, 16),
+        (ProviderElementType::U8, vec![2, 2], 16, 16),
+        (ProviderElementType::I16, vec![0, 2], 4, 0),
+    ] {
+        let output = ProviderRepresentation {
+            element_type,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape,
+            residency: ProviderResidency::Device,
+        };
+        let query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("transfer.upload"),
+            family: ProviderOperationFamily::Upload,
+            inputs: vec![ProviderRepresentation {
+                residency: ProviderResidency::Host,
+                ..output.clone()
+            }],
+            outputs: vec![output],
+            workload: ProviderWorkload {
+                requested_outputs: Some(1),
+                ..ProviderWorkload::default()
+            },
+        };
+        let evidence = provider
+            .upload_physical_evidence(&query)
+            .expect("exact native class upload evidence");
+        assert_eq!(evidence.output_requested_bytes, physical);
+        assert_eq!(evidence.host_workspace_bytes, host_workspace.into());
+        assert_eq!(evidence.provider_scratch_bytes, 8.into());
+        assert_eq!(evidence.completion_queue_slots, 1);
+        let mut malformed = query.clone();
+        malformed.inputs[0].shape = vec![1, 4];
+        assert!(provider.upload_physical_evidence(&malformed).is_none());
+        malformed = query;
+        malformed.workload.requested_outputs = Some(2);
+        assert!(provider.upload_physical_evidence(&malformed).is_none());
+    }
+}
+
+#[test]
+#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+fn actual_imfilter_typed_direct_route_is_bound_to_both_live_inputs() {
+    let provider = provider();
+    let image = single_input(&provider, true, &[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+    let kernel = single_input(&provider, false, &[1.0], &[1, 1]);
+    let options = ImfilterOptions::default();
+    let query = runmat_runtime::builtins::image::filters::placement::exact_hook_query(
+        &image, &kernel, &options,
+    )
+    .expect("live exact hook query");
+    assert!(provider.query_feasibility(&query).is_supported());
+    let physical = provider
+        .imfilter_physical_evidence(&query)
+        .expect("provider-owned direct physical plan");
+    assert_eq!(physical.input_stages.iter().count(), 1);
+    assert_eq!(physical.output_queue_slots, 1);
+    let mut malformed = query.clone();
+    malformed.outputs[0].shape = vec![1, 4];
+    assert!(!provider.query_feasibility(&malformed).is_supported());
+    malformed = query.clone();
+    malformed.inputs[1].element_type = runmat_accelerate_api::ProviderElementType::F64;
+    assert!(!provider.query_feasibility(&malformed).is_supported());
+    malformed = query.clone();
+    malformed.inputs.push(malformed.inputs[1].clone());
+    assert!(!provider.query_feasibility(&malformed).is_supported());
+    malformed = query.clone();
+    malformed.workload.imfilter.as_mut().unwrap().input_backings = None;
+    assert!(!provider.query_feasibility(&malformed).is_supported());
+    let output = block_on(provider.imfilter_exec(&image, &kernel, &options)).unwrap();
+    assert_eq!(output.shape(), &[2, 2]);
+    assert_eq!(output.physical().element_type(), NumericElementType::F32);
+    assert_eq!(
+        block_on(provider.download_numeric_exec(&output))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
+    );
+}
+
+#[test]
+#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+fn actual_imfilter_prepared_kernel_plan_is_not_a_forged_live_handle() {
+    let provider = provider();
+    let image = single_input(&provider, true, &[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+    let projected = runmat_accelerate_api::ProviderRepresentation {
+        element_type: runmat_accelerate_api::ProviderElementType::F32,
+        storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+        layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+        shape: vec![1, 1],
+        residency: runmat_accelerate_api::ProviderResidency::Device,
+    };
+    let options = ImfilterOptions::default();
+    let query = runmat_runtime::builtins::image::filters::placement::prepared_hook_query(
+        &image,
+        projected.clone(),
+        &options,
+    )
+    .unwrap();
+    assert!(provider.query_feasibility(&query).is_supported());
+    let planned = query
+        .workload
+        .imfilter
+        .as_ref()
+        .unwrap()
+        .prepared_kernel
+        .as_ref()
+        .unwrap();
+    let expected_bytes = provider
+        .imfilter_physical_evidence(&query)
+        .unwrap()
+        .prepared_kernel_requested_bytes
+        .unwrap();
+    assert_eq!(expected_bytes, 4);
+    assert_eq!(
+        provider
+            .imfilter_physical_evidence(&query)
+            .unwrap()
+            .input_stages
+            .iter()
+            .next()
+            .unwrap()
+            .incremental_peak_bytes,
+        runmat_execution::ResourceByteBound::Known(8),
+        "the prepared H allocation coexists with its provider readback staging"
+    );
+    let kernel = single_input(&provider, false, &[1.0], &[1, 1]);
+    assert!(planned
+        .admits_realized(&image, &kernel, expected_bytes)
+        .unwrap());
+    let wrong_kernel = single_input(&provider, false, &[1.0, 1.0], &[2, 1]);
+    assert!(!planned
+        .admits_realized(&image, &wrong_kernel, expected_bytes)
+        .unwrap());
+    let decoded: runmat_accelerate_api::ProviderFeasibilityQuery =
+        serde_json::from_slice(&serde_json::to_vec(&query).unwrap()).unwrap();
+    assert!(!provider.query_feasibility(&decoded).is_supported());
+    assert!(!provider.imfilter_physical_evidence(&decoded).is_some());
+}
+
+#[test]
 #[ignore = "requires an actual WGPU adapter; execute explicitly in native GPU qualification"]
 fn actual_imfilter_lazy_image_materializes_without_host_image_transfer() {
     let provider = provider();

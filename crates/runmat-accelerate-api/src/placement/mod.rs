@@ -14,6 +14,13 @@ pub use convolution::{
 mod cost;
 mod execution_inventory;
 mod feasibility;
+mod fspecial;
+pub use fspecial::ProviderFspecialFilter;
+mod imfilter;
+pub use imfilter::{
+    ProviderImfilterGeometry, ProviderImfilterInputBackings, ProviderImfilterPhysicalEvidence,
+    ProviderImfilterPhysicalRoute, ProviderImfilterPreparedKernel, ProviderImfilterWorkload,
+};
 mod iir;
 pub use iir::{
     ProviderIirRoute, ProviderIirWorkload, PROVIDER_IIR_CAUSAL_PASS_OPERATION,
@@ -41,8 +48,9 @@ pub use execution_inventory::{
     RUNMAT_CUDA_PROVIDER_ID, RUNMAT_WGPU_PROVIDER_ID,
 };
 pub use feasibility::{
-    ProviderFeasibility, ProviderFeasibilityQuery, ProviderOperationIdentity, ProviderRejection,
-    ProviderRejectionCode, ProviderResourceEstimate, ProviderTransferOutputBound, ProviderWorkload,
+    ProviderFeasibility, ProviderFeasibilityQuery, ProviderNumericUploadPhysicalEvidence,
+    ProviderOperationIdentity, ProviderRejection, ProviderRejectionCode, ProviderResourceEstimate,
+    ProviderTransferOutputBound, ProviderUploadPhysicalEvidence, ProviderWorkload,
 };
 pub use representation::{
     ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderStorage,

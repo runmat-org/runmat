@@ -1,13 +1,19 @@
 use super::*;
 use crate::context::{RuntimePlacementService, RuntimeServicePorts, RuntimeWholeWorkProbeLease};
 use crate::RuntimeError;
+use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::observation::ProviderOperationReceipt;
+use runmat_accelerate_api::{
+    GpuTensorView, ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency,
+    ProviderStorage, ThreadProviderGuard,
+};
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::{
     CancellationReason, Digest, ExecutionCandidateKind, PlacementDecision, PlacementInvalidation,
     PlacementPlanRequest, PlacementRevision, WholeWorkDecision, WholeWorkDecisionKind,
     WholeWorkPlacementRequest,
 };
+use runmat_value::Tensor;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
@@ -228,4 +234,73 @@ fn absent_placement_service_retires_receipt_without_feedback() {
     );
     owner.finish(Ok(true));
     assert_eq!(probes.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn admitted_upload_cannot_publish_success_without_its_realized_output_witness() {
+    let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    let _owner = ThreadProviderGuard::set(Some(provider));
+    let exact = crate::builtins::common::gpu_helpers::upload_tensor(
+        provider,
+        &Tensor::new(vec![1.0], vec![1, 1]).expect("exact tensor"),
+    )
+    .expect("exact output");
+    let larger = crate::builtins::common::gpu_helpers::upload_tensor(
+        provider,
+        &Tensor::new(vec![1.0; 4], vec![2, 2]).expect("larger tensor"),
+    )
+    .expect("larger output");
+    let larger_view = larger
+        .with_view(GpuTensorView::contiguous(vec![1, 1]))
+        .expect("owner-valid small view");
+    let admitted = || AdmittedHostUploadOutputs {
+        provider,
+        outputs: vec![ProviderRepresentation {
+            element_type: ProviderElementType::F64,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![1, 1],
+            residency: ProviderResidency::Device,
+        }],
+        one_output_requested_bytes: Some(exact.physical().requested_bytes()),
+    };
+
+    for mode in 0..3 {
+        let witness = Rc::new(Witness::default());
+        let cancellation = CancellationSource::new();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let mut owner = receipt_owner(
+            Some(&witness),
+            &cancellation,
+            probes.clone(),
+            ProviderOperationReceipt::new(),
+        )
+        .with_admitted_upload_outputs(admitted());
+        let submission = owner.recorder().submission().expect("upload submission");
+        match mode {
+            0 => { /* Attempt to bypass the publication validator. */ }
+            1 => {
+                owner
+                    .validate_published_outputs(&[&exact])
+                    .expect("first exact output");
+                let error = owner
+                    .validate_published_outputs(&[&larger_view])
+                    .expect_err("larger backing allocation must be rejected");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:Placement:InvalidPublishedOutput")
+                );
+            }
+            _ => owner
+                .validate_published_outputs(&[&exact])
+                .expect("exact realized output"),
+        }
+        submission.complete();
+        owner.finish(Ok(true));
+        witness.drain();
+        assert_eq!(witness.feedback().len(), usize::from(mode == 2));
+        assert_eq!(probes.load(Ordering::SeqCst), 0);
+    }
+    assert!(exact.allocation_lease().validate_live().is_ok());
+    assert!(larger.allocation_lease().validate_live().is_ok());
 }

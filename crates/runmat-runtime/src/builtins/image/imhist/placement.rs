@@ -157,12 +157,17 @@ pub(super) fn publish(
     selected: &mut Option<SelectedImhist>,
     restore: impl FnOnce() -> BuiltinResult<Value>,
 ) -> BuiltinResult<Value> {
-    let Some(selected) = selected.take() else {
+    let Some(mut selected) = selected.take() else {
         return restore();
     };
     let recorder = selected.receipt.recorder();
-    let result =
+    let mut result =
         runmat_accelerate_api::observation::with_provider_observation(Some(recorder), restore);
+    if let Ok(Value::GpuTensor(handle)) = &result {
+        if let Err(error) = selected.receipt.validate_published_outputs(&[handle]) {
+            result = Err(error);
+        }
+    }
     let published = match &result {
         Ok(output) => Ok(selected.matches(std::slice::from_ref(output))),
         Err(error) if error.identifier() == Some("RunMat:Cancelled") => {
@@ -178,12 +183,26 @@ pub(super) fn publish_many(
     selected: &mut Option<SelectedImhist>,
     restore: impl FnOnce() -> BuiltinResult<Vec<Value>>,
 ) -> BuiltinResult<Vec<Value>> {
-    let Some(selected) = selected.take() else {
+    let Some(mut selected) = selected.take() else {
         return restore();
     };
     let recorder = selected.receipt.recorder();
-    let result =
+    let mut result =
         runmat_accelerate_api::observation::with_provider_observation(Some(recorder), restore);
+    if let Ok(outputs) = &result {
+        if let Some(handles) = outputs
+            .iter()
+            .map(|output| match output {
+                Value::GpuTensor(handle) => Some(handle),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+        {
+            if let Err(error) = selected.receipt.validate_published_outputs(&handles) {
+                result = Err(error);
+            }
+        }
+    }
     let published = match &result {
         Ok(outputs) => Ok(selected.matches(outputs)),
         Err(error) if error.identifier() == Some("RunMat:Cancelled") => {

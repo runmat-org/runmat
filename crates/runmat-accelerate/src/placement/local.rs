@@ -291,6 +291,8 @@ pub(crate) fn plan_local(
                                             Into::into,
                                         ),
                                         queue_slots: 0,
+                                        provider_host_workspace: None,
+                                        provider_input_stages: None,
                                         peak_live: None,
                                     },
                                     descriptor: cpu.clone(),
@@ -317,6 +319,8 @@ pub(crate) fn plan_local(
                                             )
                                         },
                                         queue_slots: 1,
+                                        provider_host_workspace: None,
+                                        provider_input_stages: None,
                                         peak_live: None,
                                     },
                                     descriptor: provider_candidate.clone(),

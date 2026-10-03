@@ -198,3 +198,61 @@ fn convolution_route_round_trips_without_changing_legacy_workloads() {
         workload
     );
 }
+
+#[test]
+fn fspecial_route_keeps_exact_scalar_bits_in_serialized_identity() {
+    use crate::{FspecialFilter, FspecialRequest, ProviderFspecialFilter};
+    let first = ProviderFspecialFilter::from(&FspecialRequest {
+        filter: FspecialFilter::Gaussian {
+            rows: 3,
+            cols: 5,
+            sigma: 1.0,
+        },
+    });
+    let next = ProviderFspecialFilter::from(&FspecialRequest {
+        filter: FspecialFilter::Gaussian {
+            rows: 3,
+            cols: 5,
+            sigma: f64::from_bits(1.0_f64.to_bits() + 1),
+        },
+    });
+    assert_ne!(first, next);
+    assert_eq!(first.output_shape(), Some([3, 5]));
+    let workload = ProviderWorkload {
+        fspecial: Some(first),
+        ..Default::default()
+    };
+    let bytes = serde_json::to_vec(&workload).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<ProviderWorkload>(&bytes).unwrap(),
+        workload
+    );
+}
+
+#[test]
+fn imfilter_route_keeps_exact_fill_bits_and_typed_options() {
+    use crate::{
+        ImfilterMode, ImfilterOptions, ImfilterPadding, ImfilterShape, ProviderImfilterWorkload,
+    };
+    let options = ImfilterOptions {
+        mode: ImfilterMode::Convolution,
+        shape: ImfilterShape::Full,
+        padding: ImfilterPadding::Circular,
+        constant_value: -0.0,
+    };
+    let workload = ProviderImfilterWorkload::from_options(&options, true, None);
+    assert!(workload.matches_options(&options, true));
+    assert!(!workload.matches_options(&options, false));
+    let mut other = options.clone();
+    other.constant_value = 0.0;
+    assert!(!workload.matches_options(&other, true));
+    let wrapped = ProviderWorkload {
+        imfilter: Some(workload),
+        ..Default::default()
+    };
+    let encoded = serde_json::to_vec(&wrapped).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<ProviderWorkload>(&encoded).unwrap(),
+        wrapped
+    );
+}

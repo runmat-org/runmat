@@ -77,6 +77,16 @@ impl WholeWorkCandidate {
                 encoded.extend_from_slice(&device_id.to_le_bytes());
             }
             CandidateOutputResidency::Unknown => encoded.push(3),
+            CandidateOutputResidency::ConditionalHostOrProvider {
+                device_id,
+                host_bytes,
+            } => {
+                encoded.push(4);
+                encoded.extend_from_slice(&device_id.to_le_bytes());
+                encoded.extend_from_slice(
+                    &serde_json::to_vec(&host_bytes).expect("typed host bound serializes"),
+                );
+            }
         }
         let stage = serde_json::to_vec(&self.presentation)
             .expect("typed presentation stage must serialize");
@@ -107,7 +117,10 @@ impl WholeWorkCandidate {
                     device_id: execution,
                 },
                 CandidateOutputResidency::Provider { device_id: output }
-                | CandidateOutputResidency::Mirrored { device_id: output },
+                | CandidateOutputResidency::Mirrored { device_id: output }
+                | CandidateOutputResidency::ConditionalHostOrProvider {
+                    device_id: output, ..
+                },
             ) if execution != output => {
                 return Err("whole-work output resides on a foreign device");
             }
@@ -335,6 +348,40 @@ mod tests {
             preparation: CandidatePreparationState::Unknown,
         };
         assert!(host.validate().is_err());
+    }
+
+    #[test]
+    fn conditional_provider_upload_requires_exact_owner_and_host_result_evidence() {
+        let mut provider = candidate(ExecutionCandidateKind::ProviderOperation, b"provider");
+        provider.presentation = CandidateOutputPresentation::ConditionalProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_result_bytes: Some(16.into()),
+            host_scratch_bytes: 8.into(),
+            provider_scratch_bytes: 8.into(),
+            queue_slots: 1,
+        };
+        assert!(provider.validate().is_ok());
+        let selected = provider.selected("imfilter");
+        if let CandidateOutputPresentation::ConditionalProviderUpload {
+            host_result_bytes, ..
+        } = &mut provider.presentation
+        {
+            *host_result_bytes = None;
+        }
+        assert!(provider.validate().is_err());
+        if let CandidateOutputPresentation::ConditionalProviderUpload {
+            host_result_bytes,
+            device_id,
+            ..
+        } = &mut provider.presentation
+        {
+            *host_result_bytes = Some(16.into());
+            *device_id = 8;
+        }
+        assert!(provider.validate().is_err());
+        provider.presentation = CandidateOutputPresentation::Direct;
+        assert_ne!(selected, provider.selected("imfilter"));
     }
 
     #[test]

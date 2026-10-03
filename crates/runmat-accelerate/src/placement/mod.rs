@@ -25,9 +25,16 @@ pub(crate) use provider_contract::floating_conversion::{
     unresolved_adaptation as floating_cast_unresolved_adaptation,
 };
 #[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::fspecial::observation_capability as fspecial_observation_capability;
+#[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::observation_capability as provider_observation_capability;
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::physical_work as fusion_physical_work;
+#[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::imfilter::{
+    observation_capability as imfilter_observation_capability,
+    physical_evidence as imfilter_physical_evidence, shader_disabled as imfilter_shader_disabled,
+};
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::sum::observation_capability as sum_observation_capability;
 #[cfg(feature = "wgpu")]

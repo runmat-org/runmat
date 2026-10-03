@@ -157,12 +157,17 @@ pub(crate) fn publish(
     selected: &mut Option<SelectedRgbPresentation>,
     restore: impl FnOnce() -> BuiltinResult<Value>,
 ) -> BuiltinResult<Value> {
-    let Some(selected) = selected.take() else {
+    let Some(mut selected) = selected.take() else {
         return restore();
     };
     let recorder = selected.receipt.recorder();
-    let result =
+    let mut result =
         runmat_accelerate_api::observation::with_provider_observation(Some(recorder), restore);
+    if let Ok(Value::GpuTensor(handle)) = &result {
+        if let Err(error) = selected.receipt.validate_published_outputs(&[handle]) {
+            result = Err(error);
+        }
+    }
     let published = match &result {
         Ok(value) => Ok(selected.matches(value)),
         Err(error) if error.identifier() == Some("RunMat:Cancelled") => {

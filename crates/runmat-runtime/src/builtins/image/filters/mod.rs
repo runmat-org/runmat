@@ -2,5 +2,6 @@
 
 pub mod filter2;
 pub mod fspecial;
+pub(in crate::builtins::image::filters) mod geometry;
 pub mod imfilter;
-pub(crate) mod type_resolvers;
+pub mod placement;

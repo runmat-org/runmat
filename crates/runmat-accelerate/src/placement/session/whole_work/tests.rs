@@ -1,7 +1,8 @@
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, PlacementFeedback, PlacementResourceSnapshot, PlacementRevision,
-    PlacementSignature, ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
+    PlacementSignature, ProviderInputStageDemand, ProviderInputStageDemands,
+    ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
     WholeWorkObservation, WholeWorkObservationOutcome,
 };
 use runmat_runtime::context::RuntimePlacementService;
@@ -52,6 +53,8 @@ fn candidate(kind: ExecutionCandidateKind) -> WholeWorkCandidate {
             cpu_millicores: if provider { 0 } else { 1_000 },
             retained_bytes: 16.into(),
             scratch_bytes: 8.into(),
+            provider_host_workspace: None,
+            provider_input_stages: None,
             queue_slots: if provider { 1 } else { 0 },
             peak_live: None,
         },
@@ -615,6 +618,266 @@ fn bounded_host_compute_and_upload_admit_under_finite_memory() {
 }
 
 #[test]
+fn provider_hook_host_workspace_coexists_with_physical_output_peak() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.resources.retained_bytes = 16.into();
+    provider.resources.scratch_bytes =
+        ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound);
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 24,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_host_workspace = Some(64.into());
+    let mut bounded = request(vec![provider.clone()]);
+    bounded.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    bounded.resources.memory_available_bytes = Some(64);
+    bounded.resources.providers[0].scratch_available_bytes = Some(24);
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+
+    bounded.resources.memory_available_bytes = Some(63);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    bounded.resources.memory_available_bytes = Some(64);
+    bounded.resources.providers[0].scratch_available_bytes = Some(23);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+
+    bounded.resources.providers[0].scratch_available_bytes = Some(24);
+    bounded.candidates[0].resources.cpu_millicores = 1_000;
+    bounded.resources.cpu_millicores_available = 999;
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+
+    provider.resources.provider_host_workspace = Some(ResourceByteBound::Unavailable(
+        runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+    ));
+    let mut unknown = request(vec![provider]);
+    unknown.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    assert_eq!(
+        session.select_whole_work(unknown).unwrap_err().code,
+        "RunMat:Placement:InsufficientResourceEvidence"
+    );
+}
+
+#[test]
+fn conditional_host_or_provider_output_does_not_double_count_same_host_payload() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.output_residency = CandidateOutputResidency::ConditionalHostOrProvider {
+        device_id: 7,
+        host_bytes: ResourceByteBound::Known(32),
+    };
+    provider.resources.retained_bytes = 16.into();
+    provider.resources.scratch_bytes =
+        ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound);
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 24,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_host_workspace = Some(32.into());
+    let mut bounded = request(vec![provider]);
+    bounded.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    bounded.resources.memory_available_bytes = Some(32);
+    bounded.resources.providers[0].scratch_available_bytes = Some(24);
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+
+    bounded.resources.memory_available_bytes = Some(31);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    bounded.resources.memory_available_bytes = Some(32);
+    bounded.resources.providers[0].scratch_available_bytes = Some(23);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn conditional_provider_upload_peaks_sequential_host_and_device_stages() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.preparation = CandidatePreparationState::Ready;
+    provider.resources.retained_bytes = 16.into();
+    provider.resources.scratch_bytes =
+        ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound);
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 24,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_host_workspace = Some(8.into());
+    provider.presentation =
+        runmat_execution::CandidateOutputPresentation::ConditionalProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_result_bytes: Some(16.into()),
+            host_scratch_bytes: 8.into(),
+            provider_scratch_bytes: 16.into(),
+            queue_slots: 1,
+        };
+    let mut route = request(vec![provider]);
+    route.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    route.resources.memory_available_bytes = Some(24);
+    route.resources.providers[0].scratch_available_bytes = Some(32);
+    assert!(session.select_whole_work(route.clone()).is_ok());
+
+    route.resources.memory_available_bytes = Some(23);
+    assert_eq!(
+        session.select_whole_work(route.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    route.resources.memory_available_bytes = Some(24);
+    route.resources.providers[0].scratch_available_bytes = Some(31);
+    assert_eq!(
+        session.select_whole_work(route.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    route.resources.providers[0].scratch_available_bytes = Some(32);
+    route.resources.providers[0].queue_depth = Some(1);
+    route.resources.providers[0].queue_limit = Some(1);
+    assert_eq!(
+        session.select_whole_work(route.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    route.resources.providers[0].queue_depth = Some(0);
+    if let runmat_execution::CandidateOutputPresentation::ConditionalProviderUpload {
+        host_scratch_bytes,
+        ..
+    } = &mut route.candidates[0].presentation
+    {
+        *host_scratch_bytes = ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        );
+    }
+    assert_eq!(
+        session.select_whole_work(route).unwrap_err().code,
+        "RunMat:Placement:InsufficientResourceEvidence"
+    );
+}
+
+#[test]
+fn conditional_upload_retains_prepared_input_during_fallback_publication() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.preparation = CandidatePreparationState::Ready;
+    provider.resources.retained_bytes = 16.into();
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 32,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_host_workspace = Some(0.into());
+    provider.resources.provider_input_stages = Some(
+        ProviderInputStageDemands::sequential([ProviderInputStageDemand {
+            device_id: 7,
+            incremental_peak_bytes: 24.into(),
+            queue_slots: 1,
+        }])
+        .unwrap(),
+    );
+    provider.presentation =
+        runmat_execution::CandidateOutputPresentation::ConditionalProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_result_bytes: Some(16.into()),
+            host_scratch_bytes: 0.into(),
+            // The prepared 16-byte H remains live with the 8-byte completion
+            // fence; the partition adds the new 16-byte output separately.
+            provider_scratch_bytes: 24.into(),
+            queue_slots: 1,
+        };
+    let mut route = request(vec![provider]);
+    route.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    route.resources.providers[0].scratch_available_bytes = Some(40);
+    assert!(session.select_whole_work(route.clone()).is_ok());
+    route.resources.providers[0].scratch_available_bytes = Some(39);
+    assert_eq!(
+        session.select_whole_work(route).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn provider_input_stages_include_live_preparation_and_peak_against_execution() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.resources.retained_bytes = 24.into();
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 40,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_input_stages = Some(
+        ProviderInputStageDemands::sequential([
+            ProviderInputStageDemand {
+                device_id: 7,
+                incremental_peak_bytes: 16.into(),
+                queue_slots: 1,
+            },
+            // An uploaded 16-byte H remains live during its second 16-byte
+            // readback, so this stage is 32 rather than just 16 staging.
+            ProviderInputStageDemand {
+                device_id: 7,
+                incremental_peak_bytes: 32.into(),
+                queue_slots: 1,
+            },
+        ])
+        .unwrap(),
+    );
+    let mut bounded = request(vec![provider]);
+    bounded.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    bounded.resources.providers[0].scratch_available_bytes = Some(40);
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+    bounded.resources.providers[0].scratch_available_bytes = Some(39);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+
+    bounded.resources.providers[0].scratch_available_bytes = Some(40);
+    bounded.resources.providers[0].queue_depth = Some(1);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn cross_owner_provider_input_stage_needs_its_own_finite_quota() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.resources.provider_input_stages = Some(
+        ProviderInputStageDemands::sequential([ProviderInputStageDemand {
+            device_id: 8,
+            incremental_peak_bytes: 16.into(),
+            queue_slots: 1,
+        }])
+        .unwrap(),
+    );
+    let mut bounded = request(vec![provider]);
+    bounded.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    bounded.resources.providers.push(ProviderResourceSnapshot {
+        device_id: 8,
+        scratch_available_bytes: Some(16),
+        queue_depth: Some(0),
+        queue_limit: Some(1),
+        ..Default::default()
+    });
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+    bounded.resources.providers[1].scratch_available_bytes = Some(15);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
 fn host_sink_download_stage_obeys_provider_staging_and_host_payload_budgets() {
     let session = PlacementSession::default();
     let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
@@ -660,6 +923,50 @@ fn host_sink_download_stage_obeys_provider_staging_and_host_payload_budgets() {
             .expect("resource-constrained route must reject")
             .code,
         "RunMat:Placement:InsufficientResourceEvidence"
+    );
+}
+
+#[test]
+fn multi_owner_host_sink_admits_each_readback_before_host_publication() {
+    let session = PlacementSession::default();
+    let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderReadbacksHost {
+        readbacks: ProviderReadbackDemands::sequential([
+            ProviderReadbackDemand {
+                device_id: 7,
+                provider_scratch_bytes: 4.into(),
+                queue_slots: 1,
+            },
+            ProviderReadbackDemand {
+                device_id: 8,
+                provider_scratch_bytes: 8.into(),
+                queue_slots: 1,
+            },
+        ])
+        .unwrap(),
+    };
+    let mut bounded = request(vec![host]);
+    bounded.resources.providers[0].scratch_available_bytes = Some(4);
+    bounded.resources.providers[0].queue_depth = Some(0);
+    bounded.resources.providers[0].queue_limit = Some(1);
+    bounded.resources.providers.push(ProviderResourceSnapshot {
+        device_id: 8,
+        scratch_available_bytes: Some(8),
+        queue_depth: Some(0),
+        queue_limit: Some(1),
+        ..Default::default()
+    });
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+    bounded.resources.providers[1].scratch_available_bytes = Some(7);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    bounded.resources.providers[1].scratch_available_bytes = Some(8);
+    bounded.resources.providers[1].queue_depth = Some(1);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
     );
 }
 

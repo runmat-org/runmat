@@ -6,6 +6,7 @@ use super::{
     RuntimeContext, RuntimePlacementFeedbackSource, RuntimeWholeWorkProbeLease,
     RuntimeWholeWorkSelection,
 };
+use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::observation::{
     ProviderObservationFailure, ProviderObservationStatus, ProviderOperationReceipt,
     ProviderOperationRecorder,
@@ -18,10 +19,15 @@ use runmat_time::duration_ns_saturating;
 
 mod admission;
 mod host_sink;
+mod publication;
+pub(crate) use admission::combine_host_scratch;
 pub(crate) use admission::{
     select_exact_host_upload, select_exact_host_upload_with_readbacks, ExactHostUpload,
 };
-pub(crate) use host_sink::{select_exact_host_sink, ExactHostSink, HostSinkReceipt};
+pub(crate) use host_sink::{
+    select_exact_host_sink, select_exact_host_sink_with_readbacks, ExactHostSink, HostSinkReceipt,
+};
+use publication::AdmittedHostUploadOutputs;
 
 #[cfg(test)]
 #[path = "host_presentation/tests.rs"]
@@ -34,6 +40,9 @@ pub(crate) struct HostPresentationReceipt {
     runtime: RuntimeContext,
     selected: RuntimeWholeWorkSelection,
     receipt: ProviderOperationReceipt,
+    admitted_upload_outputs: Option<AdmittedHostUploadOutputs>,
+    admitted_upload_published: bool,
+    admitted_upload_validation_failed: bool,
 }
 
 impl HostPresentationReceipt {
@@ -46,11 +55,81 @@ impl HostPresentationReceipt {
             runtime,
             selected,
             receipt,
+            admitted_upload_outputs: None,
+            admitted_upload_published: false,
+            admitted_upload_validation_failed: false,
         }
+    }
+
+    pub(super) fn with_admitted_upload_outputs(
+        mut self,
+        admitted: AdmittedHostUploadOutputs,
+    ) -> Self {
+        self.admitted_upload_outputs = Some(admitted);
+        self
+    }
+
+    /// Validate the realized output against the same typed owner and exact
+    /// physical request used by selection. This is a publication check, not
+    /// a substitute for the caller's semantic class/provenance rules.
+    pub(crate) fn validate_published_outputs(
+        &mut self,
+        outputs: &[&runmat_accelerate_api::GpuTensorHandle],
+    ) -> BuiltinResult<()> {
+        self.admitted_upload_published = false;
+        self.admitted_upload_validation_failed = false;
+        if !self
+            .admitted_upload_outputs
+            .as_ref()
+            .is_some_and(|admitted| admitted.admits(outputs))
+        {
+            self.admitted_upload_validation_failed = true;
+            return Err(build_runtime_error(
+                "published host-upload result does not match its admitted owner, representation or physical allocation",
+            )
+            .with_identifier("RunMat:Placement:InvalidPublishedOutput")
+            .build());
+        }
+        self.admitted_upload_published = true;
+        Ok(())
     }
 
     pub(crate) fn recorder(&self) -> ProviderOperationRecorder {
         self.receipt.recorder()
+    }
+
+    /// A provider-first conditional route may publish a host result only
+    /// after the owning hook actually returned Unsupported. Keep the same
+    /// receipt and probe until all attempted submissions have completed.
+    pub(crate) fn finish_conditional_host_fallback(mut self) {
+        self.receipt.confirm_conditional_host_fallback();
+        self.finish(Ok(true));
+    }
+
+    pub(crate) fn finish_preparation_host_fallback(mut self) {
+        self.receipt.confirm_preparation_host_fallback();
+        self.finish(Ok(true));
+    }
+
+    /// An Unsupported hook may instead publish the admitted host result on
+    /// its exact provider owner. The upload must have completed publication
+    /// validation before this terminal witness is supplied.
+    pub(crate) fn finish_conditional_provider_upload(mut self) {
+        self.receipt.confirm_conditional_provider_upload();
+        self.finish(Ok(true));
+    }
+
+    pub(crate) fn begin_conditional_provider_upload(&mut self) {
+        self.receipt.begin_conditional_provider_upload();
+    }
+
+    pub(crate) fn begin_preparation_provider_upload(&mut self) {
+        self.receipt.begin_preparation_provider_upload();
+    }
+
+    pub(crate) fn finish_preparation_provider_upload(mut self) {
+        self.receipt.confirm_preparation_provider_upload();
+        self.finish(Ok(true));
     }
 
     /// `published` means every requested output was validated as owned by the
@@ -58,6 +137,9 @@ impl HostPresentationReceipt {
     pub(crate) fn finish(mut self, published: Result<bool, ProviderObservationFailure>) {
         if self.runtime.is_cancelled() {
             self.receipt.fail(ProviderObservationFailure::Cancelled);
+        } else if self.admitted_upload_validation_failed {
+            self.receipt
+                .fail(ProviderObservationFailure::PublicationFailed);
         } else {
             match published {
                 Err(failure) => self.receipt.fail(failure),
@@ -65,7 +147,10 @@ impl HostPresentationReceipt {
                     .receipt
                     .fail(ProviderObservationFailure::SharedRuntimeFallback),
                 Ok(true) => {
-                    if self.receipt.publish().is_err() {
+                    if self.admitted_upload_outputs.is_some() && !self.admitted_upload_published {
+                        self.receipt
+                            .fail(ProviderObservationFailure::PublicationFailed);
+                    } else if self.receipt.publish().is_err() {
                         self.receipt
                             .fail(ProviderObservationFailure::PublicationFailed);
                     }

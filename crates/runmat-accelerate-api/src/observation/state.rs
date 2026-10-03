@@ -11,6 +11,12 @@ struct State {
     failure: Option<ProviderObservationFailure>,
     taken: bool,
     selected_execution: Option<bool>,
+    conditional_host_fallback: bool,
+    conditional_provider_upload: bool,
+    conditional_provider_upload_active: bool,
+    preparation_fallback: bool,
+    provider_host_mediated_allowed: bool,
+    route_outcome: Option<ProviderRouteOutcome>,
     expected_execution: Option<(u32, crate::ProviderOperationIdentity)>,
     stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     pipelines: ProviderPipelineObservations,
@@ -146,6 +152,12 @@ impl ProviderOperationReceipt {
                         .then_some(ProviderObservationFailure::InvalidTiming),
                     taken: false,
                     selected_execution: None,
+                    conditional_host_fallback: false,
+                    conditional_provider_upload: false,
+                    conditional_provider_upload_active: false,
+                    preparation_fallback: false,
+                    provider_host_mediated_allowed: false,
+                    route_outcome: None,
                     expected_execution: None,
                     stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
                     pipelines: ProviderPipelineObservations::default(),
@@ -202,6 +214,160 @@ impl ProviderOperationReceipt {
         });
     }
 
+    /// A public form may require a provider attempt while expressly allowing
+    /// a host result only after that hook returns Unsupported. Admit that
+    /// conditional route before any staging; it is not a second selectable
+    /// host candidate or a provider-execution witness.
+    pub fn allow_conditional_host_fallback(&mut self) {
+        self.0.with(|state| {
+            if state.registered != 0
+                || state.publication.is_some()
+                || state.taken
+                || state.conditional_provider_upload
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.conditional_host_fallback = true;
+            }
+        });
+    }
+
+    /// The provider's own exact hook may execute a typed native readback,
+    /// host computation and resident upload. Require its distinct completion
+    /// witness; neither an upload alone nor a direct-shader witness relabels it.
+    pub fn allow_provider_host_mediated(&mut self) {
+        self.0.with(|state| {
+            if state.registered != 0 || state.publication.is_some() || state.taken {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.provider_host_mediated_allowed = true;
+            }
+        });
+    }
+
+    /// Admit a host-compute continuation whose final publication is uploaded
+    /// to the same selected provider. It is legal only after an Unsupported
+    /// hook result, and its physical stage is budgeted with the route.
+    pub fn allow_conditional_provider_upload(&mut self) {
+        self.0.with(|state| {
+            if state.registered != 0
+                || state.publication.is_some()
+                || state.taken
+                || state.conditional_host_fallback
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.conditional_provider_upload = true;
+            }
+        });
+    }
+
+    /// Activate the already admitted upload stage only after the provider
+    /// hook returned Unsupported. Preparation uploads cannot certify or fence
+    /// this continuation merely because they share the same outer receipt.
+    pub fn begin_conditional_provider_upload(&mut self) {
+        self.0.with(|state| {
+            if !state.conditional_provider_upload
+                || state.expected_execution.is_none()
+                || state.selected_execution != Some(false)
+                || state.publication.is_some()
+                || state.taken
+                || state.conditional_provider_upload_active
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.conditional_provider_upload_active = true;
+            }
+        });
+    }
+
+    /// A preparatory H upload returned Unsupported before the selected hook
+    /// was invoked. Admit its already-budgeted host-to-provider continuation
+    /// without misreporting that outcome as a hook fallback.
+    pub fn begin_preparation_provider_upload(&mut self) {
+        self.begin_conditional_provider_upload();
+        self.0.with(|state| {
+            if state.conditional_provider_upload_active && state.failure.is_none() {
+                state.preparation_fallback = true;
+            }
+        });
+    }
+
+    /// Called by the owning runtime only after an actual Unsupported result
+    /// and successful validation of the fallback host publication. Pending
+    /// provider submissions, if any, still gate completion of this receipt.
+    pub fn confirm_conditional_host_fallback(&mut self) {
+        self.0.with(|state| {
+            if !state.conditional_host_fallback
+                || state.expected_execution.is_none()
+                || state.selected_execution != Some(false)
+                || state.publication.is_some()
+                || state.taken
+                || state.preparation_fallback
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::ConditionalHostFallback);
+            }
+        });
+    }
+
+    pub fn confirm_preparation_host_fallback(&mut self) {
+        self.0.with(|state| {
+            if !state.conditional_host_fallback
+                || state.expected_execution.is_none()
+                || state.selected_execution != Some(false)
+                || state.publication.is_some()
+                || state.taken
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::PreparationHostFallback);
+            }
+        });
+    }
+
+    /// Called only after the Unsupported continuation uploaded and validated
+    /// every published provider output. Pending submissions still gate the
+    /// completed whole-call observation.
+    pub fn confirm_conditional_provider_upload(&mut self) {
+        self.0.with(|state| {
+            if !state.conditional_provider_upload
+                || !state.conditional_provider_upload_active
+                || state.preparation_fallback
+                || state.expected_execution.is_none()
+                || state.selected_execution != Some(false)
+                || state.publication.is_some()
+                || state.taken
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::ConditionalProviderUpload);
+            }
+        });
+    }
+
+    pub fn confirm_preparation_provider_upload(&mut self) {
+        self.0.with(|state| {
+            if !state.conditional_provider_upload
+                || !state.conditional_provider_upload_active
+                || !state.preparation_fallback
+                || state.expected_execution.is_none()
+                || state.selected_execution != Some(false)
+                || state.publication.is_some()
+                || state.taken
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::PreparationProviderUpload);
+            }
+        });
+    }
+
     /// Seal submission registration after all selected-route work and successful
     /// output publication. Positively identified synchronous/empty work with no
     /// submissions completes here. Missing instrumentation is not such evidence;
@@ -245,6 +411,7 @@ impl ProviderOperationReceipt {
             state.taken = true;
             Some(ProviderOperationObservation {
                 status,
+                route_outcome: state.route_outcome,
                 stages: state.stages,
                 pipelines: state.pipelines,
             })
@@ -275,6 +442,7 @@ impl ProviderOperationReceipt {
             (
                 Poll::Ready(Some(ProviderOperationObservation {
                     status,
+                    route_outcome: state.route_outcome,
                     stages: state.stages,
                     pipelines: state.pipelines,
                 })),
@@ -298,6 +466,49 @@ impl Drop for ProviderOperationReceipt {
 pub struct ProviderOperationRecorder(Arc<Shared>, #[cfg(feature = "wgpu")] ProgressOwner);
 
 impl ProviderOperationRecorder {
+    pub fn confirm_provider_host_mediated_after(
+        &self,
+        device_id: u32,
+        operation: &crate::ProviderOperationIdentity,
+        checkpoint: u64,
+    ) {
+        self.0.with(|state| {
+            if !state.provider_host_mediated_allowed
+                || state
+                    .expected_execution
+                    .as_ref()
+                    .is_none_or(|(expected, identity)| {
+                        *expected != device_id || identity != operation
+                    })
+                || state.selected_execution != Some(false)
+                || state.registered <= checkpoint
+                || state.publication.is_some()
+                || state.taken
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::ProviderHostMediated);
+            }
+        });
+    }
+
+    /// True only in the Unsupported continuation, after the owning runtime
+    /// activated its admitted provider-upload stage. A raw upload can then
+    /// attach a completion fence without claiming the original shader ran.
+    pub fn observes_conditional_provider_upload(&self, device_id: u32) -> bool {
+        self.0.with(|state| {
+            state.conditional_provider_upload_active
+                && state
+                    .expected_execution
+                    .as_ref()
+                    .is_some_and(|(expected, _)| *expected == device_id)
+                && state.failure.is_none()
+                && state.publication.is_none()
+                && !state.taken
+        })
+    }
+
     /// Domain owners can ignore an unrelated outer operation's receipt when
     /// they execute as a nested helper. A matching operation still validates
     /// its actual provider registration when it confirms execution.
@@ -343,6 +554,7 @@ impl ProviderOperationRecorder {
                     state.fail(ProviderObservationFailure::ExecutionUnproven);
                 } else if state.publication.is_none() && state.selected_execution.is_some() {
                     state.selected_execution = Some(true);
+                    state.route_outcome = Some(ProviderRouteOutcome::SelectedProvider);
                 }
             }
             ProviderExecutionDisposition::SharedRuntimeFallback => {
@@ -365,6 +577,7 @@ impl ProviderOperationRecorder {
         self.0.with(|state| {
             if state.publication.is_some()
                 || state.taken
+                || state.provider_host_mediated_allowed
                 || state.expected_execution.as_ref().is_none_or(
                     |(expected_device, expected_operation)| {
                         *expected_device != device_id || expected_operation != operation
@@ -374,6 +587,7 @@ impl ProviderOperationRecorder {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else if state.failure.is_none() {
                 state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::SelectedProvider);
             }
         });
     }

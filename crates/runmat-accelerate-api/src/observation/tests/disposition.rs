@@ -189,3 +189,136 @@ fn selected_upload_is_pending_until_its_post_publication_fence_completes() {
         ProviderObservationStatus::Failed(ProviderObservationFailure::Cancelled)
     );
 }
+
+#[test]
+fn conditional_host_fallback_is_one_completed_route_not_provider_execution() {
+    let operation = crate::ProviderOperationIdentity::new("fspecial");
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_provider_execution(7, operation.clone());
+    receipt.allow_conditional_host_fallback();
+    let fence = receipt.recorder().submission().unwrap();
+    receipt.confirm_conditional_host_fallback();
+    receipt.publish().unwrap();
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    fence.complete();
+    let observation = receipt.take_completed().unwrap();
+    assert!(matches!(
+        observation.status,
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+    assert_eq!(
+        observation.route_outcome,
+        Some(ProviderRouteOutcome::ConditionalHostFallback)
+    );
+    assert!(receipt.take_completed().is_none());
+
+    let mut forbidden = ProviderOperationReceipt::new();
+    forbidden.require_provider_execution(7, operation);
+    forbidden.confirm_conditional_host_fallback();
+    assert_eq!(
+        forbidden.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+}
+
+#[test]
+fn conditional_provider_upload_needs_its_own_admitted_outcome_and_completion() {
+    let operation = crate::ProviderOperationIdentity::new("imfilter");
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_provider_execution(7, operation.clone());
+    receipt.allow_conditional_provider_upload();
+    assert!(!receipt.recorder().observes_conditional_provider_upload(7));
+    receipt.begin_conditional_provider_upload();
+    assert!(receipt.recorder().observes_conditional_provider_upload(7));
+    assert!(!receipt.recorder().observes_conditional_provider_upload(8));
+    let fence = receipt.recorder().submission().unwrap();
+    receipt.confirm_conditional_provider_upload();
+    receipt.publish().unwrap();
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    fence.complete();
+    let observation = receipt.take_completed().unwrap();
+    assert!(matches!(
+        observation.status,
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+    assert_eq!(
+        observation.route_outcome,
+        Some(ProviderRouteOutcome::ConditionalProviderUpload)
+    );
+    assert!(receipt.take_completed().is_none());
+
+    let mut forbidden = ProviderOperationReceipt::new();
+    forbidden.require_provider_execution(7, operation.clone());
+    forbidden.allow_conditional_provider_upload();
+    forbidden.confirm_conditional_provider_upload();
+    assert_eq!(
+        forbidden.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+
+    let mut selected = ProviderOperationReceipt::new();
+    selected.require_provider_execution(7, operation);
+    selected.allow_conditional_provider_upload();
+    selected.begin_conditional_provider_upload();
+    selected
+        .recorder()
+        .confirm_provider_execution(7, &crate::ProviderOperationIdentity::new("imfilter"));
+    selected.confirm_conditional_provider_upload();
+    assert_eq!(
+        selected.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+}
+
+#[test]
+fn preparation_unsupported_is_not_relabelled_as_hook_execution() {
+    let operation = crate::ProviderOperationIdentity::new("imfilter");
+    let mut host = ProviderOperationReceipt::new();
+    host.require_provider_execution(7, operation.clone());
+    host.allow_conditional_host_fallback();
+    host.confirm_preparation_host_fallback();
+    host.publish().unwrap();
+    assert_eq!(
+        host.take_completed().unwrap().route_outcome,
+        Some(ProviderRouteOutcome::PreparationHostFallback)
+    );
+
+    let mut restored = ProviderOperationReceipt::new();
+    restored.require_provider_execution(7, operation.clone());
+    restored.allow_conditional_provider_upload();
+    restored.begin_preparation_provider_upload();
+    assert!(restored.recorder().observes_conditional_provider_upload(7));
+    let fence = restored.recorder().submission().unwrap();
+    restored.confirm_preparation_provider_upload();
+    restored.publish().unwrap();
+    assert_eq!(restored.status(), ProviderObservationStatus::Pending);
+    fence.complete();
+    assert_eq!(
+        restored.take_completed().unwrap().route_outcome,
+        Some(ProviderRouteOutcome::PreparationProviderUpload)
+    );
+
+    let mut wrong = ProviderOperationReceipt::new();
+    wrong.require_provider_execution(7, operation);
+    wrong.allow_conditional_provider_upload();
+    wrong.begin_preparation_provider_upload();
+    wrong.confirm_conditional_provider_upload();
+    assert_eq!(
+        wrong.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+}
+
+#[test]
+fn provider_success_cannot_be_relabelled_conditional_fallback() {
+    let operation = crate::ProviderOperationIdentity::new("fspecial");
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.require_provider_execution(7, operation.clone());
+    receipt.allow_conditional_host_fallback();
+    receipt.recorder().confirm_provider_execution(7, &operation);
+    receipt.confirm_conditional_host_fallback();
+    assert_eq!(
+        receipt.publish(),
+        Err(ProviderObservationFailure::ExecutionUnproven)
+    );
+}

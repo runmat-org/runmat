@@ -3,8 +3,9 @@ use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::types::NumericPrecision;
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{
-    unsupported_provider_operation, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
-    HostNumericTensorView, ImfilterOptions, ImfilterPadding, NumericElementType, ProviderPrecision,
+    unsupported_provider_operation, AccelProvider, GpuTensorHandle, GpuTensorStorage,
+    HostNumericDataOwned, HostNumericTensorView, ImfilterOptions, ImfilterPadding,
+    NumericElementType, ProviderOperationIdentity, ProviderPrecision,
 };
 use runmat_runtime::builtins::image::filters::imfilter::{
     apply_imfilter_native, build_imfilter_plan, floating_accumulation, FilterAccumulation,
@@ -39,6 +40,29 @@ impl WgpuProvider {
                 ));
             }
         }
+        let operation = ProviderOperationIdentity::new("imfilter");
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        // A typed runtime candidate must be re-derived from the current live
+        // views. The owner witness is only confirmed after the actual direct
+        // filter dispatch, never by the preceding H readback/reshape alone.
+        let admitted_route = runmat_runtime::builtins::image::filters::placement::exact_hook_query(
+            image, kernel, options,
+        )
+        .and_then(|query| {
+            self.query_feasibility(&query)
+                .is_supported()
+                .then(|| self.imfilter_physical_evidence(&query))
+                .flatten()
+        })
+        .map(|physical| physical.route);
+        let admitted_direct =
+            admitted_route == Some(runmat_accelerate_api::ProviderImfilterPhysicalRoute::Direct);
+        let admitted_host = matches!(
+            admitted_route,
+            Some(runmat_accelerate_api::ProviderImfilterPhysicalRoute::HostMediatedEarly
+                | runmat_accelerate_api::ProviderImfilterPhysicalRoute::HostMediatedAfterKernelReadback)
+        );
         let storage_precision = image_entry.precision;
         let accumulation = floating_accumulation(
             match storage_precision {
@@ -63,18 +87,23 @@ impl WgpuProvider {
                 "imfilter requires shader-f64 for the admitted accumulation policy",
             ));
         }
-        if std::env::var("RUNMAT_WGPU_DISABLE_IMFILTER")
-            .ok()
-            .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
-                "1" | "true" | "yes" => Some(true),
-                "0" | "false" | "no" => Some(false),
-                _ => None,
-            })
-            .unwrap_or(false)
+        if admitted_route
+            == Some(runmat_accelerate_api::ProviderImfilterPhysicalRoute::HostMediatedEarly)
+            || crate::placement::imfilter_shader_disabled()
         {
-            return self.imfilter_exec_fallback(image, kernel, options).await;
+            return self
+                .imfilter_exec_fallback(image, kernel, options, admitted_host)
+                .await;
         }
         let kernel_tensor = native_tensor(self.download_numeric_exec(kernel).await?)?;
+        if admitted_route == Some(
+            runmat_accelerate_api::ProviderImfilterPhysicalRoute::HostMediatedAfterKernelReadback,
+        ) {
+            return self.imfilter_exec_fallback(image, kernel, options, admitted_host).await;
+        }
+        let after_kernel_readback = observed.as_ref().map(
+            runmat_accelerate_api::observation::ProviderOperationRecorder::submission_checkpoint,
+        );
 
         let image_shape = if image_entry.shape.is_empty() {
             vec![1usize]
@@ -88,7 +117,9 @@ impl WgpuProvider {
         };
 
         if plan.rank > crate::backend::wgpu::params::IMFILTER_MAX_RANK {
-            return self.imfilter_exec_fallback(image, kernel, options).await;
+            return self
+                .imfilter_exec_fallback(image, kernel, options, admitted_host)
+                .await;
         }
 
         let image_ext_product = plan
@@ -97,7 +128,9 @@ impl WgpuProvider {
             .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
             .ok_or_else(|| anyhow!("imfilter: image dimensions exceed GPU limits"))?;
         if image_ext_product != image_entry.len {
-            return self.imfilter_exec_fallback(image, kernel, options).await;
+            return self
+                .imfilter_exec_fallback(image, kernel, options, admitted_host)
+                .await;
         }
 
         let output_len = plan
@@ -106,23 +139,31 @@ impl WgpuProvider {
             .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
             .ok_or_else(|| anyhow!("imfilter: output dimensions exceed GPU limits"))?;
         if output_len > u32::MAX as usize || image_entry.len > u32::MAX as usize {
-            return self.imfilter_exec_fallback(image, kernel, options).await;
+            return self
+                .imfilter_exec_fallback(image, kernel, options, admitted_host)
+                .await;
         }
 
         let kernel_points_len = plan.kernel_points.len();
         if kernel_points_len > u32::MAX as usize {
-            return self.imfilter_exec_fallback(image, kernel, options).await;
+            return self
+                .imfilter_exec_fallback(image, kernel, options, admitted_host)
+                .await;
         }
 
         let mut kernel_offsets = Vec::with_capacity(kernel_points_len * plan.rank);
         let mut kernel_values_f64 = Vec::with_capacity(kernel_points_len);
         for point in &plan.kernel_points {
             if point.offsets.len() != plan.rank {
-                return self.imfilter_exec_fallback(image, kernel, options).await;
+                return self
+                    .imfilter_exec_fallback(image, kernel, options, admitted_host)
+                    .await;
             }
             for &offset in &point.offsets {
                 if offset < i32::MIN as isize || offset > i32::MAX as isize {
-                    return self.imfilter_exec_fallback(image, kernel, options).await;
+                    return self
+                        .imfilter_exec_fallback(image, kernel, options, admitted_host)
+                        .await;
                 }
                 kernel_offsets.push(offset as i32);
             }
@@ -130,7 +171,9 @@ impl WgpuProvider {
         }
 
         if kernel_offsets.len() > u32::MAX as usize {
-            return self.imfilter_exec_fallback(image, kernel, options).await;
+            return self
+                .imfilter_exec_fallback(image, kernel, options, admitted_host)
+                .await;
         }
 
         let element_size = image_entry.element_type.element_size();
@@ -351,7 +394,7 @@ impl WgpuProvider {
 
             Ok(out_buffer)
         })??;
-        self.register_numeric_buffer(
+        let output = self.register_numeric_buffer(
             out_buffer,
             NumericBufferRegistration {
                 shape: plan.final_shape,
@@ -361,7 +404,21 @@ impl WgpuProvider {
                 allocated_bytes,
                 usage: BufferUsageClass::Generic,
             },
-        )
+        )?;
+        if admitted_direct {
+            if let Some(recorder) = observed {
+                if output_len == 0 {
+                    recorder.confirm_provider_execution(self.device_id(), &operation);
+                } else if let Some(checkpoint) = after_kernel_readback {
+                    recorder.confirm_submitted_provider_execution_after(
+                        self.device_id(),
+                        &operation,
+                        checkpoint,
+                    );
+                }
+            }
+        }
+        Ok(output)
     }
 
     async fn imfilter_exec_fallback(
@@ -369,7 +426,16 @@ impl WgpuProvider {
         image: &GpuTensorHandle,
         kernel: &GpuTensorHandle,
         options: &ImfilterOptions,
+        admitted_host: bool,
     ) -> Result<GpuTensorHandle> {
+        let operation = ProviderOperationIdentity::new("imfilter");
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        if observed.is_some() && !admitted_host {
+            return Err(unsupported_provider_operation(
+                "imfilter host-mediated route was not physically admitted",
+            ));
+        }
         let image_tensor = native_tensor(self.download_numeric_exec(image).await?)?;
         let kernel_tensor = native_tensor(self.download_numeric_exec(kernel).await?)?;
         let result = apply_imfilter_native(
@@ -388,11 +454,28 @@ impl WgpuProvider {
                     .ok_or_else(|| anyhow!("imfilter returned nonfloating native storage"))?,
             )
         };
-        self.upload_numeric_exec(&HostNumericTensorView {
+        let output = self.upload_numeric_exec(&HostNumericTensorView {
             data,
             shape: &result.shape,
             storage: GpuTensorStorage::Real,
-        })
+        })?;
+        if let Some(recorder) = observed {
+            // The mapped-at-creation upload has no queue submission. Its own
+            // completion fence is the last stage of the admitted host route.
+            let checkpoint = recorder.submission_checkpoint();
+            self.with_emission(|emission, pending| -> Result<()> {
+                let encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-imfilter-host-mediated-completion"),
+                        });
+                self.submit(emission, pending, encoder)?;
+                Ok(())
+            })??;
+            recorder.confirm_provider_host_mediated_after(self.device_id(), &operation, checkpoint);
+        }
+        Ok(output)
     }
 }
 
