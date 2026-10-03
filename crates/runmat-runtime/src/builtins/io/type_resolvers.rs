@@ -39,11 +39,6 @@ pub fn textscan_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::cell()
 }
 
-pub fn fgetl_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::String, Type::Num])
-}
-
 pub fn fgets_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num])
@@ -246,12 +241,6 @@ mod tests {
     assert_resolver!(disp_type_resolver, disp_type, &[], Type::tensor());
     assert_resolver!(input_type_resolver, input_type, &[], Type::Unknown);
 
-    assert_resolver!(
-        fgetl_type_resolver,
-        fgetl_type,
-        &[],
-        Type::Union(vec![Type::String, Type::Num])
-    );
     assert_resolver!(
         fgets_type_resolver,
         fgets_type,

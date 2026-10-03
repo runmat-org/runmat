@@ -77,6 +77,27 @@ fn fgetl_typed_single_and_resident_identifiers_are_independently_gated() {
     });
 }
 
+#[test]
+fn fgetl_rejects_known_nonscalar_resident_identifier_before_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident vector");
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let error = run_evaluate(&Value::GpuTensor(allocation.handle.clone()), &[])
+        .err()
+        .expect("nonscalar identifier");
+    assert_eq!(error.identifier(), FGETL_ERROR_INVALID_INPUT.identifier);
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
 fn unique_path(prefix: &str) -> PathBuf {
     let now = system_time_now()
         .duration_since(UNIX_EPOCH)
