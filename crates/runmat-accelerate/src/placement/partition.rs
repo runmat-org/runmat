@@ -459,6 +459,7 @@ fn candidate_resource_adjustment_ns(
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
     }
+    let mut readback_stage_demands = BTreeMap::new();
     if let CandidateOutputPresentation::ProviderReadbackUpload { readbacks, .. } = presentation {
         for readback in readbacks.iter() {
             let provider = resources
@@ -481,10 +482,7 @@ fn candidate_resource_adjustment_ns(
                 provider.scratch_available_bytes,
                 ResourceBudgetKind::ProviderScratch(readback.device_id),
             )?;
-            provider_demands
-                .entry(readback.device_id)
-                .and_modify(|existing| *existing = existing.peak(scratch))
-                .or_insert(scratch);
+            readback_stage_demands.insert(readback.device_id, scratch);
         }
     }
     if let CandidateOutputPresentation::ProviderDownload {
@@ -546,6 +544,17 @@ fn candidate_resource_adjustment_ns(
                 .add(demand.retained_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
+    }
+    // A readback finishes before the output upload/allocation. Peak each
+    // source-owner stage against the complete output stage (including its
+    // retained allocation), then add graph predecessors that remain live
+    // throughout both stages below. Summing both stages would reject a legal
+    // same-owner route at an exact finite-capacity boundary.
+    for (device_id, scratch) in readback_stage_demands {
+        provider_demands
+            .entry(device_id)
+            .and_modify(|output_stage| *output_stage = output_stage.peak(scratch))
+            .or_insert(scratch);
     }
     host_peak.within(
         resources.memory_available_bytes,

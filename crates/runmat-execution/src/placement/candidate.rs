@@ -25,7 +25,9 @@ impl ProviderReadbackDemands {
     pub fn sequential(readbacks: impl IntoIterator<Item = ProviderReadbackDemand>) -> Option<Self> {
         let mut by_device = std::collections::BTreeMap::new();
         for readback in readbacks {
-            if readback.queue_slots == 0 {
+            if readback.queue_slots == 0
+                && readback.provider_scratch_bytes != ResourceByteBound::Known(0)
+            {
                 return None;
             }
             let current: &mut ProviderReadbackDemand =
@@ -65,7 +67,8 @@ impl ProviderReadbackDemands {
             match entry {
                 Some(demand)
                     if empty
-                        || demand.queue_slots == 0
+                        || (demand.queue_slots == 0
+                            && demand.provider_scratch_bytes != ResourceByteBound::Known(0))
                         || previous.is_some_and(|device| demand.device_id <= device) =>
                 {
                     return false
@@ -121,10 +124,18 @@ mod readback_demand_tests {
         assert!(
             ProviderReadbackDemands::sequential([ProviderReadbackDemand {
                 device_id: 7,
-                provider_scratch_bytes: ResourceByteBound::Known(0),
+                provider_scratch_bytes: ResourceByteBound::Known(8),
                 queue_slots: 0,
             }])
             .is_none()
+        );
+        assert!(
+            ProviderReadbackDemands::sequential([ProviderReadbackDemand {
+                device_id: 7,
+                provider_scratch_bytes: ResourceByteBound::Known(0),
+                queue_slots: 0,
+            }])
+            .is_some()
         );
     }
 }
@@ -244,12 +255,12 @@ impl CandidateOutputPresentation {
     ) -> Result<(), &'static str> {
         match (self, execution, output) {
             (
-                Self::ProviderDownload { queue_slots, .. },
+                Self::ProviderDownload { queue_slots, provider_scratch_bytes, .. },
                 CandidateExecutionLocation::Host,
                 CandidateOutputResidency::Host,
-            ) if queue_slots > 0 => Ok(()),
+            ) if queue_slots > 0 || provider_scratch_bytes == ResourceByteBound::Known(0) => Ok(()),
             (Self::ProviderDownload { .. }, _, _) => {
-                Err("provider download presentation needs a host route, host output, and queue slot")
+                Err("provider download presentation needs a host route, host output, and a queue slot unless zero staging is proven")
             }
             (Self::Direct, CandidateExecutionLocation::Host, CandidateOutputResidency::Provider { .. }
                 | CandidateOutputResidency::Mirrored { .. }) => {

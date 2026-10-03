@@ -131,6 +131,66 @@ fn cross_owner_readback_source_staging_and_queue_are_admitted_before_upload() {
 }
 
 #[test]
+fn same_owner_readback_and_retained_output_use_sequential_physical_peak() {
+    let session = PlacementSession::default();
+    let mut host = host_with_provider_presentation();
+    host.resources.retained_bytes = ResourceByteBound::Known(8);
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderReadbackUpload {
+        device_id: 7,
+        transfer_bytes: Some(8),
+        host_result_bytes: Some(ResourceByteBound::Known(8)),
+        host_scratch_bytes: ResourceByteBound::Known(0),
+        provider_scratch_bytes: ResourceByteBound::Known(0),
+        queue_slots: 1,
+        preparation: CandidatePreparationState::Ready,
+        readbacks: ProviderReadbackDemands::sequential([ProviderReadbackDemand {
+            device_id: 7,
+            provider_scratch_bytes: ResourceByteBound::Known(8),
+            queue_slots: 1,
+        }])
+        .unwrap(),
+    };
+    let mut route = request(vec![host]);
+    route.resources.providers[0].live_bytes = 8;
+    route.resources.providers[0].capacity_bytes = Some(16);
+    route.resources.providers[0].scratch_available_bytes = Some(8);
+    assert!(session.select_whole_work(route.clone()).is_ok());
+    route.resources.providers[0].capacity_bytes = Some(15);
+    assert_eq!(
+        session.select_whole_work(route).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn empty_host_sink_needs_no_staging_or_queue_slot_under_finite_zero_quotas() {
+    let session = PlacementSession::default();
+    let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
+    host.resources.retained_bytes = ResourceByteBound::Known(0);
+    host.resources.scratch_bytes = ResourceByteBound::Known(0);
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderDownload {
+        device_id: 7,
+        provider_scratch_bytes: ResourceByteBound::Known(0),
+        queue_slots: 0,
+    };
+    let mut route = request(vec![host]);
+    route.resources.memory_available_bytes = Some(0);
+    route.resources.providers[0].scratch_available_bytes = Some(0);
+    route.resources.providers[0].queue_depth = Some(0);
+    route.resources.providers[0].queue_limit = Some(0);
+    assert!(session.select_whole_work(route.clone()).is_ok());
+    if let runmat_execution::CandidateOutputPresentation::ProviderDownload { queue_slots, .. } =
+        &mut route.candidates[0].presentation
+    {
+        *queue_slots = 1;
+    }
+    assert_eq!(
+        session.select_whole_work(route).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
 fn physical_peak_admits_only_incremental_live_bytes_and_does_not_relabel_scratch() {
     let session = PlacementSession::default();
     let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);

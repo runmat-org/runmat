@@ -136,11 +136,17 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
     // simultaneously live submissions. Unknown provider staging stays unknown.
     let readback_demands =
         ProviderReadbackDemands::sequential(readbacks.iter().zip(&source_providers).map(
-            |(source, source_provider)| ProviderReadbackDemand {
-                device_id: source_provider.device_id(),
-                provider_scratch_bytes:
-                    source_provider.download_numeric_provider_scratch_bound(source),
-                queue_slots: 1,
+            |(source, source_provider)| {
+                let provider_scratch_bytes =
+                    source_provider.download_numeric_provider_scratch_bound(source);
+                ProviderReadbackDemand {
+                    device_id: source_provider.device_id(),
+                    provider_scratch_bytes,
+                    queue_slots: u32::from(
+                        !source.shape().contains(&0)
+                            || provider_scratch_bytes != ResourceByteBound::Known(0),
+                    ),
+                }
             },
         ))
         .ok_or_else(|| {

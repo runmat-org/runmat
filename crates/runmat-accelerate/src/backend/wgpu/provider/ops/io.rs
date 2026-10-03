@@ -36,7 +36,18 @@ impl WgpuProvider {
         };
         if entry.element_type != source.physical().element_type()
             || entry.storage != source.physical().storage()
-            || entry.allocated_bytes != source.physical().requested_bytes()
+            || u64::try_from(entry.len).ok() != Some(source.physical().element_capacity())
+            || source
+                .shape()
+                .iter()
+                .try_fold(1usize, |total, &extent| total.checked_mul(extent))
+                != Some(entry.len)
+            || !numeric_download_extents_match(
+                entry.allocated_bytes,
+                entry.buffer.size(),
+                source.physical().payload_bytes(),
+                source.physical().requested_bytes(),
+            )
         {
             return ProviderFeasibility::rejected(
                 ProviderRejectionCode::UnknownResourceEstimate,
@@ -62,6 +73,22 @@ impl WgpuProvider {
             dispatches: Some(u32::from(staging > 0)),
         })
     }
+}
+
+/// Older generic registrations record logical payload bytes in `allocated_bytes`;
+/// produced uploads record buffer extent there. The authenticated physical
+/// descriptor and actual buffer must agree on extent in either case. In
+/// particular an empty payload may own one physical element while requiring
+/// no readback staging or transfer.
+fn numeric_download_extents_match(
+    recorded_bytes: u64,
+    buffer_bytes: u64,
+    payload_bytes: u64,
+    requested_bytes: u64,
+) -> bool {
+    payload_bytes <= requested_bytes
+        && buffer_bytes == requested_bytes
+        && (recorded_bytes == payload_bytes || recorded_bytes == requested_bytes)
 }
 
 fn record_provider_copy(reason: runmat_value::HostCopyReason, bytes: u64) {
@@ -808,6 +835,120 @@ mod tests {
     use super::*;
 
     #[test]
+    fn exact_download_extent_accepts_payload_or_backing_record_but_not_mismatch() {
+        assert!(numeric_download_extents_match(0, 8, 0, 8));
+        assert!(numeric_download_extents_match(8, 8, 0, 8));
+        assert!(numeric_download_extents_match(24, 24, 24, 24));
+        assert!(!numeric_download_extents_match(4, 8, 0, 8));
+        assert!(!numeric_download_extents_match(0, 4, 0, 8));
+        assert!(!numeric_download_extents_match(8, 8, 16, 8));
+    }
+
+    fn exact_empty_download_query(
+        handle: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderFeasibilityQuery {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
+            ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderStorage,
+            ProviderWorkload,
+        };
+        let element_type = match handle.physical().element_type() {
+            NumericElementType::F32 => ProviderElementType::F32,
+            NumericElementType::F64 => ProviderElementType::F64,
+            _ => panic!("floating empty fixture"),
+        };
+        let input = ProviderRepresentation {
+            element_type,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![1, 0],
+            residency: ProviderResidency::Device,
+        };
+        let output = ProviderRepresentation {
+            residency: ProviderResidency::Host,
+            ..input.clone()
+        };
+        ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("transfer.download"),
+            family: ProviderOperationFamily::Download,
+            inputs: vec![input],
+            outputs: vec![output],
+            workload: ProviderWorkload {
+                requested_outputs: Some(1),
+                ..ProviderWorkload::default()
+            },
+        }
+    }
+
+    fn admit_empty_download_under_zero_staging_and_queue(
+        provider: &WgpuProvider,
+        handle: &GpuTensorHandle,
+    ) {
+        use runmat_execution::{
+            CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
+            CandidateOutputPresentation, CandidateOutputResidency, CandidatePreparationState,
+            CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementResourceSnapshot,
+            PlacementRevision, PlacementSignature, ResourceByteBound, WholeWorkCandidate,
+            WholeWorkConstraint, WholeWorkPlacementRequest,
+        };
+        use runmat_runtime::context::RuntimePlacementService;
+        let digest = Digest::sha256(b"actual-empty-wgpu-readback");
+        let candidate = WholeWorkCandidate {
+            kind: ExecutionCandidateKind::SharedRuntime,
+            execution_location: CandidateExecutionLocation::Host,
+            preparation: CandidatePreparationState::Ready,
+            output_residency: CandidateOutputResidency::Host,
+            presentation: CandidateOutputPresentation::ProviderDownload {
+                device_id: provider.device_id(),
+                provider_scratch_bytes: provider.download_numeric_provider_scratch_bound(handle),
+                queue_slots: 0,
+            },
+            route_facts: digest,
+            cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
+            resources: CandidateResourceDemand {
+                cpu_millicores: 1_000,
+                retained_bytes: ResourceByteBound::Known(0),
+                scratch_bytes: provider.download_numeric_host_workspace_bound(handle),
+                queue_slots: 0,
+                peak_live: None,
+            },
+            transactional_results: true,
+        };
+        let mut owner = provider.placement_resources();
+        owner.scratch_available_bytes = Some(0);
+        owner.queue_depth = Some(0);
+        owner.queue_limit = Some(0);
+        let request = WholeWorkPlacementRequest {
+            signature: PlacementSignature {
+                region: None,
+                operation: "empty_download".into(),
+                runtime_facts: digest,
+                revision: PlacementRevision {
+                    program: None,
+                    catalog: digest,
+                    compiler: digest,
+                    provider: digest,
+                    policy: digest,
+                },
+            },
+            constraint: WholeWorkConstraint::AnyLegal,
+            candidates: vec![candidate],
+            resources: PlacementResourceSnapshot {
+                cpu_millicores_available: 1_000,
+                memory_available_bytes: Some(0),
+                cancellation_requested: false,
+                providers: vec![owner],
+                epoch: 0,
+            },
+            deterministic: true,
+            require_transactional_results: true,
+        };
+        assert!(crate::placement::PlacementSession::default()
+            .select_whole_work(request)
+            .is_ok());
+    }
+
+    #[test]
     #[ignore = "requires a live WGPU adapter; run explicitly for physical empty-upload qualification"]
     fn actual_empty_numeric_upload_retains_physical_buffer_but_transfers_no_payload() {
         let provider =
@@ -833,12 +974,44 @@ mod tests {
         let floor = provider.element_size as u64;
         assert_eq!(entry.buffer.size(), floor);
         assert_eq!(entry.allocated_bytes, floor);
+        assert!(provider
+            .numeric_download_feasibility_exec(&handle, &exact_empty_download_query(&handle))
+            .is_supported());
+        admit_empty_download_under_zero_staging_and_queue(&provider, &handle);
         assert_eq!(provider.placement_resources().live_bytes - before, floor);
         let downloaded = futures::executor::block_on(provider.download_numeric_exec(&handle))
             .expect("empty numeric readback");
         assert_eq!(downloaded.data.len(), 0);
         assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let registered = provider
+            .with_emission(|emission, _| {
+                provider.create_storage_buffer(emission, 0, "registered-empty-readback")
+            })
+            .unwrap()
+            .unwrap();
+        let registered = provider
+            .register_existing_buffer(registered, vec![1, 0], 0)
+            .expect("empty generic registration");
+        let registered_entry = provider.get_entry_raw(&registered).unwrap();
+        assert_eq!(registered_entry.allocated_bytes, 0);
+        assert_eq!(registered.physical().requested_bytes(), floor);
+        assert!(provider
+            .numeric_download_feasibility_exec(
+                &registered,
+                &exact_empty_download_query(&registered)
+            )
+            .is_supported());
+        admit_empty_download_under_zero_staging_and_queue(&provider, &registered);
+        assert_eq!(
+            futures::executor::block_on(provider.download_numeric_exec(&registered))
+                .unwrap()
+                .data
+                .len(),
+            0
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        registered.release().unwrap();
         handle.release().unwrap();
         assert_eq!(provider.placement_resources().live_bytes, before);
     }

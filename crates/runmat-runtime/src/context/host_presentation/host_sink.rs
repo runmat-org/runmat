@@ -187,7 +187,11 @@ pub(crate) fn select_exact_host_sink(
         presentation: CandidateOutputPresentation::ProviderDownload {
             device_id: provider.device_id(),
             provider_scratch_bytes: provider_scratch,
-            queue_slots: 1,
+            // An empty native payload has no WGPU staging or submission.
+            queue_slots: u32::from(
+                !request.source.shape().contains(&0)
+                    || provider_scratch != ResourceByteBound::Known(0),
+            ),
         },
         route_facts: Digest::sha256(
             serde_json::to_vec(&download).expect("download route serializes"),

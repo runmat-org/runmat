@@ -4,8 +4,8 @@ use futures::executor::block_on;
 use runmat_accelerate::{placement::PlacementSession, simple_provider::InProcessProvider};
 use runmat_accelerate_api::{
     handle_precision, provider_for_handle, same_provider_instance, AccelDownloadFuture,
-    AccelProvider, GpuHandleProvenance, GpuTensorHandle, HostNumericTensorView, HostTensorView,
-    ProviderPrecision, ThreadProviderGuard,
+    AccelNumericDownloadFuture, AccelProvider, GpuHandleProvenance, GpuTensorHandle,
+    HostNumericTensorView, HostTensorView, ProviderPrecision, ThreadProviderGuard,
 };
 use runmat_execution::{
     Digest, PlacementDecision, PlacementFeedback, PlacementInvalidation, PlacementPlanRequest,
@@ -27,6 +27,7 @@ use runmat_value::{IntegerStorage, Tensor, Value};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 #[derive(Default)]
@@ -34,9 +35,16 @@ struct Witness {
     selections: Cell<usize>,
     feedback: RefCell<Vec<PlacementFeedback>>,
     pending: RefCell<Vec<Box<dyn RuntimePlacementFeedbackSource>>>,
+    admission: Option<PlacementSession>,
 }
 
 impl Witness {
+    fn budgeted() -> Rc<Self> {
+        Rc::new(Self {
+            admission: Some(PlacementSession::new(Default::default())),
+            ..Default::default()
+        })
+    }
     fn context(self: &Rc<Self>) -> RuntimeContext {
         base_context()
             .with_service_ports(RuntimeServicePorts::default().with_placement(self.clone()))
@@ -46,6 +54,11 @@ impl Witness {
         let mut pending = std::mem::take(&mut *self.pending.borrow_mut());
         for mut source in pending.drain(..) {
             if let Some(feedback) = source.take_ready() {
+                if let Some(admission) = &self.admission {
+                    admission
+                        .observe(feedback.clone())
+                        .expect("admitted feedback");
+                }
                 self.feedback.borrow_mut().push(feedback);
             } else if !source.terminal_without_feedback() {
                 self.pending.borrow_mut().push(source);
@@ -75,6 +88,11 @@ impl RuntimePlacementService for Witness {
         request: WholeWorkPlacementRequest,
     ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
         request.validate().expect("admitted RGB route");
+        if let Some(admission) = &self.admission {
+            let selected = admission.select_whole_work(request)?;
+            self.selections.set(self.selections.get() + 1);
+            return Ok(selected);
+        }
         let candidate = request.candidates.first().expect("host upload candidate");
         self.selections.set(self.selections.get() + 1);
         Ok(RuntimeWholeWorkSelection {
@@ -93,6 +111,9 @@ impl RuntimePlacementService for Witness {
     }
 
     fn observe(&self, feedback: PlacementFeedback) -> Result<(), RuntimeError> {
+        if let Some(admission) = &self.admission {
+            admission.observe(feedback.clone())?;
+        }
         self.feedback.borrow_mut().push(feedback);
         Ok(())
     }
@@ -159,38 +180,47 @@ fn provider() -> (&'static InProcessProvider, ThreadProviderGuard) {
 
 /// A real in-process source with a finite, nonzero download staging demand.
 /// Its output-owner peer remains independently budgeted.
-struct FiniteReadbackOwner(InProcessProvider);
+struct FiniteReadbackOwner {
+    inner: InProcessProvider,
+    scratch_available: AtomicU64,
+}
 
 impl AccelProvider for FiniteReadbackOwner {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.0.upload(host)
+        self.inner.upload(host)
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.0.upload_numeric_raw(host)
+        self.inner.upload_numeric_raw(host)
     }
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.0.download(handle)
+        self.inner.download(handle)
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        self.inner.download_numeric(handle)
     }
     fn device_id(&self) -> u32 {
-        self.0.device_id()
+        self.inner.device_id()
     }
     fn device_info(&self) -> String {
-        self.0.device_info()
+        self.inner.device_info()
     }
     fn precision(&self) -> ProviderPrecision {
-        self.0.precision()
+        self.inner.precision()
     }
     fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
-        self.0.capability_snapshot()
+        self.inner.capability_snapshot()
     }
     fn query_feasibility(
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
-        self.0.query_feasibility(query)
+        self.inner.query_feasibility(query)
     }
     fn download_numeric_host_workspace_bound(&self, handle: &GpuTensorHandle) -> ResourceByteBound {
-        self.0.download_numeric_host_workspace_bound(handle)
+        self.inner.download_numeric_host_workspace_bound(handle)
     }
     fn download_numeric_provider_scratch_bound(&self, _: &GpuTensorHandle) -> ResourceByteBound {
         ResourceByteBound::Known(8)
@@ -198,7 +228,7 @@ impl AccelProvider for FiniteReadbackOwner {
     fn placement_resources(&self) -> ProviderResourceSnapshot {
         ProviderResourceSnapshot {
             device_id: self.device_id(),
-            scratch_available_bytes: Some(0),
+            scratch_available_bytes: Some(self.scratch_available.load(Ordering::Relaxed)),
             queue_depth: Some(0),
             queue_limit: Some(1),
             ..Default::default()
@@ -493,9 +523,11 @@ fn indexed_color_gathers_two_providers_and_restores_only_to_explicit_map_owner()
 }
 
 #[test]
-fn cross_owner_readback_staging_quota_rejects_before_either_provider_effect() {
-    let index_provider: &'static FiniteReadbackOwner =
-        Box::leak(Box::new(FiniteReadbackOwner(InProcessProvider::new())));
+fn cross_owner_readback_staging_exact_boundary_and_preeffect_rejection() {
+    let index_provider: &'static FiniteReadbackOwner = Box::leak(Box::new(FiniteReadbackOwner {
+        inner: InProcessProvider::new(),
+        scratch_available: AtomicU64::new(8),
+    }));
     // The leaked facade is the sole registered owner of its unique namespace.
     unsafe { runmat_accelerate_api::register_device_provider(index_provider) };
     let _index_guard = ThreadProviderGuard::set(Some(index_provider));
@@ -514,12 +546,34 @@ fn cross_owner_readback_staging_quota_rejects_before_either_provider_effect() {
     .unwrap();
     assert_ne!(indexed.device_id(), map.device_id());
 
-    let runtime = base_context().with_service_ports(
-        RuntimeServicePorts::default()
-            .with_placement(Rc::new(PlacementSession::new(Default::default()))),
-    );
-    let runtime = runmat_accelerate::native_auto::install_preparation_service(runtime);
-    index_provider.0.reset_telemetry();
+    let witness = Witness::budgeted();
+    let runtime = runmat_accelerate::native_auto::install_preparation_service(witness.context());
+    index_provider.inner.reset_telemetry();
+    map_provider.reset_telemetry();
+    let Value::GpuTensor(output) = block_on(call_builtin_async_in_context(
+        &runtime,
+        "ind2rgb",
+        &[
+            Value::GpuTensor(indexed.clone()),
+            Value::GpuTensor(map.clone()),
+        ],
+    ))
+    .expect("exact source staging quota admits cross-owner gather") else {
+        panic!("indexed result stays with explicit map owner")
+    };
+    assert_eq!(output.shape(), &[1, 2, 3]);
+    assert!(provider_for_handle(&output)
+        .is_some_and(|owner| same_provider_instance(owner, map_provider)));
+    assert_eq!(witness.selections.get(), 1);
+    witness.drain();
+    assert_eq!(witness.feedback.borrow().len(), 1);
+    assert!(witness.feedback.borrow()[0].succeeded);
+    assert!(index_provider.inner.telemetry_snapshot().download_bytes > 0);
+    let host = block_on(map_provider.download(&output)).unwrap();
+    assert_eq!(host.data, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+
+    index_provider.scratch_available.store(7, Ordering::Relaxed);
+    index_provider.inner.reset_telemetry();
     map_provider.reset_telemetry();
     let error = block_on(call_builtin_async_in_context(
         &runtime,
@@ -534,12 +588,13 @@ fn cross_owner_readback_staging_quota_rejects_before_either_provider_effect() {
         error.identifier(),
         Some("RunMat:Placement:NoLegalCandidate")
     );
-    assert_eq!(index_provider.0.telemetry_snapshot().download_bytes, 0);
-    assert_eq!(index_provider.0.telemetry_snapshot().upload_bytes, 0);
+    assert_eq!(index_provider.inner.telemetry_snapshot().download_bytes, 0);
+    assert_eq!(index_provider.inner.telemetry_snapshot().upload_bytes, 0);
     assert_eq!(map_provider.telemetry_snapshot().download_bytes, 0);
     assert_eq!(map_provider.telemetry_snapshot().upload_bytes, 0);
     assert!(indexed.allocation_lease().validate_live().is_ok());
     assert!(map.allocation_lease().validate_live().is_ok());
+    assert!(output.allocation_lease().validate_live().is_ok());
 }
 
 #[test]
