@@ -144,6 +144,52 @@ fn unknown_selector_remains_dynamic_and_valid_index_is_admitted() {
     tolerated.literals = LiteralContext::new(vec![LiteralValue::Number(1.0 - 1e-10)]);
     let result = inference::infer(&tolerated, &GPU_DEVICE_CATALOG_ENTRY);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+    let mut represented_single = request(vec![ValueFact::scalar(ValueKindFact::Numeric(
+        NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        },
+    ))]);
+    represented_single.literals = LiteralContext::new(vec![LiteralValue::Real {
+        text: "1.00000001".into(),
+        class: NumericClass::Single,
+    }]);
+    let result = inference::infer(&represented_single, &GPU_DEVICE_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+    let mut typed_hex = request(vec![ValueFact::scalar(ValueKindFact::Numeric(
+        NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        },
+    ))]);
+    typed_hex.literals = LiteralContext::new(vec![LiteralValue::Integer {
+        text: "0x1u64".into(),
+        class: NumericClass::UInt64,
+    }]);
+    let result = inference::infer(&typed_hex, &GPU_DEVICE_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+    typed_hex.literals = LiteralContext::new(vec![LiteralValue::Integer {
+        text: "0x2u64".into(),
+        class: NumericClass::UInt64,
+    }]);
+    let result = inference::infer(&typed_hex, &GPU_DEVICE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM.GPU_DEVICE.DEVICE_NOT_AVAILABLE"));
+
+    typed_hex.literals = LiteralContext::new(vec![LiteralValue::Integer {
+        text: "0xFFFFFFFFFFFFFFFFu64".into(),
+        class: NumericClass::UInt64,
+    }]);
+    let result = inference::infer(&typed_hex, &GPU_DEVICE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM.GPU_DEVICE.INVALID_INDEX"));
 }
 
 #[test]

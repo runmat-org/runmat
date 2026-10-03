@@ -4,10 +4,15 @@ use runmat_types::{EffectKind, ExecutionStackRequirement};
 mod contract;
 mod documentation;
 mod inference;
+mod selector;
 #[cfg(test)]
 mod tests;
 
 pub use contract::*;
+pub use selector::{
+    gpu_device_index_from_float, gpu_device_index_from_integer, GpuDeviceIndexError,
+    GPU_DEVICE_ACTIVE_INDEX,
+};
 
 pub const GPU_DEVICE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

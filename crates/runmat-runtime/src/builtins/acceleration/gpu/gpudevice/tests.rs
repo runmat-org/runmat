@@ -108,6 +108,21 @@ fn gpu_device_index_parser_reads_native_single_storage() {
     });
 }
 
+#[test]
+fn gpu_device_float_selector_uses_shared_numeric_boundary() {
+    test_support::with_test_provider(|_| {
+        assert!(matches!(
+            call(vec![Value::Num(1.0 - 1e-10)]),
+            Ok(Value::Struct(_))
+        ));
+        let error = call(vec![Value::Num(1.5)]).expect_err("nonintegral index");
+        assert_eq!(
+            error.identifier(),
+            GPU_DEVICE_ERROR_INVALID_INDEX.identifier
+        );
+    });
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn gpu_device_index_parser_rejects_out_of_range_double_before_casting() {

@@ -1,9 +1,8 @@
 //! Shared, read-only projection of the active acceleration provider's device metadata.
 
 use runmat_accelerate_api::{ApiDeviceInfo, ProviderPrecision};
+use runmat_builtins::GPU_DEVICE_ACTIVE_INDEX;
 use runmat_value::{IntValue, StructValue, Value};
-
-pub(super) const ACTIVE_DEVICE_INDEX: u32 = 1;
 
 /// An absent provider is a typed outcome, not another builtin's error identifier.
 pub(super) fn active_device_metadata() -> Option<ActiveDeviceMetadata> {
@@ -23,7 +22,7 @@ impl ActiveDeviceMetadata {
     pub(super) fn into_struct(self) -> StructValue {
         let mut result = StructValue::new();
         result.insert("device_id", Value::Int(IntValue::U32(self.info.device_id)));
-        result.insert("index", Value::Int(IntValue::U32(ACTIVE_DEVICE_INDEX)));
+        result.insert("index", Value::Int(IntValue::U32(GPU_DEVICE_ACTIVE_INDEX)));
         result.insert("name", Value::String(self.info.name));
         result.insert("vendor", Value::String(self.info.vendor));
         if let Some(backend) = self.info.backend {

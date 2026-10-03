@@ -3,10 +3,14 @@ use crate::{
     BuiltinCatalogEntry,
 };
 use runmat_types::{
-    CallInference, CallRequest, LiteralValue, NumericClass, NumericDomain, NumericFact,
-    ResidencyFact, StorageFact, StructFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain,
+    NumericFact, ResidencyFact, StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
+
+use super::selector::{
+    gpu_device_index_from_float, gpu_device_index_from_integer, GPU_DEVICE_ACTIVE_INDEX,
+};
 
 fn numeric(class: NumericClass) -> ValueFact {
     ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
@@ -101,52 +105,31 @@ fn validate_selector(
         ));
         return;
     }
-    let invalid = match literal {
-        Some(LiteralValue::Bool(false)) => true,
-        Some(LiteralValue::Number(value)) => !valid_index(*value),
-        Some(LiteralValue::Real { text, .. }) => text
-            .parse::<f64>()
-            .ok()
-            .is_some_and(|value| !valid_index(value)),
-        Some(LiteralValue::Integer { text, .. }) => text
-            .parse::<i128>()
-            .ok()
-            .is_some_and(|value| value < 1 || value > i128::from(u32::MAX)),
-        _ => false,
+    let known = match literal {
+        Some(value @ LiteralValue::Integer { .. }) => value
+            .integer_value_i128()
+            .map(gpu_device_index_from_integer),
+        Some(value @ (LiteralValue::Number(_) | LiteralValue::Real { .. })) => {
+            LiteralContext::numeric_from_literal(value).map(gpu_device_index_from_float)
+        }
+        Some(LiteralValue::Bool(value)) => Some(if *value {
+            Ok(GPU_DEVICE_ACTIVE_INDEX)
+        } else {
+            Err(super::selector::GpuDeviceIndexError::Invalid)
+        }),
+        _ => None,
     };
-    if invalid {
-        diagnostics.push(argument_error(
+    match known {
+        Some(Err(_)) => diagnostics.push(argument_error(
             "RM.GPU_DEVICE.INVALID_INDEX",
             "gpuDevice index must be a positive uint32-range integer",
             0,
-        ));
-        return;
-    }
-    let unavailable = match literal {
-        Some(LiteralValue::Number(value)) if valid_index(*value) => value.round() != 1.0,
-        Some(LiteralValue::Real { text, .. }) => text
-            .parse::<f64>()
-            .ok()
-            .is_some_and(|value| valid_index(value) && value.round() != 1.0),
-        Some(LiteralValue::Integer { text, .. }) => text
-            .parse::<i128>()
-            .ok()
-            .is_some_and(|value| value > 1 && value <= i128::from(u32::MAX)),
-        _ => false,
-    };
-    if unavailable {
-        diagnostics.push(argument_error(
+        )),
+        Some(Ok(index)) if index != GPU_DEVICE_ACTIVE_INDEX => diagnostics.push(argument_error(
             "RM.GPU_DEVICE.DEVICE_NOT_AVAILABLE",
             "only the active provider at index 1 is available",
             0,
-        ));
+        )),
+        _ => {}
     }
-}
-
-fn valid_index(value: f64) -> bool {
-    let rounded = value.round();
-    value.is_finite()
-        && rounded >= 1.0
-        && rounded <= u32::MAX as f64
-        && (rounded - value).abs() <= 1e-9
 }

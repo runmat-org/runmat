@@ -4,7 +4,7 @@ use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericScalar, Value};
 
-use super::device_metadata::{active_device_metadata, ACTIVE_DEVICE_INDEX};
+use super::device_metadata::active_device_metadata;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -16,6 +16,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "gpuDevice";
 
 use runmat_builtins::{
+    gpu_device_index_from_float, gpu_device_index_from_integer, GPU_DEVICE_ACTIVE_INDEX,
     GPU_DEVICE_ERROR_DEVICE_NOT_AVAILABLE, GPU_DEVICE_ERROR_INVALID_INDEX,
     GPU_DEVICE_ERROR_NO_PROVIDER, GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED,
     GPU_DEVICE_ERROR_TOO_MANY_INPUTS, GPU_DEVICE_ERROR_UNSUPPORTED_ARGUMENT,
@@ -117,7 +118,7 @@ fn handle_single_argument(arg: &Value) -> BuiltinResult<Value> {
         Some(index) => {
             let info = active_device_metadata()
                 .ok_or_else(|| gpu_device_error(&GPU_DEVICE_ERROR_NO_PROVIDER))?;
-            if index == ACTIVE_DEVICE_INDEX {
+            if index == GPU_DEVICE_ACTIVE_INDEX {
                 Ok(Value::Struct(info.into_struct()))
             } else {
                 Err(gpu_device_error_with_message(
@@ -145,10 +146,10 @@ fn is_reset_arg(value: &Value) -> bool {
 fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
     match value {
         Value::Int(i) => integer_to_index(i),
-        Value::Num(n) => num_to_index(*n),
+        Value::Num(n) => float_to_index(*n),
         Value::Bool(b) => {
             if *b {
-                Ok(Some(1))
+                Ok(Some(GPU_DEVICE_ACTIVE_INDEX))
             } else {
                 Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
             }
@@ -159,8 +160,8 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
                 .numeric_value_at(0)
                 .expect("tensor storage length matches shape")
             {
-                NumericScalar::F64(value) => num_to_index(value),
-                NumericScalar::F32(value) => num_to_index(f64::from(value)),
+                NumericScalar::F64(value) => float_to_index(value),
+                NumericScalar::F32(value) => float_to_index(f64::from(value)),
                 value => integer_to_index(
                     &value
                         .into_int_value()
@@ -173,7 +174,7 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
             0 => Ok(None),
             1 => {
                 if la.data[0] != 0 {
-                    Ok(Some(1))
+                    Ok(Some(GPU_DEVICE_ACTIVE_INDEX))
                 } else {
                     Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
                 }
@@ -184,38 +185,18 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
     }
 }
 
-fn int_to_index(raw: i64) -> BuiltinResult<Option<u32>> {
-    if raw <= 0 {
-        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
-    }
-    if raw > u32::MAX as i64 {
-        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
-    }
-    Ok(Some(raw as u32))
-}
-
 fn integer_to_index(value: &IntValue) -> BuiltinResult<Option<u32>> {
     value
         .try_to_u64()
-        .and_then(|raw| u32::try_from(raw).ok())
-        .filter(|raw| *raw > 0)
+        .and_then(|raw| gpu_device_index_from_integer(i128::from(raw)).ok())
         .map(Some)
         .ok_or_else(|| gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
 }
 
-fn num_to_index(raw: f64) -> BuiltinResult<Option<u32>> {
-    if !raw.is_finite() {
-        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
-    }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > 1e-9 {
-        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
-    }
-    if rounded > u32::MAX as f64 {
-        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
-    }
-    let idx = rounded as i64;
-    int_to_index(idx)
+fn float_to_index(raw: f64) -> BuiltinResult<Option<u32>> {
+    gpu_device_index_from_float(raw)
+        .map(Some)
+        .map_err(|_| gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX))
 }
 
 #[cfg(test)]

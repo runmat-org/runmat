@@ -32,19 +32,24 @@ pub enum LiteralValue {
 }
 
 impl LiteralValue {
-    /// Exactness of a source-known fixed-width integer at a binary64 boundary.
-    /// None means this is not a decodable integer literal; it does not prove
-    /// that a dynamic value is exact or inexact.
-    pub fn integer_is_exact_binary64(&self) -> Option<bool> {
+    /// Exact represented value of a source-known fixed-width integer literal.
+    /// Decimal and typed hexadecimal/binary spellings share the canonical
+    /// decoder; `None` leaves undecodable or out-of-class literals dynamic.
+    pub fn integer_value_i128(&self) -> Option<i128> {
         let Self::Integer { text, class } = self else {
             return None;
         };
         let class = class.integer_class()?;
         let value = parse_integer_literal_value(text, class)?;
         let (minimum, maximum) = class.range();
-        if !(minimum..=maximum).contains(&value) {
-            return None;
-        }
+        (minimum..=maximum).contains(&value).then_some(value)
+    }
+
+    /// Exactness of a source-known fixed-width integer at a binary64 boundary.
+    /// None means this is not a decodable integer literal; it does not prove
+    /// that a dynamic value is exact or inexact.
+    pub fn integer_is_exact_binary64(&self) -> Option<bool> {
+        let value = self.integer_value_i128()?;
         let magnitude = u64::try_from(value.unsigned_abs()).ok()?;
         Some(integer_magnitude_is_exact_binary64(magnitude))
     }
@@ -227,6 +232,34 @@ mod tests {
             );
         }
         assert_eq!(LiteralValue::Unknown.integer_is_exact_binary64(), None);
+    }
+
+    #[test]
+    fn integer_value_preserves_wide_decimal_and_signed_hex_without_binary64() {
+        for (text, class, expected) in [
+            (
+                "9007199254740993",
+                NumericClass::UInt64,
+                Some(9007199254740993),
+            ),
+            (
+                "0xFFFFFFFFFFFFFFFFu64",
+                NumericClass::UInt64,
+                Some(u64::MAX as i128),
+            ),
+            (
+                "0x8000000000000000s64",
+                NumericClass::Int64,
+                Some(i64::MIN as i128),
+            ),
+            ("18446744073709551616", NumericClass::UInt64, None),
+        ] {
+            let literal = LiteralValue::Integer {
+                text: text.into(),
+                class,
+            };
+            assert_eq!(literal.integer_value_i128(), expected, "{text}");
+        }
     }
 
     #[test]
