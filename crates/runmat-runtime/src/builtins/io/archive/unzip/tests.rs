@@ -1,4 +1,8 @@
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::builtins::io::http::transport::NativeHttpService;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::context::{RuntimeContext, RuntimeServicePorts};
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
@@ -83,6 +87,20 @@ fn run_unzip(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
     let _provider_lock = runmat_filesystem::provider_override_lock();
     let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
     block_on(unzip_builtin(None, args))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_unzip_http(args: Vec<Value>) -> BuiltinResult<Value> {
+    let driver = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("test HTTP driver");
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_http(Rc::new(NativeHttpService::new(driver.handle().clone()))),
+        );
+    block_on(unzip_builtin(Some(runtime), args))
 }
 
 fn cell_strings(value: Value) -> Vec<String> {
@@ -391,13 +409,10 @@ fn unzip_downloads_url_archive() {
     });
     let out = tempdir().expect("output folder");
 
-    run_unzip(
-        vec![
-            Value::from(url),
-            Value::from(out.path().to_string_lossy().to_string()),
-        ],
-        None,
-    )
+    run_unzip_http(vec![
+        Value::from(url),
+        Value::from(out.path().to_string_lossy().to_string()),
+    ])
     .expect("unzip URL");
 
     assert_eq!(
@@ -414,18 +429,53 @@ fn unzip_http_status_errors() {
         let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         let _ = stream.write_all(response.as_bytes());
     });
-    let out = tempdir().expect("output folder");
+    let out = tempdir().expect("output parent");
+    let destination = out.path().join("not-created");
 
-    let err = run_unzip(
-        vec![
-            Value::from(url),
-            Value::from(out.path().to_string_lossy().to_string()),
-        ],
-        None,
-    )
+    let err = run_unzip_http(vec![
+        Value::from(url),
+        Value::from(destination.to_string_lossy().to_string()),
+    ])
     .expect_err("http status");
 
     assert_eq!(err.identifier(), Some("RunMat:unzip:Http"));
+    assert!(!destination.exists());
+}
+
+#[test]
+fn unzip_rejects_oversized_http_head_before_destination_creation() {
+    let url = spawn_server(move |mut stream| {
+        drain_request(&mut stream);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            MAX_COMPRESSED_ARCHIVE_BYTES + 1
+        );
+        let _ = stream.write_all(response.as_bytes());
+    });
+    let out = tempdir().expect("output parent");
+    let destination = out.path().join("not-created");
+    let error = run_unzip_http(vec![
+        Value::from(url),
+        Value::from(destination.to_string_lossy().to_string()),
+    ])
+    .expect_err("bounded response head");
+    assert_eq!(error.identifier(), UNZIP_ERROR_HTTP.identifier);
+    assert!(!destination.exists());
+}
+
+#[test]
+fn unpolled_url_invocation_does_not_create_destination() {
+    let out = tempdir().expect("output parent");
+    let destination = out.path().join("not-created");
+    let future = unzip_builtin(
+        None,
+        vec![
+            Value::from("http://127.0.0.1:1/archive.zip"),
+            Value::from(destination.to_string_lossy().to_string()),
+        ],
+    );
+    drop(future);
+    assert!(!destination.exists());
 }
 
 #[test]

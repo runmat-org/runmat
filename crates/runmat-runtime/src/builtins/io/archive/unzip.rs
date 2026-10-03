@@ -1,7 +1,5 @@
 //! MATLAB-compatible `unzip` builtin for RunMat.
 
-#[cfg(target_arch = "wasm32")]
-use std::io::Cursor;
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -11,13 +9,10 @@ use runmat_filesystem::File;
 use runmat_filesystem::{self as vfs};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, Value};
-use url::Url;
 use zip::result::ZipError;
 use zip::ZipArchive;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
-#[cfg(target_arch = "wasm32")]
-use crate::builtins::io::http::transport::{self, HttpMethod, HttpRequest};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "unzip";
@@ -66,7 +61,28 @@ pub async fn evaluate(
     let request = parse_arguments(args)?;
     check_cancelled(runtime)?;
     let output_folder = resolve_output_folder(request.output_folder.as_deref()).await?;
-    vfs::create_dir_all_async(&output_folder)
+
+    let filenames = match request.archive {
+        runmat_builtins::UnzipSourceRoute::Http(url) => {
+            extract_remote_archive(&url, &output_folder, runtime).await?
+        }
+        runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
+            let path = resolve_archive_path(&path)?;
+            prepare_output_folder(&output_folder, runtime).await?;
+            extract_local_archive(&path, &output_folder).await?
+        }
+    };
+    check_cancelled(runtime)?;
+
+    Ok(UnzipResult { filenames })
+}
+
+async fn prepare_output_folder(
+    output_folder: &Path,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<()> {
+    check_cancelled(runtime)?;
+    vfs::create_dir_all_async(output_folder)
         .await
         .map_err(|err| {
             unzip_error_with_source(
@@ -78,21 +94,8 @@ pub async fn evaluate(
                 err,
             )
         })?;
-    reject_symlink_path(&output_folder).await?;
-    check_cancelled(runtime)?;
-
-    let filenames = match request.archive {
-        runmat_builtins::UnzipSourceRoute::Http(url) => {
-            extract_remote_archive(&url, &output_folder, runtime).await?
-        }
-        runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
-            let path = resolve_archive_path(&path)?;
-            extract_local_archive(&path, &output_folder).await?
-        }
-    };
-    check_cancelled(runtime)?;
-
-    Ok(UnzipResult { filenames })
+    reject_symlink_path(output_folder).await?;
+    check_cancelled(runtime)
 }
 
 fn check_cancelled(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<()> {
