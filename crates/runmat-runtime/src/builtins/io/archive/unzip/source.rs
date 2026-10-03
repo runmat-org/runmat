@@ -3,6 +3,10 @@ use super::*;
 mod http;
 pub(super) use http::extract_remote_archive;
 
+#[cfg(test)]
+#[path = "source/tests.rs"]
+mod tests;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) async fn extract_local_archive(
     path: &Path,
@@ -10,7 +14,7 @@ pub(super) async fn extract_local_archive(
     runtime: Option<&crate::context::RuntimeContext>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
 ) -> BuiltinResult<Vec<String>> {
-    let temp = local_archive_to_temp_file(path, runtime).await?;
+    let temp = local_archive_to_temp_file(path, runtime, provider.as_ref()).await?;
     extract_archive_file_on_worker(
         temp,
         output_folder.to_path_buf(),
@@ -27,7 +31,7 @@ pub(super) async fn extract_local_archive(
     runtime: Option<&crate::context::RuntimeContext>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
 ) -> BuiltinResult<Vec<String>> {
-    let file = File::open(path).map_err(|err| {
+    let file = File::open_on(provider.as_ref(), path).map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
             format!("unzip: unable to open '{}': {err}", path.display()),
@@ -41,8 +45,9 @@ pub(super) async fn extract_local_archive(
 async fn local_archive_to_temp_file(
     path: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
+    provider: &dyn vfs::FsProvider,
 ) -> BuiltinResult<TempArchive> {
-    let mut input = File::open_async(path).await.map_err(|err| {
+    let mut input = File::open_async_on(provider, path).await.map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
             format!("unzip: unable to open '{}': {err}", path.display()),

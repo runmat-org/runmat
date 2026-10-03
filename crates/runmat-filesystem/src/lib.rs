@@ -434,10 +434,39 @@ impl File {
         opts.open(path)
     }
 
+    /// Open through the caller's retained filesystem authority. A global
+    /// provider replacement between admission and execution cannot redirect
+    /// this input to another owner.
+    pub fn open_on(provider: &dyn FsProvider, path: impl AsRef<Path>) -> io::Result<Self> {
+        let resolved = resolve_path(path.as_ref());
+        let flags = OpenFlags {
+            read: true,
+            ..OpenFlags::default()
+        };
+        provider.open(&resolved, &flags).map(Self::from_handle)
+    }
+
     pub async fn open_async(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut opts = OpenOptions::new();
         opts.read(true);
         opts.open_async(path).await
+    }
+
+    /// Async counterpart of [`File::open_on`]; the borrowed owner is held
+    /// through completion of the provider's open future.
+    pub async fn open_async_on(
+        provider: &dyn FsProvider,
+        path: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let resolved = resolve_path(path.as_ref());
+        let flags = OpenFlags {
+            read: true,
+            ..OpenFlags::default()
+        };
+        provider
+            .open_async(&resolved, &flags)
+            .await
+            .map(Self::from_handle)
     }
 
     pub fn create(path: impl AsRef<Path>) -> io::Result<Self> {
