@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn encode_image(
-    image: &MaterializedImage,
+    image: MaterializedImage,
     invocation: &Invocation,
 ) -> BuiltinResult<Vec<u8>> {
     admission::validate(&admission::EncoderFacts {
@@ -14,13 +14,13 @@ pub(super) async fn encode_image(
     })?;
 
     match invocation.format {
-        ImageFormat::Gif => encode_gif(image, invocation).await,
+        ImageFormat::Gif => encode_gif(&image, invocation).await,
         ImageFormat::Jpeg => write_dynamic_image(
-            image_to_dynamic(&image_as_8bit(image), false)?,
+            image_to_dynamic(image_as_8bit(image), false)?,
             ImageOutputFormat::Jpeg(invocation.options.quality),
         ),
         ImageFormat::Bmp => write_dynamic_image(
-            image_to_dynamic(&image_as_8bit(image), false)?,
+            image_to_dynamic(image_as_8bit(image), false)?,
             ImageOutputFormat::Bmp,
         ),
         ImageFormat::Png => {
@@ -36,7 +36,7 @@ pub(super) async fn encode_image(
     }
 }
 
-fn image_to_dynamic(image: &MaterializedImage, keep_alpha: bool) -> BuiltinResult<DynamicImage> {
+fn image_to_dynamic(image: MaterializedImage, keep_alpha: bool) -> BuiltinResult<DynamicImage> {
     let width = u32::try_from(image.cols).map_err(|_| {
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image width is too large")
     })?;
@@ -45,30 +45,26 @@ fn image_to_dynamic(image: &MaterializedImage, keep_alpha: bool) -> BuiltinResul
     })?;
 
     match image.channels {
-        1 => match &image.data {
-            PixelData::U8(data) => {
-                ImageBuffer::<Luma<u8>, _>::from_raw(width, height, data.clone())
-                    .map(DynamicImage::ImageLuma8)
-                    .ok_or_else(|| {
-                        imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_IMAGE,
-                            "invalid grayscale image buffer",
-                        )
-                    })
-            }
-            PixelData::U16(data) => {
-                ImageBuffer::<Luma<u16>, _>::from_raw(width, height, data.clone())
-                    .map(DynamicImage::ImageLuma16)
-                    .ok_or_else(|| {
-                        imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_IMAGE,
-                            "invalid grayscale image buffer",
-                        )
-                    })
-            }
+        1 => match image.data {
+            PixelData::U8(data) => ImageBuffer::<Luma<u8>, _>::from_raw(width, height, data)
+                .map(DynamicImage::ImageLuma8)
+                .ok_or_else(|| {
+                    imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_IMAGE,
+                        "invalid grayscale image buffer",
+                    )
+                }),
+            PixelData::U16(data) => ImageBuffer::<Luma<u16>, _>::from_raw(width, height, data)
+                .map(DynamicImage::ImageLuma16)
+                .ok_or_else(|| {
+                    imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_IMAGE,
+                        "invalid grayscale image buffer",
+                    )
+                }),
         },
-        3 => match &image.data {
-            PixelData::U8(data) => ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, data.clone())
+        3 => match image.data {
+            PixelData::U8(data) => ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, data)
                 .map(DynamicImage::ImageRgb8)
                 .ok_or_else(|| {
                     imwrite_error_with_detail(
@@ -76,42 +72,36 @@ fn image_to_dynamic(image: &MaterializedImage, keep_alpha: bool) -> BuiltinResul
                         "invalid RGB image buffer",
                     )
                 }),
-            PixelData::U16(data) => {
-                ImageBuffer::<Rgb<u16>, _>::from_raw(width, height, data.clone())
-                    .map(DynamicImage::ImageRgb16)
-                    .ok_or_else(|| {
-                        imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_IMAGE,
-                            "invalid RGB image buffer",
-                        )
-                    })
-            }
+            PixelData::U16(data) => ImageBuffer::<Rgb<u16>, _>::from_raw(width, height, data)
+                .map(DynamicImage::ImageRgb16)
+                .ok_or_else(|| {
+                    imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_IMAGE,
+                        "invalid RGB image buffer",
+                    )
+                }),
         },
-        4 if keep_alpha => match &image.data {
-            PixelData::U8(data) => {
-                ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, data.clone())
-                    .map(DynamicImage::ImageRgba8)
-                    .ok_or_else(|| {
-                        imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_IMAGE,
-                            "invalid RGBA image buffer",
-                        )
-                    })
-            }
-            PixelData::U16(data) => {
-                ImageBuffer::<Rgba<u16>, _>::from_raw(width, height, data.clone())
-                    .map(DynamicImage::ImageRgba16)
-                    .ok_or_else(|| {
-                        imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_IMAGE,
-                            "invalid RGBA image buffer",
-                        )
-                    })
-            }
+        4 if keep_alpha => match image.data {
+            PixelData::U8(data) => ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, data)
+                .map(DynamicImage::ImageRgba8)
+                .ok_or_else(|| {
+                    imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_IMAGE,
+                        "invalid RGBA image buffer",
+                    )
+                }),
+            PixelData::U16(data) => ImageBuffer::<Rgba<u16>, _>::from_raw(width, height, data)
+                .map(DynamicImage::ImageRgba16)
+                .ok_or_else(|| {
+                    imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_IMAGE,
+                        "invalid RGBA image buffer",
+                    )
+                }),
         },
-        4 => match &image.data {
+        4 => match image.data {
             PixelData::U8(data) => {
-                let mut rgb = Vec::with_capacity(image.rows * image.cols * 3);
+                let mut rgb = Vec::with_capacity(geometry::samples(image.rows, image.cols, 3)?);
                 for chunk in data.chunks_exact(4) {
                     rgb.extend_from_slice(&chunk[..3]);
                 }
@@ -125,7 +115,7 @@ fn image_to_dynamic(image: &MaterializedImage, keep_alpha: bool) -> BuiltinResul
                     })
             }
             PixelData::U16(data) => {
-                let mut rgb = Vec::with_capacity(image.rows * image.cols * 3);
+                let mut rgb = Vec::with_capacity(geometry::samples(image.rows, image.cols, 3)?);
                 for chunk in data.chunks_exact(4) {
                     rgb.extend_from_slice(&chunk[..3]);
                 }
@@ -242,9 +232,11 @@ fn gif_frame_from_image(
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image height is too large")
     })?;
 
-    let mut rgba = vec![0u8; image.rows * image.cols * 4];
+    let pixels = geometry::pixels(image.rows, image.cols)?;
+    let rgba_samples = geometry::samples(image.rows, image.cols, 4)?;
+    let mut rgba = vec![0u8; rgba_samples];
     let data = image_data_as_u8(image);
-    for pixel in 0..image.rows * image.cols {
+    for pixel in 0..pixels {
         let dst = pixel * 4;
         match image.channels {
             1 => {
@@ -275,23 +267,74 @@ fn gif_frame_from_image(
     Ok(Frame::from_parts(image, 0, 0, delay))
 }
 
-fn image_data_as_u8(image: &MaterializedImage) -> Vec<u8> {
+fn image_data_as_u8(image: &MaterializedImage) -> std::borrow::Cow<'_, [u8]> {
     match &image.data {
-        PixelData::U8(data) => data.clone(),
-        PixelData::U16(data) => data
-            .iter()
-            .map(|value| ((*value as f64) / 257.0).round().clamp(0.0, 255.0) as u8)
-            .collect(),
+        PixelData::U8(data) => std::borrow::Cow::Borrowed(data),
+        PixelData::U16(data) => std::borrow::Cow::Owned(
+            data.iter()
+                .map(|value| ((*value as f64) / 257.0).round().clamp(0.0, 255.0) as u8)
+                .collect(),
+        ),
     }
 }
 
-fn image_as_8bit(image: &MaterializedImage) -> MaterializedImage {
+fn image_as_8bit(image: MaterializedImage) -> MaterializedImage {
     MaterializedImage {
         rows: image.rows,
         cols: image.cols,
         channels: image.channels,
-        data: PixelData::U8(image_data_as_u8(image)),
+        data: PixelData::U8(match image.data {
+            PixelData::U8(data) => data,
+            PixelData::U16(data) => data
+                .into_iter()
+                .map(|value| ((value as f64) / 257.0).round().clamp(0.0, 255.0) as u8)
+                .collect(),
+        }),
         alpha_applied: image.alpha_applied,
         indexed_source: image.indexed_source,
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    #[test]
+    fn native_pixels_move_into_dynamic_image_without_a_second_buffer() {
+        let pixels = vec![1_u8, 2, 3, 4, 5, 6];
+        let original = pixels.as_ptr();
+        let image = MaterializedImage {
+            rows: 1,
+            cols: 2,
+            channels: 3,
+            data: PixelData::U8(pixels),
+            alpha_applied: false,
+            indexed_source: false,
+        };
+        let dynamic = image_to_dynamic(image, true).unwrap();
+        let DynamicImage::ImageRgb8(buffer) = dynamic else {
+            panic!("expected native RGB8 image")
+        };
+        assert_eq!(buffer.as_raw().as_ptr(), original);
+        assert_eq!(buffer.as_raw(), &[1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn eight_bit_conversion_reuses_native_pixels() {
+        let pixels = vec![7_u8, 8, 9];
+        let original = pixels.as_ptr();
+        let image = MaterializedImage {
+            rows: 1,
+            cols: 1,
+            channels: 3,
+            data: PixelData::U8(pixels),
+            alpha_applied: false,
+            indexed_source: false,
+        };
+        let converted = image_as_8bit(image);
+        let PixelData::U8(data) = converted.data else {
+            panic!("expected eight-bit pixels")
+        };
+        assert_eq!(data.as_ptr(), original);
     }
 }

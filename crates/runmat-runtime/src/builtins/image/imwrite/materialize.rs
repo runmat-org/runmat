@@ -127,10 +127,9 @@ pub(super) fn image_dimensions_from_shape(shape: &[usize]) -> BuiltinResult<(usi
 
 fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage> {
     let (rows, cols, channels) = image_dimensions(tensor)?;
-    let pixels = rows.checked_mul(cols).ok_or_else(|| {
-        imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
-    })?;
-    if tensor.len() != pixels * channels {
+    let pixels = geometry::pixels(rows, cols)?;
+    let samples = geometry::samples(rows, cols, channels)?;
+    if tensor.len() != samples {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_IMAGE,
             "image data length does not match shape",
@@ -138,9 +137,9 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
     }
 
     let mut data = if tensor.numeric_dtype() == NumericDType::U16 {
-        PixelData::U16(vec![0u16; pixels * channels])
+        PixelData::U16(vec![0u16; samples])
     } else {
-        PixelData::U8(vec![0u8; pixels * channels])
+        PixelData::U8(vec![0u8; samples])
     };
     for row in 0..rows {
         for col in 0..cols {
@@ -179,6 +178,15 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
             "map must be an Nx3 colormap",
         ));
     }
+    let pixels = geometry::pixels(rows, cols)?;
+    let byte_len = geometry::samples(rows, cols, 3)?;
+    let map_len = geometry::samples(map.shape[0], 1, 3)?;
+    if indexed.len() != pixels || map.len() != map_len {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            "indexed image or colormap data length does not match shape",
+        ));
+    }
     let map_values = tensor::tensor_values_f64_cow(map);
     if !map_values
         .iter()
@@ -190,18 +198,6 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
         ));
     }
 
-    let pixels = rows.checked_mul(cols).ok_or_else(|| {
-        imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
-    })?;
-    let byte_len = pixels.checked_mul(3).ok_or_else(|| {
-        imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
-    })?;
-    if indexed.len() != pixels || map.len() != map.shape[0] * 3 {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            "indexed image or colormap data length does not match shape",
-        ));
-    }
     let mut data = vec![0u8; byte_len];
     for row in 0..rows {
         for col in 0..cols {
@@ -400,17 +396,18 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
             "Alpha must be an MxN array matching the image dimensions",
         ));
     }
-    if alpha.len() != image.rows * image.cols {
+    let pixels = geometry::pixels(image.rows, image.cols)?;
+    if alpha.len() != pixels {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
             "Alpha data length does not match shape",
         ));
     }
 
-    let pixels = image.rows * image.cols;
+    let rgba_samples = geometry::samples(image.rows, image.cols, 4)?;
     image.data = match &image.data {
         PixelData::U8(data) => {
-            let mut rgba = vec![0u8; pixels * 4];
+            let mut rgba = vec![0u8; rgba_samples];
             for row in 0..image.rows {
                 for col in 0..image.cols {
                     let pixel = row * image.cols + col;
@@ -437,7 +434,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
             PixelData::U8(rgba)
         }
         PixelData::U16(data) => {
-            let mut rgba = vec![0u16; pixels * 4];
+            let mut rgba = vec![0u16; rgba_samples];
             for row in 0..image.rows {
                 for col in 0..image.cols {
                     let pixel = row * image.cols + col;

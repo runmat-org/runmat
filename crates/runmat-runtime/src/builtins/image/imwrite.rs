@@ -20,6 +20,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod admission;
 mod encode;
+mod geometry;
 mod materialize;
 mod options;
 mod parse;
@@ -108,7 +109,7 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         invocation.map.as_ref(),
         invocation.alpha.as_ref(),
     )?;
-    let bytes = encode_image(&image, &invocation).await?;
+    let bytes = encode_image(image, &invocation).await?;
     runmat_filesystem::write_async(&invocation.path, &bytes)
         .await
         .map_err(|err| {
