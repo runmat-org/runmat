@@ -40,6 +40,7 @@ fn input() -> (
     (guard, owner, input)
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn stream_decodes_inclusive_open_ended_range() {
     let (_guard, _owner, input) = input();
@@ -57,6 +58,7 @@ fn stream_decodes_inclusive_open_ended_range() {
     assert_eq!(decoded.sample_rate, 8000.0);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn cancellation_during_decode_prevents_result_publication() {
     let (_guard, _owner, input) = input();
@@ -90,6 +92,7 @@ fn cancellation_during_decode_prevents_result_publication() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn unpolled_decode_does_not_start_a_cpu_turn() {
     let (_guard, _owner, input) = input();

@@ -49,6 +49,7 @@ fn f32_sample(sample: &[u8]) -> f32 {
     f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]])
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn one_pass_reads_each_selected_frame_once_under_a_payload_sized_budget() {
     const FRAMES: usize = 4096;
@@ -103,6 +104,7 @@ fn one_pass_reads_each_selected_frame_once_under_a_payload_sized_budget() {
     assert_eq!(short_reader.transferred, payload_bytes - 1);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn eight_channels_reduce_seeks_and_transfer_volume_together() {
     const FRAMES: usize = 4096;
@@ -141,6 +143,7 @@ fn eight_channels_reduce_seeks_and_transfer_volume_together() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn partial_range_skips_unselected_frames_but_reads_frame_padding_once() {
     let mut payload = Vec::new();
@@ -188,6 +191,7 @@ fn partial_range_skips_unselected_frames_but_reads_frame_padding_once() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn empty_selection_never_reads_or_seeks() {
     let mut reader = CountedReader::new(vec![0; 16], 0);
@@ -212,6 +216,7 @@ fn empty_selection_never_reads_or_seeks() {
     assert_eq!(reader.seeks, 0);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn maximum_valid_block_alignment_reads_each_complete_frame() {
     const BLOCK_ALIGN: usize = u16::MAX as usize;
@@ -243,6 +248,7 @@ fn maximum_valid_block_alignment_reads_each_complete_frame() {
     assert_eq!(reader.seeks, 2);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn cancellation_after_first_chunk_discards_initialized_output() {
     let source = Rc::new(CancellationSource::new());
