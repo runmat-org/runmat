@@ -30,7 +30,12 @@ pub struct OperationEntryDefinition {
 }
 
 pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry {
-    let (purity, semantic_kind, effects, capabilities) = match definition.effects {
+    let (purity, semantic_kind, effects, capabilities): (
+        BuiltinPurity,
+        BuiltinSemanticKind,
+        &'static [EffectKind],
+        &'static [CapabilityRequirement],
+    ) = match definition.effects {
         OperationEffectProfile::EvidenceWrite => (
             BuiltinPurity::Impure,
             BuiltinSemanticKind::Filesystem,

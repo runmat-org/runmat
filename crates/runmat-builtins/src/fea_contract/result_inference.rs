@@ -152,8 +152,10 @@ pub fn infer_result(
                     if let Some(name) = request.literals.literal_string_at(index) {
                         let normalized = ResultsOption::normalized_key(&name);
                         let option = ResultsOption::from_normalized(&normalized);
-                        let canonical =
-                            option.map_or(normalized.as_str(), ResultsOption::canonical_name);
+                        let canonical = match option {
+                            Some(option) => option.canonical_name(),
+                            None => normalized.as_str(),
+                        };
                         if !seen.insert(canonical.to_owned()) {
                             diagnostics.push(argument_error(
                                 "RM-CATALOG-FEA-DUPLICATE",

@@ -29,7 +29,10 @@ pub(in crate::builtins::fea) fn results_query_from_args(
     let mut seen = HashSet::new();
     for pair in expect_name_value_tail(RESULTS_NAME, args)? {
         let option = ResultsOption::from_normalized(&pair.key);
-        let canonical = option.map_or(pair.key.as_str(), ResultsOption::canonical_name);
+        let canonical = match option {
+            Some(option) => option.canonical_name(),
+            None => pair.key.as_str(),
+        };
         if !seen.insert(canonical.to_string()) {
             return Err(builtin_error(
                 RESULTS_NAME,
