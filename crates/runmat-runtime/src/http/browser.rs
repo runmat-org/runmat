@@ -8,7 +8,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{DomException, XmlHttpRequest, XmlHttpRequestResponseType};
 
-use super::{HttpRequest, HttpResponse, TransportError, TransportErrorKind};
+use super::{HttpBodyStream, HttpRequest, HttpResponse, TransportError, TransportErrorKind};
 use crate::context::{RuntimeHttpService, RuntimeServiceFuture};
 
 /// Async XHR is supported in both Window and WebWorker. The browser owns the
@@ -40,6 +40,16 @@ impl RuntimeHttpService for BrowserHttpService {
         request: HttpRequest,
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         Box::pin(async move { send_impl(request).await })
+    }
+
+    fn open_bounded(
+        &self,
+        request: HttpRequest,
+        _accepted_limit: u64,
+    ) -> RuntimeServiceFuture<Result<HttpBodyStream, TransportError>> {
+        // XHR materializes the complete ArrayBuffer before a caller can read
+        // it. Do not present that route as a pre-growth bounded stream.
+        Box::pin(async move { Err(TransportError::unsupported_streaming(&request.url)) })
     }
 }
 

@@ -54,6 +54,8 @@ pub enum TransportErrorKind {
     Connect,
     Status(u16),
     InvalidHeader(String),
+    UnsupportedStreaming,
+    BodyLimitExceeded(u64),
     Other,
 }
 
@@ -69,6 +71,14 @@ pub struct TransportError {
 }
 
 impl TransportError {
+    pub fn unsupported_streaming(url: &Url) -> Self {
+        Self::new(
+            TransportErrorKind::UnsupportedStreaming,
+            url,
+            "host HTTP service does not provide bounded response streaming",
+        )
+    }
+
     /// The host could not start its reusable HTTP service. No request was sent.
     pub fn host_service_unavailable(url: &Url, source: impl RuntimeErrorSourceBound) -> Self {
         Self::new(TransportErrorKind::Other, url, source.to_string()).with_source(source)
@@ -85,6 +95,12 @@ impl TransportError {
             }
             TransportErrorKind::InvalidHeader(name) => {
                 format!("invalid header '{name}': {detail}")
+            }
+            TransportErrorKind::UnsupportedStreaming => {
+                format!("streaming HTTP is unavailable for {url}: {detail}")
+            }
+            TransportErrorKind::BodyLimitExceeded(limit) => {
+                format!("response from {url} exceeds the {limit}-byte limit")
             }
             TransportErrorKind::Other => format!("failed to contact {url}: {detail}"),
         };

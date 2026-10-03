@@ -5,8 +5,12 @@ use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
 
-use super::{HttpMethod, HttpRequest, HttpResponse, TransportError, TransportErrorKind};
+use super::{
+    HttpBodyStream, HttpMethod, HttpRequest, HttpResponse, TransportError, TransportErrorKind,
+};
 use crate::context::{RuntimeHttpService, RuntimeServiceFuture};
+
+mod stream;
 
 /// The host supplies a reusable Tokio driver; the transport never creates a
 /// private runtime or a blocking worker for an individual request.
@@ -43,6 +47,19 @@ impl RuntimeHttpService for NativeHttpService {
             })?
         })
     }
+
+    fn open_bounded(
+        &self,
+        request: HttpRequest,
+        accepted_limit: u64,
+    ) -> RuntimeServiceFuture<Result<HttpBodyStream, TransportError>> {
+        stream::open_bounded(
+            self.driver.clone(),
+            Arc::clone(&self.clients),
+            request,
+            accepted_limit,
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -60,7 +77,7 @@ impl std::error::Error for SharedClientInitError {
     }
 }
 
-struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+pub(super) struct AbortOnDrop<T>(pub(super) tokio::task::JoinHandle<T>);
 
 impl<T> Future for AbortOnDrop<T> {
     type Output = Result<T, tokio::task::JoinError>;
@@ -80,6 +97,41 @@ async fn send_impl(
     mut request: HttpRequest,
     clients: Arc<OnceLock<Result<reqwest::Client, Arc<reqwest::Error>>>>,
 ) -> Result<HttpResponse, TransportError> {
+    let builder = prepare_request(&mut request, &clients)?;
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| request_error(&request, error))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(TransportError::new(
+            TransportErrorKind::Status(status.as_u16()),
+            &request.url,
+            status.canonical_reason().unwrap_or("HTTP error"),
+        ));
+    }
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                value.to_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| request_error(&request, error))?
+        .to_vec();
+    Ok(HttpResponse { headers, body })
+}
+
+fn prepare_request(
+    request: &mut HttpRequest,
+    clients: &Arc<OnceLock<Result<reqwest::Client, Arc<reqwest::Error>>>>,
+) -> Result<reqwest::RequestBuilder, TransportError> {
     // The previous per-request ClientBuilder validated User-Agent before
     // HeaderFields. Preserve that diagnostic order before initializing the
     // shared client or opening a socket.
@@ -133,37 +185,10 @@ async fn send_impl(
     if let Some(body) = request.body.take() {
         builder = builder.body(body);
     }
-    let response = builder
-        .send()
-        .await
-        .map_err(|error| request_error(&request, error))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(TransportError::new(
-            TransportErrorKind::Status(status.as_u16()),
-            &request.url,
-            status.canonical_reason().unwrap_or("HTTP error"),
-        ));
-    }
-    let headers = response
-        .headers()
-        .iter()
-        .map(|(name, value)| {
-            (
-                name.as_str().to_string(),
-                value.to_str().unwrap_or_default().to_string(),
-            )
-        })
-        .collect();
-    let body = response
-        .bytes()
-        .await
-        .map_err(|error| request_error(&request, error))?
-        .to_vec();
-    Ok(HttpResponse { headers, body })
+    Ok(builder)
 }
 
-fn request_error(request: &HttpRequest, error: reqwest::Error) -> TransportError {
+pub(super) fn request_error(request: &HttpRequest, error: reqwest::Error) -> TransportError {
     let kind = if error.is_timeout() {
         TransportErrorKind::Timeout
     } else if error.is_connect() {

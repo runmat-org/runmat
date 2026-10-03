@@ -162,6 +162,25 @@ pub trait RuntimeHttpService {
         &self,
         request: crate::http::HttpRequest,
     ) -> RuntimeServiceFuture<Result<crate::http::HttpResponse, crate::http::TransportError>>;
+
+    /// Open one response body without collecting it. The service must reject
+    /// an advertised length above `accepted_limit` before returning the head,
+    /// and reject any body chunk that would cross it before publishing bytes.
+    /// The caller still owns its own written-byte limit and partial-file RAII.
+    /// This bounds total accepted bytes, not an undocumented transport-chunk
+    /// or TLS allocation peak; finite memory quotas need separate admission.
+    fn open_bounded(
+        &self,
+        request: crate::http::HttpRequest,
+        _accepted_limit: u64,
+    ) -> RuntimeServiceFuture<Result<crate::http::HttpBodyStream, crate::http::TransportError>>
+    {
+        Box::pin(async move {
+            Err(crate::http::TransportError::unsupported_streaming(
+                &request.url,
+            ))
+        })
+    }
 }
 
 pub trait RuntimeErrorService {
