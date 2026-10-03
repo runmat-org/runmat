@@ -27,6 +27,19 @@ fn archive_error(name: &str, message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+fn archive_error_with_source(
+    name: &str,
+    message: impl Into<String>,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(name)
+        .with_identifier(format!("RunMat:{name}:RuntimeError"))
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .with_source(source)
+        .build()
+}
+
 pub use runmat_builtins::{
     GUNZIP_DESCRIPTOR, GUNZIP_ERROR_OUTPUTS, GUNZIP_INTEGER_AUDIT, GZIP_DESCRIPTOR,
     GZIP_ERROR_OUTPUTS, GZIP_INTEGER_AUDIT,
@@ -279,7 +292,7 @@ async fn extract_gunzip_source(
             .await
             .map_err(|err| match err {
                 transport::TransportCallError::Transport(err) => {
-                    archive_error("gunzip", err.message_with_prefix("gunzip"))
+                    archive_error_with_source("gunzip", err.message_with_prefix("gunzip"), err)
                 }
                 transport::TransportCallError::Runtime(err) => err,
             })?;

@@ -3,6 +3,13 @@ use std::time::Duration;
 use thiserror::Error;
 use url::Url;
 
+use crate::runtime_error::RuntimeErrorSourceBound;
+
+#[cfg(not(target_arch = "wasm32"))]
+type HttpErrorSource = Box<dyn std::error::Error + Send + Sync + 'static>;
+#[cfg(target_arch = "wasm32")]
+type HttpErrorSource = Box<dyn std::error::Error + 'static>;
+
 #[derive(Clone, Copy, Debug)]
 pub enum HttpMethod {
     Get,
@@ -57,6 +64,8 @@ pub struct TransportError {
     pub url: String,
     pub detail: String,
     message: String,
+    #[source]
+    source: Option<HttpErrorSource>,
 }
 
 impl TransportError {
@@ -84,7 +93,13 @@ impl TransportError {
             url,
             detail,
             message,
+            source: None,
         }
+    }
+
+    pub(super) fn with_source<E: RuntimeErrorSourceBound>(mut self, source: E) -> Self {
+        self.source = Some(Box::new(source));
+        self
     }
 
     pub fn message_with_prefix(&self, prefix: &str) -> String {

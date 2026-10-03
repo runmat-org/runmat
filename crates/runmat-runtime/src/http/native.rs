@@ -31,6 +31,7 @@ impl RuntimeHttpService for NativeHttpService {
             let task = AbortOnDrop(driver.spawn(send_impl(request)));
             task.await.map_err(|error| {
                 TransportError::new(TransportErrorKind::Other, &url, error.to_string())
+                    .with_source(error)
             })?
         })
     }
@@ -59,6 +60,7 @@ async fn send_impl(mut request: HttpRequest) -> Result<HttpResponse, TransportEr
         .build()
         .map_err(|error| {
             TransportError::new(TransportErrorKind::Other, &request.url, error.to_string())
+                .with_source(error)
         })?;
     let mut builder = match request.method {
         HttpMethod::Get => client.get(request.url.clone()),
@@ -74,6 +76,7 @@ async fn send_impl(mut request: HttpRequest) -> Result<HttpResponse, TransportEr
                 &request.url,
                 error.to_string(),
             )
+            .with_source(error)
         })?;
         let value = HeaderValue::from_str(value).map_err(|error| {
             TransportError::new(
@@ -81,6 +84,7 @@ async fn send_impl(mut request: HttpRequest) -> Result<HttpResponse, TransportEr
                 &request.url,
                 error.to_string(),
             )
+            .with_source(error)
         })?;
         builder = builder.header(key, value);
     }
@@ -125,12 +129,13 @@ fn request_error(request: &HttpRequest, error: reqwest::Error) -> TransportError
     } else {
         TransportErrorKind::Other
     };
-    TransportError::new(kind, &request.url, error.to_string())
+    TransportError::new(kind, &request.url, error.to_string()).with_source(error)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -175,6 +180,10 @@ mod tests {
         invalid.headers.push(("bad\nname".into(), "value".into()));
         let error = futures::executor::block_on(service.send(invalid)).expect_err("invalid header");
         assert!(matches!(error.kind, TransportErrorKind::InvalidHeader(_)));
+        assert!(error
+            .source()
+            .and_then(|source| source.downcast_ref::<reqwest::header::InvalidHeaderName>())
+            .is_some());
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
@@ -250,6 +259,10 @@ mod tests {
         timed.timeout = Duration::from_millis(20);
         let error = futures::executor::block_on(service.send(timed)).expect_err("header timeout");
         assert!(matches!(error.kind, TransportErrorKind::Timeout));
+        assert!(error
+            .source()
+            .and_then(|source| source.downcast_ref::<reqwest::Error>())
+            .is_some());
         server.join().unwrap();
     }
 

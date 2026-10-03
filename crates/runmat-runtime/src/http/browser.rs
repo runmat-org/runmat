@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fmt;
 use std::rc::Rc;
 
 use futures::channel::oneshot;
@@ -14,6 +15,18 @@ use crate::context::{RuntimeHttpService, RuntimeServiceFuture};
 /// event loop; this service owns only one request's callbacks and abort guard.
 #[derive(Default)]
 pub struct BrowserHttpService;
+
+/// Retain the browser exception object on the browser-local error chain.
+#[derive(Debug)]
+struct BrowserJsError(JsValue);
+
+impl fmt::Display for BrowserJsError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{:?}", self.0)
+    }
+}
+
+impl std::error::Error for BrowserJsError {}
 
 impl BrowserHttpService {
     pub fn new() -> Self {
@@ -72,6 +85,7 @@ async fn send_impl(request: HttpRequest) -> Result<HttpResponse, TransportError>
                 &request.url,
                 format!("{error:?}"),
             )
+            .with_source(BrowserJsError(error))
         })?;
     }
 
@@ -164,24 +178,34 @@ async fn send_impl(request: HttpRequest) -> Result<HttpResponse, TransportError>
         ));
     }
     if !(200..=299).contains(&status) {
-        return Err(TransportError::new(
+        let status_text = active.xhr.status_text();
+        let error = TransportError::new(
             TransportErrorKind::Status(status),
             &request.url,
-            active.xhr.status_text().unwrap_or_default(),
-        ));
+            status_text.as_deref().unwrap_or_default(),
+        );
+        return Err(match status_text {
+            Ok(_) => error,
+            Err(source) => error.with_source(BrowserJsError(source)),
+        });
     }
-    let headers =
-        parse_response_headers(&active.xhr.get_all_response_headers().unwrap_or_default());
+    let headers = parse_response_headers(
+        &active
+            .xhr
+            .get_all_response_headers()
+            .map_err(|error| map_js_error(&request, error))?,
+    );
     let response = active
         .xhr
         .response()
         .map_err(|error| map_js_error(&request, error))?;
-    let array_buffer: ArrayBuffer = response.dyn_into().map_err(|_| {
+    let array_buffer: ArrayBuffer = response.dyn_into().map_err(|error| {
         TransportError::new(
             TransportErrorKind::Other,
             &request.url,
             "response was not ArrayBuffer",
         )
+        .with_source(BrowserJsError(error))
     })?;
     let view = Uint8Array::new(&array_buffer);
     let mut body = vec![0u8; view.length() as usize];
@@ -198,13 +222,15 @@ fn map_js_error(request: &HttpRequest, error: JsValue) -> TransportError {
         } else {
             TransportErrorKind::Other
         };
-        return TransportError::new(kind, &request.url, dom.message());
+        return TransportError::new(kind, &request.url, dom.message())
+            .with_source(BrowserJsError(error));
     }
     TransportError::new(
         TransportErrorKind::Other,
         &request.url,
         format!("{error:?}"),
     )
+    .with_source(BrowserJsError(error))
 }
 
 fn wasm_network_detail(message: impl AsRef<str>) -> String {
@@ -231,6 +257,7 @@ fn parse_response_headers(raw: &str) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
     use std::future::Future;
     use std::pin::Pin;
     use std::task::{Context, Poll};
@@ -273,6 +300,18 @@ mod tests {
             Poll::Pending
         ));
         drop(request);
+        web_sys::Url::revoke_object_url(&url).expect("revoke blob URL");
+    }
+
+    #[wasm_bindgen_test]
+    fn browser_exception_remains_on_transport_source_chain() {
+        let (request, url) = blob_request();
+        let exception = DomException::new_with_message("bad header").expect("DOM exception");
+        let error = map_js_error(&request, exception.into());
+        assert!(error
+            .source()
+            .and_then(|source| source.downcast_ref::<BrowserJsError>())
+            .is_some());
         web_sys::Url::revoke_object_url(&url).expect("revoke blob URL");
     }
 }

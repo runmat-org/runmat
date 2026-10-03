@@ -139,6 +139,17 @@ fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
 
+fn compat_error_with_source(
+    name: &str,
+    message: impl Into<String>,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(name)
+        .with_source(source)
+        .build()
+}
+
 async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
@@ -324,7 +335,7 @@ async fn websave_builtin(
     .await
     .map_err(|err| match err {
         transport::TransportCallError::Transport(err) => {
-            compat_error("websave", err.message_with_prefix("websave"))
+            compat_error_with_source("websave", err.message_with_prefix("websave"), err)
         }
         transport::TransportCallError::Runtime(err) => err,
     })?;
