@@ -42,6 +42,7 @@ const PAIRED_PRODUCT_CONFIGURATIONS = deepImmutable(validatePairedConfigurations
   paired("io"),
   paired("io/archive"),
   paired("io/filetext"),
+  paired("io/http"),
   paired("io/repl_fs", ["entries"], [aggregationExport("entries", "registry")]),
   paired("io/tabular_reading"),
   paired("logical"),
