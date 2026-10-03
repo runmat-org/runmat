@@ -18,9 +18,32 @@ pub(crate) fn apply_rvalue_contract(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) {
     let facts = state.value_facts();
-    let (effects, capabilities) = rvalue_contract_with_facts(value, summaries, &facts);
+    // Expansion/captured sequences can change argument positions. Keep their
+    // call-site capabilities conservative until the exact expanded literals
+    // are represented in the sequence contract.
+    let literals = match value {
+        MirRvalue::Call(call) => proven_call_literals(call, state),
+        _ => Vec::new(),
+    };
+    let (effects, capabilities) =
+        rvalue_contract_with_facts_and_literals(value, summaries, &facts, Some(&literals));
     state.effects.0.extend(effects.0);
     state.capabilities.0.extend(capabilities.0);
+}
+
+fn proven_call_literals(call: &crate::MirCall, state: &FlowState) -> Vec<LiteralValue> {
+    if !call
+        .args
+        .iter()
+        .all(|argument| matches!(argument, crate::MirCallArg::Single(_)))
+    {
+        return Vec::new();
+    }
+    call.args
+        .iter()
+        .filter_map(|argument| argument.operand())
+        .map(|operand| super::value::operand_literal(operand, state))
+        .collect()
 }
 
 pub(crate) fn statement_contract(
@@ -69,16 +92,26 @@ pub(crate) fn rvalue_contract_with_facts(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     facts: &[Option<ValueFact>],
 ) -> (EffectSet, CapabilitySet) {
+    rvalue_contract_with_facts_and_literals(value, summaries, facts, None)
+}
+
+fn rvalue_contract_with_facts_and_literals(
+    value: &MirRvalue,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+    facts: &[Option<ValueFact>],
+    proven_literals: Option<&[LiteralValue]>,
+) -> (EffectSet, CapabilitySet) {
     let mut effects = EffectSet::default();
     let mut capabilities = CapabilitySet::default();
     match value {
         MirRvalue::Call(call) => {
-            let literals = vec![LiteralValue::Unknown; call.args.len()];
+            let unknown_literals = vec![LiteralValue::Unknown; call.args.len()];
+            let literals = proven_literals.unwrap_or(&unknown_literals);
             let inference = infer_mir_call(
                 call,
                 facts,
                 &BTreeMap::new(),
-                &literals,
+                literals,
                 summaries,
                 OutputSelection::new(call.requested_outputs),
             );
@@ -219,6 +252,66 @@ pub(crate) fn statement_contract_with_facts(
             expansion_source_contract(source, summaries, facts)
         }
         _ => statement_contract(statement, summaries),
+    }
+}
+
+#[cfg(test)]
+mod literal_capability_tests {
+    use super::*;
+
+    fn call_and_state(source: &str) -> (crate::MirCall, FlowState) {
+        let ast = runmat_parser::parse(source).expect("parse capability fixture");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower capability fixture HIR");
+        let mir =
+            crate::lowering::lower_assembly(&hir.assembly).expect("lower capability fixture MIR");
+        let body = mir.bodies.values().next().expect("fixture body");
+        let call = body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match &statement.kind {
+                MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                }
+                | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call.clone()),
+                _ => None,
+            })
+            .expect("fixture call");
+        (call, FlowState::entry(body, &[], &[]))
+    }
+
+    #[test]
+    fn call_capabilities_see_only_proven_source_literals() {
+        let (local, state) = call_and_state("out = imread('image.png');");
+        assert_eq!(
+            proven_call_literals(&local, &state),
+            vec![LiteralValue::Character("image.png".into())]
+        );
+        let (remote, state) = call_and_state("out = imread('https://example.test/a.png');");
+        assert_eq!(
+            proven_call_literals(&remote, &state),
+            vec![LiteralValue::Character("https://example.test/a.png".into())]
+        );
+        let (dynamic, mut state) =
+            call_and_state("function out = load_image(path)\n out = imread(path);\nend");
+        assert_eq!(
+            proven_call_literals(&dynamic, &state),
+            vec![LiteralValue::Unknown]
+        );
+        let Some(crate::MirCallArg::Single(crate::MirOperand::Local(local))) = dynamic.args.first()
+        else {
+            panic!("dynamic source should be a local argument");
+        };
+        state.locals[local.0].set(
+            ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+            LiteralValue::Character("file:///images/a.png".into()),
+        );
+        assert_eq!(
+            proven_call_literals(&dynamic, &state),
+            vec![LiteralValue::Character("file:///images/a.png".into())]
+        );
     }
 }
 

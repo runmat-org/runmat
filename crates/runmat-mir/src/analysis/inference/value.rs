@@ -358,7 +358,7 @@ pub(crate) fn rvalue_literal(value: &MirRvalue, state: &FlowState) -> LiteralVal
     }
 }
 
-fn operand_literal(operand: &MirOperand, state: &FlowState) -> LiteralValue {
+pub(super) fn operand_literal(operand: &MirOperand, state: &FlowState) -> LiteralValue {
     match operand {
         MirOperand::Constant(constant) => crate::analysis::dataflow::literal_value(constant),
         MirOperand::Local(local) => state.locals[local.0].literal.clone(),

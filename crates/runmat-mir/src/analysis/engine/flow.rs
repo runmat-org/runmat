@@ -195,6 +195,7 @@ fn transfer_statement(
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let assigned = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             let literal = rvalue_literal(value, state);
+            apply_rvalue_contract(value, state, summaries);
             assign_place(
                 place,
                 assigned,
@@ -202,7 +203,6 @@ fn transfer_statement(
                 pending_mutation.take().as_ref(),
                 state,
             );
-            apply_rvalue_contract(value, state, summaries);
         }
         MirStmtKind::MultiAssign { targets, value } => {
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
@@ -214,6 +214,7 @@ fn transfer_statement(
                 statement.span,
                 diagnostics,
             );
+            apply_rvalue_contract(value, state, summaries);
             for (index, target) in targets.targets.iter().enumerate() {
                 match target {
                     MirOutputTarget::Place(place) => assign_place(
@@ -236,11 +237,11 @@ fn transfer_statement(
                     MirOutputTarget::Discard => {}
                 }
             }
-            apply_rvalue_contract(value, state, summaries);
         }
         MirStmtKind::SequenceAssign { target, value } => {
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let _ = infer_rvalue(value, state, summaries, statement.span, diagnostics);
+            apply_rvalue_contract(value, state, summaries);
             let base = match target {
                 crate::MirSequenceTarget::Member { base, .. }
                 | crate::MirSequenceTarget::DynamicMember { base, .. }
@@ -254,7 +255,6 @@ fn transfer_statement(
                     );
                 }
             }
-            apply_rvalue_contract(value, state, summaries);
         }
         MirStmtKind::CaptureSequence {
             destination,
