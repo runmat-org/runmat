@@ -340,9 +340,7 @@ async fn collect_stream_samples<T, R: Read + Seek>(
         .try_reserve_exact(sample_count)
         .map_err(|err| format_error(format!("decoded audio allocation failed: {err}")))?;
     let frames_per_chunk = if block_align <= INPUT_CHUNK_BYTES {
-        (INPUT_CHUNK_BYTES / block_align)
-            .max(1)
-            .min(AUDIO_WORK_CHUNK)
+        (INPUT_CHUNK_BYTES / block_align).clamp(1, AUDIO_WORK_CHUNK)
     } else {
         1
     };
