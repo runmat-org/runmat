@@ -41,7 +41,7 @@ pub(super) async fn open_bounded(
     let body = request.body.as_deref().map(Uint8Array::from);
     init.set_body_opt_u8_array(body.as_ref());
     let fetch_request = Request::new_with_str_and_init(request.url.as_str(), &init)
-        .map_err(|source| js_error(&request.url, source))?;
+        .map_err(|source| js_error(&request.url, source.into()))?;
     active.arm_timeout(&request)?;
     let response = JsFuture::from(active.scope.fetch(&fetch_request))
         .await
