@@ -1,93 +1,71 @@
 //! Python interoperability builtins backed by the session foreign runtime.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 
-const PYTHON_ADAPTER: &str = "python";
-const PYTHON_ENVIRONMENT_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("py.PythonEnvironment");
+#[derive(Clone, Copy)]
+enum PythonBuiltinOperation {
+    Status,
+    Configure,
+    Run,
+    RunFile,
+    Terminate,
+}
 
-const ARGUMENTS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "arguments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Arguments supplied to the Python operation.",
-};
-const RESULT: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "result",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Result of the Python operation.",
-};
-const INPUTS: [BuiltinParamDescriptor; 1] = [ARGUMENTS];
-const OUTPUTS: [BuiltinParamDescriptor; 1] = [RESULT];
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "result = python_operation(arguments)",
-    inputs: &INPUTS,
-    outputs: &OUTPUTS,
-}];
-const ERROR_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PYTHON.UNAVAILABLE",
-    identifier: Some("RunMat:Foreign:UnsupportedOnWasm"),
-    when: "The current host has no explicitly provided CPython capability.",
-    message: "Python interoperability is unavailable on this host.",
-};
-const ERROR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PYTHON.INVALID_CALL",
-    identifier: Some("RunMat:Foreign:InvalidCall"),
-    when: "Arguments do not satisfy the Python interoperability contract.",
-    message: "Invalid Python interoperability operation.",
-};
-const ERROR_HOST_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PYTHON.HOST_UNAVAILABLE",
-    identifier: Some("RunMat:Foreign:HostUnavailable"),
-    when: "A Python operation is invoked without an active runtime context.",
-    message: "Python operation has no active runtime context.",
-};
-const ERRORS: [BuiltinErrorDescriptor; 3] =
-    [ERROR_UNAVAILABLE, ERROR_INVALID, ERROR_HOST_UNAVAILABLE];
-const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "Fixed-width integer scalars and arrays retain their exact signed or unsigned Python representation.",
+impl PythonBuiltinOperation {
+    const fn symbol(self) -> &'static str {
+        match self {
+            Self::Status => "status",
+            Self::Configure => "configure",
+            Self::Run => "pyrun",
+            Self::RunFile => "pyrunfile",
+            Self::Terminate => "terminate",
+        }
+    }
+}
+pub use runmat_builtins::{
+    PYARGS_DESCRIPTOR, PYENV_DESCRIPTOR, PYRUNFILE_DESCRIPTOR, PYRUN_DESCRIPTOR,
+    PYTHON_ENVIRONMENT_CLASS, PYTHON_ERROR_HOST_UNAVAILABLE, PYTHON_ERROR_INVALID,
+    PYTHON_ERROR_UNAVAILABLE, TERMINATE_DESCRIPTOR,
 };
 
-async fn invoke_python(operation: &str, arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn invoke_python(
+    context: Option<crate::context::RuntimeContext>,
+    operation: PythonBuiltinOperation,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (operation, arguments);
-        Err(python_error(&ERROR_UNAVAILABLE, ERROR_UNAVAILABLE.message))
+        let _ = context;
+        Err(python_error(
+            &PYTHON_ERROR_UNAVAILABLE,
+            PYTHON_ERROR_UNAVAILABLE.message,
+        ))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let context = crate::context::legacy::active()
-            .ok_or_else(|| python_error(&ERROR_HOST_UNAVAILABLE, ERROR_HOST_UNAVAILABLE.message))?;
+        let symbol = operation.symbol();
+        let context = context.ok_or_else(|| {
+            python_error(
+                &PYTHON_ERROR_HOST_UNAVAILABLE,
+                PYTHON_ERROR_HOST_UNAVAILABLE.message,
+            )
+        })?;
         let service = context
             .service_ports()
-            .require_foreign(operation)
+            .require_foreign(symbol)
             .map_err(|error| error.into_runtime_error())?
             .clone();
         let sequence = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
-                    adapter: PYTHON_ADAPTER.into(),
-                    symbol: operation.into(),
+                    adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
+                    symbol: symbol.into(),
                     arguments,
                     requested_outputs: crate::current_requested_outputs(),
                 },
@@ -101,29 +79,24 @@ async fn invoke_python(operation: &str, arguments: Vec<Value>) -> BuiltinResult<
 
 #[runtime_builtin(
     name = "pyenv",
-    execution_stack = "process",
-    category = "interop/python",
-    summary = "Inspect or configure the Python runtime for this session.",
-    keywords = "pyenv,python,environment,interpreter",
-    descriptor(crate::builtins::interop::python::DESCRIPTOR),
-    integer_audit(crate::builtins::interop::python::INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::python"
 )]
-async fn pyenv_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn pyenv_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
     if arguments.is_empty() {
-        invoke_python("status", arguments).await
+        invoke_python(context, PythonBuiltinOperation::Status, arguments).await
     } else {
-        invoke_python("configure", arguments).await
+        invoke_python(context, PythonBuiltinOperation::Configure, arguments).await
     }
 }
 
 #[runtime_builtin(
     name = "pyargs",
-    category = "interop/python",
-    summary = "Create a Python keyword-argument bundle.",
-    keywords = "pyargs,python,keyword,arguments",
-    descriptor(crate::builtins::interop::python::DESCRIPTOR),
-    integer_audit(crate::builtins::interop::python::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::python"
 )]
 fn pyargs_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
@@ -157,15 +130,14 @@ fn pyargs_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "pyrun",
-    execution_stack = "process",
-    category = "interop/python",
-    summary = "Execute Python code in the session's persistent Python workspace.",
-    keywords = "pyrun,python,code,workspace",
-    descriptor(crate::builtins::interop::python::DESCRIPTOR),
-    integer_audit(crate::builtins::interop::python::INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::python"
 )]
-async fn pyrun_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn pyrun_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    mut arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
     if arguments.is_empty() {
         return Err(invalid_call("pyrun requires Python source code"));
     }
@@ -173,20 +145,19 @@ async fn pyrun_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
     let outputs = requested_output_names(&mut arguments, "pyrun")?;
     let mut call = vec![code, outputs];
     call.extend(arguments);
-    invoke_python("pyrun", call).await
+    invoke_python(context, PythonBuiltinOperation::Run, call).await
 }
 
 #[runtime_builtin(
     name = "pyrunfile",
-    execution_stack = "process",
-    category = "interop/python",
-    summary = "Execute a Python file in an isolated script workspace.",
-    keywords = "pyrunfile,python,file,script",
-    descriptor(crate::builtins::interop::python::DESCRIPTOR),
-    integer_audit(crate::builtins::interop::python::INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::python"
 )]
-async fn pyrunfile_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn pyrunfile_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    mut arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
     if arguments.is_empty() {
         return Err(invalid_call("pyrunfile requires a Python file"));
     }
@@ -194,20 +165,19 @@ async fn pyrunfile_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
     let outputs = requested_output_names(&mut arguments, "pyrunfile")?;
     let mut call = vec![file, outputs];
     call.extend(arguments);
-    invoke_python("pyrunfile", call).await
+    invoke_python(context, PythonBuiltinOperation::RunFile, call).await
 }
 
 #[runtime_builtin(
     name = "terminate",
-    execution_stack = "process",
-    category = "interop/python",
-    summary = "Terminate an out-of-process Python environment.",
-    keywords = "terminate,python,environment,process",
-    descriptor(crate::builtins::interop::python::DESCRIPTOR),
-    integer_audit(crate::builtins::interop::python::INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::python"
 )]
-async fn terminate_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn terminate_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
     if arguments.len() != 1
         || !matches!(
             arguments.first(),
@@ -219,7 +189,9 @@ async fn terminate_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
             "terminate expects the PythonEnvironment returned by pyenv",
         ));
     }
-    invoke_python("terminate", Vec::new()).await
+    // The foreign adapter validates the environment's private session ticket.
+    // Keep the exact caller object; public class checking alone is insufficient.
+    invoke_python(context, PythonBuiltinOperation::Terminate, arguments).await
 }
 
 fn requested_output_names(arguments: &mut Vec<Value>, builtin: &str) -> BuiltinResult<Value> {
@@ -238,7 +210,7 @@ fn requested_output_names(arguments: &mut Vec<Value>, builtin: &str) -> BuiltinR
 }
 
 fn invalid_call(message: impl Into<String>) -> crate::RuntimeError {
-    python_error(&ERROR_INVALID, message)
+    python_error(&PYTHON_ERROR_INVALID, message)
 }
 
 fn python_error(
@@ -251,3 +223,7 @@ fn python_error(
     }
     builder.build()
 }
+
+#[cfg(test)]
+#[path = "python/tests.rs"]
+mod tests;
