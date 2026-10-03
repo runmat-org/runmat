@@ -33,7 +33,7 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// The public form permits a host result only after this provider hook
     /// returns Unsupported. This is one conditional route, not an equivalent
     /// host alternative offered to placement policy.
-    pub(crate) conditional_host_fallback: bool,
+    pub(crate) conditional_host_fallback: Option<ResourceByteBound>,
 }
 
 pub(crate) struct SelectedProviderOperation {
@@ -120,8 +120,11 @@ pub(crate) fn select_exact_provider_operation(
             device_id: provider.device_id(),
         },
         preparation: CandidatePreparationState::Ready,
-        output_residency: if request.conditional_host_fallback {
-            CandidateOutputResidency::Unknown
+        output_residency: if let Some(host_bytes) = request.conditional_host_fallback {
+            CandidateOutputResidency::ConditionalHostOrProvider {
+                device_id: provider.device_id(),
+                host_bytes,
+            }
         } else {
             CandidateOutputResidency::Provider {
                 device_id: provider.device_id(),
@@ -143,6 +146,7 @@ pub(crate) fn select_exact_provider_operation(
                 )),
             scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
             provider_host_workspace: Some(request.host_scratch),
+            provider_input_stages: None,
             queue_slots: estimate.dispatches.unwrap_or(1),
             peak_live,
         },
@@ -193,7 +197,7 @@ pub(crate) fn select_exact_provider_operation(
         return Ok(None);
     };
     receipt.require_provider_execution(provider.device_id(), query.operation.clone());
-    if request.conditional_host_fallback {
+    if request.conditional_host_fallback.is_some() {
         receipt.allow_conditional_host_fallback();
     }
     Ok(Some(SelectedProviderOperation {

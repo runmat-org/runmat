@@ -77,6 +77,16 @@ impl WholeWorkCandidate {
                 encoded.extend_from_slice(&device_id.to_le_bytes());
             }
             CandidateOutputResidency::Unknown => encoded.push(3),
+            CandidateOutputResidency::ConditionalHostOrProvider {
+                device_id,
+                host_bytes,
+            } => {
+                encoded.push(4);
+                encoded.extend_from_slice(&device_id.to_le_bytes());
+                encoded.extend_from_slice(
+                    &serde_json::to_vec(&host_bytes).expect("typed host bound serializes"),
+                );
+            }
         }
         let stage = serde_json::to_vec(&self.presentation)
             .expect("typed presentation stage must serialize");
@@ -107,7 +117,10 @@ impl WholeWorkCandidate {
                     device_id: execution,
                 },
                 CandidateOutputResidency::Provider { device_id: output }
-                | CandidateOutputResidency::Mirrored { device_id: output },
+                | CandidateOutputResidency::Mirrored { device_id: output }
+                | CandidateOutputResidency::ConditionalHostOrProvider {
+                    device_id: output, ..
+                },
             ) if execution != output => {
                 return Err("whole-work output resides on a foreign device");
             }

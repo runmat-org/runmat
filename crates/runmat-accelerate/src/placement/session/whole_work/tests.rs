@@ -1,7 +1,8 @@
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, PlacementFeedback, PlacementResourceSnapshot, PlacementRevision,
-    PlacementSignature, ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
+    PlacementSignature, ProviderInputStageDemand, ProviderInputStageDemands,
+    ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
     WholeWorkObservation, WholeWorkObservationOutcome,
 };
 use runmat_runtime::context::RuntimePlacementService;
@@ -53,6 +54,7 @@ fn candidate(kind: ExecutionCandidateKind) -> WholeWorkCandidate {
             retained_bytes: 16.into(),
             scratch_bytes: 8.into(),
             provider_host_workspace: None,
+            provider_input_stages: None,
             queue_slots: if provider { 1 } else { 0 },
             peak_live: None,
         },
@@ -637,6 +639,114 @@ fn provider_hook_host_workspace_coexists_with_physical_output_peak() {
     assert_eq!(
         session.select_whole_work(unknown).unwrap_err().code,
         "RunMat:Placement:InsufficientResourceEvidence"
+    );
+}
+
+#[test]
+fn conditional_host_or_provider_output_does_not_double_count_same_host_payload() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.output_residency = CandidateOutputResidency::ConditionalHostOrProvider {
+        device_id: 7,
+        host_bytes: ResourceByteBound::Known(32),
+    };
+    provider.resources.retained_bytes = 16.into();
+    provider.resources.scratch_bytes =
+        ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound);
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 24,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_host_workspace = Some(32.into());
+    let mut bounded = request(vec![provider]);
+    bounded.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    bounded.resources.memory_available_bytes = Some(32);
+    bounded.resources.providers[0].scratch_available_bytes = Some(24);
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+
+    bounded.resources.memory_available_bytes = Some(31);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    bounded.resources.memory_available_bytes = Some(32);
+    bounded.resources.providers[0].scratch_available_bytes = Some(23);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn provider_input_stages_include_live_preparation_and_peak_against_execution() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.resources.retained_bytes = 24.into();
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 40,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_input_stages = Some(
+        ProviderInputStageDemands::sequential([
+            ProviderInputStageDemand {
+                device_id: 7,
+                incremental_peak_bytes: 16.into(),
+                queue_slots: 1,
+            },
+            // An uploaded 16-byte H remains live during its second 16-byte
+            // readback, so this stage is 32 rather than just 16 staging.
+            ProviderInputStageDemand {
+                device_id: 7,
+                incremental_peak_bytes: 32.into(),
+                queue_slots: 1,
+            },
+        ])
+        .unwrap(),
+    );
+    let mut bounded = request(vec![provider]);
+    bounded.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    bounded.resources.providers[0].scratch_available_bytes = Some(40);
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+    bounded.resources.providers[0].scratch_available_bytes = Some(39);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+
+    bounded.resources.providers[0].scratch_available_bytes = Some(40);
+    bounded.resources.providers[0].queue_depth = Some(1);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn cross_owner_provider_input_stage_needs_its_own_finite_quota() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.resources.provider_input_stages = Some(
+        ProviderInputStageDemands::sequential([ProviderInputStageDemand {
+            device_id: 8,
+            incremental_peak_bytes: 16.into(),
+            queue_slots: 1,
+        }])
+        .unwrap(),
+    );
+    let mut bounded = request(vec![provider]);
+    bounded.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    bounded.resources.providers.push(ProviderResourceSnapshot {
+        device_id: 8,
+        scratch_available_bytes: Some(16),
+        queue_depth: Some(0),
+        queue_limit: Some(1),
+        ..Default::default()
+    });
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+    bounded.resources.providers[1].scratch_available_bytes = Some(15);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
     );
 }
 

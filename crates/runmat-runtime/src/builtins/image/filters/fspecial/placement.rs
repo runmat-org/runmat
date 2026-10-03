@@ -70,7 +70,7 @@ pub(super) fn select(
             host_scratch,
             host_cpu_millicores: 1_000,
             already_live_bytes: 0,
-            conditional_host_fallback: true,
+            conditional_host_fallback: Some(host_scratch),
         },
     )
 }

@@ -191,6 +191,7 @@ pub(crate) fn select_pair(
                 ),
                 scratch_bytes: host_compute_scratch,
                 provider_host_workspace: None,
+                provider_input_stages: None,
                 queue_slots: 0,
                 peak_live: None,
             },
@@ -236,6 +237,7 @@ pub(crate) fn select_pair(
                 // A peak-live bound is not a transient-scratch bound.
                 scratch_bytes: unknown_scratch(),
                 provider_host_workspace: None,
+                provider_input_stages: None,
                 queue_slots: estimate.dispatches.unwrap_or(1),
                 peak_live,
             },

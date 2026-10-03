@@ -493,6 +493,35 @@ fn candidate_resource_adjustment_ns(
             readback_stage_demands.insert(readback.device_id, scratch);
         }
     }
+    let mut provider_input_stage_demands = BTreeMap::new();
+    if let Some(stages) = demand.provider_input_stages {
+        if !matches!(location, CandidateExecutionLocation::Provider { .. })
+            || !stages.is_canonical()
+        {
+            return Err(ResourceAdmissionError::Overflow);
+        }
+        for stage in stages.iter() {
+            let provider = resources
+                .provider(stage.device_id)
+                .ok_or(ResourceAdmissionError::UnavailableProvider)?;
+            if provider.lost
+                || provider
+                    .queue_depth
+                    .zip(provider.queue_limit)
+                    .is_some_and(|(depth, limit)| stage.queue_slots > limit.saturating_sub(depth))
+            {
+                return Err(ResourceAdmissionError::OverBudget);
+            }
+            let peak = ResourceAccount::default()
+                .add(stage.incremental_peak_bytes)
+                .ok_or(ResourceAdmissionError::Overflow)?;
+            peak.within(
+                provider.scratch_available_bytes,
+                ResourceBudgetKind::ProviderScratch(stage.device_id),
+            )?;
+            provider_input_stage_demands.insert(stage.device_id, peak);
+        }
+    }
     if let CandidateOutputPresentation::ProviderDownload {
         device_id,
         provider_scratch_bytes,
@@ -552,6 +581,26 @@ fn candidate_resource_adjustment_ns(
                 .add(demand.retained_bytes)
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
+        CandidateOutputResidency::ConditionalHostOrProvider {
+            device_id,
+            host_bytes,
+        } => {
+            // The provider-first route already includes its operation-owned
+            // host workspace in host_peak. Its fallback result may be that
+            // same retained buffer, so compare complete branch peaks rather
+            // than counting it twice. The provider branch's physical peak is
+            // independently covered by peak_live below.
+            let host_fallback_peak = host_retained_bytes
+                .add(host_bytes)
+                .ok_or(ResourceAdmissionError::Overflow)?;
+            host_peak = host_peak.peak(host_fallback_peak);
+            let retained = provider_demands.entry(device_id).or_default();
+            if demand.peak_live.is_none() {
+                *retained = retained
+                    .add(demand.retained_bytes)
+                    .ok_or(ResourceAdmissionError::Overflow)?;
+            }
+        }
     }
     // A readback finishes before the output upload/allocation. Peak each
     // source-owner stage against the complete output stage (including its
@@ -563,6 +612,15 @@ fn candidate_resource_adjustment_ns(
             .entry(device_id)
             .and_modify(|output_stage| *output_stage = output_stage.peak(scratch))
             .or_insert(scratch);
+    }
+    // Input preparation has completed before the final provider execution
+    // stage. Each stage bound already includes operation-created allocations
+    // retained across it; borrowed/provider graph values are added once below.
+    for (device_id, peak) in provider_input_stage_demands {
+        provider_demands
+            .entry(device_id)
+            .and_modify(|output_stage| *output_stage = output_stage.peak(peak))
+            .or_insert(peak);
     }
     host_peak.within(
         resources.memory_available_bytes,
@@ -663,6 +721,16 @@ fn retain_output(
             let retained = providers.entry(device_id).or_default();
             *retained = retained.add(candidate.resources.retained_bytes)?;
         }
+        CandidateOutputResidency::ConditionalHostOrProvider {
+            device_id,
+            host_bytes,
+        } => {
+            // The static graph cannot know which branch publishes at runtime;
+            // keep both possible values live for future-consumer admission.
+            *host = host.add(host_bytes)?;
+            let retained = providers.entry(device_id).or_default();
+            *retained = retained.add(candidate.resources.retained_bytes)?;
+        }
     }
     Some(())
 }
@@ -686,6 +754,18 @@ fn release_retained(
         }
         CandidateOutputResidency::Mirrored { device_id } => {
             *host = host.subtract(candidate.resources.retained_bytes)?;
+            if let Some(retained) = providers.get_mut(&device_id) {
+                *retained = retained.subtract(candidate.resources.retained_bytes)?;
+                if retained.known_bytes == 0 && retained.unavailable_bounds.is_empty() {
+                    providers.remove(&device_id);
+                }
+            }
+        }
+        CandidateOutputResidency::ConditionalHostOrProvider {
+            device_id,
+            host_bytes,
+        } => {
+            *host = host.subtract(host_bytes)?;
             if let Some(retained) = providers.get_mut(&device_id) {
                 *retained = retained.subtract(candidate.resources.retained_bytes)?;
                 if retained.known_bytes == 0 && retained.unavailable_bounds.is_empty() {

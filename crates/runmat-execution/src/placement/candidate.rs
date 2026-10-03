@@ -81,6 +81,148 @@ impl ProviderReadbackDemands {
     }
 }
 
+/// A provider-executed route's sequential input-preparation stage. The peak
+/// includes every operation-created allocation still live at this stage (for
+/// example an adapted kernel uploaded before a second readback), plus mapped
+/// staging. It excludes authenticated borrowed allocations already counted in
+/// that provider's resource snapshot. No two stages in this set overlap.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderInputStageDemand {
+    pub device_id: u32,
+    pub incremental_peak_bytes: ResourceByteBound,
+    pub queue_slots: u32,
+}
+
+/// Canonical per-owner peak of sequential provider input stages.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderInputStageDemands {
+    entries: [Option<ProviderInputStageDemand>; 16],
+}
+
+impl ProviderInputStageDemands {
+    pub fn sequential(stages: impl IntoIterator<Item = ProviderInputStageDemand>) -> Option<Self> {
+        let mut by_device = std::collections::BTreeMap::new();
+        for stage in stages {
+            if stage.queue_slots == 0 && stage.incremental_peak_bytes != ResourceByteBound::Known(0)
+            {
+                return None;
+            }
+            let current: &mut ProviderInputStageDemand =
+                by_device.entry(stage.device_id).or_insert(stage);
+            current.queue_slots = current.queue_slots.max(stage.queue_slots);
+            current.incremental_peak_bytes =
+                match (current.incremental_peak_bytes, stage.incremental_peak_bytes) {
+                    (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => {
+                        ResourceByteBound::Known(left.max(right))
+                    }
+                    (ResourceByteBound::Unavailable(reason), _)
+                    | (_, ResourceByteBound::Unavailable(reason)) => {
+                        ResourceByteBound::Unavailable(reason)
+                    }
+                };
+        }
+        if by_device.len() > 16 {
+            return None;
+        }
+        let mut set = Self::default();
+        for (slot, demand) in set.entries.iter_mut().zip(by_device.into_values()) {
+            *slot = Some(demand);
+        }
+        Some(set)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = ProviderInputStageDemand> + '_ {
+        self.entries.iter().flatten().copied()
+    }
+
+    pub fn is_canonical(&self) -> bool {
+        let mut previous = None;
+        let mut empty = false;
+        for entry in self.entries {
+            match entry {
+                Some(demand)
+                    if empty
+                        || (demand.queue_slots == 0
+                            && demand.incremental_peak_bytes != ResourceByteBound::Known(0))
+                        || previous.is_some_and(|device| demand.device_id <= device) =>
+                {
+                    return false
+                }
+                Some(demand) => previous = Some(demand.device_id),
+                None => empty = true,
+            }
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod provider_input_stage_tests {
+    use super::*;
+
+    #[test]
+    fn sequential_stages_retain_prior_live_peak_per_owner() {
+        let stages = ProviderInputStageDemands::sequential([
+            ProviderInputStageDemand {
+                device_id: 8,
+                incremental_peak_bytes: ResourceByteBound::Known(12),
+                queue_slots: 1,
+            },
+            ProviderInputStageDemand {
+                device_id: 7,
+                incremental_peak_bytes: ResourceByteBound::Known(8),
+                queue_slots: 0,
+            },
+            ProviderInputStageDemand {
+                device_id: 8,
+                incremental_peak_bytes: ResourceByteBound::Known(20),
+                queue_slots: 2,
+            },
+        ]);
+        assert!(
+            stages.is_none(),
+            "nonempty zero-queue stage is not admitted"
+        );
+
+        let stages = ProviderInputStageDemands::sequential([
+            ProviderInputStageDemand {
+                device_id: 8,
+                incremental_peak_bytes: ResourceByteBound::Known(12),
+                queue_slots: 1,
+            },
+            ProviderInputStageDemand {
+                device_id: 7,
+                incremental_peak_bytes: ResourceByteBound::Known(0),
+                queue_slots: 0,
+            },
+            ProviderInputStageDemand {
+                device_id: 8,
+                incremental_peak_bytes: ResourceByteBound::Known(20),
+                queue_slots: 2,
+            },
+        ])
+        .unwrap();
+        assert!(stages.is_canonical());
+        assert_eq!(
+            stages.iter().collect::<Vec<_>>(),
+            vec![
+                ProviderInputStageDemand {
+                    device_id: 7,
+                    incremental_peak_bytes: ResourceByteBound::Known(0),
+                    queue_slots: 0,
+                },
+                ProviderInputStageDemand {
+                    device_id: 8,
+                    incremental_peak_bytes: ResourceByteBound::Known(20),
+                    queue_slots: 2,
+                },
+            ]
+        );
+    }
+}
+
 #[cfg(test)]
 mod readback_demand_tests {
     use super::*;
@@ -188,8 +330,20 @@ pub enum CandidatePreparationState {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum CandidateOutputResidency {
     Host,
-    Provider { device_id: u32 },
-    Mirrored { device_id: u32 },
+    Provider {
+        device_id: u32,
+    },
+    Mirrored {
+        device_id: u32,
+    },
+    /// One provider-first route may publish either a provider allocation or a
+    /// host value after a genuine Unsupported hook result. `host_bytes` is the
+    /// separately proven retained host payload; provider retained bytes remain
+    /// in CandidateResourceDemand. The branches are alternatives, not mirrors.
+    ConditionalHostOrProvider {
+        device_id: u32,
+        host_bytes: ResourceByteBound,
+    },
     Unknown,
 }
 
@@ -263,7 +417,8 @@ impl CandidateOutputPresentation {
                 Err("provider download presentation needs a host route, host output, and a queue slot unless zero staging is proven")
             }
             (Self::Direct, CandidateExecutionLocation::Host, CandidateOutputResidency::Provider { .. }
-                | CandidateOutputResidency::Mirrored { .. }) => {
+                | CandidateOutputResidency::Mirrored { .. }
+                | CandidateOutputResidency::ConditionalHostOrProvider { .. }) => {
                 Err("host execution needs an admitted provider presentation stage")
             }
             (

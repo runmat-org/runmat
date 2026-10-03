@@ -53,6 +53,11 @@ pub struct CandidateResourceDemand {
     /// domain, not that a zero-byte bound was proved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_host_workspace: Option<ResourceByteBound>,
+    /// Sequential provider-execution input preparation, each stage including
+    /// prior operation-created values still live. None is legacy unmodeled,
+    /// not a proven absence of input readbacks or uploads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_input_stages: Option<super::ProviderInputStageDemands>,
     pub queue_slots: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peak_live: Option<CandidatePeakLiveDemand>,
@@ -67,6 +72,7 @@ impl Default for CandidateResourceDemand {
             ),
             scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
             provider_host_workspace: None,
+            provider_input_stages: None,
             queue_slots: 0,
             peak_live: None,
         }

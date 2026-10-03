@@ -910,6 +910,7 @@ mod tests {
                 retained_bytes: ResourceByteBound::Known(0),
                 scratch_bytes: provider.download_numeric_host_workspace_bound(handle),
                 provider_host_workspace: None,
+                provider_input_stages: None,
                 queue_slots: 0,
                 peak_live: None,
             },

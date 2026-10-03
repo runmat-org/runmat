@@ -196,6 +196,7 @@ fn select_host_admission(
             retained_bytes: ResourceByteBound::Known(physical_retained_bytes),
             scratch_bytes: host_compute_scratch,
             provider_host_workspace: None,
+            provider_input_stages: None,
             queue_slots: 0,
             peak_live: None,
         },
