@@ -147,10 +147,9 @@ fn cancelled_ready_error_keeps_runtime_cancellation_priority() {
         },
         Box::pin(futures::stream::once(async move {
             cancellation.cancel(CancellationReason::User);
-            Err(TransportError::new(
-                TransportErrorKind::Connect,
+            Err(TransportError::host_service_unavailable(
                 &"http://127.0.0.1/".parse().unwrap(),
-                "connection failed",
+                std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "connection failed"),
             ))
         })),
     );
@@ -167,10 +166,9 @@ fn transport_failure_aborts_custom_body_owner() {
     let drops = Rc::new(Cell::new(0));
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let stream = futures::stream::once(async {
-        Err(TransportError::new(
-            TransportErrorKind::Connect,
+        Err(TransportError::host_service_unavailable(
             &"http://127.0.0.1/".parse().unwrap(),
-            "connection failed",
+            std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "connection failed"),
         ))
     })
     .chain(PendingBody {
@@ -189,6 +187,6 @@ fn transport_failure_aborts_custom_body_owner() {
     let Err(TransportCallError::Transport(error)) = result else {
         panic!("ordinary transport error must remain distinct");
     };
-    assert_eq!(error.kind, TransportErrorKind::Connect);
+    assert!(matches!(error.kind, TransportErrorKind::Other));
     assert_eq!((polls.get(), drops.get()), (0, 1));
 }
