@@ -16,7 +16,7 @@ use super::super::{
     broadcast_repetitions, device_real_scalar, ArithmeticProviderOperation, ExpandedPair,
 };
 use super::common::{
-    accept_output, common_owner, compatible_inputs, float_handle_supported,
+    accept_output, common_owner, float_handle_supported,
     provider_contract_error, provider_error,
 };
 
