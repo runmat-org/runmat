@@ -7,10 +7,10 @@ use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::{AnimationDecoder, Delay, DynamicImage, Frame, ImageFormat, ImageOutputFormat};
 use image::{ImageBuffer, Luma, Rgb, Rgba, RgbaImage};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, ImwriteOption, IMWRITE_ERROR_ENCODE, IMWRITE_ERROR_INVALID_ARGUMENT,
-    IMWRITE_ERROR_INVALID_COLORMAP, IMWRITE_ERROR_INVALID_FILENAME, IMWRITE_ERROR_INVALID_FORMAT,
-    IMWRITE_ERROR_INVALID_IMAGE, IMWRITE_ERROR_INVALID_OPTION, IMWRITE_ERROR_IO,
-    IMWRITE_SINGLE_GIF_TIFF_EXTENSION,
+    BuiltinErrorDescriptor, ImwriteOption, ImwriteWriteMode as WriteMode,
+    IMWRITE_ERROR_ENCODE, IMWRITE_ERROR_INVALID_ARGUMENT, IMWRITE_ERROR_INVALID_COLORMAP,
+    IMWRITE_ERROR_INVALID_FILENAME, IMWRITE_ERROR_INVALID_FORMAT, IMWRITE_ERROR_INVALID_IMAGE,
+    IMWRITE_ERROR_INVALID_OPTION, IMWRITE_ERROR_IO, IMWRITE_SINGLE_GIF_TIFF_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericScalar, Tensor, Value};
@@ -128,12 +128,6 @@ fn value_numeric_dtype(value: &Value) -> Option<NumericDType> {
         Value::Tensor(tensor) => Some(tensor.numeric_dtype()),
         _ => None,
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WriteMode {
-    Overwrite,
-    Append,
 }
 
 #[derive(Debug)]

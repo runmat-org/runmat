@@ -196,21 +196,23 @@ pub(super) fn parse_format_hint(value: &str) -> BuiltinResult<ImageFormat> {
             "format hint must not be empty",
         ));
     }
-    match label.as_str() {
-        "jpg" | "jpeg" | "jpe" => Ok(ImageFormat::Jpeg),
-        "png" => Ok(ImageFormat::Png),
-        "bmp" => Ok(ImageFormat::Bmp),
-        "gif" => Ok(ImageFormat::Gif),
-        "tif" | "tiff" => Ok(ImageFormat::Tiff),
-        other => ImageFormat::from_extension(other)
-            .filter(is_supported_format)
-            .ok_or_else(|| {
-                imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_FORMAT,
-                    format!("unsupported image format '{other}'"),
-                )
-            }),
+    if let Some(format) = runmat_builtins::ImwriteFormat::from_hint(&label) {
+        return Ok(match format {
+            runmat_builtins::ImwriteFormat::Png => ImageFormat::Png,
+            runmat_builtins::ImwriteFormat::Jpeg => ImageFormat::Jpeg,
+            runmat_builtins::ImwriteFormat::Bmp => ImageFormat::Bmp,
+            runmat_builtins::ImwriteFormat::Gif => ImageFormat::Gif,
+            runmat_builtins::ImwriteFormat::Tiff => ImageFormat::Tiff,
+        });
     }
+    ImageFormat::from_extension(&label)
+        .filter(is_supported_format)
+        .ok_or_else(|| {
+            imwrite_error_with_detail(
+                &IMWRITE_ERROR_INVALID_FORMAT,
+                format!("unsupported image format '{label}'"),
+            )
+        })
 }
 
 pub(super) fn infer_format_from_path(path: &Path) -> BuiltinResult<ImageFormat> {

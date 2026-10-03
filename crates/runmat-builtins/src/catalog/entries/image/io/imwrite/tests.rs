@@ -108,6 +108,13 @@ fn option_aliases_share_the_runtime_decoder() {
         ImwriteOption::from_name("Delay-Time"),
         Some(ImwriteOption::DelayTime)
     );
+    assert_eq!(ImwriteFormat::from_hint(".JPEG"), Some(ImwriteFormat::Jpeg));
+    assert_eq!(
+        ImwriteWriteMode::from_name(" append "),
+        Some(ImwriteWriteMode::Append)
+    );
+    assert!(ImwriteOption::LoopCount.validate_numeric(0.5).is_err());
+    assert!(ImwriteOption::DelayTime.validate_numeric(1e300).is_err());
     let mut request = call(
         vec![
             image(NumericClass::UInt8, vec![Some(2), Some(2)]),
@@ -123,6 +130,106 @@ fn option_aliases_share_the_runtime_decoder() {
     ]);
     let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
     assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION"));
+}
+
+#[test]
+fn every_proven_option_pair_and_format_channel_rule_is_checked() {
+    let text = || ValueFact::scalar(ValueKindFact::String);
+    let mut request = call(
+        vec![
+            image(NumericClass::Double, vec![Some(2), Some(2), Some(3)]),
+            text(),
+            text(),
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })),
+            text(),
+            text(),
+        ],
+        RequestedOutputCount::Zero,
+    );
+    request.literals = LiteralContext::new(vec![
+        LiteralValue::Unknown,
+        LiteralValue::String("x.gif".into()),
+        LiteralValue::String("DelayTime".into()),
+        LiteralValue::Unknown,
+        LiteralValue::String("Compression".into()),
+        LiteralValue::Unknown,
+    ]);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(4)));
+    request.arguments.truncate(4);
+    request.literals.literal_args.truncate(4);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-IMAGE"));
+
+    request.arguments.push(text());
+    request.arguments.push(text());
+    request
+        .literals
+        .literal_args
+        .push(LiteralValue::String("Compression".into()));
+    request.literals.literal_args.push(LiteralValue::Unknown);
+
+    request.arguments.pop();
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(4)));
+
+    request.arguments = vec![
+        image(NumericClass::UInt16, vec![Some(2), Some(2)]),
+        text(),
+        text(),
+    ];
+    request.literals = LiteralContext::new(vec![
+        LiteralValue::Unknown,
+        LiteralValue::String("x.dat".into()),
+        LiteralValue::String("jpg".into()),
+    ]);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-IMAGE"));
+
+    request.arguments = vec![
+        image(NumericClass::UInt8, vec![Some(1), Some(1)]),
+        text(),
+        text(),
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+    ];
+    request.literals = LiteralContext::new(vec![
+        LiteralValue::Unknown,
+        LiteralValue::String("x.jpg".into()),
+        LiteralValue::String("Quality".into()),
+        LiteralValue::Number(101.0),
+    ]);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(3)));
+
+    // The second value might instead be an indexed colormap. No guessed
+    // filename or option positions are allowed from that unresolved shape.
+    request.arguments[1] = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(!result
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION"));

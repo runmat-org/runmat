@@ -1,8 +1,11 @@
-use super::ImwriteOption;
+use super::{
+    ImwriteAdmissionFailure, ImwriteEncoderFacts, ImwriteFormat, ImwriteOption, ImwriteWriteMode,
+};
 use crate::catalog::inference::{argument_error, finish_fixed_outputs};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    CallInference, CallRequest, NumericClass, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, LiteralValue, NumericClass, ShapeFact, StorageFact, ValueFact,
+    ValueKindFact,
 };
 
 fn image_class_possible(value: &ValueFact) -> bool {
@@ -117,43 +120,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             2,
         ));
     }
-    // The first trailing scalar text can be an explicit format or an option
-    // name. Only invariant facts are diagnosed here; runtime owns the full
-    // format/option decoder and all value-dependent encoder limitations.
-    let first_trailing = filename_index + 1;
-    if let Some(value) = request.arguments.get(first_trailing) {
-        if !super::super::text::could_be_scalar_text(value) {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-IMWRITE-TEXT",
-                "format or option name must be scalar text",
-                first_trailing,
-            ));
-        }
-    }
-    if let Some(first) = request.literals.literal_string_at(first_trailing) {
-        if let Some(option) = ImwriteOption::from_name(&first) {
-            if option == ImwriteOption::UnsupportedAdvanced {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-IMWRITE-OPTION",
-                    "writer option is recognized but unsupported",
-                    first_trailing,
-                ));
-            }
-            if request.arguments.get(first_trailing + 1).is_none() {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-IMWRITE-OPTION",
-                    "writer option requires a value",
-                    first_trailing,
-                ));
-            }
-        } else if first.trim().trim_start_matches('.').is_empty() {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-IMWRITE-FORMAT",
-                "explicit image format must not be empty",
-                first_trailing,
-            ));
-        }
-    }
+    infer_known_tail(
+        request,
+        filename_index,
+        definitely_indexed,
+        &mut diagnostics,
+    );
     if request
         .outputs
         .requested
@@ -167,4 +139,188 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     finish_fixed_outputs(entry, request, vec![], diagnostics)
+}
+
+fn infer_known_tail(
+    request: &CallRequest,
+    filename_index: usize,
+    indexed: bool,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+) {
+    // If argument two may be a map or a filename, no later operand role is
+    // proven. Do not diagnose a possible indexed call as a malformed direct call.
+    if filename_index == 1
+        && !request.arguments.get(1).is_some_and(|value| {
+            matches!(value.kind, ValueKindFact::String | ValueKindFact::Character)
+                && super::super::text::could_be_scalar_text(value)
+        })
+    {
+        return;
+    }
+    let mut format = request
+        .literals
+        .literal_string_at(filename_index)
+        .and_then(|path| {
+            std::path::Path::new(&path)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .and_then(ImwriteFormat::from_hint)
+        });
+    let mut alpha = false;
+    let mut append = false;
+    let mut index = filename_index + 1;
+    let mut complete = true;
+    if let Some(value) = request.arguments.get(index) {
+        if !super::super::text::could_be_scalar_text(value) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-IMWRITE-TEXT",
+                "format or option name must be scalar text",
+                index,
+            ));
+            return;
+        }
+        match request.literals.literal_string_at(index) {
+            Some(first) if ImwriteOption::from_name(&first).is_none() => {
+                format = ImwriteFormat::from_hint(&first);
+                if first.trim().trim_start_matches('.').is_empty() {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-IMWRITE-FORMAT",
+                        "explicit image format must not be empty",
+                        index,
+                    ));
+                }
+                index += 1;
+            }
+            None => complete = false,
+            _ => {}
+        }
+    }
+    if !complete {
+        return;
+    }
+    while index < request.arguments.len() {
+        let value = &request.arguments[index];
+        if !super::super::text::could_be_scalar_text(value) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-IMWRITE-TEXT",
+                "option name must be scalar text",
+                index,
+            ));
+            complete = false;
+            break;
+        }
+        let Some(name) = request.literals.literal_string_at(index) else {
+            complete = false;
+            break;
+        };
+        let Some(option) = ImwriteOption::from_name(&name) else {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-IMWRITE-OPTION",
+                "writer option is unsupported",
+                index,
+            ));
+            complete = false;
+            break;
+        };
+        if option == ImwriteOption::UnsupportedAdvanced {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-IMWRITE-OPTION",
+                "writer option is recognized but unsupported",
+                index,
+            ));
+        }
+        let Some(_value) = request.arguments.get(index + 1) else {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-IMWRITE-OPTION",
+                "writer option requires a value",
+                index,
+            ));
+            complete = false;
+            break;
+        };
+        if option == ImwriteOption::Alpha {
+            alpha = true;
+        }
+        if matches!(
+            option,
+            ImwriteOption::Quality | ImwriteOption::DelayTime | ImwriteOption::LoopCount
+        ) {
+            let known = match request.literals.literal_args.get(index + 1) {
+                Some(LiteralValue::Number(number)) => Some(*number),
+                Some(LiteralValue::Real { text, .. }) => text.parse::<f64>().ok(),
+                _ => None,
+            };
+            if let Some(number) = known {
+                if let Err(message) = option.validate_numeric(number) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-IMWRITE-OPTION",
+                        message,
+                        index + 1,
+                    ));
+                }
+            }
+        }
+        if option == ImwriteOption::WriteMode {
+            if let Some(mode) = request.literals.literal_string_at(index + 1) {
+                match ImwriteWriteMode::from_name(&mode) {
+                    Some(ImwriteWriteMode::Append) => append = true,
+                    Some(ImwriteWriteMode::Overwrite) => append = false,
+                    None => diagnostics.push(argument_error(
+                        "RM-CATALOG-IMWRITE-OPTION",
+                        "WriteMode must be 'overwrite' or 'append'",
+                        index + 1,
+                    )),
+                }
+            }
+        }
+        index += 2;
+    }
+    let Some(format) = format else { return };
+    let Some(image) = request.arguments.first() else {
+        return;
+    };
+    let channels = if alpha {
+        Some(4)
+    } else if indexed {
+        Some(3)
+    } else {
+        image.shape.known_dims().and_then(|dims| match dims.len() {
+            0..=2 => Some(1),
+            3 => dims[2],
+            _ => None,
+        })
+    };
+    let sixteen_bit = matches!(
+        image.kind,
+        ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: NumericClass::UInt16,
+            ..
+        })
+    ) && !indexed;
+    if let Some(channels) = channels {
+        if let Err(failure) = (ImwriteEncoderFacts {
+            format,
+            channels,
+            sixteen_bit,
+            indexed_source: indexed,
+            alpha_applied: alpha,
+            append,
+        })
+        .validate()
+        {
+            // A later dynamic option could still supply Alpha or WriteMode.
+            if !complete && !sixteen_bit {
+                return;
+            }
+            let (code, message) = match failure {
+                ImwriteAdmissionFailure::InvalidImage(message) => {
+                    ("RM-CATALOG-IMWRITE-IMAGE", message)
+                }
+                ImwriteAdmissionFailure::InvalidOption(message) => {
+                    ("RM-CATALOG-IMWRITE-OPTION", message)
+                }
+            };
+            diagnostics.push(argument_error(code, message, 0));
+        }
+    }
 }

@@ -1,7 +1,7 @@
 use super::*;
+use runmat_builtins::{ImwriteAdmissionFailure, ImwriteEncoderFacts, ImwriteFormat};
 
-/// Facts available from admitted host values or a resident handle descriptor
-/// before a provider download. No pixel contents are presumed here.
+/// Facts available from admitted host values or a resident descriptor.
 pub(super) struct EncoderFacts {
     pub format: ImageFormat,
     pub channels: usize,
@@ -11,74 +11,36 @@ pub(super) struct EncoderFacts {
     pub append: bool,
 }
 
+pub(super) fn typed_format(format: ImageFormat) -> BuiltinResult<ImwriteFormat> {
+    match format {
+        ImageFormat::Png => Ok(ImwriteFormat::Png),
+        ImageFormat::Jpeg => Ok(ImwriteFormat::Jpeg),
+        ImageFormat::Bmp => Ok(ImwriteFormat::Bmp),
+        ImageFormat::Gif => Ok(ImwriteFormat::Gif),
+        ImageFormat::Tiff => Ok(ImwriteFormat::Tiff),
+        _ => Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_FORMAT,
+            "unsupported image format",
+        )),
+    }
+}
+
 pub(super) fn validate(facts: &EncoderFacts) -> BuiltinResult<()> {
-    if facts.channels == 4 && !facts.alpha_applied && facts.format != ImageFormat::Png {
-        let detail = if facts.format == ImageFormat::Tiff {
-            "CMYK TIFF encoding is not supported by this RunMat encoder"
-        } else {
-            "direct four-channel input is supported for PNG only"
-        };
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            detail,
-        ));
+    ImwriteEncoderFacts {
+        format: typed_format(facts.format)?,
+        channels: facts.channels,
+        sixteen_bit: facts.sixteen_bit,
+        indexed_source: facts.indexed_source,
+        alpha_applied: facts.alpha_applied,
+        append: facts.append,
     }
-    if facts.append && facts.format != ImageFormat::Gif {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_OPTION,
-            "WriteMode 'append' is supported for GIF files only",
-        ));
-    }
-    match facts.format {
-        ImageFormat::Gif => {
-            if (facts.channels == 3 && !facts.indexed_source) || facts.sixteen_bit {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_IMAGE,
-                    "GIF direct input must be grayscale/indexed 8-bit data",
-                ));
-            }
+    .validate()
+    .map_err(|failure| match failure {
+        ImwriteAdmissionFailure::InvalidImage(detail) => {
+            imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, detail)
         }
-        ImageFormat::Jpeg => {
-            if facts.channels == 4 {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_OPTION,
-                    "JPEG does not support alpha channels",
-                ));
-            }
-            if facts.sixteen_bit {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_IMAGE,
-                    "16-bit JPEG encoding is not supported by this RunMat encoder",
-                ));
-            }
+        ImwriteAdmissionFailure::InvalidOption(detail) => {
+            imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_OPTION, detail)
         }
-        ImageFormat::Bmp => {
-            if facts.channels == 4 {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_OPTION,
-                    "BMP alpha output is not supported",
-                ));
-            }
-            if facts.sixteen_bit {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_IMAGE,
-                    "BMP does not support this 16-bit image input",
-                ));
-            }
-        }
-        ImageFormat::Tiff if facts.channels == 4 => {
-            return Err(imwrite_error_with_detail(
-                &IMWRITE_ERROR_INVALID_IMAGE,
-                "CMYK TIFF encoding is not supported by this RunMat encoder",
-            ));
-        }
-        ImageFormat::Png | ImageFormat::Tiff => {}
-        _ => {
-            return Err(imwrite_error_with_detail(
-                &IMWRITE_ERROR_INVALID_FORMAT,
-                "unsupported image format",
-            ));
-        }
-    }
-    Ok(())
+    })
 }

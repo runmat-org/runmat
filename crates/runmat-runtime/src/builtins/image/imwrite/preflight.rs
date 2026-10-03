@@ -50,7 +50,8 @@ pub(super) fn preflight_option_text(
         }
         if option == Some(ImwriteOption::WriteMode)
             && crate::builtins::image::checked_text::scalar_text(&args[index + 1])
-                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("append"))
+                .and_then(|mode| WriteMode::from_name(&mode))
+                == Some(WriteMode::Append)
         {
             append = true;
         }
