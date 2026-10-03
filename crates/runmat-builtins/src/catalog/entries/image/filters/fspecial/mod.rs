@@ -1,10 +1,12 @@
 mod descriptor;
 mod documentation;
 mod inference;
+mod kind;
 #[cfg(test)]
 mod tests;
 
 pub use descriptor::*;
+pub use kind::FspecialFilterKind;
 
 use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};

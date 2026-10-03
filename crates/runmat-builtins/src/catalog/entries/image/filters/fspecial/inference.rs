@@ -1,3 +1,4 @@
+use super::FspecialFilterKind as Kind;
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, CertaintyFact, DynamicReason,
@@ -38,13 +39,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             0,
         ));
     }
-    let kind = request.literals.literal_string_at(0);
-    if let Some(kind) = kind.as_deref() {
+    let spelling = request.literals.literal_string_at(0);
+    let kind = spelling.as_deref().and_then(Kind::from_name);
+    if spelling.is_some() {
         let maximum = match kind {
-            "prewitt" | "sobel" => Some(1),
-            "gaussian" | "log" | "motion" => Some(3),
-            "average" | "disk" | "laplacian" | "unsharp" => Some(2),
-            _ => {
+            Some(kind) => Some(kind.maximum_arguments()),
+            None => {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FSPECIAL-KIND",
                     "unsupported fspecial filter type",
@@ -82,8 +82,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         if request.literals.integer_is_exact_binary64_at(index) == Some(false)
             && !(index == 1
                 && matches!(
-                    kind.as_deref(),
-                    Some("average" | "gaussian" | "log" | "motion")
+                    kind,
+                    Some(Kind::Average | Kind::Gaussian | Kind::Log | Kind::Motion)
                 ))
         {
             diagnostics.push(argument_error(
@@ -93,7 +93,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    let dims = shape_for(kind.as_deref(), request);
+    let dims = shape_for(kind, request);
     // The ambient resident-output extension can publish single or double;
     // the call request does not prove that environment/provider decision.
     let mut output = ValueFact::unknown(DynamicReason::RuntimeValue);
@@ -137,25 +137,25 @@ fn scalar_structural(request: &CallRequest, index: usize) -> Option<usize> {
     }
 }
 
-fn shape_for(kind: Option<&str>, request: &CallRequest) -> Option<[Option<usize>; 2]> {
+fn shape_for(kind: Option<Kind>, request: &CallRequest) -> Option<[Option<usize>; 2]> {
     let fixed = |n| Some([Some(n), Some(n)]);
     match kind? {
-        "average" | "gaussian" => {
+        Kind::Average | Kind::Gaussian => {
             if request.arguments.len() == 1 {
                 fixed(3)
             } else {
                 size_control(request)
             }
         }
-        "log" => {
+        Kind::Log => {
             if request.arguments.len() == 1 {
                 fixed(5)
             } else {
                 size_control(request)
             }
         }
-        "laplacian" | "prewitt" | "sobel" | "unsharp" => fixed(3),
-        "disk" => {
+        Kind::Laplacian | Kind::Prewitt | Kind::Sobel | Kind::Unsharp => fixed(3),
+        Kind::Disk => {
             let radius = if request.arguments.len() == 1 {
                 Some(5.0)
             } else {
@@ -164,7 +164,7 @@ fn shape_for(kind: Option<&str>, request: &CallRequest) -> Option<[Option<usize>
             let size = dimension(radius.ceil())?.checked_mul(2)?.checked_add(1)?;
             fixed(size)
         }
-        "motion" => {
+        Kind::Motion => {
             let length = if request.arguments.len() == 1 {
                 Some(9.0)
             } else {
@@ -188,6 +188,5 @@ fn shape_for(kind: Option<&str>, request: &CallRequest) -> Option<[Option<usize>
             };
             fixed(size)
         }
-        _ => None,
     }
 }

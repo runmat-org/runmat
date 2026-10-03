@@ -8,8 +8,8 @@ use runmat_accelerate_api::{self, FspecialFilter, FspecialRequest};
 #[cfg(test)]
 use runmat_builtins::FSPECIAL_INTEGER_CAPABILITIES;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FSPECIAL_DESCRIPTOR, FSPECIAL_ERROR_INTERNAL,
-    FSPECIAL_ERROR_INVALID_ARGUMENT, FSPECIAL_ERROR_INVALID_INPUT,
+    BuiltinErrorDescriptor, FspecialFilterKind as FilterKind, FSPECIAL_DESCRIPTOR,
+    FSPECIAL_ERROR_INTERNAL, FSPECIAL_ERROR_INVALID_ARGUMENT, FSPECIAL_ERROR_INVALID_INPUT,
     FSPECIAL_NONDOUBLE_PARAMETER_EXTENSION, FSPECIAL_NONDOUBLE_SIZE_EXTENSION,
     FSPECIAL_RESIDENT_OUTPUT_EXTENSION, FSPECIAL_UNSHARP_EXTENSION,
 };
@@ -73,19 +73,6 @@ fn fspecial_argument_error(detail: impl AsRef<str>) -> RuntimeError {
 
 fn fspecial_error(detail: impl AsRef<str>) -> RuntimeError {
     fspecial_descriptor_error(&FSPECIAL_ERROR_INVALID_INPUT, detail)
-}
-
-#[derive(Clone, Copy, Debug)]
-enum FilterKind {
-    Average,
-    Disk,
-    Gaussian,
-    Laplacian,
-    Log,
-    Motion,
-    Prewitt,
-    Sobel,
-    Unsharp,
 }
 
 /// Shared specification of an `fspecial` kernel used by both the runtime and acceleration providers.
@@ -445,20 +432,9 @@ fn parse_filter_kind(value: &Value) -> BuiltinResult<FilterKind> {
     let text = value_to_string(value)
         .ok_or_else(|| fspecial_argument_error("first argument must be a string filter name"))?;
     let lower = text.to_ascii_lowercase();
-    match lower.as_str() {
-        "average" => Ok(FilterKind::Average),
-        "disk" => Ok(FilterKind::Disk),
-        "gaussian" => Ok(FilterKind::Gaussian),
-        "laplacian" => Ok(FilterKind::Laplacian),
-        "log" => Ok(FilterKind::Log),
-        "motion" => Ok(FilterKind::Motion),
-        "prewitt" => Ok(FilterKind::Prewitt),
-        "sobel" => Ok(FilterKind::Sobel),
-        "unsharp" => Ok(FilterKind::Unsharp),
-        other => Err(fspecial_argument_error(format!(
-            "fspecial: filter type '{other}' is not supported"
-        ))),
-    }
+    FilterKind::from_name(&text).ok_or_else(|| {
+        fspecial_argument_error(format!("fspecial: filter type '{lower}' is not supported"))
+    })
 }
 
 fn ensure_arg_count(name: &str, args: &[Value], min: usize, max: usize) -> BuiltinResult<()> {

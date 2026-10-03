@@ -66,18 +66,24 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq { question: "Can fspecial publish a gpuArray?", answer: "The separately gated RUNMAT_ACCEL_FSPECIAL_DEVICE=1 mode can publish supported kernels through an active provider. Unsupported filters or providers return the host kernel; operational provider errors do not silently fall back." },
         BuiltinDocumentationFaq { question: "How do I specify a size?", answer: "Average, Gaussian, and LoG accept a scalar side length or [rows cols]. Other filters use their documented radius, length, or alpha parameter." },
+        BuiltinDocumentationFaq { question: "Which kernels are available?", answer: "Average, disk, Gaussian, Laplacian, LoG, motion, Prewitt, Sobel, and the RunMat-gated unsharp extension are implemented." },
+        BuiltinDocumentationFaq { question: "Are the kernels normalized?", answer: "Average, disk, Gaussian, and motion kernels sum to one. LoG and derivative kernels instead have their defined zero-sum or sharpening scaling." },
+        BuiltinDocumentationFaq { question: "What if a parameter is invalid?", answer: "Invalid names, dimensions, types, and parameter ranges raise a stable fspecial invalid-argument or invalid-input error before publication." },
+        BuiltinDocumentationFaq { question: "Are results exactly the same as MATLAB?", answer: "The documented forms and defaults follow MATLAB-compatible behavior, but floating-point results may vary with implementation and provider precision; this reference does not claim bitwise or release-specific identity." },
     ],
     links: &[
         BuiltinDocumentationLink { label: "imfilter", target: BuiltinDocumentationLinkTarget::Builtin("imfilter") },
         BuiltinDocumentationLink { label: "filter2", target: BuiltinDocumentationLinkTarget::Builtin("filter2") },
         BuiltinDocumentationLink { label: "conv2", target: BuiltinDocumentationLinkTarget::Builtin("conv2") },
+        BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
+        BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
         BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/fspecial.rs") },
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Kernel generation and provider publication", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/fspecial.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Kernel shapes, values, class controls and provider errors", location: "crates/runmat-runtime/src/builtins/image/filters/fspecial.rs" }],
-        notes: &["Native, WASM, and actual-provider execution remain post-composition gates."],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

@@ -7,12 +7,10 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, ImfilterMode, ImfilterOptions, ImfilterShape};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, Filter2Option, FILTER2_DESCRIPTOR, FILTER2_ERROR_INTERNAL,
+    FILTER2_ERROR_INVALID_INPUT, FILTER2_ERROR_INVALID_OPTION, FILTER2_INTEGER_GPU_EXTENSION,
+    FILTER2_LOGICAL_GPU_EXTENSION, FILTER2_MODE_EXTENSION, FILTER2_ND_EXTENSION,
+    FILTER2_VARIADIC_OPTIONS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
@@ -23,7 +21,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::image::filters::type_resolvers::filter2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::filter2")]
@@ -54,174 +51,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const FILTER2_BUILTIN: &str = "filter2";
-
-const FILTER2_MODE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "filter2-convolution-mode",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "filter2 'conv' and 'corr' mode flags are RunMat extensions",
-    error_identifier: Some("RunMat:compatibility:Filter2ModeExtension"),
-};
-
-const FILTER2_ND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "filter2-nd-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "filter2 inputs with more than two dimensions are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Filter2NdExtension"),
-};
-
-const FILTER2_VARIADIC_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "filter2-variadic-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "filter2 with more than one trailing option is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Filter2VariadicOptionsExtension"),
-};
-
-const FILTER2_INTEGER_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "filter2-integer-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "filter2 with integer gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Filter2IntegerGpuExtension"),
-};
-
-const FILTER2_LOGICAL_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "filter2-logical-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "filter2 with logical gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Filter2LogicalGpuExtension"),
-};
-
-const FILTER2_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    FILTER2_MODE_EXTENSION,
-    FILTER2_ND_EXTENSION,
-    FILTER2_VARIADIC_OPTIONS_EXTENSION,
-    FILTER2_INTEGER_GPU_EXTENSION,
-    FILTER2_LOGICAL_GPU_EXTENSION,
-];
-
-const FILTER2_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "H",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are documented for the coefficient matrix.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are documented for the input matrix.",
-    },
-];
-
-const FILTER2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = filter2(integer_H, integer_X, shape)",
-        inputs: &FILTER2_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host integer matrices enter the documented double computation domain; MATLAB GPU inputs are restricted to single and double.",
-    }];
-
-const FILTER2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Filtered output image/array.",
-}];
-
-const FILTER2_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "h",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Filter kernel.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input image/array.",
-    },
-];
-
-const FILTER2_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "h",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Filter kernel.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input image/array.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional filter2 flags: 'same'|'full'|'valid'|'conv'|'corr'.",
-    },
-];
-
-const FILTER2_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = filter2(h, X)",
-        inputs: &FILTER2_INPUTS_CORE,
-        outputs: &FILTER2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = filter2(h, X, options...)",
-        inputs: &FILTER2_INPUTS_WITH_OPTIONS,
-        outputs: &FILTER2_OUTPUT,
-    },
-];
-
-const FILTER2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTER2.INVALID_INPUT",
-    identifier: Some("RunMat:filter2:InvalidInput"),
-    when: "Input/kernel tensors are invalid or cannot be converted.",
-    message: "filter2: invalid input",
-};
-
-const FILTER2_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTER2.INVALID_OPTION",
-    identifier: Some("RunMat:filter2:InvalidOption"),
-    when: "One or more option flags are invalid.",
-    message: "filter2: invalid option",
-};
-
-const FILTER2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILTER2.INTERNAL",
-    identifier: Some("RunMat:filter2:Internal"),
-    when: "Internal filtering operation fails.",
-    message: "filter2: internal operation failed",
-};
-
-const FILTER2_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    FILTER2_ERROR_INVALID_INPUT,
-    FILTER2_ERROR_INVALID_OPTION,
-    FILTER2_ERROR_INTERNAL,
-];
-
-pub const FILTER2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FILTER2_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FILTER2_ERRORS,
-};
 
 fn filter2_descriptor_error(
     error: &'static BuiltinErrorDescriptor,
@@ -257,14 +86,7 @@ fn filter2_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 
 #[runtime_builtin(
     name = "filter2",
-    category = "image/filters",
-    summary = "Apply 2-D correlation/convolution filters.",
-    keywords = "filter2,correlation,convolution,image filtering,gpu",
-    accel = "custom-imfilter",
-    type_resolver(filter2_type),
-    descriptor(crate::builtins::image::filters::filter2::FILTER2_DESCRIPTOR),
-    extensions(FILTER2_EXTENSIONS),
-    integer_capabilities(FILTER2_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::image::filters::filter2"
 )]
 async fn filter2_builtin(
@@ -276,6 +98,7 @@ async fn filter2_builtin(
     // Invalid controls must fail before a resident integer/logical operand is
     // gathered, or a floating kernel is uploaded to the image owner.
     let options = parse_filter2_options(&rest)?;
+    preflight_filter2_geometry(&kernel, &image, options.shape)?;
     let output_single = value_is_single(&kernel) || value_is_single(&image);
     let image_precision_mismatch = matches!(&image, Value::GpuTensor(handle)
     if output_single
@@ -311,6 +134,30 @@ fn value_rank(value: &Value) -> Option<usize> {
         Value::GpuTensor(handle) => Some(handle.shape().len()),
         _ => None,
     }
+}
+
+fn filter2_value_shape(value: &Value) -> Option<Vec<usize>> {
+    match value {
+        Value::Tensor(value) => Some(value.shape.clone()),
+        Value::LogicalArray(value) => Some(value.shape.clone()),
+        Value::GpuTensor(value) => Some(value.shape().to_vec()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(vec![1, 1]),
+        _ => None,
+    }
+}
+
+fn preflight_filter2_geometry(
+    kernel: &Value,
+    image: &Value,
+    shape: ImfilterShape,
+) -> BuiltinResult<()> {
+    if let (Some(kernel_shape), Some(image_shape)) =
+        (filter2_value_shape(kernel), filter2_value_shape(image))
+    {
+        filter_output_shape(&image_shape, &kernel_shape, shape, FILTER2_BUILTIN)
+            .map_err(|error| filter2_map_error(error.into(), &FILTER2_ERROR_INVALID_INPUT))?;
+    }
+    Ok(())
 }
 
 fn is_nonfloating_gpu(value: &Value) -> bool {
@@ -616,19 +463,18 @@ fn parse_filter2_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
                 "expected string option ('same', 'full', 'valid', 'conv', 'corr')",
             ));
         };
-        let lowered = text.trim().to_ascii_lowercase();
-        match lowered.as_str() {
-            "same" => options.shape = ImfilterShape::Same,
-            "full" => options.shape = ImfilterShape::Full,
-            "valid" => options.shape = ImfilterShape::Valid,
-            "conv" => options.mode = ImfilterMode::Convolution,
-            "corr" => options.mode = ImfilterMode::Correlation,
-            other => {
+        match Filter2Option::from_name(&text) {
+            Some(Filter2Option::Same) => options.shape = ImfilterShape::Same,
+            Some(Filter2Option::Full) => options.shape = ImfilterShape::Full,
+            Some(Filter2Option::Valid) => options.shape = ImfilterShape::Valid,
+            Some(Filter2Option::Convolution) => options.mode = ImfilterMode::Convolution,
+            Some(Filter2Option::Correlation) => options.mode = ImfilterMode::Correlation,
+            None => {
                 return Err(filter2_error_with_detail(
                     &FILTER2_ERROR_INVALID_OPTION,
                     format!(
                         "unknown option '{}' (supported: 'same', 'full', 'valid', 'conv', 'corr')",
-                        other
+                        text.trim().to_ascii_lowercase()
                     ),
                 ))
             }
@@ -979,6 +825,58 @@ pub(crate) mod tests {
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
         assert!(image.allocation_lease().validate_live().is_ok());
+    }
+
+    #[test]
+    fn invalid_kernel_geometry_rejects_before_resident_transfer() {
+        use runmat_accelerate_api::AccelProvider;
+        let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let image = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[2, 2],
+            })
+            .expect("resident image");
+        let empty_kernel = Tensor::new(Vec::new(), vec![0, 2]).expect("empty kernel");
+        provider.reset_telemetry();
+        let error = block_on(filter2_builtin(
+            Value::Tensor(empty_kernel),
+            Value::GpuTensor(image.clone()),
+            Vec::new(),
+        ))
+        .expect_err("empty kernel rejected");
+        assert_eq!(error.identifier(), FILTER2_ERROR_INVALID_INPUT.identifier);
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.download_bytes, 0);
+        assert_eq!(telemetry.upload_bytes, 0);
+        assert!(image.allocation_lease().validate_live().is_ok());
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let incompatible_kernel = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 1, 2],
+            })
+            .expect("resident higher-rank kernel");
+        provider.reset_telemetry();
+        let error = block_on(filter2_builtin(
+            Value::GpuTensor(incompatible_kernel.clone()),
+            Value::GpuTensor(image.clone()),
+            Vec::new(),
+        ))
+        .expect_err("kernel axis without image axis rejected");
+        assert_eq!(error.identifier(), FILTER2_ERROR_INVALID_INPUT.identifier);
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.download_bytes, 0);
+        assert_eq!(telemetry.upload_bytes, 0);
+        assert!(image.allocation_lease().validate_live().is_ok());
+        assert!(incompatible_kernel
+            .allocation_lease()
+            .validate_live()
+            .is_ok());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
