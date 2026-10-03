@@ -14,6 +14,8 @@ fn audioread_descriptor_covers_core_forms() {
             "y = audioread(filename)",
             "[y, Fs] = audioread(filename)",
             "y = audioread(filename, samples)",
+            "[y, Fs] = audioread(filename, samples)",
+            "y = audioread(filename, datatype)",
             "[y, Fs] = audioread(filename, samples, datatype)",
         ]
     );

@@ -100,6 +100,22 @@ pub(super) const AUDIOREAD_INPUTS_RANGE: [BuiltinParamDescriptor; 2] = [
         description: "One-based inclusive frame range [first last].",
     },
 ];
+pub(super) const AUDIOREAD_INPUTS_DATATYPE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Audio file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "datatype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class: double or native.",
+    },
+];
 pub(super) const AUDIOREAD_INPUTS_RANGE_NATIVE: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "filename",
@@ -123,7 +139,7 @@ pub(super) const AUDIOREAD_INPUTS_RANGE_NATIVE: [BuiltinParamDescriptor; 3] = [
         description: "Output class; \"native\" preserves representable source classes.",
     },
 ];
-pub(super) const AUDIOREAD_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+pub(super) const AUDIOREAD_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "y = audioread(filename)",
         inputs: &AUDIOREAD_INPUTS_FILENAME,
@@ -137,6 +153,16 @@ pub(super) const AUDIOREAD_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "y = audioread(filename, samples)",
         inputs: &AUDIOREAD_INPUTS_RANGE,
+        outputs: &AUDIOREAD_OUTPUTS_SAMPLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, Fs] = audioread(filename, samples)",
+        inputs: &AUDIOREAD_INPUTS_RANGE,
+        outputs: &AUDIOREAD_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = audioread(filename, datatype)",
+        inputs: &AUDIOREAD_INPUTS_DATATYPE,
         outputs: &AUDIOREAD_OUTPUTS_SAMPLES,
     },
     BuiltinSignatureDescriptor {

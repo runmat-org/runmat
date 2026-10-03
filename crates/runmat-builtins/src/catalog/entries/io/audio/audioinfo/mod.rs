@@ -6,6 +6,12 @@ mod inference;
 #[cfg(test)]
 mod tests;
 
+const AUDIOINFO_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "The only input is a host text filename; metadata fields are double scalars or strings, not integer overloads.",
+};
+
 pub const AUDIOINFO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "audioinfo" },
@@ -48,6 +54,6 @@ pub const AUDIOINFO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &[],
-    integer_audit: None,
+    integer_audit: Some(&AUDIOINFO_INTEGER_AUDIT),
     suppress_auto_output: false,
 };
