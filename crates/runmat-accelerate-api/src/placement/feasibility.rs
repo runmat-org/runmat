@@ -173,10 +173,14 @@ impl ProviderFeasibility {
 }
 
 impl ProviderFeasibilityQuery {
-    /// Canonical exact native readback roles. A provider may support a lazy
-    /// source, but it may not reinterpret class, storage, shape, count, or
-    /// host-output layout to turn another transfer query into that route.
-    pub fn matches_numeric_download(&self, source: &GpuTensorHandle) -> bool {
+    /// Construct the exact native real-numeric readback roles for one live
+    /// source. Lazy views retain their strided input representation; the host
+    /// payload is contiguous in logical shape. Complex/unsupported physical
+    /// storage has no silently fabricated real transfer query.
+    pub fn exact_numeric_download(source: &GpuTensorHandle) -> Option<Self> {
+        if source.physical().storage() != GpuTensorStorage::Real {
+            return None;
+        }
         let element_type = match source.physical().element_type() {
             NumericElementType::F32 => ProviderElementType::F32,
             NumericElementType::F64 => ProviderElementType::F64,
@@ -189,14 +193,11 @@ impl ProviderFeasibilityQuery {
             NumericElementType::U32 => ProviderElementType::U32,
             NumericElementType::U64 => ProviderElementType::U64,
         };
-        let Some(shape) = source
+        let shape = source
             .shape()
             .iter()
             .map(|&extent| u64::try_from(extent).ok())
-            .collect::<Option<Vec<_>>>()
-        else {
-            return false;
-        };
+            .collect::<Option<Vec<_>>>()?;
         let input = ProviderRepresentation {
             element_type,
             storage: ProviderStorage::DenseReal,
@@ -215,16 +216,23 @@ impl ProviderFeasibilityQuery {
             shape,
             residency: ProviderResidency::Host,
         };
-        source.physical().storage() == GpuTensorStorage::Real
-            && self.operation.0 == "transfer.download"
-            && self.family == ProviderOperationFamily::Download
-            && self.inputs.as_slice() == [input]
-            && self.outputs.as_slice() == [output]
-            && self.workload
-                == ProviderWorkload {
-                    requested_outputs: Some(1),
-                    ..ProviderWorkload::default()
-                }
+        Some(Self {
+            operation: ProviderOperationIdentity::new("transfer.download"),
+            family: ProviderOperationFamily::Download,
+            inputs: vec![input],
+            outputs: vec![output],
+            workload: ProviderWorkload {
+                requested_outputs: Some(1),
+                ..ProviderWorkload::default()
+            },
+        })
+    }
+
+    /// Canonical exact native readback roles. A provider may support a lazy
+    /// source, but it may not reinterpret class, storage, shape, count, or
+    /// host-output layout to turn another transfer query into that route.
+    pub fn matches_numeric_download(&self, source: &GpuTensorHandle) -> bool {
+        Self::exact_numeric_download(source).as_ref() == Some(self)
     }
 
     pub(crate) fn conservative_transfer_feasibility(

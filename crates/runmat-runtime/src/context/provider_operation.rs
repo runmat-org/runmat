@@ -2,19 +2,35 @@
 //! service. Domain owners supply the typed query and physical host workspace;
 //! this boundary owns policy selection, the provider fence, and feedback.
 
-use super::{host_presentation::HostPresentationReceipt, RuntimeContext};
+use super::{
+    host_presentation::{combine_host_scratch, HostPresentationReceipt},
+    RuntimeContext,
+};
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::observation::{
     ProviderObservationCapability, ProviderObservationSupport, ProviderOperationRecorder,
 };
-use runmat_accelerate_api::{AccelProvider, ProviderFeasibility, ProviderFeasibilityQuery};
+use runmat_accelerate_api::{
+    provider_for_handle, AccelProvider, GpuTensorHandle, ProviderFeasibility,
+    ProviderFeasibilityQuery,
+};
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
     CandidateOutputPresentation, CandidateOutputResidency, CandidatePeakLiveDemand,
     CandidatePreparationState, CandidateResourceDemand, Digest, ExecutionCandidateKind,
-    PlacementResourceSnapshot, PlacementSignature, ResourceBoundUnavailable, ResourceByteBound,
-    WholeWorkCandidate, WholeWorkConstraint, WholeWorkPlacementRequest,
+    PlacementResourceSnapshot, PlacementSignature, ProviderInputStageDemand,
+    ProviderInputStageDemands, ResourceBoundUnavailable, ResourceByteBound, WholeWorkCandidate,
+    WholeWorkConstraint, WholeWorkPlacementRequest,
 };
+
+/// An original resident operand whose native readback occurs during this
+/// provider-first route. `prior_created_bytes` is operation-created provider
+/// storage still live during this stage, excluding authenticated borrowed
+/// allocations already in that owner's resource snapshot.
+pub(crate) struct ExactProviderReadback<'a> {
+    pub(crate) source: &'a GpuTensorHandle,
+    pub(crate) prior_created_bytes: ResourceByteBound,
+}
 
 pub(crate) struct ExactProviderOperation<'a> {
     pub(crate) provider: &'static dyn AccelProvider,
@@ -30,6 +46,11 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// Physical bytes of authenticated borrowed inputs already represented
     /// in the provider's live-allocation resource snapshot.
     pub(crate) already_live_bytes: u64,
+    pub(crate) readbacks: &'a [ExactProviderReadback<'a>],
+    /// Provider-owned internal stages not represented by original readbacks
+    /// (for example a second readback of an adapted, newly uploaded kernel).
+    /// The typed provider operation contract must prove these stage peaks.
+    pub(crate) internal_input_stages: Option<ProviderInputStageDemands>,
     /// The public form permits a host result only after this provider hook
     /// returns Unsupported. This is one conditional route, not an equivalent
     /// host alternative offered to placement policy.
@@ -82,8 +103,133 @@ pub(crate) fn select_exact_provider_operation(
     else {
         return Ok(None);
     };
+    let parallel = runtime
+        .service_ports()
+        .parallel()
+        .map(|port| port.placement_resources())
+        .unwrap_or_default();
+    let mut provider_resources = vec![provider.placement_resources()];
+    let mut source_capabilities = Vec::with_capacity(request.readbacks.len());
+    let mut readback_facts = Vec::with_capacity(request.readbacks.len());
+    let mut input_stages = Vec::new();
+    let mut host_scratch = request.host_scratch;
+    for readback in request.readbacks {
+        let source = readback.source;
+        let Some(source_provider) = provider_for_handle(source) else {
+            return Err(
+                build_runtime_error("provider input readback has no exact owner")
+                    .with_identifier("RunMat:Placement:InvalidReadbackOwner")
+                    .build(),
+            );
+        };
+        source.allocation_lease().validate_live().map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                build_runtime_error("provider input readback allocation is unavailable")
+                    .with_identifier("RunMat:Placement:InvalidReadbackOwner")
+                    .build(),
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?;
+        if source.device_id() != source_provider.device_id() {
+            return Err(
+                build_runtime_error("provider input readback owner device is invalid")
+                    .with_identifier("RunMat:Placement:InvalidReadbackOwner")
+                    .build(),
+            );
+        }
+        let source_resource = source_provider.placement_resources();
+        let Some(download) = ProviderFeasibilityQuery::exact_numeric_download(source) else {
+            if parallel.memory_available_bytes.is_some()
+                || source_resource.capacity_bytes.is_some()
+                || source_resource.scratch_available_bytes.is_some()
+            {
+                return Err(build_runtime_error(
+                    "provider input has no exact native readback under a finite resource budget",
+                )
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .build());
+            }
+            return Ok(None);
+        };
+        if !source_provider
+            .query_numeric_download_feasibility(source, &download)
+            .is_supported()
+        {
+            if parallel.memory_available_bytes.is_some()
+                || source_resource.capacity_bytes.is_some()
+                || source_resource.scratch_available_bytes.is_some()
+            {
+                return Err(build_runtime_error(
+                    "provider input readback has no proven route under a finite resource budget",
+                )
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .build());
+            }
+            return Ok(None);
+        }
+        host_scratch = combine_host_scratch(
+            host_scratch,
+            source_provider.download_numeric_host_workspace_bound(source),
+        )?;
+        let stage_peak = sum_resource_bounds(
+            readback.prior_created_bytes,
+            source_provider.download_numeric_provider_scratch_bound(source),
+        )?;
+        input_stages.push(ProviderInputStageDemand {
+            device_id: source_provider.device_id(),
+            incremental_peak_bytes: stage_peak,
+            queue_slots: source_provider.download_numeric_queue_slots(source),
+        });
+        source_capabilities.push((
+            source_provider.device_id(),
+            source_provider.capability_snapshot(),
+        ));
+        readback_facts.push((
+            download,
+            readback.prior_created_bytes,
+            source.view().layout(),
+            runmat_accelerate_api::handle_provenance(source),
+        ));
+        if !provider_resources
+            .iter()
+            .any(|resource| resource.device_id == source_resource.device_id)
+        {
+            provider_resources.push(source_resource);
+        }
+    }
+    if let Some(internal) = request.internal_input_stages {
+        if !internal.is_canonical() {
+            return Err(
+                build_runtime_error("provider input stage set is not canonical")
+                    .with_identifier("RunMat:Placement:InvalidInputStages")
+                    .build(),
+            );
+        }
+        if internal
+            .iter()
+            .any(|stage| stage.device_id != provider.device_id())
+        {
+            return Err(
+                build_runtime_error("provider internal stage has a foreign owner")
+                    .with_identifier("RunMat:Placement:InvalidInputStages")
+                    .build(),
+            );
+        }
+        input_stages.extend(internal.iter());
+    }
+    let input_stages = if input_stages.is_empty() {
+        None
+    } else {
+        Some(
+            ProviderInputStageDemands::sequential(input_stages).ok_or_else(|| {
+                build_runtime_error("provider input stages exceed the resource set")
+                    .with_identifier("RunMat:Placement:TooManyProviders")
+                    .build()
+            })?,
+        )
+    };
     let provider_digest = Digest::sha256(
-        serde_json::to_vec(&provider.capability_snapshot())
+        serde_json::to_vec(&(provider.capability_snapshot(), &source_capabilities))
             .expect("capability snapshot serializes"),
     );
     let Some(revision) =
@@ -99,6 +245,9 @@ pub(crate) fn select_exact_provider_operation(
                 request.variant,
                 request.domain_facts,
                 query,
+                &readback_facts,
+                input_stages,
+                host_scratch,
                 provider.device_id(),
             ))
             .expect("typed provider operation serializes"),
@@ -132,8 +281,13 @@ pub(crate) fn select_exact_provider_operation(
         },
         presentation: CandidateOutputPresentation::Direct,
         route_facts: Digest::sha256(
-            serde_json::to_vec(&(query, &estimate, request.conditional_host_fallback))
-                .expect("provider route serializes"),
+            serde_json::to_vec(&(
+                query,
+                &estimate,
+                request.conditional_host_fallback,
+                input_stages,
+            ))
+            .expect("provider route serializes"),
         ),
         cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
         resources: CandidateResourceDemand {
@@ -145,8 +299,8 @@ pub(crate) fn select_exact_provider_operation(
                     ResourceBoundUnavailable::NoRetainedValueBound,
                 )),
             scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
-            provider_host_workspace: Some(request.host_scratch),
-            provider_input_stages: None,
+            provider_host_workspace: Some(host_scratch),
+            provider_input_stages: input_stages,
             queue_slots: estimate.dispatches.unwrap_or(1),
             peak_live,
         },
@@ -155,21 +309,16 @@ pub(crate) fn select_exact_provider_operation(
             .concurrency
             .transactional_results,
     };
-    let parallel = runtime
-        .service_ports()
-        .parallel()
-        .map(|port| port.placement_resources())
-        .unwrap_or_default();
-    let provider_resource = provider.placement_resources();
+    provider_resources.sort_by_key(|resource| resource.device_id);
     let digest = Digest::sha256(
-        serde_json::to_vec(&(parallel.epoch, &provider_resource))
+        serde_json::to_vec(&(parallel.epoch, &provider_resources))
             .expect("resource snapshot serializes"),
     );
     let resources = PlacementResourceSnapshot {
         cpu_millicores_available: parallel.cpu_millicores_available,
         memory_available_bytes: parallel.memory_available_bytes,
         cancellation_requested: runtime.is_cancelled(),
-        providers: vec![provider_resource],
+        providers: provider_resources,
         epoch: u64::from_le_bytes(digest.bytes()[..8].try_into().expect("digest length")),
     };
     let selected = service.select_whole_work(WholeWorkPlacementRequest {
@@ -204,4 +353,46 @@ pub(crate) fn select_exact_provider_operation(
         provider,
         receipt: HostPresentationReceipt::new(runtime.clone(), selected, receipt),
     }))
+}
+
+fn sum_resource_bounds(
+    left: ResourceByteBound,
+    right: ResourceByteBound,
+) -> BuiltinResult<ResourceByteBound> {
+    match (left, right) {
+        (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => left
+            .checked_add(right)
+            .map(ResourceByteBound::Known)
+            .ok_or_else(|| {
+                build_runtime_error("provider input stage byte bound overflows")
+                    .with_identifier("RunMat:Placement:ResourceOverflow")
+                    .build()
+            }),
+        (ResourceByteBound::Unavailable(reason), _)
+        | (_, ResourceByteBound::Unavailable(reason)) => Ok(ResourceByteBound::Unavailable(reason)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_input_stage_overflow_is_a_resource_error_not_a_missing_selection() {
+        let error = sum_resource_bounds(
+            ResourceByteBound::Known(u64::MAX),
+            ResourceByteBound::Known(1),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:ResourceOverflow")
+        );
+    }
+
+    #[test]
+    fn provider_input_stage_unknown_never_becomes_zero() {
+        let unknown = ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound);
+        assert_eq!(sum_resource_bounds(16.into(), unknown).unwrap(), unknown);
+    }
 }

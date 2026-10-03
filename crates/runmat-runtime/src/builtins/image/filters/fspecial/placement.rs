@@ -70,6 +70,8 @@ pub(super) fn select(
             host_scratch,
             host_cpu_millicores: 1_000,
             already_live_bytes: 0,
+            readbacks: &[],
+            internal_input_stages: None,
             conditional_host_fallback: Some(host_scratch),
         },
     )

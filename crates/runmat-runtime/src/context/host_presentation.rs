@@ -18,6 +18,7 @@ use runmat_time::duration_ns_saturating;
 
 mod admission;
 mod host_sink;
+pub(crate) use admission::combine_host_scratch;
 pub(crate) use admission::{
     select_exact_host_upload, select_exact_host_upload_with_readbacks, ExactHostUpload,
 };
