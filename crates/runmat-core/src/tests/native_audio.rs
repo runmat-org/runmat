@@ -34,6 +34,10 @@ function engineResetCount()
   global audioEngineCount
   audioEngineCount = 0;
 end
+function count = engineGetCount()
+  global audioEngineCount
+  count = audioEngineCount;
+end
 function [count, y] = engineReadNoReplay(path)
   global audioEngineCount
   audioEngineCount = audioEngineCount + 1;
@@ -247,6 +251,35 @@ fn check_native_audio_suspension_has_no_effect_replay(
     assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
 }
 
+#[path = "native_audio/gated.rs"]
+mod gated;
+
+fn selected_jit_result(
+    session: &mut RunMatSession,
+    unit: &crate::ExecutableUnit,
+    procedure: &str,
+    path: &str,
+    outputs: usize,
+) -> runmat_value::ValueSequence {
+    // The counter changes only in invoke_tiered_procedure's Some(published)
+    // branch. Isolating one preferred function per invocation proves that the
+    // result being checked came from its selected native entry, not another
+    // function's compilation or a merely hot tier site.
+    for _ in 0..8 {
+        let selected_before = session.stats().jit_compiled;
+        let result = block_on(session.invoke_executable(
+            unit,
+            invocation(procedure, path, outputs),
+            &InvocationControl::default(),
+        ))
+        .expect("tiered audio invocation");
+        if session.stats().jit_compiled > selected_before {
+            return result;
+        }
+    }
+    panic!("{procedure} never executed a published native entry");
+}
+
 #[test]
 fn audioinfo_and_audioread_execute_across_interpreter_generic_native_and_jit() {
     let _lock = runmat_filesystem::provider_override_lock();
@@ -270,6 +303,18 @@ fn audioinfo_and_audioread_execute_across_interpreter_generic_native_and_jit() {
             &interpreter_unit,
             &InvocationControl::default(),
         );
+        let expected_pcm = block_on(interpreter.invoke_executable(
+            &interpreter_unit,
+            invocation("engineReadPcm", "/engine/pcm.wav", 1),
+            &InvocationControl::default(),
+        ))
+        .unwrap();
+        let expected_info = block_on(interpreter.invoke_executable(
+            &interpreter_unit,
+            invocation("engineInfo", "/engine/pcm.wav", 1),
+            &InvocationControl::default(),
+        ))
+        .unwrap();
 
         let mut native = RunMatSession::with_options(false, false).unwrap();
         let native_unit = block_on(native.compile_executable_unit(
@@ -297,13 +342,34 @@ fn audioinfo_and_audioread_execute_across_interpreter_generic_native_and_jit() {
             None,
         ))
         .unwrap();
-        for _ in 0..4 {
-            check_audio_forms(&mut jit, &jit_unit, &InvocationControl::default());
-        }
-        assert!(
-            jit.stats().jit_compiled > 0,
-            "audio call frame did not tier: {:?}",
-            jit.stats()
+        assert_eq!(
+            selected_jit_result(&mut jit, &jit_unit, "engineReadPcm", "/engine/pcm.wav", 1),
+            expected_pcm
+        );
+        let selected_float = selected_jit_result(
+            &mut jit,
+            &jit_unit,
+            "engineReadFloat",
+            "/engine/float.wav",
+            2,
+        );
+        let [Value::Tensor(samples), Value::Num(rate)] = selected_float.as_slice() else {
+            panic!("selected Float32 entry lost its two outputs");
+        };
+        assert_eq!(samples.shape, vec![3, 1]);
+        assert_eq!(*rate, 48_000.0);
+        assert_eq!(
+            samples
+                .as_f32_slice()
+                .unwrap()
+                .iter()
+                .map(|sample| sample.to_bits())
+                .collect::<Vec<_>>(),
+            vec![0x8000_0000, 0x3e80_0000, 0x7fc0_0042]
+        );
+        assert_eq!(
+            selected_jit_result(&mut jit, &jit_unit, "engineInfo", "/engine/pcm.wav", 1),
+            expected_info
         );
     });
 }
