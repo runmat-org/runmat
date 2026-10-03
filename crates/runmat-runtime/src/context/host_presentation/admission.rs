@@ -250,7 +250,7 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
 /// only a checked sum of proven bounds can pass a finite host-memory quota.
 /// Overflow is a placement error, never an unselected route that could run
 /// without admission.
-fn combine_host_scratch(
+pub(super) fn combine_host_scratch(
     operation_owned: ResourceByteBound,
     readback_host_workspace: ResourceByteBound,
 ) -> BuiltinResult<ResourceByteBound> {

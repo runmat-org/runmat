@@ -4191,6 +4191,15 @@ impl AccelProvider for InProcessProvider {
             ))
     }
 
+    fn download_numeric_provider_scratch_bound(
+        &self,
+        _handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        // The in-process registry clone becomes the returned host payload;
+        // there is no separate device or mapped staging allocation.
+        runmat_execution::ResourceByteBound::Known(0)
+    }
+
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         self.upload_numeric_raw(&HostNumericTensorView {
             data: HostNumericDataView::F64(host.data),

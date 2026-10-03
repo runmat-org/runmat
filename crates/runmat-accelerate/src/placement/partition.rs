@@ -434,11 +434,38 @@ fn candidate_resource_adjustment_ns(
                 .ok_or(ResourceAdmissionError::Overflow)?;
         }
     }
+    if let CandidateOutputPresentation::ProviderDownload {
+        device_id,
+        provider_scratch_bytes,
+        queue_slots,
+    } = presentation
+    {
+        let provider = resources
+            .provider(device_id)
+            .ok_or(ResourceAdmissionError::UnavailableProvider)?;
+        if provider.lost
+            || provider
+                .queue_depth
+                .zip(provider.queue_limit)
+                .is_some_and(|(depth, limit)| queue_slots > limit.saturating_sub(depth))
+        {
+            return Err(ResourceAdmissionError::OverBudget);
+        }
+        let scratch = ResourceAccount::default()
+            .add(provider_scratch_bytes)
+            .ok_or(ResourceAdmissionError::Overflow)?;
+        scratch.within(
+            provider.scratch_available_bytes,
+            ResourceBudgetKind::ProviderScratch(device_id),
+        )?;
+        provider_demands.insert(device_id, scratch);
+    }
     let host_published_bound = match presentation {
         CandidateOutputPresentation::ProviderUpload {
             host_result_bytes, ..
         } => host_result_bytes.unwrap_or(demand.retained_bytes),
-        CandidateOutputPresentation::Direct => demand.retained_bytes,
+        CandidateOutputPresentation::Direct
+        | CandidateOutputPresentation::ProviderDownload { .. } => demand.retained_bytes,
     };
     match output_residency {
         CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {

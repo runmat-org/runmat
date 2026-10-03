@@ -475,6 +475,46 @@ fn bounded_host_compute_and_upload_admit_under_finite_memory() {
 }
 
 #[test]
+fn host_sink_download_stage_obeys_provider_staging_and_host_payload_budgets() {
+    let session = PlacementSession::default();
+    let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderDownload {
+        device_id: 7,
+        provider_scratch_bytes: 8.into(),
+        queue_slots: 1,
+    };
+    let mut bounded = request(vec![host.clone()]);
+    bounded.resources.providers[0].scratch_available_bytes = Some(8);
+    bounded.resources.memory_available_bytes = Some(24);
+    assert!(session.select_whole_work(bounded.clone()).is_ok());
+    bounded.resources.providers[0].scratch_available_bytes = Some(7);
+    assert_eq!(
+        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    bounded.resources.providers[0].scratch_available_bytes = Some(8);
+    bounded.resources.memory_available_bytes = Some(23);
+    assert_eq!(
+        session.select_whole_work(bounded).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    host.presentation = runmat_execution::CandidateOutputPresentation::ProviderDownload {
+        device_id: 7,
+        provider_scratch_bytes: ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        ),
+        queue_slots: 1,
+    };
+    assert_eq!(
+        session
+            .select_whole_work(request(vec![host]))
+            .unwrap_err()
+            .code,
+        "RunMat:Placement:InsufficientResourceEvidence"
+    );
+}
+
+#[test]
 fn provider_required_does_not_admit_a_host_upload_route() {
     let session = PlacementSession::default();
     let mut only_host_upload = request(vec![host_with_provider_presentation()]);

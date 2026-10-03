@@ -9,13 +9,23 @@ use runmat_builtins::{
     GRAY2RGB_EXTENSIONS,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{LogicalArray, Value};
+use runmat_value::{LogicalArray, NumericDType, Value};
 
 use crate::builtins::image::color::common;
-use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
+use crate::context::host_presentation::{select_exact_host_sink, ExactHostSink, HostSinkReceipt};
+use crate::context::preparation::{
+    execute_admitted, execute_current_request, AdmittedBuiltinPreparation,
+    BuiltinPreparationAdmission,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "gray2rgb";
+
+struct SelectedGrayHostSink {
+    receipt: HostSinkReceipt,
+    output_shape: Vec<usize>,
+    output_dtype: Option<NumericDType>,
+}
 
 fn gray2rgb_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     gray2rgb_error_with_message(error.message, error)
@@ -54,9 +64,14 @@ fn gray2rgb_map_error(
 #[runtime_builtin(
     name = "gray2rgb",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::color::gray2rgb"
 )]
-async fn gray2rgb_builtin(gray: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn gray2rgb_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    gray: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(gray2rgb_error(&GRAY2RGB_ERROR_TOO_MANY_INPUTS));
     }
@@ -67,10 +82,65 @@ async fn gray2rgb_builtin(gray: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     )?;
     crate::compatibility::ensure_builtin_extension_enabled(&GRAY2RGB_EXTENSIONS[0], NAME)?;
     let prepare = admit_gray(&gray)?;
+    let selected = match &gray {
+        Value::GpuTensor(handle) => {
+            let pixels = u64::try_from(handle.shape()[0])
+                .ok()
+                .and_then(|rows| rows.checked_mul(u64::try_from(handle.shape()[1]).ok()?));
+            let logical = runmat_accelerate_api::handle_is_logical(handle);
+            let width = if logical {
+                1
+            } else {
+                handle.physical().element_type().element_size() as u64
+            };
+            let output_bytes = pixels
+                .and_then(|pixels| pixels.checked_mul(3))
+                .and_then(|elements| elements.checked_mul(width))
+                .map(runmat_execution::ResourceByteBound::Known)
+                .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                    runmat_execution::ResourceBoundUnavailable::NoRetainedValueBound,
+                ));
+            let host_compute_scratch = pixels
+                .and_then(|pixels| pixels.checked_mul(if logical { 1 } else { 24 }))
+                .map(runmat_execution::ResourceByteBound::Known)
+                .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                    runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+                ));
+            select_exact_host_sink(
+                runtime.as_ref(),
+                ExactHostSink {
+                    operation: NAME,
+                    variant: "gray.host_gather_replicate.v1",
+                    source: handle,
+                    domain_facts: runmat_execution::Digest::sha256(
+                        serde_json::to_vec(&(
+                            handle.shape(),
+                            handle.physical().element_type(),
+                            logical,
+                            handle.view().layout(),
+                        ))
+                        .expect("typed grayscale facts serialize"),
+                    ),
+                    output_bytes,
+                    host_compute_scratch,
+                },
+            )?
+            .map(|receipt| SelectedGrayHostSink {
+                receipt,
+                output_shape: vec![handle.shape()[0], handle.shape()[1], 3],
+                output_dtype: if logical {
+                    None
+                } else {
+                    Some(gray_numeric_dtype(handle))
+                },
+            })
+        }
+        _ => None,
+    };
     if !prepare {
-        return gray2rgb_execute(gray).await;
+        return gray2rgb_execute(gray, selected).await;
     }
-    execute_current_invocation(
+    let request = AdmittedBuiltinPreparation::new(
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {
                 builtin: BuiltinCatalogIdentity { name: NAME },
@@ -82,11 +152,18 @@ async fn gray2rgb_builtin(gray: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             requested_outputs: crate::output_count::current_output_count(),
         },
         vec![gray],
-        |mut operands| async move {
-            gray2rgb_execute(operands.pop().expect("one admitted grayscale operand")).await
-        },
-    )
-    .await
+    )?;
+    let execute = |mut operands: Vec<Value>| async move {
+        gray2rgb_execute(
+            operands.pop().expect("one admitted grayscale operand"),
+            selected,
+        )
+        .await
+    };
+    match runtime.as_ref() {
+        Some(runtime) => execute_admitted(runtime, request, execute).await,
+        None => execute_current_request(request, execute).await,
+    }
 }
 
 fn admit_gray(value: &Value) -> BuiltinResult<bool> {
@@ -113,7 +190,10 @@ fn admit_gray(value: &Value) -> BuiltinResult<bool> {
     }
 }
 
-async fn gray2rgb_execute(gray: Value) -> BuiltinResult<Value> {
+async fn gray2rgb_execute(
+    gray: Value,
+    selected: Option<SelectedGrayHostSink>,
+) -> BuiltinResult<Value> {
     let gathered = if matches!(gray, Value::GpuTensor(_)) {
         common::gather_value(NAME, &gray)
             .await
@@ -121,13 +201,40 @@ async fn gray2rgb_execute(gray: Value) -> BuiltinResult<Value> {
     } else {
         gray
     };
-    match gathered {
+    let result = match gathered {
         Value::LogicalArray(logical) => replicate_logical(logical),
         Value::Bool(value) => replicate_logical(
             LogicalArray::new(vec![u8::from(value)], vec![1, 1])
                 .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?,
         ),
         gathered => gray2rgb_numeric(gathered),
+    };
+    if let Some(selected) = selected {
+        let published = match (&result, selected.output_dtype) {
+            (Ok(Value::LogicalArray(output)), None) => output.shape == selected.output_shape,
+            (Ok(Value::Tensor(output)), Some(dtype)) => {
+                output.shape == selected.output_shape && output.numeric_dtype() == dtype
+            }
+            _ => false,
+        };
+        selected.receipt.finish(published);
+    }
+    result
+}
+
+fn gray_numeric_dtype(handle: &runmat_accelerate_api::GpuTensorHandle) -> NumericDType {
+    use runmat_accelerate_api::NumericElementType;
+    match handle.physical().element_type() {
+        NumericElementType::F32 => NumericDType::F32,
+        NumericElementType::F64 => NumericDType::F64,
+        NumericElementType::I8 => NumericDType::I8,
+        NumericElementType::I16 => NumericDType::I16,
+        NumericElementType::I32 => NumericDType::I32,
+        NumericElementType::I64 => NumericDType::I64,
+        NumericElementType::U8 => NumericDType::U8,
+        NumericElementType::U16 => NumericDType::U16,
+        NumericElementType::U32 => NumericDType::U32,
+        NumericElementType::U64 => NumericDType::U64,
     }
 }
 
@@ -174,14 +281,14 @@ mod tests {
 
     fn call(value: Value) -> BuiltinResult<Value> {
         let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(gray2rgb_builtin(value, Vec::new()))
+        block_on(gray2rgb_builtin(None, value, Vec::new()))
     }
 
     #[test]
     fn whole_gray2rgb_callable_is_runmat_only() {
         let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
         let input = Tensor::new(vec![0.5], vec![1, 1]).expect("input");
-        let error = block_on(gray2rgb_builtin(Value::Tensor(input), Vec::new()))
+        let error = block_on(gray2rgb_builtin(None, Value::Tensor(input), Vec::new()))
             .expect_err("whole callable is an extension");
         assert_eq!(error.identifier(), GRAY2RGB_EXTENSIONS[0].error_identifier);
         assert_eq!(GRAY2RGB_EXTENSIONS.len(), 1);
@@ -273,8 +380,12 @@ mod tests {
 
     #[test]
     fn gray2rgb_too_many_args_uses_stable_identifier() {
-        let err = block_on(gray2rgb_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
-            .expect_err("expected argument error");
+        let err = block_on(gray2rgb_builtin(
+            None,
+            Value::Num(1.0),
+            vec![Value::Num(2.0)],
+        ))
+        .expect_err("expected argument error");
         assert_eq!(err.identifier(), GRAY2RGB_ERROR_TOO_MANY_INPUTS.identifier);
     }
 }

@@ -1700,6 +1700,18 @@ pub trait AccelProvider: AcceleratorThreadBound {
         )
     }
 
+    /// Peak provider-owned staging for one native numeric download. This is
+    /// separate from the returned host payload and any host transpose clone.
+    /// Unknown must remain unavailable under a finite provider scratch quota.
+    fn download_numeric_provider_scratch_bound(
+        &self,
+        _handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        )
+    }
+
     /// Upload exact native integer storage without converting through f64.
     /// Providers that do not expose native integer buffers must reject this
     /// operation rather than silently changing the value class or precision.

@@ -123,7 +123,7 @@ impl RuntimeParallelService for HostBudget {
 struct RejectPreparation;
 impl RuntimeAccelerationService for RejectPreparation {
     fn supports_operation(&self, operation: &str) -> bool {
-        matches!(operation, "rgb2gray" | "rgb2hsv")
+        matches!(operation, "rgb2gray" | "rgb2hsv" | "gray2rgb")
     }
     fn prepare_admitted(
         &self,
@@ -436,4 +436,91 @@ fn indexed_color_gathers_two_providers_and_restores_only_to_explicit_map_owner()
     assert_eq!(witness.feedback.borrow().len(), 1);
     assert!(indexed.allocation_lease().validate_live().is_ok());
     assert!(map.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
+fn gray_host_sink_observes_completed_readback_and_replicated_host_result() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let (provider, _guard) = provider();
+    let source =
+        gpu_helpers::upload_tensor(provider, &Tensor::new(vec![0.25, 0.5], vec![1, 2]).unwrap())
+            .unwrap();
+    let witness = Rc::new(Witness::default());
+    let runtime = runmat_accelerate::native_auto::install_preparation_service(witness.context());
+    provider.reset_telemetry();
+    let Value::Tensor(output) = block_on(call_builtin_async_in_context(
+        &runtime,
+        "gray2rgb",
+        &[Value::GpuTensor(source.clone())],
+    ))
+    .expect("resident gray host sink") else {
+        panic!("gray2rgb publishes host Tensor")
+    };
+    assert_eq!(output.shape, vec![1, 2, 3]);
+    assert_eq!(
+        output.materialize_f64(),
+        vec![0.25, 0.5, 0.25, 0.5, 0.25, 0.5]
+    );
+    assert!(provider.telemetry_snapshot().download_bytes > 0);
+    assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+    assert_eq!(witness.selections.get(), 1);
+    witness.drain();
+    assert_eq!(witness.feedback.borrow().len(), 1);
+
+    let quota = base_context().with_service_ports(
+        RuntimeServicePorts::default()
+            .with_placement(Rc::new(PlacementSession::new(Default::default())))
+            .with_parallel(Rc::new(HostBudget(1))),
+    );
+    let quota = runmat_accelerate::native_auto::install_preparation_service(quota);
+    provider.reset_telemetry();
+    let error = block_on(call_builtin_async_in_context(
+        &quota,
+        "gray2rgb",
+        &[Value::GpuTensor(source.clone())],
+    ))
+    .expect_err("finite host quota rejects before readback");
+    assert!(error
+        .identifier()
+        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+
+    let unpolled_operands = [Value::GpuTensor(source.clone())];
+    let unpolled = call_builtin_async_in_context(&runtime, "gray2rgb", &unpolled_operands);
+    drop(unpolled);
+    assert_eq!(witness.selections.get(), 1);
+    assert!(source.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
+fn failed_gray_preparation_abandons_host_sink_without_feedback_or_readback() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let (provider, _guard) = provider();
+    let source =
+        gpu_helpers::upload_tensor(provider, &Tensor::new(vec![0.5], vec![1, 1]).unwrap()).unwrap();
+    let witness = Rc::new(Witness::default());
+    let context = witness.context();
+    let ports = context
+        .service_ports()
+        .clone()
+        .with_acceleration(Rc::new(RejectPreparation));
+    let runtime = context.with_service_ports(ports);
+    provider.reset_telemetry();
+    let error = block_on(call_builtin_async_in_context(
+        &runtime,
+        "gray2rgb",
+        &[Value::GpuTensor(source.clone())],
+    ))
+    .expect_err("preparation must fail without effect replay");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Preparation:FixtureFailure")
+    );
+    assert_eq!(witness.selections.get(), 1);
+    witness.drain();
+    assert!(witness.feedback.borrow().is_empty());
+    assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+    assert!(source.allocation_lease().validate_live().is_ok());
 }

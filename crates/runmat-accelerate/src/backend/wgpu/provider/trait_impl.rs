@@ -2537,6 +2537,18 @@ impl AccelProvider for WgpuProvider {
                 ResourceBoundUnavailable::NoScratchBound,
             ))
     }
+    fn download_numeric_provider_scratch_bound(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        // download_numeric_exec maps one staging buffer sized to the owning
+        // source buffer. Empty inputs allocate no staging buffer.
+        runmat_execution::ResourceByteBound::Known(if handle.physical().element_capacity() == 0 {
+            0
+        } else {
+            handle.physical().requested_bytes()
+        })
+    }
     fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
         let output = self.upload_integer_exec(host)?;
         complete_observed_upload(self)?;

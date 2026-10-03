@@ -56,13 +56,20 @@ pub enum CandidateOutputResidency {
     Unknown,
 }
 
-/// A complete route may compute on the host and then publish through an
-/// admitted provider upload. This is a real presentation stage, not a change
-/// to the computation location or a guessed transfer cost.
+/// A complete host route may require a provider readback before computation
+/// or an upload after computation. These are real transfer stages, not changes
+/// to the computation location or guessed costs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum CandidateOutputPresentation {
     Direct,
+    /// A resident input is read back and the complete result is published on
+    /// the host. Provider-owned mapped staging remains a provider resource.
+    ProviderDownload {
+        device_id: u32,
+        provider_scratch_bytes: ResourceByteBound,
+        queue_slots: u32,
+    },
     ProviderUpload {
         device_id: u32,
         /// Bytes moved by the presentation stage, if physically established.
@@ -97,6 +104,14 @@ impl CandidateOutputPresentation {
         output: CandidateOutputResidency,
     ) -> Result<(), &'static str> {
         match (self, execution, output) {
+            (
+                Self::ProviderDownload { queue_slots, .. },
+                CandidateExecutionLocation::Host,
+                CandidateOutputResidency::Host,
+            ) if queue_slots > 0 => Ok(()),
+            (Self::ProviderDownload { .. }, _, _) => {
+                Err("provider download presentation needs a host route, host output, and queue slot")
+            }
             (Self::Direct, CandidateExecutionLocation::Host, CandidateOutputResidency::Provider { .. }
                 | CandidateOutputResidency::Mirrored { .. }) => {
                 Err("host execution needs an admitted provider presentation stage")
