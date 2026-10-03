@@ -12,6 +12,7 @@ use runmat_execution::{
     WholeWorkConstraint, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
 };
 use runmat_time::{duration_ns_saturating, Instant};
+use std::path::Path;
 use std::sync::Arc;
 
 /// The requested result is distinct from the committed side effects. No
@@ -22,21 +23,52 @@ pub enum HostEffectOutput {
     ReturnedValue,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostEffectSource<'a> {
-    LocalArchive(&'a str),
+    LocalArchive(&'a Path),
     HttpArchive(&'a str),
 }
 
 /// Typed operation identity at the service evidence boundary; no builtin
 /// spelling switch or secondary scheduler is introduced here.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostEffectWorkload<'a> {
     ArchiveExtract {
         source: HostEffectSource<'a>,
-        destination: Option<&'a str>,
+        destination: Option<&'a Path>,
         output: HostEffectOutput,
     },
+}
+
+#[derive(serde::Serialize)]
+enum HostEffectSourceFacts<'a> {
+    LocalArchive(&'a [u8]),
+    HttpArchive(&'a str),
+}
+
+impl<'a> HostEffectWorkload<'a> {
+    /// Cache and service identities use the exact platform path encoding.
+    /// Serializing `Path` as UTF-8 would reject native non-UTF-8 names, while
+    /// a lossy display string could merge two distinct filesystem targets.
+    pub fn identity_bytes(self) -> Vec<u8> {
+        let Self::ArchiveExtract {
+            source,
+            destination,
+            output,
+        } = self;
+        let source = match source {
+            HostEffectSource::LocalArchive(path) => {
+                HostEffectSourceFacts::LocalArchive(path.as_os_str().as_encoded_bytes())
+            }
+            HostEffectSource::HttpArchive(url) => HostEffectSourceFacts::HttpArchive(url),
+        };
+        serde_json::to_vec(&(
+            source,
+            destination.map(|path| path.as_os_str().as_encoded_bytes()),
+            output,
+        ))
+        .expect("typed host effect path bytes serialize")
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
@@ -133,8 +165,12 @@ pub fn select_host_effect(
         region: None,
         operation: request.operation.into(),
         runtime_facts: Digest::sha256(
-            serde_json::to_vec(&(request.workload, request.domain_facts, evidence))
-                .expect("typed host effect facts serialize"),
+            serde_json::to_vec(&(
+                request.workload.identity_bytes(),
+                request.domain_facts,
+                evidence,
+            ))
+            .expect("typed host effect facts serialize"),
         ),
         revision,
     };
@@ -145,7 +181,7 @@ pub fn select_host_effect(
         output_residency: CandidateOutputResidency::Host,
         presentation: CandidateOutputPresentation::Direct,
         route_facts: Digest::sha256(
-            serde_json::to_vec(&(request.workload, evidence))
+            serde_json::to_vec(&(request.workload.identity_bytes(), evidence))
                 .expect("typed host effect route serializes"),
         ),
         cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),

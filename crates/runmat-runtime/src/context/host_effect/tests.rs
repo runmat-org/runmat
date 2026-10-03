@@ -11,6 +11,7 @@ use runmat_execution::{
     WholeWorkDecisionKind, WholeWorkObservation,
 };
 use std::cell::{Cell, RefCell};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -28,10 +29,10 @@ impl RuntimeHostEffectResourceService for Resources {
             && matches!(
                 request.workload,
                 HostEffectWorkload::ArchiveExtract {
-                    source: HostEffectSource::LocalArchive("/fixture.zip"),
-                    destination: Some("/out"),
+                    source: HostEffectSource::LocalArchive(source),
+                    destination: Some(destination),
                     ..
-                }
+                } if source == Path::new("/fixture.zip") && destination == Path::new("/out")
             )
             && Arc::ptr_eq(request.filesystem, fixture_fs())
             && request.domain_facts == Digest::sha256(b"source-and-destination"))
@@ -147,8 +148,8 @@ fn request(output: HostEffectOutput) -> HostEffectRequest<'static> {
     HostEffectRequest {
         operation: "unzip",
         workload: HostEffectWorkload::ArchiveExtract {
-            source: HostEffectSource::LocalArchive("/fixture.zip"),
-            destination: Some("/out"),
+            source: HostEffectSource::LocalArchive(Path::new("/fixture.zip")),
+            destination: Some(Path::new("/out")),
             output,
         },
         domain_facts: Digest::sha256(b"source-and-destination"),
@@ -214,8 +215,8 @@ fn finite_missing_or_unknown_bound_rejects_before_selection() {
     );
     let mut foreign_source = request(HostEffectOutput::ReturnedValue);
     foreign_source.workload = HostEffectWorkload::ArchiveExtract {
-        source: HostEffectSource::LocalArchive("/other.zip"),
-        destination: Some("/out"),
+        source: HostEffectSource::LocalArchive(Path::new("/other.zip")),
+        destination: Some(Path::new("/out")),
         output: HostEffectOutput::ReturnedValue,
     };
     assert!(select_host_effect(Some(&runtime), foreign_source).is_err());
@@ -319,4 +320,108 @@ fn dropped_and_cancelled_receipts_release_probe_without_failure_feedback() {
     receipt.finish(WholeWorkObservationOutcome::OperationalFailure);
     assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
     assert!(placement.observations.borrow().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_source_and_destination_reach_service_losslessly_and_have_distinct_identity() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    struct RawPathResources(Rc<RefCell<Vec<(Vec<u8>, Vec<u8>)>>>);
+    impl RuntimeHostEffectResourceService for RawPathResources {
+        fn admission(
+            &self,
+            request: &HostEffectRequest<'_>,
+            _runtime: &RuntimeContext,
+        ) -> Option<HostEffectResourceEvidence> {
+            let HostEffectWorkload::ArchiveExtract {
+                source: HostEffectSource::LocalArchive(source),
+                destination: Some(destination),
+                ..
+            } = request.workload
+            else {
+                return None;
+            };
+            self.0.borrow_mut().push((
+                source.as_os_str().as_encoded_bytes().to_vec(),
+                destination.as_os_str().as_encoded_bytes().to_vec(),
+            ));
+            Some(bounds(
+                ResourceByteBound::Known(1),
+                ResourceByteBound::Known(1),
+            ))
+        }
+    }
+
+    fn invalid_path(stem: &[u8], byte: u8) -> PathBuf {
+        let mut bytes = stem.to_vec();
+        bytes.push(byte);
+        PathBuf::from(OsString::from_vec(bytes))
+    }
+    fn raw_request<'a>(source: &'a Path, destination: &'a Path) -> HostEffectRequest<'a> {
+        HostEffectRequest {
+            operation: "unzip",
+            workload: HostEffectWorkload::ArchiveExtract {
+                source: HostEffectSource::LocalArchive(source),
+                destination: Some(destination),
+                output: HostEffectOutput::ReturnedValue,
+            },
+            domain_facts: Digest::sha256(b"same-domain-controls"),
+            filesystem: fixture_fs(),
+        }
+    }
+
+    let source_a = invalid_path(b"/archive-", 0xff);
+    let source_b = invalid_path(b"/archive-", 0xfe);
+    let destination_a = invalid_path(b"/output-", 0xff);
+    let destination_b = invalid_path(b"/output-", 0xfe);
+    assert_eq!(source_a.to_string_lossy(), source_b.to_string_lossy());
+    assert_eq!(
+        destination_a.to_string_lossy(),
+        destination_b.to_string_lossy()
+    );
+
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let placement = Rc::new(Placement::default());
+    placement.revision_available.set(true);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_placement(placement)
+                .with_host_effect_resources(Rc::new(RawPathResources(seen.clone())))
+                .with_parallel(Rc::new(Parallel(Some(2)))),
+        );
+    let identity = |source: &Path, destination: &Path| {
+        select_host_effect(Some(&runtime), raw_request(source, destination))
+            .expect("exact raw paths are admitted")
+            .expect("whole-work selection")
+            .selected
+            .decision
+            .signature
+            .runtime_facts
+    };
+    let first = identity(&source_a, &destination_a);
+    let changed_source = identity(&source_b, &destination_a);
+    let changed_destination = identity(&source_a, &destination_b);
+    assert_ne!(first, changed_source);
+    assert_ne!(first, changed_destination);
+    assert_eq!(
+        seen.borrow().as_slice(),
+        &[
+            (
+                source_a.as_os_str().as_encoded_bytes().to_vec(),
+                destination_a.as_os_str().as_encoded_bytes().to_vec(),
+            ),
+            (
+                source_b.as_os_str().as_encoded_bytes().to_vec(),
+                destination_a.as_os_str().as_encoded_bytes().to_vec(),
+            ),
+            (
+                source_a.as_os_str().as_encoded_bytes().to_vec(),
+                destination_b.as_os_str().as_encoded_bytes().to_vec(),
+            ),
+        ]
+    );
 }
