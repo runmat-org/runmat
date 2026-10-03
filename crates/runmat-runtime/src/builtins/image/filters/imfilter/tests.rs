@@ -3,6 +3,14 @@ use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_value::{IntegerStorage, Tensor, Value};
 
+async fn imfilter_builtin(
+    image: Value,
+    kernel: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    super::imfilter_builtin(None, image, kernel, rest).await
+}
+
 struct MutatingAliasingImfilterProvider {
     inner: runmat_accelerate::simple_provider::InProcessProvider,
 }

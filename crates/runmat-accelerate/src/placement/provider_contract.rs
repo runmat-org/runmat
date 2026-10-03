@@ -17,6 +17,7 @@ mod iir;
 pub(crate) mod floating_conversion;
 #[cfg(feature = "wgpu")]
 pub(crate) mod fspecial;
+pub(crate) mod imfilter;
 pub(crate) mod fusion_elementwise;
 mod integer_conversion;
 mod logical;
@@ -249,6 +250,7 @@ pub(crate) fn in_process_capability_snapshot(
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);
     convolution::append(&mut snapshot, false);
+    imfilter::append(&mut snapshot, false);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
@@ -275,6 +277,7 @@ pub(crate) fn wgpu_capability_snapshot(
     sum::append(&mut snapshot);
     convolution::append(&mut snapshot, true);
     fspecial::append(&mut snapshot, true);
+    imfilter::append(&mut snapshot, true);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
@@ -298,6 +301,9 @@ pub(crate) fn in_process_feasibility(
         return result;
     }
     if let Some(result) = convolution::validate(provider, false, query) {
+        return result;
+    }
+    if let Some(result) = imfilter::validate(provider, false, query) {
         return result;
     }
     if let Some(result) = resident_select::validate(provider, false, query) {
@@ -379,6 +385,9 @@ pub(crate) fn wgpu_feasibility(
         return result;
     }
     if let Some(result) = fspecial::validate(provider, true, query) {
+        return result;
+    }
+    if let Some(result) = imfilter::validate(provider, true, query) {
         return result;
     }
     if let Some(result) = resident_select::validate(provider, true, query) {

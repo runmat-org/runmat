@@ -35,6 +35,7 @@ pub(crate) struct ExactProviderReadback<'a> {
 pub(crate) struct ExactProviderOperation<'a> {
     pub(crate) provider: &'static dyn AccelProvider,
     pub(crate) query: &'a ProviderFeasibilityQuery,
+    pub(crate) semantic_operation: &'static str,
     pub(crate) variant: &'static str,
     /// Typed controls and original operand provenance. Never a textual
     /// substitute for the live handles that the domain owner authenticates.
@@ -42,6 +43,9 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// Peak operation-owned host workspace, including any work before the
     /// provider hook but excluding provider internal host workspace.
     pub(crate) host_scratch: ResourceByteBound,
+    /// Provider-hook internal host workspace, certified by its typed physical
+    /// route contract. This remains separate from operation-owned preparation.
+    pub(crate) provider_host_scratch: ResourceByteBound,
     pub(crate) host_cpu_millicores: u32,
     /// Physical bytes of authenticated borrowed inputs already represented
     /// in the provider's live-allocation resource snapshot.
@@ -51,6 +55,7 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// (for example a second readback of an adapted, newly uploaded kernel).
     /// The typed provider operation contract must prove these stage peaks.
     pub(crate) internal_input_stages: Option<ProviderInputStageDemands>,
+    pub(crate) output_queue_slots: Option<u32>,
     /// The public form permits a host result only after this provider hook
     /// returns Unsupported. This is one conditional route, not an equivalent
     /// host alternative offered to placement policy.
@@ -112,7 +117,8 @@ pub(crate) fn select_exact_provider_operation(
     let mut source_capabilities = Vec::with_capacity(request.readbacks.len());
     let mut readback_facts = Vec::with_capacity(request.readbacks.len());
     let mut input_stages = Vec::new();
-    let mut host_scratch = request.host_scratch;
+    let mut host_scratch =
+        combine_host_scratch(request.host_scratch, request.provider_host_scratch)?;
     for readback in request.readbacks {
         let source = readback.source;
         let Some(source_provider) = provider_for_handle(source) else {
@@ -239,15 +245,17 @@ pub(crate) fn select_exact_provider_operation(
     };
     let signature = PlacementSignature {
         region: None,
-        operation: query.operation.0.clone(),
+        operation: request.semantic_operation.into(),
         runtime_facts: Digest::sha256(
             serde_json::to_vec(&(
                 request.variant,
+                request.semantic_operation,
                 request.domain_facts,
                 query,
                 &readback_facts,
                 input_stages,
                 host_scratch,
+                request.output_queue_slots,
                 provider.device_id(),
             ))
             .expect("typed provider operation serializes"),
@@ -286,6 +294,7 @@ pub(crate) fn select_exact_provider_operation(
                 &estimate,
                 request.conditional_host_fallback,
                 input_stages,
+                request.output_queue_slots,
             ))
             .expect("provider route serializes"),
         ),
@@ -301,7 +310,9 @@ pub(crate) fn select_exact_provider_operation(
             scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
             provider_host_workspace: Some(host_scratch),
             provider_input_stages: input_stages,
-            queue_slots: estimate.dispatches.unwrap_or(1),
+            queue_slots: request
+                .output_queue_slots
+                .unwrap_or_else(|| estimate.dispatches.unwrap_or(1)),
             peak_live,
         },
         transactional_results: provider
@@ -332,7 +343,7 @@ pub(crate) fn select_exact_provider_operation(
         require_transactional_results: false,
     })?;
     if selected.decision.signature != signature
-        || selected.decision.selected != candidate.selected(&query.operation.0)
+        || selected.decision.selected != candidate.selected(request.semantic_operation)
     {
         return Err(
             build_runtime_error("placement selected an unadmitted provider operation")

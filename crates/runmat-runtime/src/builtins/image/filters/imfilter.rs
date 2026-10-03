@@ -40,6 +40,8 @@ pub use kernel::{
 #[path = "imfilter/provider.rs"]
 mod provider;
 use provider::imfilter_gpu;
+#[path = "imfilter/placement.rs"]
+pub mod placement;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -116,9 +118,11 @@ fn imfilter_map_error(
 #[runtime_builtin(
     name = "imfilter",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::filters::imfilter"
 )]
 async fn imfilter_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     image: Value,
     kernel: Value,
     rest: Vec<Value>,
@@ -127,10 +131,16 @@ async fn imfilter_builtin(
     preflight_imfilter_geometry(&image, &kernel, options.shape)?;
     match (image, kernel) {
         (Value::GpuTensor(image_handle), Value::GpuTensor(filter_handle)) => {
-            imfilter_gpu(image_handle, Value::GpuTensor(filter_handle), options).await
+            imfilter_gpu(
+                runtime.as_ref(),
+                image_handle,
+                Value::GpuTensor(filter_handle),
+                options,
+            )
+            .await
         }
         (Value::GpuTensor(image_handle), filter_value) => {
-            imfilter_gpu(image_handle, filter_value, options).await
+            imfilter_gpu(runtime.as_ref(), image_handle, filter_value, options).await
         }
         (image_value, Value::GpuTensor(filter_handle)) => {
             let filter_tensor = download_kernel_tensor(&filter_handle).await?;

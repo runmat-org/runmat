@@ -31,6 +31,11 @@ pub(crate) use provider_contract::fusion_elementwise::observation_capability as 
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::physical_work as fusion_physical_work;
 #[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::imfilter::{
+    observation_capability as imfilter_observation_capability,
+    physical_evidence as imfilter_physical_evidence,
+};
+#[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::sum::observation_capability as sum_observation_capability;
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::sum::{physical_work as sum_physical_work, SumKernelRoute};

@@ -65,13 +65,16 @@ pub(super) fn select(
         ExactProviderOperation {
             provider,
             query: &query,
+            semantic_operation: "fspecial",
             variant: "fspecial.optional_resident_constructor.v1",
             domain_facts,
             host_scratch,
+            provider_host_scratch: ResourceByteBound::Known(0),
             host_cpu_millicores: 1_000,
             already_live_bytes: 0,
             readbacks: &[],
             internal_input_stages: None,
+            output_queue_slots: None,
             conditional_host_fallback: Some(host_scratch),
         },
     )

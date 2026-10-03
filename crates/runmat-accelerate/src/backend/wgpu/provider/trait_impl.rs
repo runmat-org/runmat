@@ -180,7 +180,12 @@ impl AccelProvider for WgpuProvider {
                     let convolution =
                         crate::placement::convolution_observation_capability(self, query);
                     if matches!(convolution, runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported) {
-                        crate::placement::fspecial_observation_capability(self, query)
+                        let fspecial = crate::placement::fspecial_observation_capability(self, query);
+                        if matches!(fspecial, runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported) {
+                            crate::placement::imfilter_observation_capability(self, query)
+                        } else {
+                            fspecial
+                        }
                     } else {
                         convolution
                     }
@@ -275,6 +280,24 @@ impl AccelProvider for WgpuProvider {
             max_workgroups_per_dimension: self.adapter_limits.max_compute_workgroups_per_dimension,
             workgroup_size: crate::backend::wgpu::config::WORKGROUP_SIZE,
         })
+    }
+
+    fn imfilter_geometry(&self) -> Option<runmat_accelerate_api::ProviderImfilterGeometry> {
+        Some(runmat_accelerate_api::ProviderImfilterGeometry {
+            max_buffer_bytes: self.adapter_limits.max_buffer_size,
+            max_binding_bytes: u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+            max_rank: crate::backend::wgpu::params::IMFILTER_MAX_RANK,
+            max_workgroups_per_dispatch: crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
+            workgroup_size: crate::backend::wgpu::config::WORKGROUP_SIZE,
+            shader_f64: self.adapter.features().contains(wgpu::Features::SHADER_F64),
+        })
+    }
+
+    fn imfilter_physical_evidence(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderImfilterPhysicalEvidence> {
+        crate::placement::imfilter_physical_evidence(self, query)
     }
 
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {

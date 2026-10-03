@@ -4,7 +4,8 @@ use crate::backend::wgpu::types::NumericPrecision;
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{
     unsupported_provider_operation, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
-    HostNumericTensorView, ImfilterOptions, ImfilterPadding, NumericElementType, ProviderPrecision,
+    HostNumericTensorView, ImfilterOptions, ImfilterPadding, NumericElementType,
+    ProviderOperationIdentity, ProviderPrecision,
 };
 use runmat_runtime::builtins::image::filters::imfilter::{
     apply_imfilter_native, build_imfilter_plan, floating_accumulation, FilterAccumulation,
@@ -39,6 +40,17 @@ impl WgpuProvider {
                 ));
             }
         }
+        let operation = ProviderOperationIdentity::new("imfilter");
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        // A typed runtime candidate must be re-derived from the current live
+        // views. The owner witness is only confirmed after the actual direct
+        // filter dispatch, never by the preceding H readback/reshape alone.
+        let admitted_direct =
+            runmat_runtime::builtins::image::filters::imfilter::placement::exact_hook_query(
+                image, kernel, options,
+            )
+            .is_some_and(|query| self.query_feasibility(&query).is_supported());
         let storage_precision = image_entry.precision;
         let accumulation = floating_accumulation(
             match storage_precision {
@@ -75,6 +87,9 @@ impl WgpuProvider {
             return self.imfilter_exec_fallback(image, kernel, options).await;
         }
         let kernel_tensor = native_tensor(self.download_numeric_exec(kernel).await?)?;
+        let after_kernel_readback = observed.as_ref().map(
+            runmat_accelerate_api::observation::ProviderOperationRecorder::submission_checkpoint,
+        );
 
         let image_shape = if image_entry.shape.is_empty() {
             vec![1usize]
@@ -351,7 +366,7 @@ impl WgpuProvider {
 
             Ok(out_buffer)
         })??;
-        self.register_numeric_buffer(
+        let output = self.register_numeric_buffer(
             out_buffer,
             NumericBufferRegistration {
                 shape: plan.final_shape,
@@ -361,7 +376,21 @@ impl WgpuProvider {
                 allocated_bytes,
                 usage: BufferUsageClass::Generic,
             },
-        )
+        )?;
+        if admitted_direct {
+            if let Some(recorder) = observed {
+                if output_len == 0 {
+                    recorder.confirm_provider_execution(self.device_id(), &operation);
+                } else if let Some(checkpoint) = after_kernel_readback {
+                    recorder.confirm_submitted_provider_execution_after(
+                        self.device_id(),
+                        &operation,
+                        checkpoint,
+                    );
+                }
+            }
+        }
+        Ok(output)
     }
 
     async fn imfilter_exec_fallback(

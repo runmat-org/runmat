@@ -17,7 +17,10 @@ mod feasibility;
 mod fspecial;
 pub use fspecial::ProviderFspecialFilter;
 mod imfilter;
-pub use imfilter::{ProviderImfilterInputBackings, ProviderImfilterWorkload};
+pub use imfilter::{
+    ProviderImfilterGeometry, ProviderImfilterInputBackings, ProviderImfilterPhysicalEvidence,
+    ProviderImfilterWorkload,
+};
 mod iir;
 pub use iir::{
     ProviderIirRoute, ProviderIirWorkload, PROVIDER_IIR_CAUSAL_PASS_OPERATION,

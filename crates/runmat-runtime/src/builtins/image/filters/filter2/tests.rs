@@ -4,6 +4,14 @@ use futures::executor::block_on;
 use runmat_accelerate_api::{HostTensorView, ImfilterMode, ImfilterOptions, ImfilterShape};
 use runmat_value::LogicalArray;
 
+async fn filter2_builtin(
+    kernel: Value,
+    image: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    super::filter2_builtin(None, kernel, image, rest).await
+}
+
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
     Tensor::new(data, vec![rows, cols]).expect("tensor construction")
 }

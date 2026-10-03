@@ -33,6 +33,46 @@ fn single_input(
 }
 
 #[test]
+#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+fn actual_imfilter_typed_direct_route_is_bound_to_both_live_inputs() {
+    let provider = provider();
+    let image = single_input(&provider, true, &[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+    let kernel = single_input(&provider, false, &[1.0], &[1, 1]);
+    let options = ImfilterOptions::default();
+    let query = runmat_runtime::builtins::image::filters::imfilter::placement::exact_hook_query(
+        &image, &kernel, &options,
+    )
+    .expect("live exact hook query");
+    assert!(provider.query_feasibility(&query).is_supported());
+    let physical = provider
+        .imfilter_physical_evidence(&query)
+        .expect("provider-owned direct physical plan");
+    assert_eq!(physical.input_stages.iter().count(), 1);
+    assert_eq!(physical.output_queue_slots, 1);
+    let mut malformed = query.clone();
+    malformed.outputs[0].shape = vec![1, 4];
+    assert!(!provider.query_feasibility(&malformed).is_supported());
+    malformed = query.clone();
+    malformed.inputs[1].element_type = runmat_accelerate_api::ProviderElementType::F64;
+    assert!(!provider.query_feasibility(&malformed).is_supported());
+    malformed = query.clone();
+    malformed.inputs.push(malformed.inputs[1].clone());
+    assert!(!provider.query_feasibility(&malformed).is_supported());
+    malformed = query.clone();
+    malformed.workload.imfilter.as_mut().unwrap().input_backings = None;
+    assert!(!provider.query_feasibility(&malformed).is_supported());
+    let output = block_on(provider.imfilter_exec(&image, &kernel, &options)).unwrap();
+    assert_eq!(output.shape(), &[2, 2]);
+    assert_eq!(output.physical().element_type(), NumericElementType::F32);
+    assert_eq!(
+        block_on(provider.download_numeric_exec(&output))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
+    );
+}
+
+#[test]
 #[ignore = "requires an actual WGPU adapter; execute explicitly in native GPU qualification"]
 fn actual_imfilter_lazy_image_materializes_without_host_image_transfer() {
     let provider = provider();

@@ -15,7 +15,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
-use super::imfilter::{apply_imfilter_tensor, filter_output_shape};
+use super::imfilter::{apply_imfilter_tensor, filter_output_shape, placement};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -87,9 +87,11 @@ fn filter2_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 #[runtime_builtin(
     name = "filter2",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::filters::filter2"
 )]
 async fn filter2_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     kernel: Value,
     image: Value,
     rest: Vec<Value>,
@@ -112,7 +114,13 @@ async fn filter2_builtin(
     }
     match (kernel, image) {
         (Value::GpuTensor(kernel_handle), Value::GpuTensor(image_handle)) => {
-            filter2_gpu(Value::GpuTensor(kernel_handle), image_handle, &options).await
+            filter2_gpu(
+                runtime.as_ref(),
+                Value::GpuTensor(kernel_handle),
+                image_handle,
+                &options,
+            )
+            .await
         }
         (Value::GpuTensor(kernel_handle), image_value) => {
             let kernel_tensor = gpu_helpers::gather_tensor_async(&kernel_handle)
@@ -121,7 +129,7 @@ async fn filter2_builtin(
             filter2_host(Value::Tensor(kernel_tensor), image_value, &options)
         }
         (kernel_value, Value::GpuTensor(image_handle)) => {
-            filter2_gpu(kernel_value, image_handle, &options).await
+            filter2_gpu(runtime.as_ref(), kernel_value, image_handle, &options).await
         }
         (kernel_value, image_value) => filter2_host(kernel_value, image_value, &options),
     }
@@ -255,6 +263,7 @@ fn filter2_host(
 }
 
 async fn filter2_gpu(
+    runtime: Option<&crate::context::RuntimeContext>,
     kernel_value: Value,
     image_handle: GpuTensorHandle,
     options: &ImfilterOptions,
@@ -364,10 +373,24 @@ async fn filter2_gpu(
     )
     .map_err(|error| filter2_map_error(error.into(), &FILTER2_ERROR_INVALID_INPUT))?;
 
-    match provider
-        .imfilter(&image_handle, &kernel_handle, options)
-        .await
-    {
+    let selected = if uploaded_kernel.is_none() {
+        placement::select_direct(
+            runtime,
+            FILTER2_BUILTIN,
+            &image_handle,
+            &kernel_handle,
+            options,
+            false,
+        )?
+    } else {
+        None
+    };
+    let provider_result = runmat_accelerate_api::observation::observe_provider_future(
+        selected.as_ref().map(|selection| selection.recorder()),
+        provider.imfilter(&image_handle, &kernel_handle, options),
+    )
+    .await;
+    match provider_result {
         Ok(mut output) => {
             drop(uploaded_kernel);
             let valid = output.shape() == expected_shape
@@ -390,6 +413,9 @@ async fn filter2_gpu(
                     false,
                 );
             if !valid {
+                if let Some(selection) = selected {
+                    selection.finish(Err(runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed));
+                }
                 let mut error = filter2_error_with_detail(
                     &FILTER2_ERROR_INTERNAL,
                     "provider returned an invalid filter2 result",
@@ -397,34 +423,56 @@ async fn filter2_gpu(
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(output, error));
             }
-            gpu_helpers::propagate_output_provenance(&mut output, [&image_handle])?;
-            gpu_helpers::resident_gpu_value(output)
+            let result = gpu_helpers::propagate_output_provenance(&mut output, [&image_handle])
+                .and_then(|()| gpu_helpers::resident_gpu_value(output));
+            if let Some(selection) = selected {
+                selection.finish(if result.is_ok() { Ok(true) } else { Err(runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed) });
+            }
+            result
         }
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             drop(uploaded_kernel);
-            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
-                .await
-                .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-            let kernel_tensor = if let Some(ref tensor) = kernel_tensor_cache {
-                tensor.clone()
-            } else {
-                gpu_helpers::gather_tensor_async(&kernel_handle_clone)
+            let fallback = async {
+                let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
                     .await
-                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?
+                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
+                let kernel_tensor = if let Some(ref tensor) = kernel_tensor_cache {
+                    tensor.clone()
+                } else {
+                    gpu_helpers::gather_tensor_async(&kernel_handle_clone)
+                        .await
+                        .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?
+                };
+                filter2_host(
+                    Value::Tensor(kernel_tensor),
+                    Value::Tensor(image_tensor),
+                    options,
+                )
             };
-            filter2_host(
-                Value::Tensor(kernel_tensor),
-                Value::Tensor(image_tensor),
-                options,
+            let result = runmat_accelerate_api::observation::observe_provider_future(
+                selected.as_ref().map(|selection| selection.recorder()),
+                fallback,
             )
+            .await;
+            if let Some(selection) = selected {
+                selection.finish(Ok(false));
+            }
+            result
         }
-        Err(error) => Err(crate::runtime_error::with_provider_execution_source(
-            filter2_error_with_detail(
-                &FILTER2_ERROR_INTERNAL,
-                format!("provider execution failed: {error}"),
-            ),
-            error.into(),
-        )),
+        Err(error) => {
+            if let Some(selection) = selected {
+                selection.finish(Err(
+                    runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                ));
+            }
+            Err(crate::runtime_error::with_provider_execution_source(
+                filter2_error_with_detail(
+                    &FILTER2_ERROR_INTERNAL,
+                    format!("provider execution failed: {error}"),
+                ),
+                error.into(),
+            ))
+        }
     }
 }
 

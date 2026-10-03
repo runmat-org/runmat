@@ -2,6 +2,7 @@ use super::kernel::fallback_accumulation;
 use super::*;
 
 pub(super) async fn imfilter_gpu(
+    runtime: Option<&crate::context::RuntimeContext>,
     image_handle: GpuTensorHandle,
     kernel_value: Value,
     options: ImfilterOptions,
@@ -23,8 +24,51 @@ pub(super) async fn imfilter_gpu(
     let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")
     })?;
+    let selected = if let (Some(image_precision), Value::GpuTensor(kernel)) =
+        (output_class.provider_precision(), &kernel_value)
+    {
+        let required_kernel_precision = match floating_accumulation(
+            image_precision,
+            runmat_accelerate_api::handle_is_explicit(&image_handle),
+        ) {
+            FilterAccumulation::HostDouble => ProviderPrecision::F64,
+            FilterAccumulation::GpuSingle => ProviderPrecision::F32,
+        };
+        if runmat_accelerate_api::handle_precision(kernel) == Some(ProviderPrecision::F64)
+            && runmat_accelerate_api::handle_precision(kernel) == Some(required_kernel_precision)
+            && runmat_accelerate_api::handle_storage(kernel) == GpuTensorStorage::Real
+            && !runmat_accelerate_api::handle_is_logical(kernel)
+            && runmat_accelerate_api::handle_integer_type(kernel).is_none()
+            && gpu_helpers::gpu_class_metadata_matches(
+                kernel,
+                Some(ProviderPrecision::F64),
+                None,
+                false,
+            )
+        {
+            placement::select_direct(
+                runtime,
+                IMFILTER_BUILTIN,
+                &image_handle,
+                kernel,
+                &options,
+                true,
+            )?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let (kernel_tensor, resident_kernel) = match kernel_value {
-        Value::GpuTensor(handle) => (download_kernel_tensor(&handle).await?, Some(handle)),
+        Value::GpuTensor(handle) => {
+            let downloaded = runmat_accelerate_api::observation::observe_provider_future(
+                selected.as_ref().map(|selection| selection.recorder()),
+                download_kernel_tensor(&handle),
+            )
+            .await?;
+            (downloaded, Some(handle))
+        }
         other => (host_kernel_tensor(other)?, None),
     };
     let expected_shape = build_imfilter_plan(
@@ -87,9 +131,11 @@ pub(super) async fn imfilter_gpu(
             }
         },
     };
-    let provider_result = provider
-        .imfilter(&image_handle, &kernel_handle, &options)
-        .await;
+    let provider_result = runmat_accelerate_api::observation::observe_provider_future(
+        selected.as_ref().map(|selection| selection.recorder()),
+        provider.imfilter(&image_handle, &kernel_handle, &options),
+    )
+    .await;
 
     match provider_result {
         Ok(mut output) => {
@@ -104,6 +150,9 @@ pub(super) async fn imfilter_gpu(
                 .as_ref()
                 .is_some_and(|original| output.shares_allocation_with(original))
             {
+                if let Some(selection) = selected {
+                    selection.finish(Err(runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed));
+                }
                 let mut error = imfilter_error_with_detail(
                     &IMFILTER_ERROR_INTERNAL,
                     "provider returned an invalid imfilter result",
@@ -111,26 +160,41 @@ pub(super) async fn imfilter_gpu(
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(output, error));
             }
-            gpu_helpers::propagate_output_provenance(&mut output, [&image_handle])?;
-            gpu_helpers::resident_gpu_value(output)
+            let result = gpu_helpers::propagate_output_provenance(&mut output, [&image_handle])
+                .and_then(|()| gpu_helpers::resident_gpu_value(output));
+            if let Some(selection) = selected {
+                selection.finish(if result.is_ok() { Ok(true) } else { Err(runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed) });
+            }
+            result
         }
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-            imfilter_gpu_host_fallback(
+            let result = imfilter_gpu_host_fallback(
                 provider,
                 &image_handle,
                 &kernel_tensor,
                 &options,
                 resident_kernel.as_ref(),
             )
-            .await
+            .await;
+            if let Some(selection) = selected {
+                selection.finish(Ok(false));
+            }
+            result
         }
-        Err(error) => Err(kernel_error::with_provider_source(
-            imfilter_error_with_detail(
-                &IMFILTER_ERROR_INTERNAL,
-                format!("provider execution failed: {error}"),
-            ),
-            error.into(),
-        )),
+        Err(error) => {
+            if let Some(selection) = selected {
+                selection.finish(Err(
+                    runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                ));
+            }
+            Err(kernel_error::with_provider_source(
+                imfilter_error_with_detail(
+                    &IMFILTER_ERROR_INTERNAL,
+                    format!("provider execution failed: {error}"),
+                ),
+                error.into(),
+            ))
+        }
     }
 }
 

@@ -2041,6 +2041,22 @@ pub trait AccelProvider: AcceleratorThreadBound {
         None
     }
 
+    /// Read-only limits of the actual typed imfilter shader. The default
+    /// asserts no direct route and never infers one from generic compute.
+    fn imfilter_geometry(&self) -> Option<ProviderImfilterGeometry> {
+        None
+    }
+
+    /// Exact provider-owned host and input-stage evidence for the same typed
+    /// imfilter hook query returned Supported by query_feasibility. None is
+    /// unproven, never a zero-workspace assumption.
+    fn imfilter_physical_evidence(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+    ) -> Option<ProviderImfilterPhysicalEvidence> {
+        None
+    }
+
     /// Read a single scalar at linear index from a device tensor, returning it as f64.
     fn read_scalar(&self, _h: &GpuTensorHandle, _linear_index: usize) -> anyhow::Result<f64> {
         Err(unsupported_provider_operation(
