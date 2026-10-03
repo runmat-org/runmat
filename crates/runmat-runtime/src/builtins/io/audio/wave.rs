@@ -1,10 +1,3 @@
-#[derive(Debug, Clone, Copy)]
-pub(super) struct WaveContainer {
-    pub(super) format: WaveFormat,
-    pub(super) data_offset: usize,
-    pub(super) data_len: usize,
-}
-
 pub(super) fn parse_wave_metadata(
     bytes: &[u8],
     file_size: u64,
@@ -82,71 +75,6 @@ pub(super) fn parse_wave_metadata(
     let fmt = fmt.ok_or_else(|| "WAVE file is missing a fmt chunk".to_string())?;
     let data_bytes = data_bytes.ok_or_else(|| "WAVE file is missing a data chunk".to_string())?;
     Ok((fmt, data_bytes))
-}
-
-pub(super) fn parse_wave_container(bytes: &[u8]) -> Result<WaveContainer, String> {
-    if bytes.len() < 12 || &bytes[8..12] != b"WAVE" {
-        return Err("RIFF/RF64 file is not a WAVE container".to_string());
-    }
-    let is_rf64 = bytes.starts_with(b"RF64");
-    let mut pos = 12usize;
-    let mut fmt: Option<WaveFormat> = None;
-    let mut data: Option<(usize, usize)> = None;
-    let mut rf64_data_size: Option<u64> = None;
-    while pos.checked_add(8).is_some_and(|end| end <= bytes.len()) {
-        let id_end = pos
-            .checked_add(4)
-            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
-        let size_offset = pos
-            .checked_add(4)
-            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
-        let id = &bytes[pos..id_end];
-        let declared_size = read_u32_le(bytes, size_offset)?;
-        pos = pos
-            .checked_add(8)
-            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
-        let size = if is_rf64 && id == b"data" && declared_size == u32::MAX {
-            let actual = rf64_data_size.ok_or_else(|| {
-                "RF64 data chunk uses sentinel size without ds64 metadata".to_string()
-            })?;
-            usize::try_from(actual)
-                .map_err(|_| "RF64 data chunk is too large for this platform".to_string())?
-        } else {
-            declared_size as usize
-        };
-        let chunk_end = pos
-            .checked_add(size)
-            .ok_or_else(|| "WAVE chunk size overflows platform limits".to_string())?;
-        if chunk_end > bytes.len() {
-            return Err("WAVE chunk extends past end of file".to_string());
-        }
-        match id {
-            b"ds64" if is_rf64 => {
-                if size < 24 {
-                    return Err("RF64 ds64 chunk is too short".to_string());
-                }
-                rf64_data_size = Some(read_u64_le(bytes, pos + 8)?);
-            }
-            b"fmt " => fmt = Some(parse_wave_fmt(&bytes[pos..chunk_end])?),
-            b"data" => data = Some((pos, size)),
-            _ => {}
-        }
-        let padded_size = size
-            .checked_add(size % 2)
-            .ok_or_else(|| "WAVE padded chunk size overflows platform limits".to_string())?;
-        pos = pos
-            .checked_add(padded_size)
-            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
-    }
-
-    let fmt = fmt.ok_or_else(|| "WAVE file is missing a fmt chunk".to_string())?;
-    let (data_offset, data_len) =
-        data.ok_or_else(|| "WAVE file is missing a data chunk".to_string())?;
-    Ok(WaveContainer {
-        format: fmt,
-        data_offset,
-        data_len,
-    })
 }
 
 #[derive(Debug, Clone, Copy)]
