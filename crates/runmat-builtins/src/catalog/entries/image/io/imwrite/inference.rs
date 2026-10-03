@@ -131,7 +131,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     if let Some(first) = request.literals.literal_string_at(first_trailing) {
-        if let Some(option) = ImwriteOption::from_name(first) {
+        if let Some(option) = ImwriteOption::from_name(&first) {
             if option == ImwriteOption::UnsupportedAdvanced {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-IMWRITE-OPTION",
