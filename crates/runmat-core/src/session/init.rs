@@ -31,7 +31,7 @@ impl RunMatSession {
         let parallel_services = crate::parallel_runtime::CoreParallelServices::new();
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_call(std::rc::Rc::new(runmat_runtime::context::RuntimeCallRouter))
-            .with_http(super::http_host::default_http_service()?)
+            .with_http(super::http_host::default_http_service())
             .with_placement(placement.clone())
             .with_acceleration(std::rc::Rc::new(
                 runmat_accelerate::native_auto::AdmittedAcceleration,

@@ -1,0 +1,376 @@
+use super::*;
+use runmat_builtins::WEBWRITE_DESCRIPTOR;
+
+#[test]
+fn webwrite_rejects_excess_outputs_before_input_or_http_service() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let error = futures::executor::block_on(webwrite_builtin(None, Value::Num(1.0), vec![]))
+        .expect_err("excess outputs");
+    assert_eq!(error.identifier(), Some("RunMat:webwrite:TooManyOutputs"));
+}
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc;
+use std::thread;
+
+#[test]
+fn body_and_query_text_preserve_exact_uint64() {
+    let value = Value::Int(runmat_value::IntValue::U64(u64::MAX));
+    assert_eq!(
+        scalar_to_string(&value).expect("body text"),
+        "18446744073709551615"
+    );
+    assert_eq!(
+        value_to_query_string(&value, "id").expect("query text"),
+        "18446744073709551615"
+    );
+}
+
+#[test]
+fn body_query_and_numeric_scalar_read_typed_integer_storage_exactly() {
+    let text = Tensor::new_integer(
+        runmat_value::IntegerStorage::U64(vec![u64::MAX]),
+        vec![1, 1],
+    )
+    .expect("typed text tensor");
+    let value = Value::Tensor(text.clone());
+    assert_eq!(
+        scalar_to_string(&value).expect("body text"),
+        "18446744073709551615"
+    );
+    assert_eq!(
+        value_to_query_string(&value, "id").expect("query text"),
+        "18446744073709551615"
+    );
+
+    let timeout = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2026]), vec![1, 1])
+        .expect("typed timeout tensor");
+    assert_eq!(
+        numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
+        2026.0
+    );
+}
+
+fn spawn_server<F>(handler: F) -> String
+where
+    F: FnOnce(TcpStream) + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let addr = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        if let Ok((stream, _)) = listener.accept() {
+            handler(stream);
+        }
+    });
+    format!("http://{}", addr)
+}
+
+fn read_request(stream: &mut TcpStream) -> (String, Vec<u8>) {
+    let mut buffer = Vec::new();
+    let mut tmp = [0u8; 512];
+    let mut header_end = None;
+    loop {
+        match stream.read(&mut tmp) {
+            Ok(0) => break,
+            Ok(n) => {
+                buffer.extend_from_slice(&tmp[..n]);
+                if let Some(idx) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                    header_end = Some(idx + 4);
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    let header_end = header_end.unwrap_or(buffer.len());
+    let headers = String::from_utf8_lossy(&buffer[..header_end]).to_string();
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let mut parts = line.splitn(2, ':');
+            let name = parts.next()?.trim();
+            let value = parts.next()?.trim();
+            if name.eq_ignore_ascii_case("content-length") {
+                value.parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    let mut body = buffer[header_end..].to_vec();
+    while body.len() < content_length {
+        match stream.read(&mut tmp) {
+            Ok(0) => break,
+            Ok(n) => body.extend_from_slice(&tmp[..n]),
+            Err(_) => break,
+        }
+    }
+    (headers, body)
+}
+
+fn respond_with(mut stream: TcpStream, content_type: &str, body: &[u8]) {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n",
+        body.len(),
+        content_type
+    );
+    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.write_all(body);
+}
+
+fn run_webwrite(url: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    futures::executor::block_on(webwrite_builtin(
+        Some(transport::test_runtime_context()),
+        url,
+        rest,
+    ))
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webwrite_descriptor_signatures_cover_core_forms() {
+    let labels: Vec<&str> = WEBWRITE_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|sig| sig.label)
+        .collect();
+    assert!(labels.contains(&"response = webwrite(url, data)"));
+    assert!(labels.contains(&"response = webwrite(url, data, optionsStruct)"));
+    assert!(labels.contains(&"response = webwrite(url, data, name, value, ...)"));
+}
+
+#[test]
+fn webwrite_post_values_preserve_exact_integer_vectors() {
+    let value = Value::Tensor(
+        Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![i64::MIN, (1_i64 << 53) + 1]),
+            vec![1, 2],
+        )
+        .expect("integer post vector"),
+    );
+    assert_eq!(
+        value_to_query_string(&value, "id").expect("post encoding"),
+        "-9223372036854775808,9007199254740993"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webwrite_posts_form_data_by_default() {
+    let payload = {
+        let mut st = StructValue::new();
+        st.fields.insert("name".to_string(), Value::from("Ada"));
+        st.fields.insert("score".to_string(), Value::Num(42.0));
+        st
+    };
+    let opts = {
+        let mut st = StructValue::new();
+        st.fields
+            .insert("ContentType".to_string(), Value::from("json"));
+        st
+    };
+
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let (headers, body) = read_request(&mut stream);
+        tx.send((headers, body)).unwrap();
+        respond_with(
+            stream,
+            "application/json",
+            br#"{"status":"ok","received":true}"#,
+        );
+    });
+
+    let result = run_webwrite(
+        Value::from(url),
+        vec![Value::Struct(payload), Value::Struct(opts)],
+    )
+    .expect("webwrite");
+
+    let (headers, body) = rx.recv().expect("request captured");
+    assert!(headers.starts_with("POST "));
+    let headers_lower = headers.to_ascii_lowercase();
+    assert!(headers_lower.contains("content-type: application/x-www-form-urlencoded"));
+    let body_text = String::from_utf8(body).expect("utf8 body");
+    assert!(body_text.contains("name=Ada"));
+    assert!(body_text.contains("score=42"));
+
+    match result {
+        Value::Struct(reply) => {
+            assert!(matches!(
+                reply.fields.get("received"),
+                Some(Value::Bool(true))
+            ));
+        }
+        other => panic!("expected struct response, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webwrite_sends_json_when_media_type_json() {
+    let payload = {
+        let mut st = StructValue::new();
+        st.fields.insert("title".to_string(), Value::from("RunMat"));
+        st.fields.insert("stars".to_string(), Value::Num(5.0));
+        st
+    };
+    let opts = {
+        let mut st = StructValue::new();
+        st.fields.insert(
+            "MediaType".to_string(),
+            Value::from("application/json; charset=utf-8"),
+        );
+        st.fields
+            .insert("ContentType".to_string(), Value::from("json"));
+        st
+    };
+
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let (headers, body) = read_request(&mut stream);
+        tx.send((headers, body)).unwrap();
+        respond_with(stream, "application/json", br#"{"ok":true}"#);
+    });
+
+    let result = run_webwrite(
+        Value::from(url),
+        vec![Value::Struct(payload), Value::Struct(opts)],
+    )
+    .expect("webwrite");
+
+    let (headers, body) = rx.recv().expect("request");
+    let headers_lower = headers.to_ascii_lowercase();
+    assert!(headers_lower.contains("content-type: application/json"));
+    let body_text = String::from_utf8(body).expect("utf8 body");
+    assert!(body_text.contains("\"title\":\"RunMat\""));
+    assert!(body_text.contains("\"stars\":5"));
+
+    match result {
+        Value::Struct(reply) => {
+            assert!(matches!(reply.fields.get("ok"), Some(Value::Bool(true))));
+        }
+        other => panic!("expected struct response, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webwrite_applies_basic_auth_and_custom_headers() {
+    let payload = Value::from("");
+    let mut header_struct = StructValue::new();
+    header_struct
+        .fields
+        .insert("X-Test".to_string(), Value::from("yes"));
+    header_struct
+        .fields
+        .insert("Accept".to_string(), Value::from("text/plain"));
+    let mut opts_struct = StructValue::new();
+    opts_struct
+        .fields
+        .insert("Username".to_string(), Value::from("ada"));
+    opts_struct
+        .fields
+        .insert("Password".to_string(), Value::from("secret"));
+    opts_struct
+        .fields
+        .insert("HeaderFields".to_string(), Value::Struct(header_struct));
+    opts_struct
+        .fields
+        .insert("ContentType".to_string(), Value::from("text"));
+    opts_struct
+        .fields
+        .insert("MediaType".to_string(), Value::from("text/plain"));
+
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let (headers, _) = read_request(&mut stream);
+        tx.send(headers).unwrap();
+        respond_with(stream, "text/plain", b"OK");
+    });
+
+    let result = run_webwrite(Value::from(url), vec![payload, Value::Struct(opts_struct)])
+        .expect("webwrite");
+
+    let headers = rx.recv().expect("headers");
+    let headers_lower = headers.to_ascii_lowercase();
+    assert!(headers_lower.contains("authorization: basic"));
+    assert!(headers_lower.contains("x-test: yes"));
+    assert!(headers_lower.contains("accept: text/plain"));
+
+    match result {
+        Value::CharArray(ca) => {
+            let text: String = ca.data.iter().collect();
+            assert_eq!(text, "OK");
+        }
+        other => panic!("expected char array, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webwrite_supports_query_parameters() {
+    let payload = Value::Struct(StructValue::new());
+    let mut qp_struct = StructValue::new();
+    qp_struct.fields.insert("page".to_string(), Value::Num(2.0));
+    qp_struct
+        .fields
+        .insert("verbose".to_string(), Value::Bool(true));
+    let mut opts_struct = StructValue::new();
+    opts_struct
+        .fields
+        .insert("QueryParameters".to_string(), Value::Struct(qp_struct));
+
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let (headers, _) = read_request(&mut stream);
+        tx.send(headers).unwrap();
+        respond_with(stream, "application/json", br#"{"ok":true}"#);
+    });
+
+    let _ = run_webwrite(
+        Value::from(url.clone()),
+        vec![payload, Value::Struct(opts_struct)],
+    )
+    .expect("webwrite");
+
+    let headers = rx.recv().expect("headers");
+    let first_line = headers.lines().next().unwrap_or("");
+    assert!(first_line.starts_with("POST "));
+    assert!(first_line.contains("page=2"));
+    assert!(first_line.contains("verbose=true"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webwrite_binary_payload_respected() {
+    let tensor = Tensor::new_integer(
+        runmat_value::IntegerStorage::U8(vec![1, 2, 3, 255]),
+        vec![4, 1],
+    )
+    .unwrap();
+    let payload = Value::Tensor(tensor);
+    let mut opts_struct = StructValue::new();
+    opts_struct
+        .fields
+        .insert("ContentType".to_string(), Value::from("binary"));
+    opts_struct.fields.insert(
+        "MediaType".to_string(),
+        Value::from("application/octet-stream"),
+    );
+
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let (headers, body) = read_request(&mut stream);
+        tx.send((headers, body)).unwrap();
+        respond_with(stream, "text/plain", b"OK");
+    });
+
+    let _ = run_webwrite(Value::from(url), vec![payload, Value::Struct(opts_struct)])
+        .expect("webwrite");
+
+    let (headers, body) = rx.recv().expect("request");
+    let headers_lower = headers.to_ascii_lowercase();
+    assert!(headers_lower.contains("content-type: application/octet-stream"));
+    assert_eq!(body, vec![1, 2, 3, 255]);
+}

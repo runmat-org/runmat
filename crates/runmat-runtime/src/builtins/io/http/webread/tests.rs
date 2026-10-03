@@ -1,0 +1,420 @@
+use super::*;
+use runmat_builtins::WEBREAD_DESCRIPTOR;
+
+#[test]
+fn webread_rejects_excess_outputs_before_input_or_http_service() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let error = futures::executor::block_on(webread_builtin(None, Value::Num(1.0), vec![]))
+        .expect_err("excess outputs");
+    assert_eq!(error.identifier(), Some("RunMat:webread:TooManyOutputs"));
+}
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc;
+use std::thread;
+
+#[test]
+fn query_text_preserves_exact_uint64() {
+    assert_eq!(
+        value_to_query_string(&Value::Int(runmat_value::IntValue::U64(u64::MAX)), "id")
+            .expect("query text"),
+        "18446744073709551615"
+    );
+}
+
+#[test]
+fn query_text_and_numeric_scalar_read_typed_integer_storage_exactly() {
+    let query = Tensor::new_integer(
+        runmat_value::IntegerStorage::U64(vec![u64::MAX]),
+        vec![1, 1],
+    )
+    .expect("typed query tensor");
+    assert_eq!(
+        value_to_query_string(&Value::Tensor(query), "id").expect("query text"),
+        "18446744073709551615"
+    );
+
+    let timeout = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2026]), vec![1, 1])
+        .expect("typed timeout tensor");
+    assert_eq!(
+        numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
+        2026.0
+    );
+}
+
+fn error_message(err: RuntimeError) -> String {
+    err.message().to_string()
+}
+
+fn run_webread(url: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+    futures::executor::block_on(webread_builtin(
+        Some(transport::test_runtime_context()),
+        url,
+        args,
+    ))
+}
+
+fn spawn_server<F>(handler: F) -> String
+where
+    F: FnOnce(TcpStream) + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let addr = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        if let Ok((stream, _)) = listener.accept() {
+            handler(stream);
+        }
+    });
+    format!("http://{}", addr)
+}
+
+fn respond_with(mut stream: TcpStream, content_type: &str, body: &[u8]) {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n",
+        body.len(),
+        content_type
+    );
+    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.write_all(body);
+}
+
+fn read_request_headers(stream: &mut TcpStream) -> String {
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 256];
+    while let Ok(read) = stream.read(&mut chunk) {
+        if read == 0 {
+            break;
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+        if buffer.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if buffer.len() > 16 * 1024 {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&buffer).to_string()
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_descriptor_signatures_cover_core_forms() {
+    let labels: Vec<&str> = WEBREAD_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|sig| sig.label)
+        .collect();
+    assert!(labels.contains(&"data = webread(url)"));
+    assert!(labels.contains(&"data = webread(url, optionsStruct)"));
+    assert!(labels.contains(&"data = webread(url, name, value, ...)"));
+}
+
+#[test]
+fn webread_query_values_preserve_exact_integer_vectors() {
+    let value = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("integer query vector"),
+    );
+    assert_eq!(
+        value_to_query_string(&value, "id").expect("query encoding"),
+        "9007199254740993,18446744073709551615"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_fetches_json_response() {
+    let url = spawn_server(|mut stream| {
+        let mut buffer = [0u8; 1024];
+        let _ = stream.read(&mut buffer);
+        respond_with(
+            stream,
+            "application/json",
+            br#"{"message":"hello","value":42}"#,
+        );
+    });
+
+    let result = run_webread(Value::from(url), vec![]).expect("webread JSON response");
+
+    match result {
+        Value::Struct(struct_value) => {
+            let message = struct_value.fields.get("message").expect("message field");
+            let value = struct_value.fields.get("value").expect("value field");
+            match message {
+                Value::CharArray(ca) => {
+                    let text: String = ca.data.iter().collect();
+                    assert_eq!(text, "hello");
+                }
+                other => panic!("expected char array, got {other:?}"),
+            }
+            match value {
+                Value::Num(n) => assert_eq!(*n, 42.0),
+                other => panic!("expected numeric value, got {other:?}"),
+            }
+        }
+        other => panic!("expected struct, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_fetches_text_response() {
+    let url = spawn_server(|mut stream| {
+        let mut buffer = [0u8; 512];
+        let _ = stream.read(&mut buffer);
+        respond_with(stream, "text/plain; charset=utf-8", b"RunMat webread test");
+    });
+
+    let result = run_webread(Value::from(url), vec![]).expect("webread text response");
+
+    match result {
+        Value::CharArray(ca) => {
+            let text: String = ca.data.iter().collect();
+            assert_eq!(text, "RunMat webread test");
+        }
+        other => panic!("expected char array, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_fetches_binary_payload() {
+    let payload = [1u8, 2, 3, 254, 255];
+    let url = spawn_server(move |mut stream| {
+        let mut buffer = [0u8; 512];
+        let _ = stream.read(&mut buffer);
+        respond_with(stream, "application/octet-stream", &payload);
+    });
+
+    let args = vec![Value::from("ContentType"), Value::from("binary")];
+    let result = run_webread(Value::from(url), args).expect("webread binary response");
+
+    match result {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 5]);
+            assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::U8(payload.to_vec()))
+            );
+
+            // Binary consumers must use exact uint8 backing storage rather
+            // than the compatibility f64 mirror.
+            let persisted = crate::data::DataArrayPayload::from_value(
+                "uint8".to_string(),
+                &Value::Tensor(tensor),
+            )
+            .expect("persist binary payload");
+            let bytes = serde_json::to_vec(&persisted).expect("encode payload");
+            let decoded: crate::data::DataArrayPayload =
+                serde_json::from_slice(&bytes).expect("decode payload");
+            assert_eq!(
+                decoded.values,
+                crate::data::DataArrayValues::U8(payload.to_vec())
+            );
+        }
+        other => panic!("expected tensor, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_appends_query_parameters() {
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let request = read_request_headers(&mut stream);
+        let _ = tx.send(request);
+        respond_with(stream, "application/json", br#"{"ok":true}"#);
+    });
+
+    let args = vec![
+        Value::from("count"),
+        Value::Num(42.0),
+        Value::from("ContentType"),
+        Value::from("json"),
+    ];
+    let result = run_webread(Value::from(url.clone()), args).expect("webread query");
+    match result {
+        Value::Struct(struct_value) => {
+            assert!(struct_value.fields.contains_key("ok"));
+        }
+        other => panic!("expected struct result, got {other:?}"),
+    }
+    let request = rx.recv().expect("request log");
+    assert!(
+        request.starts_with("GET /"),
+        "unexpected request line: {request}"
+    );
+    assert!(
+        request.contains("count=42"),
+        "query parameters missing: {request}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_struct_argument_supports_options_and_query() {
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let request = read_request_headers(&mut stream);
+        let _ = tx.send(request);
+        respond_with(stream, "application/json", br#"{"value":123}"#);
+    });
+
+    let mut fields = StructValue::new();
+    fields
+        .fields
+        .insert("ContentType".to_string(), Value::from("json"));
+    fields.fields.insert("limit".to_string(), Value::Num(5.0));
+
+    let result = run_webread(Value::from(url.clone()), vec![Value::Struct(fields)])
+        .expect("webread struct arg");
+
+    let request = rx.recv().expect("request log");
+    assert!(
+        request.contains("GET /?limit=5"),
+        "expected limit query parameter: {request}"
+    );
+
+    match result {
+        Value::Struct(struct_value) => match struct_value.fields.get("value") {
+            Some(Value::Num(n)) => assert_eq!(*n, 123.0),
+            other => panic!("unexpected JSON decode result: {other:?}"),
+        },
+        other => panic!("expected struct, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_headerfields_struct_applies_custom_headers() {
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let request = read_request_headers(&mut stream);
+        let _ = tx.send(request);
+        respond_with(stream, "application/json", br#"{"ok":true}"#);
+    });
+
+    let mut headers = StructValue::new();
+    headers
+        .fields
+        .insert("X-Test".to_string(), Value::from("RunMat"));
+
+    let args = vec![
+        Value::from("HeaderFields"),
+        Value::Struct(headers),
+        Value::from("ContentType"),
+        Value::from("json"),
+    ];
+
+    let result = run_webread(Value::from(url), args).expect("webread header fields");
+    assert!(matches!(result, Value::Struct(_)));
+
+    let request = rx.recv().expect("request log");
+    assert!(
+        request.to_ascii_lowercase().contains("x-test: runmat"),
+        "custom header missing: {request}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_queryparameters_option_struct() {
+    let (tx, rx) = mpsc::channel();
+    let url = spawn_server(move |mut stream| {
+        let request = read_request_headers(&mut stream);
+        let _ = tx.send(request);
+        respond_with(stream, "application/json", br#"{"ok":true}"#);
+    });
+
+    let mut params = StructValue::new();
+    params.fields.insert("page".to_string(), Value::Num(2.0));
+
+    let args = vec![
+        Value::from("QueryParameters"),
+        Value::Struct(params),
+        Value::from("ContentType"),
+        Value::from("json"),
+    ];
+
+    let result = run_webread(Value::from(url.clone()), args).expect("webread query parameters");
+    assert!(matches!(result, Value::Struct(_)));
+
+    let request = rx.recv().expect("request log");
+    assert!(
+        request.contains("page=2"),
+        "query parameter missing: {request}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_errors_on_missing_name_value_pair() {
+    let err = run_webread(
+        Value::from("https://example.com"),
+        vec![Value::from("Timeout")],
+    )
+    .expect_err("expected missing value error");
+    let err = error_message(err);
+    assert!(
+        err.contains("missing value"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_rejects_non_positive_timeout() {
+    let args = vec![Value::from("Timeout"), Value::Num(0.0)];
+    let err = run_webread(Value::from("https://example.com"), args).expect_err("timeout error");
+    let err = error_message(err);
+    assert!(
+        err.contains("Timeout must be a positive scalar"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_rejects_password_without_username() {
+    let args = vec![Value::from("Password"), Value::from("secret")];
+    let err = run_webread(Value::from("https://example.com"), args).expect_err("auth error");
+    let err = error_message(err);
+    assert!(
+        err.contains("Password requires a Username"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_rejects_unsupported_content_type() {
+    let args = vec![Value::from("ContentType"), Value::from("table")];
+    let err = run_webread(Value::from("https://example.com"), args).expect_err("format error");
+    let err = error_message(err);
+    assert!(
+        err.contains("unsupported ContentType"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn webread_rejects_invalid_headerfields_shape() {
+    let cell = crate::make_cell(
+        vec![Value::from("A"), Value::from("B"), Value::from("C")],
+        1,
+        3,
+    )
+    .expect("make cell");
+
+    let args = vec![Value::from("HeaderFields"), cell];
+    let err = run_webread(Value::from("https://example.com"), args).expect_err("header error");
+    let err = error_message(err);
+    assert!(
+        err.contains("HeaderFields cell array must have exactly two columns"),
+        "unexpected error message: {err}"
+    );
+}

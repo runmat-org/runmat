@@ -1,12 +1,14 @@
 //! URL, download, and mail compatibility helpers.
 
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+#[path = "compat/websave_helpers.rs"]
+mod websave_helpers;
+#[path = "compat/sendmail_helpers.rs"]
+mod sendmail_helpers;
+use sendmail_helpers::*;
+use websave_helpers::*;
+
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+use runmat_builtins::{WEBSAVE_DESCRIPTOR, WEBSAVE_ERROR_OUTPUTS, WEBSAVE_EXPLICIT_GPU_EXTENSION};
 use runmat_value::NumericScalar;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
@@ -102,57 +104,6 @@ pub const URLDECODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "urldecode accepts host text only; integer and resident numeric values reject before provider access or decoding.",
     };
-simple_descriptor!(
-    WEBSAVE_SIGNATURES,
-    WEBSAVE_DESCRIPTOR,
-    "filename = websave(filename, url)",
-    &INPUTS_TWO
-);
-const WEBSAVE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "websave-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "passing explicit gpuArray values to host-only websave is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:WebsaveExplicitGpuInputExtension"),
-};
-pub const WEBSAVE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [WEBSAVE_EXPLICIT_GPU_EXTENSION];
-const WEBSAVE_QUERY_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "QueryValue",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Integer scalars and vectors are rendered directly from authoritative storage, including full-width signed and unsigned values.",
-    }];
-const WEBSAVE_TIMEOUT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "options.Timeout",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A positive integer timeout is bounded before conversion to the host HTTP duration.",
-    }];
-pub const WEBSAVE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "filename = websave(filename, url, query_name, integer_query_value, ...)",
-        inputs: &WEBSAVE_QUERY_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Default comma-separated query encoding preserves every integer element exactly; the returned filename remains text.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "filename = websave(filename, url, ..., options) with integer options.Timeout",
-        inputs: &WEBSAVE_TIMEOUT_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The bounded timeout crosses the host duration boundary; explicit gpuArray arguments are separately gated before provider access while automatic residency gathers transparently.",
-    },
-];
 const SENDMAIL_INPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "to",
@@ -337,14 +288,6 @@ fn percent_decode(text: &str) -> BuiltinResult<String> {
 
 #[runtime_builtin(
     name = "websave",
-    category = "io/http",
-    summary = "Download URL content into a file.",
-    keywords = "websave,download,url,file,http",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::http::compat::WEBSAVE_DESCRIPTOR),
-    extensions(crate::builtins::io::http::compat::WEBSAVE_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::http::compat::WEBSAVE_INTEGER_CAPABILITIES),
     binding_variant = "default",
     context = true,
     builtin_path = "crate::builtins::io::http::compat"
@@ -353,6 +296,11 @@ async fn websave_builtin(
     context: Option<crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &WEBSAVE_DESCRIPTOR,
+        &WEBSAVE_ERROR_OUTPUTS,
+        "websave",
+    )?;
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -362,7 +310,6 @@ async fn websave_builtin(
             "websave",
         )?;
     }
-    let args = gather_args("websave", &args).await?;
     if args.len() < 2 {
         return Err(compat_error(
             "websave",
@@ -373,16 +320,11 @@ async fn websave_builtin(
     let url_text = scalar_text(&args[1], "websave", "url")?;
     let mut url = Url::parse(&url_text)
         .map_err(|err| compat_error("websave", format!("websave: invalid URL ({err})")))?;
+    let rest = gather_args("websave", &args[2..]).await?;
     let mut headers = Vec::new();
     let mut timeout = DEFAULT_TIMEOUT;
     let mut user_agent = USER_AGENT.to_string();
-    parse_websave_rest(
-        &mut url,
-        &mut headers,
-        &mut timeout,
-        &mut user_agent,
-        &args[2..],
-    )?;
+    parse_websave_rest(&mut url, &mut headers, &mut timeout, &mut user_agent, &rest)?;
     let response = transport::send_request(
         HttpRequest {
             url,
@@ -405,224 +347,6 @@ async fn websave_builtin(
         .await
         .map_err(|err| compat_error("websave", format!("websave: {err}")))?;
     Ok(char_value(&path_to_string(&filename)))
-}
-
-fn parse_websave_rest(
-    url: &mut Url,
-    headers: &mut Vec<(String, String)>,
-    timeout: &mut Duration,
-    user_agent: &mut String,
-    args: &[Value],
-) -> BuiltinResult<()> {
-    let mut idx = 0usize;
-    if let Some(Value::Struct(options)) = args.first() {
-        apply_websave_options(options, headers, timeout, user_agent)?;
-        idx = 1;
-    }
-    if !(args.len() - idx).is_multiple_of(2) {
-        return Err(compat_error(
-            "websave",
-            "websave: name-value arguments must be paired",
-        ));
-    }
-    while idx < args.len() {
-        let name = scalar_text(&args[idx], "websave", "name")?;
-        let value = &args[idx + 1];
-        match name.to_ascii_lowercase().as_str() {
-            "timeout" => {
-                *timeout = duration_from_seconds(numeric_seconds(value, "websave Timeout")?)
-            }
-            "useragent" => *user_agent = scalar_text(value, "websave", "UserAgent")?,
-            "headerfields" => {
-                return Err(compat_error(
-                    "websave",
-                    "websave: HeaderFields must be supplied through weboptions",
-                ));
-            }
-            _ => {
-                let value = query_value_to_string(value, &name)?;
-                url.query_pairs_mut().append_pair(&name, &value);
-            }
-        }
-        idx += 2;
-    }
-    Ok(())
-}
-
-fn apply_websave_options(
-    options: &runmat_value::StructValue,
-    headers: &mut Vec<(String, String)>,
-    timeout: &mut Duration,
-    user_agent: &mut String,
-) -> BuiltinResult<()> {
-    if let Some(value) = options.fields.get("Timeout") {
-        *timeout = duration_from_seconds(numeric_seconds(value, "websave Timeout")?);
-    }
-    if let Some(value) = options.fields.get("UserAgent") {
-        let ua = scalar_text(value, "websave", "UserAgent")?;
-        if !ua.is_empty() {
-            *user_agent = ua;
-        }
-    }
-    if let Some(value) = options.fields.get("HeaderFields") {
-        append_header_fields(value, headers)?;
-    }
-    Ok(())
-}
-
-fn numeric_seconds(value: &Value, label: &str) -> BuiltinResult<f64> {
-    match value {
-        Value::Num(v) if *v > 0.0 && (!v.is_finite() || *v <= MAX_TIMEOUT_SECONDS) => Ok(*v),
-        Value::Int(v) if v.to_i64() > 0 && v.to_f64() <= MAX_TIMEOUT_SECONDS => Ok(v.to_f64()),
-        Value::Tensor(tensor) if tensor.len() == 1 => {
-            let value = tensor
-                .numeric_value_at(0)
-                .expect("timeout tensor index must exist");
-            let seconds = format_numeric_scalar(value).parse::<f64>().map_err(|_| {
-                compat_error(
-                    "websave",
-                    format!("websave: {label} must be a positive numeric scalar"),
-                )
-            })?;
-            if seconds > 0.0 && (!seconds.is_finite() || seconds <= MAX_TIMEOUT_SECONDS) {
-                Ok(seconds)
-            } else {
-                Err(compat_error(
-                    "websave",
-                    format!("websave: {label} is outside the supported timeout range"),
-                ))
-            }
-        }
-        Value::String(text) => parse_positive_seconds(text),
-        Value::CharArray(array) if array.rows == 1 => {
-            parse_positive_seconds(&array.data.iter().collect::<String>())
-        }
-        _ => Err(compat_error(
-            "websave",
-            format!("websave: {label} must be a positive finite scalar"),
-        )),
-    }
-}
-
-fn parse_positive_seconds(text: &str) -> BuiltinResult<f64> {
-    let seconds: f64 = text.trim().parse().map_err(|_| {
-        compat_error(
-            "websave",
-            "websave: Timeout must be a positive finite scalar",
-        )
-    })?;
-    if seconds > 0.0 && (!seconds.is_finite() || seconds <= MAX_TIMEOUT_SECONDS) {
-        Ok(seconds)
-    } else {
-        Err(compat_error(
-            "websave",
-            "websave: Timeout must be a positive finite scalar",
-        ))
-    }
-}
-
-fn duration_from_seconds(seconds: f64) -> Duration {
-    Duration::from_secs_f64(if seconds.is_infinite() {
-        MAX_TIMEOUT_SECONDS
-    } else {
-        seconds
-    })
-}
-
-fn query_value_to_string(value: &Value, name: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
-            scalar_text(value, "websave", name)
-        }
-        Value::Num(value) => Ok(value.to_string()),
-        Value::Int(value) => Ok(value.decimal_string()),
-        Value::Bool(value) => Ok(if *value { "true" } else { "false" }.to_string()),
-        Value::Tensor(tensor)
-            if tensor.shape.len() <= 2 && (tensor.rows() == 1 || tensor.cols() == 1) =>
-        {
-            Ok((0..tensor.len())
-                .map(|index| {
-                    format_numeric_scalar(
-                        tensor
-                            .numeric_value_at(index)
-                            .expect("query tensor index must exist"),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(","))
-        }
-        Value::LogicalArray(array)
-            if array.shape.len() <= 2
-                && (array.shape.first().copied().unwrap_or(1) == 1
-                    || array.shape.get(1).copied().unwrap_or(1) == 1) =>
-        {
-            Ok(array
-                .data
-                .iter()
-                .map(|value| if *value != 0 { "true" } else { "false" })
-                .collect::<Vec<_>>()
-                .join(","))
-        }
-        _ => Err(compat_error(
-            "websave",
-            format!("websave: query value '{name}' must be text or a numeric, logical, or datetime scalar or vector"),
-        )),
-    }
-}
-
-fn format_numeric_scalar(value: NumericScalar) -> String {
-    match value {
-        NumericScalar::F64(value) => value.to_string(),
-        NumericScalar::F32(value) => value.to_string(),
-        NumericScalar::I8(value) => value.to_string(),
-        NumericScalar::I16(value) => value.to_string(),
-        NumericScalar::I32(value) => value.to_string(),
-        NumericScalar::I64(value) => value.to_string(),
-        NumericScalar::U8(value) => value.to_string(),
-        NumericScalar::U16(value) => value.to_string(),
-        NumericScalar::U32(value) => value.to_string(),
-        NumericScalar::U64(value) => value.to_string(),
-    }
-}
-
-fn append_header_fields(value: &Value, headers: &mut Vec<(String, String)>) -> BuiltinResult<()> {
-    match value {
-        Value::Struct(st) => {
-            for (name, value) in &st.fields {
-                let header_value = scalar_text(value, "websave", "HeaderFields value")?;
-                if !name.is_empty() && !header_value.is_empty() {
-                    headers.push((name.clone(), header_value));
-                }
-            }
-            Ok(())
-        }
-        Value::Cell(cell) if cell.cols == 2 => {
-            for row in 0..cell.rows {
-                let name = scalar_text(&cell.data[row * cell.cols], "websave", "header name")?;
-                let value =
-                    scalar_text(&cell.data[row * cell.cols + 1], "websave", "header value")?;
-                if !name.is_empty() && !value.is_empty() {
-                    headers.push((name, value));
-                }
-            }
-            Ok(())
-        }
-        Value::Cell(_) => Err(compat_error(
-            "websave",
-            "websave: HeaderFields cell array must have two columns",
-        )),
-        _ => Err(compat_error(
-            "websave",
-            "websave: HeaderFields must be a struct or two-column cell array",
-        )),
-    }
-}
-
-fn path_from_value(value: &Value, name: &str) -> BuiltinResult<PathBuf> {
-    let text = scalar_text(value, name, "filename")?;
-    Ok(PathBuf::from(
-        expand_user_path(text.trim(), name).map_err(|err| compat_error(name, err))?,
-    ))
 }
 
 #[runtime_builtin(
@@ -689,285 +413,6 @@ async fn sendmail_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ))
 }
 
-fn parse_sendmail_args(args: &[Value]) -> BuiltinResult<(Vec<String>, String, String)> {
-    if args.len() < 2 || args.len() > 4 {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: recipient, subject, optional message, and optional attachments are expected",
-        ));
-    }
-    let recipients = recipients_from_value(&args[0])?;
-    let subject = scalar_text(&args[1], "sendmail", "subject")?;
-    let body = args
-        .get(2)
-        .map(|value| scalar_text(value, "sendmail", "message"))
-        .transpose()?
-        .unwrap_or_default();
-    if recipients.is_empty() {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: recipient must not be empty",
-        ));
-    }
-    if args.len() == 4 {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: attachments are not supported by the current mail transport",
-        ));
-    }
-    Ok((recipients, subject, body))
-}
-
-fn value_contains_resident(value: &Value) -> bool {
-    match value {
-        Value::GpuTensor(_) => true,
-        Value::Cell(value) => value.data.iter().any(value_contains_resident),
-        Value::Struct(value) => value.fields.values().any(value_contains_resident),
-        Value::Object(value) => value.properties.values().any(value_contains_resident),
-        Value::Closure(value) => value.captures.iter().any(value_contains_resident),
-        Value::OutputList(values) => values.iter().any(value_contains_resident),
-        _ => false,
-    }
-}
-
-fn recipients_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
-    match value {
-        Value::StringArray(array) => Ok(array
-            .data
-            .iter()
-            .filter(|value| !value.trim().is_empty())
-            .cloned()
-            .collect()),
-        Value::Cell(cell) => {
-            let mut out = Vec::new();
-            for value in &cell.data {
-                let recipient = scalar_text(value, "sendmail", "recipient")?;
-                if !recipient.trim().is_empty() {
-                    out.push(recipient);
-                }
-            }
-            Ok(out)
-        }
-        value => {
-            let recipient = scalar_text(value, "sendmail", "recipient")?;
-            if recipient.trim().is_empty() {
-                Ok(Vec::new())
-            } else {
-                Ok(vec![recipient])
-            }
-        }
-    }
-}
-
-fn format_mail_message(recipients: &[String], subject: &str, body: &str) -> String {
-    let subject = subject.replace(['\r', '\n'], " ");
-    format!(
-        "To: {}\nSubject: {subject}\nContent-Type: text/plain; charset=utf-8\n\n{body}\n",
-        recipients.join(", ")
-    )
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn try_sendmail_command(recipients: &[String], message: &str) -> BuiltinResult<bool> {
-    let configured = std::env::var("RUNMAT_SENDMAIL_COMMAND").ok();
-    let command = configured
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            let path = PathBuf::from("/usr/sbin/sendmail");
-            if path.exists() {
-                Some(path)
-            } else {
-                None
-            }
-        });
-    let Some(command) = command else {
-        return Ok(false);
-    };
-    let mut child = Command::new(&command)
-        .arg("-t")
-        .arg("-oi")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| {
-            compat_error(
-                "sendmail",
-                format!("sendmail: unable to spawn {} ({err})", command.display()),
-            )
-        })?;
-    {
-        let stdin = child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| compat_error("sendmail", "sendmail: unable to open mail stdin"))?;
-        use std::io::Write;
-        stdin
-            .write_all(message.as_bytes())
-            .map_err(|err| compat_error("sendmail", format!("sendmail: {err}")))?;
-    }
-    let output = child
-        .wait_with_output()
-        .map_err(|err| compat_error("sendmail", format!("sendmail: {err}")))?;
-    if output.status.success() {
-        return Ok(true);
-    }
-    let detail = String::from_utf8_lossy(&output.stderr);
-    Err(compat_error(
-        "sendmail",
-        format!(
-            "sendmail: {} failed for {} ({})",
-            command.display(),
-            recipients.join(", "),
-            detail.trim()
-        ),
-    ))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn try_sendmail_command(_recipients: &[String], _message: &str) -> BuiltinResult<bool> {
-    Ok(false)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
-        futures::executor::block_on(value)
-    }
-
-    #[test]
-    fn url_round_trip_uses_percent_encoding() {
-        let encoded = run(urlencode_builtin(vec![Value::String("a b/c".to_string())])).unwrap();
-        assert_eq!(encoded, char_value("a%20b%2Fc"));
-        let decoded = run(urldecode_builtin(vec![char_value("a%20b%2Fc")])).unwrap();
-        assert_eq!(decoded, char_value("a b/c"));
-    }
-
-    #[test]
-    fn url_text_helpers_reject_integer_and_resident_values_before_provider_access() {
-        assert_eq!(
-            URLENCODE_INTEGER_AUDIT.kind,
-            BuiltinIntegerAuditKind::NotApplicable
-        );
-        assert_eq!(
-            URLDECODE_INTEGER_AUDIT.kind,
-            BuiltinIntegerAuditKind::NotApplicable
-        );
-        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
-            .allocate_zeroed(
-                vec![1, 1],
-                runmat_accelerate_api::NumericElementType::F64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            )
-            .unwrap();
-        let original = allocation.handle.wire_descriptor();
-        assert!(
-            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
-                .is_none()
-        );
-        for error in [
-            run(urlencode_builtin(vec![Value::Int(
-                runmat_value::IntValue::U64(u64::MAX),
-            )]))
-            .expect_err("integer text must reject"),
-            run(urldecode_builtin(vec![Value::GpuTensor(
-                allocation.handle.clone(),
-            )]))
-            .expect_err("resident text must reject"),
-        ] {
-            assert!(error
-                .message()
-                .contains("host string scalar or character vector"));
-            assert!(!error.message().to_ascii_lowercase().contains("provider"));
-        }
-        assert_eq!(allocation.handle.wire_descriptor(), original);
-        assert_eq!(allocation.probe.retirements(), 0);
-        drop(allocation.handle);
-        assert_eq!(allocation.probe.retirements(), 1);
-    }
-
-    #[test]
-    fn websave_rest_applies_options_and_query_pairs() {
-        let mut url = Url::parse("https://example.test/data").unwrap();
-        let mut headers = Vec::new();
-        let mut timeout = DEFAULT_TIMEOUT;
-        let mut user_agent = USER_AGENT.to_string();
-        let mut options = runmat_value::StructValue::new();
-        options.insert("Timeout", Value::Num(7.0));
-        options.insert("UserAgent", Value::String("agent".to_string()));
-        let mut header_struct = runmat_value::StructValue::new();
-        header_struct.insert("XRunMat", Value::String("yes".to_string()));
-        options.insert("HeaderFields", Value::Struct(header_struct));
-
-        parse_websave_rest(
-            &mut url,
-            &mut headers,
-            &mut timeout,
-            &mut user_agent,
-            &[
-                Value::Struct(options),
-                Value::String("q".to_string()),
-                Value::String("hello world".to_string()),
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(url.query(), Some("q=hello+world"));
-        assert_eq!(headers, vec![("XRunMat".to_string(), "yes".to_string())]);
-        assert_eq!(timeout, Duration::from_secs(7));
-        assert_eq!(user_agent, "agent");
-    }
-
-    #[test]
-    fn websave_query_values_preserve_exact_integer_vectors() {
-        let value = Value::Tensor(
-            runmat_value::Tensor::new_integer(
-                runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
-                vec![1, 2],
-            )
-            .expect("integer query vector"),
-        );
-        assert_eq!(
-            query_value_to_string(&value, "id").expect("query encoding"),
-            "9007199254740993,18446744073709551615"
-        );
-    }
-
-    #[test]
-    fn sendmail_rejects_integer_payloads_before_transport() {
-        let error = run(sendmail_builtin(vec![
-            Value::String("recipient@example.test".to_string()),
-            Value::String("subject".to_string()),
-            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
-        ]))
-        .expect_err("integer message must reject before transport selection");
-        assert!(error.message().contains("must be text"));
-
-        let nested =
-            runmat_value::CellArray::new(vec![Value::Int(runmat_value::IntValue::I8(1))], 1, 1)
-                .unwrap();
-        let error = run(sendmail_builtin(vec![
-            Value::Cell(nested),
-            Value::String("subject".to_string()),
-            Value::String("message".to_string()),
-        ]))
-        .expect_err("nested integer recipient must reject before transport selection");
-        assert!(error.message().contains("must be text"));
-    }
-
-    #[test]
-    fn sendmail_two_argument_form_uses_an_empty_message() {
-        let (recipients, subject, message) = parse_sendmail_args(&[
-            Value::String("recipient@example.test".to_string()),
-            Value::String("subject".to_string()),
-        ])
-        .expect("two-argument sendmail form");
-        assert_eq!(recipients, ["recipient@example.test"]);
-        assert_eq!(subject, "subject");
-        assert!(message.is_empty());
-    }
-}
+#[path = "compat/tests.rs"]
+pub(crate) mod tests;

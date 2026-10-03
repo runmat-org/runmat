@@ -60,6 +60,11 @@ pub struct TransportError {
 }
 
 impl TransportError {
+    /// The host could not start its reusable HTTP service. No request was sent.
+    pub fn host_service_unavailable(url: &Url, detail: impl Into<String>) -> Self {
+        Self::new(TransportErrorKind::Other, url, detail)
+    }
+
     pub(super) fn new(kind: TransportErrorKind, url: &Url, detail: impl Into<String>) -> Self {
         let url = url.to_string();
         let detail = detail.into();
