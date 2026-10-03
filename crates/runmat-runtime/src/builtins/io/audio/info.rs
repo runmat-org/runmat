@@ -30,11 +30,13 @@ pub(super) async fn audioinfo_builtin(
             audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
         })?;
         cooperation.completed(0).await?;
-        Ok(match outputs {
+        let value = match outputs {
             Some(0) => Value::OutputList(Vec::new()),
             None | Some(1) => Value::Struct(metadata.into_struct(&path, scan.file_size as f64)),
             Some(_) => unreachable!("output arity was admitted before filesystem capture"),
-        })
+        };
+        cooperation.completed(0).await?;
+        Ok(value)
     }
     .await;
     finish_receipt(receipt, &result, cooperation.was_cancelled());

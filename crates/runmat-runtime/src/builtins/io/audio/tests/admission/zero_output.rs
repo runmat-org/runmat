@@ -1,7 +1,6 @@
 use super::*;
 use crate::context::host_effect::{HostEffectOutput, HostEffectWorkload};
 use runmat_execution::cancellation::CancellationSource;
-use runmat_execution::CancellationReason;
 use runmat_execution::{ResourceBoundUnavailable, ResourceByteBound, WholeWorkObservationOutcome};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
