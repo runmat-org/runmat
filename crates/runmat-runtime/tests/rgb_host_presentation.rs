@@ -388,6 +388,12 @@ fn indexed_color_gathers_two_providers_and_restores_only_to_explicit_map_owner()
     let (index_provider, _index_guard) = provider();
     let (map_provider, _map_guard) = provider();
     assert_ne!(index_provider.device_id(), map_provider.device_id());
+    // Both leaked fixtures remain alive for the process lifetime and own
+    // distinct device namespaces. Ambient selection alone addresses only one.
+    unsafe {
+        runmat_accelerate_api::register_device_provider(index_provider);
+        runmat_accelerate_api::register_device_provider(map_provider);
+    }
     let indexed = gpu_helpers::upload_tensor(
         index_provider,
         &Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap(),
