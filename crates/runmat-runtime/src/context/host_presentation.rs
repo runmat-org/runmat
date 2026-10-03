@@ -62,6 +62,11 @@ impl HostPresentationReceipt {
         self.finish(Ok(true));
     }
 
+    pub(crate) fn finish_preparation_host_fallback(mut self) {
+        self.receipt.confirm_preparation_host_fallback();
+        self.finish(Ok(true));
+    }
+
     /// An Unsupported hook may instead publish the admitted host result on
     /// its exact provider owner. The upload must have completed publication
     /// validation before this terminal witness is supplied.
@@ -72,6 +77,15 @@ impl HostPresentationReceipt {
 
     pub(crate) fn begin_conditional_provider_upload(&mut self) {
         self.receipt.begin_conditional_provider_upload();
+    }
+
+    pub(crate) fn begin_preparation_provider_upload(&mut self) {
+        self.receipt.begin_preparation_provider_upload();
+    }
+
+    pub(crate) fn finish_preparation_provider_upload(mut self) {
+        self.receipt.confirm_preparation_provider_upload();
+        self.finish(Ok(true));
     }
 
     /// `published` means every requested output was validated as owned by the

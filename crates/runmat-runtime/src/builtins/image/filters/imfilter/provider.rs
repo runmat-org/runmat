@@ -98,14 +98,47 @@ pub(super) async fn imfilter_gpu(
         )? {
             Some(uploaded) => uploaded,
             None => {
-                return imfilter_gpu_host_fallback(
-                    provider,
-                    &image_handle,
-                    &kernel_tensor,
-                    &options,
-                    resident_kernel.as_ref(),
+                let explicit = runmat_accelerate_api::handle_is_explicit(&image_handle);
+                if explicit {
+                    if let Some(selection) = selected.as_mut() {
+                        selection.begin_preparation_provider_upload();
+                    }
+                }
+                let result = runmat_accelerate_api::observation::observe_provider_future(
+                    selected.as_ref().map(|selection| selection.recorder()),
+                    imfilter_gpu_host_fallback(
+                        provider,
+                        &image_handle,
+                        &kernel_tensor,
+                        &options,
+                        resident_kernel.as_ref(),
+                    ),
                 )
-                .await
+                .await;
+                let result = validate_conditional_restore(
+                    result,
+                    selected.as_ref(),
+                    &image_handle,
+                    resident_kernel.as_ref(),
+                    &expected_shape,
+                    expected_precision,
+                    provider,
+                );
+                if let Some(selection) = selected {
+                    match (&result, explicit) {
+                        (Ok(Value::GpuTensor(_)), true) => {
+                            selection.finish_preparation_provider_upload()
+                        }
+                        (Ok(_), false) => selection.finish_preparation_host_fallback(),
+                        (Ok(_), true) => selection.finish(Err(
+                            runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed,
+                        )),
+                        (Err(_), _) => selection.finish(Err(
+                            runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                        )),
+                    }
+                }
+                return result;
             }
         },
     };
@@ -139,7 +172,7 @@ pub(super) async fn imfilter_gpu(
             if !valid_provider_output(
                 &output,
                 &image_handle,
-                &kernel_handle,
+                Some(&kernel_handle),
                 &expected_shape,
                 expected_precision,
                 provider,
@@ -182,28 +215,15 @@ pub(super) async fn imfilter_gpu(
                 ),
             )
             .await;
-            let result = match result {
-                Ok(Value::GpuTensor(output))
-                    if selected.as_ref().is_some_and(|selection| {
-                        !valid_provider_output(
-                            &output,
-                            &image_handle,
-                            &kernel_handle,
-                            &expected_shape,
-                            expected_precision,
-                            provider,
-                        ) || !selection.admits_conditional_provider_upload(&output)
-                    }) =>
-                {
-                    let mut error = imfilter_error_with_detail(
-                        &IMFILTER_ERROR_INTERNAL,
-                        "conditional restore returned a result outside its admitted physical route",
-                    );
-                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                    Err(gpu_helpers::reject_gpu_output(output, error))
-                }
-                other => other,
-            };
+            let result = validate_conditional_restore(
+                result,
+                selected.as_ref(),
+                &image_handle,
+                Some(&kernel_handle),
+                &expected_shape,
+                expected_precision,
+                provider,
+            );
             if let Some(selection) = selected {
                 match (&result, explicit) {
                     (Ok(Value::GpuTensor(_)), true) => {
@@ -554,10 +574,37 @@ async fn imfilter_gpu_host_fallback(
     }
 }
 
+fn validate_conditional_restore(
+    result: BuiltinResult<Value>,
+    selected: Option<&crate::context::provider_operation::SelectedProviderOperation>,
+    image: &GpuTensorHandle,
+    kernel: Option<&GpuTensorHandle>,
+    expected_shape: &[usize],
+    precision: ProviderPrecision,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> BuiltinResult<Value> {
+    match result {
+        Ok(Value::GpuTensor(output))
+            if selected.is_some_and(|selection| {
+                !valid_provider_output(&output, image, kernel, expected_shape, precision, provider)
+                    || !selection.admits_conditional_provider_upload(&output)
+            }) =>
+        {
+            let mut error = imfilter_error_with_detail(
+                &IMFILTER_ERROR_INTERNAL,
+                "conditional restore returned a result outside its admitted physical route",
+            );
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(gpu_helpers::reject_gpu_output(output, error))
+        }
+        other => other,
+    }
+}
+
 fn valid_provider_output(
     output: &GpuTensorHandle,
     image: &GpuTensorHandle,
-    kernel: &GpuTensorHandle,
+    kernel: Option<&GpuTensorHandle>,
     expected_shape: &[usize],
     expected_precision: ProviderPrecision,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
@@ -565,7 +612,7 @@ fn valid_provider_output(
     output.shape() == expected_shape
         && output.device_id() == image.device_id()
         && !output.shares_allocation_with(image)
-        && !output.shares_allocation_with(kernel)
+        && !kernel.is_some_and(|kernel| output.shares_allocation_with(kernel))
         && output.allocation_lease().validate_live().is_ok()
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))

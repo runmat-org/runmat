@@ -23,7 +23,7 @@ use runmat_runtime::{
 use runmat_value::{Tensor, Value};
 use std::{
     rc::Rc,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 struct HostBudget(u64);
@@ -51,7 +51,7 @@ fn context(session: Rc<PlacementSession>, host_bytes: u64) -> RuntimeContext {
     )
 }
 
-struct UnsupportedImfilter(&'static WgpuProvider, AtomicUsize, bool);
+struct UnsupportedImfilter(&'static WgpuProvider, AtomicUsize, bool, AtomicBool);
 impl AccelProvider for UnsupportedImfilter {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.0.upload(host)
@@ -60,6 +60,11 @@ impl AccelProvider for UnsupportedImfilter {
         self.0.download(handle)
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+        if self.3.swap(false, Ordering::SeqCst) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "fixture: H preparation unavailable",
+            ));
+        }
         self.0.upload_numeric_raw(host)
     }
     fn download_numeric<'a>(
@@ -165,6 +170,7 @@ fn explicit_unsupported_restores_exact_owner_after_one_completed_whole_call() {
         backend,
         AtomicUsize::new(0),
         false,
+        AtomicBool::new(false),
     )));
     let _owner = ThreadProviderGuard::set(Some(facade));
     let input = backend
@@ -238,6 +244,7 @@ fn explicit_unsupported_restores_exact_owner_after_one_completed_whole_call() {
         backend,
         AtomicUsize::new(0),
         true,
+        AtomicBool::new(false),
     )));
     let _unavailable_owner = ThreadProviderGuard::set(Some(unavailable));
     let before = backend.telemetry_snapshot();
@@ -255,4 +262,45 @@ fn explicit_unsupported_restores_exact_owner_after_one_completed_whole_call() {
     let after = backend.telemetry_snapshot();
     assert_eq!(after.upload_bytes, before.upload_bytes);
     assert_eq!(after.download_bytes, before.download_bytes);
+
+    let preparation: &'static UnsupportedImfilter = Box::leak(Box::new(UnsupportedImfilter(
+        backend,
+        AtomicUsize::new(0),
+        false,
+        AtomicBool::new(true),
+    )));
+    let _preparation_owner = ThreadProviderGuard::set(Some(preparation));
+    let session = Rc::new(PlacementSession::new(Default::default()));
+    let prepared_result = block_on(call_builtin_async_in_context(
+        &context(session.clone(), 4096),
+        "imfilter",
+        &args,
+    ))
+    .expect("admitted preparation Unsupported continuation");
+    let Value::GpuTensor(prepared_output) = prepared_result else {
+        panic!("explicit preparation fallback must restore the original owner")
+    };
+    assert_eq!(preparation.1.load(Ordering::SeqCst), 0);
+    assert_eq!(prepared_output.device_id(), input.device_id());
+    assert_eq!(
+        block_on(backend.download_numeric(&prepared_output))
+            .expect("prepared fallback readback")
+            .data,
+        HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0]),
+    );
+    assert!(
+        (0..1000).any(|_| {
+            if session.profile_snapshot().feedback.iter().any(|sample| {
+                sample.signature.operation == "imfilter"
+                    && sample.samples == 1
+                    && sample.failures == 0
+            }) {
+                true
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                false
+            }
+        }),
+        "preparation Unsupported must have one completion-qualified receipt"
+    );
 }

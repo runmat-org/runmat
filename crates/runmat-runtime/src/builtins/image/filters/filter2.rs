@@ -456,11 +456,13 @@ async fn filter2_gpu(
                             options,
                         );
                         if let Some(prepared) = prepared_selection {
-                            prepared.selection.finish(if result.is_ok() {
-                                Ok(false)
+                            if result.is_ok() {
+                                prepared.selection.finish_preparation_host_fallback();
                             } else {
-                                Err(runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed)
-                            });
+                                prepared.selection.finish(Err(
+                                    runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                                ));
+                            }
                         }
                         return result;
                     }
@@ -494,11 +496,13 @@ async fn filter2_gpu(
                     let result =
                         filter2_host(Value::Tensor(tensor), Value::Tensor(image_tensor), options);
                     if let Some(prepared) = prepared_selection {
-                        prepared.selection.finish(if result.is_ok() {
-                            Ok(false)
+                        if result.is_ok() {
+                            prepared.selection.finish_preparation_host_fallback();
                         } else {
-                            Err(runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed)
-                        });
+                            prepared.selection.finish(Err(
+                                runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                            ));
+                        }
                     }
                     return result;
                 }

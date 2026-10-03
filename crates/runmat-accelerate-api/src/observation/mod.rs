@@ -113,6 +113,9 @@ pub enum ProviderRouteOutcome {
     /// The selected hook returned Unsupported; the admitted conditional host
     /// continuation published a validated result on the original provider.
     ConditionalProviderUpload,
+    /// H preparation returned Unsupported before the selected hook began.
+    PreparationHostFallback,
+    PreparationProviderUpload,
 }
 
 /// Stage measurements are separate from the end-to-end total: intervals may

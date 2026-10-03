@@ -96,6 +96,10 @@ impl SelectedProviderOperation {
         self.receipt.begin_conditional_provider_upload();
     }
 
+    pub(crate) fn begin_preparation_provider_upload(&mut self) {
+        self.receipt.begin_preparation_provider_upload();
+    }
+
     pub(crate) fn recorder(&self) -> ProviderOperationRecorder {
         self.receipt.recorder()
     }
@@ -122,8 +126,16 @@ impl SelectedProviderOperation {
         self.receipt.finish_conditional_host_fallback();
     }
 
+    pub(crate) fn finish_preparation_host_fallback(self) {
+        self.receipt.finish_preparation_host_fallback();
+    }
+
     pub(crate) fn finish_conditional_provider_upload(self) {
         self.receipt.finish_conditional_provider_upload();
+    }
+
+    pub(crate) fn finish_preparation_provider_upload(self) {
+        self.receipt.finish_preparation_provider_upload();
     }
 }
 

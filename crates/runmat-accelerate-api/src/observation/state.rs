@@ -14,6 +14,7 @@ struct State {
     conditional_host_fallback: bool,
     conditional_provider_upload: bool,
     conditional_provider_upload_active: bool,
+    preparation_fallback: bool,
     route_outcome: Option<ProviderRouteOutcome>,
     expected_execution: Option<(u32, crate::ProviderOperationIdentity)>,
     stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
@@ -153,6 +154,7 @@ impl ProviderOperationReceipt {
                     conditional_host_fallback: false,
                     conditional_provider_upload: false,
                     conditional_provider_upload_active: false,
+                    preparation_fallback: false,
                     route_outcome: None,
                     expected_execution: None,
                     stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
@@ -264,6 +266,18 @@ impl ProviderOperationReceipt {
         });
     }
 
+    /// A preparatory H upload returned Unsupported before the selected hook
+    /// was invoked. Admit its already-budgeted host-to-provider continuation
+    /// without misreporting that outcome as a hook fallback.
+    pub fn begin_preparation_provider_upload(&mut self) {
+        self.begin_conditional_provider_upload();
+        self.0.with(|state| {
+            if state.conditional_provider_upload_active && state.failure.is_none() {
+                state.preparation_fallback = true;
+            }
+        });
+    }
+
     /// Called by the owning runtime only after an actual Unsupported result
     /// and successful validation of the fallback host publication. Pending
     /// provider submissions, if any, still gate completion of this receipt.
@@ -274,11 +288,28 @@ impl ProviderOperationReceipt {
                 || state.selected_execution != Some(false)
                 || state.publication.is_some()
                 || state.taken
+                || state.preparation_fallback
             {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else if state.failure.is_none() {
                 state.selected_execution = Some(true);
                 state.route_outcome = Some(ProviderRouteOutcome::ConditionalHostFallback);
+            }
+        });
+    }
+
+    pub fn confirm_preparation_host_fallback(&mut self) {
+        self.0.with(|state| {
+            if !state.conditional_host_fallback
+                || state.expected_execution.is_none()
+                || state.selected_execution != Some(false)
+                || state.publication.is_some()
+                || state.taken
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::PreparationHostFallback);
             }
         });
     }
@@ -290,6 +321,7 @@ impl ProviderOperationReceipt {
         self.0.with(|state| {
             if !state.conditional_provider_upload
                 || !state.conditional_provider_upload_active
+                || state.preparation_fallback
                 || state.expected_execution.is_none()
                 || state.selected_execution != Some(false)
                 || state.publication.is_some()
@@ -299,6 +331,24 @@ impl ProviderOperationReceipt {
             } else if state.failure.is_none() {
                 state.selected_execution = Some(true);
                 state.route_outcome = Some(ProviderRouteOutcome::ConditionalProviderUpload);
+            }
+        });
+    }
+
+    pub fn confirm_preparation_provider_upload(&mut self) {
+        self.0.with(|state| {
+            if !state.conditional_provider_upload
+                || !state.conditional_provider_upload_active
+                || !state.preparation_fallback
+                || state.expected_execution.is_none()
+                || state.selected_execution != Some(false)
+                || state.publication.is_some()
+                || state.taken
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::PreparationProviderUpload);
             }
         });
     }
