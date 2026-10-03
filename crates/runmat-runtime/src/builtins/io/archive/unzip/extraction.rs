@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn extract_archive_file_on_worker(
+pub(super) async fn extract_archive_file_on_worker(
     path: PathBuf,
     output_folder: PathBuf,
 ) -> BuiltinResult<Vec<String>> {
@@ -38,7 +38,10 @@ async fn extract_archive_file_on_worker(
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn extract_archive<R>(reader: R, output_folder: &Path) -> BuiltinResult<Vec<String>>
+pub(super) async fn extract_archive<R>(
+    reader: R,
+    output_folder: &Path,
+) -> BuiltinResult<Vec<String>>
 where
     R: Read + Seek,
 {
@@ -195,7 +198,7 @@ fn temporary_output_path(path: &Path) -> PathBuf {
     ))
 }
 
-async fn reject_symlink_path(path: &Path) -> BuiltinResult<()> {
+pub(super) async fn reject_symlink_path(path: &Path) -> BuiltinResult<()> {
     match vfs::symlink_metadata_async(path).await {
         Ok(metadata) if metadata.is_symlink() => Err(unzip_error_with(
             &UNZIP_ERROR_SECURITY,

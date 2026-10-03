@@ -62,7 +62,7 @@ pub(crate) async fn next_body_chunk(
         }
     };
     let result = await_http(body.next_chunk(), runtime).await;
-    if matches!(&result, Err(TransportCallError::Runtime(_))) {
+    if result.is_err() {
         body.abort();
     }
     result
@@ -105,7 +105,7 @@ async fn await_http<T>(
         return Err(TransportCallError::Runtime(cancelled()));
     }
     let response = match select(Box::pin(future), cancellation.cancelled()).await {
-        Either::Left((result, _listener)) => result.map_err(TransportCallError::Transport)?,
+        Either::Left((result, _listener)) => result,
         Either::Right((_reason, _request)) => {
             return Err(TransportCallError::Runtime(cancelled()));
         }
@@ -113,7 +113,7 @@ async fn await_http<T>(
     if cancellation.is_cancelled() {
         return Err(TransportCallError::Runtime(cancelled()));
     }
-    Ok(response)
+    response.map_err(TransportCallError::Transport)
 }
 
 fn cancelled() -> RuntimeError {

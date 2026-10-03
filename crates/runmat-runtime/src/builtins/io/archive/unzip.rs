@@ -121,6 +121,7 @@ mod extraction;
 use self::extraction::extract_archive;
 #[cfg(not(target_arch = "wasm32"))]
 use self::extraction::extract_archive_file_on_worker;
+use self::extraction::reject_symlink_path;
 
 #[derive(Debug, Clone)]
 pub struct UnzipResult {

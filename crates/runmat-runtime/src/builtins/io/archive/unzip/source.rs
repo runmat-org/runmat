@@ -1,6 +1,6 @@
 use super::*;
 
-async fn extract_remote_archive(
+pub(super) async fn extract_remote_archive(
     url: &Url,
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
@@ -21,13 +21,19 @@ async fn extract_remote_archive(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn extract_local_archive(path: &Path, output_folder: &Path) -> BuiltinResult<Vec<String>> {
+pub(super) async fn extract_local_archive(
+    path: &Path,
+    output_folder: &Path,
+) -> BuiltinResult<Vec<String>> {
     let temp = local_archive_to_temp_file(path).await?;
     extract_archive_file_on_worker(temp.path.clone(), output_folder.to_path_buf()).await
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn extract_local_archive(path: &Path, output_folder: &Path) -> BuiltinResult<Vec<String>> {
+pub(super) async fn extract_local_archive(
+    path: &Path,
+    output_folder: &Path,
+) -> BuiltinResult<Vec<String>> {
     let file = File::open(path).map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
@@ -116,13 +122,13 @@ async fn local_archive_to_temp_file(path: &Path) -> BuiltinResult<TempArchive> {
     Ok(TempArchive { path: temp_path })
 }
 
-fn resolve_archive_path(text: &str) -> BuiltinResult<PathBuf> {
+pub(super) fn resolve_archive_path(text: &str) -> BuiltinResult<PathBuf> {
     let expanded = expand_user_path(text.trim(), BUILTIN_NAME)
         .map_err(|msg| unzip_error_with(&UNZIP_ERROR_FILENAME, msg))?;
     Ok(PathBuf::from(expanded))
 }
 
-async fn resolve_output_folder(text: Option<&str>) -> BuiltinResult<PathBuf> {
+pub(super) async fn resolve_output_folder(text: Option<&str>) -> BuiltinResult<PathBuf> {
     match text {
         Some(raw) => {
             let expanded = expand_user_path(raw.trim(), BUILTIN_NAME)
@@ -313,7 +319,7 @@ async fn download_archive(
     Ok(response.body)
 }
 
-fn ensure_compressed_size_within_limit(size: u64) -> BuiltinResult<()> {
+pub(super) fn ensure_compressed_size_within_limit(size: u64) -> BuiltinResult<()> {
     if size > MAX_COMPRESSED_ARCHIVE_BYTES {
         return Err(unzip_error_with(
             &UNZIP_ERROR_HTTP,
