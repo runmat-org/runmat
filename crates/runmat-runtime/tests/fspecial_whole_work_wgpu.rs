@@ -6,7 +6,10 @@
 use futures::executor::block_on;
 use runmat_accelerate::{backend::wgpu::provider::WgpuProvider, placement::PlacementSession};
 use runmat_accelerate_api::{
-    AccelProvider, HostNumericDataOwned, ProviderPrecision, ThreadProviderGuard,
+    observation::{ProviderObservationCapability, ProviderObservationSupport},
+    AccelDownloadFuture, AccelProvider, FspecialRequest, GpuTensorHandle, HostNumericDataOwned,
+    HostTensorView, ProviderCapabilitySnapshot, ProviderFeasibility, ProviderFeasibilityQuery,
+    ProviderPrecision, ThreadProviderGuard,
 };
 use runmat_runtime::{
     call_builtin_async_in_context,
@@ -42,6 +45,55 @@ fn context(session: Rc<PlacementSession>, host_bytes: u64) -> RuntimeContext {
             .with_placement(session)
             .with_parallel(Rc::new(HostBudget(host_bytes))),
     )
+}
+
+/// Keep WGPU's actual capability, resource and observation contracts while
+/// forcing the one legal provider-hook Unsupported outcome. No synthetic GPU
+/// submission is counted as selected-kernel work.
+struct UnsupportedFspecial<'a>(&'a WgpuProvider);
+
+impl AccelProvider for UnsupportedFspecial<'_> {
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        panic!("unsupported fspecial fixture must not upload")
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        panic!("unsupported fspecial fixture must not download")
+    }
+    fn precision(&self) -> ProviderPrecision {
+        self.0.precision()
+    }
+    fn device_info(&self) -> String {
+        self.0.device_info()
+    }
+    fn device_id(&self) -> u32 {
+        self.0.device_id()
+    }
+    fn capability_snapshot(&self) -> ProviderCapabilitySnapshot {
+        self.0.capability_snapshot()
+    }
+    fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
+        self.0.query_feasibility(query)
+    }
+    fn operation_observation_capability(
+        &self,
+        query: &ProviderFeasibilityQuery,
+    ) -> ProviderObservationCapability {
+        self.0.operation_observation_capability(query)
+    }
+    fn begin_operation_observation(
+        &self,
+        query: &ProviderFeasibilityQuery,
+    ) -> ProviderObservationSupport {
+        self.0.begin_operation_observation(query)
+    }
+    fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
+        self.0.placement_resources()
+    }
+    fn fspecial(&self, _: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "fixture: provider route became unavailable",
+        ))
+    }
 }
 
 struct FspecialEnvRestore(Option<std::ffi::OsString>);
@@ -126,4 +178,39 @@ fn finite_host_workspace_and_completed_fspecial_publication() {
         .allocation_lease()
         .validate_live()
         .expect("published sibling must survive rejection");
+}
+
+#[test]
+#[ignore = "requires actual WGPU adapter; run explicitly in the image-filter hardware gate"]
+fn provider_unsupported_host_fallback_is_one_completed_conditional_route() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let _restore = FspecialEnvRestore(std::env::var_os("RUNMAT_ACCEL_FSPECIAL_DEVICE"));
+    std::env::set_var("RUNMAT_ACCEL_FSPECIAL_DEVICE", "1");
+    let backend: &'static WgpuProvider = Box::leak(Box::new(
+        WgpuProvider::new(Default::default()).expect("actual WGPU adapter required"),
+    ));
+    let facade: &'static UnsupportedFspecial<'static> =
+        Box::leak(Box::new(UnsupportedFspecial(backend)));
+    let _owner = ThreadProviderGuard::set(Some(facade));
+    let session = Rc::new(PlacementSession::new(Default::default()));
+    let args = [Value::from("average"), Value::Num(2.0)];
+    let output = block_on(call_builtin_async_in_context(
+        &context(session.clone(), 32),
+        "fspecial",
+        &args,
+    ))
+    .expect("actual Unsupported hook permits host fallback");
+    let Value::Tensor(output) = output else {
+        panic!("unsupported hook must publish the host double tensor")
+    };
+    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.materialize_f64(), vec![0.25; 4]);
+    let samples = session
+        .profile_snapshot()
+        .feedback
+        .iter()
+        .filter(|sample| sample.signature.operation == "fspecial")
+        .map(|sample| (sample.samples, sample.failures))
+        .collect::<Vec<_>>();
+    assert_eq!(samples, vec![(1, 0)]);
 }
