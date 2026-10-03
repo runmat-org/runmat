@@ -33,7 +33,7 @@ pub const FGETS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],
-        capabilities: &[],
+        capabilities: &[CapabilityRequirement::Filesystem],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,

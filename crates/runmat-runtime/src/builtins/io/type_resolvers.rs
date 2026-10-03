@@ -39,10 +39,6 @@ pub fn textscan_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::cell()
 }
 
-pub fn fileread_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
 pub fn filewrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
@@ -236,7 +232,6 @@ mod tests {
     assert_resolver!(disp_type_resolver, disp_type, &[], Type::tensor());
     assert_resolver!(input_type_resolver, input_type, &[], Type::Unknown);
 
-    assert_resolver!(fileread_type_resolver, fileread_type, &[], Type::String);
     assert_resolver!(filewrite_type_resolver, filewrite_type, &[], Type::Num);
     assert_resolver!(fprintf_type_resolver, fprintf_type, &[], Type::Num);
     assert_resolver!(

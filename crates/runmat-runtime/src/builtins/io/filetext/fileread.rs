@@ -3,170 +3,18 @@
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, FILEREAD_ERROR_DECODE, FILEREAD_ERROR_INTERNAL,
+    FILEREAD_ERROR_INVALID_INPUT, FILEREAD_ERROR_INVALID_OPTION, FILEREAD_ERROR_IO,
 };
+#[cfg(test)]
+use runmat_builtins::{BuiltinIntegerAuditKind, FILEREAD_DESCRIPTOR, FILEREAD_INTEGER_AUDIT};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem as fs;
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fileread")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "fileread",
-    op_kind: GpuOpKind::Custom("io-file-read"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Performs synchronous host file I/O; acceleration providers are not involved.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fileread")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "fileread",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion; executes as a standalone host operation.",
-};
-
 const BUILTIN_NAME: &str = "fileread";
-
-const FILEREAD_OUTPUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "text",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "File contents as a 1-by-N character vector.",
-}];
-const FILEREAD_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Path to a readable file.",
-}];
-const FILEREAD_INPUTS_FILENAME_ENCODING: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Path to a readable file.",
-    },
-    BuiltinParamDescriptor {
-        name: "encoding",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"auto\""),
-        description: "Encoding label (for example 'utf-8', 'latin1', 'ascii', 'raw').",
-    },
-];
-const FILEREAD_INPUTS_FILENAME_ENCODING_PAIR: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Path to a readable file.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::PropertyName,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"Encoding\""),
-        description: "Name of supported option; currently only 'Encoding'.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::PropertyValue,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"auto\""),
-        description: "Option value for the provided option name.",
-    },
-];
-const FILEREAD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "text = fileread(filename)",
-        inputs: &FILEREAD_INPUTS_FILENAME,
-        outputs: &FILEREAD_OUTPUT_TEXT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "text = fileread(filename, encoding)",
-        inputs: &FILEREAD_INPUTS_FILENAME_ENCODING,
-        outputs: &FILEREAD_OUTPUT_TEXT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "text = fileread(filename, \"Encoding\", encoding)",
-        inputs: &FILEREAD_INPUTS_FILENAME_ENCODING_PAIR,
-        outputs: &FILEREAD_OUTPUT_TEXT,
-    },
-];
-
-const FILEREAD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILEREAD.INVALID_INPUT",
-    identifier: Some("RunMat:fileread:InvalidInput"),
-    when: "Filename or argument cardinality/type constraints are violated.",
-    message: "fileread: invalid input arguments",
-};
-const FILEREAD_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILEREAD.INVALID_OPTION",
-    identifier: Some("RunMat:fileread:InvalidOption"),
-    when: "Encoding option syntax or value is invalid.",
-    message: "fileread: invalid option configuration",
-};
-const FILEREAD_ERROR_DECODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILEREAD.DECODE",
-    identifier: Some("RunMat:fileread:DecodeFailed"),
-    when: "Requested decoding of bytes fails (for example UTF-8 or ASCII mismatch).",
-    message: "fileread: unable to decode file contents",
-};
-const FILEREAD_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILEREAD.IO",
-    identifier: Some("RunMat:fileread:IoFailure"),
-    when: "Filesystem read operation fails.",
-    message: "fileread: file read failed",
-};
-const FILEREAD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILEREAD.INTERNAL",
-    identifier: None,
-    when: "Internal runtime control-flow or conversion fails.",
-    message: "fileread: internal error",
-};
-const FILEREAD_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    FILEREAD_ERROR_INVALID_INPUT,
-    FILEREAD_ERROR_INVALID_OPTION,
-    FILEREAD_ERROR_DECODE,
-    FILEREAD_ERROR_IO,
-    FILEREAD_ERROR_INTERNAL,
-];
-pub const FILEREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FILEREAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FILEREAD_ERRORS,
-};
-
-pub const FILEREAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "fileread accepts host-text filename and Encoding inputs and returns a character row; numeric and provider-resident values are rejected before any gather, provider access, or filesystem read.",
-    };
 
 fn fileread_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -230,13 +78,7 @@ impl FileEncoding {
 
 #[runtime_builtin(
     name = "fileread",
-    category = "io/filetext",
-    summary = "Read full text files into character vectors.",
-    keywords = "fileread,io,read file,text file,character vector",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::fileread_type),
-    descriptor(crate::builtins::io::filetext::fileread::FILEREAD_DESCRIPTOR),
-    integer_audit(crate::builtins::io::filetext::fileread::FILEREAD_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::filetext::fileread"
 )]
 async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
