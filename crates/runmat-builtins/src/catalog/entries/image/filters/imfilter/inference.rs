@@ -129,9 +129,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     ..
                 })
                 | ValueKindFact::Logical => {
-                    if matches!(&option.shape, ShapeFact::Shaped { dims } if dims.iter().all(|dim| matches!(dim, DimensionFact::Known(_))) && dims.iter().fold(Some(1usize), |count, dim| match (count, dim) { (Some(count), DimensionFact::Known(value)) => count.checked_mul(*value), _ => None }) != Some(1))
-                        || matches!(option.shape, ShapeFact::Ranked { rank } if rank > 2)
-                    {
+                    let known_non_scalar = match &option.shape {
+                        ShapeFact::Shaped { dims }
+                            if dims
+                                .iter()
+                                .all(|dim| matches!(dim, DimensionFact::Known(_))) =>
+                        {
+                            dims.iter().try_fold(1usize, |count, dim| match dim {
+                                DimensionFact::Known(value) => count.checked_mul(*value),
+                                _ => None,
+                            }) != Some(1)
+                        }
+                        ShapeFact::Ranked { rank } => *rank > 2,
+                        _ => false,
+                    };
+                    if known_non_scalar {
                         diagnostics.push(argument_error(
                             "RM-CATALOG-IMFILTER-PAD",
                             "padding value must be scalar",

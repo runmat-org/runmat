@@ -112,7 +112,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 
 fn dimension(value: f64) -> Option<usize> {
     (value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value < usize::MAX as f64)
-        .then(|| value as usize)
+        .then_some(value as usize)
 }
 
 fn size_control(request: &CallRequest) -> Option<[Option<usize>; 2]> {
