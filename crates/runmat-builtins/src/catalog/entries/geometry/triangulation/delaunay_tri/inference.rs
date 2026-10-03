@@ -116,7 +116,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut output = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(super::CLASS.owned()),
+            runtime_class: Some(super::DELAUNAY_TRI_CLASS.owned()),
             properties,
             properties_complete: true,
             handle_semantics: Some(false),
