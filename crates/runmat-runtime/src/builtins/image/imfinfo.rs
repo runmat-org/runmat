@@ -81,7 +81,7 @@ async fn imfinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .map(|value| {
             let hint = scalar_text(value, "fmt")?;
             let extension = hint.trim().trim_start_matches('.');
-            image::ImageFormat::from_extension(&extension.to_ascii_lowercase())
+            image::ImageFormat::from_extension(extension.to_ascii_lowercase())
                 .map(|format| (format, extension.to_string()))
                 .ok_or_else(|| info_error(&IMFINFO_ERROR_FORMAT, "unsupported image format hint"))
         })
