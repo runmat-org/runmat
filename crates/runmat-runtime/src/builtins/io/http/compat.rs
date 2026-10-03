@@ -40,22 +40,6 @@ const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Input argument.",
 }];
-const INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "input1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "input2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input argument.",
-    },
-];
 const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "value",
     ty: BuiltinParamType::Any,

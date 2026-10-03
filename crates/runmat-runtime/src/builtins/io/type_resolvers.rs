@@ -103,32 +103,6 @@ pub fn weboptions_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
 
-pub fn webread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![
-        Type::Struct { known_fields: None },
-        Type::cell(),
-        Type::String,
-        Type::tensor(),
-        Type::logical(),
-        Type::Num,
-        Type::Bool,
-    ])
-}
-
-pub fn webwrite_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![
-        Type::Struct { known_fields: None },
-        Type::cell(),
-        Type::String,
-        Type::tensor(),
-        Type::logical(),
-        Type::Num,
-        Type::Bool,
-    ])
-}
-
 pub fn jsondecode_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![
@@ -344,35 +318,6 @@ mod tests {
         &[],
         Type::Struct { known_fields: None }
     );
-    assert_resolver!(
-        webread_type_resolver,
-        webread_type,
-        &[],
-        Type::Union(vec![
-            Type::Struct { known_fields: None },
-            Type::cell(),
-            Type::String,
-            Type::tensor(),
-            Type::logical(),
-            Type::Num,
-            Type::Bool,
-        ])
-    );
-    assert_resolver!(
-        webwrite_type_resolver,
-        webwrite_type,
-        &[],
-        Type::Union(vec![
-            Type::Struct { known_fields: None },
-            Type::cell(),
-            Type::String,
-            Type::tensor(),
-            Type::logical(),
-            Type::Num,
-            Type::Bool,
-        ])
-    );
-
     assert_resolver!(
         jsondecode_type_resolver,
         jsondecode_type,
