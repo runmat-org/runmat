@@ -39,14 +39,6 @@ pub fn textscan_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::cell()
 }
 
-pub fn fclose_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
-
-pub fn feof_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    bool_type(args, ctx)
-}
-
 pub fn fgetl_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num])
@@ -65,18 +57,6 @@ pub fn filewrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn fopen_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::tensor();
-    }
-    match args.first() {
-        Some(Type::Num) | Some(Type::Int) => Type::String,
-        Some(Type::String) => Type::Union(vec![Type::Num, Type::tensor()]),
-        Some(Type::Unknown) => Type::Union(vec![Type::String, Type::Num, Type::tensor()]),
-        _ => Type::Union(vec![Type::Num, Type::tensor()]),
-    }
-}
-
 pub fn fprintf_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
@@ -84,10 +64,6 @@ pub fn fprintf_type(args: &[Type], ctx: &ResolveContext) -> Type {
 pub fn fread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
-}
-
-pub fn frewind_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Void
 }
 
 pub fn fwrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
@@ -270,8 +246,6 @@ mod tests {
     assert_resolver!(disp_type_resolver, disp_type, &[], Type::tensor());
     assert_resolver!(input_type_resolver, input_type, &[], Type::Unknown);
 
-    assert_resolver!(fclose_type_resolver, fclose_type, &[], Type::Num);
-    assert_resolver!(feof_type_resolver, feof_type, &[], Type::Bool);
     assert_resolver!(
         fgetl_type_resolver,
         fgetl_type,
@@ -286,7 +260,6 @@ mod tests {
     );
     assert_resolver!(fileread_type_resolver, fileread_type, &[], Type::String);
     assert_resolver!(filewrite_type_resolver, filewrite_type, &[], Type::Num);
-    assert_resolver!(fopen_type_resolver, fopen_type, &[], Type::tensor());
     assert_resolver!(fprintf_type_resolver, fprintf_type, &[], Type::Num);
     assert_resolver!(
         fread_type_resolver,

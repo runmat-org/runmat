@@ -4,137 +4,22 @@
 //! The implementation mirrors MATLAB semantics for host-side files and
 //! integrates with the shared registry used by the other text I/O builtins.
 
+#[cfg(test)]
+use runmat_builtins::FEOF_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, FEOF_ERROR_INTERNAL, FEOF_ERROR_INVALID_IDENTIFIER,
+    FEOF_ERROR_INVALID_INPUT, FEOF_INTEGER_ID_EXTENSION, FEOF_LOGICAL_ID_EXTENSION,
+    FEOF_RESIDENT_ID_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const IDENTIFIER_TYPE_ERROR_DETAIL: &str = "file identifier must be a numeric scalar";
 const BUILTIN_NAME: &str = "feof";
-
-const FEOF_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feof-integer-fileid",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "integer-class feof file identifiers are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeofIntegerIdExtension"),
-};
-const FEOF_LOGICAL_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feof-logical-fileid",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "logical feof file identifiers are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeofLogicalIdExtension"),
-};
-const FEOF_RESIDENT_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feof-resident-fileid",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "provider-resident feof file identifiers are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeofResidentIdExtension"),
-};
-pub const FEOF_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    FEOF_INTEGER_ID_EXTENSION,
-    FEOF_LOGICAL_ID_EXTENSION,
-    FEOF_RESIDENT_ID_EXTENSION,
-];
-
-const FEOF_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fileID",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "MATLAB-compatible file IDs are integer-valued doubles; all eight typed integer classes are one gated RunMat extension and are checked exactly against i32 before registry access.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "tf = feof(integer_fileID)",
-        inputs: &FEOF_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The identifier is validated exactly before the registry query; resident and logical identifiers have independent RunMat-only gates, and the result is a host logical scalar.",
-    }];
-
-const FEOF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when positioned at end-of-file.",
-}];
-const FEOF_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fid",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "File identifier opened by fopen.",
-}];
-const FEOF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = feof(fid)",
-    inputs: &FEOF_INPUTS,
-    outputs: &FEOF_OUTPUT,
-}];
-
-const FEOF_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEOF.INVALID_INPUT",
-    identifier: Some("RunMat:feof:InvalidInput"),
-    when: "Input identifier is malformed or out of range.",
-    message: "feof: invalid file identifier input",
-};
-const FEOF_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEOF.INVALID_IDENTIFIER",
-    identifier: Some("RunMat:feof:InvalidIdentifier"),
-    when: "Identifier does not refer to an open file handle.",
-    message: "feof: invalid file identifier. Use fopen to generate a valid file ID.",
-};
-const FEOF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEOF.INTERNAL",
-    identifier: None,
-    when: "Internal control-flow conversion failed.",
-    message: "feof: internal error",
-};
-const FEOF_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    FEOF_ERROR_INVALID_INPUT,
-    FEOF_ERROR_INVALID_IDENTIFIER,
-    FEOF_ERROR_INTERNAL,
-];
-pub const FEOF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FEOF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FEOF_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::feof")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "feof",
-    op_kind: GpuOpKind::Custom("file-io"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host-only file I/O query; providers are not involved.",
-};
 
 fn feof_error_with_message(
     message: impl Into<String>,
@@ -168,27 +53,9 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::feof")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "feof",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "File I/O queries are not eligible for fusion; metadata registered for completeness.",
-};
-
 #[runtime_builtin(
     name = "feof",
-    category = "io/filetext",
-    summary = "Query end-of-file state for file identifiers.",
-    keywords = "feof,end of file,io,file identifier",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::feof_type),
-    descriptor(crate::builtins::io::filetext::feof::FEOF_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::filetext::feof::INTEGER_CAPABILITIES),
-    extensions(crate::builtins::io::filetext::feof::FEOF_EXTENSIONS),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::filetext::feof"
 )]
 async fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {
@@ -256,6 +123,28 @@ fn preflight_fid(value: &Value) -> BuiltinResult<()> {
                     &FEOF_LOGICAL_ID_EXTENSION,
                     BUILTIN_NAME,
                 )?;
+            }
+            if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+                || handle
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |n, d| n.checked_mul(*d))
+                    != Some(1)
+            {
+                return Err(feof_error_with_detail(
+                    &FEOF_ERROR_INVALID_INPUT,
+                    IDENTIFIER_TYPE_ERROR_DETAIL,
+                ));
+            }
+            if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_precision(handle)
+                    != Some(runmat_accelerate_api::ProviderPrecision::F64)
+            {
+                return Err(feof_error_with_detail(
+                    &FEOF_ERROR_INVALID_INPUT,
+                    "file identifier must be an integer-valued double scalar",
+                ));
             }
             Ok(())
         }

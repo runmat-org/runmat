@@ -20,9 +20,32 @@ enum Resource {
 }
 
 struct CloseEntry {
+    fid: i32,
     info: FileInfo,
-    entry: Entry,
+    entry: Option<Entry>,
     file: Option<File>,
+    committed: bool,
+}
+
+impl Drop for CloseEntry {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        // Dropping a pending flush future must restore both the identifier
+        // and its exact handle. Keep the registry -> handle lock order used
+        // by close_async; no lock is held across the flush await.
+        let mut registry = REGISTRY.lock().unwrap_or_else(|poison| poison.into_inner());
+        if let Some(entry) = self.entry.take() {
+            if let Some(handle) = entry.file_handle() {
+                let mut slot = handle.lock().unwrap_or_else(|poison| poison.into_inner());
+                if slot.is_none() {
+                    *slot = self.file.take();
+                }
+            }
+            registry.entries.insert(self.fid, entry);
+        }
+    }
 }
 
 struct Entry {
@@ -212,9 +235,11 @@ pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
                 guard.take()
             });
             CloseEntry {
+                fid,
                 info: entry.info(),
-                entry,
+                entry: Some(entry),
                 file,
+                committed: false,
             }
         })
     };
@@ -223,22 +248,11 @@ pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
         return Ok(None);
     };
 
-    if let Some(mut file) = entry.file.take() {
-        if let Err(err) = file.flush_async().await {
-            if let Some(handle) = entry.entry.file_handle() {
-                let mut guard = handle.lock().expect("registered file handle poisoned");
-                if guard.is_none() {
-                    *guard = Some(file);
-                }
-            }
-
-            let mut guard = REGISTRY.lock().expect("file registry poisoned");
-            guard.entries.insert(fid, entry.entry);
-            return Err(err);
-        }
+    if let Some(file) = entry.file.as_mut() {
+        file.flush_async().await?;
     }
-
-    Ok(Some(entry.info))
+    entry.committed = true;
+    Ok(Some(entry.info.clone()))
 }
 
 #[cfg(test)]

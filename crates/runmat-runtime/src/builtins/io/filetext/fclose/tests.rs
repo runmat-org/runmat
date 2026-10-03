@@ -250,6 +250,39 @@ fn concurrent_fclose_only_one_call_closes_file() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn dropping_pending_close_restores_identifier_and_exact_handle() {
+    use std::future::Future;
+    use std::task::{Context, Poll};
+
+    let _guard = registry_guard();
+    let _provider_lock = runmat_filesystem::provider_override_lock();
+    registry::reset_for_tests();
+    let _provider_guard = runmat_filesystem::replace_provider(Arc::new(FailingFlushProvider {
+        fail_flush: Arc::new(AtomicBool::new(false)),
+    }));
+
+    let eval = run_fopen(&[Value::from("pending_close.txt"), Value::from("w")]).expect("fopen");
+    let fid = eval.as_open().expect("open result").fid as i32;
+    let original = registry::shared_handle(fid).expect("registered handle");
+    let mut future = Box::pin(registry::close_async(fid));
+    let mut context = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(matches!(
+        Future::poll(future.as_mut(), &mut context),
+        Poll::Pending
+    ));
+    assert!(registry::info_for(fid).is_none());
+    drop(future);
+
+    assert!(registry::info_for(fid).is_some());
+    let restored = registry::shared_handle(fid).expect("restored handle");
+    assert!(Arc::ptr_eq(&original, &restored));
+    assert!(restored.lock().expect("handle lock").is_some());
+    let closed = futures::executor::block_on(registry::close_async(fid)).expect("retry");
+    assert!(closed.is_some());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn fclose_standard_stream_bool_argument() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = registry_guard();

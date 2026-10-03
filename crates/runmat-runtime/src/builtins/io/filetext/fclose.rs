@@ -5,21 +5,18 @@
 //! extension-gated. The implementation integrates with the shared file registry
 //! managed by `fopen` and always executes on the host.
 
+#[cfg(test)]
+use runmat_builtins::FCLOSE_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, FCLOSE_CELL_ID_EXTENSION, FCLOSE_ERROR_INTERNAL,
+    FCLOSE_ERROR_INVALID_IDENTIFIER, FCLOSE_ERROR_INVALID_INPUT, FCLOSE_INTEGER_ID_EXTENSION,
+    FCLOSE_LOGICAL_ID_EXTENSION, FCLOSE_MESSAGE_OUTPUT_EXTENSION, FCLOSE_NO_INPUT_EXTENSION,
+    FCLOSE_RESIDENT_ID_EXTENSION, FCLOSE_SINGLE_ID_EXTENSION, FCLOSE_STRING_ALL_EXTENSION,
+    FCLOSE_VECTOR_ID_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericDType, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{
     helpers::{char_array_value, extract_scalar_string},
@@ -28,236 +25,6 @@ use crate::builtins::io::filetext::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "fclose";
-
-macro_rules! fclose_extension {
-    ($name:ident, $id:literal, $description:literal, $error:literal) => {
-        const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-            id: $id,
-            mode: BuiltinExtensionMode::RunMatOnly,
-            description: $description,
-            error_identifier: Some($error),
-        };
-    };
-}
-fclose_extension!(
-    FCLOSE_NO_INPUT_EXTENSION,
-    "fclose-no-input-close-all",
-    "fclose() close-all syntax is a RunMat extension",
-    "RunMat:compatibility:FcloseNoInputExtension"
-);
-fclose_extension!(
-    FCLOSE_INTEGER_ID_EXTENSION,
-    "fclose-integer-fileid",
-    "integer-class fclose file identifiers are a RunMat extension",
-    "RunMat:compatibility:FcloseIntegerIdExtension"
-);
-fclose_extension!(
-    FCLOSE_VECTOR_ID_EXTENSION,
-    "fclose-fileid-vector",
-    "fclose file-identifier arrays are a RunMat extension",
-    "RunMat:compatibility:FcloseVectorIdExtension"
-);
-fclose_extension!(
-    FCLOSE_LOGICAL_ID_EXTENSION,
-    "fclose-logical-fileid",
-    "logical fclose file identifiers are a RunMat extension",
-    "RunMat:compatibility:FcloseLogicalIdExtension"
-);
-fclose_extension!(
-    FCLOSE_CELL_ID_EXTENSION,
-    "fclose-cell-fileids",
-    "cell fclose file-identifier collections are a RunMat extension",
-    "RunMat:compatibility:FcloseCellIdExtension"
-);
-fclose_extension!(
-    FCLOSE_STRING_ALL_EXTENSION,
-    "fclose-string-all",
-    "string-scalar fclose all syntax is a RunMat extension",
-    "RunMat:compatibility:FcloseStringAllExtension"
-);
-fclose_extension!(
-    FCLOSE_MESSAGE_OUTPUT_EXTENSION,
-    "fclose-message-output",
-    "a second fclose diagnostic output is a RunMat extension",
-    "RunMat:compatibility:FcloseMessageOutputExtension"
-);
-fclose_extension!(
-    FCLOSE_RESIDENT_ID_EXTENSION,
-    "fclose-resident-fileid",
-    "resident fclose file identifiers are a RunMat extension",
-    "RunMat:compatibility:FcloseResidentIdExtension"
-);
-fclose_extension!(
-    FCLOSE_SINGLE_ID_EXTENSION,
-    "fclose-single-fileid",
-    "single-precision fclose file identifiers are a RunMat extension",
-    "RunMat:compatibility:FcloseSingleIdExtension"
-);
-pub const FCLOSE_EXTENSIONS: [BuiltinExtensionDescriptor; 9] = [
-    FCLOSE_NO_INPUT_EXTENSION,
-    FCLOSE_INTEGER_ID_EXTENSION,
-    FCLOSE_VECTOR_ID_EXTENSION,
-    FCLOSE_LOGICAL_ID_EXTENSION,
-    FCLOSE_CELL_ID_EXTENSION,
-    FCLOSE_STRING_ALL_EXTENSION,
-    FCLOSE_MESSAGE_OUTPUT_EXTENSION,
-    FCLOSE_RESIDENT_ID_EXTENSION,
-    FCLOSE_SINGLE_ID_EXTENSION,
-];
-
-const FCLOSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fileID",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are parsed exactly and must fit the runtime file-identifier domain before registry access.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "status = fclose(integer_fileID)",
-        inputs: &FCLOSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "This RunMat-only scalar form returns double status and never converts the identifier through binary64.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "status = fclose(integer_fileIDs)",
-        inputs: &FCLOSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The collection and resident forms are independently gated RunMat extensions; every identifier validates before any close side effect.",
-    },
-];
-
-const FCLOSE_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "0 on success, -1 on failure.",
-}];
-
-const FCLOSE_OUTPUT_MESSAGE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "status",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "0 on success, -1 on failure.",
-    },
-    BuiltinParamDescriptor {
-        name: "msg",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"\""),
-        description: "Failure message when status is -1.",
-    },
-];
-
-const FCLOSE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const FCLOSE_INPUTS_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fid",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "File identifier scalar, vector, cell list, or keyword \"all\".",
-}];
-const FCLOSE_INPUTS_ALL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: Some("\"all\""),
-    description: "Close all open user file identifiers.",
-}];
-
-const FCLOSE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "status = fclose()",
-        inputs: &FCLOSE_INPUTS_NONE,
-        outputs: &FCLOSE_OUTPUT_STATUS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = fclose(fid)",
-        inputs: &FCLOSE_INPUTS_FID,
-        outputs: &FCLOSE_OUTPUT_STATUS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = fclose(\"all\")",
-        inputs: &FCLOSE_INPUTS_ALL,
-        outputs: &FCLOSE_OUTPUT_STATUS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[status, msg] = fclose(...)",
-        inputs: &FCLOSE_INPUTS_FID,
-        outputs: &FCLOSE_OUTPUT_MESSAGE,
-    },
-];
-
-const FCLOSE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FCLOSE.INVALID_INPUT",
-    identifier: Some("RunMat:fclose:InvalidInput"),
-    when: "Input argument count or file identifier value/type is invalid.",
-    message: "fclose: invalid input arguments",
-};
-
-const FCLOSE_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FCLOSE.INVALID_IDENTIFIER",
-    identifier: Some("RunMat:fclose:InvalidIdentifier"),
-    when: "The provided file identifier does not refer to an open file.",
-    message: "fclose: invalid file identifier. Use fopen to generate a valid file ID.",
-};
-
-const FCLOSE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FCLOSE.IO",
-    identifier: Some("RunMat:fclose:IoFailure"),
-    when: "Closing an open file failed due to I/O error.",
-    message: "fclose: failed to close file",
-};
-
-const FCLOSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FCLOSE.INTERNAL",
-    identifier: None,
-    when: "Internal runtime control-flow or conversion failed.",
-    message: "fclose: internal error",
-};
-
-const FCLOSE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    FCLOSE_ERROR_INVALID_INPUT,
-    FCLOSE_ERROR_INVALID_IDENTIFIER,
-    FCLOSE_ERROR_IO,
-    FCLOSE_ERROR_INTERNAL,
-];
-
-pub const FCLOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FCLOSE_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FCLOSE_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "fclose",
-    op_kind: GpuOpKind::Custom("file-io"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes:
-        "Host-only operation: closes identifiers stored in the shared file registry; GPU inputs are gathered automatically.",
-};
 
 fn fclose_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -287,27 +54,9 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "fclose",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "File I/O is not eligible for fusion; metadata is registered for completeness.",
-};
-
 #[runtime_builtin(
     name = "fclose",
-    category = "io/filetext",
-    summary = "Close file identifiers.",
-    keywords = "fclose,file,close,io,identifier",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::fclose_type),
-    descriptor(crate::builtins::io::filetext::fclose::FCLOSE_DESCRIPTOR),
-    extensions(FCLOSE_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::filetext::fclose::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::filetext::fclose"
 )]
 async fn fclose_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

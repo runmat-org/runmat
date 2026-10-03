@@ -70,6 +70,42 @@ fn fopen_query_classifies_typed_integer_scalar_tensors_exactly() {
     assert_eq!(parse_fid(&Value::Tensor(tensor)).unwrap(), 3);
 }
 
+#[test]
+fn invalid_open_controls_are_rejected_before_resident_materialization() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident fixture");
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let resident = Value::GpuTensor(allocation.handle.clone());
+
+    let too_many = run_evaluate(&[
+        Value::from("unused.bin"),
+        Value::from("r"),
+        Value::from("native"),
+        Value::from("UTF-8"),
+        resident.clone(),
+    ])
+    .err()
+    .expect("arity must precede provider lookup");
+    assert_eq!(too_many.identifier(), FOPEN_ERROR_INVALID_INPUT.identifier);
+
+    let invalid_permission = run_evaluate(&[Value::from("unused.bin"), resident])
+        .err()
+        .expect("numeric permission must precede provider lookup");
+    assert_eq!(
+        invalid_permission.identifier(),
+        FOPEN_ERROR_INVALID_PERMISSION.identifier
+    );
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fopen_read_existing_file_returns_fid() {

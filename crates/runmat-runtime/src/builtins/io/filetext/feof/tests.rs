@@ -331,6 +331,37 @@ fn feof_accepts_gpu_identifier_via_gather() {
     test_support::fs::remove_file(path).unwrap();
 }
 
+#[test]
+fn feof_rejects_known_invalid_resident_class_and_shape_before_download() {
+    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let single = owner
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F32,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("single allocation");
+    let vector = owner
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("vector allocation");
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    for allocation in [&single, &vector] {
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let error = run_evaluate(&Value::GpuTensor(allocation.handle.clone()))
+            .err()
+            .expect("metadata-invalid identifier");
+        assert_eq!(error.identifier(), FEOF_ERROR_INVALID_INPUT.identifier);
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn feof_standard_identifier_returns_false() {

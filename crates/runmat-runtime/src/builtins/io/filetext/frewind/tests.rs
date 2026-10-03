@@ -17,6 +17,29 @@ fn run_evaluate(fid_value: &Value) -> BuiltinResult<()> {
     futures::executor::block_on(evaluate(fid_value))
 }
 
+#[test]
+fn resident_logical_identifier_uses_logical_gate_before_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_logical_zeroed(vec![1, 1], runmat_accelerate_api::ProviderPrecision::F32)
+        .expect("logical allocation");
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = run_evaluate(&Value::GpuTensor(allocation.handle.clone()))
+        .err()
+        .expect("resident compatibility gate");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:FrewindResidentIdExtension")
+    );
+    drop(_strict);
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    preflight_fid(&Value::GpuTensor(allocation.handle.clone())).expect("admitted logical ID");
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
 fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
     futures::executor::block_on(fopen::evaluate(args))
 }
