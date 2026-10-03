@@ -20,6 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
             "Metadata inspection is host filesystem I/O, a fusion boundary, and never a GPU kernel. It consumes no GPU-resident numeric input and returns a host struct. `audioinfo` does not decode samples; use `audioread` for supported WAV/RF64 sample payloads.",
+            "When a finite host-memory budget is active, the complete metadata call is admitted before opening the file. If the installed host resource service cannot establish complete bounds for the captured filesystem and metadata work, the call fails without reading the file. Calls without a finite host-memory budget retain the ordinary metadata path when no measured route is selected.",
         ] },
     ],
     examples: &[BuiltinExample {
@@ -63,12 +64,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Audio metadata implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/info.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Audio metadata reader", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/info.rs") },
+            BuiltinDocumentationLink { label: "Captured filesystem source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/input.rs") },
+            BuiltinDocumentationLink { label: "Complete-call admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/admission.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "WAV metadata", location: "builtins::io::audio::tests::metadata::audioinfo_reads_wav_metadata" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "FLAC STREAMINFO", location: "builtins::io::audio::tests::metadata::audioinfo_reads_flac_streaminfo" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "MP3 frame header", location: "builtins::io::audio::tests::metadata::audioinfo_parses_mp3_frame_header" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Unknown data error", location: "builtins::io::audio::tests::metadata::audioinfo_rejects_unknown_data" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Finite admission before file effects", location: "builtins::io::audio::tests::admission::cases::finite_missing_and_unknown_evidence_reject_both_identities_before_file_effects" },
         ],
         notes: &[],
     },

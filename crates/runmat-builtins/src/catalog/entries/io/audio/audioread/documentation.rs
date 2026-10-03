@@ -26,6 +26,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Filesystem I/O and decoding execute on the host, terminate fusion, and create host-resident tensors. No provider kernel runs; GPU-resident arguments reject before provider access. Use `gpuArray` explicitly after reading if subsequent computation should reside on a device.",
             "The active native, browser, sandbox, or remote filesystem provider must supply the input bytes. A filename is not a transferable file snapshot, so distributed workers require their own accessible file and filesystem capability.",
             "With a seekable filesystem handle, WAV/RF64 sample ranges are read from selected frames in bounded input chunks. Providers that support whole-file reads but not seekable handles use the read fallback. The returned tensor occupies memory proportional to requested frames and channels; providers may have additional internal buffering costs.",
+            "When a finite host-memory budget is active, the complete read-and-decode call is admitted before opening the file. If the installed host resource service cannot establish complete bounds for the captured filesystem and decoder, the call fails without reading the file. Calls without a finite host-memory budget retain the ordinary reading path when no measured route is selected.",
         ] },
     ],
     examples: &[
@@ -72,7 +73,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Audio sample decoder", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/read.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Audio read entrypoint and controls", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/read.rs") },
+            BuiltinDocumentationLink { label: "Captured filesystem source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/input.rs") },
+            BuiltinDocumentationLink { label: "Complete-call admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/admission.rs") },
+            BuiltinDocumentationLink { label: "Streaming WAV decoder", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/stream.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Normalized PCM16", location: "builtins::io::audio::tests::samples::audioread_reads_mono_pcm16_as_normalized_double" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Channel-major storage", location: "builtins::io::audio::tests::samples::audioread_stereo_output_is_column_major_by_channel" },
@@ -80,6 +86,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact native uint8", location: "builtins::io::audio::tests::samples::audioread_native_pcm8_uses_exact_uint8_storage" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed integer range rejection", location: "builtins::io::audio::tests::samples::audioread_sample_range_rejects_all_typed_integer_classes" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Provider filesystem", location: "builtins::io::audio::tests::samples::audioread_reads_via_active_filesystem_provider" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Finite admission before file effects", location: "builtins::io::audio::tests::admission::cases::finite_missing_and_unknown_evidence_reject_both_identities_before_file_effects" },
         ],
         notes: &[],
     },
