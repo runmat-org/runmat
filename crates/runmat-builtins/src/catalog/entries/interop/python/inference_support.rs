@@ -118,7 +118,7 @@ pub(super) fn text_at(
     if request
         .literals
         .literal_string_at(index)
-        .is_some_and(str::is_empty)
+        .is_some_and(|value| value.is_empty())
     {
         diagnostics.push(argument_error(
             "RM-PYTHON-EMPTY",
