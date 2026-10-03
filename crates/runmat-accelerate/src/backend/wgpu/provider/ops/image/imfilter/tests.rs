@@ -444,9 +444,13 @@ fn actual_imfilter_host_mediated_fallback_preserves_single_and_arithmetic_policy
         .unwrap();
     for explicit in [false, true] {
         let input = single_input(&provider, explicit, &values, &[3, 1]);
-        let output =
-            block_on(provider.imfilter_exec_fallback(&input, &kernel, &ImfilterOptions::default()))
-                .unwrap();
+        let output = block_on(provider.imfilter_exec_fallback(
+            &input,
+            &kernel,
+            &ImfilterOptions::default(),
+            false,
+        ))
+        .unwrap();
         assert_eq!(output.physical().element_type(), NumericElementType::F32);
         let HostNumericDataOwned::F32(actual) = block_on(provider.download_numeric_exec(&output))
             .unwrap()

@@ -154,6 +154,8 @@ mod tests {
                     sum: None,
                     convolution: None,
                     iir: None,
+                    fspecial: None,
+                    imfilter: None,
                     transfer_output_bounds: None,
                     elements: Some(4),
                     flops: Some(8),

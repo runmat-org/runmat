@@ -637,13 +637,21 @@ fn provider_hook_host_workspace_coexists_with_physical_output_peak() {
 
     bounded.resources.memory_available_bytes = Some(63);
     assert_eq!(
-        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        session
+            .select_whole_work(bounded.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     bounded.resources.memory_available_bytes = Some(64);
     bounded.resources.providers[0].scratch_available_bytes = Some(23);
     assert_eq!(
-        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        session
+            .select_whole_work(bounded.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 
@@ -651,7 +659,11 @@ fn provider_hook_host_workspace_coexists_with_physical_output_peak() {
     bounded.candidates[0].resources.cpu_millicores = 1_000;
     bounded.resources.cpu_millicores_available = 999;
     assert_eq!(
-        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        session
+            .select_whole_work(bounded.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 
@@ -661,7 +673,11 @@ fn provider_hook_host_workspace_coexists_with_physical_output_peak() {
     let mut unknown = request(vec![provider]);
     unknown.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
     assert_eq!(
-        session.select_whole_work(unknown).unwrap_err().code,
+        session
+            .select_whole_work(unknown)
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:InsufficientResourceEvidence"
     );
 }
@@ -690,13 +706,21 @@ fn conditional_host_or_provider_output_does_not_double_count_same_host_payload()
 
     bounded.resources.memory_available_bytes = Some(31);
     assert_eq!(
-        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        session
+            .select_whole_work(bounded.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     bounded.resources.memory_available_bytes = Some(32);
     bounded.resources.providers[0].scratch_available_bytes = Some(23);
     assert_eq!(
-        session.select_whole_work(bounded).unwrap_err().code,
+        session
+            .select_whole_work(bounded)
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 }
@@ -731,20 +755,32 @@ fn conditional_provider_upload_peaks_sequential_host_and_device_stages() {
 
     route.resources.memory_available_bytes = Some(23);
     assert_eq!(
-        session.select_whole_work(route.clone()).unwrap_err().code,
+        session
+            .select_whole_work(route.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     route.resources.memory_available_bytes = Some(24);
     route.resources.providers[0].scratch_available_bytes = Some(31);
     assert_eq!(
-        session.select_whole_work(route.clone()).unwrap_err().code,
+        session
+            .select_whole_work(route.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     route.resources.providers[0].scratch_available_bytes = Some(32);
     route.resources.providers[0].queue_depth = Some(1);
     route.resources.providers[0].queue_limit = Some(1);
     assert_eq!(
-        session.select_whole_work(route.clone()).unwrap_err().code,
+        session
+            .select_whole_work(route.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     route.resources.providers[0].queue_depth = Some(0);
@@ -758,7 +794,11 @@ fn conditional_provider_upload_peaks_sequential_host_and_device_stages() {
         );
     }
     assert_eq!(
-        session.select_whole_work(route).unwrap_err().code,
+        session
+            .select_whole_work(route)
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:InsufficientResourceEvidence"
     );
 }
@@ -799,7 +839,11 @@ fn conditional_upload_retains_prepared_input_during_fallback_publication() {
     assert!(session.select_whole_work(route.clone()).is_ok());
     route.resources.providers[0].scratch_available_bytes = Some(39);
     assert_eq!(
-        session.select_whole_work(route).unwrap_err().code,
+        session
+            .select_whole_work(route)
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 }
@@ -836,14 +880,22 @@ fn provider_input_stages_include_live_preparation_and_peak_against_execution() {
     assert!(session.select_whole_work(bounded.clone()).is_ok());
     bounded.resources.providers[0].scratch_available_bytes = Some(39);
     assert_eq!(
-        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        session
+            .select_whole_work(bounded.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 
     bounded.resources.providers[0].scratch_available_bytes = Some(40);
     bounded.resources.providers[0].queue_depth = Some(1);
     assert_eq!(
-        session.select_whole_work(bounded).unwrap_err().code,
+        session
+            .select_whole_work(bounded)
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 }
@@ -872,7 +924,11 @@ fn cross_owner_provider_input_stage_needs_its_own_finite_quota() {
     assert!(session.select_whole_work(bounded.clone()).is_ok());
     bounded.resources.providers[1].scratch_available_bytes = Some(15);
     assert_eq!(
-        session.select_whole_work(bounded).unwrap_err().code,
+        session
+            .select_whole_work(bounded)
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 }
@@ -959,13 +1015,21 @@ fn multi_owner_host_sink_admits_each_readback_before_host_publication() {
     assert!(session.select_whole_work(bounded.clone()).is_ok());
     bounded.resources.providers[1].scratch_available_bytes = Some(7);
     assert_eq!(
-        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        session
+            .select_whole_work(bounded.clone())
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     bounded.resources.providers[1].scratch_available_bytes = Some(8);
     bounded.resources.providers[1].queue_depth = Some(1);
     assert_eq!(
-        session.select_whole_work(bounded).unwrap_err().code,
+        session
+            .select_whole_work(bounded)
+            .err()
+            .expect("whole-work route must be rejected")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 }
