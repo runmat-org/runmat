@@ -7,7 +7,10 @@ pub(super) struct WaveContainer {
     pub(super) data_len: usize,
 }
 
-pub(super) fn parse_wave_metadata(bytes: &[u8]) -> Result<(WaveFormat, u64), String> {
+pub(super) fn parse_wave_metadata(
+    bytes: &[u8],
+    file_size: u64,
+) -> Result<(WaveFormat, u64), String> {
     if bytes.len() < 12 || &bytes[8..12] != b"WAVE" {
         return Err("RIFF/RF64 file is not a WAVE container".to_string());
     }
@@ -20,14 +23,25 @@ pub(super) fn parse_wave_metadata(bytes: &[u8]) -> Result<(WaveFormat, u64), Str
         let id = &bytes[pos..pos + 4];
         let declared_size = read_u32_le(bytes, pos + 4)?;
         pos += 8;
-        if is_rf64 && id == b"data" && declared_size == u32::MAX {
-            let data_size = rf64_data_size.ok_or_else(|| {
+        let size = if is_rf64 && id == b"data" && declared_size == u32::MAX {
+            rf64_data_size.ok_or_else(|| {
                 "RF64 data chunk uses sentinel size without ds64 metadata".to_string()
-            })?;
-            data_bytes = Some(data_size);
+            })?
+        } else {
+            u64::from(declared_size)
+        };
+        let chunk_end = (pos as u64)
+            .checked_add(size)
+            .ok_or_else(|| "WAVE chunk size overflows address space".to_string())?;
+        if chunk_end > file_size {
+            return Err("WAVE chunk extends past end of file".to_string());
+        }
+        if id == b"data" {
+            data_bytes = Some(size);
             break;
         }
-        let size = declared_size as usize;
+        let size = usize::try_from(size)
+            .map_err(|_| "WAVE chunk size overflows address space".to_string())?;
         match id {
             b"ds64" if is_rf64 => {
                 let end = pos
@@ -49,10 +63,6 @@ pub(super) fn parse_wave_metadata(bytes: &[u8]) -> Result<(WaveFormat, u64), Str
                     return Err("WAVE chunk extends past end of file".to_string());
                 }
                 fmt = Some(parse_wave_fmt(&bytes[pos..end])?);
-            }
-            b"data" => {
-                data_bytes = Some(size as u64);
-                break;
             }
             _ => {
                 let end = pos
@@ -153,13 +163,42 @@ pub(super) struct WaveFormat {
     pub(super) valid_bits_per_sample: Option<u16>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum WaveSampleCoding {
+    Pcm8,
+    Pcm16,
+    Pcm24,
+    Pcm32,
+    Float32,
+    Float64,
+}
+
 impl WaveFormat {
     pub(super) fn effective_format_tag(self) -> u16 {
         self.subformat_tag.unwrap_or(self.format_tag)
     }
 
-    pub(super) fn effective_bits_per_sample(self) -> u16 {
-        self.valid_bits_per_sample.unwrap_or(self.bits_per_sample)
+    /// The encoded sample always occupies the container width. Extensible PCM
+    /// precision is left-aligned inside that container, not a shorter stride.
+    pub(super) fn storage_bits_per_sample(self) -> u16 {
+        self.bits_per_sample
+    }
+
+    pub(super) fn sample_coding(self) -> Result<WaveSampleCoding, String> {
+        let coding = match (self.effective_format_tag(), self.storage_bits_per_sample()) {
+            (0x0001, 8) => WaveSampleCoding::Pcm8,
+            (0x0001, 16) => WaveSampleCoding::Pcm16,
+            (0x0001, 24) => WaveSampleCoding::Pcm24,
+            (0x0001, 32) => WaveSampleCoding::Pcm32,
+            (0x0003, 32) => WaveSampleCoding::Float32,
+            (0x0003, 64) => WaveSampleCoding::Float64,
+            (tag, bits) => {
+                return Err(format!(
+                    "unsupported WAVE sample encoding tag 0x{tag:04x} with {bits} bits per sample"
+                ));
+            }
+        };
+        Ok(coding)
     }
 }
 
@@ -190,6 +229,9 @@ pub(super) fn parse_wave_fmt(chunk: &[u8]) -> Result<WaveFormat, String> {
             return Err("WAVE extensible fmt chunk has invalid extension size".to_string());
         }
         let valid = u16::from_le_bytes([chunk[18], chunk[19]]);
+        if valid > bits_per_sample {
+            return Err("WAVE valid sample precision exceeds its container width".to_string());
+        }
         valid_bits_per_sample = if valid == 0 { None } else { Some(valid) };
         subformat_tag = wave_extensible_subformat_tag(&chunk[24..40]);
     }

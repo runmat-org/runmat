@@ -86,7 +86,12 @@ fn audioinfo_reads_wav_metadata() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioinfo_reads_rf64_data_size_from_ds64() {
-    let metadata = AudioMetadata::parse(&audio_scan(rf64_fixture(48_000, 2, 16, 5))).expect("rf64");
+    let metadata = AudioMetadata::parse(&audio_scan(rf64_pcm16_wav(
+        48_000,
+        2,
+        &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    )))
+    .expect("rf64");
     assert_eq!(metadata.format, "WAV");
     assert_eq!(metadata.total_samples, Some(5));
     assert_eq!(metadata.num_channels, 2);
@@ -97,9 +102,30 @@ fn audioinfo_reads_rf64_data_size_from_ds64() {
 fn audioinfo_keeps_rf64_sample_count_in_u64_space() {
     let block_align = 2u64 * (16u64 / 8);
     let frames = (u32::MAX as u64 / block_align) + 10;
-    let metadata =
-        AudioMetadata::parse(&audio_scan(rf64_fixture(48_000, 2, 16, frames))).expect("rf64");
+    let prefix = rf64_fixture(48_000, 2, 16, frames);
+    // Model a sparse/virtual file: the bounded prefix is present, while the
+    // filesystem metadata reports the genuine 64-bit payload extent.
+    let scan = AudioInfoScan {
+        file_size: prefix.len() as u64 + frames * block_align,
+        prefix,
+        tail: None,
+    };
+    let metadata = AudioMetadata::parse(&scan).expect("rf64");
     assert_eq!(metadata.total_samples, Some(frames));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn audioinfo_rejects_truncated_riff_and_rf64_data_extents() {
+    let mut riff = wav_fixture(8_000, 1, 16, 2);
+    riff.truncate(riff.len() - 2);
+    let error = AudioMetadata::parse(&audio_scan(riff)).expect_err("truncated RIFF data");
+    assert!(error.contains("extends past end of file"));
+
+    let mut rf64 = rf64_pcm16_wav(8_000, 1, &[0, 1]);
+    rf64.truncate(rf64.len() - 2);
+    let error = AudioMetadata::parse(&audio_scan(rf64)).expect_err("truncated RF64 data");
+    assert!(error.contains("extends past end of file"));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -117,7 +117,7 @@ impl AudioMetadata {
             return Err("file is too small to contain audio metadata".to_string());
         }
         if bytes.starts_with(b"RIFF") || bytes.starts_with(b"RF64") {
-            return parse_wave(bytes);
+            return parse_wave(bytes, scan.file_size);
         }
         if bytes.starts_with(b"fLaC") {
             return parse_flac(bytes);
@@ -169,8 +169,8 @@ impl AudioMetadata {
     }
 }
 
-pub(super) fn parse_wave(bytes: &[u8]) -> Result<AudioMetadata, String> {
-    let (format, data_bytes) = parse_wave_metadata(bytes)?;
+pub(super) fn parse_wave(bytes: &[u8], file_size: u64) -> Result<AudioMetadata, String> {
+    let (format, data_bytes) = parse_wave_metadata(bytes, file_size)?;
     let total_samples = if format.block_align > 0 {
         Some(data_bytes / format.block_align as u64)
     } else {

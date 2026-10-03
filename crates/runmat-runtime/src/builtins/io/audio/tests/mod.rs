@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 mod fixtures;
+mod extensible;
 mod metadata;
 mod samples;
 use fixtures::*;

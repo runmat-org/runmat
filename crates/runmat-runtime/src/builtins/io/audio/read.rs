@@ -164,7 +164,7 @@ pub(super) const COMPRESSED_AUDIO_ERROR: &str = "sample decoding is currently im
 pub(super) const UNSUPPORTED_AUDIO_ERROR: &str = "unsupported audio format";
 
 pub(super) fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {
-    match (fmt.effective_format_tag(), fmt.effective_bits_per_sample()) {
+    match (fmt.effective_format_tag(), fmt.storage_bits_per_sample()) {
         (0x0001, 8) => NumericDType::U8,
         (0x0003, 32) => NumericDType::F32,
         _ => NumericDType::F64,
@@ -176,7 +176,7 @@ pub(super) fn decode_wave_sample(
     fmt: WaveFormat,
     native: bool,
 ) -> Result<f64, String> {
-    match (fmt.effective_format_tag(), fmt.effective_bits_per_sample()) {
+    match (fmt.effective_format_tag(), fmt.storage_bits_per_sample()) {
         (0x0001, 8) => {
             let raw = bytes[0] as f64;
             Ok(if native { raw } else { (raw - 128.0) / 128.0 })

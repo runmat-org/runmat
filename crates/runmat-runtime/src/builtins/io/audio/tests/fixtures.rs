@@ -123,6 +123,37 @@ pub(super) fn pcm32_wav(sample_rate: u32, channels: u16, samples_interleaved: &[
     wav_with_payload(sample_rate, channels, 32, 1, &payload)
 }
 
+pub(super) fn extensible_pcm32_wav(
+    sample_rate: u32,
+    valid_bits: u16,
+    samples_interleaved: &[i32],
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let data_size = (samples_interleaved.len() * 4) as u32;
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(60u32 + data_size).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&40u32.to_le_bytes());
+    bytes.extend_from_slice(&0xfffeu16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * 4).to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&32u16.to_le_bytes());
+    bytes.extend_from_slice(&22u16.to_le_bytes());
+    bytes.extend_from_slice(&valid_bits.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&[
+        1, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71,
+    ]);
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_size.to_le_bytes());
+    for sample in samples_interleaved {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    bytes
+}
+
 pub(super) fn float32_wav(sample_rate: u32, channels: u16, samples_interleaved: &[f32]) -> Vec<u8> {
     let mut payload = Vec::new();
     for sample in samples_interleaved {

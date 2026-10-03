@@ -95,6 +95,7 @@ async fn decode_seekable_wave<R: Read + Seek>(
 ) -> BuiltinResult<DecodedAudio> {
     let parsed = scan_wave(file, path, cooperation).await?;
     let fmt = parsed.format;
+    let coding = fmt.sample_coding().map_err(format_error)?;
     let channels = usize::from(fmt.channels);
     let block_align = usize::from(fmt.block_align);
     let bytes_per_channel = usize::from(fmt.bits_per_sample.div_ceil(8));
@@ -135,19 +136,15 @@ async fn decode_seekable_wave<R: Read + Seek>(
         block_align,
         bytes_per_channel,
     };
-    let samples = match (
-        options.datatype,
-        fmt.effective_format_tag(),
-        fmt.effective_bits_per_sample(),
-    ) {
-        (AudioReadDataType::Native, 0x0001, 8) => Tensor::new_integer(
+    let samples = match (options.datatype, coding) {
+        (AudioReadDataType::Native, WaveSampleCoding::Pcm8) => Tensor::new_integer(
             IntegerStorage::U8(
                 collect_stream_samples(file, path, geometry, cooperation, |sample| Ok(sample[0]))
                     .await?,
             ),
             shape,
         ),
-        (AudioReadDataType::Native, 0x0001, 16) => Tensor::new_integer(
+        (AudioReadDataType::Native, WaveSampleCoding::Pcm16) => Tensor::new_integer(
             IntegerStorage::I16(
                 collect_stream_samples(file, path, geometry, cooperation, |sample| {
                     Ok(i16::from_le_bytes([sample[0], sample[1]]))
@@ -156,7 +153,7 @@ async fn decode_seekable_wave<R: Read + Seek>(
             ),
             shape,
         ),
-        (AudioReadDataType::Native, 0x0001, 24) => Tensor::new_integer(
+        (AudioReadDataType::Native, WaveSampleCoding::Pcm24) => Tensor::new_integer(
             IntegerStorage::I32(
                 collect_stream_samples(file, path, geometry, cooperation, |sample| {
                     Ok(sign_extend_24(sample) << 8)
@@ -165,7 +162,7 @@ async fn decode_seekable_wave<R: Read + Seek>(
             ),
             shape,
         ),
-        (AudioReadDataType::Native, 0x0001, 32) => Tensor::new_integer(
+        (AudioReadDataType::Native, WaveSampleCoding::Pcm32) => Tensor::new_integer(
             IntegerStorage::I32(
                 collect_stream_samples(file, path, geometry, cooperation, |sample| {
                     Ok(i32::from_le_bytes([
