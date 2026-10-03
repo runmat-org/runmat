@@ -6,6 +6,7 @@
 
 mod capability;
 mod host_document;
+pub mod host_effect;
 pub(crate) mod host_presentation;
 pub(crate) mod provider_operation;
 #[cfg(test)]
@@ -35,11 +36,11 @@ pub use services::{
     RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService,
     RuntimeCollectiveService, RuntimeDistributedCallRequest, RuntimeDistributedInvocation,
     RuntimeDistributedRetirement, RuntimeDistributedService, RuntimeDistributedSnapshot,
-    RuntimeErrorService, RuntimeForeignService, RuntimeHostService, RuntimeHttpService,
-    RuntimeNativeService, RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
-    RuntimePlacementFeedbackSource, RuntimePlacementService, RuntimeServiceFuture,
-    RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
-    RuntimeSpmdService, RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection,
-    RuntimeWorkspaceService,
+    RuntimeErrorService, RuntimeForeignService, RuntimeHostEffectResourceService,
+    RuntimeHostService, RuntimeHttpService, RuntimeNativeService, RuntimeObjectService,
+    RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackSource,
+    RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
+    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService, RuntimeWholeWorkProbeLease,
+    RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;

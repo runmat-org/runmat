@@ -22,6 +22,43 @@ use zip::write::SimpleFileOptions;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+#[cfg(not(target_arch = "wasm32"))]
+struct FiniteHostBudget;
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::context::RuntimeParallelService for FiniteHostBudget {
+    fn supports(&self, _: crate::context::ParallelCapability) -> bool {
+        false
+    }
+    fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+        crate::context::RuntimeParallelResources {
+            memory_available_bytes: Some(1024),
+            ..Default::default()
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn finite_budget_without_host_effect_evidence_rejects_before_filesystem_effects() {
+    let root = tempdir().unwrap();
+    let archive = root.path().join("missing.zip");
+    let destination = root.path().join("must-not-create");
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(FiniteHostBudget)),
+        );
+    let error = block_on(unzip_builtin(
+        Some(runtime),
+        vec![
+            Value::String(archive.to_string_lossy().into_owned()),
+            Value::String(destination.to_string_lossy().into_owned()),
+        ],
+    ))
+    .unwrap_err();
+    assert_eq!(error.code, "RunMat:Placement:InsufficientResourceEvidence");
+    assert!(!destination.exists());
+}
+
 struct CountingProvider {
     inner: runmat_accelerate::simple_provider::InProcessProvider,
     downloads: AtomicUsize,

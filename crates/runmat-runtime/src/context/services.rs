@@ -243,6 +243,19 @@ pub struct RuntimeWholeWorkSelection {
     pub probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
 }
 
+/// Host-owned, operation-specific evidence for a complete side-effecting call.
+/// A provider capability digest and an archive size limit are not substitutes
+/// for this installed service's revision and peak-memory evidence. An adapter
+/// must return None unless it can certify the exact request's transport,
+/// filesystem, codec, and result-storage bounds; a configured size cap alone
+/// is not a peak-memory proof.
+pub trait RuntimeHostEffectResourceService {
+    fn admission(
+        &self,
+        request: &super::host_effect::HostEffectRequest,
+    ) -> Option<super::host_effect::HostEffectResourceEvidence>;
+}
+
 /// Session-owned execution-placement authority. The runtime exposes only
 /// executor-neutral contracts; candidate generation and policy remain in their
 /// owning executor/acceleration crates.
@@ -641,6 +654,7 @@ pub struct RuntimeServicePorts {
     error: Option<Rc<dyn RuntimeErrorService>>,
     acceleration: Option<Rc<dyn RuntimeAccelerationService>>,
     placement: Option<Rc<dyn RuntimePlacementService>>,
+    host_effect_resources: Option<Rc<dyn RuntimeHostEffectResourceService>>,
     native: Option<Rc<dyn RuntimeNativeService>>,
     foreign: Option<Rc<dyn RuntimeForeignService>>,
     parallel: Option<Rc<dyn RuntimeParallelService>>,
@@ -662,6 +676,10 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("error", &self.error.is_some())
             .field("acceleration", &self.acceleration.is_some())
             .field("placement", &self.placement.is_some())
+            .field(
+                "host_effect_resources",
+                &self.host_effect_resources.is_some(),
+            )
             .field("native", &self.native.is_some())
             .field("foreign", &self.foreign.is_some())
             .field("parallel", &self.parallel.is_some())
@@ -774,6 +792,14 @@ impl RuntimeServicePorts {
         placement,
         RuntimePlacementService,
         Placement
+    );
+    port_accessors!(
+        with_host_effect_resources,
+        host_effect_resources,
+        require_host_effect_resources,
+        host_effect_resources,
+        RuntimeHostEffectResourceService,
+        Host
     );
     port_accessors!(
         with_native,

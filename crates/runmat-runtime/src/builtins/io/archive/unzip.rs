@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_execution::{Digest, WholeWorkObservationOutcome};
 use runmat_filesystem::File;
 use runmat_filesystem::{self as vfs};
 use runmat_macros::runtime_builtin;
@@ -44,38 +45,88 @@ async fn unzip_builtin(
                 format!("unzip: expected at most 1 output, got {out_count}"),
             ));
         }
-        let result = evaluate(&args, runtime.as_ref()).await?;
+        let output = if out_count == 0 {
+            crate::context::host_effect::HostEffectOutput::EffectOnly
+        } else {
+            crate::context::host_effect::HostEffectOutput::ReturnedValue
+        };
+        let result = evaluate_with_output(&args, runtime.as_ref(), output).await?;
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(result.finish_effect_only());
         }
-        return Ok(Value::OutputList(vec![result.into_value()?]));
+        return result.into_value_with(|value| Value::OutputList(vec![value]));
     }
     let result = evaluate(&args, runtime.as_ref()).await?;
-    result.into_value()
+    result.into_value_with(std::convert::identity)
 }
 
 pub async fn evaluate(
     args: &[Value],
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<UnzipResult> {
+    evaluate_with_output(
+        args,
+        runtime,
+        crate::context::host_effect::HostEffectOutput::ReturnedValue,
+    )
+    .await
+}
+
+async fn evaluate_with_output(
+    args: &[Value],
+    runtime: Option<&crate::context::RuntimeContext>,
+    output: crate::context::host_effect::HostEffectOutput,
+) -> BuiltinResult<UnzipResult> {
+    use crate::context::host_effect::{
+        select_host_effect, HostEffectRequest, HostEffectSource, HostEffectWorkload,
+    };
     let request = parse_arguments(args)?;
     check_cancelled(runtime)?;
-    let output_provider = vfs::current_provider();
-    let output_folder = resolve_output_folder(request.output_folder.as_deref()).await?;
-
-    let filenames = match request.archive {
-        runmat_builtins::UnzipSourceRoute::Http(url) => {
-            extract_remote_archive(&url, &output_folder, runtime, output_provider).await?
-        }
-        runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
-            let path = resolve_archive_path(&path)?;
-            prepare_output_folder(&output_folder, runtime, output_provider.as_ref()).await?;
-            extract_local_archive(&path, &output_folder, runtime, output_provider).await?
-        }
+    let source = match &request.archive {
+        runmat_builtins::UnzipSourceRoute::Http(_) => HostEffectSource::HttpArchive,
+        runmat_builtins::UnzipSourceRoute::LocalPath(_) => HostEffectSource::LocalArchive,
     };
-    check_cancelled(runtime)?;
-
-    Ok(UnzipResult { filenames })
+    let source_text = match &request.archive {
+        runmat_builtins::UnzipSourceRoute::Http(url) => url.as_str(),
+        runmat_builtins::UnzipSourceRoute::LocalPath(path) => path.as_str(),
+    };
+    let receipt = select_host_effect(
+        runtime,
+        HostEffectRequest {
+            operation: BUILTIN_NAME,
+            workload: HostEffectWorkload::ArchiveExtract { source, output },
+            domain_facts: Digest::sha256(
+                serde_json::to_vec(&(source_text, &request.output_folder))
+                    .expect("archive source and destination serialize"),
+            ),
+        },
+    )?;
+    let output_provider = vfs::current_provider();
+    let execution = async {
+        let output_folder = resolve_output_folder(request.output_folder.as_deref()).await?;
+        let filenames = match request.archive {
+            runmat_builtins::UnzipSourceRoute::Http(url) => {
+                extract_remote_archive(&url, &output_folder, runtime, output_provider).await?
+            }
+            runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
+                let path = resolve_archive_path(&path)?;
+                prepare_output_folder(&output_folder, runtime, output_provider.as_ref()).await?;
+                extract_local_archive(&path, &output_folder, runtime, output_provider).await?
+            }
+        };
+        check_cancelled(runtime)?;
+        Ok(filenames)
+    }
+    .await;
+    match execution {
+        Ok(filenames) => Ok(UnzipResult { filenames, receipt }),
+        Err(error) => {
+            if let Some(receipt) = receipt {
+                receipt.finish(WholeWorkObservationOutcome::OperationalFailure);
+            }
+            Err(error)
+        }
+    }
 }
 
 async fn prepare_output_folder(
@@ -129,21 +180,38 @@ use self::extraction::extract_archive;
 use self::extraction::extract_archive_file_on_worker;
 use self::extraction::reject_symlink_path;
 
-#[derive(Debug, Clone)]
 pub struct UnzipResult {
     filenames: Vec<String>,
+    receipt: Option<crate::context::host_effect::HostEffectReceipt>,
 }
 
 impl UnzipResult {
-    fn into_value(self) -> BuiltinResult<Value> {
+    fn finish_effect_only(self) -> Value {
+        let value = Value::OutputList(Vec::new());
+        if let Some(receipt) = self.receipt {
+            receipt.finish(WholeWorkObservationOutcome::Success);
+        }
+        value
+    }
+
+    fn into_value_with(self, wrap: impl FnOnce(Value) -> Value) -> BuiltinResult<Value> {
         let rows = self.filenames.len();
         let values = self
             .filenames
             .into_iter()
             .map(|path| Value::CharArray(CharArray::new_row(&path)))
             .collect::<Vec<_>>();
-        crate::make_cell(values, rows, 1)
-            .map_err(|err| unzip_error_with(&UNZIP_ERROR_OUTPUT, format!("unzip: {err}")))
+        let value = crate::make_cell(values, rows, 1)
+            .map(wrap)
+            .map_err(|err| unzip_error_with(&UNZIP_ERROR_OUTPUT, format!("unzip: {err}")));
+        if let Some(receipt) = self.receipt {
+            receipt.finish(if value.is_ok() {
+                WholeWorkObservationOutcome::Success
+            } else {
+                WholeWorkObservationOutcome::OperationalFailure
+            });
+        }
+        value
     }
 }
 
