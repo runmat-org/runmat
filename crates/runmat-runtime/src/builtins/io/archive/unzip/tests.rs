@@ -55,7 +55,10 @@ fn finite_budget_without_host_effect_evidence_rejects_before_filesystem_effects(
         ],
     ))
     .unwrap_err();
-    assert_eq!(error.code, "RunMat:Placement:InsufficientResourceEvidence");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
     assert!(!destination.exists());
 }
 

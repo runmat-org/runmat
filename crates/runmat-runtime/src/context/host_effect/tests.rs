@@ -156,7 +156,7 @@ fn request(output: HostEffectOutput) -> HostEffectRequest<'static> {
     }
 }
 
-fn runtime(
+fn runtime_context(
     placement: Rc<Placement>,
     evidence: Option<HostEffectResourceEvidence>,
     available: Option<u64>,
@@ -193,15 +193,18 @@ fn finite_missing_or_unknown_bound_rejects_before_selection() {
             ResourceByteBound::Known(4),
         )),
     ] {
-        let runtime = runtime(placement.clone(), evidence, Some(32));
+        let runtime = runtime_context(placement.clone(), evidence, Some(32));
         let error = select_host_effect(Some(&runtime), request(HostEffectOutput::ReturnedValue))
             .err()
             .expect("finite unknown must reject");
-        assert_eq!(error.code, "RunMat:Placement:InsufficientResourceEvidence");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:InsufficientResourceEvidence")
+        );
     }
     assert_eq!(placement.selections.get(), 0);
 
-    let runtime = runtime(
+    let runtime = runtime_context(
         placement.clone(),
         Some(bounds(
             ResourceByteBound::Known(4),
@@ -224,7 +227,7 @@ fn finite_missing_or_unknown_bound_rejects_before_selection() {
     assert!(select_host_effect(Some(&runtime), foreign_owner).is_err());
     assert_eq!(placement.selections.get(), 0);
 
-    let runtime = runtime(
+    let runtime = runtime_context(
         placement.clone(),
         Some(bounds(
             ResourceByteBound::Known(4),
@@ -236,7 +239,10 @@ fn finite_missing_or_unknown_bound_rejects_before_selection() {
     let error = select_host_effect(Some(&runtime), request(HostEffectOutput::ReturnedValue))
         .err()
         .expect("finite missing revision must reject");
-    assert_eq!(error.code, "RunMat:Placement:InsufficientResourceEvidence");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
     assert_eq!(placement.selections.get(), 0);
 }
 
@@ -247,7 +253,7 @@ fn finite_effect_only_uses_zero_retained_but_still_budgets_scratch() {
         ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
         ResourceByteBound::Known(24),
     ));
-    let enough = runtime(placement.clone(), evidence, Some(24));
+    let enough = runtime_context(placement.clone(), evidence, Some(24));
     let receipt = select_host_effect(Some(&enough), request(HostEffectOutput::EffectOnly))
         .unwrap()
         .expect("effect-only call admitted");
@@ -265,7 +271,7 @@ fn finite_effect_only_uses_zero_retained_but_still_budgets_scratch() {
         placement.observations.borrow()[1].outcome,
         WholeWorkObservationOutcome::OperationalFailure
     );
-    let insufficient = runtime(placement.clone(), evidence, Some(23));
+    let insufficient = runtime_context(placement.clone(), evidence, Some(23));
     assert!(
         select_host_effect(Some(&insufficient), request(HostEffectOutput::EffectOnly)).is_err()
     );
@@ -279,12 +285,12 @@ fn finite_returned_value_charges_retained_and_scratch_together() {
         ResourceByteBound::Known(12),
         ResourceByteBound::Known(24),
     ));
-    let enough = runtime(placement.clone(), evidence, Some(36));
+    let enough = runtime_context(placement.clone(), evidence, Some(36));
     select_host_effect(Some(&enough), request(HostEffectOutput::ReturnedValue))
         .unwrap()
         .unwrap()
         .finish(WholeWorkObservationOutcome::Success);
-    let short = runtime(placement.clone(), evidence, Some(35));
+    let short = runtime_context(placement.clone(), evidence, Some(35));
     assert!(select_host_effect(Some(&short), request(HostEffectOutput::ReturnedValue)).is_err());
     assert_eq!(placement.selections.get(), 1);
 }
@@ -292,7 +298,7 @@ fn finite_returned_value_charges_retained_and_scratch_together() {
 #[test]
 fn dropped_and_cancelled_receipts_release_probe_without_failure_feedback() {
     let placement = Rc::new(Placement::default());
-    let runtime = runtime(
+    let runtime = runtime_context(
         placement.clone(),
         Some(bounds(
             ResourceByteBound::Known(8),
