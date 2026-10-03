@@ -242,13 +242,23 @@ fn keyword_bundle(value: runmat_value::ObjectInstance) -> Result<PythonValue, Ru
             .iter()
             .zip(values)
             .map(|(name, value)| {
+                if !crate::builtins::common::validation::value_is_text_scalar(name) {
+                    return Err(invalid_conversion("pyargs names must be text"));
+                }
                 let name = String::try_from(name)
                     .map_err(|_| invalid_conversion("pyargs names must be text"))?;
+                if name.is_empty() {
+                    return Err(invalid_conversion("pyargs names must be non-empty"));
+                }
                 Ok((name, value_to_python_inner(value.clone())?))
             })
             .collect::<Result<_, RuntimeError>>()?,
     ))
 }
+
+#[cfg(test)]
+#[path = "conversion/keyword_tests.rs"]
+mod keyword_tests;
 
 pub(super) fn value_from_python(value: PythonValue) -> Result<Value, RuntimeError> {
     match value {

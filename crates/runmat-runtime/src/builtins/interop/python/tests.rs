@@ -43,8 +43,15 @@ fn pyargs_rejects_invalid_pairs_before_any_python_service() {
         .err()
         .expect("odd pair");
     assert_eq!(odd.identifier(), Some("RunMat:Foreign:InvalidCall"));
-    let nontext = pyargs_builtin(vec![Value::Num(1.0), Value::Num(2.0)])
-        .err()
-        .expect("text name");
-    assert_eq!(nontext.identifier(), Some("RunMat:Foreign:InvalidCall"));
+    for name in [
+        Value::Num(1.0),
+        Value::Int(runmat_value::IntValue::I64(1)),
+        Value::Bool(true),
+        Value::String(String::new()),
+    ] {
+        let nontext = pyargs_builtin(vec![name, Value::Num(2.0)])
+            .err()
+            .expect("nonempty text name");
+        assert_eq!(nontext.identifier(), Some("RunMat:Foreign:InvalidCall"));
+    }
 }

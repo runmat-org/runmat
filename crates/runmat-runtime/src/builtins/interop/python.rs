@@ -108,6 +108,9 @@ fn pyargs_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(arguments.len() / 2);
     let mut arguments = arguments.into_iter();
     while let Some(name) = arguments.next() {
+        if !crate::builtins::common::validation::value_is_text_scalar(&name) {
+            return Err(invalid_call("pyargs names must be text"));
+        }
         let name =
             String::try_from(&name).map_err(|_| invalid_call("pyargs names must be text"))?;
         if name.is_empty() {
