@@ -46,9 +46,11 @@ fn validated_query<'a>(
         return None;
     }
     let workload = query.workload.imfilter.as_ref()?;
-    let mut expected_workload = ProviderWorkload::default();
-    expected_workload.imfilter = Some(workload.clone());
-    expected_workload.requested_outputs = Some(1);
+    let expected_workload = ProviderWorkload {
+        imfilter: Some(workload.clone()),
+        requested_outputs: Some(1),
+        ..ProviderWorkload::default()
+    };
     if query.workload != expected_workload {
         return None;
     }
@@ -153,13 +155,13 @@ pub(super) fn validate(
     }
     #[cfg(feature = "wgpu")]
     {
-        return Some(match planned_route(provider, query) {
+        Some(match planned_route(provider, query) {
             Some(plan) => ProviderFeasibility::supported(plan.estimate),
             None => ProviderFeasibility::rejected(
                 ProviderRejectionCode::UnknownResourceEstimate,
                 "imfilter.physical_route_unproven",
             ),
-        });
+        })
     }
     #[cfg(not(feature = "wgpu"))]
     {

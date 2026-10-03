@@ -363,8 +363,10 @@ impl AccelProvider for WgpuProvider {
         {
             return None;
         }
-        let mut expected_workload = ProviderWorkload::default();
-        expected_workload.requested_outputs = Some(1);
+        let expected_workload = ProviderWorkload {
+            requested_outputs: Some(1),
+            ..ProviderWorkload::default()
+        };
         if query.workload != expected_workload {
             return None;
         }
