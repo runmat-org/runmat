@@ -138,3 +138,48 @@ fn fgets_typed_scalar_parameters_ignore_poisoned_f64_mirrors() {
         );
     }
 }
+
+#[test]
+fn invalid_limit_and_resident_geometry_precede_provider_download() {
+    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let scalar = owner
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident identifier");
+    let vector = owner
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident limit");
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&scalar.handle).is_none()
+    );
+
+    let invalid_host_limit = run_evaluate(
+        &Value::GpuTensor(scalar.handle.clone()),
+        &[Value::Num(f64::NAN)],
+    )
+    .err()
+    .expect("invalid limit before identifier gather");
+    assert_eq!(
+        invalid_host_limit.identifier(),
+        FGETS_ERROR_INVALID_INPUT.identifier
+    );
+
+    let invalid_resident_limit =
+        run_evaluate(&Value::Num(3.0), &[Value::GpuTensor(vector.handle.clone())])
+            .err()
+            .expect("invalid resident geometry before gather");
+    assert_eq!(
+        invalid_resident_limit.identifier(),
+        FGETS_ERROR_INVALID_INPUT.identifier
+    );
+    assert_eq!(scalar.probe.retirements(), 0);
+    assert_eq!(vector.probe.retirements(), 0);
+}

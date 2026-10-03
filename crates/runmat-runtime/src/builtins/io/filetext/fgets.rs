@@ -1,20 +1,19 @@
 //! MATLAB-compatible `fgets` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, FGETS_ERROR_INTERNAL, FGETS_ERROR_INVALID_IDENTIFIER,
+    FGETS_ERROR_INVALID_INPUT, FGETS_ERROR_IO, FGETS_INTEGER_ID_EXTENSION,
+    FGETS_INTEGER_NCHAR_EXTENSION, FGETS_RESIDENT_ID_EXTENSION, FGETS_RESIDENT_NCHAR_EXTENSION,
+    FGETS_SINGLE_ID_EXTENSION, FGETS_SINGLE_NCHAR_EXTENSION,
+};
+#[cfg(test)]
+use runmat_builtins::{
+    BuiltinIntegerInputAvailability, FGETS_DESCRIPTOR,
+    FGETS_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{
     helpers::{bytes_to_char_array, empty_numeric_row, numeric_row, read_text_line},
@@ -25,217 +24,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const BUILTIN_NAME: &str = "fgets";
 const NCHAR_NONNEGATIVE_INTEGER_DETAIL: &str = "nchar must be a non-negative integer scalar";
 const NCHAR_OUT_OF_RANGE_DETAIL: &str = "nchar is out of range";
-
-macro_rules! fgets_extension {
-    ($name:ident, $id:literal, $description:literal, $error:literal) => {
-        const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-            id: $id,
-            mode: BuiltinExtensionMode::RunMatOnly,
-            description: $description,
-            error_identifier: Some($error),
-        };
-    };
-}
-fgets_extension!(
-    FGETS_INTEGER_ID_EXTENSION,
-    "fgets-integer-fileid",
-    "integer-class fgets file identifiers are a RunMat extension",
-    "RunMat:compatibility:FgetsIntegerIdExtension"
-);
-fgets_extension!(
-    FGETS_INTEGER_NCHAR_EXTENSION,
-    "fgets-integer-nchar",
-    "integer-class fgets nchar values are a RunMat extension",
-    "RunMat:compatibility:FgetsIntegerNcharExtension"
-);
-fgets_extension!(
-    FGETS_SINGLE_ID_EXTENSION,
-    "fgets-single-fileid",
-    "single-precision fgets file identifiers are a RunMat extension",
-    "RunMat:compatibility:FgetsSingleIdExtension"
-);
-fgets_extension!(
-    FGETS_SINGLE_NCHAR_EXTENSION,
-    "fgets-single-nchar",
-    "single-precision fgets nchar values are a RunMat extension",
-    "RunMat:compatibility:FgetsSingleNcharExtension"
-);
-fgets_extension!(
-    FGETS_RESIDENT_ID_EXTENSION,
-    "fgets-resident-fileid",
-    "provider-resident fgets file identifiers are a RunMat extension",
-    "RunMat:compatibility:FgetsResidentIdExtension"
-);
-fgets_extension!(
-    FGETS_RESIDENT_NCHAR_EXTENSION,
-    "fgets-resident-nchar",
-    "provider-resident fgets nchar values are a RunMat extension",
-    "RunMat:compatibility:FgetsResidentNcharExtension"
-);
-pub const FGETS_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
-    FGETS_INTEGER_ID_EXTENSION,
-    FGETS_INTEGER_NCHAR_EXTENSION,
-    FGETS_SINGLE_ID_EXTENSION,
-    FGETS_SINGLE_NCHAR_EXTENSION,
-    FGETS_RESIDENT_ID_EXTENSION,
-    FGETS_RESIDENT_NCHAR_EXTENSION,
-];
-
-const FGETS_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fileID",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "MATLAB-compatible file identifiers are integer-valued doubles; all eight typed integer classes are one independently gated RunMat extension and are checked exactly against the registry identifier domain.",
-    }];
-const FGETS_INTEGER_NCHAR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "nchar",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "MATLAB-compatible nchar values are non-negative integer-valued doubles; all eight typed integer classes are one independently gated RunMat extension and are converted exactly to the runtime length domain.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "tline = fgets(integer_fileID, ...)",
-        inputs: &FGETS_INTEGER_ID_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The identifier is validated exactly before registry access; a successful read returns a host character row and end-of-file returns the double sentinel -1.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "tline = fgets(fileID, integer_nchar)",
-        inputs: &FGETS_INTEGER_NCHAR_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The character limit is validated exactly before reading; line and terminator outputs remain host values independent of the nchar class.",
-    },
-];
-
-const FGETS_OUTPUT_LINE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tline",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Next line including terminators, or -1 at end-of-file.",
-}];
-const FGETS_OUTPUT_LINE_TERMINATORS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "tline",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Next line including terminators, or -1 at end-of-file.",
-    },
-    BuiltinParamDescriptor {
-        name: "terminators",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Numeric row vector of terminator byte values.",
-    },
-];
-const FGETS_INPUTS_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fid",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "File identifier opened by fopen.",
-}];
-const FGETS_INPUTS_FID_NCHAR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "fid",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "File identifier opened by fopen.",
-    },
-    BuiltinParamDescriptor {
-        name: "nchar",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Maximum number of characters to read.",
-    },
-];
-const FGETS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "tline = fgets(fid)",
-        inputs: &FGETS_INPUTS_FID,
-        outputs: &FGETS_OUTPUT_LINE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tline = fgets(fid, nchar)",
-        inputs: &FGETS_INPUTS_FID_NCHAR,
-        outputs: &FGETS_OUTPUT_LINE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[tline, terminators] = fgets(fid, ...)",
-        inputs: &FGETS_INPUTS_FID_NCHAR,
-        outputs: &FGETS_OUTPUT_LINE_TERMINATORS,
-    },
-];
-
-const FGETS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FGETS.INVALID_INPUT",
-    identifier: Some("RunMat:fgets:InvalidInput"),
-    when: "Input argument count or scalar constraints are invalid.",
-    message: "fgets: invalid input arguments",
-};
-const FGETS_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FGETS.INVALID_IDENTIFIER",
-    identifier: Some("RunMat:fgets:InvalidIdentifier"),
-    when: "Identifier does not refer to an open readable file.",
-    message: "fgets: invalid file identifier. Use fopen to generate a valid file ID.",
-};
-const FGETS_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FGETS.IO",
-    identifier: Some("RunMat:fgets:IoFailure"),
-    when: "File read or decode operation failed.",
-    message: "fgets: file I/O failed",
-};
-const FGETS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FGETS.INTERNAL",
-    identifier: None,
-    when: "Internal control-flow conversion failed.",
-    message: "fgets: internal error",
-};
-const FGETS_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    FGETS_ERROR_INVALID_INPUT,
-    FGETS_ERROR_INVALID_IDENTIFIER,
-    FGETS_ERROR_IO,
-    FGETS_ERROR_INTERNAL,
-];
-pub const FGETS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FGETS_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FGETS_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fgets")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "fgets",
-    op_kind: GpuOpKind::Custom("file-io"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host-only file I/O; arguments gathered from the GPU when necessary.",
-};
 
 fn fgets_error_with_message(
     message: impl Into<String>,
@@ -269,27 +57,9 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fgets")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "fgets",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "File I/O calls are not eligible for fusion.",
-};
-
 #[runtime_builtin(
     name = "fgets",
-    category = "io/filetext",
-    summary = "Read the next line including newline characters.",
-    keywords = "fgets,file,io,line,newline",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::fgets_type),
-    descriptor(crate::builtins::io::filetext::fgets::FGETS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::filetext::fgets::INTEGER_CAPABILITIES),
-    extensions(crate::builtins::io::filetext::fgets::FGETS_EXTENSIONS),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::filetext::fgets"
 )]
 async fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -342,8 +112,14 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
     }
 
     preflight_fid(fid_value)?;
+    if !matches!(fid_value, Value::GpuTensor(_)) {
+        parse_fid(fid_value)?;
+    }
     if let Some(nchar) = rest.first() {
         preflight_nchar(nchar)?;
+        if !matches!(nchar, Value::GpuTensor(_)) {
+            parse_nchar_host(nchar)?;
+        }
     }
     let fid_host = gather_value(fid_value).await?;
     preflight_fid(&fid_host)?;
@@ -464,9 +240,25 @@ fn preflight_numeric_role(
                     BUILTIN_NAME,
                 )?;
             }
+            if runmat_accelerate_api::handle_is_logical(handle)
+                || handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+                || handle
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |n, d| n.checked_mul(*d))
+                    != Some(1)
+            {
+                return Err(fgets_error_with_detail(
+                    &FGETS_ERROR_INVALID_INPUT,
+                    "file identifier and nchar must be numeric scalars",
+                ));
+            }
             Ok(())
         }
-        _ => Ok(()),
+        _ => Err(fgets_error_with_detail(
+            &FGETS_ERROR_INVALID_INPUT,
+            "file identifier and nchar must be numeric scalars",
+        )),
     }
 }
 
@@ -547,7 +339,10 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
     }
     let value = gather_value(&args[0]).await?;
     preflight_nchar(&value)?;
+    parse_nchar_host(&value)
+}
 
+fn parse_nchar_host(value: &Value) -> BuiltinResult<Option<usize>> {
     fn checked_f64_to_usize(n: f64) -> BuiltinResult<usize> {
         let upper_exclusive = usize::MAX as f64 + 1.0;
         if n >= upper_exclusive {
@@ -591,15 +386,15 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
                     NCHAR_NONNEGATIVE_INTEGER_DETAIL,
                 ));
             }
-            checked_f64_to_usize(n).map(Some)
+            checked_f64_to_usize(*n).map(Some)
         }
-        Value::Int(i) => checked_int_to_usize(&i).map(Some),
-        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
+        Value::Int(i) => checked_int_to_usize(i).map(Some),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 return checked_int_to_usize(&value).map(Some);
             }
-            let n = tensor::tensor_value_f64(&t, 0);
+            let n = tensor::tensor_value_f64(t, 0);
             if !n.is_finite() {
                 return Err(fgets_error_with_detail(
                     &FGETS_ERROR_INVALID_INPUT,
