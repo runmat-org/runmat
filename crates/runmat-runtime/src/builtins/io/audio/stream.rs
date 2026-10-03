@@ -14,6 +14,9 @@ mod tests;
 #[cfg(test)]
 #[path = "stream/fallback_tests.rs"]
 mod fallback_tests;
+#[cfg(test)]
+#[path = "stream/native_float32_tests.rs"]
+mod native_float32_tests;
 
 #[derive(Clone, Copy)]
 struct WaveStream {
@@ -173,21 +176,24 @@ async fn decode_seekable_wave<R: Read + Seek>(
             ),
             shape,
         ),
+        (AudioReadDataType::Native, WaveSampleCoding::Float32) => Tensor::from_numeric_storage(
+            runmat_value::NumericStorage::F32(
+                collect_stream_samples(file, path, geometry, cooperation, |sample| {
+                    Ok(f32::from_le_bytes([
+                        sample[0], sample[1], sample[2], sample[3],
+                    ]))
+                })
+                .await?,
+            ),
+            shape,
+        ),
         (datatype, coding) => {
             let native = datatype == AudioReadDataType::Native;
             let out = collect_stream_samples(file, path, geometry, cooperation, |sample| {
                 Ok(decode_wave_sample(sample, coding, native))
             })
             .await?;
-            Tensor::new_with_dtype(
-                out,
-                shape,
-                if native && coding == WaveSampleCoding::Float32 {
-                    NumericDType::F32
-                } else {
-                    NumericDType::F64
-                },
-            )
+            Tensor::new(out, shape)
         }
     }
     .map_err(|err| format_error(format!("decoded audio tensor shape is invalid: {err}")))?;
