@@ -232,7 +232,6 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     .unwrap_err();
     assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_OPTION.identifier);
     assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
-    assert!(block_on(owner.download_numeric(&logical_alpha)).is_ok());
     let rgb = tensor(vec![0.0; 12], vec![2, 2, 3], NumericDType::F64);
     let rgb = crate::builtins::common::gpu_helpers::upload_tensor(owner, &rgb).unwrap();
     let error = call(vec![
@@ -281,6 +280,9 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
         assert!(!file.exists());
     }
+    // Liveness probes deliberately download. Keep them after every zero-readback
+    // assertion so the fixture's own probes cannot pollute admission counters.
+    assert!(block_on(owner.download_numeric(&logical_alpha)).is_ok());
     assert!(block_on(owner.download_numeric(&resident)).is_ok());
 
     let reads = owner.downloads.load(Ordering::SeqCst);
