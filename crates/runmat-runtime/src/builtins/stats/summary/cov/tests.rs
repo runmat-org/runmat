@@ -694,6 +694,79 @@ fn cov_wgpu_matches_cpu() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 #[cfg(feature = "wgpu")]
+fn cov_wgpu_noncentered_f32_cancellation_matches_quantized_oracle() {
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .expect("this covariance witness requires a real WGPU adapter");
+    let tensor = Tensor::new_with_dtype(
+        vec![4.0, 4.2, 3.9, 4.3, 4.1, 2.0, 2.1, 2.0, 2.1, 2.2],
+        vec![5, 2],
+        runmat_value::NumericDType::F32,
+    )
+    .expect("typed single observations");
+    let quantized = tensor.materialize_f64();
+    let n = 5;
+    let means = [
+        quantized[..n].iter().sum::<f64>() / n as f64,
+        quantized[n..].iter().sum::<f64>() / n as f64,
+    ];
+    let mut expected = [0.0; 4];
+    let mut cancellation_scale = [0.0; 4];
+    for col in 0..2 {
+        for row in 0..2 {
+            let index = col * 2 + row;
+            let mut centered = 0.0;
+            let mut raw_products = 0.0;
+            for sample in 0..n {
+                let left = quantized[row * n + sample];
+                let right = quantized[col * n + sample];
+                centered += (left - means[row]) * (right - means[col]);
+                raw_products += (left * right).abs();
+            }
+            expected[index] = centered / (n - 1) as f64;
+            cancellation_scale[index] =
+                (raw_products + n as f64 * (means[row] * means[col]).abs()) / (n - 1) as f64;
+        }
+    }
+    assert!(expected[0] > 0.0 && expected[0] < 0.1);
+
+    let cpu_result = block_on(cov_builtin(Value::Tensor(tensor.clone()), Vec::new()))
+        .expect("host typed single covariance");
+    let Value::Tensor(cpu_tensor) = cpu_result else {
+        panic!("expected host tensor covariance");
+    };
+    assert_eq!(cpu_tensor.numeric_dtype(), runmat_value::NumericDType::F32);
+    for (got, want) in cpu_tensor.materialize_f64().iter().zip(expected) {
+        assert!((got - want).abs() <= 2.0 * f32::EPSILON as f64 * want.abs());
+    }
+
+    let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("typed single upload");
+    assert_eq!(
+        runmat_accelerate_api::handle_precision(&handle),
+        Some(runmat_accelerate_api::ProviderPrecision::F32)
+    );
+    let gpu_value = cov_builtin_sync(Value::GpuTensor(handle), Vec::new())
+        .expect("resident noncentered covariance");
+    assert!(matches!(&gpu_value, Value::GpuTensor(_)));
+    let gathered = test_support::gather(gpu_value).expect("gather resident covariance");
+    assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(gathered.shape, vec![2, 2]);
+    // The provider forms XᵀX - nμμᵀ before dividing by n-1. Bound F32
+    // roundoff by the actual magnitudes of those cancelling terms per cell,
+    // rather than relaxing every covariance test by a fixed tolerance.
+    for (index, (got, want)) in gathered.materialize_f64().iter().zip(expected).enumerate() {
+        let tolerance = 8.0 * f32::EPSILON as f64 * cancellation_scale[index];
+        assert!(
+            (got - want).abs() <= tolerance,
+            "noncentered covariance {index}: got {got}, quantized oracle {want}, bound {tolerance}"
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(feature = "wgpu")]
 fn cov_wgpu_paired_matrices_vectorize_to_two_variables() {
     let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
