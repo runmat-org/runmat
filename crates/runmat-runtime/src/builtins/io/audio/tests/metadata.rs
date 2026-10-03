@@ -64,9 +64,8 @@ fn audioinfo_rejects_numeric_resident_path_without_gather() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioinfo_reads_wav_metadata() {
-    let _lock = runmat_filesystem::provider_override_lock();
-    let path = temp_path("wav");
-    fs::write(&path, wav_fixture(44_100, 2, 16, 4)).expect("write fixture");
+    let file = audio_file("wav", &wav_fixture(44_100, 2, 16, 4));
+    let path = &file.path;
 
     let info = block_on(audioinfo_builtin(
         None,
@@ -83,7 +82,6 @@ fn audioinfo_reads_wav_metadata() {
     assert_eq!(field(&info, "SampleRate"), &Value::Num(44_100.0));
     assert_eq!(field(&info, "TotalSamples"), &Value::Num(4.0));
     assert_eq!(field(&info, "BitsPerSample"), &Value::Num(16.0));
-    let _ = fs::remove_file(path);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -134,9 +132,8 @@ fn audioinfo_rejects_truncated_riff_and_rf64_data_extents() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioinfo_reads_flac_streaminfo() {
-    let _lock = runmat_filesystem::provider_override_lock();
-    let path = temp_path("flac");
-    fs::write(&path, flac_fixture(48_000, 2, 24, 96_000)).expect("write fixture");
+    let file = audio_file("flac", &flac_fixture(48_000, 2, 24, 96_000));
+    let path = &file.path;
 
     let info = block_on(audioinfo_builtin(
         None,
@@ -150,15 +147,13 @@ fn audioinfo_reads_flac_streaminfo() {
     assert_eq!(field(&info, "TotalSamples"), &Value::Num(96_000.0));
     assert_eq!(field(&info, "Duration"), &Value::Num(2.0));
     assert_eq!(field(&info, "BitsPerSample"), &Value::Num(24.0));
-    let _ = fs::remove_file(path);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioinfo_rejects_unknown_data() {
-    let _lock = runmat_filesystem::provider_override_lock();
-    let path = temp_path("bin");
-    fs::write(&path, b"not audio").expect("write fixture");
+    let file = audio_file("bin", b"not audio");
+    let path = &file.path;
 
     let err = block_on(audioinfo_builtin(
         None,
@@ -166,7 +161,6 @@ fn audioinfo_rejects_unknown_data() {
     ))
     .expect_err("format error");
     assert!(err.message().contains("unsupported audio format"));
-    let _ = fs::remove_file(path);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

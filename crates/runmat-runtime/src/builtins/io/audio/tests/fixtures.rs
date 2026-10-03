@@ -1,19 +1,24 @@
 use super::*;
 
-static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+pub(super) struct AudioFileFixture {
+    pub(super) path: PathBuf,
+    _owner: runmat_filesystem::ProviderGuard,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
 
-pub(super) fn temp_path(ext: &str) -> PathBuf {
-    let millis = unix_timestamp_ms();
-    let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let mut path = std::env::temp_dir();
-    path.push(format!(
-        "runmat_audioinfo_{}_{}_{}.{}",
-        std::process::id(),
-        millis,
-        unique,
-        ext
-    ));
-    path
+pub(super) fn audio_file(ext: &str, bytes: &[u8]) -> AudioFileFixture {
+    let lock = runmat_filesystem::provider_override_lock();
+    let path = PathBuf::from(format!("/audio/fixture.{ext}"));
+    let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    provider
+        .write_project_path(&path, bytes)
+        .expect("audio fixture bytes");
+    let owner = runmat_filesystem::replace_provider(provider);
+    AudioFileFixture {
+        path,
+        _owner: owner,
+        _lock: lock,
+    }
 }
 
 pub(super) fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
