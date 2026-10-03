@@ -40,6 +40,7 @@ pub use kernel::{
 #[path = "imfilter/provider.rs"]
 mod provider;
 use provider::imfilter_gpu;
+mod host_route;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -141,8 +142,7 @@ async fn imfilter_builtin(
             imfilter_gpu(runtime.as_ref(), image_handle, filter_value, options).await
         }
         (image_value, Value::GpuTensor(filter_handle)) => {
-            let filter_tensor = download_kernel_tensor(&filter_handle).await?;
-            imfilter_host_value(image_value, filter_tensor, options)
+            host_route::run(runtime.as_ref(), image_value, filter_handle, options).await
         }
         (image_value, filter_value) => {
             let filter_tensor = host_kernel_tensor(filter_value)?;
