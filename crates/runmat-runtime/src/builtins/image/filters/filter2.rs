@@ -368,7 +368,7 @@ async fn filter2_gpu(
         .imfilter(&image_handle, &kernel_handle, options)
         .await
     {
-        Ok(output) => {
+        Ok(mut output) => {
             drop(uploaded_kernel);
             let valid = output.shape() == expected_shape
                 && output.device_id() == image_handle.device_id()
@@ -397,7 +397,8 @@ async fn filter2_gpu(
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(output, error));
             }
-            Ok(Value::GpuTensor(output))
+            gpu_helpers::propagate_output_provenance(&mut output, [&image_handle])?;
+            gpu_helpers::resident_gpu_value(output)
         }
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             drop(uploaded_kernel);

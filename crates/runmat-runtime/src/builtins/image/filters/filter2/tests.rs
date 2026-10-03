@@ -421,6 +421,35 @@ fn filter2_gpu_matches_cpu() {
     });
 }
 
+#[test]
+fn explicit_resident_image_provenance_survives_provider_filter() {
+    use runmat_accelerate_api::AccelProvider;
+    let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+        Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+    );
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let image = provider
+        .upload(&HostTensorView {
+            data: &[1.0, 2.0, 3.0, 4.0],
+            shape: &[2, 2],
+        })
+        .expect("image")
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .expect("explicit image view");
+    let output = block_on(filter2_builtin(
+        Value::Tensor(tensor(vec![1.0], 1, 1)),
+        Value::GpuTensor(image.clone()),
+        Vec::new(),
+    ))
+    .expect("resident filter2");
+    let Value::GpuTensor(output) = output else {
+        panic!("provider result must remain resident");
+    };
+    assert!(runmat_accelerate_api::handle_is_explicit(&output));
+    assert!(!output.shares_allocation_with(&image));
+    assert!(image.allocation_lease().validate_live().is_ok());
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filter2_gpu_kernel_and_image() {
