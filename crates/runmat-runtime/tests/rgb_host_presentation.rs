@@ -89,7 +89,7 @@ impl RuntimePlacementService for Witness {
     ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
         request.validate().expect("admitted RGB route");
         if let Some(admission) = &self.admission {
-            let selected = admission.select_whole_work(request)?;
+            let selected = RuntimePlacementService::select_whole_work(admission, request)?;
             self.selections.set(self.selections.get() + 1);
             return Ok(selected);
         }
@@ -112,7 +112,7 @@ impl RuntimePlacementService for Witness {
 
     fn observe(&self, feedback: PlacementFeedback) -> Result<(), RuntimeError> {
         if let Some(admission) = &self.admission {
-            admission.observe(feedback.clone())?;
+            RuntimePlacementService::observe(admission, feedback.clone())?;
         }
         self.feedback.borrow_mut().push(feedback);
         Ok(())
