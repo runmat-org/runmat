@@ -4,8 +4,13 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures::Stream;
+use js_sys::Promise;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
+use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::wasm_bindgen_test;
+use web_sys::ReadableStream;
 
 use super::*;
 use crate::context::RuntimeHttpService;
@@ -133,6 +138,110 @@ fn dropping_body_owner_aborts_fetch_and_reader() {
     assert!(!signal.aborted());
     drop(body);
     assert!(signal.aborted(), "body drop must abort the fetch owner");
+    web_sys::Url::revoke_object_url(&url).expect("revoke blob URL");
+}
+
+#[wasm_bindgen_test]
+fn dropping_a_pending_body_read_aborts_and_releases_reader() {
+    let (request, url) = blob_request("pending body read");
+    let scope = HostScope::current(&request.url).expect("Window host");
+    let active = ActiveFetch::new(scope, &request.url).expect("abort controller");
+    let signal = active.controller.signal();
+    let stream = ReadableStream::new().expect("pending readable stream");
+    let reader = stream
+        .get_reader()
+        .dyn_into::<ReadableStreamDefaultReader>()
+        .expect("default reader");
+    let mut body = BrowserBody::new(active, reader, 1024, request.url);
+    let waker = futures::task::noop_waker();
+    assert!(matches!(
+        Pin::new(&mut body).poll_next(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    assert!(stream.locked());
+    drop(body);
+    assert!(signal.aborted(), "pending body owner must abort Fetch");
+    assert!(
+        !stream.locked(),
+        "pending body owner must release reader lock"
+    );
+    web_sys::Url::revoke_object_url(&url).expect("revoke blob URL");
+}
+
+#[wasm_bindgen_test]
+fn dropping_a_pending_head_future_aborts_its_request_generation() {
+    let (request, url) = blob_request("pending head");
+    let scope = HostScope::current(&request.url).expect("Window host");
+    let mut active = ActiveFetch::new(scope, &request.url).expect("abort controller");
+    active.arm_timeout(&request).expect("browser timeout");
+    let signal = active.controller.signal();
+    let pending = Promise::new(&mut |_, _| {});
+    let mut head = Box::pin(async move {
+        let _active = active;
+        JsFuture::from(pending).await
+    });
+    let waker = futures::task::noop_waker();
+    assert!(matches!(
+        head.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    drop(head);
+    assert!(signal.aborted(), "pending head drop must abort Fetch");
+    web_sys::Url::revoke_object_url(&url).expect("revoke blob URL");
+}
+
+#[wasm_bindgen_test(async)]
+async fn real_browser_timer_rejects_ready_body_without_late_publication() {
+    let (mut request, url) = blob_request("must not publish after timeout");
+    request.timeout = Duration::from_millis(1);
+    let scope = HostScope::current(&request.url).expect("Window host");
+    let mut active = ActiveFetch::new(scope, &request.url).expect("abort controller");
+    active.arm_timeout(&request).expect("real browser timeout");
+    let signal = active.controller.signal();
+    let callback = std::rc::Rc::new(std::cell::RefCell::new(None::<Closure<dyn FnMut()>>));
+    let callback_for_promise = std::rc::Rc::clone(&callback);
+    let signal_for_promise = signal.clone();
+    let aborted = Promise::new(&mut move |_, reject| {
+        let on_abort = Closure::<dyn FnMut()>::new(move || {
+            let source = web_sys::DomException::new_with_message("timed out")
+                .expect("timeout DOM exception");
+            let _ = reject.call1(&JsValue::UNDEFINED, &source);
+        });
+        signal_for_promise.set_onabort(Some(on_abort.as_ref().unchecked_ref()));
+        *callback_for_promise.borrow_mut() = Some(on_abort);
+    });
+    let source = JsFuture::from(aborted)
+        .await
+        .err()
+        .expect("browser timer must abort pending request");
+    signal.set_onabort(None);
+    callback.borrow_mut().take();
+    assert!(signal.aborted());
+    assert!(
+        active.timed_out.get(),
+        "timer callback, not a test flag, fired"
+    );
+    let error = fetch_error(&request.url, &active, source);
+    assert!(matches!(error.kind, TransportErrorKind::Timeout));
+    assert!(std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<BrowserJsError>())
+        .is_some());
+
+    let response = Response::new_with_opt_str(Some("late bytes")).expect("response fixture");
+    let reader = response
+        .body()
+        .expect("readable body")
+        .get_reader()
+        .dyn_into::<ReadableStreamDefaultReader>()
+        .expect("default reader");
+    let mut body = BrowserBody::new(active, reader, 1024, request.url);
+    let waker = futures::task::noop_waker();
+    let Poll::Ready(Some(Err(error))) =
+        Pin::new(&mut body).poll_next(&mut Context::from_waker(&waker))
+    else {
+        panic!("timed-out request published late body bytes");
+    };
+    assert!(matches!(error.kind, TransportErrorKind::Timeout));
     web_sys::Url::revoke_object_url(&url).expect("revoke blob URL");
 }
 
