@@ -131,9 +131,127 @@ fn request_error(request: &HttpRequest, error: reqwest::Error) -> TransportError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
+    use url::Url;
+
+    fn request(url: Url) -> HttpRequest {
+        HttpRequest {
+            url,
+            method: HttpMethod::Get,
+            headers: Vec::new(),
+            body: None,
+            timeout: Duration::from_secs(2),
+            user_agent: "RunMat HTTP test".into(),
+        }
+    }
+
+    fn server() -> (TcpListener, Url) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("local HTTP listener");
+        let url = Url::parse(&format!(
+            "http://{}/resource",
+            listener.local_addr().unwrap()
+        ))
+        .expect("local URL");
+        (listener, url)
+    }
+
+    #[test]
+    fn unpolled_and_invalid_header_requests_do_not_open_a_socket() {
+        let driver = tokio::runtime::Runtime::new().expect("native HTTP test driver");
+        let service = NativeHttpService::new(driver.handle().clone());
+        let (listener, url) = server();
+        listener.set_nonblocking(true).unwrap();
+        drop(service.send(request(url.clone())));
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+
+        let mut invalid = request(url);
+        invalid.headers.push(("bad\nname".into(), "value".into()));
+        let error = futures::executor::block_on(service.send(invalid)).expect_err("invalid header");
+        assert!(matches!(error.kind, TransportErrorKind::InvalidHeader(_)));
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
+    #[test]
+    fn post_preserves_auth_body_response_headers_and_status_error() {
+        let driver = tokio::runtime::Runtime::new().expect("native HTTP test driver");
+        let service = NativeHttpService::new(driver.handle().clone());
+        let (listener, url) = server();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("request");
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0u8; 1024];
+            while !bytes.windows(4).any(|part| part == b"\r\n\r\n") || !bytes.ends_with(b"ping") {
+                let count = socket.read(&mut buffer).expect("read request");
+                assert!(count > 0, "request ended early");
+                bytes.extend_from_slice(&buffer[..count]);
+            }
+            let text = String::from_utf8(bytes).expect("HTTP request text");
+            assert!(text.starts_with("POST /resource HTTP/1.1"));
+            assert!(text
+                .to_ascii_lowercase()
+                .contains("authorization: basic dhj1c3rzzwnyzxq="));
+            assert!(text.ends_with("ping"));
+            socket.write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 2\r\nX-RunMat: yes\r\nConnection: close\r\n\r\nok").unwrap();
+        });
+        let mut post = request(url);
+        post.method = HttpMethod::Post;
+        post.headers
+            .push(("Authorization".into(), "Basic dHJ1c3RzZWNyZXQ=".into()));
+        post.body = Some(b"ping".to_vec());
+        let response = futures::executor::block_on(service.send(post)).expect("POST response");
+        assert_eq!(response.body, b"ok");
+        assert!(response
+            .headers
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("x-runmat") && value == "yes"));
+        server.join().unwrap();
+
+        let (listener, url) = server();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("status request");
+            let mut buffer = [0u8; 1024];
+            let _ = socket.read(&mut buffer);
+            socket
+                .write_all(
+                    b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+        let error = futures::executor::block_on(service.send(request(url))).expect_err("HTTP 403");
+        assert!(matches!(error.kind, TransportErrorKind::Status(403)));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn timeout_covers_delayed_response_headers() {
+        let driver = tokio::runtime::Runtime::new().expect("native HTTP test driver");
+        let service = NativeHttpService::new(driver.handle().clone());
+        let (listener, url) = server();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("timeout request");
+            let mut buffer = [0u8; 1024];
+            let _ = socket.read(&mut buffer);
+            std::thread::sleep(Duration::from_millis(150));
+        });
+        let mut timed = request(url);
+        timed.timeout = Duration::from_millis(20);
+        let error = futures::executor::block_on(service.send(timed)).expect_err("header timeout");
+        assert!(matches!(error.kind, TransportErrorKind::Timeout));
+        server.join().unwrap();
+    }
 
     struct DropFlag(Arc<AtomicUsize>);
 

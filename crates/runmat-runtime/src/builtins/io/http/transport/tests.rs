@@ -2,6 +2,8 @@ use std::cell::Cell;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -33,6 +35,14 @@ impl RuntimeHttpService for PendingService {
 }
 
 struct PendingRequest(Rc<Counts>);
+
+struct CountWakes(AtomicUsize);
+
+impl futures::task::ArcWake for CountWakes {
+    fn wake_by_ref(waker: &Arc<Self>) {
+        waker.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
 
 impl Future for PendingRequest {
     type Output = Result<HttpResponse, TransportError>;
@@ -128,13 +138,56 @@ fn cancellation_wakes_pending_request_and_keeps_transport_cause_distinct() {
     let cancellation = CancellationSource::new();
     let runtime = context(counts.clone(), cancellation.clone());
     let mut future = Box::pin(send_request(request(), Some(&runtime)));
-    assert!(poll_once(future.as_mut()).is_pending());
+    let wakes = Arc::new(CountWakes(AtomicUsize::new(0)));
+    let waker = futures::task::waker(wakes.clone());
+    assert!(future
+        .as_mut()
+        .poll(&mut Context::from_waker(&waker))
+        .is_pending());
+    assert_eq!(wakes.0.load(Ordering::SeqCst), 0);
     cancellation.cancel(CancellationReason::User);
+    assert_eq!(wakes.0.load(Ordering::SeqCst), 1);
     let Poll::Ready(Err(TransportCallError::Runtime(error))) = poll_once(future.as_mut()) else {
         panic!("cancelled request must return a runtime cancellation cause");
     };
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert_eq!(counts.aborts.get(), 1);
+}
+
+struct ReadyCancellingService(CancellationSource);
+
+impl RuntimeHttpService for ReadyCancellingService {
+    fn send(
+        &self,
+        _request: HttpRequest,
+    ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
+        let cancellation = self.0.clone();
+        Box::pin(async move {
+            cancellation.cancel(CancellationReason::User);
+            Ok(HttpResponse {
+                headers: Vec::new(),
+                body: b"must not publish".to_vec(),
+            })
+        })
+    }
+}
+
+#[test]
+fn completed_service_cannot_publish_after_concurrent_cancellation() {
+    let cancellation = CancellationSource::new();
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    )
+    .with_service_ports(
+        RuntimeServicePorts::default().with_http(Rc::new(ReadyCancellingService(cancellation))),
+    );
+    let error = futures::executor::block_on(send_request(request(), Some(&runtime)))
+        .expect_err("cancelled response cannot publish");
+    let TransportCallError::Runtime(error) = error else {
+        panic!("cancellation must remain a runtime cause");
+    };
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
 }
 
 #[test]
@@ -151,4 +204,51 @@ fn independently_polled_contexts_keep_request_ownership_separate() {
     assert_eq!((first.aborts.get(), second.aborts.get()), (1, 0));
     drop(b_future);
     assert_eq!(second.aborts.get(), 1);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_live_response_cancels_while_body_is_incomplete() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let driver = tokio::runtime::Runtime::new().expect("HTTP test driver");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("local listener");
+    let url = Url::parse(&format!("http://{}/body", listener.local_addr().unwrap())).unwrap();
+    let cancellation = CancellationSource::new();
+    let server_cancellation = cancellation.clone();
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("accepted request");
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut buffer = [0u8; 1024];
+        let _ = socket.read(&mut buffer).expect("request read");
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\na")
+            .expect("partial response");
+        std::thread::sleep(Duration::from_millis(40));
+        server_cancellation.cancel(CancellationReason::User);
+        std::thread::sleep(Duration::from_millis(100));
+    });
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    )
+    .with_service_ports(
+        RuntimeServicePorts::default()
+            .with_http(Rc::new(NativeHttpService::new(driver.handle().clone()))),
+    );
+    let error = futures::executor::block_on(send_request(request_for(url), Some(&runtime)))
+        .expect_err("cancelled live body must not publish");
+    let TransportCallError::Runtime(error) = error else {
+        panic!("live cancellation must retain its runtime cause");
+    };
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    server.join().unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn request_for(url: Url) -> HttpRequest {
+    HttpRequest { url, ..request() }
 }
