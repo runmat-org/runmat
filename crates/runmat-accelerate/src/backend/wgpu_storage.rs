@@ -1,8 +1,5 @@
 //! Physical integer buffer geometry shared by WGPU allocation and admission.
-use runmat_accelerate_api::{
-    IntegerElementType, ProviderElementType, ProviderPrecision, ProviderRepresentation,
-    ProviderStorage,
-};
+use runmat_accelerate_api::{IntegerElementType, ProviderElementType, ProviderRepresentation};
 
 /// Requested raw-word storage, including WGPU's nonzero empty binding buffer.
 /// Payload length remains separate; this is not driver allocation granularity.
@@ -49,10 +46,12 @@ pub(crate) fn checked_allocation_bytes(value: &ProviderRepresentation) -> Option
 
 /// Storage reserved by the WGPU numeric upload path. Empty uploads use the
 /// provider's floating-element buffer even for integer and complex payloads.
+#[cfg(feature = "wgpu")]
 pub(crate) fn checked_upload_allocation_bytes(
     value: &ProviderRepresentation,
-    precision: ProviderPrecision,
+    precision: runmat_accelerate_api::ProviderPrecision,
 ) -> Option<u64> {
+    use runmat_accelerate_api::ProviderStorage;
     let expected_storage = match value.element_type {
         ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => {
             ProviderStorage::DenseComplexInterleaved
