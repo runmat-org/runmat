@@ -2,9 +2,9 @@ use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, Digest, EstimateConfidence, EstimateSource,
     ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
-    ExecutionCostEstimate, PlacementFeedback, PlacementGraph, PlacementGraphCandidate,
-    PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest, PlacementResourceSnapshot,
-    PlacementRevision, PlacementSignature,
+    ExecutionCostEstimate, PlacementExecutionAuthorityRevision, PlacementFeedback, PlacementGraph,
+    PlacementGraphCandidate, PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest,
+    PlacementResourceSnapshot, PlacementRevision, PlacementSignature,
 };
 use runmat_runtime::context::RuntimeContext;
 use runmat_value::Value;
@@ -231,7 +231,9 @@ fn signature(
             program: runtime.program_revision().cloned(),
             catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
             compiler: Digest::sha256(b"runmat-native-vector-region-v1"),
-            provider: Digest::sha256(b"host-only"),
+            authority: PlacementExecutionAuthorityRevision::HostService(Digest::sha256(
+                b"host-only",
+            )),
             policy: Digest::sha256(b"shared-placement-v1"),
         },
     }

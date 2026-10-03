@@ -4,6 +4,24 @@ use runmat_runtime::execution::RuntimeExecutionService;
 use std::rc::Rc;
 
 #[test]
+fn native_region_revision_uses_host_authority_not_provider_namespace() {
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let signature = signature(&runtime, &plan(), &[&Value::Num(1.)]);
+    let digest = Digest::sha256(b"host-only");
+    assert_eq!(
+        signature.revision.authority,
+        PlacementExecutionAuthorityRevision::HostService(digest)
+    );
+    assert!(
+        runmat_execution::PlacementInvalidation::HostService { digest }
+            .matches_signature(&signature)
+    );
+    assert!(
+        !runmat_execution::PlacementInvalidation::Provider { digest }.matches_signature(&signature)
+    );
+}
+
+#[test]
 fn unrepresentable_output_demand_is_rejected_without_a_memory_budget() {
     // `choose_region` checks this before constructing a placement request;
     // an absent budget does not turn arithmetic overflow into unknown demand.
