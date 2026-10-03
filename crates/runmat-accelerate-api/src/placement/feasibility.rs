@@ -138,6 +138,20 @@ pub struct ProviderNumericUploadPhysicalEvidence {
     pub completion_queue_slots: u32,
 }
 
+/// Physical one-result class-preserving host publication, including native
+/// integer and logical storage. Logical payload bytes and physical provider
+/// retention are distinct. Providers without an audited route return None.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderUploadPhysicalEvidence {
+    pub output_requested_bytes: u64,
+    /// Provider-created native host conversion/word-packing workspace beyond
+    /// the caller's retained payload and operation-owned temporaries.
+    pub host_workspace_bytes: runmat_execution::ResourceByteBound,
+    pub provider_scratch_bytes: runmat_execution::ResourceByteBound,
+    pub completion_queue_slots: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderRejectionCode {

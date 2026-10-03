@@ -3,9 +3,6 @@
 //! preparation routes remain with their respective domain owners.
 
 use super::geometry::filter_output_shape;
-use crate::context::host_presentation::{
-    select_exact_host_sink_with_readbacks, ExactHostSink, HostSinkReceipt,
-};
 use crate::context::provider_operation::{
     select_exact_provider_operation, ExactConditionalProviderUpload, ExactProviderOperation,
     ExactProviderReadback, ExactProviderReadbackPhase, SelectedProviderOperation,
@@ -19,78 +16,10 @@ use runmat_accelerate_api::{
     ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
 };
 use runmat_execution::{Digest, ResourceBoundUnavailable, ResourceByteBound};
-
-/// Host-only class-preserving filtering (integer/logical A) has no legal
-/// floating provider hook. Admit its real readbacks and native result before
-/// the first H gather; the public class decision remains with the caller.
-pub(in crate::builtins::image::filters) fn select_host_only_sink(
-    runtime: Option<&RuntimeContext>,
-    builtin: &'static str,
-    image: &GpuTensorHandle,
-    kernel_shape: &[usize],
-    options: &ImfilterOptions,
-    readbacks: &[GpuTensorHandle],
-    host_element_width: u64,
-) -> BuiltinResult<Option<HostSinkReceipt>> {
-    use crate::context::host_presentation::combine_host_scratch;
-    let output_shape = filter_output_shape(image.shape(), kernel_shape, options.shape, builtin)
-        .map_err(|message| {
-            crate::build_runtime_error(message)
-                .with_builtin(builtin)
-                .build()
-        })?;
-    let count = |shape: &[usize]| {
-        shape.iter().try_fold(1_u64, |total, &extent| {
-            total.checked_mul(u64::try_from(extent).ok()?)
-        })
-    };
-    let output_bytes = count(&output_shape).and_then(|len| len.checked_mul(host_element_width));
-    let (operation_scratch, _) = conditional_host_bounds(
-        builtin,
-        image.shape(),
-        kernel_shape,
-        options,
-        false,
-        false,
-        false,
-    );
-    // The integer/logical native evaluator converts A into f64 arithmetic
-    // storage while the downloaded typed payload remains live.
-    let converted_image = count(image.shape())
-        .and_then(|len| len.checked_mul(8))
-        .map(ResourceByteBound::Known)
-        .unwrap_or(ResourceByteBound::Unavailable(
-            ResourceBoundUnavailable::NoScratchBound,
-        ));
-    let host_compute_scratch = combine_host_scratch(operation_scratch, converted_image)?;
-    select_exact_host_sink_with_readbacks(
-        runtime,
-        ExactHostSink {
-            operation: builtin,
-            variant: "filters.integer_logical.host_native.v1",
-            source: image,
-            domain_facts: Digest::sha256(
-                serde_json::to_vec(&(
-                    image.shape(),
-                    kernel_shape,
-                    options.mode,
-                    options.shape,
-                    options.padding,
-                    options.constant_value.to_bits(),
-                    image.physical().element_type(),
-                    runmat_accelerate_api::handle_is_logical(image),
-                    host_element_width,
-                ))
-                .expect("typed host filter facts serialize"),
-            ),
-            output_bytes: output_bytes.map(ResourceByteBound::Known).unwrap_or(
-                ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound),
-            ),
-            host_compute_scratch,
-        },
-        readbacks,
-    )
-}
+mod host_only;
+pub(in crate::builtins::image::filters) use host_only::{
+    select_host_only_sink, select_host_only_upload,
+};
 
 /// Checked operation-owned plan/evaluation/conversion workspace shared by
 /// filter2 and imfilter's equivalent host continuation. Provider readback

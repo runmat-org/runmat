@@ -25,10 +25,9 @@ pub(super) async fn imfilter_gpu(
     let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")
     })?;
-    let host_sink = if output_class.provider_precision().is_none()
-        && !runmat_accelerate_api::handle_is_explicit(&image_handle)
-        && valid_public_kernel(&kernel_value)
-    {
+    let host_only =
+        output_class.provider_precision().is_none() && valid_public_kernel(&kernel_value);
+    let (host_sink, host_upload) = if host_only {
         let kernel_shape =
             imfilter_value_shape(&kernel_value).expect("admitted public H has numeric geometry");
         let readbacks = std::iter::once(image_handle.clone())
@@ -37,18 +36,44 @@ pub(super) async fn imfilter_gpu(
                 _ => None,
             })
             .collect::<Vec<_>>();
-        placement::select_host_only_sink(
-            runtime,
-            IMFILTER_BUILTIN,
-            &image_handle,
-            &kernel_shape,
-            &options,
-            &readbacks,
-            u64::try_from(image_handle.physical().element_type().element_size())
-                .expect("element byte width fits u64"),
-        )?
+        if runmat_accelerate_api::handle_is_explicit(&image_handle) {
+            let element_type = if output_class == ImageOutputClass::Logical {
+                runmat_accelerate_api::ProviderElementType::Logical
+            } else {
+                runmat_accelerate_api::ProviderElementType::from(
+                    runmat_accelerate_api::handle_integer_type(&image_handle)
+                        .expect("admitted nonfloating A has integer storage"),
+                )
+            };
+            (
+                None,
+                placement::select_host_only_upload(
+                    runtime,
+                    IMFILTER_BUILTIN,
+                    &image_handle,
+                    &kernel_shape,
+                    &options,
+                    &readbacks,
+                    element_type,
+                )?,
+            )
+        } else {
+            (
+                placement::select_host_only_sink(
+                    runtime,
+                    IMFILTER_BUILTIN,
+                    &image_handle,
+                    &kernel_shape,
+                    &options,
+                    &readbacks,
+                    u64::try_from(image_handle.physical().element_type().element_size())
+                        .expect("element byte width fits u64"),
+                )?,
+                None,
+            )
+        }
     } else {
-        None
+        (None, None)
     };
     let (mut selected, planned_query) = select_provider_route(
         runtime,
@@ -61,7 +86,10 @@ pub(super) async fn imfilter_gpu(
     let (kernel_tensor, resident_kernel) = match kernel_value {
         Value::GpuTensor(handle) => {
             let downloaded = runmat_accelerate_api::observation::observe_provider_future(
-                selected.as_ref().map(|selection| selection.recorder()),
+                host_upload
+                    .as_ref()
+                    .map(|receipt| receipt.recorder())
+                    .or_else(|| selected.as_ref().map(|selection| selection.recorder())),
                 download_kernel_tensor(&handle),
             )
             .await?;
@@ -81,16 +109,46 @@ pub(super) async fn imfilter_gpu(
     // logical images take an exact owner-aware host path, then explicit inputs
     // are restored to their owner with their original class metadata.
     let Some(expected_precision) = output_class.provider_precision() else {
-        let result = imfilter_gpu_host_fallback(
-            provider,
-            &image_handle,
-            &kernel_tensor,
-            &options,
-            resident_kernel.as_ref(),
+        let result = runmat_accelerate_api::observation::observe_provider_future(
+            host_upload.as_ref().map(|receipt| receipt.recorder()),
+            imfilter_gpu_host_fallback(
+                provider,
+                &image_handle,
+                &kernel_tensor,
+                &options,
+                resident_kernel.as_ref(),
+            ),
         )
         .await;
+        let result = if runmat_accelerate_api::handle_is_explicit(&image_handle)
+            && result.as_ref().is_ok_and(|value| {
+                !valid_host_only_restore(
+                    value,
+                    &image_handle,
+                    resident_kernel.as_ref(),
+                    &expected_shape,
+                    output_class,
+                    provider,
+                )
+            }) {
+            let mut error = imfilter_error_with_detail(
+                &IMFILTER_ERROR_INTERNAL,
+                "host-filter result did not match exact owner, class and shape",
+            );
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(error)
+        } else {
+            result
+        };
         if let Some(receipt) = host_sink {
             receipt.finish(result.is_ok());
+        }
+        if let Some(receipt) = host_upload {
+            receipt.finish(if result.is_ok() {
+                Ok(true)
+            } else {
+                Err(runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed)
+            });
         }
         return result;
     };
@@ -486,6 +544,28 @@ fn valid_public_kernel(kernel: &Value) -> bool {
         }
         _ => false,
     }
+}
+
+fn valid_host_only_restore(
+    value: &Value,
+    image: &GpuTensorHandle,
+    resident_kernel: Option<&GpuTensorHandle>,
+    expected_shape: &[usize],
+    expected_class: ImageOutputClass,
+    owner: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    let Value::GpuTensor(output) = value else {
+        return false;
+    };
+    output.shape() == expected_shape
+        && output.device_id() == image.device_id()
+        && output.allocation_lease().validate_live().is_ok()
+        && !output.shares_allocation_with(image)
+        && resident_kernel.is_none_or(|kernel| !output.shares_allocation_with(kernel))
+        && runmat_accelerate_api::handle_is_explicit(output)
+        && ImageOutputClass::from_gpu_handle(output).ok() == Some(expected_class)
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|actual| runmat_accelerate_api::same_provider_instance(actual, owner))
 }
 
 fn upload_kernel(

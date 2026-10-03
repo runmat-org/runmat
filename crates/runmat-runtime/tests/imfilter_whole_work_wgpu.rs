@@ -464,3 +464,105 @@ fn automatic_integer_two_readbacks_obey_finite_host_quota_before_effects() {
     image.allocation_lease().validate_live().unwrap();
     kernel.allocation_lease().validate_live().unwrap();
 }
+
+#[test]
+#[ignore = "requires actual WGPU adapter; run in native image-filter qualification"]
+fn explicit_integer_and_logical_restore_keep_exact_class_owner_and_fence() {
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostLogicalTensorView,
+    };
+    assert!(std::env::var("RUNMAT_WGPU_DISABLE_IMFILTER").is_err());
+    let backend: &'static WgpuProvider = Box::leak(Box::new(
+        WgpuProvider::new(Default::default()).expect("actual WGPU adapter required"),
+    ));
+    assert_eq!(backend.precision(), ProviderPrecision::F32);
+    let _owner = ThreadProviderGuard::set(Some(backend));
+    let integer = backend
+        .upload_integer(&HostIntegerTensorView {
+            data: HostIntegerDataView::U8(&[1, 2, 3, 4]),
+            shape: &[2, 2],
+        })
+        .expect("integer upload")
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap();
+    let logical = backend
+        .upload_logical(&HostLogicalTensorView {
+            data: &[0, 1, 1, 0],
+            shape: &[2, 2],
+        })
+        .expect("logical upload")
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap();
+    let kernel = backend
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.0]),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("double H");
+    for (image, expected, logical_class) in [
+        (integer, HostNumericDataOwned::U8(vec![1, 2, 3, 4]), false),
+        (
+            logical,
+            HostNumericDataOwned::F32(vec![0.0, 1.0, 1.0, 0.0]),
+            true,
+        ),
+    ] {
+        let args = [
+            Value::GpuTensor(image.clone()),
+            Value::GpuTensor(kernel.clone()),
+        ];
+        let before = backend.telemetry_snapshot();
+        let error = block_on(call_builtin_async_in_context(
+            &context(Rc::new(PlacementSession::new(Default::default())), 0),
+            "imfilter",
+            &args,
+        ))
+        .expect_err("finite zero host quota rejects before H readback");
+        assert!(error
+            .identifier()
+            .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+        let after = backend.telemetry_snapshot();
+        assert_eq!(after.download_bytes, before.download_bytes);
+        assert_eq!(after.upload_bytes, before.upload_bytes);
+        let session = Rc::new(PlacementSession::new(Default::default()));
+        let result = block_on(call_builtin_async_in_context(
+            &context(session.clone(), 4096),
+            "imfilter",
+            &args,
+        ))
+        .expect("admitted class-preserving restore");
+        let Value::GpuTensor(output) = result else {
+            panic!("explicit result remains on original owner")
+        };
+        assert_eq!(output.device_id(), image.device_id());
+        assert_eq!(output.shape(), &[2, 2]);
+        assert!(!output.shares_allocation_with(&image));
+        assert!(!output.shares_allocation_with(&kernel));
+        assert_eq!(
+            runmat_accelerate_api::handle_is_logical(&output),
+            logical_class
+        );
+        assert_eq!(
+            block_on(backend.download_numeric(&output)).unwrap().data,
+            expected
+        );
+        assert!(
+            (0..1000).any(|_| {
+                if session.profile_snapshot().feedback.iter().any(|sample| {
+                    sample.signature.operation == "imfilter"
+                        && sample.samples == 1
+                        && sample.failures == 0
+                }) {
+                    true
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    false
+                }
+            }),
+            "one completion-qualified class-preserving upload sample"
+        );
+        image.allocation_lease().validate_live().unwrap();
+        kernel.allocation_lease().validate_live().unwrap();
+    }
+}

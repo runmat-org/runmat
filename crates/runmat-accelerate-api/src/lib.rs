@@ -1913,6 +1913,16 @@ pub trait AccelProvider: AcceleratorThreadBound {
         None
     }
 
+    /// The same exact one-result upload boundary for class-preserving host
+    /// publication. This includes native integer and logical routes; a
+    /// generic byte estimate is not evidence of staging or completion.
+    fn upload_physical_evidence(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+    ) -> Option<ProviderUploadPhysicalEvidence> {
+        None
+    }
+
     /// Exact native numeric readback admission for a live source handle.
     /// Generic dense feasibility cannot certify a lazy view's owner-specific
     /// transpose/readback path. The default keeps that route unsupported.

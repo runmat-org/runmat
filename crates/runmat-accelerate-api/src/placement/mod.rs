@@ -50,7 +50,7 @@ pub use execution_inventory::{
 pub use feasibility::{
     ProviderFeasibility, ProviderFeasibilityQuery, ProviderNumericUploadPhysicalEvidence,
     ProviderOperationIdentity, ProviderRejection, ProviderRejectionCode, ProviderResourceEstimate,
-    ProviderTransferOutputBound, ProviderWorkload,
+    ProviderTransferOutputBound, ProviderUploadPhysicalEvidence, ProviderWorkload,
 };
 pub use representation::{
     ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderStorage,

@@ -348,6 +348,83 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn upload_physical_evidence(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderUploadPhysicalEvidence> {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderFeasibility, ProviderLayout, ProviderOperationFamily,
+            ProviderResidency, ProviderStorage, ProviderWorkload,
+        };
+        if query.operation.0 != "transfer.upload"
+            || query.family != ProviderOperationFamily::Upload
+            || query.inputs.len() != 1
+            || query.outputs.len() != 1
+        {
+            return None;
+        }
+        let mut expected_workload = ProviderWorkload::default();
+        expected_workload.requested_outputs = Some(1);
+        if query.workload != expected_workload {
+            return None;
+        }
+        let output = &query.outputs[0];
+        if !matches!(
+            output.element_type,
+            ProviderElementType::Logical
+                | ProviderElementType::I8
+                | ProviderElementType::I16
+                | ProviderElementType::I32
+                | ProviderElementType::I64
+                | ProviderElementType::U8
+                | ProviderElementType::U16
+                | ProviderElementType::U32
+                | ProviderElementType::U64
+                | ProviderElementType::F32
+                | ProviderElementType::F64
+        ) || output.storage != ProviderStorage::DenseReal
+            || output.layout != ProviderLayout::ColumnMajorContiguous
+            || output.residency != ProviderResidency::Device
+        {
+            return None;
+        }
+        let ProviderFeasibility::Supported { estimate } = self.query_feasibility(query) else {
+            return None;
+        };
+        let output_requested_bytes = crate::backend::wgpu_storage::checked_upload_allocation_bytes(
+            output,
+            self.precision(),
+        )?;
+        if estimate.output_bytes != Some(output_requested_bytes) {
+            return None;
+        }
+        let host_conversion_width = match output.element_type {
+            ProviderElementType::Logical => {
+                ProviderElementType::from(self.precision()).byte_width()
+            }
+            ProviderElementType::I8
+            | ProviderElementType::I16
+            | ProviderElementType::I32
+            | ProviderElementType::U8
+            | ProviderElementType::U16
+            | ProviderElementType::U32 => 4,
+            ProviderElementType::I64 | ProviderElementType::U64 => 8,
+            ProviderElementType::F32 | ProviderElementType::F64 => 0,
+            ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => return None,
+        };
+        let host_workspace_bytes = output
+            .checked_element_count()?
+            .checked_mul(host_conversion_width)?;
+        Some(runmat_accelerate_api::ProviderUploadPhysicalEvidence {
+            output_requested_bytes,
+            host_workspace_bytes: runmat_execution::ResourceByteBound::Known(host_workspace_bytes),
+            provider_scratch_bytes: runmat_execution::ResourceByteBound::Known(
+                crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
+            ),
+            completion_queue_slots: 1,
+        })
+    }
+
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
         self.export_context_exec(kind)
     }

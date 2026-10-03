@@ -78,6 +78,60 @@ fn actual_conditional_imfilter_upload_has_physical_empty_floor_and_fence() {
 
 #[test]
 #[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+fn actual_class_preserving_upload_evidence_covers_integer_logical_and_empty() {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
+        ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderStorage,
+        ProviderWorkload,
+    };
+    let provider = provider();
+    assert_eq!(
+        provider.precision(),
+        runmat_accelerate_api::ProviderPrecision::F32
+    );
+    for (element_type, shape, physical, host_workspace) in [
+        (ProviderElementType::Logical, vec![2, 2], 16, 16),
+        (ProviderElementType::U8, vec![2, 2], 16, 16),
+        (ProviderElementType::I16, vec![0, 2], 4, 0),
+    ] {
+        let output = ProviderRepresentation {
+            element_type,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape,
+            residency: ProviderResidency::Device,
+        };
+        let query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("transfer.upload"),
+            family: ProviderOperationFamily::Upload,
+            inputs: vec![ProviderRepresentation {
+                residency: ProviderResidency::Host,
+                ..output.clone()
+            }],
+            outputs: vec![output],
+            workload: ProviderWorkload {
+                requested_outputs: Some(1),
+                ..ProviderWorkload::default()
+            },
+        };
+        let evidence = provider
+            .upload_physical_evidence(&query)
+            .expect("exact native class upload evidence");
+        assert_eq!(evidence.output_requested_bytes, physical);
+        assert_eq!(evidence.host_workspace_bytes, host_workspace.into());
+        assert_eq!(evidence.provider_scratch_bytes, 8.into());
+        assert_eq!(evidence.completion_queue_slots, 1);
+        let mut malformed = query.clone();
+        malformed.inputs[0].shape = vec![1, 4];
+        assert!(provider.upload_physical_evidence(&malformed).is_none());
+        malformed = query;
+        malformed.workload.requested_outputs = Some(2);
+        assert!(provider.upload_physical_evidence(&malformed).is_none());
+    }
+}
+
+#[test]
+#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
 fn actual_imfilter_typed_direct_route_is_bound_to_both_live_inputs() {
     let provider = provider();
     let image = single_input(&provider, true, &[1.0, 2.0, 3.0, 4.0], &[2, 2]);
