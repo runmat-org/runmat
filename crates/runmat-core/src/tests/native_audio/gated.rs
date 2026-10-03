@@ -282,7 +282,7 @@ fn native_audio_pending_open_cancellation_retires_owner_and_does_not_replay() {
         let RunError::Runtime(error) = error else {
             panic!("expected typed cancellation");
         };
-        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
         assert!(release.send(()).is_err(), "open future was not retired");
         assert_eq!(evidence.completed.load(Ordering::SeqCst), 0);
         assert_eq!(evidence.retired_futures.load(Ordering::SeqCst), 1);
