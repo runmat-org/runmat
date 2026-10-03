@@ -126,6 +126,7 @@ pub(super) fn infer_known_tail(
             let class_possible = matches!(
                 value.kind,
                 ValueKindFact::Unknown
+                    | ValueKindFact::Logical
                     | ValueKindFact::Numeric(runmat_types::NumericFact {
                         class: NumericClass::Double
                             | NumericClass::Single

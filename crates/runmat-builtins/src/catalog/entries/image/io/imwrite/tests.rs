@@ -325,3 +325,39 @@ fn complex_pixels_colormap_alpha_and_mismatched_alpha_shape_diagnose() {
         .iter()
         .any(|d| d.code == "RM-CATALOG-IMWRITE-OPTION" && d.argument == Some(3)));
 }
+
+#[test]
+fn logical_alpha_matches_runtime_class_and_still_requires_image_geometry() {
+    let logical = |shape| {
+        ValueFact::proven(
+            ValueKindFact::Logical,
+            ShapeFact::from(shape),
+            StorageFact::Dense,
+        )
+    };
+    let mut request = call(
+        vec![
+            image(NumericClass::UInt8, vec![Some(2), Some(3)]),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            logical(vec![Some(2), Some(3)]),
+        ],
+        RequestedOutputCount::Zero,
+    );
+    request.literals = LiteralContext::new(vec![
+        LiteralValue::Unknown,
+        LiteralValue::String("x.png".into()),
+        LiteralValue::String("Alpha".into()),
+        LiteralValue::Unknown,
+    ]);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+    request.arguments[3] = logical(vec![Some(1), Some(3)]);
+    let result = inference::infer(&request, &IMWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-IMWRITE-OPTION"
+            && diagnostic.argument == Some(3)));
+}
