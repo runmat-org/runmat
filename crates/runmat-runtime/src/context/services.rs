@@ -842,7 +842,7 @@ impl RuntimeServicePorts {
         require_host_effect_resources,
         host_effect_resources,
         RuntimeHostEffectResourceService,
-        Host
+        Placement
     );
     port_accessors!(
         with_native,
