@@ -126,6 +126,21 @@ fn imread_windows_drive_letter_path_is_not_treated_as_url_scheme() {
 }
 
 #[test]
+fn parsed_opaque_and_nonlocal_file_urls_reject_before_filesystem_access() {
+    for source in ["mailto:alice@example.com", "ftp://example.test/pixels.png"] {
+        let err = futures::executor::block_on(imread_builtin(Value::from(source), Vec::new()))
+            .expect_err("unsupported URL scheme");
+        assert_eq!(err.identifier(), IMREAD_ERROR_UNSUPPORTED_SCHEME.identifier);
+    }
+    let err = futures::executor::block_on(imread_builtin(
+        Value::from("file://remote.example/pixels.png"),
+        Vec::new(),
+    ))
+    .expect_err("nonlocal file URL");
+    assert_eq!(err.identifier(), IMREAD_ERROR_INVALID_FILE_URL.identifier);
+}
+
+#[test]
 fn imread_respects_explicit_format_hint() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("image-no-extension");

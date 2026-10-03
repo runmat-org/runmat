@@ -1,50 +1,39 @@
-/// The source transport identity after public URL spelling has been parsed.
-/// Runtime and catalog use this one scheme decision; a drive letter is a path.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use url::Url;
+
+/// One parsed source identity for catalog admission and runtime dispatch.
+/// A failed URL parse and a single-letter drive scheme retain the historical
+/// local-path route; no second lexical URL parser is used for literals.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImreadSourceRoute {
     LocalPath,
-    FileUrl,
-    Http,
-    UnsupportedScheme,
+    FileUrl(Url),
+    InvalidFileUrlHost { host: String },
+    Http(Url),
+    UnsupportedScheme { scheme: String },
 }
 
 impl ImreadSourceRoute {
-    pub fn from_parsed_scheme(scheme: &str) -> Self {
+    pub fn parse(source: &str) -> Self {
+        let Ok(url) = Url::parse(source) else {
+            return Self::LocalPath;
+        };
+        let scheme = url.scheme();
         if scheme.len() == 1 {
             return Self::LocalPath;
         }
         match scheme {
-            "http" | "https" => Self::Http,
-            "file" => Self::FileUrl,
-            _ => Self::UnsupportedScheme,
+            "http" | "https" => Self::Http(url),
+            "file" => match url.host_str() {
+                Some(host) if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") => {
+                    Self::InvalidFileUrlHost {
+                        host: host.to_string(),
+                    }
+                }
+                _ => Self::FileUrl(url),
+            },
+            _ => Self::UnsupportedScheme {
+                scheme: scheme.to_string(),
+            },
         }
-    }
-
-    /// Only establish a URL route from a literal when its authority is a
-    /// conservative, certainly parseable ASCII host. Other spellings remain
-    /// unknown to inference; runtime's URL parser remains authoritative.
-    pub fn from_proven_literal(source: &str) -> Option<Self> {
-        let (scheme, rest) = source.split_once("://")?;
-        if scheme.is_empty()
-            || !scheme.bytes().enumerate().all(|(index, byte)| {
-                byte.is_ascii_alphabetic()
-                    || (index > 0 && (byte.is_ascii_digit() || matches!(byte, b'+' | b'-' | b'.')))
-            })
-        {
-            return None;
-        }
-        let route = Self::from_parsed_scheme(&scheme.to_ascii_lowercase());
-        if route == Self::FileUrl {
-            return Some(route);
-        }
-        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-        if authority.is_empty()
-            || !authority
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
-        {
-            return None;
-        }
-        Some(route)
     }
 }

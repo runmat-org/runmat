@@ -37,26 +37,22 @@ pub(super) fn parse_format_hint(value: &str) -> BuiltinResult<ImageFormat> {
 }
 
 pub(super) async fn read_source_bytes(source: &str) -> BuiltinResult<Vec<u8>> {
-    if let Ok(url) = Url::parse(source) {
-        let scheme = url.scheme();
-        // A single-letter scheme is a Windows drive letter (e.g. "C:/..."), not a URL.
-        if scheme.len() > 1 {
-            return match ImreadSourceRoute::from_parsed_scheme(scheme) {
-                ImreadSourceRoute::Http => read_url_bytes(url).await,
-                ImreadSourceRoute::FileUrl => {
-                    let path = file_url_to_path(&url)?;
-                    read_local_path(&path).await
-                }
-                ImreadSourceRoute::UnsupportedScheme => Err(imread_error_with_detail(
-                    &IMREAD_ERROR_UNSUPPORTED_SCHEME,
-                    format!("unsupported URL scheme '{scheme}'"),
-                )),
-                ImreadSourceRoute::LocalPath => read_local_path(Path::new(source)).await,
-            };
+    match ImreadSourceRoute::parse(source) {
+        ImreadSourceRoute::Http(url) => read_url_bytes(url).await,
+        ImreadSourceRoute::FileUrl(url) => {
+            let path = file_url_to_path(&url)?;
+            read_local_path(&path).await
         }
+        ImreadSourceRoute::InvalidFileUrlHost { host } => Err(imread_error_with_detail(
+            &IMREAD_ERROR_INVALID_FILE_URL,
+            format!("file URL host '{host}' is not local"),
+        )),
+        ImreadSourceRoute::UnsupportedScheme { scheme } => Err(imread_error_with_detail(
+            &IMREAD_ERROR_UNSUPPORTED_SCHEME,
+            format!("unsupported URL scheme '{scheme}'"),
+        )),
+        ImreadSourceRoute::LocalPath => read_local_path(Path::new(source)).await,
     }
-
-    read_local_path(Path::new(source)).await
 }
 
 async fn read_local_path(path: &Path) -> BuiltinResult<Vec<u8>> {
@@ -70,15 +66,6 @@ async fn read_local_path(path: &Path) -> BuiltinResult<Vec<u8>> {
 }
 
 fn file_url_to_path(url: &Url) -> BuiltinResult<PathBuf> {
-    if let Some(host) = url.host_str() {
-        if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") {
-            return Err(imread_error_with_detail(
-                &IMREAD_ERROR_INVALID_FILE_URL,
-                format!("file URL host '{host}' is not local"),
-            ));
-        }
-    }
-
     let decoded = percent_decode_url_path(url.path())?;
 
     #[cfg(windows)]

@@ -85,34 +85,60 @@ fn url_and_dynamic_source_capabilities_are_not_confused() {
 
 #[test]
 fn proven_unsupported_scheme_rejects_without_ambient_service_requirement() {
-    let result = inference::infer(
-        &request(
-            ValueFact::scalar(ValueKindFact::String),
-            Some("ftp://example.test/pixels.png"),
-            RequestedOutputCount::One,
+    for (source, code) in [
+        ("ftp://example.test/pixels.png", "RM-CATALOG-IMREAD-SCHEME"),
+        ("mailto:alice@example.com", "RM-CATALOG-IMREAD-SCHEME"),
+        (
+            "file://remote.example/pixels.png",
+            "RM-CATALOG-IMREAD-FILE-URL",
         ),
-        &IMREAD_CATALOG_ENTRY,
-    );
-    assert!(result
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "RM-CATALOG-IMREAD-SCHEME"));
-    assert!(!result
-        .capabilities
-        .0
-        .contains(&CapabilityRequirement::Filesystem));
-    assert!(!result
-        .capabilities
-        .0
-        .contains(&CapabilityRequirement::Network));
-    assert_eq!(
-        ImreadSourceRoute::from_parsed_scheme("ftp"),
-        ImreadSourceRoute::UnsupportedScheme
-    );
-    assert_eq!(
-        ImreadSourceRoute::from_proven_literal("C:/pixels.png"),
-        None
-    );
+    ] {
+        let result = inference::infer(
+            &request(
+                ValueFact::scalar(ValueKindFact::String),
+                Some(source),
+                RequestedOutputCount::One,
+            ),
+            &IMREAD_CATALOG_ENTRY,
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == code),
+            "{source}"
+        );
+        assert!(
+            !result
+                .capabilities
+                .0
+                .contains(&CapabilityRequirement::Filesystem),
+            "{source}"
+        );
+        assert!(
+            !result
+                .capabilities
+                .0
+                .contains(&CapabilityRequirement::Network),
+            "{source}"
+        );
+    }
+    assert!(matches!(
+        ImreadSourceRoute::parse("C:/pixels.png"),
+        ImreadSourceRoute::LocalPath
+    ));
+    assert!(matches!(
+        ImreadSourceRoute::parse("http://"),
+        ImreadSourceRoute::LocalPath
+    ));
+    assert!(matches!(
+        ImreadSourceRoute::parse("HTTPS://example.test/pixels.png"),
+        ImreadSourceRoute::Http(_)
+    ));
+    assert!(matches!(
+        ImreadSourceRoute::parse("file:///tmp/pixels.png"),
+        ImreadSourceRoute::FileUrl(_)
+    ));
 }
 
 #[test]

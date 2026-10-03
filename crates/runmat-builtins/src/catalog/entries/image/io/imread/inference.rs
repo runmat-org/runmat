@@ -54,10 +54,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut contract = CallContract::fixed(vec![image, map, alpha]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
-    match request.literals.literal_string_at(0) {
-        Some(source)
-            if ImreadSourceRoute::from_proven_literal(&source) == Some(ImreadSourceRoute::Http) =>
-        {
+    match request
+        .literals
+        .literal_string_at(0)
+        .map(|source| ImreadSourceRoute::parse(&source))
+    {
+        Some(ImreadSourceRoute::Http(_)) => {
             contract.effects.0.remove(&EffectKind::FilesystemRead);
             contract
                 .capabilities
@@ -68,10 +70,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 .0
                 .insert(CapabilityRequirement::Network);
         }
-        Some(source)
-            if ImreadSourceRoute::from_proven_literal(&source)
-                == Some(ImreadSourceRoute::UnsupportedScheme) =>
-        {
+        Some(
+            route @ (ImreadSourceRoute::UnsupportedScheme { .. }
+            | ImreadSourceRoute::InvalidFileUrlHost { .. }),
+        ) => {
             contract.effects.0.remove(&EffectKind::FilesystemRead);
             contract.effects.0.remove(&EffectKind::Network);
             contract
@@ -82,16 +84,19 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 .capabilities
                 .0
                 .remove(&CapabilityRequirement::Network);
-            diagnostics.push(argument_error(
-                "RM-CATALOG-IMREAD-SCHEME",
-                "source URL scheme is unsupported",
-                0,
-            ));
+            let (code, detail) = match route {
+                ImreadSourceRoute::UnsupportedScheme { .. } => (
+                    "RM-CATALOG-IMREAD-SCHEME",
+                    "source URL scheme is unsupported",
+                ),
+                ImreadSourceRoute::InvalidFileUrlHost { .. } => {
+                    ("RM-CATALOG-IMREAD-FILE-URL", "file URL host is not local")
+                }
+                _ => unreachable!("matched only rejected URL routes"),
+            };
+            diagnostics.push(argument_error(code, detail, 0));
         }
-        Some(source)
-            if ImreadSourceRoute::from_proven_literal(&source).is_some()
-                || !source.contains("://") =>
-        {
+        Some(ImreadSourceRoute::FileUrl(_) | ImreadSourceRoute::LocalPath) => {
             contract.effects.0.remove(&EffectKind::Network);
             contract
                 .capabilities
