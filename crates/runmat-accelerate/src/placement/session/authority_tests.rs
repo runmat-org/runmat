@@ -1,6 +1,5 @@
 use super::*;
 use runmat_execution::{PlacementExecutionAuthorityRevision, PlacementRevision};
-use runmat_runtime::context::RuntimePlacementService;
 
 fn signature(token: &str) -> PlacementSignature {
     let digest = Digest::sha256(token.as_bytes());

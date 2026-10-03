@@ -3,6 +3,7 @@ use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputPresentation, CandidateOutputResidency,
     CandidatePreparationState, CandidateResourceDemand, PlacementExecutionAuthorityRevision,
     PlacementResourceSnapshot, PlacementSignature, ResourceBoundUnavailable, ResourceByteBound,
+    WholeWorkObservationOutcome,
 };
 use runmat_runtime::context::RuntimePlacementService;
 
