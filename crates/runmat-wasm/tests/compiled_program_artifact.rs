@@ -35,7 +35,7 @@ async fn request_with_contract(
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: function.to_string(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
