@@ -86,6 +86,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     } else {
         let mut unknown = ValueFact::unknown(DynamicReason::ExternalData);
         unknown.shape = ShapeFact::from(vec![None, None]);
+        unknown.storage = StorageFact::Dense;
+        unknown.layout = LayoutFact::ColumnMajor;
+        unknown.contiguity = ContiguityFact::Contiguous;
+        unknown.view = ViewFact::Materialized;
         unknown.residency = ResidencyFact::Host;
         unknown
     };

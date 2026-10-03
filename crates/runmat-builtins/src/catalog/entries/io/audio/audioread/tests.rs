@@ -57,6 +57,8 @@ fn default_and_native_result_facts_reflect_file_dependent_class() {
     assert!(native.diagnostics.is_empty(), "{:?}", native.diagnostics);
     assert!(matches!(native.outputs[0].kind, ValueKindFact::Unknown));
     assert_eq!(native.outputs[0].residency, ResidencyFact::Host);
+    assert_eq!(native.outputs[0].storage, StorageFact::Dense);
+    assert_eq!(native.outputs[0].layout, LayoutFact::ColumnMajor);
 }
 
 #[test]
