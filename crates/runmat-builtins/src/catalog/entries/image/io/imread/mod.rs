@@ -7,7 +7,7 @@ mod tests;
 pub use descriptor::*;
 
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 pub const IMREAD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -32,10 +32,13 @@ pub const IMREAD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],
-        // A known literal source selects exactly one service in inference. A
-        // dynamic source requires both as possible ambient dependencies; the
-        // static catalog field cannot express this conditional requirement.
-        capabilities: &[],
+        // The catalog handle conservatively declares both possible services.
+        // Literal-source inference removes the opposite requirement; a
+        // dynamic source retains the union until runtime source parsing.
+        capabilities: &[
+            CapabilityRequirement::Filesystem,
+            CapabilityRequirement::Network,
+        ],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
