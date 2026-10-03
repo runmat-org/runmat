@@ -17,6 +17,7 @@ use runmat_mir::{
 use runmat_runtime::call::arguments::{ArgumentExpansionSpec, ArgumentSpec};
 use std::collections::HashMap;
 
+mod aggregate_construction;
 mod subscript_path;
 
 #[derive(Clone)]
@@ -3950,11 +3951,9 @@ impl Compiler {
         &self,
         elements: &[runmat_mir::MirAggregateElement],
     ) -> bool {
-        elements.iter().any(|element| {
-            element
-                .operand()
-                .is_none_or(|operand| self.mir_operand_needs_dynamic_concat(operand))
-        })
+        self.body
+            .as_ref()
+            .is_none_or(|body| aggregate_construction::needs_dynamic_concat(body, elements))
     }
 
     fn mir_delete_rhs_is_empty_tensor_literal(&self, value: &MirRvalue) -> bool {
@@ -3965,29 +3964,6 @@ impl Compiler {
                 row_lengths,
                 elements,
             } if row_lengths.is_empty() && elements.is_empty()
-        )
-    }
-
-    fn mir_operand_needs_dynamic_concat(&self, operand: &MirOperand) -> bool {
-        match operand {
-            MirOperand::Constant(MirConstant::String(_)) => true,
-            MirOperand::Local(local) => self
-                .mir_local_rvalue(*local)
-                .is_some_and(|value| self.mir_rvalue_needs_dynamic_concat(&value)),
-            _ => false,
-        }
-    }
-
-    fn mir_rvalue_needs_dynamic_concat(&self, value: &MirRvalue) -> bool {
-        matches!(
-            value,
-            MirRvalue::Range { .. }
-                | MirRvalue::Call(_)
-                | MirRvalue::Aggregate { .. }
-                | MirRvalue::Index { .. }
-                | MirRvalue::Member { .. }
-                | MirRvalue::DynamicMember { .. }
-                | MirRvalue::WorkspaceFirstStaticProperty { .. }
         )
     }
 
@@ -4168,19 +4144,6 @@ impl Compiler {
         Ok(())
     }
 
-    fn mir_local_rvalue(&self, local: runmat_mir::MirLocalId) -> Option<MirRvalue> {
-        let body = self.body.as_ref()?;
-        body.blocks
-            .iter()
-            .flat_map(|block| block.statements.iter())
-            .find_map(|stmt| match &stmt.kind {
-                MirStmtKind::Assign {
-                    place: MirPlace::Local(candidate),
-                    value,
-                } if *candidate == local => Some(value.clone()),
-                _ => None,
-            })
-    }
     fn compile_mir_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {
         match operand {
             MirOperand::Local(local) => {
