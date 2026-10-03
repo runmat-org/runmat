@@ -196,6 +196,10 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
 fn relative_source_and_typed_range_mode_reach_exact_captured_owner() {
     let _lock = runmat_filesystem::provider_override_lock();
     let (fs, _guard) = fixture();
+    // Installing a provider preserves an existing virtual session directory.
+    // Establish this test's relative-path base explicitly on every platform;
+    // the provider guard restores the prior directory as well as its owner.
+    runmat_filesystem::set_current_dir("/audio").expect("relative audio fixture directory");
     let provider: Arc<dyn runmat_filesystem::FsProvider> = fs.clone();
     let (runtime, resources, placement) = context(provider, known(), Some(512 * 1024));
     let range = Value::Tensor(Tensor::new(vec![2.0, f64::INFINITY], vec![1, 2]).expect("range"));
