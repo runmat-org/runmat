@@ -348,3 +348,6 @@ fn no_legal_candidate() -> PlacementPlanError {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "whole_work/host_effect_tests.rs"]
+mod host_effect_tests;
