@@ -110,7 +110,9 @@ pub(crate) fn restore_resident_numeric_result_for_sources(
         .find(|handle| runmat_accelerate_api::handle_is_explicit(handle))
         .unwrap_or(first_source);
     for input in sources {
-        super::resident_owner::exact_owner(input, name)?;
+        // Host computation may have suspended while reading back an operand.
+        // Revalidate every borrowed source before entering any upload hook.
+        super::resident_owner::validate_live(input, name)?;
     }
     let _residency = protect_resident_inputs(sources);
     let restore = |value| {

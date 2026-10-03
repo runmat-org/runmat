@@ -2,6 +2,68 @@ use super::*;
 use crate::builtins::common::{gpu_helpers, test_support};
 use runmat_value::{IntValue, IntegerStorage};
 
+struct PublicationOwner(runmat_accelerate_api::test_support::TestAllocationOwner);
+
+impl runmat_accelerate_api::AccelProvider for PublicationOwner {
+    fn device_id(&self) -> u32 {
+        self.0.device_id()
+    }
+
+    fn device_info(&self) -> String {
+        "color publication lease witness".into()
+    }
+
+    fn upload(&self, _: &runmat_accelerate_api::HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        panic!("unavailable source must reject before upload")
+    }
+
+    fn download<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        panic!("publication must not download again")
+    }
+}
+
+#[test]
+fn publication_revalidates_a_source_that_became_unavailable_after_readback() {
+    let _state = test_support::accel_test_lock();
+    let provider: &'static PublicationOwner = Box::leak(Box::new(PublicationOwner(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+    )));
+    let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let first = provider
+        .0
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let second = provider
+        .0
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let sources = [first.handle, second.handle];
+    for source in &sources {
+        super::super::resident_owner::validate_live(source, "color-test").unwrap();
+    }
+    // Independent native payload has already returned; provider loss makes
+    // only the second borrowed source unavailable before result publication.
+    let host_result = Value::Tensor(Tensor::new(vec![0.25; 3], vec![1, 1, 3]).unwrap());
+    second.probe.mark_unavailable();
+    let error = restore_resident_numeric_result_for_sources(&sources, host_result, "color-test")
+        .expect_err("lost readback source cannot authorize publication");
+    assert!(error.message().contains("invalid resident allocation"));
+    assert!(sources[0].allocation_lease().validate_live().is_ok());
+    assert_eq!(first.probe.retirements(), 0);
+    assert_eq!(second.probe.retirements(), 0);
+}
+
 #[test]
 fn image_scalar_collapse_reads_authoritative_storage() {
     let single = Tensor::from_f32(vec![0.25], vec![1, 1]).unwrap();
