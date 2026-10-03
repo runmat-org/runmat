@@ -25,6 +25,7 @@ enum Proof {
 
 /// Shared by all aggregate expressions in one function body. Neither deep
 /// temporary chains nor repeated operands rescan statements or recurse.
+#[derive(Clone)]
 pub(super) struct ProofIndex {
     definitions: Vec<Definition>,
     proofs: Vec<Proof>,
@@ -154,6 +155,7 @@ impl ProofIndex {
                         .is_some_and(|operands| {
                             operands
                                 .into_iter()
+                                .flatten()
                                 .all(|operand| self.operand_is_complete(operand))
                         });
                     self.proofs[local.0] = if proven {
@@ -173,7 +175,7 @@ impl ProofIndex {
             };
             self.proofs[local.0] = Proof::Visiting;
             work.push((local, true));
-            for operand in operands.into_iter().rev() {
+            for operand in operands.into_iter().flatten().rev() {
                 match operand {
                     MirOperand::Local(child) => match self.proofs.get(child.0) {
                         Some(Proof::Unseen) => work.push((*child, false)),
@@ -200,19 +202,19 @@ impl ProofIndex {
     }
 }
 
-fn rvalue_operands(value: &MirRvalue) -> Option<Vec<&MirOperand>> {
+fn rvalue_operands(value: &MirRvalue) -> Option<[Option<&MirOperand>; 2]> {
     match value {
-        MirRvalue::Use(operand) => Some(vec![operand]),
+        MirRvalue::Use(operand) => Some([Some(operand), None]),
         MirRvalue::Unary(operator, operand)
             if matches!(
                 operator,
                 OperatorKind::UnaryPlus | OperatorKind::UnaryMinus | OperatorKind::Not
             ) =>
         {
-            Some(vec![operand])
+            Some([Some(operand), None])
         }
         MirRvalue::Binary(left, operator, right) if scalar_binary(*operator) => {
-            Some(vec![left, right])
+            Some([Some(left), Some(right)])
         }
         _ => None,
     }
@@ -343,6 +345,22 @@ mod tests {
         assert!(!index.needs_dynamic_concat(&body, &aggregate(511, 512)));
         assert_eq!(index.proofs[511], Proof::Primitive);
         assert!(!index.needs_dynamic_concat(&body, &aggregate(511, 512)));
+    }
+
+    #[test]
+    fn duplicate_pending_child_is_not_a_cycle() {
+        let shared = body(vec![
+            MirRvalue::Use(MirOperand::Constant(MirConstant::Number("2".into()))),
+            MirRvalue::Binary(
+                MirOperand::Local(MirLocalId(0)),
+                OperatorKind::Add,
+                MirOperand::Local(MirLocalId(0)),
+            ),
+        ]);
+        let mut index = ProofIndex::new(&shared);
+        assert!(!index.needs_dynamic_concat(&shared, &aggregate(1, 2)));
+        assert_eq!(index.proofs[0], Proof::Primitive);
+        assert_eq!(index.proofs[1], Proof::Primitive);
     }
 
     #[test]
