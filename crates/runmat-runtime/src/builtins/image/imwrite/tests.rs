@@ -1,4 +1,8 @@
 use super::*;
+use crate::context::RuntimeContext;
+use crate::execution::{
+    CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError, RuntimeExecutionService,
+};
 use futures::executor::block_on;
 use image::io::Reader as ImageReader;
 use runmat_accelerate_api::{
@@ -6,8 +10,13 @@ use runmat_accelerate_api::{
     HostLogicalTensorView, HostNumericTensorView, HostTensorView, ProviderPrecision,
     ThreadProviderGuard,
 };
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
 use runmat_value::IntegerStorage;
+use std::cell::Cell;
 use std::fs;
+use std::num::NonZeroU64;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tempfile::tempdir;
 
@@ -78,6 +87,86 @@ fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
 
 fn call(args: Vec<Value>) -> BuiltinResult<Value> {
     block_on(imwrite_builtin(None, args))
+}
+
+fn indexed_with_large_host_map(path: &std::path::Path) -> Vec<Value> {
+    vec![
+        Value::Tensor(tensor(vec![1.0], vec![1, 1], NumericDType::F64)),
+        Value::Tensor(tensor(
+            vec![0.5; 1500 * 3],
+            vec![1500, 3],
+            NumericDType::F64,
+        )),
+        Value::String(path.to_string_lossy().into_owned()),
+    ]
+}
+
+#[test]
+fn known_invalid_option_precedes_host_map_scan_and_cancellation() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("invalid-option.png");
+    let mut args = indexed_with_large_host_map(&path);
+    args.extend([Value::String("BitDepth".into()), Value::Num(8.0)]);
+    let cancellation = CancellationSource::new();
+    cancellation.cancel(CancellationReason::User);
+    let context = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    );
+    let error = block_on(imwrite_builtin(Some(context), args)).unwrap_err();
+    assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_OPTION.identifier);
+    assert!(!path.exists());
+}
+
+#[test]
+fn host_map_scan_reports_cooperation_failure_before_io() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("turn-failed.png");
+    let args = indexed_with_large_host_map(&path);
+    preflight::preflight_resident_argument_roles(&args).unwrap();
+    let turns = Rc::new(Cell::new(0));
+    let counted = turns.clone();
+    let cancellation = CancellationSource::new();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        cancellation.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            Box::pin(async {
+                Err(ExecutionServiceError::Infrastructure(
+                    "test turn failed".into(),
+                ))
+            })
+        },
+    );
+    let mut cooperation = ImageCooperation::with_budget(budget, BUILTIN_NAME);
+    let error = block_on(preflight::preflight_known_host_pixels(
+        &args,
+        &mut cooperation,
+    ))
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:parallel:InfrastructureFailure")
+    );
+    assert_eq!(turns.get(), 1);
+    assert!(!path.exists());
+}
+
+#[test]
+fn builtin_context_cancellation_stops_before_file_publication() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("cancelled.png");
+    let args = indexed_with_large_host_map(&path);
+    let cancellation = CancellationSource::new();
+    cancellation.cancel(CancellationReason::User);
+    let context = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    );
+    let error = block_on(imwrite_builtin(Some(context), args)).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(!path.exists());
 }
 
 #[test]

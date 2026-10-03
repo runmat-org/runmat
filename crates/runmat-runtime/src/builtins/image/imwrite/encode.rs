@@ -457,8 +457,12 @@ mod ownership_tests {
                 ..ImwriteOptions::default()
             },
         };
-        let error = futures::executor::block_on(encode_gif(&image, &invocation))
-            .expect_err("invalid new frame must precede missing append source");
+        let error = futures::executor::block_on(encode_gif(
+            &image,
+            &invocation,
+            &mut ImageCooperation::new(None, BUILTIN_NAME),
+        ))
+        .expect_err("invalid new frame must precede missing append source");
         assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
     }
 }

@@ -80,8 +80,7 @@ async fn imwrite_builtin(
             "filename must not be empty",
         ));
     }
-    let mut cooperation = ImageCooperation::new(runtime.as_ref(), BUILTIN_NAME);
-    preflight::preflight_resident_argument_roles(&args, &mut cooperation).await?;
+    preflight::preflight_resident_argument_roles(&args)?;
     let format = preflight::preflight_option_text(
         &args,
         filename_index + 1,
@@ -96,6 +95,8 @@ async fn imwrite_builtin(
             BUILTIN_NAME,
         )?;
     }
+    let mut cooperation = ImageCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    preflight::preflight_known_host_pixels(&args, &mut cooperation).await?;
     cooperation.completed(0).await?;
     let mut host_args = Vec::with_capacity(args.len());
     for arg in &args {

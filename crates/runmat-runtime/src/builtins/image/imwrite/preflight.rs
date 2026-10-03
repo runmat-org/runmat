@@ -201,10 +201,9 @@ fn preflight_known_option_value(
     Ok(())
 }
 
-pub(super) async fn preflight_resident_argument_roles(
-    args: &[Value],
-    cooperation: &mut ImageCooperation,
-) -> BuiltinResult<()> {
+/// Metadata-only validation retains class, ownership and geometry precedence
+/// without scanning host pixels before option syntax/admission is known.
+pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult<()> {
     for value in args {
         if let Value::GpuTensor(handle) = value {
             validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
@@ -235,19 +234,6 @@ pub(super) async fn preflight_resident_argument_roles(
             }
             Value::Tensor(tensor) => {
                 ensure_double_colormap(map)?;
-                let map_values = crate::builtins::common::tensor::tensor_values_f64_cow(tensor);
-                for chunk in map_values.chunks(IMAGE_WORK_CHUNK) {
-                    if !chunk
-                        .iter()
-                        .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
-                    {
-                        return Err(imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_COLORMAP,
-                            "map values must be finite and in the range [0, 1]",
-                        ));
-                    }
-                    cooperation.completed(chunk.len()).await?;
-                }
                 tensor.shape.as_slice()
             }
             _ => {
@@ -263,6 +249,41 @@ pub(super) async fn preflight_resident_argument_roles(
                 "map must be an Nx3 colormap",
             ));
         }
+    }
+    Ok(())
+}
+
+/// Value-level scans run only after the complete known option tail has passed
+/// admission. They still precede any provider readback or filesystem effect.
+pub(super) async fn preflight_known_host_pixels(
+    args: &[Value],
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<()> {
+    let Some(image) = args.first() else {
+        return Ok(());
+    };
+    if args.get(1).is_some_and(|value| !is_string_like(value)) {
+        let map = &args[1];
+        let shape = match map {
+            Value::GpuTensor(handle) => handle.shape(),
+            Value::Tensor(tensor) => {
+                let map_values = crate::builtins::common::tensor::tensor_values_f64_cow(tensor);
+                for chunk in map_values.chunks(IMAGE_WORK_CHUNK) {
+                    if !chunk
+                        .iter()
+                        .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                    {
+                        return Err(imwrite_error_with_detail(
+                            &IMWRITE_ERROR_INVALID_COLORMAP,
+                            "map values must be finite and in the range [0, 1]",
+                        ));
+                    }
+                    cooperation.completed(chunk.len()).await?;
+                }
+                tensor.shape.as_slice()
+            }
+            _ => unreachable!("metadata admission validated map class"),
+        };
         // Host X values and the resident map's row count are both known now.
         // Use the same conversion/range rule as materialization before any map readback.
         if !matches!(image, Value::GpuTensor(_)) {
