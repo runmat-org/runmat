@@ -4,6 +4,16 @@ use runmat_types::{
     OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
+#[test]
+fn legacy_discovery_terms_and_related_builtins_remain_available() {
+    for keyword in ["read image", "jpg", "bmp", "upload"] {
+        assert!(documentation::DOCUMENTATION.keywords.contains(&keyword));
+    }
+    for related in ["image", "imagesc", "class", "size", "gpuArray"] {
+        assert!(documentation::DOCUMENTATION.related.contains(&related));
+    }
+}
+
 fn request(source: ValueFact, literal: Option<&str>, outputs: RequestedOutputCount) -> CallRequest {
     CallRequest {
         arguments: vec![source],

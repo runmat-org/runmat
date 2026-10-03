@@ -6,7 +6,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     slug: Some("imwrite"),
     summary: "Encode an image array and write PNG, JPEG, GIF, BMP, or TIFF bytes.",
     description: "`imwrite(A,filename)` writes direct grayscale or color data. An optional explicit format, indexed colormap, and format-specific name-value controls select other supported forms.",
-    keywords: &["imwrite", "image", "PNG", "JPEG", "GIF", "BMP", "TIFF", "indexed image"],
+    keywords: &["imwrite", "image", "write image", "png", "jpeg", "jpg", "gif", "bmp", "tiff", "indexed image"],
     related: &["imread", "imfinfo", "gpuArray"],
     sections: &[
         BuiltinDocumentationSection { heading: "Data and formats", paragraphs: &[
@@ -84,6 +84,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     example_exemption: None,
     faqs: &[
+        BuiltinDocumentationFaq { question: "Which image formats can imwrite create?", answer: "PNG, JPEG, GIF, BMP, and TIFF are available. Admitted image classes and channel counts depend on the format: direct RGBA uses PNG; GIF append accepts grayscale or indexed frames; TIFF does not accept direct four-channel data." },
+        BuiltinDocumentationFaq { question: "What errors can image writes raise?", answer: "Invalid arguments, filenames, formats, image data, colormaps, and options have specific RunMat:imwrite identifiers. Encoder and filesystem failures preserve their underlying causes." },
         BuiltinDocumentationFaq { question: "Can imwrite use gpuArray inputs?", answer: "Yes. Numeric resident operands are downloaded through their owning provider for the host encoder; the caller's resident value remains resident." },
         BuiltinDocumentationFaq { question: "Is GIF append atomic?", answer: "No. It reads existing frames and rewrites the GIF without a portable lock." },
     ],

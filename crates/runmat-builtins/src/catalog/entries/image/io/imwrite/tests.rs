@@ -5,6 +5,13 @@ use runmat_types::{
     ValueKindFact,
 };
 
+#[test]
+fn legacy_writer_discovery_terms_remain_available() {
+    for keyword in ["write image", "jpg", "indexed image"] {
+        assert!(documentation::DOCUMENTATION.keywords.contains(&keyword));
+    }
+}
+
 fn image(class: NumericClass, shape: Vec<Option<usize>>) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {

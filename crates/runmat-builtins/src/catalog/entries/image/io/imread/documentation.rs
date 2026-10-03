@@ -22,8 +22,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("imread"), slug: Some("imread"),
     summary: "Decode a local or HTTP(S) raster image into host numeric arrays.",
     description: "`imread(filename)` detects an image format from its bytes; `imread(filename, fmt)` uses an explicit format hint. Requested outputs select the image, empty direct-color colormap, and optional alpha plane.",
-    keywords: &["imread", "image", "png", "jpeg", "tiff", "gif", "webp", "URL"],
-    related: &["imwrite", "imfinfo", "gpuArray", "size"],
+    keywords: &["imread", "image", "read image", "png", "jpeg", "jpg", "tiff", "bmp", "gif", "webp", "upload", "URL"],
+    related: &["image", "imagesc", "class", "size", "gpuArray", "imwrite", "imfinfo"],
     sections: &[
         BuiltinDocumentationSection { heading: "Sources and formats", paragraphs: &[
             "The source and optional format are scalar text. Local paths and local `file://` URLs use the active filesystem; `http://` and `https://` URLs use the configured HTTP transport. A browser needs the corresponding filesystem bridge or network permission and may additionally be constrained by CORS. Unsupported URL schemes reject. Common explicit hints include png, jpg/jpeg, tif/tiff, bmp, gif, and webp; byte-stream detection is used when the hint is omitted. A format hint selects a decoder but does not search for a missing `filename.fmt` path.",
@@ -61,8 +61,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
     ],
     example_exemption: None,
-    faqs: &[BuiltinDocumentationFaq { question: "Does imread return gpuArray data?", answer: "No. Decoding publishes host tensors; use gpuArray afterward if device residency is needed." }],
+    faqs: &[
+        BuiltinDocumentationFaq { question: "What shape does imread return for RGB images?", answer: "RGB images return an M-by-N-by-3 tensor with red, green, and blue planes in RunMat's column-major layout." },
+        BuiltinDocumentationFaq { question: "Where is the alpha channel returned?", answer: "Use `[I,map,alpha] = imread(filename)`. For direct color, map is empty; alpha is M-by-N when present and empty otherwise." },
+        BuiltinDocumentationFaq { question: "Can imread load file:// or HTTP URLs?", answer: "Yes, through the configured filesystem or HTTP transport. Browser filesystem bridges, network permission, and CORS policy may limit availability; unsupported schemes fail." },
+        BuiltinDocumentationFaq { question: "Does imread return gpuArray data?", answer: "No. Decoding publishes host tensors; use gpuArray afterward if device residency is needed. A resident numeric value is not a filename." },
+        BuiltinDocumentationFaq { question: "Are animated GIF frames supported?", answer: "Frame selection is not supported; the decoder returns the first decoded image frame as direct pixel data." },
+    ],
     links: &[
+        BuiltinDocumentationLink { label: "image", target: BuiltinDocumentationLinkTarget::Builtin("image") },
+        BuiltinDocumentationLink { label: "imagesc", target: BuiltinDocumentationLinkTarget::Builtin("imagesc") },
+        BuiltinDocumentationLink { label: "class", target: BuiltinDocumentationLinkTarget::Builtin("class") },
         BuiltinDocumentationLink { label: "imwrite", target: BuiltinDocumentationLinkTarget::Builtin("imwrite") },
         BuiltinDocumentationLink { label: "size", target: BuiltinDocumentationLinkTarget::Builtin("size") },
         BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
