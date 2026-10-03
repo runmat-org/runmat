@@ -74,10 +74,14 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
 async fn browser_executes_the_exact_portable_artifact_without_a_project() {
+    let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::MemoryFsProvider::new(),
+    ));
     let request = request_with_contract(
         runmat_types::InteropManifest::empty(),
         BTreeSet::from([
             runmat_types::CapabilityRequirement::HostRuntime,
+            runmat_types::CapabilityRequirement::Filesystem,
             runmat_types::CapabilityRequirement::UserInterface,
             runmat_types::CapabilityRequirement::ParallelRuntime,
         ]),
