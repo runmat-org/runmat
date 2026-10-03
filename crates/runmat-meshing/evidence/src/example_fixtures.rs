@@ -2,6 +2,7 @@
 //! these through the same evidence builders used by the analysis pipeline.
 
 use runmat_geometry_core::GeometryAsset;
+use runmat_geometry_io::{import_geometry, GeometryImportOptions};
 use runmat_meshing_core::{
     contracts::{
         artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryEdge, AnalysisBoundaryFace,
@@ -50,20 +51,21 @@ impl AuthorStudyExampleFiles {
     }
 }
 
-/// `geometry` must be the result of importing `TETRA_STL` as `TETRA_PATH`.
+/// `geometry` must match the typed result of importing `TETRA_STL` as
+/// `TETRA_PATH` with the public load operation's default import options.
 /// No geometry ID, revision, or source hash is guessed by the fixture builder.
 /// The STL importer currently leaves its source content hash empty; the mesh
 /// therefore records no source hash rather than claiming one it did not obtain.
 pub fn author_study_example_files(
     geometry: &GeometryAsset,
 ) -> Result<AuthorStudyExampleFiles, Box<dyn std::error::Error>> {
-    if geometry.geometry_id != format!("geo:{TETRA_PATH}")
-        || geometry.revision != 1
-        || !geometry
-            .regions
-            .iter()
-            .any(|region| region.region_id == REGION)
-    {
+    let canonical_geometry = import_geometry(
+        TETRA_PATH,
+        TETRA_STL.as_bytes(),
+        GeometryImportOptions::default(),
+    )?
+    .asset;
+    if geometry != &canonical_geometry {
         return Err("fixture requires the imported tetra STL and its default region".into());
     }
     let mesh = tetrahedron_mesh(geometry);

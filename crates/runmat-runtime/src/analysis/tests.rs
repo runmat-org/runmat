@@ -139,6 +139,25 @@ fn imported_author_study_fixture_loads_through_analysis_artifact_contract() {
     });
 }
 
+#[cfg(feature = "fea-example-fixtures")]
+#[test]
+fn author_study_fixture_rejects_same_path_with_different_imported_surface() {
+    use runmat_meshing_evidence::example_fixtures::{
+        author_study_example_files, TETRA_PATH, TETRA_STL,
+    };
+
+    let changed_stl = TETRA_STL.replace("vertex 0 0 1", "vertex 0 0 2");
+    let geometry = crate::geometry::geometry_load(TETRA_PATH, changed_stl.as_bytes())
+        .expect("modified but valid STL should import under the same path");
+    assert_eq!(geometry.geometry_id, format!("geo:{TETRA_PATH}"));
+    assert_eq!(geometry.revision, 1);
+    assert!(geometry
+        .regions
+        .iter()
+        .any(|region| region.region_id == "region_default"));
+    assert!(author_study_example_files(&geometry).is_err());
+}
+
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 
