@@ -427,7 +427,7 @@ async fn webwrite_builtin(
 
     let (options, query_params) = parse_arguments(queue)?;
     let body = prepare_request_body(data_value, &options).await?;
-    execute_request(&url_text, options, &query_params, body)
+    execute_request(&url_text, options, &query_params, body, context.as_ref()).await
 }
 
 fn parse_arguments(
@@ -547,11 +547,12 @@ fn process_name_value_pair(
     }
 }
 
-fn execute_request(
+async fn execute_request(
     url_text: &str,
     options: WebWriteOptions,
     query_params: &[(String, String)],
     body: PreparedBody,
+    context: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     let username_present = options
         .username
@@ -622,7 +623,7 @@ fn execute_request(
         user_agent,
     };
 
-    let response = transport::send_request(request, context.as_ref())
+    let response = transport::send_request(request, context)
         .await
         .map_err(|err| match err {
             transport::TransportCallError::Transport(err) => webwrite_error_with_source(

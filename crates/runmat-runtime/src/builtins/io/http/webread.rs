@@ -413,7 +413,7 @@ async fn webread_builtin(
         ));
     }
     let (options, query_params) = parse_arguments(gathered_args)?;
-    execute_request(&url_text, options, &query_params)
+    execute_request(&url_text, options, &query_params, context.as_ref()).await
 }
 
 async fn gather_arguments(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -580,10 +580,11 @@ fn append_query_from_cell(
     Ok(())
 }
 
-fn execute_request(
+async fn execute_request(
     url_text: &str,
     options: WebReadOptions,
     query_params: &[(String, String)],
+    context: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     let username_present = options
         .username
@@ -645,7 +646,7 @@ fn execute_request(
         user_agent,
     };
 
-    let response = transport::send_request(request, context.as_ref())
+    let response = transport::send_request(request, context)
         .await
         .map_err(|err| match err {
             transport::TransportCallError::Transport(err) => webread_error_with_source(

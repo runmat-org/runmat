@@ -16,16 +16,12 @@ pub(super) fn default_http_service() -> anyhow::Result<Rc<dyn RuntimeHttpService
         })
         .as_ref()
         .map_err(|error| anyhow::anyhow!("HTTP execution driver unavailable: {error}"))?;
-    Ok(Rc::new(
-        runmat_runtime::builtins::io::http::transport::NativeHttpService::new(
-            driver.handle().clone(),
-        ),
-    ))
+    Ok(Rc::new(runmat_runtime::http::NativeHttpService::new(
+        driver.handle().clone(),
+    )))
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn default_http_service() -> anyhow::Result<Rc<dyn RuntimeHttpService>> {
-    Ok(Rc::new(
-        runmat_runtime::builtins::io::http::transport::BrowserHttpService::new(),
-    ))
+    Ok(Rc::new(runmat_runtime::http::BrowserHttpService::new()))
 }

@@ -1,10 +1,5 @@
 //! Shared HTTP wire contract and cancellable invocation boundary.
 
-mod types;
-#[cfg(not(target_arch = "wasm32"))]
-mod native;
-#[cfg(target_arch = "wasm32")]
-mod browser;
 #[cfg(test)]
 mod tests;
 
@@ -15,10 +10,10 @@ use crate::context::RuntimeContext;
 use crate::{runtime_error, RuntimeError};
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::BrowserHttpService;
+pub use crate::http::BrowserHttpService;
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::NativeHttpService;
-pub use types::{HttpMethod, HttpRequest, HttpResponse, TransportError, TransportErrorKind};
+pub use crate::http::NativeHttpService;
+pub use crate::http::{HttpMethod, HttpRequest, HttpResponse, TransportError, TransportErrorKind};
 
 pub(crate) const HEADER_CONTENT_TYPE: &str = "content-type";
 

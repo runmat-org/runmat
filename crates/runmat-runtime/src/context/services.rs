@@ -160,13 +160,8 @@ pub trait RuntimeHostService {
 pub trait RuntimeHttpService {
     fn send(
         &self,
-        request: crate::builtins::io::http::transport::HttpRequest,
-    ) -> RuntimeServiceFuture<
-        Result<
-            crate::builtins::io::http::transport::HttpResponse,
-            crate::builtins::io::http::transport::TransportError,
-        >,
-    >;
+        request: crate::http::HttpRequest,
+    ) -> RuntimeServiceFuture<Result<crate::http::HttpResponse, crate::http::TransportError>>;
 }
 
 pub trait RuntimeErrorService {

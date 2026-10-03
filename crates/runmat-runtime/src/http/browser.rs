@@ -243,7 +243,7 @@ mod tests {
         let url = web_sys::Url::create_object_url_with_blob(&blob).expect("blob URL");
         let request = HttpRequest {
             url: url::Url::parse(&url).expect("parse blob URL"),
-            method: super::super::HttpMethod::Get,
+            method: super::HttpMethod::Get,
             headers: Vec::new(),
             body: None,
             timeout: std::time::Duration::from_secs(5),

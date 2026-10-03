@@ -27,9 +27,10 @@ impl RuntimeHttpService for NativeHttpService {
         Box::pin(async move {
             // Spawn only when polled. Dropping this carrier aborts request send
             // and response-body reception rather than detaching a JoinHandle.
-            let task = AbortOnDrop(driver.spawn(send_impl(request.clone())));
+            let url = request.url.clone();
+            let task = AbortOnDrop(driver.spawn(send_impl(request)));
             task.await.map_err(|error| {
-                TransportError::new(TransportErrorKind::Other, &request.url, error.to_string())
+                TransportError::new(TransportErrorKind::Other, &url, error.to_string())
             })?
         })
     }
