@@ -451,6 +451,12 @@ mod tests {
         }
     }
 
+    impl ForeignResourceRelease for ReleaseCounter {
+        fn release(&self, key: &ForeignResourceKey) {
+            ForeignHostRelease::release(self, key);
+        }
+    }
+
     fn metadata() -> ForeignResourceMetadata {
         ForeignResourceMetadata {
             type_identity: ForeignTypeIdentity {
