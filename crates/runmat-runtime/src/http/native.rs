@@ -1,6 +1,8 @@
-use reqwest::header::{HeaderName, HeaderValue};
+use reqwest::header::{HeaderName, HeaderValue, USER_AGENT};
+use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
 
 use super::{HttpMethod, HttpRequest, HttpResponse, TransportError, TransportErrorKind};
@@ -8,13 +10,18 @@ use crate::context::{RuntimeHttpService, RuntimeServiceFuture};
 
 /// The host supplies a reusable Tokio driver; the transport never creates a
 /// private runtime or a blocking worker for an individual request.
+#[derive(Clone)]
 pub struct NativeHttpService {
     driver: tokio::runtime::Handle,
+    clients: Arc<OnceLock<Result<reqwest::Client, Arc<reqwest::Error>>>>,
 }
 
 impl NativeHttpService {
     pub fn new(driver: tokio::runtime::Handle) -> Self {
-        Self { driver }
+        Self {
+            driver,
+            clients: Arc::new(OnceLock::new()),
+        }
     }
 }
 
@@ -24,16 +31,32 @@ impl RuntimeHttpService for NativeHttpService {
         request: HttpRequest,
     ) -> RuntimeServiceFuture<Result<HttpResponse, TransportError>> {
         let driver = self.driver.clone();
+        let clients = Arc::clone(&self.clients);
         Box::pin(async move {
             // Spawn only when polled. Dropping this carrier aborts request send
             // and response-body reception rather than detaching a JoinHandle.
             let url = request.url.clone();
-            let task = AbortOnDrop(driver.spawn(send_impl(request)));
+            let task = AbortOnDrop(driver.spawn(send_impl(request, clients)));
             task.await.map_err(|error| {
                 TransportError::new(TransportErrorKind::Other, &url, error.to_string())
                     .with_source(error)
             })?
         })
+    }
+}
+
+#[derive(Debug)]
+struct SharedClientInitError(Arc<reqwest::Error>);
+
+impl fmt::Display for SharedClientInitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.0.as_ref(), formatter)
+    }
+}
+
+impl std::error::Error for SharedClientInitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
     }
 }
 
@@ -53,22 +76,19 @@ impl<T> Drop for AbortOnDrop<T> {
     }
 }
 
-async fn send_impl(mut request: HttpRequest) -> Result<HttpResponse, TransportError> {
-    let client = reqwest::Client::builder()
-        .timeout(request.timeout)
-        .user_agent(&request.user_agent)
-        .build()
-        .map_err(|error| {
-            TransportError::new(TransportErrorKind::Other, &request.url, error.to_string())
-                .with_source(error)
-        })?;
-    let mut builder = match request.method {
-        HttpMethod::Get => client.get(request.url.clone()),
-        HttpMethod::Post => client.post(request.url.clone()),
-        HttpMethod::Put => client.put(request.url.clone()),
-        HttpMethod::Patch => client.patch(request.url.clone()),
-        HttpMethod::Delete => client.delete(request.url.clone()),
-    };
+async fn send_impl(
+    mut request: HttpRequest,
+    clients: Arc<OnceLock<Result<reqwest::Client, Arc<reqwest::Error>>>>,
+) -> Result<HttpResponse, TransportError> {
+    // The previous per-request ClientBuilder validated User-Agent before
+    // HeaderFields. Preserve that diagnostic order before initializing the
+    // shared client or opening a socket.
+    let user_agent = HeaderValue::from_str(&request.user_agent).map_err(|error| {
+        TransportError::new(TransportErrorKind::Other, &request.url, error.to_string())
+            .with_source(error)
+    })?;
+    let mut headers = Vec::with_capacity(request.headers.len());
+    let mut explicit_user_agent = false;
     for (name, value) in &request.headers {
         let key = HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
             TransportError::new(
@@ -86,6 +106,28 @@ async fn send_impl(mut request: HttpRequest) -> Result<HttpResponse, TransportEr
             )
             .with_source(error)
         })?;
+        explicit_user_agent |= key == USER_AGENT;
+        headers.push((key, value));
+    }
+    let client = clients
+        .get_or_init(|| reqwest::Client::builder().build().map_err(Arc::new))
+        .as_ref()
+        .map_err(|error| {
+            TransportError::new(TransportErrorKind::Other, &request.url, error.to_string())
+                .with_source(SharedClientInitError(Arc::clone(error)))
+        })?;
+    let mut builder = match request.method {
+        HttpMethod::Get => client.get(request.url.clone()),
+        HttpMethod::Post => client.post(request.url.clone()),
+        HttpMethod::Put => client.put(request.url.clone()),
+        HttpMethod::Patch => client.patch(request.url.clone()),
+        HttpMethod::Delete => client.delete(request.url.clone()),
+    };
+    builder = builder.timeout(request.timeout);
+    if !explicit_user_agent {
+        builder = builder.header(USER_AGENT, user_agent);
+    }
+    for (key, value) in headers {
         builder = builder.header(key, value);
     }
     if let Some(body) = request.body.take() {
@@ -171,12 +213,16 @@ mod tests {
         let (listener, url) = server();
         listener.set_nonblocking(true).unwrap();
         drop(service.send(request(url.clone())));
+        assert!(
+            service.clients.get().is_none(),
+            "unpolled send has no client"
+        );
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
         );
 
-        let mut invalid = request(url);
+        let mut invalid = request(url.clone());
         invalid.headers.push(("bad\nname".into(), "value".into()));
         let error = futures::executor::block_on(service.send(invalid)).expect_err("invalid header");
         assert!(matches!(error.kind, TransportErrorKind::InvalidHeader(_)));
@@ -184,6 +230,115 @@ mod tests {
             .source()
             .and_then(|source| source.downcast_ref::<reqwest::header::InvalidHeaderName>())
             .is_some());
+        assert!(
+            service.clients.get().is_none(),
+            "invalid header has no client"
+        );
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+
+        let mut invalid_agent = request(url);
+        invalid_agent.user_agent = "bad\nagent".into();
+        let error = futures::executor::block_on(service.send(invalid_agent))
+            .expect_err("invalid User-Agent");
+        assert!(matches!(error.kind, TransportErrorKind::Other));
+        assert!(error.source().is_some());
+        assert!(
+            service.clients.get().is_none(),
+            "invalid User-Agent has no client"
+        );
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
+    #[test]
+    fn cloned_service_reuses_client_and_honors_request_user_agent_override() {
+        let driver = tokio::runtime::Runtime::new().expect("native HTTP test driver");
+        let service = NativeHttpService::new(driver.handle().clone());
+        let clone = service.clone();
+        assert!(Arc::ptr_eq(&service.clients, &clone.clients));
+        let (listener, url) = server();
+        let (sent, received) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().expect("HTTP request");
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0u8; 512];
+                while !bytes.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let count = socket.read(&mut buffer).expect("read headers");
+                    assert!(count > 0, "request ended before headers");
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                sent.send(String::from_utf8(bytes).expect("HTTP headers"))
+                    .expect("captured headers");
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .expect("response");
+            }
+        });
+
+        let mut first = request(url.clone());
+        first.user_agent = "RunMat first".into();
+        assert_eq!(
+            futures::executor::block_on(service.send(first))
+                .expect("first response")
+                .body,
+            b"ok"
+        );
+        let first_headers = received.recv().expect("first request headers");
+        assert!(first_headers
+            .to_ascii_lowercase()
+            .contains("user-agent: runmat first"));
+        assert!(service.clients.get().is_some());
+
+        let mut second = request(url);
+        second.user_agent = "RunMat fallback".into();
+        second
+            .headers
+            .push(("User-Agent".into(), "RunMat override".into()));
+        assert_eq!(
+            futures::executor::block_on(clone.send(second))
+                .expect("second response")
+                .body,
+            b"ok"
+        );
+        let second_headers = received.recv().expect("second request headers");
+        assert!(second_headers
+            .to_ascii_lowercase()
+            .contains("user-agent: runmat override"));
+        assert!(!second_headers
+            .to_ascii_lowercase()
+            .contains("runmat fallback"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn shared_client_initialization_failure_retains_typed_cause_without_network() {
+        let driver = tokio::runtime::Runtime::new().expect("native HTTP test driver");
+        let service = NativeHttpService::new(driver.handle().clone());
+        let init_error = reqwest::Client::new()
+            .get("://invalid")
+            .build()
+            .expect_err("invalid request URL fixture");
+        assert!(service.clients.set(Err(Arc::new(init_error))).is_ok());
+        let (listener, url) = server();
+        listener.set_nonblocking(true).unwrap();
+        let error = futures::executor::block_on(service.send(request(url)))
+            .expect_err("shared client initialization failure");
+        let shared = error
+            .source()
+            .and_then(|source| source.downcast_ref::<SharedClientInitError>())
+            .expect("typed shared initialization source");
+        assert!(shared.source().unwrap().is::<reqwest::Error>());
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
