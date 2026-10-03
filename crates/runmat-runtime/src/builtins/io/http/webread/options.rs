@@ -47,21 +47,17 @@ pub(super) fn parse_header_fields(value: &Value) -> BuiltinResult<Vec<(String, S
     }
 }
 
-pub(super) fn parse_content_type(value: &Value) -> BuiltinResult<ContentTypeHint> {
+pub(super) fn parse_content_type(value: &Value) -> BuiltinResult<HttpResponseMode> {
     let text = expect_string_scalar(
         value,
         "webread: ContentType must be a character vector or string scalar",
     )?;
-    match text.trim().to_ascii_lowercase().as_str() {
-        "auto" => Ok(ContentTypeHint::Auto),
-        "json" => Ok(ContentTypeHint::Json),
-        "text" | "char" | "string" => Ok(ContentTypeHint::Text),
-        "binary" | "octet-stream" | "raw" => Ok(ContentTypeHint::Binary),
-        other => Err(webread_error(format!(
+    HttpResponseMode::decode(&text, HttpResponseDialect::WebRead).ok_or_else(|| {
+        webread_error(format!(
             "webread: unsupported ContentType '{}'; use 'auto', 'json', 'text', or 'binary'",
-            other
-        ))),
-    }
+            text.trim().to_ascii_lowercase()
+        ))
+    })
 }
 
 pub(super) fn parse_timeout(value: &Value) -> BuiltinResult<Duration> {
@@ -185,14 +181,6 @@ pub(super) fn format_numeric_scalar(value: NumericScalar) -> String {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum ContentTypeHint {
-    Auto,
-    Text,
-    Json,
-    Binary,
-}
-
-#[derive(Clone, Copy, Debug)]
 pub(super) enum ResolvedContentType {
     Text,
     Json,
@@ -201,7 +189,7 @@ pub(super) enum ResolvedContentType {
 
 #[derive(Clone, Debug)]
 pub(super) struct WebReadOptions {
-    pub(super) content_type: ContentTypeHint,
+    pub(super) content_type: HttpResponseMode,
     pub(super) timeout: Duration,
     pub(super) headers: Vec<(String, String)>,
     pub(super) user_agent: Option<String>,
@@ -213,7 +201,7 @@ pub(super) struct WebReadOptions {
 impl Default for WebReadOptions {
     fn default() -> Self {
         Self {
-            content_type: ContentTypeHint::Auto,
+            content_type: HttpResponseMode::Auto,
             timeout: Duration::from_secs_f64(DEFAULT_TIMEOUT_SECONDS),
             headers: Vec::new(),
             user_agent: None,
@@ -227,10 +215,10 @@ impl Default for WebReadOptions {
 impl WebReadOptions {
     pub(super) fn resolve_content_type(&self, header: Option<&str>) -> ResolvedContentType {
         match self.content_type {
-            ContentTypeHint::Json => ResolvedContentType::Json,
-            ContentTypeHint::Text => ResolvedContentType::Text,
-            ContentTypeHint::Binary => ResolvedContentType::Binary,
-            ContentTypeHint::Auto => infer_content_type(header),
+            HttpResponseMode::Json => ResolvedContentType::Json,
+            HttpResponseMode::Text => ResolvedContentType::Text,
+            HttpResponseMode::Binary => ResolvedContentType::Binary,
+            HttpResponseMode::Auto => infer_content_type(header),
         }
     }
 }

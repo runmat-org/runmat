@@ -48,14 +48,6 @@ pub(super) struct PreparedBody {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum ContentTypeHint {
-    Auto,
-    Text,
-    Json,
-    Binary,
-}
-
-#[derive(Clone, Copy, Debug)]
 pub(super) enum ResolvedContentType {
     Text,
     Json,
@@ -73,7 +65,7 @@ pub(super) enum RequestFormat {
 
 #[derive(Clone, Debug)]
 pub(super) struct WebWriteOptions {
-    pub(super) content_type: ContentTypeHint,
+    pub(super) content_type: HttpResponseMode,
     pub(super) timeout: Duration,
     pub(super) headers: Vec<(String, String)>,
     pub(super) user_agent: Option<String>,
@@ -88,7 +80,7 @@ pub(super) struct WebWriteOptions {
 impl Default for WebWriteOptions {
     fn default() -> Self {
         Self {
-            content_type: ContentTypeHint::Auto,
+            content_type: HttpResponseMode::Auto,
             timeout: Duration::from_secs_f64(DEFAULT_TIMEOUT_SECONDS),
             headers: Vec::new(),
             user_agent: None,
@@ -105,10 +97,10 @@ impl Default for WebWriteOptions {
 impl WebWriteOptions {
     pub(super) fn resolve_content_type(&self, header: Option<&str>) -> ResolvedContentType {
         match self.content_type {
-            ContentTypeHint::Json => ResolvedContentType::Json,
-            ContentTypeHint::Text => ResolvedContentType::Text,
-            ContentTypeHint::Binary => ResolvedContentType::Binary,
-            ContentTypeHint::Auto => infer_response_content_type(header),
+            HttpResponseMode::Json => ResolvedContentType::Json,
+            HttpResponseMode::Text => ResolvedContentType::Text,
+            HttpResponseMode::Binary => ResolvedContentType::Binary,
+            HttpResponseMode::Auto => infer_response_content_type(header),
         }
     }
 }

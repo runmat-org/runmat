@@ -1,19 +1,12 @@
 use super::*;
-pub(super) fn parse_content_type(value: &Value) -> BuiltinResult<ContentTypeHint> {
+pub(super) fn parse_content_type(value: &Value) -> BuiltinResult<HttpResponseMode> {
     let text = expect_string_scalar(
         value,
         "webwrite: ContentType must be a character vector or string scalar",
     )?;
-    let lower = text.trim().to_ascii_lowercase();
-    match lower.as_str() {
-        "auto" => Ok(ContentTypeHint::Auto),
-        "json" => Ok(ContentTypeHint::Json),
-        "text" => Ok(ContentTypeHint::Text),
-        "binary" => Ok(ContentTypeHint::Binary),
-        _ => Err(webwrite_error(
-            "webwrite: ContentType must be 'auto', 'json', 'text', or 'binary'",
-        )),
-    }
+    HttpResponseMode::decode(&text, HttpResponseDialect::WebWrite).ok_or_else(|| {
+        webwrite_error("webwrite: ContentType must be 'auto', 'json', 'text', or 'binary'")
+    })
 }
 
 pub(super) fn parse_timeout(value: &Value) -> BuiltinResult<Duration> {
