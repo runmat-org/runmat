@@ -26,6 +26,10 @@ fn open_query_list_and_unknown_forms_keep_distinct_output_facts() {
     assert!(open.diagnostics.is_empty());
     assert!(matches!(open.outputs[0].kind, ValueKindFact::Numeric(_)));
     assert!(matches!(open.outputs[1].kind, ValueKindFact::Character));
+    assert!(open
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
 
     let query = inference::infer(&request(Some(numeric), None, 4), &FOPEN_CATALOG_ENTRY);
     assert!(query
@@ -33,6 +37,10 @@ fn open_query_list_and_unknown_forms_keep_distinct_output_facts() {
         .iter()
         .all(|fact| matches!(fact.kind, ValueKindFact::Character)));
     assert!(!query.effects.0.contains(&EffectKind::FilesystemWrite));
+    assert!(!query
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
 
     let list = inference::infer(
         &request(Some(text.clone()), Some("all"), 4),
@@ -41,10 +49,18 @@ fn open_query_list_and_unknown_forms_keep_distinct_output_facts() {
     assert!(matches!(list.outputs[0].kind, ValueKindFact::Numeric(_)));
     assert!(matches!(list.outputs[1].kind, ValueKindFact::Cell(_)));
     assert!(!list.effects.0.contains(&EffectKind::FilesystemRead));
+    assert!(!list
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
 
     let unknown = inference::infer(&request(Some(text), None, 1), &FOPEN_CATALOG_ENTRY);
     assert!(matches!(unknown.outputs[0].kind, ValueKindFact::Unknown));
     assert!(unknown.diagnostics.is_empty());
+    assert!(unknown
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
     let no_args = inference::infer(&request(None, None, 1), &FOPEN_CATALOG_ENTRY);
     assert!(matches!(no_args.outputs[0].kind, ValueKindFact::Numeric(_)));
 }

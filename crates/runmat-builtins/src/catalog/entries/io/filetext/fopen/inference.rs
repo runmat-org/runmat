@@ -37,6 +37,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         result.effects.0.remove(&EffectKind::FilesystemRead);
         result.effects.0.remove(&EffectKind::FilesystemWrite);
         result.effects.0.remove(&EffectKind::EnvironmentWrite);
+        result
+            .capabilities
+            .0
+            .remove(&CapabilityRequirement::Filesystem);
     }
     if form == Form::Invalid {
         result.diagnostics.push(argument_error(
