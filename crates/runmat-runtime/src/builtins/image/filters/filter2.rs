@@ -24,6 +24,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod host_route;
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::filter2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "filter2",
@@ -109,9 +111,7 @@ async fn filter2_builtin(
             provider.precision() != runmat_accelerate_api::ProviderPrecision::F32
         }));
     if is_nonfloating_gpu(&kernel) || is_nonfloating_gpu(&image) || image_precision_mismatch {
-        let kernel = gather_filter2_value(kernel).await?;
-        let image = gather_filter2_value(image).await?;
-        return filter2_host(kernel, image, &options);
+        return host_route::run(runtime.as_ref(), kernel, image, &options).await;
     }
     match (kernel, image) {
         (Value::GpuTensor(kernel_handle), Value::GpuTensor(image_handle)) => {
@@ -124,15 +124,20 @@ async fn filter2_builtin(
             .await
         }
         (Value::GpuTensor(kernel_handle), image_value) => {
-            let kernel_tensor = gpu_helpers::gather_tensor_async(&kernel_handle)
-                .await
-                .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-            filter2_host(Value::Tensor(kernel_tensor), image_value, &options)
+            host_route::run(
+                runtime.as_ref(),
+                Value::GpuTensor(kernel_handle),
+                image_value,
+                &options,
+            )
+            .await
         }
         (kernel_value, Value::GpuTensor(image_handle)) => {
             filter2_gpu(runtime.as_ref(), kernel_value, image_handle, &options).await
         }
-        (kernel_value, image_value) => filter2_host(kernel_value, image_value, &options),
+        (kernel_value, image_value) => {
+            host_route::run(runtime.as_ref(), kernel_value, image_value, &options).await
+        }
     }
 }
 
@@ -351,10 +356,13 @@ async fn filter2_gpu(
     let provider = match gpu_helpers::exact_provider_for_handle(&image_handle) {
         Some(p) => p,
         None => {
-            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
-                .await
-                .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-            return filter2_host(kernel_clone, Value::Tensor(image_tensor), options);
+            return host_route::run(
+                runtime,
+                kernel_clone,
+                Value::GpuTensor(image_handle),
+                options,
+            )
+            .await;
         }
     };
 
