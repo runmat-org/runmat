@@ -30,7 +30,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[path = "imfilter/kernel.rs"]
 mod kernel;
 use kernel::apply_imfilter_host;
-pub(crate) use kernel::filter_output_shape;
+pub use kernel::filter_output_shape;
 #[cfg(test)]
 use kernel::reflect_index;
 pub use kernel::{

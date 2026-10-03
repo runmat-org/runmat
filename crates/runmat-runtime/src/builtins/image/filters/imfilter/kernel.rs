@@ -165,7 +165,7 @@ pub fn build_imfilter_plan(
 /// Output geometry is needed before a provider result can be adopted. This
 /// projection performs the same image/kernel rank and shape admission as the
 /// host plan without materializing a dummy kernel or touching resident data.
-pub(crate) fn filter_output_shape(
+pub fn filter_output_shape(
     image_shape: &[usize],
     kernel_shape: &[usize],
     shape_mode: ImfilterShape,

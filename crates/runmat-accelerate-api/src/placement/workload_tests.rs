@@ -228,3 +228,31 @@ fn fspecial_route_keeps_exact_scalar_bits_in_serialized_identity() {
         workload
     );
 }
+
+#[test]
+fn imfilter_route_keeps_exact_fill_bits_and_typed_options() {
+    use crate::{
+        ImfilterMode, ImfilterOptions, ImfilterPadding, ImfilterShape, ProviderImfilterWorkload,
+    };
+    let options = ImfilterOptions {
+        mode: ImfilterMode::Convolution,
+        shape: ImfilterShape::Full,
+        padding: ImfilterPadding::Circular,
+        constant_value: -0.0,
+    };
+    let workload = ProviderImfilterWorkload::from_options(&options, true, None);
+    assert!(workload.matches_options(&options, true));
+    assert!(!workload.matches_options(&options, false));
+    let mut other = options.clone();
+    other.constant_value = 0.0;
+    assert!(!workload.matches_options(&other, true));
+    let wrapped = ProviderWorkload {
+        imfilter: Some(workload),
+        ..Default::default()
+    };
+    let encoded = serde_json::to_vec(&wrapped).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<ProviderWorkload>(&encoded).unwrap(),
+        wrapped
+    );
+}
