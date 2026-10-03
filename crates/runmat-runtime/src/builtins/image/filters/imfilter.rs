@@ -12,9 +12,8 @@ use runmat_accelerate_api::{
 #[cfg(test)]
 use runmat_builtins::IMFILTER_INTEGER_CAPABILITIES;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, ImfilterOption, IMFILTER_DESCRIPTOR, IMFILTER_ERROR_INTERNAL,
-    IMFILTER_ERROR_INVALID_INPUT, IMFILTER_ERROR_INVALID_OPTION, IMFILTER_FILL_EXTENSION,
-    IMFILTER_VALID_EXTENSION,
+    BuiltinErrorDescriptor, ImfilterOption, IMFILTER_ERROR_INTERNAL, IMFILTER_ERROR_INVALID_INPUT,
+    IMFILTER_ERROR_INVALID_OPTION, IMFILTER_FILL_EXTENSION, IMFILTER_VALID_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericDType};

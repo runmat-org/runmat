@@ -2,6 +2,7 @@ use super::*;
 #[cfg(feature = "wgpu")]
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
+use runmat_builtins::FSPECIAL_DESCRIPTOR;
 use runmat_value::IntegerStorage;
 use std::ffi::OsString;
 use std::sync::{Mutex, MutexGuard, OnceLock};

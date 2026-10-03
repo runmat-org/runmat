@@ -2,6 +2,7 @@ use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_accelerate_api::{HostTensorView, ImfilterMode, ImfilterOptions, ImfilterShape};
+use runmat_builtins::FILTER2_DESCRIPTOR;
 use runmat_value::LogicalArray;
 
 async fn filter2_builtin(

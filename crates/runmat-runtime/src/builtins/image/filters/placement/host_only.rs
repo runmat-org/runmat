@@ -2,7 +2,8 @@
 //! The caller owns the public class decision; generic context admission owns
 //! resources, selection, whole-work timing and feedback.
 
-use super::{conditional_host_bounds, filter_output_shape};
+use super::super::geometry::filter_output_shape;
+use super::conditional_host_bounds;
 use crate::context::host_presentation::{
     combine_host_scratch, select_exact_host_sink_with_readbacks,
     select_exact_host_upload_with_readbacks, ExactHostSink, ExactHostUpload,
