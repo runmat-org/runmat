@@ -1,5 +1,11 @@
 use crate::*;
 
+pub const GPU_INFO_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "gpuInfo accepts no inputs and returns a formatted host string; integer values are not an input or result class, and extra arguments reject before provider metadata access.",
+};
+
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "summary",
     ty: BuiltinParamType::StringScalar,

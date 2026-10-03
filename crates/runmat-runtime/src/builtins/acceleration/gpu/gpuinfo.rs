@@ -1,4 +1,4 @@
-//! MATLAB-compatible `gpuInfo` builtin that formats the active GPU device metadata.
+//! RunMat `gpuInfo` status string from shared active-provider metadata.
 
 use super::device_metadata::active_device_metadata;
 use crate::builtins::common::spec::{

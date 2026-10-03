@@ -1,4 +1,4 @@
-//! MATLAB-compatible `gpuDevice` builtin with provider-aware semantics.
+//! RunMat `gpuDevice` provider-metadata facade (not MATLAB's GPUDevice object).
 
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
