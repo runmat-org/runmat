@@ -76,3 +76,14 @@ fn primitive_numeric_and_complex_literals_keep_fixed_constructor() {
         interpret(&bytecode).expect("execute primitive literal");
     }
 }
+
+#[test]
+fn primitive_scalar_operator_results_keep_fixed_constructor() {
+    let source = "a = [1+2 3*4 8/2 2^3 1<2]; assert(isequal(a,[3 12 4 8 1]));";
+    let bytecode = compile_source(source).expect("compile primitive scalar operators");
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instr::CreateMatrix(1, 5))));
+    interpret(&bytecode).expect("execute primitive scalar operators");
+}

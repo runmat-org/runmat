@@ -57,6 +57,7 @@ pub struct Compiler {
     pub layout: Option<VmAssemblyLayout>,
     pub function: Option<FunctionId>,
     pub body: Option<MirBody>,
+    aggregate_proof: Option<aggregate_construction::ProofIndex>,
     pub class_registrations: Vec<ClassRegistration>,
     current_span: Option<runmat_hir::Span>,
     pending_place_mutation: Option<MirPlaceMutation>,
@@ -517,6 +518,7 @@ impl Compiler {
             layout: Some(layout),
             function: Some(function),
             body: Some(body),
+            aggregate_proof: None,
             class_registrations: hir_class_registrations(hir),
             current_span: None,
             pending_place_mutation: None,
@@ -562,6 +564,7 @@ impl Compiler {
             layout: Some(layout),
             function: Some(function),
             body: Some(body),
+            aggregate_proof: None,
             class_registrations: hir_class_registrations(hir),
             current_span: None,
             pending_place_mutation: None,
@@ -594,6 +597,7 @@ impl Compiler {
         body.validate_expression_regions().map_err(|error| {
             CompileError::new(format!("invalid MIR expression region: {error}"))
         })?;
+        self.aggregate_proof = None;
 
         for registration in self.class_registrations.clone() {
             self.emit(Instr::RegisterClass {
@@ -3948,12 +3952,15 @@ impl Compiler {
     }
 
     fn mir_aggregate_needs_dynamic_concat(
-        &self,
+        &mut self,
         elements: &[runmat_mir::MirAggregateElement],
     ) -> bool {
-        self.body
-            .as_ref()
-            .is_none_or(|body| aggregate_construction::needs_dynamic_concat(body, elements))
+        let Some(body) = self.body.as_ref() else {
+            return true;
+        };
+        self.aggregate_proof
+            .get_or_insert_with(|| aggregate_construction::ProofIndex::new(body))
+            .needs_dynamic_concat(body, elements)
     }
 
     fn mir_delete_rhs_is_empty_tensor_literal(&self, value: &MirRvalue) -> bool {
@@ -4640,6 +4647,7 @@ mod tests {
                     },
                 }],
             }),
+            aggregate_proof: None,
             class_registrations: Vec::new(),
             current_span: None,
             pending_place_mutation: None,

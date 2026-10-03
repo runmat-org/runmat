@@ -1,6 +1,5 @@
-//! Fixed matrix construction is valid only for primitive scalar stack values.
-//! Shape-one tensors are not interchangeable with `Num`, `Int`, `Bool`, or
-//! `Complex`: the fixed constructor converts each stack value as a scalar.
+//! Fixed matrix construction requires primitive scalar stack values, not
+//! shape-one tensors. Index definitions once and prove temporaries iteratively.
 
 use runmat_hir::OperatorKind;
 use runmat_mir::{
@@ -9,15 +8,217 @@ use runmat_mir::{
 };
 use runmat_value::Value;
 
-pub(super) fn needs_dynamic_concat(body: &MirBody, elements: &[MirAggregateElement]) -> bool {
-    elements.iter().any(|element| {
-        element
-            .operand()
-            .is_none_or(|operand| !primitive_scalar(body, operand, &mut Vec::new()))
-    })
+#[derive(Clone, Copy)]
+enum Definition {
+    Missing,
+    Unique { block: usize, statement: usize },
+    Invalid,
 }
 
-fn primitive_scalar(body: &MirBody, operand: &MirOperand, visiting: &mut Vec<MirLocalId>) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Proof {
+    Unseen,
+    Visiting,
+    Primitive,
+    NotPrimitive,
+}
+
+/// Shared by all aggregate expressions in one function body. Neither deep
+/// temporary chains nor repeated operands rescan statements or recurse.
+pub(super) struct ProofIndex {
+    definitions: Vec<Definition>,
+    proofs: Vec<Proof>,
+}
+
+impl ProofIndex {
+    pub(super) fn new(body: &MirBody) -> Self {
+        let mut index = Self {
+            definitions: vec![Definition::Missing; body.locals.len()],
+            proofs: vec![Proof::Unseen; body.locals.len()],
+        };
+        for (block, basic_block) in body.blocks.iter().enumerate() {
+            for (statement, item) in basic_block.statements.iter().enumerate() {
+                match &item.kind {
+                    MirStmtKind::Assign { place, .. } => {
+                        if let Some(local) = place_root_local(place) {
+                            if matches!(place, MirPlace::Local(_)) {
+                                index.record_unique(local, block, statement);
+                            } else {
+                                index.invalidate(local);
+                            }
+                        }
+                    }
+                    MirStmtKind::MultiAssign { targets, .. } => {
+                        for target in &targets.targets {
+                            let local = match target {
+                                MirOutputTarget::Place(place) => place_root_local(place),
+                                MirOutputTarget::Sequence(target) => {
+                                    place_root_local(target.base())
+                                }
+                                MirOutputTarget::Discard => None,
+                            };
+                            if let Some(local) = local {
+                                index.invalidate(local);
+                            }
+                        }
+                    }
+                    MirStmtKind::SequenceAssign { target, .. } => {
+                        if let Some(local) = place_root_local(target.base()) {
+                            index.invalidate(local);
+                        }
+                    }
+                    MirStmtKind::PlaceMutation(mutation) => {
+                        if let Some(local) = place_root_local(&mutation.place) {
+                            index.invalidate(local);
+                        }
+                    }
+                    MirStmtKind::WorkspaceEffect { bindings, .. } => {
+                        for local in bindings {
+                            index.invalidate(*local);
+                        }
+                    }
+                    MirStmtKind::CaptureSequence { .. }
+                    | MirStmtKind::Expr(_)
+                    | MirStmtKind::EnvironmentEffect(_) => {}
+                }
+            }
+        }
+        index
+    }
+
+    pub(super) fn needs_dynamic_concat(
+        &mut self,
+        body: &MirBody,
+        elements: &[MirAggregateElement],
+    ) -> bool {
+        elements.iter().any(|element| {
+            element
+                .operand()
+                .is_none_or(|operand| !self.primitive_operand(body, operand))
+        })
+    }
+
+    fn record_unique(&mut self, local: MirLocalId, block: usize, statement: usize) {
+        if let Some(definition) = self.definitions.get_mut(local.0) {
+            *definition = match definition {
+                Definition::Missing => Definition::Unique { block, statement },
+                Definition::Unique { .. } | Definition::Invalid => Definition::Invalid,
+            };
+        }
+    }
+
+    fn invalidate(&mut self, local: MirLocalId) {
+        if let Some(definition) = self.definitions.get_mut(local.0) {
+            *definition = Definition::Invalid;
+        }
+    }
+
+    fn definition<'a>(&self, body: &'a MirBody, local: MirLocalId) -> Option<&'a MirRvalue> {
+        if !body
+            .locals
+            .get(local.0)
+            .is_some_and(|slot| slot.id == local && matches!(slot.kind, MirLocalKind::Temporary))
+        {
+            return None;
+        }
+        let Definition::Unique { block, statement } = *self.definitions.get(local.0)? else {
+            return None;
+        };
+        match &body.blocks.get(block)?.statements.get(statement)?.kind {
+            MirStmtKind::Assign {
+                place: MirPlace::Local(candidate),
+                value,
+            } if *candidate == local => Some(value),
+            _ => None,
+        }
+    }
+
+    fn primitive_operand(&mut self, body: &MirBody, operand: &MirOperand) -> bool {
+        match operand {
+            MirOperand::Local(local) => self.prove_local(body, *local),
+            other => primitive_constant(other),
+        }
+    }
+
+    fn prove_local(&mut self, body: &MirBody, root: MirLocalId) -> bool {
+        let mut work = vec![(root, false)];
+        while let Some((local, finish)) = work.pop() {
+            let Some(&proof) = self.proofs.get(local.0) else {
+                continue;
+            };
+            if finish {
+                if proof == Proof::Visiting {
+                    let proven = self
+                        .definition(body, local)
+                        .and_then(rvalue_operands)
+                        .is_some_and(|operands| {
+                            operands
+                                .into_iter()
+                                .all(|operand| self.operand_is_complete(operand))
+                        });
+                    self.proofs[local.0] = if proven {
+                        Proof::Primitive
+                    } else {
+                        Proof::NotPrimitive
+                    };
+                }
+                continue;
+            }
+            if proof != Proof::Unseen {
+                continue;
+            }
+            let Some(operands) = self.definition(body, local).and_then(rvalue_operands) else {
+                self.proofs[local.0] = Proof::NotPrimitive;
+                continue;
+            };
+            self.proofs[local.0] = Proof::Visiting;
+            work.push((local, true));
+            for operand in operands.into_iter().rev() {
+                match operand {
+                    MirOperand::Local(child) => match self.proofs.get(child.0) {
+                        Some(Proof::Unseen) => work.push((*child, false)),
+                        Some(Proof::Visiting) | None => {
+                            self.proofs[local.0] = Proof::NotPrimitive;
+                        }
+                        Some(Proof::Primitive | Proof::NotPrimitive) => {}
+                    },
+                    other if !primitive_constant(other) => {
+                        self.proofs[local.0] = Proof::NotPrimitive;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.proofs.get(root.0) == Some(&Proof::Primitive)
+    }
+
+    fn operand_is_complete(&self, operand: &MirOperand) -> bool {
+        match operand {
+            MirOperand::Local(local) => self.proofs.get(local.0) == Some(&Proof::Primitive),
+            other => primitive_constant(other),
+        }
+    }
+}
+
+fn rvalue_operands(value: &MirRvalue) -> Option<Vec<&MirOperand>> {
+    match value {
+        MirRvalue::Use(operand) => Some(vec![operand]),
+        MirRvalue::Unary(operator, operand)
+            if matches!(
+                operator,
+                OperatorKind::UnaryPlus | OperatorKind::UnaryMinus | OperatorKind::Not
+            ) =>
+        {
+            Some(vec![operand])
+        }
+        MirRvalue::Binary(left, operator, right) if scalar_binary(*operator) => {
+            Some(vec![left, right])
+        }
+        _ => None,
+    }
+}
+
+fn primitive_constant(operand: &MirOperand) -> bool {
     match operand {
         MirOperand::Constant(
             MirConstant::Number(_) | MirConstant::IntegerLiteral(_) | MirConstant::Bool(_),
@@ -27,77 +228,9 @@ fn primitive_scalar(body: &MirBody, operand: &MirOperand, visiting: &mut Vec<Mir
             Some(Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _))
         ),
         MirOperand::Constant(MirConstant::String(_) | MirConstant::EmptyArray)
-        | MirOperand::FunctionHandle(_) => false,
-        MirOperand::Local(local) => primitive_temporary(body, *local, visiting),
+        | MirOperand::FunctionHandle(_)
+        | MirOperand::Local(_) => false,
     }
-}
-
-fn primitive_temporary(body: &MirBody, local: MirLocalId, visiting: &mut Vec<MirLocalId>) -> bool {
-    if visiting.len() >= body.locals.len()
-        || visiting.contains(&local)
-        || !body
-            .locals
-            .get(local.0)
-            .is_some_and(|slot| slot.id == local && matches!(slot.kind, MirLocalKind::Temporary))
-    {
-        return false;
-    }
-    let mut definition = None;
-    for statement in body.blocks.iter().flat_map(|block| &block.statements) {
-        match &statement.kind {
-            MirStmtKind::Assign { place, value } if place_root_local(place) == Some(local) => {
-                if !matches!(place, MirPlace::Local(_)) || definition.replace(value).is_some() {
-                    return false;
-                }
-            }
-            MirStmtKind::MultiAssign { targets, .. }
-                if targets.targets.iter().any(|target| match target {
-                    MirOutputTarget::Place(place) => place_root_local(place) == Some(local),
-                    MirOutputTarget::Sequence(target) => {
-                        place_root_local(target.base()) == Some(local)
-                    }
-                    MirOutputTarget::Discard => false,
-                }) =>
-            {
-                return false
-            }
-            MirStmtKind::SequenceAssign { target, .. }
-                if place_root_local(target.base()) == Some(local) =>
-            {
-                return false
-            }
-            MirStmtKind::PlaceMutation(mutation)
-                if place_root_local(&mutation.place) == Some(local) =>
-            {
-                return false
-            }
-            MirStmtKind::WorkspaceEffect { bindings, .. } if bindings.contains(&local) => {
-                return false
-            }
-            _ => {}
-        }
-    }
-    let Some(value) = definition else {
-        return false;
-    };
-    visiting.push(local);
-    let proven = match value {
-        MirRvalue::Use(operand) => primitive_scalar(body, operand, visiting),
-        MirRvalue::Unary(operator, operand)
-            if matches!(
-                operator,
-                OperatorKind::UnaryPlus | OperatorKind::UnaryMinus | OperatorKind::Not
-            ) =>
-        {
-            primitive_scalar(body, operand, visiting)
-        }
-        MirRvalue::Binary(left, operator, right) if scalar_binary(*operator) => {
-            primitive_scalar(body, left, visiting) && primitive_scalar(body, right, visiting)
-        }
-        _ => false,
-    };
-    visiting.pop();
-    proven
 }
 
 fn scalar_binary(operator: OperatorKind) -> bool {
@@ -125,11 +258,125 @@ fn scalar_binary(operator: OperatorKind) -> bool {
 }
 
 fn place_root_local(place: &MirPlace) -> Option<MirLocalId> {
-    match place {
-        MirPlace::Local(local) => Some(*local),
-        MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) | MirPlace::Index(base, _) => {
-            place_root_local(base)
+    let mut current = place;
+    loop {
+        match current {
+            MirPlace::Local(local) => return Some(*local),
+            MirPlace::Member(base, _)
+            | MirPlace::DynamicMember(base, _)
+            | MirPlace::Index(base, _) => current = base,
+            MirPlace::Binding(_) => return None,
         }
-        MirPlace::Binding(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_hir::{FunctionAbi, FunctionId, RequestedOutputCount, Span};
+    use runmat_mir::{
+        BasicBlock, BasicBlockId, MirLocal, MirOutputTargetList, MirStmt, MirTerminator,
+        MirTerminatorKind,
+    };
+
+    fn body(values: Vec<MirRvalue>) -> MirBody {
+        let span = Span::default();
+        let locals = (0..values.len())
+            .map(|id| MirLocal {
+                id: MirLocalId(id),
+                binding: None,
+                kind: MirLocalKind::Temporary,
+                span,
+            })
+            .collect();
+        let statements = values
+            .into_iter()
+            .enumerate()
+            .map(|(id, value)| MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(id)),
+                    value,
+                },
+                span,
+            })
+            .collect();
+        MirBody {
+            function: FunctionId(0),
+            abi: FunctionAbi {
+                fixed_inputs: Vec::new(),
+                varargin: None,
+                fixed_outputs: Vec::new(),
+                varargout: None,
+                implicit_nargin: None,
+                implicit_nargout: None,
+            },
+            locals,
+            blocks: vec![BasicBlock {
+                id: BasicBlockId(0),
+                statements,
+                terminator: MirTerminator {
+                    kind: MirTerminatorKind::Return(Vec::new()),
+                    span,
+                },
+            }],
+        }
+    }
+
+    fn aggregate(local: usize, count: usize) -> Vec<MirAggregateElement> {
+        vec![MirAggregateElement::Single(MirOperand::Local(MirLocalId(local))); count]
+    }
+
+    #[test]
+    fn deep_chain_and_repeated_aggregate_operand_are_iterative_and_memoized() {
+        let mut values = vec![MirRvalue::Use(MirOperand::Constant(MirConstant::Number(
+            "2".into(),
+        )))];
+        for id in 1..512 {
+            values.push(MirRvalue::Binary(
+                MirOperand::Local(MirLocalId(id - 1)),
+                OperatorKind::Add,
+                MirOperand::Constant(MirConstant::Number("1".into())),
+            ));
+        }
+        let body = body(values);
+        let mut index = ProofIndex::new(&body);
+        assert!(!index.needs_dynamic_concat(&body, &aggregate(511, 512)));
+        assert_eq!(index.proofs[511], Proof::Primitive);
+        assert!(!index.needs_dynamic_concat(&body, &aggregate(511, 512)));
+    }
+
+    #[test]
+    fn cycles_redefinitions_and_multioutput_destinations_are_not_primitive() {
+        let cycle = body(vec![
+            MirRvalue::Use(MirOperand::Local(MirLocalId(1))),
+            MirRvalue::Use(MirOperand::Local(MirLocalId(0))),
+        ]);
+        assert!(ProofIndex::new(&cycle).needs_dynamic_concat(&cycle, &aggregate(0, 1)));
+
+        let mut changed = body(vec![MirRvalue::Use(MirOperand::Constant(
+            MirConstant::Number("1".into()),
+        ))]);
+        let span = Span::default();
+        changed.blocks[0].statements.push(MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("2".into()))),
+            },
+            span,
+        });
+        assert!(ProofIndex::new(&changed).needs_dynamic_concat(&changed, &aggregate(0, 1)));
+
+        changed.blocks[0].statements.pop();
+        changed.blocks[0].statements.push(MirStmt {
+            kind: MirStmtKind::MultiAssign {
+                targets: MirOutputTargetList {
+                    targets: vec![MirOutputTarget::Place(MirPlace::Local(MirLocalId(0)))],
+                    requested_outputs: RequestedOutputCount::One,
+                },
+                value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("2".into()))),
+            },
+            span,
+        });
+        assert!(ProofIndex::new(&changed).needs_dynamic_concat(&changed, &aggregate(0, 1)));
     }
 }
