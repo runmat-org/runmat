@@ -59,12 +59,16 @@ pub(super) fn select_decode(
 pub(super) fn select_metadata(
     runtime: Option<&RuntimeContext>,
     input: &FsInputLease,
+    outputs: Option<usize>,
 ) -> BuiltinResult<Option<HostEffectReceipt>> {
-    // audioinfo currently constructs and returns its struct even when the
-    // caller requests no outputs. Conservatively charge it as retained.
+    let output = match outputs {
+        Some(0) => HostEffectOutput::EffectOnly,
+        None | Some(1) => HostEffectOutput::ReturnedValue,
+        Some(_) => unreachable!("output arity was admitted before filesystem capture"),
+    };
     let workload = HostEffectWorkload::AudioMetadata {
         source: input.path.as_path(),
-        output: HostEffectOutput::ReturnedValue,
+        output,
     };
     select_host_effect(
         runtime,

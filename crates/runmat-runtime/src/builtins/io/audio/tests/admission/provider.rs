@@ -1,9 +1,11 @@
 use async_trait::async_trait;
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
 use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub(super) struct CountedFs {
     pub(super) inner: runmat_filesystem::MemoryFsProvider,
@@ -15,6 +17,7 @@ pub(super) struct CountedFs {
     pub(super) pending_metadata: Arc<AtomicBool>,
     pub(super) pending_provider_metadata: AtomicBool,
     pub(super) unsupported_open: AtomicBool,
+    pub(super) cancel_on_read: Arc<Mutex<Option<CancellationSource>>>,
     cwd: PathBuf,
 }
 
@@ -30,6 +33,7 @@ impl CountedFs {
             pending_metadata: Arc::new(AtomicBool::new(false)),
             pending_provider_metadata: AtomicBool::new(false),
             unsupported_open: AtomicBool::new(false),
+            cancel_on_read: Arc::new(Mutex::new(None)),
             cwd: PathBuf::from(cwd),
         }
     }
@@ -46,10 +50,19 @@ impl CountedFs {
 struct MetadataHandle {
     inner: Box<dyn FileHandle>,
     pending: Arc<AtomicBool>,
+    cancel_on_read: Arc<Mutex<Option<CancellationSource>>>,
 }
 
 impl Read for MetadataHandle {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if let Some(source) = self
+            .cancel_on_read
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
+            source.cancel(CancellationReason::User);
+        }
         self.inner.read(buffer)
     }
 }
@@ -101,6 +114,7 @@ impl FsProvider for CountedFs {
         Ok(Box::new(MetadataHandle {
             inner: self.inner.open(path, flags)?,
             pending: self.pending_metadata.clone(),
+            cancel_on_read: self.cancel_on_read.clone(),
         }))
     }
     async fn open_async(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {

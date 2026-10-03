@@ -170,7 +170,7 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
         let _outputs = crate::output_count::push_output_count(Some(0));
         let info =
             block_on(audioinfo_builtin(Some(runtime), value())).expect("zero-output metadata");
-        assert_eq!(field(&info, "TotalSamples"), &Value::Num(2.0));
+        assert!(output_list(info).is_empty());
     }
     assert_eq!(resources.calls.get(), 6);
     assert_eq!(placement.selections.get(), 6);
@@ -188,10 +188,7 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
         demands[1].scratch_bytes,
         ResourceByteBound::Known(256 * 1024)
     );
-    assert_eq!(
-        demands[5].retained_bytes,
-        ResourceByteBound::Known(4 * 1024)
-    );
+    assert_eq!(demands[5].retained_bytes, ResourceByteBound::Known(0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

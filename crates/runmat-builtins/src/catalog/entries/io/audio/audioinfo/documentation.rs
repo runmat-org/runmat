@@ -12,6 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Inputs and fields", paragraphs: &[
             "The filename is scalar string, singleton string array, or one-row character array. The active filesystem provider supplies the file. The result is a host scalar structure with `Filename`, `CompressionMethod`, `NumChannels`, `SampleRate`, `TotalSamples`, `Duration`, `BitsPerSample`, `BitRate`, `FileSize`, and `Format` fields.",
             "When headers do not establish a field, `TotalSamples`, `Duration`, `BitsPerSample`, or `BitRate` is `NaN`; the field is retained rather than omitted.",
+            "When the caller explicitly discards the result, `audioinfo` still reads and validates the file but does not construct or retain the metadata structure.",
             "For WAVE_FORMAT_EXTENSIBLE, `BitsPerSample` reports valid sample precision; the encoded container may be wider. `audioread(..., 'native')` chooses its integer storage from the container width.",
         ] },
         BuiltinDocumentationSection { heading: "Containers and limits", paragraphs: &[
@@ -75,6 +76,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "MP3 frame header", location: "builtins::io::audio::tests::metadata::audioinfo_parses_mp3_frame_header" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Unknown data error", location: "builtins::io::audio::tests::metadata::audioinfo_rejects_unknown_data" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Finite admission before file effects", location: "builtins::io::audio::tests::admission::cases::finite_missing_and_unknown_evidence_reject_both_identities_before_file_effects" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Discarded metadata output", location: "builtins::io::audio::tests::admission::zero_output::discarded_audioinfo_has_no_retained_value_but_still_needs_scratch" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Metadata scan cancellation", location: "builtins::io::audio::tests::admission::zero_output::discarded_audioinfo_cancellation_during_synchronous_read_never_publishes" },
         ],
         notes: &[],
     },

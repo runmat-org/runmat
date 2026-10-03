@@ -21,16 +21,20 @@ pub(super) async fn audioinfo_builtin(
     let input = FsInputLease::capture(path.clone(), &AUDIOINFO_ERROR_IO, AUDIOINFO_BUILTIN_NAME)?;
     let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOINFO_BUILTIN_NAME);
     cooperation.completed(0).await?;
-    let receipt = select_metadata(runtime.as_ref(), &input)?;
+    let receipt = select_metadata(runtime.as_ref(), &input, outputs)?;
     let result = async {
         cooperation.completed(0).await?;
         let scan = read_audioinfo_scan(&input, &mut cooperation).await?;
+        cooperation.completed(0).await?;
         let metadata = AudioMetadata::parse(&scan).map_err(|message| {
             audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
         })?;
-        Ok(Value::Struct(
-            metadata.into_struct(&path, scan.file_size as f64),
-        ))
+        cooperation.completed(0).await?;
+        Ok(match outputs {
+            Some(0) => Value::OutputList(Vec::new()),
+            None | Some(1) => Value::Struct(metadata.into_struct(&path, scan.file_size as f64)),
+            Some(_) => unreachable!("output arity was admitted before filesystem capture"),
+        })
     }
     .await;
     finish_receipt(receipt, &result, cooperation.was_cancelled());

@@ -76,7 +76,7 @@ impl RuntimeHostEffectResourceService for Resources {
             }
             HostEffectWorkload::AudioMetadata {
                 source,
-                output: HostEffectOutput::ReturnedValue,
+                output: HostEffectOutput::EffectOnly | HostEffectOutput::ReturnedValue,
             } if request.operation == AUDIOINFO_BUILTIN_NAME
                 && source == Path::new("/audio/tone.wav") =>
             {
