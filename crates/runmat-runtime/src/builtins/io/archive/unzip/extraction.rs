@@ -199,18 +199,20 @@ where
 }
 
 fn temporary_output_path(path: &Path) -> PathBuf {
+    static NEXT_OUTPUT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("entry");
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
+    let nanos = runmat_time::unix_timestamp_ns();
+    let sequence = NEXT_OUTPUT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(target_arch = "wasm32"))]
+    let process = std::process::id();
+    #[cfg(target_arch = "wasm32")]
+    let process = 0;
     parent.join(format!(
-        ".{name}.runmat-unzip-tmp-{}-{nanos}",
-        std::process::id()
+        ".{name}.runmat-unzip-tmp-{process}-{nanos}-{sequence}"
     ))
 }
 
