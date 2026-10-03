@@ -68,12 +68,15 @@ pub(super) fn browser_execution_host_inventory(
     let environment = runmat_core::program_environment(runmat_core::CompatMode::RunMat);
     let host_capabilities = [
         CapabilityRequirement::HostRuntime,
-        CapabilityRequirement::Filesystem,
         CapabilityRequirement::Network,
         CapabilityRequirement::UserInterface,
         CapabilityRequirement::ParallelRuntime,
     ]
     .into_iter()
+    .chain(
+        runmat_filesystem::current_provider_supports_read()
+            .then_some(CapabilityRequirement::Filesystem),
+    )
     .chain((!accelerators.is_empty()).then_some(CapabilityRequirement::Accelerator))
     .collect();
     let inventory = ExecutionHostInventory {

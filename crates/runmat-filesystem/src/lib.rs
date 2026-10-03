@@ -321,6 +321,13 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Whether this installed provider can service ordinary file reads.
+    /// Hosts use this metadata for capability admission; it does not promise
+    /// that a particular path exists or that a subsequent read will succeed.
+    fn supports_read(&self) -> bool {
+        true
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         None
     }
@@ -614,6 +621,14 @@ pub fn current_provider() -> Arc<dyn FsProvider> {
         .expect("filesystem provider lock poisoned")
         .provider
         .clone()
+}
+
+pub fn current_provider_supports_read() -> bool {
+    provider_state_lock()
+        .read()
+        .expect("filesystem provider lock poisoned")
+        .provider
+        .supports_read()
 }
 
 pub fn current_dir() -> io::Result<PathBuf> {

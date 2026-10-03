@@ -41,6 +41,10 @@ pub(super) struct JsFsFuncs {
 }
 
 impl JsFsFuncs {
+    pub(super) fn supports_read(&self) -> bool {
+        self.read_file.is_some()
+    }
+
     pub(super) fn new(bindings: &JsValue) -> Result<Self, JsValue> {
         if !bindings.is_object() {
             return Err(js_error("fsProvider must be an object"));

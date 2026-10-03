@@ -29,6 +29,10 @@ unsafe impl Sync for JsFsProvider {}
 
 #[async_trait(?Send)]
 impl FsProvider for JsFsProvider {
+    fn supports_read(&self) -> bool {
+        self.funcs.supports_read()
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/"))
     }

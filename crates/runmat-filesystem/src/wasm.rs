@@ -11,6 +11,10 @@ pub struct PlaceholderFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for PlaceholderFsProvider {
+    fn supports_read(&self) -> bool {
+        false
+    }
+
     fn current_dir_override(&self) -> Option<std::path::PathBuf> {
         Some(std::path::PathBuf::from("/"))
     }

@@ -78,7 +78,6 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
         runmat_types::InteropManifest::empty(),
         BTreeSet::from([
             runmat_types::CapabilityRequirement::HostRuntime,
-            runmat_types::CapabilityRequirement::Filesystem,
             runmat_types::CapabilityRequirement::UserInterface,
             runmat_types::CapabilityRequirement::ParallelRuntime,
         ]),
@@ -97,6 +96,40 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
         panic!("browser returned an invalid output vector");
     };
     assert_eq!(**value, InlineValue::F64Bits(42.0_f64.to_bits()));
+}
+
+#[wasm_bindgen_test]
+async fn browser_filesystem_admission_tracks_the_installed_read_provider() {
+    use std::sync::Arc;
+
+    use runmat_filesystem::{MemoryFsProvider, PlaceholderFsProvider};
+
+    let request = request_with_contract(
+        runmat_types::InteropManifest::empty(),
+        BTreeSet::from([runmat_types::CapabilityRequirement::Filesystem]),
+    )
+    .await;
+    {
+        let _provider = runmat_filesystem::replace_provider(Arc::new(PlaceholderFsProvider));
+        let response =
+            runmat_wasm::execute_program_artifact(serde_wasm_bindgen::to_value(&request).unwrap())
+                .await
+                .unwrap();
+        let response: ProgramExecutionResponse = serde_wasm_bindgen::from_value(response).unwrap();
+        let ProgramExecutionResponse::Failure { message } = response else {
+            panic!("browser admitted a filesystem requirement without a read provider");
+        };
+        assert!(message.contains("browser host rejected unavailable executable capabilities"));
+    }
+    {
+        let _provider = runmat_filesystem::replace_provider(Arc::new(MemoryFsProvider::new()));
+        let response =
+            runmat_wasm::execute_program_artifact(serde_wasm_bindgen::to_value(&request).unwrap())
+                .await
+                .unwrap();
+        let response: ProgramExecutionResponse = serde_wasm_bindgen::from_value(response).unwrap();
+        assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+    }
 }
 
 #[wasm_bindgen_test]
