@@ -16,11 +16,11 @@ pub(super) async fn encode_image(
     match invocation.format {
         ImageFormat::Gif => encode_gif(&image, invocation).await,
         ImageFormat::Jpeg => write_dynamic_image(
-            image_to_dynamic(image_as_8bit(image), false)?,
+            image_to_dynamic(image_as_8bit(image)?, false)?,
             ImageOutputFormat::Jpeg(invocation.options.quality),
         ),
         ImageFormat::Bmp => write_dynamic_image(
-            image_to_dynamic(image_as_8bit(image), false)?,
+            image_to_dynamic(image_as_8bit(image)?, false)?,
             ImageOutputFormat::Bmp,
         ),
         ImageFormat::Png => {
@@ -101,7 +101,8 @@ fn image_to_dynamic(image: MaterializedImage, keep_alpha: bool) -> BuiltinResult
         },
         4 => match image.data {
             PixelData::U8(data) => {
-                let mut rgb = Vec::with_capacity(geometry::samples(image.rows, image.cols, 3)?);
+                let mut rgb =
+                    geometry::reserve::<u8>(geometry::samples(image.rows, image.cols, 3)?)?;
                 for chunk in data.chunks_exact(4) {
                     rgb.extend_from_slice(&chunk[..3]);
                 }
@@ -115,7 +116,8 @@ fn image_to_dynamic(image: MaterializedImage, keep_alpha: bool) -> BuiltinResult
                     })
             }
             PixelData::U16(data) => {
-                let mut rgb = Vec::with_capacity(geometry::samples(image.rows, image.cols, 3)?);
+                let mut rgb =
+                    geometry::reserve::<u16>(geometry::samples(image.rows, image.cols, 3)?)?;
                 for chunk in data.chunks_exact(4) {
                     rgb.extend_from_slice(&chunk[..3]);
                 }
@@ -145,6 +147,10 @@ fn write_dynamic_image(image: DynamicImage, format: ImageOutputFormat) -> Builti
 }
 
 async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> BuiltinResult<Vec<u8>> {
+    // Validate and construct the new frame before an append reads existing
+    // filesystem data. The old frames and final encoded bytes still need a
+    // separate bounded codec/resource contract.
+    let new_frame = gif_frame_from_image(image, invocation.options.delay_time)?;
     let mut frames = Vec::new();
     let mut existing_repeat = None;
     if invocation.options.write_mode == WriteMode::Append {
@@ -172,7 +178,7 @@ async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> Built
             })?);
         }
     }
-    frames.push(gif_frame_from_image(image, invocation.options.delay_time)?);
+    frames.push(new_frame);
 
     let mut bytes = Vec::new();
     {
@@ -234,8 +240,8 @@ fn gif_frame_from_image(
 
     let pixels = geometry::pixels(image.rows, image.cols)?;
     let rgba_samples = geometry::samples(image.rows, image.cols, 4)?;
-    let mut rgba = vec![0u8; rgba_samples];
-    let data = image_data_as_u8(image);
+    let mut rgba = geometry::buffer::<u8>(rgba_samples)?;
+    let data = image_data_as_u8(image)?;
     for pixel in 0..pixels {
         let dst = pixel * 4;
         match image.channels {
@@ -267,32 +273,39 @@ fn gif_frame_from_image(
     Ok(Frame::from_parts(image, 0, 0, delay))
 }
 
-fn image_data_as_u8(image: &MaterializedImage) -> std::borrow::Cow<'_, [u8]> {
+fn image_data_as_u8(image: &MaterializedImage) -> BuiltinResult<std::borrow::Cow<'_, [u8]>> {
     match &image.data {
-        PixelData::U8(data) => std::borrow::Cow::Borrowed(data),
-        PixelData::U16(data) => std::borrow::Cow::Owned(
-            data.iter()
-                .map(|value| ((*value as f64) / 257.0).round().clamp(0.0, 255.0) as u8)
-                .collect(),
-        ),
+        PixelData::U8(data) => Ok(std::borrow::Cow::Borrowed(data)),
+        PixelData::U16(data) => {
+            let mut converted = geometry::reserve::<u8>(data.len())?;
+            converted.extend(
+                data.iter()
+                    .map(|value| ((*value as f64) / 257.0).round().clamp(0.0, 255.0) as u8),
+            );
+            Ok(std::borrow::Cow::Owned(converted))
+        }
     }
 }
 
-fn image_as_8bit(image: MaterializedImage) -> MaterializedImage {
-    MaterializedImage {
+fn image_as_8bit(image: MaterializedImage) -> BuiltinResult<MaterializedImage> {
+    Ok(MaterializedImage {
         rows: image.rows,
         cols: image.cols,
         channels: image.channels,
         data: PixelData::U8(match image.data {
             PixelData::U8(data) => data,
-            PixelData::U16(data) => data
-                .into_iter()
-                .map(|value| ((value as f64) / 257.0).round().clamp(0.0, 255.0) as u8)
-                .collect(),
+            PixelData::U16(data) => {
+                let mut converted = geometry::reserve::<u8>(data.len())?;
+                converted.extend(
+                    data.into_iter()
+                        .map(|value| ((value as f64) / 257.0).round().clamp(0.0, 255.0) as u8),
+                );
+                converted
+            }
         }),
         alpha_applied: image.alpha_applied,
         indexed_source: image.indexed_source,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -331,10 +344,53 @@ mod ownership_tests {
             alpha_applied: false,
             indexed_source: false,
         };
-        let converted = image_as_8bit(image);
+        let converted = image_as_8bit(image).unwrap();
         let PixelData::U8(data) = converted.data else {
             panic!("expected eight-bit pixels")
         };
         assert_eq!(data.as_ptr(), original);
+    }
+
+    #[test]
+    fn explicit_sixteen_bit_to_byte_conversion_keeps_scaling() {
+        let image = MaterializedImage {
+            rows: 1,
+            cols: 3,
+            channels: 1,
+            data: PixelData::U16(vec![0, 257, u16::MAX]),
+            alpha_applied: false,
+            indexed_source: false,
+        };
+        let converted = image_as_8bit(image).unwrap();
+        let PixelData::U8(data) = converted.data else {
+            panic!("expected eight-bit pixels")
+        };
+        assert_eq!(data, vec![0, 1, u8::MAX]);
+    }
+
+    #[test]
+    fn gif_append_rejects_invalid_new_frame_before_reading_old_file() {
+        let image = MaterializedImage {
+            rows: usize::MAX,
+            cols: 2,
+            channels: 1,
+            data: PixelData::U8(Vec::new()),
+            alpha_applied: false,
+            indexed_source: false,
+        };
+        let invocation = Invocation {
+            image: Value::Num(0.0),
+            map: None,
+            alpha: None,
+            path: PathBuf::from("nonexistent-gif-append-before-read.gif"),
+            format: ImageFormat::Gif,
+            options: ImwriteOptions {
+                write_mode: WriteMode::Append,
+                ..ImwriteOptions::default()
+            },
+        };
+        let error = futures::executor::block_on(encode_gif(&image, &invocation))
+            .expect_err("invalid new frame must precede missing append source");
+        assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
     }
 }

@@ -24,11 +24,8 @@ pub(super) fn tensor_from_numeric_like(value: &Value, label: &str) -> BuiltinRes
 }
 
 fn logical_to_tensor(value: &LogicalArray) -> BuiltinResult<Tensor> {
-    let data = value
-        .data
-        .iter()
-        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
-        .collect::<Vec<_>>();
+    let mut data = geometry::reserve::<f64>(value.data.len())?;
+    data.extend(value.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }));
     Tensor::new(data, value.shape.clone())
         .map_err(|err| imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, err))
 }
@@ -137,9 +134,9 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
     }
 
     let mut data = if tensor.numeric_dtype() == NumericDType::U16 {
-        PixelData::U16(vec![0u16; samples])
+        PixelData::U16(geometry::buffer(samples)?)
     } else {
-        PixelData::U8(vec![0u8; samples])
+        PixelData::U8(geometry::buffer(samples)?)
     };
     for row in 0..rows {
         for col in 0..cols {
@@ -198,7 +195,7 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
         ));
     }
 
-    let mut data = vec![0u8; byte_len];
+    let mut data = geometry::buffer::<u8>(byte_len)?;
     for row in 0..rows {
         for col in 0..cols {
             let pixel = row + rows * col;
@@ -407,7 +404,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
     let rgba_samples = geometry::samples(image.rows, image.cols, 4)?;
     image.data = match &image.data {
         PixelData::U8(data) => {
-            let mut rgba = vec![0u8; rgba_samples];
+            let mut rgba = geometry::buffer::<u8>(rgba_samples)?;
             for row in 0..image.rows {
                 for col in 0..image.cols {
                     let pixel = row * image.cols + col;
@@ -434,7 +431,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
             PixelData::U8(rgba)
         }
         PixelData::U16(data) => {
-            let mut rgba = vec![0u16; rgba_samples];
+            let mut rgba = geometry::buffer::<u16>(rgba_samples)?;
             for row in 0..image.rows {
                 for col in 0..image.cols {
                     let pixel = row * image.cols + col;

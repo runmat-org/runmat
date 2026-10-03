@@ -13,6 +13,44 @@ pub(super) fn pixels(rows: usize, cols: usize) -> BuiltinResult<usize> {
     samples(rows, cols, 1)
 }
 
+fn checked_allocation_bytes<T>(elements: usize) -> BuiltinResult<usize> {
+    let bytes = elements
+        .checked_mul(std::mem::size_of::<T>())
+        .ok_or_else(|| {
+            imwrite_error_with_detail(
+                &IMWRITE_ERROR_INVALID_IMAGE,
+                "image allocation size overflows",
+            )
+        })?;
+    if bytes > isize::MAX as usize {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            "image allocation exceeds addressable storage",
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Reserve the exact element capacity before image-owned writes or conversion.
+pub(super) fn reserve<T>(elements: usize) -> BuiltinResult<Vec<T>> {
+    checked_allocation_bytes::<T>(elements)?;
+    let mut values = Vec::new();
+    values.try_reserve_exact(elements).map_err(|error| {
+        imwrite_error_with_source(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            "image allocation unavailable",
+            error,
+        )
+    })?;
+    Ok(values)
+}
+
+pub(super) fn buffer<T: Copy + Default>(elements: usize) -> BuiltinResult<Vec<T>> {
+    let mut values = reserve(elements)?;
+    values.resize(elements, T::default());
+    Ok(values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -24,5 +62,15 @@ mod tests {
         let error = samples(usize::MAX / 2, 1, 3).expect_err("channels must overflow");
         assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
         assert_eq!(samples(2, 3, 4).unwrap(), 24);
+    }
+
+    #[test]
+    fn native_byte_capacity_rejects_before_reservation() {
+        let too_many_u16 = (isize::MAX as usize / std::mem::size_of::<u16>()) + 1;
+        let error = reserve::<u16>(too_many_u16).expect_err("unaddressable allocation");
+        assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
+        let error = reserve::<u16>(usize::MAX).expect_err("byte multiplication overflow");
+        assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
+        assert_eq!(buffer::<u16>(3).unwrap(), vec![0_u16; 3]);
     }
 }
