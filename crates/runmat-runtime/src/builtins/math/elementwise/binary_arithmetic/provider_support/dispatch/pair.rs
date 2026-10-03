@@ -16,8 +16,7 @@ use super::super::{
     broadcast_repetitions, device_real_scalar, ArithmeticProviderOperation, ExpandedPair,
 };
 use super::common::{
-    accept_output, common_owner, float_handle_supported,
-    provider_contract_error, provider_error,
+    accept_output, common_owner, float_handle_supported, provider_contract_error, provider_error,
 };
 
 pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
