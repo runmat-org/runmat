@@ -104,7 +104,7 @@ impl RuntimePlacementService for Placement {
                 }
                 _ => None,
             };
-            if !demand.is_some_and(|demand| demand <= available) {
+            if demand.is_none_or(|demand| demand > available) {
                 return Err(build_runtime_error("test placement resource limit")
                     .with_identifier("RunMat:Placement:ResourceLimit")
                     .build());
@@ -329,7 +329,12 @@ fn non_utf8_source_and_destination_reach_service_losslessly_and_have_distinct_id
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    struct RawPathResources(Rc<RefCell<Vec<(Vec<u8>, Vec<u8>)>>>);
+    #[derive(Debug, PartialEq, Eq)]
+    struct ObservedPaths {
+        source: Vec<u8>,
+        destination: Vec<u8>,
+    }
+    struct RawPathResources(Rc<RefCell<Vec<ObservedPaths>>>);
     impl RuntimeHostEffectResourceService for RawPathResources {
         fn admission(
             &self,
@@ -344,10 +349,10 @@ fn non_utf8_source_and_destination_reach_service_losslessly_and_have_distinct_id
             else {
                 return None;
             };
-            self.0.borrow_mut().push((
-                source.as_os_str().as_encoded_bytes().to_vec(),
-                destination.as_os_str().as_encoded_bytes().to_vec(),
-            ));
+            self.0.borrow_mut().push(ObservedPaths {
+                source: source.as_os_str().as_encoded_bytes().to_vec(),
+                destination: destination.as_os_str().as_encoded_bytes().to_vec(),
+            });
             Some(bounds(
                 ResourceByteBound::Known(1),
                 ResourceByteBound::Known(1),
@@ -410,18 +415,18 @@ fn non_utf8_source_and_destination_reach_service_losslessly_and_have_distinct_id
     assert_eq!(
         seen.borrow().as_slice(),
         &[
-            (
-                source_a.as_os_str().as_encoded_bytes().to_vec(),
-                destination_a.as_os_str().as_encoded_bytes().to_vec(),
-            ),
-            (
-                source_b.as_os_str().as_encoded_bytes().to_vec(),
-                destination_a.as_os_str().as_encoded_bytes().to_vec(),
-            ),
-            (
-                source_a.as_os_str().as_encoded_bytes().to_vec(),
-                destination_b.as_os_str().as_encoded_bytes().to_vec(),
-            ),
+            ObservedPaths {
+                source: source_a.as_os_str().as_encoded_bytes().to_vec(),
+                destination: destination_a.as_os_str().as_encoded_bytes().to_vec(),
+            },
+            ObservedPaths {
+                source: source_b.as_os_str().as_encoded_bytes().to_vec(),
+                destination: destination_a.as_os_str().as_encoded_bytes().to_vec(),
+            },
+            ObservedPaths {
+                source: source_a.as_os_str().as_encoded_bytes().to_vec(),
+                destination: destination_b.as_os_str().as_encoded_bytes().to_vec(),
+            },
         ]
     );
 }

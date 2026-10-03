@@ -227,7 +227,7 @@ fn actual_imfilter_prepared_kernel_plan_is_not_a_forged_live_handle() {
     let decoded: runmat_accelerate_api::ProviderFeasibilityQuery =
         serde_json::from_slice(&serde_json::to_vec(&query).unwrap()).unwrap();
     assert!(!provider.query_feasibility(&decoded).is_supported());
-    assert!(!provider.imfilter_physical_evidence(&decoded).is_some());
+    assert!(provider.imfilter_physical_evidence(&decoded).is_none());
 }
 
 #[test]

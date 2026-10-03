@@ -504,7 +504,9 @@ fn candidate_resource_adjustment_ns(
         CandidateOutputPresentation::ProviderReadbackUpload { readbacks, .. } => {
             Some(readbacks.as_ref())
         }
-        CandidateOutputPresentation::ProviderReadbacksHost { readbacks } => Some(readbacks.as_ref()),
+        CandidateOutputPresentation::ProviderReadbacksHost { readbacks } => {
+            Some(readbacks.as_ref())
+        }
         _ => None,
     };
     if let Some(readbacks) = readbacks {

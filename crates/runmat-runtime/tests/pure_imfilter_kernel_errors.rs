@@ -1,8 +1,8 @@
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView, ImfilterOptions,
 };
-use runmat_runtime::builtins::image::filters::imfilter::{
-    apply_imfilter_tensor, kernel_error::ImfilterKernelError,
+use runmat_runtime::builtins::image::filters::kernel::{
+    apply_imfilter_tensor, ImfilterKernelError,
 };
 use runmat_value::{Tensor, Value};
 use std::error::Error;
