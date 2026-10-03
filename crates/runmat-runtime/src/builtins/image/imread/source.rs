@@ -1,4 +1,5 @@
 use super::*;
+use runmat_builtins::ImreadSourceRoute;
 
 pub(super) fn string_arg(label: &str, value: &Value) -> BuiltinResult<String> {
     crate::builtins::image::checked_text::scalar_text(value).ok_or_else(|| {
@@ -40,16 +41,17 @@ pub(super) async fn read_source_bytes(source: &str) -> BuiltinResult<Vec<u8>> {
         let scheme = url.scheme();
         // A single-letter scheme is a Windows drive letter (e.g. "C:/..."), not a URL.
         if scheme.len() > 1 {
-            return match scheme {
-                "http" | "https" => read_url_bytes(url).await,
-                "file" => {
+            return match ImreadSourceRoute::from_parsed_scheme(scheme) {
+                ImreadSourceRoute::Http => read_url_bytes(url).await,
+                ImreadSourceRoute::FileUrl => {
                     let path = file_url_to_path(&url)?;
                     read_local_path(&path).await
                 }
-                _ => Err(imread_error_with_detail(
+                ImreadSourceRoute::UnsupportedScheme => Err(imread_error_with_detail(
                     &IMREAD_ERROR_UNSUPPORTED_SCHEME,
                     format!("unsupported URL scheme '{scheme}'"),
                 )),
+                ImreadSourceRoute::LocalPath => read_local_path(Path::new(source)).await,
             };
         }
     }

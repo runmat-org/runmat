@@ -1,10 +1,12 @@
 mod descriptor;
 mod documentation;
 mod inference;
+mod route;
 #[cfg(test)]
 mod tests;
 
 pub use descriptor::*;
+pub use route::ImreadSourceRoute;
 
 use crate::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};

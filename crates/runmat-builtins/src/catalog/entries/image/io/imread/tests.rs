@@ -84,6 +84,38 @@ fn url_and_dynamic_source_capabilities_are_not_confused() {
 }
 
 #[test]
+fn proven_unsupported_scheme_rejects_without_ambient_service_requirement() {
+    let result = inference::infer(
+        &request(
+            ValueFact::scalar(ValueKindFact::String),
+            Some("ftp://example.test/pixels.png"),
+            RequestedOutputCount::One,
+        ),
+        &IMREAD_CATALOG_ENTRY,
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-IMREAD-SCHEME"));
+    assert!(!result
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
+    assert!(!result
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Network));
+    assert_eq!(
+        ImreadSourceRoute::from_parsed_scheme("ftp"),
+        ImreadSourceRoute::UnsupportedScheme
+    );
+    assert_eq!(
+        ImreadSourceRoute::from_proven_literal("C:/pixels.png"),
+        None
+    );
+}
+
+#[test]
 fn definitely_invalid_text_shape_and_excess_outputs_diagnose() {
     let source = ValueFact::proven(
         ValueKindFact::Character,

@@ -1,3 +1,4 @@
+use super::ImreadSourceRoute;
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, CapabilityRequirement, DynamicReason,
@@ -55,12 +56,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     contract.capabilities = entry.contract.capability_set();
     match request.literals.literal_string_at(0) {
         Some(source)
-            if source
-                .get(..7)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
-                || source
-                    .get(..8)
-                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://")) =>
+            if ImreadSourceRoute::from_proven_literal(source) == Some(ImreadSourceRoute::Http) =>
         {
             contract.effects.0.remove(&EffectKind::FilesystemRead);
             contract
@@ -72,7 +68,30 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 .0
                 .insert(CapabilityRequirement::Network);
         }
-        Some(_) => {
+        Some(source)
+            if ImreadSourceRoute::from_proven_literal(source)
+                == Some(ImreadSourceRoute::UnsupportedScheme) =>
+        {
+            contract.effects.0.remove(&EffectKind::FilesystemRead);
+            contract.effects.0.remove(&EffectKind::Network);
+            contract
+                .capabilities
+                .0
+                .remove(&CapabilityRequirement::Filesystem);
+            contract
+                .capabilities
+                .0
+                .remove(&CapabilityRequirement::Network);
+            diagnostics.push(argument_error(
+                "RM-CATALOG-IMREAD-SCHEME",
+                "source URL scheme is unsupported",
+                0,
+            ));
+        }
+        Some(source)
+            if ImreadSourceRoute::from_proven_literal(source).is_some()
+                || !source.contains("://") =>
+        {
             contract.effects.0.remove(&EffectKind::Network);
             contract
                 .capabilities
@@ -83,7 +102,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 .0
                 .insert(CapabilityRequirement::Filesystem);
         }
-        None => {
+        _ => {
             // The source value chooses one of two ambient services at runtime.
             // Until resolved, neither service may be presumed available.
             contract
