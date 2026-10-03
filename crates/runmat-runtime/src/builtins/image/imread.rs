@@ -13,10 +13,9 @@ use runmat_builtins::{
     IMREAD_ERROR_UNSUPPORTED_SCHEME,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericDType, Tensor, Value};
+use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
 use url::Url;
 
-use crate::builtins::common::tensor;
 use crate::builtins::io::http::transport::{
     self, HttpMethod, HttpRequest, TransportError, TransportErrorKind,
 };
