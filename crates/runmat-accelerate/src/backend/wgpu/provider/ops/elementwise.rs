@@ -27,6 +27,8 @@ use crate::backend::wgpu::types::NumericPrecision;
 
 #[path = "elementwise_indexed.rs"]
 mod indexed;
+#[path = "elementwise/complex_broadcast.rs"]
+mod complex_broadcast;
 use indexed::{
     validate_indexed_layout, FusionMultiRequest, IndexedFusionObserved, MultiFusionLayout,
 };
@@ -1571,8 +1573,6 @@ impl WgpuProvider {
         entry_a: &super::backend_types::BufferEntry,
         entry_b: &super::backend_types::BufferEntry,
     ) -> Result<GpuTensorHandle> {
-        use crate::backend::wgpu::params::BCAST_MAX_RANK;
-
         let complex_op = ComplexBinaryOp::try_from_binary_op(op)
             .ok_or_else(|| anyhow!("binary operation is not supported for complex GPU tensors"))?;
         let lhs_complex = self.effective_storage_for_entry(a, entry_a)
@@ -1580,12 +1580,8 @@ impl WgpuProvider {
         let rhs_complex = self.effective_storage_for_entry(b, entry_b)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
 
-        let (shape_a, shape_b, out_shape) = super::backend_shared::matlab_broadcast_shapes(
-            "complex broadcast",
-            &entry_a.shape,
-            &entry_b.shape,
-            BCAST_MAX_RANK,
-        )?;
+        let (shape_a, shape_b, out_shape) =
+            complex_broadcast::admit_shapes(&entry_a.shape, &entry_b.shape)?;
         let rank = out_shape.len();
 
         let logical_len = out_shape
@@ -3757,6 +3753,44 @@ mod tests {
         );
         let expected = [-2.5, -0.2, 0.5, 1.23, 150.0, 98800.0];
         assert_close_scaled(&significant_host.data, &expected, tol);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an actual compatible WGPU adapter"]
+    async fn complex_broadcast_over_shader_rank_rejects_before_effects() {
+        let provider = register_wgpu_provider_for_test().expect("required actual WGPU adapter");
+        let mut complex_shape = vec![1; crate::backend::wgpu::params::BCAST_MAX_RANK + 1];
+        let mut real_shape = complex_shape.clone();
+        complex_shape[0] = 2;
+        real_shape[1] = 2;
+        let complex = complex_pair(provider, &[1.0, 3.0], &[2.0, 4.0], &complex_shape).await;
+        let real = provider
+            .upload(&HostTensorView {
+                data: &[10.0, 20.0],
+                shape: &real_shape,
+            })
+            .expect("real high-rank upload");
+        let telemetry = provider.telemetry_snapshot();
+        let allocations = provider
+            .allocations
+            .record_count()
+            .expect("allocation records");
+
+        let error = provider
+            .elem_add(&complex, &real)
+            .await
+            .expect_err("shader ABI cannot address this rank");
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &error
+        ));
+        assert_eq!(provider.telemetry_snapshot(), telemetry);
+        assert_eq!(
+            provider
+                .allocations
+                .record_count()
+                .expect("allocation records"),
+            allocations
+        );
     }
 
     #[tokio::test]

@@ -1,5 +1,45 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "requires an actual compatible WGPU adapter"]
+fn plus_wgpu_complex_rank_beyond_shader_abi_uses_legal_host_fallback() {
+    let _guard = test_support::accel_test_lock();
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .expect("required actual WGPU adapter");
+    let mut complex_shape = vec![1; 129];
+    let mut real_shape = complex_shape.clone();
+    complex_shape[0] = 2;
+    real_shape[1] = 2;
+    let complex = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, 4.0)], complex_shape)
+        .expect("complex high-rank input");
+    let real = Tensor::from_f32(vec![10.0, 20.0], real_shape).expect("real high-rank input");
+    let complex_handle =
+        gpu_helpers::upload_complex_tensor(provider, &complex).expect("complex upload");
+    let real_handle = gpu_helpers::upload_tensor(provider, &real).expect("real upload");
+    let result = plus_builtin(
+        Value::GpuTensor(complex_handle.clone()),
+        Value::GpuTensor(real_handle.clone()),
+        Vec::new(),
+    )
+    .expect("unsupported shader rank must use the legal host route");
+    let Value::ComplexTensor(result) = result else {
+        panic!("rank-limited provider hook must yield a host complex tensor");
+    };
+    let mut expected_shape = vec![1; 129];
+    expected_shape[0] = 2;
+    expected_shape[1] = 2;
+    assert_eq!(result.shape, expected_shape);
+    assert_eq!(
+        result.materialize_f64(),
+        vec![(11.0, 2.0), (13.0, 4.0), (21.0, 2.0), (23.0, 4.0)]
+    );
+    assert!(complex_handle.allocation_lease().validate_live().is_ok());
+    assert!(real_handle.allocation_lease().validate_live().is_ok());
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 #[cfg(feature = "wgpu")]
