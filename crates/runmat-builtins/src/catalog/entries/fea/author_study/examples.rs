@@ -11,10 +11,6 @@ const AUTHORED_TETRA: BuiltinExampleFixture =
         root: BuiltinFilesystemRoot::IsolatedWorkspace,
         entries: &[
             BuiltinFilesystemEntry::File {
-                relative_path: "tetra.stl",
-                content: BuiltinFixtureContent::Bytes(include_bytes!("fixtures/tetra.stl")),
-            },
-            BuiltinFilesystemEntry::File {
                 relative_path: "analysis_mesh.json",
                 content: BuiltinFixtureContent::Bytes(include_bytes!(
                     "fixtures/analysis_mesh.json"
@@ -29,6 +25,10 @@ const AUTHORED_TETRA: BuiltinExampleFixture =
             BuiltinFilesystemEntry::File {
                 relative_path: "mesh_summary.json",
                 content: BuiltinFixtureContent::Bytes(include_bytes!("fixtures/mesh_summary.json")),
+            },
+            BuiltinFilesystemEntry::File {
+                relative_path: "tetra.stl",
+                content: BuiltinFixtureContent::Bytes(include_bytes!("fixtures/tetra.stl")),
             },
         ],
     });
