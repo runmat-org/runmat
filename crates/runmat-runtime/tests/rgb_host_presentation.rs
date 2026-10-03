@@ -524,3 +524,121 @@ fn failed_gray_preparation_abandons_host_sink_without_feedback_or_readback() {
     assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
     assert!(source.allocation_lease().validate_live().is_ok());
 }
+
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+#[test]
+#[ignore = "requires an actual WGPU adapter; run explicitly for F32 and F64"]
+fn actual_wgpu_gray_host_sink_completes_nonempty_empty_and_lazy_readbacks() {
+    use runmat_accelerate::backend::wgpu::provider::WgpuProvider;
+    use runmat_accelerate_api::{GpuTensorLayout, NumericElementType, TransposeInfo};
+    use runmat_execution::ResourceByteBound;
+    use runmat_value::NumericDType;
+
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let provider: &'static WgpuProvider = Box::leak(Box::new(
+        WgpuProvider::new(Default::default()).expect("actual WGPU adapter required"),
+    ));
+    let _guard = ThreadProviderGuard::set(Some(provider));
+    match std::env::var("RUNMAT_WGPU_FORCE_PRECISION").as_deref() {
+        Ok("f32") => assert_eq!(provider.precision(), ProviderPrecision::F32),
+        Ok("f64") => assert_eq!(provider.precision(), ProviderPrecision::F64),
+        _ => panic!("set RUNMAT_WGPU_FORCE_PRECISION=f32 or f64 for the required hardware gate"),
+    }
+    let dtype = match provider.precision() {
+        ProviderPrecision::F32 => NumericDType::F32,
+        ProviderPrecision::F64 => NumericDType::F64,
+    };
+    let expected_element = match provider.precision() {
+        ProviderPrecision::F32 => NumericElementType::F32,
+        ProviderPrecision::F64 => NumericElementType::F64,
+    };
+    for (name, values, shape, lazy, expected_plane) in [
+        (
+            "nonempty",
+            vec![0.25, 0.5],
+            vec![1, 2],
+            false,
+            vec![0.25, 0.5],
+        ),
+        ("empty", vec![], vec![0, 2], false, vec![]),
+        (
+            "lazy",
+            vec![1., 2., 3., 4., 5., 6.],
+            vec![2, 3],
+            true,
+            vec![1., 3., 5., 2., 4., 6.],
+        ),
+    ] {
+        let tensor = Tensor::new_with_dtype(values, shape, dtype).unwrap();
+        let backing = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+        let source = if lazy {
+            backing
+                .with_view(backing.view().clone().with_shape(vec![3, 2]).with_layout(
+                    GpuTensorLayout::Transpose(TransposeInfo {
+                        base_rows: 2,
+                        base_cols: 3,
+                    }),
+                ))
+                .expect("actual owner admits lazy view")
+        } else {
+            backing.clone()
+        };
+        assert_eq!(source.physical().element_type(), expected_element);
+        let expected_staging = if source.physical().element_capacity() == 0 {
+            0
+        } else {
+            source.physical().requested_bytes()
+        };
+        assert_eq!(
+            provider.download_numeric_provider_scratch_bound(&source),
+            ResourceByteBound::Known(expected_staging),
+            "{name} staging"
+        );
+        let witness = Rc::new(Witness::default());
+        let runtime =
+            runmat_accelerate::native_auto::install_preparation_service(witness.context());
+        provider.reset_telemetry();
+        let Value::Tensor(output) = block_on(call_builtin_async_in_context(
+            &runtime,
+            "gray2rgb",
+            &[Value::GpuTensor(source.clone())],
+        ))
+        .expect("required actual WGPU gray readback") else {
+            panic!("{name} must publish host tensor")
+        };
+        assert_eq!(output.shape, vec![source.shape()[0], source.shape()[1], 3]);
+        assert_eq!(output.numeric_dtype(), dtype);
+        let actual = output.materialize_f64();
+        let expected = [
+            expected_plane.as_slice(),
+            expected_plane.as_slice(),
+            expected_plane.as_slice(),
+        ]
+        .concat();
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() <= 1e-6,
+                "{name}: {actual} != {expected}"
+            );
+        }
+        assert_eq!(
+            provider.telemetry_snapshot().upload_bytes,
+            0,
+            "{name} must not upload"
+        );
+        assert_eq!(
+            provider.telemetry_snapshot().download_bytes,
+            expected_staging,
+            "{name} physical readback bytes"
+        );
+        assert_eq!(witness.selections.get(), 1, "{name} one whole route");
+        witness.drain();
+        assert_eq!(
+            witness.feedback.borrow().len(),
+            1,
+            "{name} completed whole call"
+        );
+        assert!(source.allocation_lease().validate_live().is_ok());
+    }
+}

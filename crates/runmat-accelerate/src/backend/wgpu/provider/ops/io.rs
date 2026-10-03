@@ -5,6 +5,65 @@ use runmat_accelerate_api::{
     IntegerElementType, NumericElementType,
 };
 
+impl WgpuProvider {
+    /// Side-effect-free exact admission for this owner’s native readback,
+    /// including the logical transpose performed after mapped staging.
+    pub(crate) fn numeric_download_feasibility_exec(
+        &self,
+        source: &GpuTensorHandle,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        use runmat_accelerate_api::{
+            ProviderFeasibility, ProviderRejectionCode, ProviderResourceEstimate,
+        };
+        if !query.matches_numeric_download(source) || source.device_id() != self.device_id() {
+            return ProviderFeasibility::rejected(
+                ProviderRejectionCode::InvalidShape,
+                "provider.download.exact_contract",
+            );
+        }
+        if source.allocation_lease().validate_live().is_err() {
+            return ProviderFeasibility::rejected(
+                ProviderRejectionCode::ProviderUnavailable,
+                "provider.download.source_unavailable",
+            );
+        }
+        let Ok(entry) = self.get_entry_raw(source) else {
+            return ProviderFeasibility::rejected(
+                ProviderRejectionCode::ProviderUnavailable,
+                "provider.download.source_owner",
+            );
+        };
+        if entry.element_type != source.physical().element_type()
+            || entry.storage != source.physical().storage()
+            || entry.allocated_bytes != source.physical().requested_bytes()
+        {
+            return ProviderFeasibility::rejected(
+                ProviderRejectionCode::UnknownResourceEstimate,
+                "provider.download.physical_mismatch",
+            );
+        }
+        let staging = if entry.len == 0 {
+            0
+        } else {
+            entry.allocated_bytes
+        };
+        if staging > self.adapter_limits.max_buffer_size {
+            return ProviderFeasibility::rejected(
+                ProviderRejectionCode::ResourceLimit,
+                "provider.download.staging_limit",
+            );
+        }
+        ProviderFeasibility::supported(ProviderResourceEstimate {
+            // The shared resource hook proves staging, but this estimate does
+            // not claim a whole-device peak across other borrowed allocations.
+            transient_bytes: None,
+            output_bytes: query.outputs[0].checked_byte_len(),
+            dispatches: Some(u32::from(staging > 0)),
+        })
+    }
+}
+
 fn record_provider_copy(reason: runmat_value::HostCopyReason, bytes: u64) {
     runmat_value::record_host_copy(reason, usize::try_from(bytes).unwrap_or(usize::MAX));
 }

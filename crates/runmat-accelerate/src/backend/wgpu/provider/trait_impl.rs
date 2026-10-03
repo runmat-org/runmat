@@ -318,6 +318,14 @@ impl AccelProvider for WgpuProvider {
         crate::placement::wgpu_feasibility(self, query, self.adapter_limits.max_buffer_size)
     }
 
+    fn query_numeric_download_feasibility(
+        &self,
+        source: &GpuTensorHandle,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        self.numeric_download_feasibility_exec(source, query)
+    }
+
     fn estimate_cost(
         &self,
         query: &runmat_accelerate_api::ProviderCostQuery,

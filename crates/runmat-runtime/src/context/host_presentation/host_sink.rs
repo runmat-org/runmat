@@ -113,6 +113,9 @@ pub(crate) fn select_exact_host_sink(
     };
     let mut output = input.clone();
     output.residency = ProviderResidency::Host;
+    // A lazy source is read through its strided view, but the completed host
+    // payload is native column-major data in the logical output shape.
+    output.layout = ProviderLayout::ColumnMajorContiguous;
     let download = ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new("transfer.download"),
         family: ProviderOperationFamily::Download,
@@ -130,7 +133,7 @@ pub(crate) fn select_exact_host_sink(
         .unwrap_or_default();
     let provider_resource = provider.placement_resources();
     if !matches!(
-        provider.query_feasibility(&download),
+        provider.query_numeric_download_feasibility(request.source, &download),
         ProviderFeasibility::Supported { .. }
     ) {
         if parallel.memory_available_bytes.is_some()

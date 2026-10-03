@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ProviderPrecision;
+use crate::{GpuTensorHandle, GpuTensorStorage, NumericElementType, ProviderPrecision};
 
 #[cfg(test)]
 #[path = "workload_tests.rs"]
@@ -169,6 +169,60 @@ impl ProviderFeasibility {
 }
 
 impl ProviderFeasibilityQuery {
+    /// Canonical exact native readback roles. A provider may support a lazy
+    /// source, but it may not reinterpret class, storage, shape, count, or
+    /// host-output layout to turn another transfer query into that route.
+    pub fn matches_numeric_download(&self, source: &GpuTensorHandle) -> bool {
+        let element_type = match source.physical().element_type() {
+            NumericElementType::F32 => ProviderElementType::F32,
+            NumericElementType::F64 => ProviderElementType::F64,
+            NumericElementType::I8 => ProviderElementType::I8,
+            NumericElementType::I16 => ProviderElementType::I16,
+            NumericElementType::I32 => ProviderElementType::I32,
+            NumericElementType::I64 => ProviderElementType::I64,
+            NumericElementType::U8 => ProviderElementType::U8,
+            NumericElementType::U16 => ProviderElementType::U16,
+            NumericElementType::U32 => ProviderElementType::U32,
+            NumericElementType::U64 => ProviderElementType::U64,
+        };
+        let Some(shape) = source
+            .shape()
+            .iter()
+            .map(|&extent| u64::try_from(extent).ok())
+            .collect::<Option<Vec<_>>>()
+        else {
+            return false;
+        };
+        let input = ProviderRepresentation {
+            element_type,
+            storage: ProviderStorage::DenseReal,
+            layout: if crate::handle_is_transposed(source) {
+                ProviderLayout::Strided
+            } else {
+                ProviderLayout::ColumnMajorContiguous
+            },
+            shape: shape.clone(),
+            residency: ProviderResidency::Device,
+        };
+        let output = ProviderRepresentation {
+            element_type,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape,
+            residency: ProviderResidency::Host,
+        };
+        source.physical().storage() == GpuTensorStorage::Real
+            && self.operation.0 == "transfer.download"
+            && self.family == ProviderOperationFamily::Download
+            && self.inputs.as_slice() == [input]
+            && self.outputs.as_slice() == [output]
+            && self.workload
+                == ProviderWorkload {
+                    requested_outputs: Some(1),
+                    ..ProviderWorkload::default()
+                }
+    }
+
     pub(crate) fn conservative_transfer_feasibility(
         &self,
         precision: ProviderPrecision,

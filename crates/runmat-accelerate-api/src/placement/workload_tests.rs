@@ -1,6 +1,84 @@
 use super::ProviderWorkload;
 
 #[test]
+fn exact_numeric_download_binds_lazy_view_class_roles_and_one_host_output() {
+    use crate::{
+        test_support::TestAllocationOwner, GpuTensorLayout, GpuTensorStorage, NumericElementType,
+        ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
+        ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderStorage,
+        TransposeInfo,
+    };
+    let source = TestAllocationOwner::new()
+        .allocate_zeroed(vec![2, 3], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap()
+        .handle;
+    let lazy = source
+        .with_view(source.view().clone().with_shape(vec![3, 2]).with_layout(
+            GpuTensorLayout::Transpose(TransposeInfo {
+                base_rows: 2,
+                base_cols: 3,
+            }),
+        ))
+        .unwrap();
+    let input = ProviderRepresentation {
+        element_type: ProviderElementType::F64,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::Strided,
+        shape: vec![3, 2],
+        residency: ProviderResidency::Device,
+    };
+    let output = ProviderRepresentation {
+        layout: ProviderLayout::ColumnMajorContiguous,
+        residency: ProviderResidency::Host,
+        ..input.clone()
+    };
+    let exact = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new("transfer.download"),
+        family: ProviderOperationFamily::Download,
+        inputs: vec![input],
+        outputs: vec![output],
+        workload: ProviderWorkload {
+            requested_outputs: Some(1),
+            ..ProviderWorkload::default()
+        },
+    };
+    assert!(exact.matches_numeric_download(&lazy));
+    let mut wrong = exact.clone();
+    wrong.inputs[0].layout = ProviderLayout::ColumnMajorContiguous;
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.outputs[0].element_type = ProviderElementType::F32;
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.inputs[0].element_type = ProviderElementType::F32;
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.inputs[0].storage = ProviderStorage::DenseComplexInterleaved;
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.outputs[0].shape = vec![2, 3];
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.outputs[0].residency = ProviderResidency::Device;
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.inputs.push(wrong.inputs[0].clone());
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.outputs.push(wrong.outputs[0].clone());
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.workload.requested_outputs = Some(2);
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.workload.scalar_work_units = Some(7);
+    assert!(!wrong.matches_numeric_download(&lazy));
+    wrong = exact.clone();
+    wrong.operation = ProviderOperationIdentity::new("transfer.upload");
+    assert!(!wrong.matches_numeric_download(&lazy));
+}
+
+#[test]
 fn bounded_upload_keeps_exact_shape_unclaimed_and_checks_late_shape() {
     use crate::{
         ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,

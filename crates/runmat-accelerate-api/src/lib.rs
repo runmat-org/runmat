@@ -1896,6 +1896,23 @@ pub trait AccelProvider: AcceleratorThreadBound {
         query.conservative_transfer_feasibility(self.precision())
     }
 
+    /// Exact native numeric readback admission for a live source handle.
+    /// Generic dense feasibility cannot certify a lazy view's owner-specific
+    /// transpose/readback path. The default keeps that route unsupported.
+    fn query_numeric_download_feasibility(
+        &self,
+        source: &GpuTensorHandle,
+        query: &ProviderFeasibilityQuery,
+    ) -> ProviderFeasibility {
+        if !query.matches_numeric_download(source) || source.device_id() != self.device_id() {
+            return ProviderFeasibility::rejected(
+                ProviderRejectionCode::InvalidShape,
+                "provider.download.exact_contract",
+            );
+        }
+        self.query_feasibility(query)
+    }
+
     /// Returns a side-effect-free component cost estimate for an already
     /// feasible operation. Providers may return `None` until they have a
     /// trustworthy prior or observation; placement then supplies a bounded
