@@ -1,0 +1,216 @@
+use super::{
+    filewrite_error_with_detail, FILEWRITE_ERROR_INVALID_INPUT, FILEWRITE_ERROR_INVALID_OPTION,
+};
+use crate::BuiltinResult;
+use runmat_value::Value;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FileEncoding {
+    Auto,
+    Utf8,
+    Ascii,
+    Latin1,
+    Raw,
+}
+
+impl FileEncoding {
+    fn from_label(label: &str) -> Option<Self> {
+        match label.trim().to_ascii_lowercase().as_str() {
+            "auto" | "default" | "system" | "native" => Some(FileEncoding::Auto),
+            "utf-8" | "utf8" | "utf_8" | "unicode" => Some(FileEncoding::Utf8),
+            "ascii" | "us-ascii" | "us_ascii" | "usascii" => Some(FileEncoding::Ascii),
+            "latin1" | "latin-1" | "latin_1" | "iso-8859-1" | "iso8859-1" | "iso88591" => {
+                Some(FileEncoding::Latin1)
+            }
+            "raw" | "bytes" | "byte" | "binary" => Some(FileEncoding::Raw),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WriteMode {
+    Overwrite,
+    Append,
+}
+
+impl WriteMode {
+    fn from_label(label: &str) -> Option<Self> {
+        match label.trim().to_ascii_lowercase().as_str() {
+            "overwrite" | "replace" | "truncate" => Some(WriteMode::Overwrite),
+            "append" | "add" => Some(WriteMode::Append),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FilewriteOptions {
+    pub(super) encoding: FileEncoding,
+    pub(super) write_mode: WriteMode,
+}
+
+impl Default for FilewriteOptions {
+    fn default() -> Self {
+        Self {
+            encoding: FileEncoding::Auto,
+            write_mode: WriteMode::Overwrite,
+        }
+    }
+}
+pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<FilewriteOptions> {
+    if args.is_empty() {
+        return Ok(FilewriteOptions::default());
+    }
+
+    let mut options = FilewriteOptions::default();
+    let mut idx = 0usize;
+    let mut encoding_specified = false;
+    let mut write_mode_specified = false;
+
+    if !args.is_empty() && !is_keyword(&args[0])? {
+        match encoding_from_value(&args[0]) {
+            Ok(enc) => {
+                options.encoding = enc;
+                encoding_specified = true;
+                idx = 1;
+            }
+            Err(err) => {
+                if args.len() == 1 {
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    if !(args.len() - idx).is_multiple_of(2) {
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "expected keyword/value argument pairs",
+        ));
+    }
+
+    while idx < args.len() {
+        let key = keyword_name(&args[idx])?;
+        let value = &args[idx + 1];
+        if key.eq_ignore_ascii_case("encoding") {
+            if encoding_specified {
+                return Err(filewrite_error_with_detail(
+                    &FILEWRITE_ERROR_INVALID_OPTION,
+                    "duplicate 'Encoding' argument",
+                ));
+            }
+            options.encoding = encoding_from_value(value)?;
+            encoding_specified = true;
+        } else if key.eq_ignore_ascii_case("writemode") {
+            if write_mode_specified {
+                return Err(filewrite_error_with_detail(
+                    &FILEWRITE_ERROR_INVALID_OPTION,
+                    "duplicate 'WriteMode' argument",
+                ));
+            }
+            options.write_mode = write_mode_from_value(value)?;
+            write_mode_specified = true;
+        } else {
+            return Err(filewrite_error_with_detail(
+                &FILEWRITE_ERROR_INVALID_OPTION,
+                format!("unrecognised option '{}'", key),
+            ));
+        }
+        idx += 2;
+    }
+
+    Ok(options)
+}
+
+fn is_keyword(value: &Value) -> BuiltinResult<bool> {
+    let text = keyword_name(value)?;
+    Ok(text.eq_ignore_ascii_case("encoding") || text.eq_ignore_ascii_case("writemode"))
+}
+
+fn keyword_name(value: &Value) -> BuiltinResult<String> {
+    match value {
+        Value::String(s) => Ok(s.clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
+        Value::CharArray(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "keyword names must be 1-by-N character vectors",
+        )),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "keyword inputs must be scalar string arrays",
+        )),
+        other => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            format!("expected keyword as string scalar or character vector, got {other:?}"),
+        )),
+    }
+}
+
+fn encoding_from_value(value: &Value) -> BuiltinResult<FileEncoding> {
+    let label = keyword_name(value)?;
+    match FileEncoding::from_label(&label) {
+        Some(enc) => Ok(enc),
+        None if label.trim().is_empty() => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "encoding name must not be empty",
+        )),
+        None => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            format!("unsupported encoding '{}'", label),
+        )),
+    }
+}
+
+fn write_mode_from_value(value: &Value) -> BuiltinResult<WriteMode> {
+    let label = keyword_name(value)?;
+    match WriteMode::from_label(&label) {
+        Some(mode) => Ok(mode),
+        None if label.trim().is_empty() => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "write mode must not be empty",
+        )),
+        None => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            format!(
+                "unsupported write mode '{}'; use 'overwrite' or 'append'",
+                label
+            ),
+        )),
+    }
+}
+
+pub(super) fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
+    match value {
+        Value::String(s) => normalize_path(s),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            let path: String = ca.data.iter().collect();
+            normalize_path(&path)
+        }
+        Value::CharArray(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_INPUT,
+            "filename must be a 1-by-N character vector",
+        )),
+        Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
+        Value::StringArray(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_INPUT,
+            "string array filename inputs must be scalar",
+        )),
+        other => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_INPUT,
+            format!("expected filename as string scalar or character vector, got {other:?}"),
+        )),
+    }
+}
+
+fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
+    if raw.is_empty() {
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_INPUT,
+            "filename must not be empty",
+        ));
+    }
+    Ok(Path::new(raw).to_path_buf())
+}

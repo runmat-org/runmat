@@ -1,4 +1,5 @@
 use super::*;
+use runmat_value::CellArray;
 
 #[test]
 fn filewrite_is_gated_before_filesystem_side_effects() {
@@ -63,4 +64,53 @@ fn filewrite_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"count = filewrite(filename, data, encoding)"));
     assert!(labels.contains(&"count = filewrite(filename, data, \"Encoding\", encoding)"));
     assert!(labels.contains(&"count = filewrite(filename, data, ..., \"WriteMode\", mode)"));
+}
+
+#[test]
+fn invalid_host_path_options_and_nested_data_precede_resident_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident data");
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let resident = Value::GpuTensor(allocation.handle.clone());
+    let bad_path = run_filewrite(Value::Num(1.0), resident.clone(), Vec::new())
+        .expect_err("invalid path before data gather");
+    assert_eq!(
+        bad_path.identifier(),
+        FILEWRITE_ERROR_INVALID_INPUT.identifier
+    );
+
+    let target = unique_path("filewrite_preflight");
+    let bad_option = run_filewrite(
+        Value::from(target.to_string_lossy().to_string()),
+        resident.clone(),
+        vec![Value::Num(23.0)],
+    )
+    .expect_err("invalid option before data gather");
+    assert_eq!(
+        bad_option.identifier(),
+        FILEWRITE_ERROR_INVALID_OPTION.identifier
+    );
+    assert!(!target.exists());
+
+    let cell = CellArray::new(vec![resident], 1, 1).expect("nested resident data");
+    let bad_data = run_filewrite(
+        Value::from(target.to_string_lossy().to_string()),
+        Value::Cell(cell),
+        Vec::new(),
+    )
+    .expect_err("cell payload before recursive gather");
+    assert_eq!(
+        bad_data.identifier(),
+        FILEWRITE_ERROR_INVALID_DATA.identifier
+    );
+    assert_eq!(allocation.probe.retirements(), 0);
+    assert!(!target.exists());
 }
