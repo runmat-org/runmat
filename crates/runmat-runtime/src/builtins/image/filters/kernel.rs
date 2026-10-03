@@ -1,20 +1,18 @@
 use runmat_accelerate_api::{ImfilterOptions, ImfilterShape, ProviderPrecision};
-use runmat_value::{LogicalArray, NumericDType, NumericStorage, Tensor, Value};
+use runmat_value::Tensor;
 
 use crate::builtins::common::tensor;
 
-pub use super::super::geometry::ImfilterKernelPoint;
-use super::super::geometry::{extend_shape, normalize_shape, validate_kernel_shape};
-use super::{
-    filter_error, BuiltinResult, ImageOutputClass, ImfilterKernelError, ImfilterKernelResult,
-};
-#[path = "kernel/evaluation.rs"]
+pub use super::geometry::ImfilterKernelPoint;
+use super::geometry::{extend_shape, normalize_shape, validate_kernel_shape};
+mod error;
+pub use error::{ImfilterKernelError, ImfilterKernelResult};
 mod evaluation;
 #[cfg(test)]
 pub(super) use evaluation::reflect_index;
 use evaluation::{build_kernel_points, compute_strides, evaluate_filter};
 
-/// Core host implementation of `imfilter`, shared with the in-process acceleration provider.
+/// Pure host filter plan shared by filter2, imfilter and provider adapters.
 
 #[derive(Clone, Debug)]
 pub struct ImfilterPlan {
@@ -36,30 +34,10 @@ pub enum FilterAccumulation {
 /// Floating provider arithmetic follows placement intent, independently of
 /// physical input/output storage or a provider's preferred precision.
 pub fn floating_accumulation(precision: ProviderPrecision, explicit: bool) -> FilterAccumulation {
-    fallback_accumulation(
-        match precision {
-            ProviderPrecision::F32 => ImageOutputClass::Single,
-            ProviderPrecision::F64 => ImageOutputClass::Double,
-        },
-        explicit,
-    )
-}
-
-pub(super) fn fallback_accumulation(
-    output_class: ImageOutputClass,
-    explicit_gpu_array: bool,
-) -> FilterAccumulation {
-    if !explicit_gpu_array {
-        FilterAccumulation::HostDouble
+    if explicit && precision == ProviderPrecision::F32 {
+        FilterAccumulation::GpuSingle
     } else {
-        match output_class {
-            ImageOutputClass::Integer(NumericDType::U32) | ImageOutputClass::Double => {
-                FilterAccumulation::HostDouble
-            }
-            ImageOutputClass::Integer(_) | ImageOutputClass::Logical | ImageOutputClass::Single => {
-                FilterAccumulation::GpuSingle
-            }
-        }
+        FilterAccumulation::HostDouble
     }
 }
 
@@ -69,7 +47,7 @@ impl ImfilterPlan {
         self.evaluate_with_accumulation(image_data, options, FilterAccumulation::HostDouble)
     }
 
-    pub(super) fn evaluate_with_accumulation(
+    pub(in crate::builtins::image::filters) fn evaluate_with_accumulation(
         &self,
         image_data: &[f64],
         options: &ImfilterOptions,
@@ -172,13 +150,33 @@ pub fn filter_output_shape(
     shape_mode: ImfilterShape,
     builtin: &str,
 ) -> ImfilterKernelResult<Vec<usize>> {
-    super::super::geometry::filter_output_shape(image_shape, kernel_shape, shape_mode, builtin)
+    super::geometry::filter_output_shape(image_shape, kernel_shape, shape_mode, builtin)
         .map_err(|message| ImfilterKernelError::new(builtin, message))
 }
 
 #[cfg(test)]
 mod output_shape_tests {
     use super::*;
+
+    #[test]
+    fn floating_accumulation_keeps_host_and_explicit_precision_policy() {
+        assert_eq!(
+            floating_accumulation(ProviderPrecision::F32, false),
+            FilterAccumulation::HostDouble
+        );
+        assert_eq!(
+            floating_accumulation(ProviderPrecision::F64, false),
+            FilterAccumulation::HostDouble
+        );
+        assert_eq!(
+            floating_accumulation(ProviderPrecision::F32, true),
+            FilterAccumulation::GpuSingle
+        );
+        assert_eq!(
+            floating_accumulation(ProviderPrecision::F64, true),
+            FilterAccumulation::HostDouble
+        );
+    }
 
     #[test]
     fn shape_only_provider_admission_matches_host_plan_for_all_modes() {
@@ -250,84 +248,4 @@ pub fn apply_imfilter_native(
         ProviderPrecision::F64 => Tensor::new(data, plan.final_shape),
     }
     .map_err(|error| ImfilterKernelError::new(builtin, error))
-}
-
-pub(super) fn apply_imfilter_host(
-    image: &Tensor,
-    kernel: &Tensor,
-    options: &ImfilterOptions,
-    output_class: ImageOutputClass,
-    accumulation: FilterAccumulation,
-    builtin: &str,
-) -> BuiltinResult<Value> {
-    let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
-    let image_values = tensor::tensor_values_f64_cow(image);
-    let data = plan.evaluate_with_accumulation(&image_values, options, accumulation);
-    let shape = plan.final_shape;
-
-    let storage = match output_class {
-        ImageOutputClass::Double => NumericStorage::F64(data),
-        ImageOutputClass::Single => {
-            NumericStorage::F32(data.into_iter().map(|value| value as f32).collect())
-        }
-        ImageOutputClass::Integer(dtype) => integer_filter_storage(data, dtype),
-        ImageOutputClass::Logical => {
-            let bits = data
-                .into_iter()
-                .map(|value| u8::from(round_and_clamp(value, 0.0, 1.0) != 0.0))
-                .collect();
-            let logical = LogicalArray::new(bits, shape)
-                .map_err(|error| filter_error(builtin, format!("{builtin}: {error}")))?;
-            return Ok(if logical.data.len() == 1 {
-                Value::Bool(logical.data[0] != 0)
-            } else {
-                Value::LogicalArray(logical)
-            });
-        }
-    };
-    let tensor = Tensor::from_numeric_storage(storage, shape)
-        .map_err(|error| filter_error(builtin, format!("{builtin}: {error}")))?;
-    Ok(tensor::tensor_into_value(tensor))
-}
-
-fn integer_filter_storage(data: Vec<f64>, dtype: NumericDType) -> NumericStorage {
-    macro_rules! signed {
-        ($variant:ident, $ty:ty) => {
-            NumericStorage::$variant(
-                data.into_iter()
-                    .map(|value| {
-                        round_and_clamp(value, <$ty>::MIN as f64, <$ty>::MAX as f64) as $ty
-                    })
-                    .collect(),
-            )
-        };
-    }
-    macro_rules! unsigned {
-        ($variant:ident, $ty:ty) => {
-            NumericStorage::$variant(
-                data.into_iter()
-                    .map(|value| round_and_clamp(value, 0.0, <$ty>::MAX as f64) as $ty)
-                    .collect(),
-            )
-        };
-    }
-    match dtype {
-        NumericDType::I8 => signed!(I8, i8),
-        NumericDType::I16 => signed!(I16, i16),
-        NumericDType::I32 => signed!(I32, i32),
-        NumericDType::U8 => unsigned!(U8, u8),
-        NumericDType::U16 => unsigned!(U16, u16),
-        NumericDType::U32 => unsigned!(U32, u32),
-        NumericDType::I64 | NumericDType::U64 | NumericDType::F32 | NumericDType::F64 => {
-            unreachable!("unsupported imfilter output class rejected before finalization")
-        }
-    }
-}
-
-fn round_and_clamp(value: f64, minimum: f64, maximum: f64) -> f64 {
-    if value.is_nan() {
-        0.0_f64.clamp(minimum, maximum)
-    } else {
-        value.round().clamp(minimum, maximum)
-    }
 }

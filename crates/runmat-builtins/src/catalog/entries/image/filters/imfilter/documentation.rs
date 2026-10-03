@@ -84,7 +84,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "imfilter admission and options", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/imfilter.rs") },
-            BuiltinDocumentationLink { label: "Host kernel and geometry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/imfilter/kernel.rs") },
+            BuiltinDocumentationLink { label: "Shared filter kernel and geometry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/kernel.rs") },
             BuiltinDocumentationLink { label: "Resident provider route", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/filters/imfilter/provider.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Class, padding, geometry, resident fallback", location: "crates/runmat-runtime/src/builtins/image/filters/imfilter/tests.rs" }],

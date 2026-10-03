@@ -26,16 +26,14 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-#[path = "imfilter/kernel.rs"]
-mod kernel;
-use kernel::apply_imfilter_host;
-pub use kernel::filter_output_shape;
 #[cfg(test)]
-use kernel::reflect_index;
-pub use kernel::{
-    apply_imfilter_native, apply_imfilter_tensor, build_imfilter_plan, floating_accumulation,
-    FilterAccumulation, ImfilterKernelPoint, ImfilterPlan,
+use super::kernel::{apply_imfilter_tensor, reflect_index};
+use super::kernel::{
+    build_imfilter_plan, filter_output_shape, floating_accumulation, FilterAccumulation,
 };
+#[path = "imfilter/host_kernel.rs"]
+mod host_kernel;
+use host_kernel::{apply_imfilter_host, fallback_accumulation};
 #[path = "imfilter/provider.rs"]
 mod provider;
 use provider::imfilter_gpu;
@@ -75,8 +73,7 @@ fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
 }
 
 #[path = "imfilter/kernel_error.rs"]
-pub mod kernel_error;
-use kernel_error::{ImfilterKernelError, ImfilterKernelResult};
+mod kernel_error;
 
 fn imfilter_descriptor_error(
     error: &'static BuiltinErrorDescriptor,

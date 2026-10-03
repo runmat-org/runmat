@@ -1,4 +1,4 @@
-use super::kernel::fallback_accumulation;
+use super::host_kernel::fallback_accumulation;
 use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;

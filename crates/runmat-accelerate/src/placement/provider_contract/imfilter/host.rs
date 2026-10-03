@@ -131,7 +131,7 @@ pub(super) fn plan(
     };
     let early_kernel = if disabled_early { 0 } else { kernel_payload };
     let point_width = u64::try_from(std::mem::size_of::<
-        runmat_runtime::builtins::image::filters::imfilter::ImfilterKernelPoint,
+        runmat_runtime::builtins::image::filters::kernel::ImfilterKernelPoint,
     >())
     .ok()?
     .checked_add(rank_u64.checked_mul(8)?)?;

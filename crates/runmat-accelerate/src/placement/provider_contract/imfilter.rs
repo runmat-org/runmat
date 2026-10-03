@@ -97,7 +97,7 @@ fn validated_query<'a>(
     };
     let image_shape = shape(image)?;
     let kernel_shape = shape(kernel)?;
-    let expected_shape = runmat_runtime::builtins::image::filters::imfilter::filter_output_shape(
+    let expected_shape = runmat_runtime::builtins::image::filters::kernel::filter_output_shape(
         &image_shape,
         &kernel_shape,
         workload.shape,
@@ -337,7 +337,7 @@ fn direct_plan(
     let rank_bytes = u64::try_from(rank).ok()?.checked_mul(32)?.checked_mul(8)?;
     let point_bytes = kernel_len.checked_mul(
         u64::try_from(std::mem::size_of::<
-            runmat_runtime::builtins::image::filters::imfilter::ImfilterKernelPoint,
+            runmat_runtime::builtins::image::filters::kernel::ImfilterKernelPoint,
         >())
         .ok()?
         .checked_add(u64::try_from(rank).ok()?.checked_mul(8)?)?,

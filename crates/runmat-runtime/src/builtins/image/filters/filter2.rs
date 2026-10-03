@@ -1,6 +1,6 @@
 //! MATLAB-compatible `filter2` builtin implementing 2-D correlation and convolution.
 //!
-//! The implementation builds on the shared `imfilter` infrastructure so that host
+//! The implementation builds on the shared filter kernel so that host
 //! and GPU behaviour stay perfectly aligned. By default the builtin performs a
 //! correlation and returns an output the same size as the input image, matching
 //! MathWorks MATLAB semantics.
@@ -14,7 +14,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
-use super::imfilter::{apply_imfilter_tensor, filter_output_shape};
+use super::kernel::{apply_imfilter_tensor, filter_output_shape};
 use super::placement;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,

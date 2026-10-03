@@ -7,7 +7,7 @@ use runmat_accelerate_api::{
     HostNumericDataOwned, HostNumericTensorView, ImfilterOptions, ImfilterPadding,
     NumericElementType, ProviderOperationIdentity, ProviderPrecision,
 };
-use runmat_runtime::builtins::image::filters::imfilter::{
+use runmat_runtime::builtins::image::filters::kernel::{
     apply_imfilter_native, build_imfilter_plan, floating_accumulation, FilterAccumulation,
 };
 use runmat_value::Tensor;

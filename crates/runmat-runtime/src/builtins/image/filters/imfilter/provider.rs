@@ -1,5 +1,4 @@
 use super::super::placement;
-use super::kernel::fallback_accumulation;
 use super::*;
 #[path = "provider/route.rs"]
 mod route;

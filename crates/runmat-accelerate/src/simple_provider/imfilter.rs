@@ -47,7 +47,7 @@ impl InProcessProvider {
                 };
             (snapshot(image, image_data)?, snapshot(kernel, kernel_data)?)
         };
-        let result = runmat_runtime::builtins::image::filters::imfilter::apply_imfilter_native(
+        let result = runmat_runtime::builtins::image::filters::kernel::apply_imfilter_native(
             &image_tensor,
             &kernel_tensor,
             options,
