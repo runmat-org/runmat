@@ -90,11 +90,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let image = request.arguments.get(1);
     let shape = match (shape_mode, image) {
         (Some(Filter2Option::Same), Some(image)) => image.shape.clone(),
-        (Some(Filter2Option::Full | Filter2Option::Valid), Some(image)) => geometry(
-            &image.shape,
-            kernel.map(|kernel| &kernel.shape),
-            shape_mode.unwrap(),
-        ),
+        (Some(mode @ (Filter2Option::Full | Filter2Option::Valid)), Some(image)) => {
+            geometry(&image.shape, kernel.map(|kernel| &kernel.shape), mode)
+        }
         _ => ShapeFact::Unknown,
     };
     let known_classes = [kernel, image]
