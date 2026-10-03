@@ -370,9 +370,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     descriptor(crate::builtins::io::http::webwrite::WEBWRITE_DESCRIPTOR),
     extensions(crate::builtins::io::http::webwrite::WEBWRITE_EXTENSIONS),
     integer_capabilities(crate::builtins::io::http::webwrite::WEBWRITE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::http::webwrite"
 )]
-async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn webwrite_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    url: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if crate::builtins::common::validation::value_contains_explicit_gpu(&url)
         || rest
             .iter()
@@ -616,13 +622,16 @@ fn execute_request(
         user_agent,
     };
 
-    let response = transport::send_request(&request).map_err(|err| {
-        webwrite_error_with_source(
-            &WEBWRITE_ERROR_TRANSPORT,
-            err.message_with_prefix("webwrite"),
-            err,
-        )
-    })?;
+    let response = transport::send_request(request, context.as_ref())
+        .await
+        .map_err(|err| match err {
+            transport::TransportCallError::Transport(err) => webwrite_error_with_source(
+                &WEBWRITE_ERROR_TRANSPORT,
+                err.message_with_prefix("webwrite"),
+                err,
+            ),
+            transport::TransportCallError::Runtime(err) => err,
+        })?;
 
     let header_content_type =
         header_value(&response.headers, HEADER_CONTENT_TYPE).map(|value| value.to_string());
@@ -1380,7 +1389,11 @@ pub(crate) mod tests {
     }
 
     fn run_webwrite(url: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(webwrite_builtin(url, rest))
+        futures::executor::block_on(webwrite_builtin(
+            Some(transport::test_runtime_context()),
+            url,
+            rest,
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

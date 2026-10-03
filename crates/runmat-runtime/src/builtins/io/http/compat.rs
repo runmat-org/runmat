@@ -345,9 +345,14 @@ fn percent_decode(text: &str) -> BuiltinResult<String> {
     descriptor(crate::builtins::io::http::compat::WEBSAVE_DESCRIPTOR),
     extensions(crate::builtins::io::http::compat::WEBSAVE_EXTENSIONS),
     integer_capabilities(crate::builtins::io::http::compat::WEBSAVE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::http::compat"
 )]
-async fn websave_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn websave_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -378,15 +383,24 @@ async fn websave_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         &mut user_agent,
         &args[2..],
     )?;
-    let response = transport::send_request(&HttpRequest {
-        url,
-        method: HttpMethod::Get,
-        headers,
-        body: None,
-        timeout,
-        user_agent,
-    })
-    .map_err(|err| compat_error("websave", err.message_with_prefix("websave")))?;
+    let response = transport::send_request(
+        HttpRequest {
+            url,
+            method: HttpMethod::Get,
+            headers,
+            body: None,
+            timeout,
+            user_agent,
+        },
+        context.as_ref(),
+    )
+    .await
+    .map_err(|err| match err {
+        transport::TransportCallError::Transport(err) => {
+            compat_error("websave", err.message_with_prefix("websave"))
+        }
+        transport::TransportCallError::Runtime(err) => err,
+    })?;
     vfs::write_async(&filename, response.body)
         .await
         .map_err(|err| compat_error("websave", format!("websave: {err}")))?;

@@ -379,9 +379,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     descriptor(crate::builtins::io::http::webread::WEBREAD_DESCRIPTOR),
     extensions(crate::builtins::io::http::webread::WEBREAD_EXTENSIONS),
     integer_capabilities(crate::builtins::io::http::webread::WEBREAD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::http::webread"
 )]
-async fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn webread_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    url: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if crate::builtins::common::validation::value_contains_explicit_gpu(&url)
         || rest
             .iter()
@@ -639,13 +645,16 @@ fn execute_request(
         user_agent,
     };
 
-    let response = transport::send_request(&request).map_err(|err| {
-        webread_error_with_source(
-            &WEBREAD_ERROR_TRANSPORT,
-            err.message_with_prefix("webread"),
-            err,
-        )
-    })?;
+    let response = transport::send_request(request, context.as_ref())
+        .await
+        .map_err(|err| match err {
+            transport::TransportCallError::Transport(err) => webread_error_with_source(
+                &WEBREAD_ERROR_TRANSPORT,
+                err.message_with_prefix("webread"),
+                err,
+            ),
+            transport::TransportCallError::Runtime(err) => err,
+        })?;
 
     let header_content_type =
         header_value(&response.headers, HEADER_CONTENT_TYPE).map(|value| value.to_string());
@@ -986,7 +995,11 @@ pub(crate) mod tests {
     }
 
     fn run_webread(url: Value, args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(webread_builtin(url, args))
+        futures::executor::block_on(webread_builtin(
+            Some(transport::test_runtime_context()),
+            url,
+            args,
+        ))
     }
 
     fn spawn_server<F>(handler: F) -> String

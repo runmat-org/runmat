@@ -190,9 +190,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::unzip_type),
     descriptor(crate::builtins::io::archive::unzip::UNZIP_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::archive::unzip"
 )]
-async fn unzip_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn unzip_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count > 1 {
             return Err(unzip_error_with(
@@ -200,17 +205,24 @@ async fn unzip_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 format!("unzip: expected at most 1 output, got {out_count}"),
             ));
         }
-        let result = evaluate(&args).await?;
+        let result = evaluate_with_context(&args, context.as_ref()).await?;
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
         return Ok(Value::OutputList(vec![result.into_value()?]));
     }
-    let result = evaluate(&args).await?;
+    let result = evaluate_with_context(&args, context.as_ref()).await?;
     result.into_value()
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<UnzipResult> {
+    evaluate_with_context(args, None).await
+}
+
+async fn evaluate_with_context(
+    args: &[Value],
+    context: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<UnzipResult> {
     let gathered = gather_arguments(args).await?;
     let request = parse_arguments(&gathered)?;
     let output_folder = resolve_output_folder(request.output_folder.as_deref()).await?;
@@ -229,7 +241,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<UnzipResult> {
     reject_symlink_path(&output_folder).await?;
 
     let filenames = if is_http_url(&request.archive) {
-        extract_remote_archive(&request.archive, &output_folder).await?
+        extract_remote_archive(&request.archive, &output_folder, context).await?
     } else {
         let path = resolve_archive_path(&request.archive)?;
         extract_local_archive(&path, &output_folder).await?
@@ -282,16 +294,18 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<UnzipRequest> {
 async fn extract_remote_archive(
     url_text: &str,
     output_folder: &Path,
+    context: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Vec<String>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let _ = context;
         let temp = download_archive_to_temp_file_async(url_text.to_string()).await?;
         extract_archive_file_on_worker(temp.path.clone(), output_folder.to_path_buf()).await
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        let bytes = download_archive(url_text)?;
+        let bytes = download_archive(url_text, context).await?;
         extract_archive(Cursor::new(bytes), output_folder).await
     }
 }
@@ -611,7 +625,10 @@ fn create_unique_temp_archive() -> BuiltinResult<(PathBuf, std::fs::File)> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn download_archive(url_text: &str) -> BuiltinResult<Vec<u8>> {
+async fn download_archive(
+    url_text: &str,
+    context: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Vec<u8>> {
     let url = Url::parse(url_text).map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_FILENAME,
@@ -633,9 +650,14 @@ fn download_archive(url_text: &str) -> BuiltinResult<Vec<u8>> {
         timeout: DEFAULT_TIMEOUT,
         user_agent: DEFAULT_USER_AGENT.to_string(),
     };
-    let response = transport::send_request(&request).map_err(|err| {
-        unzip_error_with_source(&UNZIP_ERROR_HTTP, err.message_with_prefix("unzip"), err)
-    })?;
+    let response = transport::send_request(request, context)
+        .await
+        .map_err(|err| match err {
+            transport::TransportCallError::Transport(err) => {
+                unzip_error_with_source(&UNZIP_ERROR_HTTP, err.message_with_prefix("unzip"), err)
+            }
+            transport::TransportCallError::Runtime(err) => err,
+        })?;
     ensure_compressed_size_within_limit(response.body.len() as u64)?;
     Ok(response.body)
 }
@@ -1019,7 +1041,10 @@ mod tests {
     fn run_unzip(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
         let _provider_lock = runmat_filesystem::provider_override_lock();
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
-        block_on(unzip_builtin(args))
+        block_on(unzip_builtin(
+            Some(crate::builtins::io::http::transport::test_runtime_context()),
+            args,
+        ))
     }
 
     fn cell_strings(value: Value) -> Vec<String> {

@@ -190,9 +190,13 @@ async fn gzip_one(input: &Path, output_folder: Option<&Path>) -> BuiltinResult<P
 #[runtime_builtin(
     name = "gunzip",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::archive::gzip"
 )]
-async fn gunzip_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn gunzip_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &GUNZIP_DESCRIPTOR,
         &GUNZIP_ERROR_OUTPUTS,
@@ -212,7 +216,8 @@ async fn gunzip_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     };
     let mut outputs = Vec::with_capacity(inputs.len());
     for input in inputs {
-        outputs.push(extract_gunzip_source(input, output_folder.as_deref()).await?);
+        outputs
+            .push(extract_gunzip_source(input, output_folder.as_deref(), context.as_ref()).await?);
     }
     cellstr(outputs, "gunzip")
 }
@@ -255,19 +260,29 @@ fn parse_gunzip_source(text: &str) -> BuiltinResult<GunzipSource> {
 async fn extract_gunzip_source(
     source: GunzipSource,
     output_folder: Option<&Path>,
+    context: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<PathBuf> {
     match source {
         GunzipSource::Path(path) => gunzip_one(&path, output_folder).await,
         GunzipSource::Url(url) => {
-            let response = transport::send_request(&HttpRequest {
-                url: url.clone(),
-                method: HttpMethod::Get,
-                headers: Vec::new(),
-                body: None,
-                timeout: DEFAULT_TIMEOUT,
-                user_agent: "RunMat gunzip/0.0".to_string(),
-            })
-            .map_err(|err| archive_error("gunzip", err.message_with_prefix("gunzip")))?;
+            let response = transport::send_request(
+                HttpRequest {
+                    url: url.clone(),
+                    method: HttpMethod::Get,
+                    headers: Vec::new(),
+                    body: None,
+                    timeout: DEFAULT_TIMEOUT,
+                    user_agent: "RunMat gunzip/0.0".to_string(),
+                },
+                context,
+            )
+            .await
+            .map_err(|err| match err {
+                transport::TransportCallError::Transport(err) => {
+                    archive_error("gunzip", err.message_with_prefix("gunzip"))
+                }
+                transport::TransportCallError::Runtime(err) => err,
+            })?;
             let name = url
                 .path_segments()
                 .and_then(|mut segments| segments.next_back())
@@ -341,7 +356,11 @@ mod tests {
         let gz = dir.join("data.txt.gz");
         assert!(gz.exists());
         std::fs::remove_file(&input).unwrap();
-        run(gunzip_builtin(vec![Value::String(path_to_string(&gz))])).unwrap();
+        run(gunzip_builtin(
+            None,
+            vec![Value::String(path_to_string(&gz))],
+        ))
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&input).unwrap(), "hello");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -396,10 +415,10 @@ mod tests {
                 .map(|value| scalar_text(value, "gzip", "output").unwrap())
                 .collect();
             assert_eq!(names, vec!["compressed/a.txt.gz", "compressed/b.txt.gz"]);
-            run(gunzip_builtin(vec![
-                Value::Cell(files),
-                Value::String("restored".into()),
-            ]))
+            run(gunzip_builtin(
+                None,
+                vec![Value::Cell(files), Value::String("restored".into())],
+            ))
             .unwrap();
             assert_eq!(
                 futures::executor::block_on(vfs::read_async("restored/a.txt")).unwrap(),
@@ -427,7 +446,7 @@ mod tests {
         let _outputs = crate::output_count::push_output_count(Some(2));
         for (name, result) in [
             ("gzip", run(gzip_builtin(vec![Value::Num(1.0)]))),
-            ("gunzip", run(gunzip_builtin(vec![Value::Num(1.0)]))),
+            ("gunzip", run(gunzip_builtin(None, vec![Value::Num(1.0)]))),
         ] {
             assert_eq!(
                 result.unwrap_err().identifier(),
