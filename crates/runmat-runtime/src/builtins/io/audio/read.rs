@@ -11,7 +11,8 @@ pub(super) async fn audioread_builtin(
     filename: Value,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+    let outputs = crate::output_count::current_output_count();
+    if outputs.is_some_and(|count| count > 2) {
         return Err(audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
             "audioread: too many output arguments",
@@ -28,23 +29,25 @@ pub(super) async fn audioread_builtin(
     let options = parse_audioread_options(&args)?;
     let path = resolve_audioread_path(&filename)?;
     let input = FsInputLease::capture(path, &AUDIOREAD_ERROR_IO, AUDIOREAD_BUILTIN_NAME)?;
+    let receipt = select_decode(runtime.as_ref(), &input, options, outputs)?;
     let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOREAD_BUILTIN_NAME);
-    cooperation.completed(0).await?;
-    let decoded = decode_wave_stream(&input, options, &mut cooperation).await?;
-
-    match crate::output_count::current_output_count() {
-        None => Ok(Value::Tensor(decoded.samples)),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Tensor(decoded.samples)])),
-        Some(2) => Ok(Value::OutputList(vec![
-            Value::Tensor(decoded.samples),
-            Value::Num(decoded.sample_rate),
-        ])),
-        Some(_) => Err(audioread_error_with(
-            &AUDIOREAD_ERROR_ARGUMENT,
-            "audioread: too many output arguments",
-        )),
+    let result = async {
+        cooperation.completed(0).await?;
+        let decoded = decode_wave_stream(&input, options, &mut cooperation).await?;
+        Ok(match outputs {
+            None => Value::Tensor(decoded.samples),
+            Some(0) => Value::OutputList(Vec::new()),
+            Some(1) => Value::OutputList(vec![Value::Tensor(decoded.samples)]),
+            Some(2) => Value::OutputList(vec![
+                Value::Tensor(decoded.samples),
+                Value::Num(decoded.sample_rate),
+            ]),
+            Some(_) => unreachable!("output arity was admitted before filesystem capture"),
+        })
     }
+    .await;
+    finish_receipt(receipt, &result);
+    result
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

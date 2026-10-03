@@ -22,6 +22,7 @@ const MAX_AUDIOINFO_PREFIX_BYTES: u64 = 1024 * 1024;
 const MAX_AUDIOINFO_TAIL_BYTES: u64 = 64 * 1024;
 
 mod error;
+mod admission;
 mod cooperation;
 mod flac_aiff;
 mod ieee;
@@ -35,6 +36,7 @@ mod wave;
 #[cfg(test)]
 mod tests;
 
+use admission::*;
 use cooperation::*;
 use error::*;
 use flac_aiff::*;

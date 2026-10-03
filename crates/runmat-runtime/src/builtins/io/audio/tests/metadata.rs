@@ -12,10 +12,11 @@ fn audioinfo_descriptor_covers_core_form() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioinfo_invalid_control_rejects_before_filesystem_read() {
-    let err = block_on(audioinfo_builtin(Value::Num(42.0))).expect_err("numeric filename");
+    let err = block_on(audioinfo_builtin(None, Value::Num(42.0))).expect_err("numeric filename");
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
     let _count = crate::output_count::push_output_count(Some(2));
-    let err = block_on(audioinfo_builtin(Value::from("missing.wav"))).expect_err("output count");
+    let err =
+        block_on(audioinfo_builtin(None, Value::from("missing.wav"))).expect_err("output count");
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
 }
 
@@ -31,7 +32,7 @@ fn audioinfo_relative_filename_keeps_public_spelling_with_captured_owner() {
         .expect("fixture");
     let _owner = runmat_filesystem::replace_provider(provider);
     runmat_filesystem::set_current_dir("/audio").expect("cwd");
-    let info = block_on(audioinfo_builtin(Value::from("sample.wav"))).expect("metadata");
+    let info = block_on(audioinfo_builtin(None, Value::from("sample.wav"))).expect("metadata");
     assert_eq!(
         field(&info, "Filename"),
         &Value::String("sample.wav".into())
@@ -50,9 +51,10 @@ fn audioinfo_rejects_numeric_resident_path_without_gather() {
         )
         .expect("genuine resident allocation");
     let original = allocation.handle.wire_descriptor();
-    let err = block_on(audioinfo_builtin(Value::GpuTensor(
-        allocation.handle.clone(),
-    )))
+    let err = block_on(audioinfo_builtin(
+        None,
+        Value::GpuTensor(allocation.handle.clone()),
+    ))
     .expect_err("numeric resident filename rejects");
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
     assert_eq!(allocation.handle.wire_descriptor(), original);
@@ -66,9 +68,10 @@ fn audioinfo_reads_wav_metadata() {
     let path = temp_path("wav");
     fs::write(&path, wav_fixture(44_100, 2, 16, 4)).expect("write fixture");
 
-    let info = block_on(audioinfo_builtin(Value::from(
-        path.to_string_lossy().into_owned(),
-    )))
+    let info = block_on(audioinfo_builtin(
+        None,
+        Value::from(path.to_string_lossy().into_owned()),
+    ))
     .expect("audioinfo");
 
     assert_eq!(field(&info, "Format"), &Value::String("WAV".to_string()));
@@ -135,9 +138,10 @@ fn audioinfo_reads_flac_streaminfo() {
     let path = temp_path("flac");
     fs::write(&path, flac_fixture(48_000, 2, 24, 96_000)).expect("write fixture");
 
-    let info = block_on(audioinfo_builtin(Value::from(
-        path.to_string_lossy().into_owned(),
-    )))
+    let info = block_on(audioinfo_builtin(
+        None,
+        Value::from(path.to_string_lossy().into_owned()),
+    ))
     .expect("audioinfo");
 
     assert_eq!(field(&info, "Format"), &Value::String("FLAC".to_string()));
@@ -156,9 +160,10 @@ fn audioinfo_rejects_unknown_data() {
     let path = temp_path("bin");
     fs::write(&path, b"not audio").expect("write fixture");
 
-    let err = block_on(audioinfo_builtin(Value::from(
-        path.to_string_lossy().into_owned(),
-    )))
+    let err = block_on(audioinfo_builtin(
+        None,
+        Value::from(path.to_string_lossy().into_owned()),
+    ))
     .expect_err("format error");
     assert!(err.message().contains("unsupported audio format"));
     let _ = fs::remove_file(path);

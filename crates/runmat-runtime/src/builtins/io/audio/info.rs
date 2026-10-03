@@ -3,10 +3,15 @@ use super::*;
 #[runtime_builtin(
     name = "audioinfo",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::audio"
 )]
-pub(super) async fn audioinfo_builtin(filename: Value) -> BuiltinResult<Value> {
-    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+pub(super) async fn audioinfo_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    filename: Value,
+) -> BuiltinResult<Value> {
+    let outputs = crate::output_count::current_output_count();
+    if outputs.is_some_and(|count| count > 1) {
         return Err(audioinfo_error_with(
             &AUDIOINFO_ERROR_ARGUMENT,
             "audioinfo: too many output arguments",
@@ -14,13 +19,21 @@ pub(super) async fn audioinfo_builtin(filename: Value) -> BuiltinResult<Value> {
     }
     let path = resolve_audioinfo_path(&filename)?;
     let input = FsInputLease::capture(path.clone(), &AUDIOINFO_ERROR_IO, AUDIOINFO_BUILTIN_NAME)?;
-    let scan = read_audioinfo_scan(&input).await?;
-    let metadata = AudioMetadata::parse(&scan).map_err(|message| {
-        audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
-    })?;
-    Ok(Value::Struct(
-        metadata.into_struct(&path, scan.file_size as f64),
-    ))
+    let receipt = select_metadata(runtime.as_ref(), &input)?;
+    let result = async {
+        let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOINFO_BUILTIN_NAME);
+        cooperation.completed(0).await?;
+        let scan = read_audioinfo_scan(&input).await?;
+        let metadata = AudioMetadata::parse(&scan).map_err(|message| {
+            audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
+        })?;
+        Ok(Value::Struct(
+            metadata.into_struct(&path, scan.file_size as f64),
+        ))
+    }
+    .await;
+    finish_receipt(receipt, &result);
+    result
 }
 
 pub(super) struct AudioInfoScan {
