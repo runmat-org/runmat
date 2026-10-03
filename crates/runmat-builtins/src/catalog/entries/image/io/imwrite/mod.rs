@@ -28,8 +28,8 @@ pub const IMWRITE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         environment_effect: None,
         effects: &[
             EffectKind::EnvironmentRead,
-            EffectKind::FilesystemWrite,
             EffectKind::FilesystemRead,
+            EffectKind::FilesystemWrite,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],

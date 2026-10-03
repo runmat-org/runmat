@@ -109,8 +109,8 @@ pub const IMFINFO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::FilesystemRead,
             EffectKind::EnvironmentRead,
+            EffectKind::FilesystemRead,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],
