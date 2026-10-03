@@ -40,15 +40,12 @@ where
 }
 
 fn scalar_text(value: &Value, arg: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        _ => Err(info_error(
+    super::checked_text::scalar_text(value).ok_or_else(|| {
+        info_error(
             &IMFINFO_ERROR_ARGUMENT,
             format!("{arg} must be a string scalar or character vector"),
-        )),
-    }
+        )
+    })
 }
 
 fn char_value(text: &str) -> Value {
