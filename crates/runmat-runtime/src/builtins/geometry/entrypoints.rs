@@ -2,13 +2,15 @@ use super::*;
 
 #[runtime_builtin(
     name = "geometry.load",
-    category = "geometry",
-    summary = "Load a geometry file into a structured geometry asset.",
-    keywords = "geometry,load,cad,mesh,stl,step,obj",
-    descriptor(crate::builtins::geometry::GEOMETRY_LOAD_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry"
 )]
 pub async fn geometry_load_builtin(path: String) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &GEOMETRY_LOAD_DESCRIPTOR,
+        &GEOMETRY_LOAD_ERROR_OUTPUTS,
+        GEOMETRY_LOAD_NAME,
+    )?;
     let bytes = read_file(GEOMETRY_LOAD_NAME, &GEOMETRY_LOAD_ERROR_IO, &path).await?;
     operation_result_to_value(
         GEOMETRY_LOAD_NAME,
@@ -22,13 +24,15 @@ pub async fn geometry_load_builtin(path: String) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "geometry.inspect",
-    category = "geometry",
-    summary = "Inspect a geometry file without importing the full asset.",
-    keywords = "geometry,inspect,cad,mesh,stl,step,obj",
-    descriptor(crate::builtins::geometry::GEOMETRY_INSPECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry"
 )]
 pub async fn geometry_inspect_builtin(path: String) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &GEOMETRY_INSPECT_DESCRIPTOR,
+        &GEOMETRY_INSPECT_ERROR_OUTPUTS,
+        GEOMETRY_INSPECT_NAME,
+    )?;
     let bytes = read_file(GEOMETRY_INSPECT_NAME, &GEOMETRY_INSPECT_ERROR_IO, &path).await?;
     operation_result_to_value(
         GEOMETRY_INSPECT_NAME,
@@ -42,14 +46,15 @@ pub async fn geometry_inspect_builtin(path: String) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "geometry.listRegions",
-    category = "geometry",
-    summary = "List regions imported into a geometry asset.",
-    keywords = "geometry,regions,cad,selectors,fea",
-    descriptor(crate::builtins::geometry::GEOMETRY_LIST_REGIONS_DESCRIPTOR),
-    integer_audit(crate::builtins::geometry::GEOMETRY_LIST_REGIONS_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry"
 )]
 pub async fn geometry_list_regions_builtin(asset: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &GEOMETRY_LIST_REGIONS_DESCRIPTOR,
+        &GEOMETRY_LIST_REGIONS_ERROR_OUTPUTS,
+        GEOMETRY_LIST_REGIONS_NAME,
+    )?;
     let asset = geometry_asset_from_value(&asset)?;
     operation_result_to_value(
         GEOMETRY_LIST_REGIONS_NAME,
@@ -63,14 +68,15 @@ pub async fn geometry_list_regions_builtin(asset: Value) -> BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "geometry.meshes",
-    category = "geometry",
-    summary = "Return renderable surface mesh topology for a geometry asset.",
-    keywords = "geometry,mesh,vertices,triangles,faces,patch,fea",
-    descriptor(crate::builtins::geometry::GEOMETRY_MESHES_DESCRIPTOR),
-    integer_audit(crate::builtins::geometry::GEOMETRY_MESHES_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry"
 )]
 pub async fn geometry_meshes_builtin(asset: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &GEOMETRY_MESHES_DESCRIPTOR,
+        &GEOMETRY_MESHES_ERROR_OUTPUTS,
+        GEOMETRY_MESHES_NAME,
+    )?;
     let asset = geometry_asset_from_value_with_builtin(&asset, GEOMETRY_MESHES_NAME)?;
     geometry_meshes_value(&asset)
 }

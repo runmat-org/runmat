@@ -2,6 +2,71 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::Value;
 
+const TRIANGLE_STL: &str = "solid demo\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid demo\n";
+
+#[test]
+fn geometry_load_returns_canonical_asset_without_native_cad() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("part.stl");
+    std::fs::write(&path, TRIANGLE_STL).unwrap();
+    let value = block_on(geometry_load_builtin(path.to_string_lossy().to_string())).unwrap();
+    let Value::Object(asset) = value else {
+        panic!("expected asset object")
+    };
+    assert!(asset.class_name.is(GEOMETRY_ASSET_CLASS));
+    assert!(asset.properties.contains_key(GEOMETRY_ASSET_JSON_PROPERTY));
+    assert!(asset.properties.contains_key("surface_meshes"));
+}
+
+#[test]
+fn geometry_file_read_error_retains_io_identifier() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("missing.stl");
+    let error = block_on(geometry_load_builtin(path.to_string_lossy().to_string()))
+        .expect_err("missing file must fail");
+    assert_eq!(error.identifier(), GEOMETRY_LOAD_ERROR_IO.identifier);
+    assert!(error.source.is_some());
+}
+
+#[test]
+fn geometry_output_count_is_rejected_before_file_read() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("missing.stl");
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let error = block_on(geometry_load_builtin(path.to_string_lossy().to_string()))
+        .expect_err("too many outputs must fail before I/O");
+    assert_eq!(error.identifier(), GEOMETRY_LOAD_ERROR_OUTPUTS.identifier);
+}
+
+#[test]
+fn geometry_inspect_output_count_is_rejected_before_file_read() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("missing.stl");
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let error = block_on(geometry_inspect_builtin(path.to_string_lossy().to_string()))
+        .expect_err("too many outputs must fail before I/O");
+    assert_eq!(
+        error.identifier(),
+        GEOMETRY_INSPECT_ERROR_OUTPUTS.identifier
+    );
+}
+
+#[test]
+fn asset_queries_reject_nonasset_before_projection() {
+    let regions = block_on(geometry_list_regions_builtin(Value::Num(3.0)))
+        .expect_err("numeric receiver must fail");
+    assert_eq!(
+        regions.identifier(),
+        GEOMETRY_INSPECT_ERROR_INTERNAL.identifier
+    );
+    let meshes =
+        block_on(geometry_meshes_builtin(Value::Num(3.0))).expect_err("numeric receiver must fail");
+    assert_eq!(
+        meshes.identifier(),
+        GEOMETRY_INSPECT_ERROR_INTERNAL.identifier
+    );
+}
+
 #[test]
 fn geometry_inspect_builtin_returns_object_value() {
     let tmp = tempfile::TempDir::new().unwrap();

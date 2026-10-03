@@ -1,5 +1,16 @@
 use super::*;
 
+#[derive(Debug)]
+struct GeometryOperationFailure(OperationErrorEnvelope);
+
+impl std::fmt::Display for GeometryOperationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.0.error_code, self.0.message)
+    }
+}
+
+impl std::error::Error for GeometryOperationFailure {}
+
 pub(super) fn operation_error(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
@@ -16,6 +27,7 @@ pub(super) fn operation_error(
                 .identifier
                 .unwrap_or("RunMat:geometry:OperationFailed"),
         )
+        .with_source(GeometryOperationFailure(source))
         .build()
 }
 
