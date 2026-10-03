@@ -1,6 +1,9 @@
 use super::*;
 
-pub(super) fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
+pub(super) async fn parse_invocation(
+    args: &[Value],
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<Invocation> {
     if args.len() < 2 {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_ARGUMENT,
@@ -60,7 +63,7 @@ pub(super) fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
 
         match ImwriteOption::from_name(&name) {
             Some(ImwriteOption::Alpha) => {
-                let alpha_tensor = tensor_from_numeric_like(value, "Alpha")?;
+                let alpha_tensor = tensor_from_numeric_like(value, "Alpha", cooperation).await?;
                 ensure_documented_alpha_class(&alpha_tensor)?;
                 alpha = Some(alpha_tensor);
             }

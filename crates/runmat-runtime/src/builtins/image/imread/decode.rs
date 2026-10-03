@@ -57,7 +57,10 @@ impl DecodedSample for f32 {
     }
 }
 
-pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<MaterializedImage> {
+pub(super) async fn materialize_image(
+    image: DynamicImage,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<MaterializedImage> {
     if let Some(buffer) = image.as_luma8() {
         return Ok(MaterializedImage {
             image: tensor_from_interleaved(
@@ -67,7 +70,9 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 1,
                 1,
                 NumericDType::U8,
-            )?,
+                cooperation,
+            )
+            .await?,
             alpha: None,
         });
     }
@@ -80,15 +85,21 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 2,
                 1,
                 NumericDType::U8,
-            )?,
-            alpha: Some(alpha_from_interleaved(
-                buffer.as_raw(),
-                buffer.width(),
-                buffer.height(),
-                2,
-                1,
-                NumericDType::U8,
-            )?),
+                cooperation,
+            )
+            .await?,
+            alpha: Some(
+                alpha_from_interleaved(
+                    buffer.as_raw(),
+                    buffer.width(),
+                    buffer.height(),
+                    2,
+                    1,
+                    NumericDType::U8,
+                    cooperation,
+                )
+                .await?,
+            ),
         });
     }
     if let Some(buffer) = image.as_rgb8() {
@@ -100,7 +111,9 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 3,
                 3,
                 NumericDType::U8,
-            )?,
+                cooperation,
+            )
+            .await?,
             alpha: None,
         });
     }
@@ -113,15 +126,21 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 4,
                 3,
                 NumericDType::U8,
-            )?,
-            alpha: Some(alpha_from_interleaved(
-                buffer.as_raw(),
-                buffer.width(),
-                buffer.height(),
-                4,
-                3,
-                NumericDType::U8,
-            )?),
+                cooperation,
+            )
+            .await?,
+            alpha: Some(
+                alpha_from_interleaved(
+                    buffer.as_raw(),
+                    buffer.width(),
+                    buffer.height(),
+                    4,
+                    3,
+                    NumericDType::U8,
+                    cooperation,
+                )
+                .await?,
+            ),
         });
     }
     if let Some(buffer) = image.as_luma16() {
@@ -133,7 +152,9 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 1,
                 1,
                 NumericDType::U16,
-            )?,
+                cooperation,
+            )
+            .await?,
             alpha: None,
         });
     }
@@ -146,15 +167,21 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 2,
                 1,
                 NumericDType::U16,
-            )?,
-            alpha: Some(alpha_from_interleaved(
-                buffer.as_raw(),
-                buffer.width(),
-                buffer.height(),
-                2,
-                1,
-                NumericDType::U16,
-            )?),
+                cooperation,
+            )
+            .await?,
+            alpha: Some(
+                alpha_from_interleaved(
+                    buffer.as_raw(),
+                    buffer.width(),
+                    buffer.height(),
+                    2,
+                    1,
+                    NumericDType::U16,
+                    cooperation,
+                )
+                .await?,
+            ),
         });
     }
     if let Some(buffer) = image.as_rgb16() {
@@ -166,7 +193,9 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 3,
                 3,
                 NumericDType::U16,
-            )?,
+                cooperation,
+            )
+            .await?,
             alpha: None,
         });
     }
@@ -179,15 +208,21 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 4,
                 3,
                 NumericDType::U16,
-            )?,
-            alpha: Some(alpha_from_interleaved(
-                buffer.as_raw(),
-                buffer.width(),
-                buffer.height(),
-                4,
-                3,
-                NumericDType::U16,
-            )?),
+                cooperation,
+            )
+            .await?,
+            alpha: Some(
+                alpha_from_interleaved(
+                    buffer.as_raw(),
+                    buffer.width(),
+                    buffer.height(),
+                    4,
+                    3,
+                    NumericDType::U16,
+                    cooperation,
+                )
+                .await?,
+            ),
         });
     }
     if let Some(buffer) = image.as_rgb32f() {
@@ -199,7 +234,9 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 3,
                 3,
                 NumericDType::F32,
-            )?,
+                cooperation,
+            )
+            .await?,
             alpha: None,
         });
     }
@@ -212,15 +249,21 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
                 4,
                 3,
                 NumericDType::F32,
-            )?,
-            alpha: Some(alpha_from_interleaved(
-                buffer.as_raw(),
-                buffer.width(),
-                buffer.height(),
-                4,
-                3,
-                NumericDType::F32,
-            )?),
+                cooperation,
+            )
+            .await?,
+            alpha: Some(
+                alpha_from_interleaved(
+                    buffer.as_raw(),
+                    buffer.width(),
+                    buffer.height(),
+                    4,
+                    3,
+                    NumericDType::F32,
+                    cooperation,
+                )
+                .await?,
+            ),
         });
     }
 
@@ -233,25 +276,32 @@ pub(super) fn materialize_image(image: DynamicImage) -> BuiltinResult<Materializ
             4,
             3,
             NumericDType::U8,
-        )?,
-        alpha: Some(alpha_from_interleaved(
-            rgba.as_raw(),
-            rgba.width(),
-            rgba.height(),
-            4,
-            3,
-            NumericDType::U8,
-        )?),
+            cooperation,
+        )
+        .await?,
+        alpha: Some(
+            alpha_from_interleaved(
+                rgba.as_raw(),
+                rgba.width(),
+                rgba.height(),
+                4,
+                3,
+                NumericDType::U8,
+                cooperation,
+            )
+            .await?,
+        ),
     })
 }
 
-fn tensor_from_interleaved<T>(
+async fn tensor_from_interleaved<T>(
     raw: &[T],
     width: u32,
     height: u32,
     input_channels: usize,
     output_channels: usize,
     dtype: NumericDType,
+    cooperation: &mut ImageCooperation,
 ) -> BuiltinResult<Tensor>
 where
     T: DecodedSample,
@@ -266,16 +316,25 @@ where
             "decoded sample class does not match image storage",
         ));
     }
+    cooperation.completed(0).await?;
     let mut data = native_buffer::<T>(output_len)?;
+    cooperation.fill(&mut data, output_len).await?;
+    let mut completed = 0;
     for row in 0..rows {
         for col in 0..cols {
             let source_base = (row * cols + col) * input_channels;
             let dest_base = row + rows * col;
             for channel in 0..output_channels {
                 data[dest_base + pixels * channel] = raw[source_base + channel];
+                completed += 1;
+                if completed == crate::builtins::image::io_cooperation::IMAGE_WORK_CHUNK {
+                    cooperation.completed(completed).await?;
+                    completed = 0;
+                }
             }
         }
     }
+    cooperation.completed(completed).await?;
     let shape = if output_channels == 1 {
         vec![rows, cols]
     } else {
@@ -285,13 +344,14 @@ where
         .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))
 }
 
-fn alpha_from_interleaved<T>(
+async fn alpha_from_interleaved<T>(
     raw: &[T],
     width: u32,
     height: u32,
     input_channels: usize,
     alpha_channel: usize,
     dtype: NumericDType,
+    cooperation: &mut ImageCooperation,
 ) -> BuiltinResult<Tensor>
 where
     T: DecodedSample,
@@ -311,14 +371,23 @@ where
             "decoded alpha class does not match image storage",
         ));
     }
+    cooperation.completed(0).await?;
     let mut data = native_buffer::<T>(pixels)?;
+    cooperation.fill(&mut data, pixels).await?;
+    let mut completed = 0;
     for row in 0..rows {
         for col in 0..cols {
             let source_index = (row * cols + col) * input_channels + alpha_channel;
             let dest_index = row + rows * col;
             data[dest_index] = raw[source_index];
+            completed += 1;
+            if completed == crate::builtins::image::io_cooperation::IMAGE_WORK_CHUNK {
+                cooperation.completed(completed).await?;
+                completed = 0;
+            }
         }
     }
+    cooperation.completed(completed).await?;
     Tensor::from_numeric_storage(T::into_storage(data), vec![rows, cols])
         .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))
 }
@@ -380,7 +449,6 @@ fn native_buffer<T: DecodedSample>(elements: usize) -> BuiltinResult<Vec<T>> {
             error,
         )
     })?;
-    values.resize(elements, T::default());
     Ok(values)
 }
 
@@ -391,83 +459,5 @@ pub(super) fn empty_tensor_value() -> BuiltinResult<Value> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decoded_geometry_rejects_overflow_and_truncated_pixel_storage() {
-        let error =
-            checked_interleaved_geometry(usize::MAX, 2, 4, 3, 0).expect_err("geometry overflow");
-        assert_eq!(error.identifier(), IMREAD_ERROR_SHAPE.identifier);
-        let error = checked_interleaved_geometry(2, 3, 4, 3, 23).expect_err("truncated storage");
-        assert_eq!(error.identifier(), IMREAD_ERROR_SHAPE.identifier);
-        assert_eq!(
-            checked_interleaved_geometry(2, 3, 4, 3, 24).unwrap(),
-            (6, 24, 18)
-        );
-    }
-
-    #[test]
-    fn decoded_geometry_rejects_zero_or_excess_channels_before_allocation() {
-        for (input, output) in [(0, 1), (1, 0), (1, 2)] {
-            let error = checked_interleaved_geometry(0, 0, input, output, 0)
-                .expect_err("invalid channel contract");
-            assert_eq!(error.identifier(), IMREAD_ERROR_SHAPE.identifier);
-        }
-        let error = tensor_from_interleaved(&[1_u8], 1, 1, 1, 2, NumericDType::U8)
-            .expect_err("output channel exceeds decoded source");
-        assert_eq!(error.identifier(), IMREAD_ERROR_SHAPE.identifier);
-    }
-
-    #[test]
-    fn native_byte_capacity_is_checked_before_reservation() {
-        let elements = (isize::MAX as usize / std::mem::size_of::<u16>()) + 1;
-        let error = native_buffer::<u16>(elements).expect_err("addressable capacity exceeded");
-        assert_eq!(error.identifier(), IMREAD_ERROR_SHAPE.identifier);
-        assert_eq!(native_buffer::<u16>(3).unwrap(), vec![0_u16; 3]);
-    }
-
-    #[test]
-    fn valid_interleaved_alpha_keeps_native_class_and_column_major_order() {
-        let raw = [10_u8, 20, 30, 40, 50, 60, 70, 80];
-        let image = tensor_from_interleaved(&raw, 2, 1, 4, 3, NumericDType::U8).unwrap();
-        let alpha = alpha_from_interleaved(&raw, 2, 1, 4, 3, NumericDType::U8).unwrap();
-        assert_eq!(image.numeric_dtype(), NumericDType::U8);
-        assert_eq!(image.shape, vec![1, 2, 3]);
-        assert_eq!(
-            image.materialize_f64(),
-            vec![10.0, 50.0, 20.0, 60.0, 30.0, 70.0]
-        );
-        assert_eq!(alpha.numeric_dtype(), NumericDType::U8);
-        assert_eq!(alpha.shape, vec![1, 2]);
-        assert_eq!(alpha.materialize_f64(), vec![40.0, 80.0]);
-    }
-
-    #[test]
-    fn nonsquare_rgba_preserves_column_major_order_and_native_classes() {
-        fn assert_layout<T: DecodedSample + From<u8>>() {
-            let raw = (1_u8..=24).map(T::from).collect::<Vec<_>>();
-            let image = tensor_from_interleaved(&raw, 3, 2, 4, 3, T::DTYPE).unwrap();
-            let alpha = alpha_from_interleaved(&raw, 3, 2, 4, 3, T::DTYPE).unwrap();
-            assert_eq!(image.numeric_dtype(), T::DTYPE);
-            assert_eq!(image.shape, vec![2, 3, 3]);
-            assert_eq!(
-                image.materialize_f64(),
-                vec![
-                    1.0, 13.0, 5.0, 17.0, 9.0, 21.0, 2.0, 14.0, 6.0, 18.0, 10.0, 22.0, 3.0, 15.0,
-                    7.0, 19.0, 11.0, 23.0,
-                ]
-            );
-            assert_eq!(alpha.numeric_dtype(), T::DTYPE);
-            assert_eq!(alpha.shape, vec![2, 3]);
-            assert_eq!(
-                alpha.materialize_f64(),
-                vec![4.0, 16.0, 8.0, 20.0, 12.0, 24.0]
-            );
-        }
-
-        assert_layout::<u8>();
-        assert_layout::<u16>();
-        assert_layout::<f32>();
-    }
-}
+#[path = "decode/tests.rs"]
+mod tests;

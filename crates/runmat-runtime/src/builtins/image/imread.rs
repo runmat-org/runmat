@@ -16,6 +16,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
 use url::Url;
 
+use crate::builtins::image::io_cooperation::ImageCooperation;
 use crate::builtins::io::http::transport::{
     self, HttpMethod, HttpRequest, TransportError, TransportErrorKind,
 };
@@ -104,9 +105,12 @@ async fn imread_builtin(
         _ => return Err(imread_error(&IMREAD_ERROR_TOO_MANY_INPUTS)),
     };
 
+    let mut cooperation = ImageCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    cooperation.completed(0).await?;
     let bytes = read_source_bytes(&source, runtime.as_ref()).await?;
+    cooperation.completed(0).await?;
     let decoded = decode_image_bytes(&bytes, format_hint)?;
-    let materialized = materialize_image(decoded)?;
+    let materialized = materialize_image(decoded, &mut cooperation).await?;
 
     match requested_outputs {
         None => Ok(Value::Tensor(materialized.image)),

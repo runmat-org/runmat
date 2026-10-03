@@ -77,7 +77,7 @@ fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
 }
 
 fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(imwrite_builtin(args))
+    block_on(imwrite_builtin(None, args))
 }
 
 #[test]
@@ -299,16 +299,16 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     assert!(block_on(owner.download_numeric(&resident)).is_ok());
 
     let reads = owner.downloads.load(Ordering::SeqCst);
-    let unpolled = imwrite_builtin(vec![Value::GpuTensor(resident.clone()), path.clone()]);
+    let unpolled = imwrite_builtin(None, vec![Value::GpuTensor(resident.clone()), path.clone()]);
     drop(unpolled);
     assert_eq!(owner.downloads.load(Ordering::SeqCst), reads);
     assert!(!dir.path().join("never.png").exists());
 
     owner.pending.store(true, Ordering::SeqCst);
-    let mut future = Box::pin(imwrite_builtin(vec![
-        Value::GpuTensor(resident.clone()),
-        path,
-    ]));
+    let mut future = Box::pin(imwrite_builtin(
+        None,
+        vec![Value::GpuTensor(resident.clone()), path],
+    ));
     let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
     assert!(std::future::Future::poll(future.as_mut(), &mut context).is_pending());
     assert_eq!(owner.downloads.load(Ordering::SeqCst), reads + 1);

@@ -3,6 +3,7 @@ use super::*;
 pub(super) async fn encode_image(
     image: MaterializedImage,
     invocation: &Invocation,
+    cooperation: &mut ImageCooperation,
 ) -> BuiltinResult<Vec<u8>> {
     admission::validate(&admission::EncoderFacts {
         format: invocation.format,
@@ -14,21 +15,23 @@ pub(super) async fn encode_image(
     })?;
 
     match invocation.format {
-        ImageFormat::Gif => encode_gif(&image, invocation).await,
+        ImageFormat::Gif => encode_gif(&image, invocation, cooperation).await,
         ImageFormat::Jpeg => write_dynamic_image(
-            image_to_dynamic(image_as_8bit(image)?, false)?,
+            image_to_dynamic(image_as_8bit(image, cooperation).await?, false, cooperation).await?,
             ImageOutputFormat::Jpeg(invocation.options.quality),
         ),
         ImageFormat::Bmp => write_dynamic_image(
-            image_to_dynamic(image_as_8bit(image)?, false)?,
+            image_to_dynamic(image_as_8bit(image, cooperation).await?, false, cooperation).await?,
             ImageOutputFormat::Bmp,
         ),
-        ImageFormat::Png => {
-            write_dynamic_image(image_to_dynamic(image, true)?, ImageOutputFormat::Png)
-        }
-        ImageFormat::Tiff => {
-            write_dynamic_image(image_to_dynamic(image, true)?, ImageOutputFormat::Tiff)
-        }
+        ImageFormat::Png => write_dynamic_image(
+            image_to_dynamic(image, true, cooperation).await?,
+            ImageOutputFormat::Png,
+        ),
+        ImageFormat::Tiff => write_dynamic_image(
+            image_to_dynamic(image, true, cooperation).await?,
+            ImageOutputFormat::Tiff,
+        ),
         _ => Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_FORMAT,
             "unsupported image format",
@@ -36,7 +39,12 @@ pub(super) async fn encode_image(
     }
 }
 
-fn image_to_dynamic(image: MaterializedImage, keep_alpha: bool) -> BuiltinResult<DynamicImage> {
+async fn image_to_dynamic(
+    image: MaterializedImage,
+    keep_alpha: bool,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<DynamicImage> {
+    cooperation.completed(0).await?;
     let width = u32::try_from(image.cols).map_err(|_| {
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image width is too large")
     })?;
@@ -103,9 +111,16 @@ fn image_to_dynamic(image: MaterializedImage, keep_alpha: bool) -> BuiltinResult
             PixelData::U8(data) => {
                 let mut rgb =
                     geometry::reserve::<u8>(geometry::samples(image.rows, image.cols, 3)?)?;
+                let mut pending = 0;
                 for chunk in data.chunks_exact(4) {
                     rgb.extend_from_slice(&chunk[..3]);
+                    pending += 3;
+                    if pending >= IMAGE_WORK_CHUNK {
+                        cooperation.completed(pending).await?;
+                        pending = 0;
+                    }
                 }
+                cooperation.completed(pending).await?;
                 ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb)
                     .map(DynamicImage::ImageRgb8)
                     .ok_or_else(|| {
@@ -118,9 +133,16 @@ fn image_to_dynamic(image: MaterializedImage, keep_alpha: bool) -> BuiltinResult
             PixelData::U16(data) => {
                 let mut rgb =
                     geometry::reserve::<u16>(geometry::samples(image.rows, image.cols, 3)?)?;
+                let mut pending = 0;
                 for chunk in data.chunks_exact(4) {
                     rgb.extend_from_slice(&chunk[..3]);
+                    pending += 3;
+                    if pending >= IMAGE_WORK_CHUNK {
+                        cooperation.completed(pending).await?;
+                        pending = 0;
+                    }
                 }
+                cooperation.completed(pending).await?;
                 ImageBuffer::<Rgb<u16>, _>::from_raw(width, height, rgb)
                     .map(DynamicImage::ImageRgb16)
                     .ok_or_else(|| {
@@ -146,11 +168,15 @@ fn write_dynamic_image(image: DynamicImage, format: ImageOutputFormat) -> Builti
     Ok(cursor.into_inner())
 }
 
-async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> BuiltinResult<Vec<u8>> {
+async fn encode_gif(
+    image: &MaterializedImage,
+    invocation: &Invocation,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<Vec<u8>> {
     // Validate and construct the new frame before an append reads existing
     // filesystem data. The old frames and final encoded bytes still need a
     // separate bounded codec/resource contract.
-    let new_frame = gif_frame_from_image(image, invocation.options.delay_time)?;
+    let new_frame = gif_frame_from_image(image, invocation.options.delay_time, cooperation).await?;
     let mut frames = Vec::new();
     let mut existing_repeat = None;
     if invocation.options.write_mode == WriteMode::Append {
@@ -168,11 +194,13 @@ async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> Built
                     err,
                 )
             })?;
+        cooperation.completed(0).await?;
         existing_repeat = gif_repeat_from_bytes(&existing);
         let decoder = GifDecoder::new(Cursor::new(existing)).map_err(|err| {
             imwrite_error_with_source(&IMWRITE_ERROR_ENCODE, "failed to decode GIF", err)
         })?;
         for frame in decoder.into_frames() {
+            cooperation.completed(0).await?;
             frames.push(frame.map_err(|err| {
                 imwrite_error_with_source(&IMWRITE_ERROR_ENCODE, "failed to decode GIF frame", err)
             })?);
@@ -194,6 +222,7 @@ async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> Built
             })?;
         }
         for frame in frames {
+            cooperation.completed(0).await?;
             encoder.encode_frame(frame).map_err(|err| {
                 imwrite_error_with_source(&IMWRITE_ERROR_ENCODE, "failed to encode GIF frame", err)
             })?;
@@ -227,10 +256,12 @@ fn loop_count_to_repeat(loop_count: f64) -> BuiltinResult<Repeat> {
     Ok(Repeat::Finite(loop_count.round() as u16))
 }
 
-fn gif_frame_from_image(
+async fn gif_frame_from_image(
     image: &MaterializedImage,
     delay_time: Option<f64>,
+    cooperation: &mut ImageCooperation,
 ) -> BuiltinResult<Frame> {
+    cooperation.completed(0).await?;
     let width = u32::try_from(image.cols).map_err(|_| {
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image width is too large")
     })?;
@@ -240,8 +271,10 @@ fn gif_frame_from_image(
 
     let pixels = geometry::pixels(image.rows, image.cols)?;
     let rgba_samples = geometry::samples(image.rows, image.cols, 4)?;
-    let mut rgba = geometry::buffer::<u8>(rgba_samples)?;
-    let data = image_data_as_u8(image)?;
+    let mut rgba = geometry::reserve::<u8>(rgba_samples)?;
+    cooperation.fill(&mut rgba, rgba_samples).await?;
+    let data = image_data_as_u8(image, cooperation).await?;
+    let mut pending = 0;
     for pixel in 0..pixels {
         let dst = pixel * 4;
         match image.channels {
@@ -263,7 +296,13 @@ fn gif_frame_from_image(
             }
             _ => unreachable!(),
         }
+        pending += 4;
+        if pending >= IMAGE_WORK_CHUNK {
+            cooperation.completed(pending).await?;
+            pending = 0;
+        }
     }
+    cooperation.completed(pending).await?;
     let image = RgbaImage::from_raw(width, height, rgba).ok_or_else(|| {
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "invalid GIF frame buffer")
     })?;
@@ -273,21 +312,33 @@ fn gif_frame_from_image(
     Ok(Frame::from_parts(image, 0, 0, delay))
 }
 
-fn image_data_as_u8(image: &MaterializedImage) -> BuiltinResult<std::borrow::Cow<'_, [u8]>> {
+async fn image_data_as_u8<'a>(
+    image: &'a MaterializedImage,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<std::borrow::Cow<'a, [u8]>> {
+    cooperation.completed(0).await?;
     match &image.data {
         PixelData::U8(data) => Ok(std::borrow::Cow::Borrowed(data)),
         PixelData::U16(data) => {
             let mut converted = geometry::reserve::<u8>(data.len())?;
-            converted.extend(
-                data.iter()
-                    .map(|value| ((*value as f64) / 257.0).round().clamp(0.0, 255.0) as u8),
-            );
+            for chunk in data.chunks(IMAGE_WORK_CHUNK) {
+                converted.extend(
+                    chunk
+                        .iter()
+                        .map(|value| ((*value as f64) / 257.0).round().clamp(0.0, 255.0) as u8),
+                );
+                cooperation.completed(chunk.len()).await?;
+            }
             Ok(std::borrow::Cow::Owned(converted))
         }
     }
 }
 
-fn image_as_8bit(image: MaterializedImage) -> BuiltinResult<MaterializedImage> {
+async fn image_as_8bit(
+    image: MaterializedImage,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<MaterializedImage> {
+    cooperation.completed(0).await?;
     Ok(MaterializedImage {
         rows: image.rows,
         cols: image.cols,
@@ -296,10 +347,14 @@ fn image_as_8bit(image: MaterializedImage) -> BuiltinResult<MaterializedImage> {
             PixelData::U8(data) => data,
             PixelData::U16(data) => {
                 let mut converted = geometry::reserve::<u8>(data.len())?;
-                converted.extend(
-                    data.into_iter()
-                        .map(|value| ((value as f64) / 257.0).round().clamp(0.0, 255.0) as u8),
-                );
+                for chunk in data.chunks(IMAGE_WORK_CHUNK) {
+                    converted.extend(
+                        chunk
+                            .iter()
+                            .map(|value| ((*value as f64) / 257.0).round().clamp(0.0, 255.0) as u8),
+                    );
+                    cooperation.completed(chunk.len()).await?;
+                }
                 converted
             }
         }),
@@ -324,7 +379,12 @@ mod ownership_tests {
             alpha_applied: false,
             indexed_source: false,
         };
-        let dynamic = image_to_dynamic(image, true).unwrap();
+        let dynamic = futures::executor::block_on(image_to_dynamic(
+            image,
+            true,
+            &mut ImageCooperation::new(None, BUILTIN_NAME),
+        ))
+        .unwrap();
         let DynamicImage::ImageRgb8(buffer) = dynamic else {
             panic!("expected native RGB8 image")
         };
@@ -344,7 +404,11 @@ mod ownership_tests {
             alpha_applied: false,
             indexed_source: false,
         };
-        let converted = image_as_8bit(image).unwrap();
+        let converted = futures::executor::block_on(image_as_8bit(
+            image,
+            &mut ImageCooperation::new(None, BUILTIN_NAME),
+        ))
+        .unwrap();
         let PixelData::U8(data) = converted.data else {
             panic!("expected eight-bit pixels")
         };
@@ -361,7 +425,11 @@ mod ownership_tests {
             alpha_applied: false,
             indexed_source: false,
         };
-        let converted = image_as_8bit(image).unwrap();
+        let converted = futures::executor::block_on(image_as_8bit(
+            image,
+            &mut ImageCooperation::new(None, BUILTIN_NAME),
+        ))
+        .unwrap();
         let PixelData::U8(data) = converted.data else {
             panic!("expected eight-bit pixels")
         };

@@ -140,10 +140,25 @@ fn preflight_known_option_value(
                     }
                     handle.shape().to_vec()
                 }
+                Value::Tensor(alpha) => {
+                    ensure_documented_alpha_class(alpha)?;
+                    alpha.shape.clone()
+                }
+                Value::LogicalArray(alpha) => alpha.shape.clone(),
+                Value::Num(_) | Value::Bool(_) | Value::Int(IntValue::U8(_) | IntValue::U16(_)) => {
+                    vec![1, 1]
+                }
+                Value::Int(_) => {
+                    return Err(imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_OPTION,
+                        "Alpha class must be double, single, uint8, or uint16",
+                    ));
+                }
                 _ => {
-                    let alpha = tensor_from_numeric_like(value, "Alpha")?;
-                    ensure_documented_alpha_class(&alpha)?;
-                    alpha.shape
+                    return Err(imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_IMAGE,
+                        "Alpha must be numeric or logical",
+                    ));
                 }
             };
             let image_shape = match image {
@@ -186,7 +201,10 @@ fn preflight_known_option_value(
     Ok(())
 }
 
-pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult<()> {
+pub(super) async fn preflight_resident_argument_roles(
+    args: &[Value],
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<()> {
     for value in args {
         if let Value::GpuTensor(handle) = value {
             validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
@@ -217,14 +235,18 @@ pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult
             }
             Value::Tensor(tensor) => {
                 ensure_double_colormap(map)?;
-                if !crate::builtins::common::tensor::tensor_values_f64_cow(tensor)
-                    .iter()
-                    .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
-                {
-                    return Err(imwrite_error_with_detail(
-                        &IMWRITE_ERROR_INVALID_COLORMAP,
-                        "map values must be finite and in the range [0, 1]",
-                    ));
+                let map_values = crate::builtins::common::tensor::tensor_values_f64_cow(tensor);
+                for chunk in map_values.chunks(IMAGE_WORK_CHUNK) {
+                    if !chunk
+                        .iter()
+                        .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                    {
+                        return Err(imwrite_error_with_detail(
+                            &IMWRITE_ERROR_INVALID_COLORMAP,
+                            "map values must be finite and in the range [0, 1]",
+                        ));
+                    }
+                    cooperation.completed(chunk.len()).await?;
                 }
                 tensor.shape.as_slice()
             }
@@ -244,22 +266,61 @@ pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult
         // Host X values and the resident map's row count are both known now.
         // Use the same conversion/range rule as materialization before any map readback.
         if !matches!(image, Value::GpuTensor(_)) {
-            let owned;
-            let indexed = match image {
-                Value::Tensor(tensor) => tensor,
-                _ => {
-                    owned = tensor_from_numeric_like(image, "image")?;
-                    &owned
+            match image {
+                Value::Tensor(indexed) => {
+                    let mut pending = 0;
+                    for index in 0..indexed.len() {
+                        let value = indexed.numeric_value_at(index).ok_or_else(|| {
+                            imwrite_error_with_detail(
+                                &IMWRITE_ERROR_INVALID_IMAGE,
+                                format!("indexed image storage is unavailable at element {index}"),
+                            )
+                        })?;
+                        super::materialize::map_index(value, shape[0])?;
+                        pending += 1;
+                        if pending == IMAGE_WORK_CHUNK {
+                            cooperation.completed(pending).await?;
+                            pending = 0;
+                        }
+                    }
+                    cooperation.completed(pending).await?;
                 }
-            };
-            for index in 0..indexed.len() {
-                let value = indexed.numeric_value_at(index).ok_or_else(|| {
-                    imwrite_error_with_detail(
-                        &IMWRITE_ERROR_INVALID_IMAGE,
-                        format!("indexed image storage is unavailable at element {index}"),
-                    )
-                })?;
-                super::materialize::map_index(value, shape[0])?;
+                Value::LogicalArray(indexed) => {
+                    let mut pending = 0;
+                    for &value in &indexed.data {
+                        super::materialize::map_index(
+                            NumericScalar::F64(if value == 0 { 0.0 } else { 1.0 }),
+                            shape[0],
+                        )?;
+                        pending += 1;
+                        if pending == IMAGE_WORK_CHUNK {
+                            cooperation.completed(pending).await?;
+                            pending = 0;
+                        }
+                    }
+                    cooperation.completed(pending).await?;
+                }
+                Value::Num(value) => {
+                    super::materialize::map_index(NumericScalar::F64(*value), shape[0])?;
+                }
+                Value::Bool(value) => {
+                    super::materialize::map_index(
+                        NumericScalar::F64(if *value { 1.0 } else { 0.0 }),
+                        shape[0],
+                    )?;
+                }
+                Value::Int(value) => {
+                    let indexed =
+                        Tensor::new_integer(IntegerStorage::from_scalar(value.clone()), vec![1, 1])
+                            .map_err(|err| {
+                                imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, err)
+                            })?;
+                    super::materialize::map_index(
+                        indexed.numeric_value_at(0).expect("scalar storage"),
+                        shape[0],
+                    )?;
+                }
+                _ => {}
             }
         }
     }

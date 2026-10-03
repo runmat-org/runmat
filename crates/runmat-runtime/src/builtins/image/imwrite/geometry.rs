@@ -45,12 +45,6 @@ pub(super) fn reserve<T>(elements: usize) -> BuiltinResult<Vec<T>> {
     Ok(values)
 }
 
-pub(super) fn buffer<T: Copy + Default>(elements: usize) -> BuiltinResult<Vec<T>> {
-    let mut values = reserve(elements)?;
-    values.resize(elements, T::default());
-    Ok(values)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +65,6 @@ mod tests {
         assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
         let error = reserve::<u16>(usize::MAX).expect_err("byte multiplication overflow");
         assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
-        assert_eq!(buffer::<u16>(3).unwrap(), vec![0_u16; 3]);
+        assert!(reserve::<u16>(3).unwrap().capacity() >= 3);
     }
 }

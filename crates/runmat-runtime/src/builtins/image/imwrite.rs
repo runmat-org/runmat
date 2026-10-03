@@ -16,6 +16,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::tensor;
+use crate::builtins::image::io_cooperation::{ImageCooperation, IMAGE_WORK_CHUNK};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod admission;
@@ -41,9 +42,13 @@ const BUILTIN_NAME: &str = "imwrite";
 #[runtime_builtin(
     name = "imwrite",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::imwrite"
 )]
-async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn imwrite_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     if let Some(n) = crate::output_count::current_output_count() {
         if n > 0 {
             return Err(imwrite_error_with_detail(
@@ -75,7 +80,8 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "filename must not be empty",
         ));
     }
-    preflight::preflight_resident_argument_roles(&args)?;
+    let mut cooperation = ImageCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    preflight::preflight_resident_argument_roles(&args, &mut cooperation).await?;
     let format = preflight::preflight_option_text(
         &args,
         filename_index + 1,
@@ -90,12 +96,14 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
+    cooperation.completed(0).await?;
     let mut host_args = Vec::with_capacity(args.len());
     for arg in &args {
         host_args.push(preflight::gather_imwrite_argument(arg).await?);
+        cooperation.completed(0).await?;
     }
 
-    let invocation = parse_invocation(&host_args)?;
+    let invocation = parse_invocation(&host_args, &mut cooperation).await?;
     if matches!(invocation.format, ImageFormat::Gif | ImageFormat::Tiff)
         && value_numeric_dtype(&invocation.image) == Some(NumericDType::F32)
     {
@@ -108,8 +116,11 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         &invocation.image,
         invocation.map.as_ref(),
         invocation.alpha.as_ref(),
-    )?;
-    let bytes = encode_image(image, &invocation).await?;
+        &mut cooperation,
+    )
+    .await?;
+    let bytes = encode_image(image, &invocation, &mut cooperation).await?;
+    cooperation.completed(0).await?;
     runmat_filesystem::write_async(&invocation.path, &bytes)
         .await
         .map_err(|err| {

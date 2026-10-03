@@ -1,9 +1,13 @@
 use super::*;
 
-pub(super) fn tensor_from_numeric_like(value: &Value, label: &str) -> BuiltinResult<Tensor> {
+pub(super) async fn tensor_from_numeric_like(
+    value: &Value,
+    label: &str,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t.clone()),
-        Value::LogicalArray(a) => logical_to_tensor(a),
+        Value::LogicalArray(a) => logical_to_tensor(a, cooperation).await,
         Value::Num(n) => Tensor::new(vec![*n], vec![1, 1]).map_err(|err| {
             imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, format!("{label}: {err}"))
         }),
@@ -23,31 +27,44 @@ pub(super) fn tensor_from_numeric_like(value: &Value, label: &str) -> BuiltinRes
     }
 }
 
-fn logical_to_tensor(value: &LogicalArray) -> BuiltinResult<Tensor> {
+async fn logical_to_tensor(
+    value: &LogicalArray,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<Tensor> {
+    cooperation.completed(0).await?;
     let mut data = geometry::reserve::<f64>(value.data.len())?;
-    data.extend(value.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }));
+    for chunk in value.data.chunks(IMAGE_WORK_CHUNK) {
+        data.extend(chunk.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }));
+        cooperation.completed(chunk.len()).await?;
+    }
     Tensor::new(data, value.shape.clone())
         .map_err(|err| imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, err))
 }
 
-pub(super) fn materialize_image(
+pub(super) async fn materialize_image(
     image: &Value,
     map: Option<&Value>,
     alpha: Option<&Tensor>,
+    cooperation: &mut ImageCooperation,
 ) -> BuiltinResult<MaterializedImage> {
     ensure_documented_image_class(image, map.is_some(), "image")?;
     if let Some(map) = map {
         ensure_double_colormap(map)?;
     }
-    let tensor = tensor_from_numeric_like(image, "image")?;
+    let tensor = tensor_from_numeric_like(image, "image", cooperation).await?;
     let mut out = if let Some(map_value) = map {
-        materialize_indexed_image(&tensor, &tensor_from_numeric_like(map_value, "map")?)?
+        materialize_indexed_image(
+            &tensor,
+            &tensor_from_numeric_like(map_value, "map", cooperation).await?,
+            cooperation,
+        )
+        .await?
     } else {
-        materialize_direct_image(&tensor)?
+        materialize_direct_image(&tensor, cooperation).await?
     };
 
     if let Some(alpha) = alpha {
-        apply_alpha(&mut out, alpha)?;
+        apply_alpha(&mut out, alpha, cooperation).await?;
     }
     Ok(out)
 }
@@ -122,7 +139,10 @@ pub(super) fn image_dimensions_from_shape(shape: &[usize]) -> BuiltinResult<(usi
     }
 }
 
-fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage> {
+async fn materialize_direct_image(
+    tensor: &Tensor,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<MaterializedImage> {
     let (rows, cols, channels) = image_dimensions(tensor)?;
     let pixels = geometry::pixels(rows, cols)?;
     let samples = geometry::samples(rows, cols, channels)?;
@@ -133,11 +153,17 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
         ));
     }
 
+    cooperation.completed(0).await?;
     let mut data = if tensor.numeric_dtype() == NumericDType::U16 {
-        PixelData::U16(geometry::buffer(samples)?)
+        let mut out = geometry::reserve::<u16>(samples)?;
+        cooperation.fill(&mut out, samples).await?;
+        PixelData::U16(out)
     } else {
-        PixelData::U8(geometry::buffer(samples)?)
+        let mut out = geometry::reserve::<u8>(samples)?;
+        cooperation.fill(&mut out, samples).await?;
+        PixelData::U8(out)
     };
+    let mut pending = 0;
     for row in 0..rows {
         for col in 0..cols {
             for channel in 0..channels {
@@ -148,9 +174,15 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
                     PixelData::U8(data) => data[dst] = value_to_u8(value),
                     PixelData::U16(data) => data[dst] = value_to_u16(value),
                 }
+                pending += 1;
+                if pending == IMAGE_WORK_CHUNK {
+                    cooperation.completed(pending).await?;
+                    pending = 0;
+                }
             }
         }
     }
+    cooperation.completed(pending).await?;
     Ok(MaterializedImage {
         rows,
         cols,
@@ -161,7 +193,11 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
     })
 }
 
-fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<MaterializedImage> {
+async fn materialize_indexed_image(
+    indexed: &Tensor,
+    map: &Tensor,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<MaterializedImage> {
     let (rows, cols, channels) = image_dimensions(indexed)?;
     if channels != 1 {
         return Err(imwrite_error_with_detail(
@@ -185,17 +221,23 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
         ));
     }
     let map_values = tensor::tensor_values_f64_cow(map);
-    if !map_values
-        .iter()
-        .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
-    {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_COLORMAP,
-            "map values must be finite and in the range [0, 1]",
-        ));
+    for chunk in map_values.chunks(IMAGE_WORK_CHUNK) {
+        if !chunk
+            .iter()
+            .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+        {
+            return Err(imwrite_error_with_detail(
+                &IMWRITE_ERROR_INVALID_COLORMAP,
+                "map values must be finite and in the range [0, 1]",
+            ));
+        }
+        cooperation.completed(chunk.len()).await?;
     }
 
-    let mut data = geometry::buffer::<u8>(byte_len)?;
+    cooperation.completed(0).await?;
+    let mut data = geometry::reserve::<u8>(byte_len)?;
+    cooperation.fill(&mut data, byte_len).await?;
+    let mut pending = 0;
     for row in 0..rows {
         for col in 0..cols {
             let pixel = row + rows * col;
@@ -208,8 +250,14 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
                 let src = map_idx + map.shape[0] * channel;
                 data[dst + channel] = value_to_u8(tensor_numeric_value(map, src, "colormap")?);
             }
+            pending += 3;
+            if pending >= IMAGE_WORK_CHUNK {
+                cooperation.completed(pending).await?;
+                pending = 0;
+            }
         }
     }
+    cooperation.completed(pending).await?;
     Ok(MaterializedImage {
         rows,
         cols,
@@ -236,157 +284,14 @@ fn tensor_numeric_value(
     })
 }
 
-pub(super) fn map_index(value: NumericScalar, map_rows: usize) -> BuiltinResult<usize> {
-    let index = match value {
-        NumericScalar::F64(value) => floating_map_index(value)?,
-        NumericScalar::F32(value) => floating_map_index(f64::from(value))?,
-        NumericScalar::U8(value) => usize::from(value),
-        NumericScalar::U16(value) => usize::from(value),
-        NumericScalar::I8(value) => one_based_signed_index(i128::from(value))?,
-        NumericScalar::I16(value) => one_based_signed_index(i128::from(value))?,
-        NumericScalar::I32(value) => one_based_signed_index(i128::from(value))?,
-        NumericScalar::I64(value) => one_based_signed_index(i128::from(value))?,
-        NumericScalar::U32(value) => one_based_unsigned_index(u128::from(value))?,
-        NumericScalar::U64(value) => one_based_unsigned_index(u128::from(value))?,
-    };
-    if index >= map_rows {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            format!(
-                "indexed image value {} is outside the colormap",
-                numeric_scalar_text(value)
-            ),
-        ));
-    }
-    Ok(index)
-}
+mod numeric;
+pub(super) use numeric::{map_index, value_to_u16, value_to_u8};
 
-fn floating_map_index(value: f64) -> BuiltinResult<usize> {
-    if !value.is_finite() {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            "indexed image values must be finite",
-        ));
-    }
-    let rounded = value.round();
-    if rounded < 1.0 || rounded > usize::MAX as f64 {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            format!("indexed image value {value} is outside the colormap"),
-        ));
-    }
-    Ok(rounded as usize - 1)
-}
-
-fn one_based_signed_index(value: i128) -> BuiltinResult<usize> {
-    if value < 1 {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            format!("indexed image value {value} is outside the colormap"),
-        ));
-    }
-    usize::try_from(value - 1).map_err(|_| {
-        imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            format!("indexed image value {value} is outside the colormap"),
-        )
-    })
-}
-
-fn one_based_unsigned_index(value: u128) -> BuiltinResult<usize> {
-    if value == 0 {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            "indexed image value 0 is outside the colormap",
-        ));
-    }
-    usize::try_from(value - 1).map_err(|_| {
-        imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            format!("indexed image value {value} is outside the colormap"),
-        )
-    })
-}
-
-pub(super) fn value_to_u8(value: NumericScalar) -> u8 {
-    match value {
-        NumericScalar::F64(value) => normalized_float_to_u8(value),
-        NumericScalar::F32(value) => normalized_float_to_u8(f64::from(value)),
-        integer => scaled_integer(integer, u8::MAX as u128) as u8,
-    }
-}
-
-pub(super) fn value_to_u16(value: NumericScalar) -> u16 {
-    match value {
-        NumericScalar::F64(value) => normalized_float_to_u16(value),
-        NumericScalar::F32(value) => normalized_float_to_u16(f64::from(value)),
-        integer => scaled_integer(integer, u16::MAX as u128) as u16,
-    }
-}
-
-fn normalized_float_to_u8(value: f64) -> u8 {
-    let scaled = value.clamp(0.0, 1.0) * u8::MAX as f64;
-    if scaled.is_nan() {
-        0
-    } else {
-        scaled.round() as u8
-    }
-}
-
-fn normalized_float_to_u16(value: f64) -> u16 {
-    let scaled = value.clamp(0.0, 1.0) * u16::MAX as f64;
-    if scaled.is_nan() {
-        0
-    } else {
-        scaled.round() as u16
-    }
-}
-
-fn scaled_integer(value: NumericScalar, output_max: u128) -> u128 {
-    let (offset, input_max) = match value {
-        NumericScalar::I8(value) => (
-            (i128::from(value) - i128::from(i8::MIN)) as u128,
-            u128::from(u8::MAX),
-        ),
-        NumericScalar::I16(value) => (
-            (i128::from(value) - i128::from(i16::MIN)) as u128,
-            u128::from(u16::MAX),
-        ),
-        NumericScalar::I32(value) => (
-            (i128::from(value) - i128::from(i32::MIN)) as u128,
-            u128::from(u32::MAX),
-        ),
-        NumericScalar::I64(value) => (
-            (i128::from(value) - i128::from(i64::MIN)) as u128,
-            u128::from(u64::MAX),
-        ),
-        NumericScalar::U8(value) => (u128::from(value), u128::from(u8::MAX)),
-        NumericScalar::U16(value) => (u128::from(value), u128::from(u16::MAX)),
-        NumericScalar::U32(value) => (u128::from(value), u128::from(u32::MAX)),
-        NumericScalar::U64(value) => (u128::from(value), u128::from(u64::MAX)),
-        NumericScalar::F64(_) | NumericScalar::F32(_) => {
-            unreachable!("floating image samples use normalized conversion")
-        }
-    };
-    (offset * output_max + input_max / 2) / input_max
-}
-
-fn numeric_scalar_text(value: NumericScalar) -> String {
-    match value {
-        NumericScalar::F64(value) => value.to_string(),
-        NumericScalar::F32(value) => value.to_string(),
-        NumericScalar::I8(value) => value.to_string(),
-        NumericScalar::I16(value) => value.to_string(),
-        NumericScalar::I32(value) => value.to_string(),
-        NumericScalar::I64(value) => value.to_string(),
-        NumericScalar::U8(value) => value.to_string(),
-        NumericScalar::U16(value) => value.to_string(),
-        NumericScalar::U32(value) => value.to_string(),
-        NumericScalar::U64(value) => value.to_string(),
-    }
-}
-
-fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<()> {
+async fn apply_alpha(
+    image: &mut MaterializedImage,
+    alpha: &Tensor,
+    cooperation: &mut ImageCooperation,
+) -> BuiltinResult<()> {
     if alpha.shape.len() != 2 || alpha.shape[0] != image.rows || alpha.shape[1] != image.cols {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
@@ -402,9 +307,12 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
     }
 
     let rgba_samples = geometry::samples(image.rows, image.cols, 4)?;
+    cooperation.completed(0).await?;
+    let mut pending = 0;
     image.data = match &image.data {
         PixelData::U8(data) => {
-            let mut rgba = geometry::buffer::<u8>(rgba_samples)?;
+            let mut rgba = geometry::reserve::<u8>(rgba_samples)?;
+            cooperation.fill(&mut rgba, rgba_samples).await?;
             for row in 0..image.rows {
                 for col in 0..image.cols {
                     let pixel = row * image.cols + col;
@@ -426,12 +334,18 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
                         _ => unreachable!(),
                     }
                     rgba[dst + 3] = value_to_u8(tensor_numeric_value(alpha, alpha_idx, "Alpha")?);
+                    pending += 4;
+                    if pending >= IMAGE_WORK_CHUNK {
+                        cooperation.completed(pending).await?;
+                        pending = 0;
+                    }
                 }
             }
             PixelData::U8(rgba)
         }
         PixelData::U16(data) => {
-            let mut rgba = geometry::buffer::<u16>(rgba_samples)?;
+            let mut rgba = geometry::reserve::<u16>(rgba_samples)?;
+            cooperation.fill(&mut rgba, rgba_samples).await?;
             for row in 0..image.rows {
                 for col in 0..image.cols {
                     let pixel = row * image.cols + col;
@@ -453,12 +367,22 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
                         _ => unreachable!(),
                     }
                     rgba[dst + 3] = value_to_u16(tensor_numeric_value(alpha, alpha_idx, "Alpha")?);
+                    pending += 4;
+                    if pending >= IMAGE_WORK_CHUNK {
+                        cooperation.completed(pending).await?;
+                        pending = 0;
+                    }
                 }
             }
             PixelData::U16(rgba)
         }
     };
+    cooperation.completed(pending).await?;
     image.channels = 4;
     image.alpha_applied = true;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "materialize/cooperation_tests.rs"]
+mod cooperation_tests;
