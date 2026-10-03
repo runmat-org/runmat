@@ -311,7 +311,7 @@ fn upload_candidate(
             ),
             queue_slots,
             preparation: CandidatePreparationState::Ready,
-            readbacks,
+            readbacks: Box::new(readbacks),
         },
         None => CandidateOutputPresentation::ProviderUpload {
             device_id,

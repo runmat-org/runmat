@@ -262,7 +262,7 @@ fn candidate_total_ns(
             CandidateResourceFacts {
                 location: candidate.descriptor.execution_location,
                 output_residency: candidate.descriptor.output_residency,
-                presentation: candidate.descriptor.presentation,
+                presentation: &candidate.descriptor.presentation,
                 kind: candidate.descriptor.kind,
                 demand: candidate.resources,
                 transactional_results: candidate.transactional_results,
@@ -282,7 +282,7 @@ fn candidate_total_ns(
 /// Resource-only admission shared by numeric graph placement and exploratory
 /// whole-work selection. It never constructs a synthetic cost estimate.
 pub(super) fn single_candidate_resources_admitted(
-    candidate: CandidateResourceFacts,
+    candidate: CandidateResourceFacts<'_>,
     resources: &PlacementResourceSnapshot,
     require_transactional_results: bool,
 ) -> Result<(), ResourceAdmissionError> {
@@ -298,10 +298,10 @@ pub(super) fn single_candidate_resources_admitted(
     .map(|_| ())
 }
 
-pub(super) struct CandidateResourceFacts {
+pub(super) struct CandidateResourceFacts<'a> {
     pub(super) location: CandidateExecutionLocation,
     pub(super) output_residency: CandidateOutputResidency,
-    pub(super) presentation: CandidateOutputPresentation,
+    pub(super) presentation: &'a CandidateOutputPresentation,
     pub(super) kind: ExecutionCandidateKind,
     pub(super) demand: CandidateResourceDemand,
     pub(super) transactional_results: bool,
@@ -315,7 +315,7 @@ struct ResourceAdmissionContext<'a> {
 }
 
 fn candidate_resource_adjustment_ns(
-    candidate: CandidateResourceFacts,
+    candidate: CandidateResourceFacts<'_>,
     admission: ResourceAdmissionContext<'_>,
 ) -> Result<u64, ResourceAdmissionError> {
     let CandidateResourceFacts {
@@ -413,11 +413,11 @@ fn candidate_resource_adjustment_ns(
             queue_slots,
             ..
         } => Some((
-            device_id,
-            host_result_bytes,
-            host_scratch_bytes,
-            provider_scratch_bytes,
-            queue_slots,
+            *device_id,
+            *host_result_bytes,
+            *host_scratch_bytes,
+            *provider_scratch_bytes,
+            *queue_slots,
         )),
         _ => None,
     };
@@ -492,24 +492,24 @@ fn candidate_resource_adjustment_ns(
     } = presentation
     {
         let provider = resources
-            .provider(device_id)
+            .provider(*device_id)
             .ok_or(ResourceAdmissionError::UnavailableProvider)?;
         if provider.lost
             || provider
                 .queue_depth
                 .zip(provider.queue_limit)
-                .is_some_and(|(depth, limit)| queue_slots > limit.saturating_sub(depth))
+                .is_some_and(|(depth, limit)| *queue_slots > limit.saturating_sub(depth))
         {
             return Err(ResourceAdmissionError::OverBudget);
         }
         let scratch = ResourceAccount::default()
-            .add(provider_scratch_bytes)
+            .add(*provider_scratch_bytes)
             .ok_or(ResourceAdmissionError::Overflow)?;
         scratch.within(
             provider.scratch_available_bytes,
-            ResourceBudgetKind::ProviderScratch(device_id),
+            ResourceBudgetKind::ProviderScratch(*device_id),
         )?;
-        provider_demands.insert(device_id, scratch);
+        provider_demands.insert(*device_id, scratch);
     }
     let host_published_bound = match presentation {
         CandidateOutputPresentation::ProviderUpload {

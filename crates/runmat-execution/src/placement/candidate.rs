@@ -13,7 +13,7 @@ pub struct ProviderReadbackDemand {
 }
 
 /// Placement snapshots admit at most sixteen provider namespaces. A fixed
-/// inline set retains the candidate's Copy ABI and rejects excess owners,
+/// inline set rejects excess owners,
 /// never truncating an otherwise unbudgeted readback route.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,6 +84,46 @@ impl ProviderReadbackDemands {
 #[cfg(test)]
 mod readback_demand_tests {
     use super::*;
+
+    #[test]
+    fn presentation_keeps_inline_routes_compact_and_readback_wire_shape_unchanged() {
+        assert!(std::mem::size_of::<CandidateOutputPresentation>() <= 128);
+        let demands = ProviderReadbackDemands::sequential([ProviderReadbackDemand {
+            device_id: 7,
+            provider_scratch_bytes: ResourceByteBound::Known(8),
+            queue_slots: 1,
+        }])
+        .unwrap();
+        let presentation = CandidateOutputPresentation::ProviderReadbackUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_result_bytes: Some(ResourceByteBound::Known(16)),
+            host_scratch_bytes: ResourceByteBound::Known(0),
+            provider_scratch_bytes: ResourceByteBound::Known(8),
+            queue_slots: 1,
+            preparation: CandidatePreparationState::Ready,
+            readbacks: Box::new(demands),
+        };
+        let encoded = serde_json::to_value(&presentation).unwrap();
+        assert_eq!(encoded["readbacks"], serde_json::to_value(demands).unwrap());
+        assert_eq!(
+            serde_json::from_value::<CandidateOutputPresentation>(encoded).unwrap(),
+            presentation,
+        );
+        let owner = |device_id| ProviderReadbackDemand {
+            device_id,
+            provider_scratch_bytes: ResourceByteBound::Known(8),
+            queue_slots: 1,
+        };
+        assert_eq!(
+            ProviderReadbackDemands::sequential((0..16).map(owner))
+                .unwrap()
+                .iter()
+                .count(),
+            16,
+        );
+        assert!(ProviderReadbackDemands::sequential((0..17).map(owner)).is_none());
+    }
 
     #[test]
     fn sequential_readbacks_keep_each_owner_and_peak_same_owner_staging() {
@@ -196,7 +236,7 @@ pub enum CandidateOutputResidency {
 /// A complete host route may require a provider readback before computation
 /// or an upload after computation. These are real transfer stages, not changes
 /// to the computation location or guessed costs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum CandidateOutputPresentation {
     Direct,
@@ -237,7 +277,7 @@ pub enum CandidateOutputPresentation {
         provider_scratch_bytes: ResourceByteBound,
         queue_slots: u32,
         preparation: CandidatePreparationState,
-        readbacks: ProviderReadbackDemands,
+        readbacks: Box<ProviderReadbackDemands>,
     },
 }
 
@@ -249,7 +289,7 @@ impl Default for CandidateOutputPresentation {
 
 impl CandidateOutputPresentation {
     pub fn validate_for(
-        self,
+        &self,
         execution: CandidateExecutionLocation,
         output: CandidateOutputResidency,
     ) -> Result<(), &'static str> {
@@ -258,7 +298,7 @@ impl CandidateOutputPresentation {
                 Self::ProviderDownload { queue_slots, provider_scratch_bytes, .. },
                 CandidateExecutionLocation::Host,
                 CandidateOutputResidency::Host,
-            ) if queue_slots > 0 || provider_scratch_bytes == ResourceByteBound::Known(0) => Ok(()),
+            ) if *queue_slots > 0 || *provider_scratch_bytes == ResourceByteBound::Known(0) => Ok(()),
             (Self::ProviderDownload { .. }, _, _) => {
                 Err("provider download presentation needs a host route, host output, and a queue slot unless zero staging is proven")
             }
@@ -276,7 +316,7 @@ impl CandidateOutputPresentation {
                 CandidateExecutionLocation::Host,
                 CandidateOutputResidency::Provider { device_id: output }
                 | CandidateOutputResidency::Mirrored { device_id: output },
-            ) if upload == output && queue_slots > 0
+            ) if *upload == output && *queue_slots > 0
                 && !matches!(
                     preparation,
                     CandidatePreparationState::Preparing | CandidatePreparationState::Unknown
@@ -292,7 +332,7 @@ impl CandidateOutputPresentation {
                 CandidateExecutionLocation::Host,
                 CandidateOutputResidency::Provider { device_id: output }
                 | CandidateOutputResidency::Mirrored { device_id: output },
-            ) if upload == output && queue_slots > 0
+            ) if *upload == output && *queue_slots > 0
                 && !matches!(preparation, CandidatePreparationState::Preparing | CandidatePreparationState::Unknown)
                 && readbacks.is_canonical() && readbacks.iter().next().is_some() => Ok(()),
             (Self::ProviderUpload { .. }, _, _) => {

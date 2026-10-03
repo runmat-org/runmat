@@ -70,7 +70,7 @@ impl PlacementSession {
                 CandidateResourceFacts {
                     location: candidate.execution_location,
                     output_residency: candidate.output_residency,
-                    presentation: candidate.presentation,
+                    presentation: &candidate.presentation,
                     kind: candidate.kind,
                     demand,
                     transactional_results: candidate.transactional_results,
@@ -233,7 +233,7 @@ impl PlacementSession {
                         preparation: item.candidate.preparation,
                         cost,
                         output_residency: item.candidate.output_residency,
-                        presentation: item.candidate.presentation,
+                        presentation: item.candidate.presentation.clone(),
                         guards: Vec::new(),
                     },
                     resources: item.candidate.resources,

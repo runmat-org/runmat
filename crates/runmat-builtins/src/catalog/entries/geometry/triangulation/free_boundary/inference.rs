@@ -64,7 +64,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         StorageFact::Dense,
     );
     output.residency = ResidencyFact::Host;
-    if request.arguments.first().is_none() {
+    if request.arguments.is_empty() {
         output.certainty = runmat_types::CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
     }
     let mut contract = CallContract::fixed(vec![output]);

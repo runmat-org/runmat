@@ -84,12 +84,14 @@ fn host_with_cross_owner_readback(scratch: ResourceByteBound) -> WholeWorkCandid
         provider_scratch_bytes: ResourceByteBound::Known(8),
         queue_slots: 1,
         preparation: CandidatePreparationState::Ready,
-        readbacks: ProviderReadbackDemands::sequential([ProviderReadbackDemand {
-            device_id: 8,
-            provider_scratch_bytes: scratch,
-            queue_slots: 1,
-        }])
-        .unwrap(),
+        readbacks: Box::new(
+            ProviderReadbackDemands::sequential([ProviderReadbackDemand {
+                device_id: 8,
+                provider_scratch_bytes: scratch,
+                queue_slots: 1,
+            }])
+            .unwrap(),
+        ),
     };
     host
 }
@@ -155,12 +157,14 @@ fn same_owner_readback_and_retained_output_use_sequential_physical_peak() {
         provider_scratch_bytes: ResourceByteBound::Known(0),
         queue_slots: 1,
         preparation: CandidatePreparationState::Ready,
-        readbacks: ProviderReadbackDemands::sequential([ProviderReadbackDemand {
-            device_id: 7,
-            provider_scratch_bytes: ResourceByteBound::Known(8),
-            queue_slots: 1,
-        }])
-        .unwrap(),
+        readbacks: Box::new(
+            ProviderReadbackDemands::sequential([ProviderReadbackDemand {
+                device_id: 7,
+                provider_scratch_bytes: ResourceByteBound::Known(8),
+                queue_slots: 1,
+            }])
+            .unwrap(),
+        ),
     };
     let mut route = request(vec![host]);
     route.resources.providers[0].live_bytes = 8;
