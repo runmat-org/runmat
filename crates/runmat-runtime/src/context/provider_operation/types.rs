@@ -74,7 +74,73 @@ pub(crate) struct ExactProviderOperation<'a> {
 pub(crate) struct SelectedProviderOperation {
     pub(super) provider: &'static dyn AccelProvider,
     pub(super) receipt: HostPresentationReceipt,
+    pub(super) direct_output: DirectProviderPublication,
     pub(super) conditional_upload: ConditionalUploadPublication,
+}
+
+pub(super) enum DirectProviderPublication {
+    NoOutput,
+    Pending {
+        outputs: usize,
+        requested_bytes: u64,
+    },
+    Validated {
+        outputs: usize,
+        requested_bytes: u64,
+    },
+    Rejected,
+}
+
+impl DirectProviderPublication {
+    pub(super) fn new(outputs: usize, requested_bytes: Option<u64>) -> Option<Self> {
+        if outputs == 0 {
+            return Some(Self::NoOutput);
+        }
+        requested_bytes.map(|requested_bytes| Self::Pending {
+            outputs,
+            requested_bytes,
+        })
+    }
+
+    fn validate(
+        &mut self,
+        provider: &'static dyn AccelProvider,
+        handles: &[&GpuTensorHandle],
+    ) -> bool {
+        let (outputs, requested_bytes) = match *self {
+            Self::Pending {
+                outputs,
+                requested_bytes,
+            }
+            | Self::Validated {
+                outputs,
+                requested_bytes,
+            } => (outputs, requested_bytes),
+            Self::NoOutput | Self::Rejected => {
+                *self = Self::Rejected;
+                return false;
+            }
+        };
+        let actual_bytes = handles.iter().try_fold(0_u64, |total, handle| {
+            conditional_output_owner_valid(provider, handle)
+                .then(|| total.checked_add(handle.physical().requested_bytes()))
+                .flatten()
+        });
+        if handles.len() == outputs && actual_bytes == Some(requested_bytes) {
+            *self = Self::Validated {
+                outputs,
+                requested_bytes,
+            };
+            true
+        } else {
+            *self = Self::Rejected;
+            false
+        }
+    }
+
+    fn can_publish(&self) -> bool {
+        matches!(self, Self::NoOutput | Self::Validated { .. })
+    }
 }
 
 pub(super) enum ConditionalUploadPublication {
@@ -133,6 +199,10 @@ fn conditional_output_owner_valid(
 }
 
 impl SelectedProviderOperation {
+    pub(crate) fn validate_direct_provider_output(&mut self, output: &GpuTensorHandle) -> bool {
+        self.direct_output.validate(self.provider, &[output])
+    }
+
     pub(crate) fn begin_conditional_provider_upload(&mut self) {
         self.conditional_upload.begin();
         self.receipt.begin_conditional_provider_upload();
@@ -159,7 +229,10 @@ impl SelectedProviderOperation {
     }
 
     pub(crate) fn finish(self, published: Result<bool, ProviderObservationFailure>) {
-        if matches!(published, Ok(true)) && self.conditional_upload.conditional_attempted() {
+        if matches!(published, Ok(true))
+            && (self.conditional_upload.conditional_attempted()
+                || !self.direct_output.can_publish())
+        {
             self.receipt
                 .finish(Err(ProviderObservationFailure::PublicationFailed));
         } else {
@@ -206,10 +279,14 @@ impl SelectedProviderOperation {
 
 #[cfg(test)]
 mod tests {
-    use super::{conditional_output_owner_valid, ConditionalUploadPublication};
+    use super::{
+        conditional_output_owner_valid, ConditionalUploadPublication, DirectProviderPublication,
+    };
     use crate::builtins::common::gpu_helpers;
     use runmat_accelerate::simple_provider::InProcessProvider;
-    use runmat_accelerate_api::{same_provider_instance, AccelProvider, ThreadProviderGuard};
+    use runmat_accelerate_api::{
+        same_provider_instance, AccelProvider, GpuTensorView, ThreadProviderGuard,
+    };
     use runmat_value::Tensor;
 
     #[test]
@@ -255,5 +332,47 @@ mod tests {
         ));
         assert!(!selected.validated());
         assert!(output.allocation_lease().validate_live().is_ok());
+    }
+
+    #[test]
+    fn direct_publication_uses_selected_physical_extent_and_exact_owner() {
+        let owner: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+        let foreign: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+        let _selected_owner = ThreadProviderGuard::set(Some(owner));
+        let exact = gpu_helpers::upload_tensor(
+            owner,
+            &Tensor::new(vec![1.0], vec![1, 1]).expect("exact tensor"),
+        )
+        .expect("exact output");
+        let retained_caller = gpu_helpers::upload_tensor(
+            owner,
+            &Tensor::new(vec![2.0; 4], vec![2, 2]).expect("large tensor"),
+        )
+        .expect("caller-owned allocation");
+        let larger_view = retained_caller
+            .with_view(GpuTensorView::contiguous(vec![1, 1]))
+            .expect("same view, larger backing allocation");
+        let expected = exact.physical().requested_bytes();
+        assert!(DirectProviderPublication::new(0, None)
+            .expect("no-output form")
+            .can_publish());
+        assert!(DirectProviderPublication::new(1, None).is_none());
+        let mut admitted = DirectProviderPublication::new(1, Some(expected)).expect("bound");
+        assert!(!admitted.can_publish());
+        assert!(admitted.validate(owner, &[&exact]));
+        assert!(admitted.can_publish());
+        let mut oversized = DirectProviderPublication::new(1, Some(expected)).expect("bound");
+        assert!(!oversized.validate(owner, &[&larger_view]));
+        assert!(!oversized.can_publish());
+        assert!(!oversized.validate(owner, &[&exact]));
+        let mut wrong_owner = DirectProviderPublication::new(1, Some(expected)).expect("bound");
+        assert!(!wrong_owner.validate(foreign, &[&exact]));
+        assert!(!wrong_owner.can_publish());
+        let error = crate::build_runtime_error("invalid provider result")
+            .with_identifier("RunMat:test")
+            .build();
+        let _ = gpu_helpers::reject_gpu_output(larger_view, error);
+        assert!(retained_caller.allocation_lease().validate_live().is_ok());
+        assert!(exact.allocation_lease().validate_live().is_ok());
     }
 }

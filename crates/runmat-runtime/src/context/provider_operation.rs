@@ -15,7 +15,7 @@ mod readbacks;
 mod types;
 use candidate::admitted_candidate;
 use readbacks::prepare_readbacks;
-use types::ConditionalUploadPublication;
+use types::{ConditionalUploadPublication, DirectProviderPublication};
 pub(crate) use types::{
     ExactConditionalProviderUpload, ExactProviderOperation, ExactProviderReadback,
     ExactProviderReadbackPhase, SelectedProviderOperation,
@@ -42,6 +42,30 @@ pub(crate) fn select_exact_provider_operation(
         .build());
     }
     let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(query) else {
+        return Ok(None);
+    };
+    let Some(direct_output) =
+        DirectProviderPublication::new(query.outputs.len(), estimate.output_bytes)
+    else {
+        // No selected route may claim a physical retained result from its
+        // logical output geometry. The provider call remains available to the
+        // caller without a qualified placement receipt only when no finite
+        // memory resource contract would thereby be bypassed.
+        let resources = provider.placement_resources();
+        let finite_host = runtime
+            .service_ports()
+            .parallel()
+            .is_some_and(|port| port.placement_resources().memory_available_bytes.is_some());
+        if finite_host
+            || resources.capacity_bytes.is_some()
+            || resources.scratch_available_bytes.is_some()
+        {
+            return Err(build_runtime_error(
+                "provider result has no physical publication bound under a finite resource budget",
+            )
+            .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+            .build());
+        }
         return Ok(None);
     };
     if request
@@ -126,6 +150,7 @@ pub(crate) fn select_exact_provider_operation(
     Ok(Some(SelectedProviderOperation {
         provider,
         receipt: HostPresentationReceipt::new(runtime.clone(), selected, receipt),
+        direct_output,
         conditional_upload: ConditionalUploadPublication::new(
             prepared
                 .conditional_provider_upload

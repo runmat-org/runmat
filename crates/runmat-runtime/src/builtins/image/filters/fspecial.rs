@@ -264,7 +264,7 @@ async fn fspecial_builtin(
     }
     let spec = build_filter_spec(&kind, &rest)?;
     let materialize_on_gpu = should_materialize_on_gpu();
-    let selected = placement::select(runtime.as_ref(), &spec, materialize_on_gpu)?;
+    let mut selected = placement::select(runtime.as_ref(), &spec, materialize_on_gpu)?;
     let tensor = spec.generate_tensor()?;
     let recorder = selected.as_ref().map(|selection| selection.recorder());
     let provider = selected.as_ref().map(|selection| selection.provider());
@@ -274,6 +274,22 @@ async fn fspecial_builtin(
         .as_ref()
         .is_ok_and(|published| published.unsupported_fallback);
     let result = publication.map(|published| published.value);
+    let result = match result {
+        Ok(Value::GpuTensor(output))
+            if selected
+                .as_mut()
+                .is_some_and(|selection| !selection.validate_direct_provider_output(&output)) =>
+        {
+            let error = fspecial_descriptor_error(
+                &FSPECIAL_ERROR_INTERNAL,
+                "provider result exceeded its admitted physical publication",
+            );
+            Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                output, error,
+            ))
+        }
+        other => other,
+    };
     if let Some(selection) = selected {
         match &result {
             Ok(Value::GpuTensor(_)) => selection.finish(Ok(true)),

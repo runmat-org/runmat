@@ -280,6 +280,9 @@ pub(super) async fn imfilter_gpu(
             ) || resident_kernel
                 .as_ref()
                 .is_some_and(|original| output.shares_allocation_with(original))
+                || selected
+                    .as_mut()
+                    .is_some_and(|selection| !selection.validate_direct_provider_output(&output))
             {
                 if let Some(selection) = selected {
                     selection.finish(Err(runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed));

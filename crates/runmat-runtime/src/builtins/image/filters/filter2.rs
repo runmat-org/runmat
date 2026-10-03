@@ -561,7 +561,7 @@ async fn filter2_gpu(
         value_is_single(&Value::GpuTensor(kernel_handle.clone())),
         false,
     );
-    let selected = if let Some(prepared) = prepared_selection {
+    let mut selected = if let Some(prepared) = prepared_selection {
         Some(prepared.selection)
     } else if uploaded_kernel.is_none() {
         placement::select_direct(
@@ -610,7 +610,10 @@ async fn filter2_gpu(
                     Some(provider.precision()),
                     None,
                     false,
-                );
+                )
+                && selected
+                    .as_mut()
+                    .is_none_or(|selection| selection.validate_direct_provider_output(&output));
             if !valid {
                 if let Some(selection) = selected {
                     selection.finish(Err(runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed));
