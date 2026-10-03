@@ -13,8 +13,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 runmat-geometry-io = { workspace = true, optional = true }
 runmat-meshing-core = { workspace = true }
+runmat-geometry-core = { workspace = true, optional = true }
 
 [features]
 default = []
 dev-evidence = []
-example-fixtures = ["dep:runmat-geometry-io"]
+example-fixtures = ["dep:runmat-geometry-io", "dep:runmat-geometry-core"]

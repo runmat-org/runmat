@@ -114,8 +114,14 @@ tokio = { version = "1.36", default-features = false, features = ["macros", "rt"
 wgpu = "24.0.0"
 runmat-accelerate = { workspace = true, features = ["wgpu"] }
 
+[[bin]]
+name = "export_fea_author_study_fixture"
+path = "src/bin/export_fea_author_study_fixture.rs"
+required-features = ["fea-example-fixtures"]
+
 [features]
 default = ["plot-core"]
+fea-example-fixtures = ["runmat-meshing-evidence/example-fixtures"]
 
 # Core plotting types (figures, builders, shared renderer structs)
 plot-core = ["dep:runmat-plot"]

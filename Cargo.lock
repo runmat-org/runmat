@@ -6909,6 +6909,8 @@ dependencies = [
 name = "runmat-meshing-evidence"
 version = "0.6.2"
 dependencies = [
+ "runmat-geometry-core",
+ "runmat-geometry-io",
  "runmat-meshing-core",
  "serde",
  "serde_json",
