@@ -2,7 +2,10 @@
 
 #[path = "webread/options.rs"]
 mod options;
+#[path = "webread/preflight.rs"]
+mod preflight;
 use options::*;
+use preflight::*;
 
 use runmat_value::NumericScalar;
 use std::collections::VecDeque;
@@ -124,6 +127,7 @@ async fn webread_builtin(
             "webread: URL must not be empty",
         ));
     }
+    preflight_host_arguments(&rest)?;
     let gathered_args = gather_arguments(rest).await?;
     let (options, query_params) = parse_arguments(gathered_args)?;
     execute_request(&url_text, options, &query_params, context.as_ref()).await

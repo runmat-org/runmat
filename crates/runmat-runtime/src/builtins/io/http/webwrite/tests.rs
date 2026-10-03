@@ -8,6 +8,30 @@ fn webwrite_rejects_excess_outputs_before_input_or_http_service() {
         .expect_err("excess outputs");
     assert_eq!(error.identifier(), Some("RunMat:webwrite:TooManyOutputs"));
 }
+
+#[test]
+fn webwrite_rejects_known_invalid_timeout_before_resident_body_readback() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident request body");
+    let error = futures::executor::block_on(webwrite_builtin(
+        None,
+        Value::from("https://example.test"),
+        vec![
+            Value::GpuTensor(allocation.handle.clone()),
+            Value::from("Timeout"),
+            Value::Num(-1.0),
+        ],
+    ))
+    .expect_err("invalid host timeout");
+    assert!(error.message().contains("Timeout"));
+    assert!(!error.message().contains("provider"));
+    assert_eq!(allocation.probe.retirements(), 0);
+}
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;

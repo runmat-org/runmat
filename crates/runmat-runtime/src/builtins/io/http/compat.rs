@@ -304,6 +304,7 @@ async fn websave_builtin(
     let url_text = scalar_text(&args[1], "websave", "url")?;
     let mut url = Url::parse(&url_text)
         .map_err(|err| compat_error("websave", format!("websave: invalid URL ({err})")))?;
+    preflight_websave_rest(&args[2..])?;
     let rest = gather_args("websave", &args[2..]).await?;
     let mut headers = Vec::new();
     let mut timeout = DEFAULT_TIMEOUT;

@@ -1,4 +1,50 @@
 use super::*;
+pub(super) fn preflight_websave_rest(args: &[Value]) -> BuiltinResult<()> {
+    let mut headers = Vec::new();
+    let mut timeout = DEFAULT_TIMEOUT;
+    let mut user_agent = USER_AGENT.to_string();
+    let mut index = 0;
+    if let Some(Value::Struct(options)) = args.first() {
+        if !crate::dispatcher::value_contains_gpu(&args[0]) {
+            apply_websave_options(options, &mut headers, &mut timeout, &mut user_agent)?;
+        }
+        index = 1;
+    }
+    if !(args.len() - index).is_multiple_of(2) {
+        return Err(compat_error(
+            "websave",
+            "websave: name-value arguments must be paired",
+        ));
+    }
+    while index < args.len() {
+        if !crate::dispatcher::value_contains_gpu(&args[index]) {
+            let name = scalar_text(&args[index], "websave", "name")?;
+            let value = &args[index + 1];
+            if !crate::dispatcher::value_contains_gpu(value) {
+                match name.to_ascii_lowercase().as_str() {
+                    "timeout" => {
+                        let _ = numeric_seconds(value, "websave Timeout")?;
+                    }
+                    "useragent" => {
+                        let _ = scalar_text(value, "websave", "UserAgent")?;
+                    }
+                    "headerfields" => {
+                        return Err(compat_error(
+                            "websave",
+                            "websave: HeaderFields must be supplied through weboptions",
+                        ));
+                    }
+                    _ => {
+                        let _ = query_value_to_string(value, &name)?;
+                    }
+                }
+            }
+        }
+        index += 2;
+    }
+    Ok(())
+}
+
 pub(super) fn parse_websave_rest(
     url: &mut Url,
     headers: &mut Vec<(String, String)>,

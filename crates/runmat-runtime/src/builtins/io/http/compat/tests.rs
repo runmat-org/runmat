@@ -7,6 +7,32 @@ fn websave_rejects_excess_outputs_before_input_or_http_service() {
     assert_eq!(error.identifier(), Some("RunMat:websave:TooManyOutputs"));
 }
 
+#[test]
+fn websave_rejects_known_invalid_timeout_before_resident_query_readback() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident query value");
+    let error = run(websave_builtin(
+        None,
+        vec![
+            Value::from("result.bin"),
+            Value::from("https://example.test"),
+            Value::from("Timeout"),
+            Value::Num(-1.0),
+            Value::from("q"),
+            Value::GpuTensor(allocation.handle.clone()),
+        ],
+    ))
+    .expect_err("invalid host timeout");
+    assert!(error.message().contains("Timeout"));
+    assert!(!error.message().contains("provider"));
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
 fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
     futures::executor::block_on(value)
 }

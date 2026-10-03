@@ -6,9 +6,12 @@ mod body;
 mod model;
 #[path = "webwrite/options.rs"]
 mod options;
+#[path = "webwrite/preflight.rs"]
+mod preflight;
 use body::*;
 use model::*;
 use options::*;
+use preflight::*;
 
 use runmat_value::NumericScalar;
 use std::collections::VecDeque;
@@ -138,6 +141,7 @@ async fn webwrite_builtin(
             WEBWRITE_ERROR_MISSING_DATA.message,
         ));
     }
+    preflight_host_arguments(&rest[1..])?;
 
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
