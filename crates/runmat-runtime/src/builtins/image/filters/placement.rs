@@ -2,7 +2,7 @@
 //! provider-side physical preflight. Public filter2/imfilter identity and
 //! preparation routes remain with their respective domain owners.
 
-use super::imfilter::filter_output_shape;
+use super::geometry::filter_output_shape;
 use crate::context::provider_operation::{
     select_exact_provider_operation, ExactConditionalProviderUpload, ExactProviderOperation,
     ExactProviderReadback, ExactProviderReadbackPhase, SelectedProviderOperation,
@@ -53,7 +53,7 @@ pub(in crate::builtins::image::filters) fn conditional_host_bounds(
     let output_single = image_single || kernel_single;
     let result = (|| {
         let point_width =
-            u64::try_from(std::mem::size_of::<super::imfilter::ImfilterKernelPoint>())
+            u64::try_from(std::mem::size_of::<super::geometry::ImfilterKernelPoint>())
                 .ok()?
                 .checked_add(rank.checked_mul(8)?)?;
         let rank_vectors = rank.checked_mul(16)?.checked_mul(8)?;
