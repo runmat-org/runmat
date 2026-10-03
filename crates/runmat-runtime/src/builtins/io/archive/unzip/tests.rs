@@ -439,6 +439,7 @@ fn unzip_directory_only_archive_returns_empty_cell() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn unzip_downloads_url_archive() {
     let archive = unique_zip_path("unzip_url");
     write_test_zip(&archive, &[("remote.txt", b"downloaded")]);
@@ -463,6 +464,7 @@ fn unzip_downloads_url_archive() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn unzip_http_status_errors() {
     let url = spawn_server(move |mut stream| {
         drain_request(&mut stream);
@@ -483,6 +485,7 @@ fn unzip_http_status_errors() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn unzip_rejects_oversized_http_head_before_destination_creation() {
     let url = spawn_server(move |mut stream| {
         drain_request(&mut stream);

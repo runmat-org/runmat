@@ -1,11 +1,14 @@
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::builtins::io::http::transport::NativeHttpService;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::context::{RuntimeContext, RuntimeServicePorts};
 use image::{ImageBuffer, ImageOutputFormat, Luma, Rgb, RgbImage, Rgba, RgbaImage};
 use runmat_builtins::IMREAD_DESCRIPTOR;
 use runmat_value::IntegerStorage;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+#[cfg(not(target_arch = "wasm32"))]
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -308,6 +311,7 @@ fn imread_decodes_16_bit_grayscale() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn imread_fetches_http_url() {
     let driver = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -334,6 +338,7 @@ fn imread_fetches_http_url() {
     assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn http_response(status: u16, reason: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut response = format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n",
@@ -344,6 +349,7 @@ fn http_response(status: u16, reason: &str, content_type: &str, body: &[u8]) -> 
     response
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_server(response: Vec<u8>) -> String {
     spawn_repeating_server(1, response)
 }

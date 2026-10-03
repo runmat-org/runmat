@@ -268,7 +268,6 @@ fn parse_response_headers(raw: &str) -> Vec<(String, String)> {
 mod tests {
     use super::*;
     use std::error::Error;
-    use std::future::Future;
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use wasm_bindgen_test::wasm_bindgen_test;
@@ -280,7 +279,7 @@ mod tests {
         let url = web_sys::Url::create_object_url_with_blob(&blob).expect("blob URL");
         let request = HttpRequest {
             url: url::Url::parse(&url).expect("parse blob URL"),
-            method: super::HttpMethod::Get,
+            method: crate::http::HttpMethod::Get,
             headers: Vec::new(),
             body: None,
             timeout: std::time::Duration::from_secs(5),
