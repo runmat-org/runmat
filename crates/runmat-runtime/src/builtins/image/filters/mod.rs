@@ -5,4 +5,5 @@ pub mod filter2;
 pub mod fspecial;
 mod geometry;
 pub mod imfilter;
+pub mod kernel;
 pub mod placement;
