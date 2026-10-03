@@ -68,8 +68,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
     ], media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Image reader and decoder", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imread.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Local, URL, multi-output and precision behavior", location: "crates/runmat-runtime/src/builtins/image/imread.rs" }],
+        implementation: &[BuiltinDocumentationLink { label: "Image reader and decoder", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imread/decode.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Local, URL, multi-output and precision behavior", location: "crates/runmat-runtime/src/builtins/image/imread/tests.rs" }],
         notes: &[],
     },
     introduced: None, status: None,
