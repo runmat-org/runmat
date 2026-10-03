@@ -30,6 +30,13 @@ use runmat_execution::{
 pub(crate) struct ExactProviderReadback<'a> {
     pub(crate) source: &'a GpuTensorHandle,
     pub(crate) prior_created_bytes: ResourceByteBound,
+    pub(crate) phase: ExactProviderReadbackPhase,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, serde::Serialize)]
+pub(crate) enum ExactProviderReadbackPhase {
+    Preparation,
+    Conditional,
 }
 
 /// Physical continuation admitted only for an Unsupported provider hook that
@@ -72,6 +79,9 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// returns Unsupported. This is one conditional route, not an equivalent
     /// host alternative offered to placement policy.
     pub(crate) conditional_host_fallback: Option<ResourceByteBound>,
+    /// Fallback-only host workspace; includes its final host result when that
+    /// result is published on host, unlike provider upload's exclusive scratch.
+    pub(crate) conditional_host_scratch: ResourceByteBound,
     pub(crate) conditional_provider_upload: Option<ExactConditionalProviderUpload>,
 }
 
@@ -165,9 +175,8 @@ pub(crate) fn select_exact_provider_operation(
     let mut source_capabilities = Vec::with_capacity(request.readbacks.len());
     let mut readback_facts = Vec::with_capacity(request.readbacks.len());
     let mut input_stages = Vec::new();
-    let mut host_scratch =
-        combine_host_scratch(request.host_scratch, request.provider_host_scratch)?;
-    let mut readback_host_workspace = ResourceByteBound::Known(0);
+    let mut preparation_host_workspace = ResourceByteBound::Known(0);
+    let mut conditional_readback_host_workspace = ResourceByteBound::Known(0);
     for readback in request.readbacks {
         let source = readback.source;
         let Some(source_provider) = provider_for_handle(source) else {
@@ -223,10 +232,19 @@ pub(crate) fn select_exact_provider_operation(
             return Ok(None);
         }
         let workspace = source_provider.download_numeric_host_workspace_bound(source);
-        readback_host_workspace = combine_host_scratch(readback_host_workspace, workspace)?;
-        host_scratch = combine_host_scratch(host_scratch, workspace)?;
+        match readback.phase {
+            ExactProviderReadbackPhase::Preparation => {
+                preparation_host_workspace =
+                    combine_host_scratch(preparation_host_workspace, workspace)?;
+            }
+            ExactProviderReadbackPhase::Conditional => {
+                conditional_readback_host_workspace =
+                    combine_host_scratch(conditional_readback_host_workspace, workspace)?;
+            }
+        }
         let stage_peak = sum_resource_bounds(
             readback.prior_created_bytes,
+            readback.phase,
             source_provider.download_numeric_provider_scratch_bound(source),
         )?;
         input_stages.push(ProviderInputStageDemand {
@@ -282,10 +300,23 @@ pub(crate) fn select_exact_provider_operation(
             })?,
         )
     };
+    let prefix_host_workspace =
+        combine_host_scratch(request.host_scratch, preparation_host_workspace)?;
+    let direct_host_peak =
+        combine_host_scratch(prefix_host_workspace, request.provider_host_scratch)?;
+    let host_scratch = if request.conditional_host_fallback.is_some() {
+        let fallback = combine_host_scratch(
+            combine_host_scratch(prefix_host_workspace, conditional_readback_host_workspace)?,
+            request.conditional_host_scratch,
+        )?;
+        peak_resource_bounds(direct_host_peak, fallback)
+    } else {
+        direct_host_peak
+    };
     let conditional_provider_upload = if let Some(upload) = request.conditional_provider_upload {
         Some(ExactConditionalProviderUpload {
             host_scratch_bytes: combine_host_scratch(
-                combine_host_scratch(request.host_scratch, readback_host_workspace)?,
+                combine_host_scratch(prefix_host_workspace, conditional_readback_host_workspace)?,
                 upload.host_scratch_bytes,
             )?,
             ..upload
@@ -314,8 +345,11 @@ pub(crate) fn select_exact_provider_operation(
                 &readback_facts,
                 input_stages,
                 host_scratch,
+                preparation_host_workspace,
+                conditional_readback_host_workspace,
                 request.output_queue_slots,
                 request.conditional_host_fallback,
+                request.conditional_host_scratch,
                 conditional_provider_upload.as_ref().map(|upload| {
                     (
                         upload.transfer_bytes,
@@ -479,6 +513,16 @@ fn sum_resource_bounds(
     }
 }
 
+fn peak_resource_bounds(left: ResourceByteBound, right: ResourceByteBound) -> ResourceByteBound {
+    match (left, right) {
+        (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => {
+            ResourceByteBound::Known(left.max(right))
+        }
+        (ResourceByteBound::Unavailable(reason), _)
+        | (_, ResourceByteBound::Unavailable(reason)) => ResourceByteBound::Unavailable(reason),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,5 +544,13 @@ mod tests {
     fn provider_input_stage_unknown_never_becomes_zero() {
         let unknown = ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound);
         assert_eq!(sum_resource_bounds(16.into(), unknown).unwrap(), unknown);
+    }
+
+    #[test]
+    fn conditional_host_peak_is_maximum_of_sequential_branches() {
+        assert_eq!(peak_resource_bounds(24.into(), 32.into()), 32.into());
+        assert_eq!(peak_resource_bounds(40.into(), 32.into()), 40.into());
+        let unknown = ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound);
+        assert_eq!(peak_resource_bounds(40.into(), unknown), unknown);
     }
 }

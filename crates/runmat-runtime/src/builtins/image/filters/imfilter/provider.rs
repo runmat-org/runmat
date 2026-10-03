@@ -263,15 +263,17 @@ fn projected_public_kernel(
     let len = shape.iter().try_fold(1_u64, |count, &extent| {
         count.checked_mul(u64::try_from(extent).ok()?)
     })?;
-    let scratch = if precision == ProviderPrecision::F32 {
-        len.checked_mul(4)
-            .map(runmat_execution::ResourceByteBound::Known)
-            .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
-                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
-            ))
-    } else {
-        runmat_execution::ResourceByteBound::Known(0)
-    };
+    let scratch = len
+        .checked_mul(if precision == ProviderPrecision::F32 {
+            4
+        } else {
+            0
+        })
+        .and_then(|bytes| bytes.checked_add(u64::from(matches!(value, Value::Num(_))) * 8))
+        .map(runmat_execution::ResourceByteBound::Known)
+        .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        ));
     Some((
         ProviderRepresentation {
             element_type: ProviderElementType::from(precision),

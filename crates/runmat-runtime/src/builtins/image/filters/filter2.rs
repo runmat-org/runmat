@@ -155,6 +155,24 @@ fn filter2_value_shape(value: &Value) -> Option<Vec<usize>> {
     }
 }
 
+/// A prepared H can retain its converted host tensor and a cached copy while
+/// the provider hook runs. The caller's original host payload is excluded.
+fn prepared_host_kernel_prefix(value: &Value) -> runmat_execution::ResourceByteBound {
+    use runmat_execution::{ResourceBoundUnavailable, ResourceByteBound};
+    filter2_value_shape(value)
+        .and_then(|shape| {
+            shape.into_iter().try_fold(1_u64, |total, extent| {
+                total.checked_mul(u64::try_from(extent).ok()?)
+            })
+        })
+        .and_then(|count| count.checked_mul(if value_is_single(value) { 4 } else { 8 }))
+        .and_then(|bytes| bytes.checked_mul(2))
+        .map(ResourceByteBound::Known)
+        .unwrap_or(ResourceByteBound::Unavailable(
+            ResourceBoundUnavailable::NoScratchBound,
+        ))
+}
+
 fn projected_filter2_kernel(
     value: &Value,
 ) -> Option<runmat_accelerate_api::ProviderRepresentation> {
@@ -377,7 +395,7 @@ async fn filter2_gpu(
             },
             original_kernel,
             projected,
-            runmat_execution::ResourceByteBound::Known(0),
+            prepared_host_kernel_prefix(&kernel_value),
         )?
     } else {
         None

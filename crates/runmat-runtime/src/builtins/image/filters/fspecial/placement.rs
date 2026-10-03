@@ -76,6 +76,7 @@ pub(super) fn select(
             internal_input_stages: None,
             output_queue_slots: None,
             conditional_host_fallback: Some(host_scratch),
+            conditional_host_scratch: ResourceByteBound::Known(0),
             conditional_provider_upload: None,
         },
     )

@@ -3,10 +3,9 @@
 //! preparation routes remain with their respective domain owners.
 
 use super::imfilter::filter_output_shape;
-use crate::context::host_presentation::combine_host_scratch;
 use crate::context::provider_operation::{
     select_exact_provider_operation, ExactConditionalProviderUpload, ExactProviderOperation,
-    ExactProviderReadback, SelectedProviderOperation,
+    ExactProviderReadback, ExactProviderReadbackPhase, SelectedProviderOperation,
 };
 use crate::context::RuntimeContext;
 use crate::BuiltinResult;
@@ -305,6 +304,7 @@ pub(in crate::builtins::image::filters) fn select_direct(
     let readback = ExactProviderReadback {
         source: kernel,
         prior_created_bytes: ResourceByteBound::Known(0),
+        phase: ExactProviderReadbackPhase::Preparation,
     };
     let mut readbacks = Vec::new();
     if original_kernel_readback {
@@ -323,19 +323,20 @@ pub(in crate::builtins::image::filters) fn select_direct(
     {
         let source = *source;
         if !readbacks.iter().any(|stage: &ExactProviderReadback<'_>| {
-            stage.source.view_identity() == source.view_identity()
+            stage.phase == ExactProviderReadbackPhase::Conditional
+                && stage.source.view_identity() == source.view_identity()
         }) {
             readbacks.push(ExactProviderReadback {
                 source,
                 prior_created_bytes: ResourceByteBound::Known(0),
+                phase: ExactProviderReadbackPhase::Conditional,
             });
         }
     }
-    let host_scratch = if let Some(route) = conditional_host.as_ref() {
-        combine_host_scratch(ResourceByteBound::Known(0), route.operation_scratch)?
-    } else {
-        ResourceByteBound::Known(0)
-    };
+    let host_scratch = ResourceByteBound::Known(0);
+    let conditional_host_scratch = conditional_host
+        .as_ref()
+        .map_or(ResourceByteBound::Known(0), |route| route.operation_scratch);
     let conditional_upload = conditional_provider
         .as_ref()
         .and_then(|route| exact_conditional_upload(provider, &query, route.operation_scratch));
@@ -358,6 +359,7 @@ pub(in crate::builtins::image::filters) fn select_direct(
             internal_input_stages: Some(physical.input_stages),
             output_queue_slots: Some(physical.output_queue_slots),
             conditional_host_fallback: conditional_host.map(|route| route.result_bytes),
+            conditional_host_scratch,
             conditional_provider_upload: conditional_upload,
         },
     )
@@ -538,6 +540,7 @@ pub(in crate::builtins::image::filters) fn select_prepared(
     let readback = original_kernel.map(|source| ExactProviderReadback {
         source,
         prior_created_bytes: ResourceByteBound::Known(0),
+        phase: ExactProviderReadbackPhase::Preparation,
     });
     let mut readbacks = readback.into_iter().collect::<Vec<_>>();
     for source in conditional_host
@@ -552,10 +555,10 @@ pub(in crate::builtins::image::filters) fn select_prepared(
         )
     {
         let source = *source;
-        if !readbacks
-            .iter()
-            .any(|stage| stage.source.view_identity() == source.view_identity())
-        {
+        if !readbacks.iter().any(|stage| {
+            stage.phase == ExactProviderReadbackPhase::Conditional
+                && stage.source.view_identity() == source.view_identity()
+        }) {
             readbacks.push(ExactProviderReadback {
                 source,
                 prior_created_bytes: ResourceByteBound::Known(
@@ -565,14 +568,14 @@ pub(in crate::builtins::image::filters) fn select_prepared(
                         0
                     },
                 ),
+                phase: ExactProviderReadbackPhase::Conditional,
             });
         }
     }
-    let host_scratch = if let Some(route) = conditional_host.as_ref() {
-        combine_host_scratch(operation_host_scratch, route.operation_scratch)?
-    } else {
-        operation_host_scratch
-    };
+    let host_scratch = operation_host_scratch;
+    let conditional_host_scratch = conditional_host
+        .as_ref()
+        .map_or(ResourceByteBound::Known(0), |route| route.operation_scratch);
     let mut conditional_upload = conditional_provider
         .as_ref()
         .and_then(|route| exact_conditional_upload(provider, &query, route.operation_scratch));
@@ -601,6 +604,7 @@ pub(in crate::builtins::image::filters) fn select_prepared(
             internal_input_stages: Some(physical.input_stages),
             output_queue_slots: Some(physical.output_queue_slots),
             conditional_host_fallback: conditional_host.map(|route| route.result_bytes),
+            conditional_host_scratch,
             conditional_provider_upload: conditional_upload,
         },
     )?;
