@@ -338,7 +338,7 @@ fn actual_provider_host_mediated_route_has_one_completed_whole_call() {
         .unwrap();
     let kernel = backend
         .upload_numeric(&HostNumericTensorView {
-            data: HostNumericDataView::F32(&[1.0]),
+            data: HostNumericDataView::F64(&[1.0]),
             shape: &[1, 1],
             storage: GpuTensorStorage::Real,
         })
