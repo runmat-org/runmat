@@ -326,6 +326,7 @@ runmat accel-info
 | Command | Use |
 | --- | --- |
 | `info` | Print version, runtime configuration, environment, and GC status. |
+| `info --json` | Emit versioned JSON describing the runtime features compiled into this executable. |
 | `version --detailed` | Print build details useful for support and bug reports. |
 | `gc stats` | Print current GC counters. |
 | `gc minor`, `gc major` | Force a minor or major collection. |
