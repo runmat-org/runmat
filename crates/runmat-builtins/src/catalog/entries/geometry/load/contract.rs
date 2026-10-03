@@ -34,6 +34,12 @@ pub const ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "The geometry file cannot be read.",
     message: "geometry.load: failed to read geometry file",
 };
+pub const ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GEOMETRY.LOAD.INVALID_PATH",
+    identifier: Some("RunMat:geometry:load:InvalidPath"),
+    when: "The path is not scalar string text or a character row.",
+    message: "geometry.load: invalid path",
+};
 pub const ERROR_OPERATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GEOMETRY.LOAD.OPERATION_FAILED",
     identifier: Some("RunMat:geometry:load:OperationFailed"),
@@ -52,8 +58,13 @@ pub const ERROR_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "More than one output is requested.",
     message: "geometry.load: too many output arguments",
 };
-const ERRORS: [BuiltinErrorDescriptor; 4] =
-    [ERROR_IO, ERROR_OPERATION, ERROR_INTERNAL, ERROR_OUTPUTS];
+const ERRORS: [BuiltinErrorDescriptor; 5] = [
+    ERROR_INPUT,
+    ERROR_IO,
+    ERROR_OPERATION,
+    ERROR_INTERNAL,
+    ERROR_OUTPUTS,
+];
 pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

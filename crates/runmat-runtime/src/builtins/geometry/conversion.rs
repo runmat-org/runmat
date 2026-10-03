@@ -1,5 +1,27 @@
 use super::*;
 
+/// Preserve the previously admitted scalar string/string-array and character
+/// row forms without the broad `String::try_from(Value)` numeric coercion.
+/// Admission must precede any filesystem provider access.
+pub(super) fn geometry_path_from_value(
+    value: &Value,
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
+    match value {
+        Value::String(path) => Ok(path.clone()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
+            Ok(array.data.iter().collect())
+        }
+        _ => Err(builtin_error(
+            builtin,
+            error,
+            "expected a string scalar or character row path",
+        )),
+    }
+}
+
 pub(super) async fn read_file(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,

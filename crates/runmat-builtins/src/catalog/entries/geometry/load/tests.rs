@@ -1,7 +1,7 @@
 use super::*;
 use runmat_types::{
-    CallRequest, DynamicReason, LiteralContext, OutputSelection, RequestedOutputCount, ValueFact,
-    ValueKindFact,
+    CallRequest, DynamicReason, LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
 
 fn request(input: ValueFact, count: RequestedOutputCount) -> CallRequest {
@@ -10,6 +10,46 @@ fn request(input: ValueFact, count: RequestedOutputCount) -> CallRequest {
         literals: LiteralContext::default(),
         outputs: OutputSelection::new(count),
     }
+}
+
+#[test]
+fn known_nonscalar_paths_are_invalid_but_unknown_shape_is_not() {
+    for fact in [
+        ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        ),
+        ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::from(vec![Some(1), Some(2)]),
+            StorageFact::Dense,
+        ),
+        ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(1), Some(3), Some(1)]),
+            StorageFact::Dense,
+        ),
+    ] {
+        let invalid = inference::infer(
+            &request(fact, RequestedOutputCount::One),
+            &GEOMETRY_LOAD_CATALOG_ENTRY,
+        );
+        assert!(invalid
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-GEOMETRY-LOAD-PATH"));
+    }
+    let unknown_rows = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![None, Some(3)]),
+        StorageFact::Dense,
+    );
+    let result = inference::infer(
+        &request(unknown_rows, RequestedOutputCount::One),
+        &GEOMETRY_LOAD_CATALOG_ENTRY,
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
 }
 
 #[test]

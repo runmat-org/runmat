@@ -1,6 +1,7 @@
 use super::*;
 use runmat_types::{
-    CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ValueFact, ValueKindFact,
+    CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 #[test]
@@ -32,4 +33,33 @@ fn inspection_has_typed_properties_and_rejects_nontext_path() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-GEOMETRY-INSPECT-PATH"));
+}
+
+#[test]
+fn inspect_rejects_known_multirow_and_multistring_paths() {
+    for fact in [
+        ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        ),
+        ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::from(vec![Some(1), Some(2)]),
+            StorageFact::Dense,
+        ),
+    ] {
+        let result = inference::infer(
+            &CallRequest {
+                arguments: vec![fact],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+            &GEOMETRY_INSPECT_CATALOG_ENTRY,
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-GEOMETRY-INSPECT-PATH"));
+    }
 }

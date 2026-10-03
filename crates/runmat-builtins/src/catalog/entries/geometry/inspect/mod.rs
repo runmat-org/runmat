@@ -37,6 +37,12 @@ pub const GEOMETRY_INSPECT_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescri
     when: "The geometry file cannot be read.",
     message: "geometry.inspect: failed to read geometry file",
 };
+pub const GEOMETRY_INSPECT_ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GEOMETRY.INSPECT.INVALID_PATH",
+    identifier: Some("RunMat:geometry:inspect:InvalidPath"),
+    when: "The path is not scalar string text or a character row.",
+    message: "geometry.inspect: invalid path",
+};
 pub const GEOMETRY_INSPECT_ERROR_OPERATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GEOMETRY.INSPECT.OPERATION_FAILED",
     identifier: Some("RunMat:geometry:inspect:OperationFailed"),
@@ -55,7 +61,8 @@ pub const GEOMETRY_INSPECT_ERROR_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorD
     when: "More than one output is requested.",
     message: "geometry.inspect: too many output arguments",
 };
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
+const ERRORS: [BuiltinErrorDescriptor; 5] = [
+    GEOMETRY_INSPECT_ERROR_INPUT,
     GEOMETRY_INSPECT_ERROR_IO,
     GEOMETRY_INSPECT_ERROR_OPERATION,
     GEOMETRY_INSPECT_ERROR_INTERNAL,

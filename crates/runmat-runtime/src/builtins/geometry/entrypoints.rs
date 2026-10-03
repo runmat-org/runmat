@@ -5,12 +5,13 @@ use super::*;
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry"
 )]
-pub async fn geometry_load_builtin(path: String) -> BuiltinResult<Value> {
+pub async fn geometry_load_builtin(path: Value) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &GEOMETRY_LOAD_DESCRIPTOR,
         &GEOMETRY_LOAD_ERROR_OUTPUTS,
         GEOMETRY_LOAD_NAME,
     )?;
+    let path = geometry_path_from_value(&path, GEOMETRY_LOAD_NAME, &GEOMETRY_LOAD_ERROR_INPUT)?;
     let bytes = read_file(GEOMETRY_LOAD_NAME, &GEOMETRY_LOAD_ERROR_IO, &path).await?;
     operation_result_to_value(
         GEOMETRY_LOAD_NAME,
@@ -27,12 +28,14 @@ pub async fn geometry_load_builtin(path: String) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry"
 )]
-pub async fn geometry_inspect_builtin(path: String) -> BuiltinResult<Value> {
+pub async fn geometry_inspect_builtin(path: Value) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &GEOMETRY_INSPECT_DESCRIPTOR,
         &GEOMETRY_INSPECT_ERROR_OUTPUTS,
         GEOMETRY_INSPECT_NAME,
     )?;
+    let path =
+        geometry_path_from_value(&path, GEOMETRY_INSPECT_NAME, &GEOMETRY_INSPECT_ERROR_INPUT)?;
     let bytes = read_file(GEOMETRY_INSPECT_NAME, &GEOMETRY_INSPECT_ERROR_IO, &path).await?;
     operation_result_to_value(
         GEOMETRY_INSPECT_NAME,

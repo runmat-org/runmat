@@ -2,6 +2,9 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::Value;
 
+#[path = "tests/path_admission.rs"]
+mod path_admission;
+
 const TRIANGLE_STL: &str = "solid demo\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid demo\n";
 
 #[test]
@@ -9,7 +12,10 @@ fn geometry_load_returns_canonical_asset_without_native_cad() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("part.stl");
     std::fs::write(&path, TRIANGLE_STL).unwrap();
-    let value = block_on(geometry_load_builtin(path.to_string_lossy().to_string())).unwrap();
+    let value = block_on(geometry_load_builtin(Value::String(
+        path.to_string_lossy().to_string(),
+    )))
+    .unwrap();
     let Value::Object(asset) = value else {
         panic!("expected asset object")
     };
@@ -22,8 +28,10 @@ fn geometry_load_returns_canonical_asset_without_native_cad() {
 fn geometry_file_read_error_retains_io_identifier() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("missing.stl");
-    let error = block_on(geometry_load_builtin(path.to_string_lossy().to_string()))
-        .expect_err("missing file must fail");
+    let error = block_on(geometry_load_builtin(Value::String(
+        path.to_string_lossy().to_string(),
+    )))
+    .expect_err("missing file must fail");
     assert_eq!(error.identifier(), GEOMETRY_LOAD_ERROR_IO.identifier);
     assert!(error.source.is_some());
 }
@@ -33,8 +41,10 @@ fn geometry_output_count_is_rejected_before_file_read() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("missing.stl");
     let _guard = crate::output_count::push_output_count(Some(2));
-    let error = block_on(geometry_load_builtin(path.to_string_lossy().to_string()))
-        .expect_err("too many outputs must fail before I/O");
+    let error = block_on(geometry_load_builtin(Value::String(
+        path.to_string_lossy().to_string(),
+    )))
+    .expect_err("too many outputs must fail before I/O");
     assert_eq!(error.identifier(), GEOMETRY_LOAD_ERROR_OUTPUTS.identifier);
 }
 
@@ -43,8 +53,10 @@ fn geometry_inspect_output_count_is_rejected_before_file_read() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("missing.stl");
     let _guard = crate::output_count::push_output_count(Some(2));
-    let error = block_on(geometry_inspect_builtin(path.to_string_lossy().to_string()))
-        .expect_err("too many outputs must fail before I/O");
+    let error = block_on(geometry_inspect_builtin(Value::String(
+        path.to_string_lossy().to_string(),
+    )))
+    .expect_err("too many outputs must fail before I/O");
     assert_eq!(
         error.identifier(),
         GEOMETRY_INSPECT_ERROR_OUTPUTS.identifier
@@ -90,8 +102,10 @@ fn geometry_inspect_builtin_returns_object_value() {
         )
         .unwrap();
 
-    let value = block_on(geometry_inspect_builtin(path.to_string_lossy().to_string()))
-        .expect("inspect builtin should return an object");
+    let value = block_on(geometry_inspect_builtin(Value::String(
+        path.to_string_lossy().to_string(),
+    )))
+    .expect("inspect builtin should return an object");
 
     let Value::Object(result) = value else {
         panic!("expected object value");
@@ -111,14 +125,36 @@ fn geometry_list_regions_builtin_returns_imported_regions() {
         )
         .unwrap();
 
-    let asset = block_on(geometry_load_builtin(path.to_string_lossy().to_string()))
-        .expect("geometry should load");
+    let asset = block_on(geometry_load_builtin(Value::String(
+        path.to_string_lossy().to_string(),
+    )))
+    .expect("geometry should load");
     let regions = block_on(geometry_list_regions_builtin(asset)).expect("regions should be listed");
 
     let Value::Struct(result) = regions else {
         panic!("expected struct value");
     };
     assert!(result.fields.contains_key("regions"));
+}
+
+#[test]
+fn stl_region_projection_preserves_default_region_identity_and_count() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("part.stl");
+    std::fs::write(&path, TRIANGLE_STL).unwrap();
+    let asset = block_on(geometry_load_builtin(Value::String(
+        path.to_string_lossy().to_string(),
+    )))
+    .expect("STL asset");
+    let result = block_on(geometry_list_regions_builtin(asset)).expect("STL regions");
+    let Value::Struct(outer) = result else {
+        panic!("expected scalar result struct")
+    };
+    let Some(Value::Struct(region)) = outer.fields.get("regions") else {
+        panic!("one imported region should be a scalar struct")
+    };
+    let region_id = region.fields.get("region_id").expect("region identity");
+    assert_eq!(String::try_from(region_id).unwrap(), "region_default");
 }
 
 #[test]
@@ -131,8 +167,10 @@ fn geometry_meshes_builtin_returns_patch_ready_surface_topology() {
         )
         .unwrap();
 
-    let asset = block_on(geometry_load_builtin(path.to_string_lossy().to_string()))
-        .expect("geometry should load");
+    let asset = block_on(geometry_load_builtin(Value::String(
+        path.to_string_lossy().to_string(),
+    )))
+    .expect("geometry should load");
     let meshes = block_on(geometry_meshes_builtin(asset)).expect("meshes should project");
 
     let Value::Cell(cell) = meshes else {
