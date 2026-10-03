@@ -585,9 +585,48 @@ fn finalize_output_with_gpu_policy(
     if let Some(provider) = runmat_accelerate_api::provider() {
         match spec.to_request() {
             Ok(request) => match provider.fspecial(&request) {
-                Ok(handle) => return Ok(Value::GpuTensor(handle)),
+                Ok(handle) => {
+                    let expected_precision = provider.precision();
+                    let valid = handle.shape() == tensor.shape
+                        && handle.device_id() == provider.device_id()
+                        && handle.allocation_lease().validate_live().is_ok()
+                        && runmat_accelerate_api::provider_for_handle(&handle).is_some_and(
+                            |owner| runmat_accelerate_api::same_provider_instance(owner, provider),
+                        )
+                        && runmat_accelerate_api::handle_storage(&handle)
+                            == runmat_accelerate_api::GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_precision(&handle)
+                            == Some(expected_precision)
+                        && runmat_accelerate_api::handle_integer_type(&handle).is_none()
+                        && !runmat_accelerate_api::handle_is_logical(&handle)
+                        && crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+                            &handle,
+                            Some(expected_precision),
+                            None,
+                            false,
+                        );
+                    if !valid {
+                        let error = fspecial_descriptor_error(
+                            &FSPECIAL_ERROR_INTERNAL,
+                            "provider returned an invalid fspecial result",
+                        );
+                        return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                            handle, error,
+                        ));
+                    }
+                    return Ok(Value::GpuTensor(handle));
+                }
+                Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+                    warn!("fspecial: provider hook unavailable, falling back to host path: {err}");
+                }
                 Err(err) => {
-                    warn!("fspecial: provider hook unavailable, falling back to host path: {err}")
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        fspecial_descriptor_error(
+                            &FSPECIAL_ERROR_INTERNAL,
+                            format!("provider generation failed: {err}"),
+                        ),
+                        err.into(),
+                    ))
                 }
             },
             Err(error) => {
@@ -1361,6 +1400,70 @@ pub(crate) mod tests {
     use runmat_value::IntegerStorage;
     use std::ffi::OsString;
     use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    struct FspecialFailureProvider {
+        device_id: u32,
+        unsupported: bool,
+    }
+
+    impl runmat_accelerate_api::AccelProvider for FspecialFailureProvider {
+        fn upload(
+            &self,
+            _: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            panic!("generation failure fixture must not upload")
+        }
+        fn download<'a>(
+            &'a self,
+            _: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            panic!("generation failure fixture must not download")
+        }
+        fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+            runmat_accelerate_api::ProviderPrecision::F64
+        }
+        fn device_info(&self) -> String {
+            "fspecial-failure-fixture".into()
+        }
+        fn device_id(&self) -> u32 {
+            self.device_id
+        }
+        fn fspecial(
+            &self,
+            _: &FspecialRequest,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            if self.unsupported {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "fspecial fixture unsupported",
+                ))
+            } else {
+                Err(anyhow::anyhow!("fspecial driver failure sentinel"))
+            }
+        }
+    }
+
+    #[test]
+    fn fspecial_only_unsupported_provider_errors_fall_back_to_host() {
+        let spec = FspecialFilterSpec::Average { rows: 3, cols: 3 };
+        for unsupported in [true, false] {
+            let provider: &'static FspecialFailureProvider =
+                Box::leak(Box::new(FspecialFailureProvider {
+                    device_id: runmat_accelerate_api::next_device_id(),
+                    unsupported,
+                }));
+            let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let tensor = spec.generate_tensor().unwrap();
+            let result = finalize_output_with_gpu_policy(&spec, tensor, true);
+            if unsupported {
+                assert!(matches!(result.unwrap(), Value::Tensor(_)));
+            } else {
+                let error = result.expect_err("driver failure must not replay on host");
+                assert_eq!(error.identifier(), FSPECIAL_ERROR_INTERNAL.identifier);
+                assert!(error.message().contains("driver failure sentinel"));
+                assert!(error.source.is_some());
+            }
+        }
+    }
 
     fn assert_close(actual: f64, expected: f64, epsilon: f64) {
         if (actual - expected).abs() > epsilon {

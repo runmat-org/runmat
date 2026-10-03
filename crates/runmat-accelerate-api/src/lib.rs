@@ -2412,7 +2412,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Generate a 2-D correlation kernel matching MATLAB's `fspecial` builtin.
     fn fspecial(&self, _request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("fspecial not supported by provider"))
+        Err(unsupported_provider_operation(
+            "fspecial not supported by provider",
+        ))
     }
 
     /// Evaluate the `peaks` test surface on an n×n grid spanning [-3,3]×[-3,3].
