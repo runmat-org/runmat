@@ -8,10 +8,6 @@ pub fn filter2_type(args: &[Type], _context: &ResolveContext) -> Type {
     image_shape_output(&args[1]).unwrap_or_else(Type::tensor)
 }
 
-pub fn fspecial_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
 pub fn imfilter_type(args: &[Type], context: &ResolveContext) -> Type {
     if args.len() < 2 {
         return Type::tensor();
@@ -86,14 +82,6 @@ mod tests {
             Type::Tensor {
                 shape: Some(vec![Some(4), Some(5)])
             }
-        );
-    }
-
-    #[test]
-    fn fspecial_type_reports_tensor() {
-        assert_eq!(
-            fspecial_type(&[], &ResolveContext::new(Vec::new())),
-            Type::tensor()
         );
     }
 
