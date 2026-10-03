@@ -6,7 +6,7 @@ use super::*;
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::{
     observation::{ProviderObservationCapability, ProviderObservationOverhead},
-    ProviderImfilterPhysicalEvidence,
+    ProviderImfilterPhysicalEvidence, ProviderWorkload,
 };
 #[cfg(feature = "wgpu")]
 use runmat_execution::{ProviderInputStageDemand, ProviderInputStageDemands, ResourceByteBound};
