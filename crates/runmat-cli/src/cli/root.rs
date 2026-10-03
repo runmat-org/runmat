@@ -303,7 +303,11 @@ pub enum Commands {
         detailed: bool,
     },
     /// Show system information
-    Info,
+    Info {
+        /// Emit versioned, machine-readable compiled runtime feature facts
+        #[arg(long)]
+        json: bool,
+    },
     /// Show acceleration provider information
     AccelInfo {
         /// Output provider information and telemetry as JSON

@@ -233,6 +233,7 @@ pub fn cli_output_mode(cli: &Cli) -> OutputMode {
     }
     match cli.command.as_ref() {
         Some(Commands::Check { json: true, .. })
+        | Some(Commands::Info { json: true })
         | Some(Commands::Run { json: true, .. })
         | Some(Commands::AccelInfo { json: true, .. })
         | Some(Commands::Batch {
@@ -595,6 +596,8 @@ mod tests {
 
         let info = Cli::try_parse_from(["runmat", "info"]).unwrap();
         assert_eq!(cli_output_mode(&info), OutputMode::Human);
+        let info_json = Cli::try_parse_from(["runmat", "info", "--json"]).unwrap();
+        assert_eq!(cli_output_mode(&info_json), OutputMode::Machine);
 
         let human_recovery = Cli::try_parse_from([
             "runmat",

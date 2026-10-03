@@ -99,7 +99,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             version::show_version(detailed);
             Ok(())
         }
-        Commands::Info => version::show_system_info(config).await,
+        Commands::Info { json } => version::show_system_info(config, json).await,
         Commands::AccelInfo { json, reset } => accel::show_accel_info(json, reset).await,
         #[cfg(feature = "wgpu")]
         Commands::AccelCalibrate {
