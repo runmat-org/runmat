@@ -27,6 +27,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         "No optional feature is required; the active host must install HTTP service capability.",
         ] },
         BuiltinDocumentationSection { heading: "Further examples", paragraphs: &[
+        "The external API addresses below are illustrative and depend on third-party responses. Runnable loopback examples on this page exercise the same form, JSON, text, binary, query, and credential/header call forms with fixed response data.",
         "Posting form fields to a REST endpoint\npayload = struct(\"name\", \"Ada\", \"score\", 42);\nopts = struct(\"ContentType\", \"json\");          % expect JSON response\nreply = webwrite(\"https://api.example.com/submit\", payload, opts);\ndisp(reply.status)\nExpected display:     \"ok\"",
         "Sending JSON payloads\nbody = struct(\"title\", \"RunMat\", \"stars\", 5);\nopts = struct(\"MediaType\", \"application/json\", \"ContentType\", \"json\");\nresp = webwrite(\"https://api.example.com/projects\", body, opts)",
         "Uploading plain text\nmessage = \"Hello from RunMat!\";\nreply = webwrite(\"https://api.example.com/echo\", message, ...\n                 \"MediaType\", \"text/plain\", \"ContentType\", \"text\")",

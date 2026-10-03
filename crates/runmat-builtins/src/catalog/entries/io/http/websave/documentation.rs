@@ -25,6 +25,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         "No optional feature is required; the active host must install HTTP service capability.",
         ] },
         BuiltinDocumentationSection { heading: "Further examples", paragraphs: &[
+        "The external API address below is illustrative. A runnable loopback example on this page checks exact integer query formatting and saved file contents against a fixed response.",
         "Download a file with a query value\nsaved = websave(\"report.json\", \"https://api.example.com/report\", \"id\", uint64(42))",
         ] },
     ],

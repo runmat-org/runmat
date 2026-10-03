@@ -27,6 +27,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         "No optional feature is required; the active host must install HTTP service capability.",
         ] },
         BuiltinDocumentationSection { heading: "Further examples", paragraphs: &[
+        "The external API addresses below are illustrative and depend on third-party responses. Runnable loopback examples on this page exercise the same JSON, text, binary, query, and credential/header call forms with fixed response data.",
         "Reading JSON data from a REST API\nopts = weboptions(\"ContentType\", \"json\", \"Timeout\", 15);\nweather = webread(\"https://api.example.com/weather\", opts, \"city\", \"Reykjavik\");\ndisp(weather.temperatureC)\nExpected display:     2.3",
         "Downloading plain text as a character vector\nhtml = webread(\"https://example.com/index.txt\", \"Timeout\", 5);\nextract = html(1:200)",
         "Retrieving binary payloads such as images\nbytes = webread(\"https://example.com/logo.png\", \"ContentType\", \"binary\");\nfilewrite(\"logo.png\", uint8(bytes))",
