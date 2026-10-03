@@ -526,6 +526,10 @@ test("all protocol schemas are closed against unknown and missing fields", () =>
     assert.throws(() => validateInventory(missingExampleField), /missing: runnerKey/);
 
     const plan = buildPlan(inventory);
+    const nativeShard = structuredClone(completeResults(inventory, plan).find((shard) => shard.product === "native-cli" && shard.adapter.available));
+    nativeShard.runtimeFeatureProbe = null;
+    nativeShard.shardResultDigest = digestObject(nativeShard, ["shardResultDigest"]);
+    assert.throws(() => validateShardResult(nativeShard), /lacks its staged runtime feature probe/);
     const unknownPlan = structuredClone(plan);
     unknownPlan.lanes[0].surprise = true;
     refreshPlan(unknownPlan);
