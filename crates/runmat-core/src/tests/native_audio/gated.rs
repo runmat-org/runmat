@@ -277,7 +277,7 @@ fn native_audio_pending_open_cancellation_retires_owner_and_does_not_replay() {
             &control,
         ));
         poll_to_gate(pending.as_mut(), &evidence);
-        cancellation.cancel(runmat_execution::cancellation::CancellationReason::User);
+        cancellation.cancel(runmat_execution::CancellationReason::User);
         let error = block_on(pending).expect_err("pending audio cancellation");
         let RunError::Runtime(error) = error else {
             panic!("expected typed cancellation");

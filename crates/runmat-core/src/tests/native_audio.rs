@@ -238,7 +238,7 @@ fn check_native_audio_suspension_has_no_effect_replay(
     }
 
     let cancellation = runmat_execution::cancellation::CancellationSource::new();
-    cancellation.cancel(runmat_execution::cancellation::CancellationReason::User);
+    cancellation.cancel(runmat_execution::CancellationReason::User);
     let error = block_on(session.invoke_executable(
         unit,
         invocation("engineReadPcm", "/engine/pcm.wav", 1),
