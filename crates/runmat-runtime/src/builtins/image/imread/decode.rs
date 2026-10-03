@@ -373,10 +373,11 @@ fn native_buffer<T: DecodedSample>(elements: usize) -> BuiltinResult<Vec<T>> {
         ));
     }
     let mut values = Vec::new();
-    values.try_reserve_exact(elements).map_err(|_| {
-        imread_error_with_detail(
+    values.try_reserve_exact(elements).map_err(|error| {
+        imread_error_with_source(
             &IMREAD_ERROR_SHAPE,
             "decoded image allocation is unavailable",
+            error,
         )
     })?;
     values.resize(elements, T::default());
@@ -440,5 +441,33 @@ mod tests {
         assert_eq!(alpha.numeric_dtype(), NumericDType::U8);
         assert_eq!(alpha.shape, vec![1, 2]);
         assert_eq!(alpha.materialize_f64(), vec![40.0, 80.0]);
+    }
+
+    #[test]
+    fn nonsquare_rgba_preserves_column_major_order_and_native_classes() {
+        fn assert_layout<T: DecodedSample + From<u8>>() {
+            let raw = (1_u8..=24).map(T::from).collect::<Vec<_>>();
+            let image = tensor_from_interleaved(&raw, 3, 2, 4, 3, T::DTYPE).unwrap();
+            let alpha = alpha_from_interleaved(&raw, 3, 2, 4, 3, T::DTYPE).unwrap();
+            assert_eq!(image.numeric_dtype(), T::DTYPE);
+            assert_eq!(image.shape, vec![2, 3, 3]);
+            assert_eq!(
+                image.materialize_f64(),
+                vec![
+                    1.0, 13.0, 5.0, 17.0, 9.0, 21.0, 2.0, 14.0, 6.0, 18.0, 10.0, 22.0, 3.0, 15.0,
+                    7.0, 19.0, 11.0, 23.0,
+                ]
+            );
+            assert_eq!(alpha.numeric_dtype(), T::DTYPE);
+            assert_eq!(alpha.shape, vec![2, 3]);
+            assert_eq!(
+                alpha.materialize_f64(),
+                vec![4.0, 16.0, 8.0, 20.0, 12.0, 24.0]
+            );
+        }
+
+        assert_layout::<u8>();
+        assert_layout::<u16>();
+        assert_layout::<f32>();
     }
 }
