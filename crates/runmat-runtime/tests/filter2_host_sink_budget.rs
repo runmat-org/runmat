@@ -12,7 +12,7 @@ use runmat_runtime::{
         RuntimeServicePorts,
     },
 };
-use runmat_value::{Tensor, Value};
+use runmat_value::{NumericDType, Tensor, Value};
 use std::rc::Rc;
 
 struct HostBudget(u64);
@@ -102,4 +102,57 @@ fn resident_h_host_image_is_one_admitted_readback_and_no_effect_below_budget() {
     .expect_err("invalid host input must fail before readback");
     assert_eq!(invalid.identifier(), Some("RunMat:filter2:InvalidInput"));
     assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+}
+
+#[test]
+fn integer_host_h_with_resident_x_uses_admitted_host_route_without_upload() {
+    let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let image = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("X");
+    let resident_x = gpu_helpers::upload_tensor(provider, &image).expect("resident X");
+    let kernel =
+        Tensor::new_with_dtype(vec![2.0], vec![1, 1], NumericDType::U8).expect("integer H");
+    let args = [Value::Tensor(kernel), Value::GpuTensor(resident_x.clone())];
+
+    provider.reset_telemetry();
+    let session = Rc::new(PlacementSession::new(Default::default()));
+    let result = block_on(call_builtin_async_in_context(
+        &context(session.clone(), 1_000_000),
+        "filter2",
+        &args,
+    ))
+    .expect("admitted host evaluator");
+    let Value::Tensor(result) = result else {
+        panic!("host result expected")
+    };
+    assert_eq!(result.numeric_dtype(), NumericDType::F64);
+    assert_eq!(result.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
+    let telemetry = provider.telemetry_snapshot();
+    assert!(telemetry.download_bytes > 0);
+    assert_eq!(telemetry.upload_bytes, 0);
+    assert_eq!(
+        session
+            .profile_snapshot()
+            .feedback
+            .iter()
+            .filter(|sample| sample.signature.operation == "filter2")
+            .map(|sample| sample.samples)
+            .sum::<u64>(),
+        1
+    );
+
+    provider.reset_telemetry();
+    let rejected = block_on(call_builtin_async_in_context(
+        &context(Rc::new(PlacementSession::new(Default::default())), 1),
+        "filter2",
+        &args,
+    ))
+    .expect_err("finite quota rejects before X readback");
+    assert!(rejected
+        .identifier()
+        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    let telemetry = provider.telemetry_snapshot();
+    assert_eq!(telemetry.download_bytes, 0);
+    assert_eq!(telemetry.upload_bytes, 0);
+    assert!(resident_x.allocation_lease().validate_live().is_ok());
 }

@@ -110,7 +110,7 @@ async fn filter2_builtin(
         && runmat_accelerate_api::provider_for_handle(handle).is_some_and(|provider| {
             provider.precision() != runmat_accelerate_api::ProviderPrecision::F32
         }));
-    if is_nonfloating_gpu(&kernel) || is_nonfloating_gpu(&image) || image_precision_mismatch {
+    if is_nonfloating_input(&kernel) || is_nonfloating_input(&image) || image_precision_mismatch {
         return host_route::run(runtime.as_ref(), kernel, image, &options).await;
     }
     match (kernel, image) {
@@ -231,8 +231,19 @@ fn preflight_filter2_geometry(
     Ok(())
 }
 
-fn is_nonfloating_gpu(value: &Value) -> bool {
-    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some() || runmat_accelerate_api::handle_is_logical(handle))
+fn is_nonfloating_input(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+        }
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F32 | NumericDType::F64
+        ),
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        _ => false,
+    }
 }
 
 fn value_is_single(value: &Value) -> bool {
