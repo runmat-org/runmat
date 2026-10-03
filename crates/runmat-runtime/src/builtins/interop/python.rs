@@ -16,6 +16,7 @@ enum PythonBuiltinOperation {
 }
 
 impl PythonBuiltinOperation {
+    #[cfg(not(target_arch = "wasm32"))]
     const fn symbol(self) -> &'static str {
         match self {
             Self::Status => "status",

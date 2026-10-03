@@ -16,7 +16,7 @@ execution_mode = "in_process"
 
 `version`, `minimum_version`, and `maximum_version` use `major.minor` form. `executable` selects a specific interpreter. The default `in_process` mode gives Python and NumPy direct access to compatible RunMat host buffers. `out_of_process` runs CPython through a child mode of the same `runmat` executable; it contains interpreter crashes and supports `terminate`, but values cross a process boundary.
 
-`pyenv` reports the selected executable, library, version, status, and execution mode without starting Python. Its `Version` and `ExecutionMode` options can change an environment only before startup. An in-process CPython instance cannot be unloaded safely; `terminate(environment)` is therefore available only for an out-of-process environment.
+`pyenv` reports the selected executable, library, version, status, and execution mode without starting the persistent Python session. Discovery can launch a short-lived interpreter probe. Its `Version` and `ExecutionMode` options can change an environment only before startup. An in-process CPython instance cannot be unloaded safely; `terminate(environment)` is therefore available only for an out-of-process environment.
 
 ## Call Python code
 
@@ -68,4 +68,4 @@ Artifact names must be unique across the resolved package graph. RunMat does not
 
 Python calls are part of executable reachability. Native compilation embeds the required environment and wheel identities together with the wheel contents. Remote submissions carry the same content-addressed artifacts, and a worker must satisfy the declared Python adapter contract before execution.
 
-Browser and WebAssembly sessions do not embed CPython. A product that reaches `py.*`, `pyenv`, `pyargs`, `pyrun`, or `pyrunfile` carries an explicit native-Python requirement and fails admission with `RunMat:Foreign:UnsupportedOnWasm` before execution. RunMat does not silently substitute another Python implementation. A future browser host bridge must be declared explicitly by both the product and host.
+Browser and WebAssembly sessions do not embed CPython. Calls through `py.*`, `pyenv`, `pyrun`, `pyrunfile`, and `terminate` require a native Python host. RunMat does not silently substitute another Python implementation. `pyargs` only constructs a local keyword-argument bundle, so it works without a Python host, including in WebAssembly; using that bundle to call Python still requires the native host. A future browser host bridge must be declared explicitly by both the product and host.
