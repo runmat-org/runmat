@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use futures::Stream;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -128,15 +129,7 @@ fn dropping_body_owner_aborts_fetch_and_reader() {
         .get_reader()
         .dyn_into::<ReadableStreamDefaultReader>()
         .expect("default reader");
-    let body = BrowserBody {
-        active,
-        reader,
-        pending: None,
-        accepted: 0,
-        accepted_limit: 1024,
-        url: request.url,
-        finished: false,
-    };
+    let body = BrowserBody::new(active, reader, 1024, request.url);
     assert!(!signal.aborted());
     drop(body);
     assert!(signal.aborted(), "body drop must abort the fetch owner");
@@ -176,15 +169,7 @@ fn timed_out_body_cannot_publish_ready_bytes() {
         .get_reader()
         .dyn_into::<ReadableStreamDefaultReader>()
         .expect("default reader");
-    let mut body = BrowserBody {
-        active,
-        reader,
-        pending: None,
-        accepted: 0,
-        accepted_limit: 1024,
-        url: request.url,
-        finished: false,
-    };
+    let mut body = BrowserBody::new(active, reader, 1024, request.url);
     let waker = futures::task::noop_waker();
     let Poll::Ready(Some(Err(error))) =
         Pin::new(&mut body).poll_next(&mut Context::from_waker(&waker))
