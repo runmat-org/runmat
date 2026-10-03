@@ -138,7 +138,7 @@ impl RuntimePlacementService for Placement {
                 }
             }
         }
-        self.demands.borrow_mut().push(candidate.resources.clone());
+        self.demands.borrow_mut().push(candidate.resources);
         self.selections.set(self.selections.get() + 1);
         self.probes.fetch_add(1, Ordering::SeqCst);
         Ok(RuntimeWholeWorkSelection {
