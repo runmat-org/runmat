@@ -111,13 +111,21 @@ fn cross_owner_readback_source_staging_and_queue_are_admitted_before_upload() {
 
     route.resources.providers[1].scratch_available_bytes = Some(7);
     assert_eq!(
-        session.select_whole_work(route.clone()).unwrap_err().code,
+        session
+            .select_whole_work(route.clone())
+            .err()
+            .expect("resource-constrained route must reject")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     route.resources.providers[1].scratch_available_bytes = Some(8);
     route.resources.providers[1].queue_depth = Some(1);
     assert_eq!(
-        session.select_whole_work(route.clone()).unwrap_err().code,
+        session
+            .select_whole_work(route.clone())
+            .err()
+            .expect("resource-constrained route must reject")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     route.resources.providers[1].queue_depth = Some(0);
@@ -125,7 +133,11 @@ fn cross_owner_readback_source_staging_and_queue_are_admitted_before_upload() {
         ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound),
     )];
     assert_eq!(
-        session.select_whole_work(route).unwrap_err().code,
+        session
+            .select_whole_work(route)
+            .err()
+            .expect("resource-constrained route must reject")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 }
@@ -157,7 +169,11 @@ fn same_owner_readback_and_retained_output_use_sequential_physical_peak() {
     assert!(session.select_whole_work(route.clone()).is_ok());
     route.resources.providers[0].capacity_bytes = Some(15);
     assert_eq!(
-        session.select_whole_work(route).unwrap_err().code,
+        session
+            .select_whole_work(route)
+            .err()
+            .expect("resource-constrained route must reject")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 }
@@ -185,7 +201,11 @@ fn empty_host_sink_needs_no_staging_or_queue_slot_under_finite_zero_quotas() {
         *queue_slots = 1;
     }
     assert_eq!(
-        session.select_whole_work(route).unwrap_err().code,
+        session
+            .select_whole_work(route)
+            .err()
+            .expect("resource-constrained route must reject")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
 }
@@ -605,13 +625,21 @@ fn host_sink_download_stage_obeys_provider_staging_and_host_payload_budgets() {
     assert!(session.select_whole_work(bounded.clone()).is_ok());
     bounded.resources.providers[0].scratch_available_bytes = Some(7);
     assert_eq!(
-        session.select_whole_work(bounded.clone()).unwrap_err().code,
+        session
+            .select_whole_work(bounded.clone())
+            .err()
+            .expect("resource-constrained route must reject")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     bounded.resources.providers[0].scratch_available_bytes = Some(8);
     bounded.resources.memory_available_bytes = Some(23);
     assert_eq!(
-        session.select_whole_work(bounded).unwrap_err().code,
+        session
+            .select_whole_work(bounded)
+            .err()
+            .expect("resource-constrained route must reject")
+            .code,
         "RunMat:Placement:NoLegalCandidate"
     );
     host.presentation = runmat_execution::CandidateOutputPresentation::ProviderDownload {
@@ -624,7 +652,8 @@ fn host_sink_download_stage_obeys_provider_staging_and_host_payload_budgets() {
     assert_eq!(
         session
             .select_whole_work(request(vec![host]))
-            .unwrap_err()
+            .err()
+            .expect("resource-constrained route must reject")
             .code,
         "RunMat:Placement:InsufficientResourceEvidence"
     );

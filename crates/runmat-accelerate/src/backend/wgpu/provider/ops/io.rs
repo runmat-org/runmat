@@ -891,7 +891,6 @@ mod tests {
             PlacementRevision, PlacementSignature, ResourceByteBound, WholeWorkCandidate,
             WholeWorkConstraint, WholeWorkPlacementRequest,
         };
-        use runmat_runtime::context::RuntimePlacementService;
         let digest = Digest::sha256(b"actual-empty-wgpu-readback");
         let candidate = WholeWorkCandidate {
             kind: ExecutionCandidateKind::SharedRuntime,
