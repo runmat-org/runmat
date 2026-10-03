@@ -192,10 +192,7 @@ fn wrap_index(mut coord: isize, len: isize) -> usize {
     coord as usize
 }
 
-pub(in crate::builtins::image::filters::imfilter) fn reflect_index(
-    coord: isize,
-    len: isize,
-) -> usize {
+pub(in crate::builtins::image::filters) fn reflect_index(coord: isize, len: isize) -> usize {
     if len <= 0 {
         return 0;
     }
