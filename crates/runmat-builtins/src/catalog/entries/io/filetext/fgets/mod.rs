@@ -1,5 +1,5 @@
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 mod contract;
 mod documentation;
