@@ -10,7 +10,7 @@ use std::sync::Arc;
 const PCM16: &[u8] = &[
     0x52, 0x49, 0x46, 0x46, 0x28, 0, 0, 0, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20, 0x10, 0,
     0, 0, 1, 0, 1, 0, 0x40, 0x1f, 0, 0, 0x80, 0x3e, 0, 0, 2, 0, 16, 0, 0x64, 0x61, 0x74, 0x61, 4,
-    0, 0, 0, 0, 0, 0x40,
+    0, 0, 0, 0, 0, 0, 0x40,
 ];
 
 #[derive(Default)]
@@ -133,6 +133,11 @@ fn run(
     fail_read: bool,
 ) -> (Result<DecodedAudio, RuntimeError>, Arc<Evidence>) {
     let evidence = Arc::new(Evidence::default());
+    assert_eq!(
+        PCM16.len(),
+        48,
+        "two complete PCM16 frames after the header"
+    );
     let input = FsInputLease {
         provider: Arc::new(ReadOnlyProvider {
             evidence: evidence.clone(),

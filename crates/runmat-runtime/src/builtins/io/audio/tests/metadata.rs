@@ -189,17 +189,23 @@ fn audioinfo_mp3_duration_uses_actual_file_size() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioinfo_large_non_ogg_scan_skips_tail_window() {
-    let path = temp_path("wav");
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/audio",
+    ));
+    let path = PathBuf::from("/audio/large.wav");
     let bytes = wav_fixture(44_100, 1, 16, 600_000);
-    fs::write(&path, &bytes).expect("write fixture");
+    provider
+        .write_project_path(&path, &bytes)
+        .expect("write fixture");
+    let _owner = runmat_filesystem::replace_provider(provider);
 
     let input = FsInputLease::capture(path, &AUDIOINFO_ERROR_IO, AUDIOINFO_BUILTIN_NAME)
         .expect("captured input");
     let scan = block_on(read_audioinfo_scan(&input)).expect("audio scan");
     assert_eq!(scan.file_size, bytes.len() as u64);
+    assert_eq!(scan.prefix.len() as u64, MAX_AUDIOINFO_PREFIX_BYTES);
     assert!(scan.tail.is_none());
-
-    let _ = fs::remove_file(&input.path);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
