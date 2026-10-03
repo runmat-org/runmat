@@ -60,12 +60,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     for index in 1..request.arguments.len() {
-        if request.arguments[index].shape.is_definitely_nonscalar()
-            || !matches!(
-                &request.arguments[index].kind,
-                ValueKindFact::Character | ValueKindFact::String | ValueKindFact::Unknown
-            )
-        {
+        if invalid_text(&request.arguments[index]) {
             result.diagnostics.push(argument_error(
                 "RM-CATALOG-FOPEN-CONTROL",
                 "permission, machine format, and encoding must be scalar text",
@@ -80,13 +75,14 @@ fn classify(request: &CallRequest) -> Form {
     let Some(first) = request.arguments.first() else {
         return Form::List;
     };
-    if first.shape.is_definitely_nonscalar() {
-        return Form::Invalid;
-    }
     match &first.kind {
-        ValueKindFact::Numeric(fact) if fact.domain == NumericDomain::Real => Form::Query,
+        ValueKindFact::Numeric(fact)
+            if fact.domain == NumericDomain::Real && !first.shape.is_definitely_nonscalar() =>
+        {
+            Form::Query
+        }
         ValueKindFact::Numeric(_) => Form::Invalid,
-        ValueKindFact::Character | ValueKindFact::String => {
+        ValueKindFact::Character | ValueKindFact::String if !invalid_text(first) => {
             match request.literals.literal_string_at(0).as_deref() {
                 Some(text) if text.eq_ignore_ascii_case("all") => Form::List,
                 Some(_) => Form::Open,
@@ -95,6 +91,22 @@ fn classify(request: &CallRequest) -> Form {
         }
         ValueKindFact::Unknown => Form::Unknown,
         _ => Form::Invalid,
+    }
+}
+
+fn invalid_text(value: &ValueFact) -> bool {
+    match &value.kind {
+        ValueKindFact::Character => value.shape.known_dims().is_some_and(|dims| {
+            dims.first()
+                .is_some_and(|rows| rows.is_some_and(|rows| rows != 1))
+                || dims
+                    .iter()
+                    .skip(2)
+                    .any(|dim| dim.is_some_and(|dim| dim != 1))
+        }),
+        ValueKindFact::String => value.shape.is_definitely_nonscalar(),
+        ValueKindFact::Unknown => false,
+        _ => true,
     }
 }
 

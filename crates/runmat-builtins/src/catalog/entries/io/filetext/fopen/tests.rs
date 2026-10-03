@@ -86,3 +86,29 @@ fn invalid_first_argument_and_extra_slots_are_not_guessed() {
         }))
     );
 }
+
+#[test]
+fn known_character_rows_are_valid_paths_and_controls() {
+    let row = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(9)]),
+        StorageFact::Dense,
+    );
+    let mut call = request(Some(row.clone()), Some("input.txt"), 1);
+    call.arguments.push(row);
+    let inferred = inference::infer(&call, &FOPEN_CATALOG_ENTRY);
+    assert!(inferred.diagnostics.is_empty());
+    assert!(matches!(
+        inferred.outputs[0].kind,
+        ValueKindFact::Numeric(_)
+    ));
+
+    call.arguments[1] = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    assert!(!inference::infer(&call, &FOPEN_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+}
