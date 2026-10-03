@@ -1194,4 +1194,66 @@ mod tests {
             vec![runmat_execution::resource::AcceleratorRequest::generic_compute(1).unwrap()];
         assert!(recipe_supports_capabilities(&recipe, &capabilities));
     }
+
+    #[test]
+    fn image_reader_builtin_callable_requires_both_source_services_at_host_admission() {
+        use std::collections::BTreeSet;
+
+        use runmat_execution::host::{
+            ExecutionHostInventory, ExecutionHostRequirement, ExecutionHostTarget,
+            EXECUTION_HOST_SCHEMA_VERSION,
+        };
+        use runmat_execution::security::ExecutionTrustTier;
+        use runmat_execution::LanguageCompatibilityMode;
+        use runmat_types::{CapabilityRequirement, CapabilitySet, InteropManifest};
+
+        // This test requires the composed typed imread catalog entry. A
+        // builtin worker callable has no call-site source literal to narrow.
+        let registry = crate::FunctionRegistry::new(HashMap::new());
+        let callable = ProgramCallable::builtin("imread").expect("builtin callable");
+        let capabilities = super::callable_capabilities(&registry, &callable)
+            .expect("resolve builtin callable requirements");
+        assert!(capabilities.0.contains(&CapabilityRequirement::Filesystem));
+        assert!(capabilities.0.contains(&CapabilityRequirement::Network));
+
+        let environment = ProgramEnvironment::new(
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
+            Digest::sha256(b"image-reader-runtime"),
+            Digest::sha256(b"image-reader-catalog"),
+            "matlab",
+        )
+        .unwrap();
+        let requirement = ExecutionHostRequirement::portable(
+            environment.clone(),
+            capabilities,
+            InteropManifest::empty(),
+            BTreeSet::from([ExecutionTrustTier::CustomerTrusted]),
+        )
+        .expect("portable builtin requirement");
+        let mut host = ExecutionHostInventory {
+            schema_version: EXECUTION_HOST_SCHEMA_VERSION,
+            semantic_schema: environment.semantic_schema,
+            compiler_schema: environment.compiler_schema,
+            runtime_fingerprint: environment.runtime_fingerprint,
+            catalog_fingerprint: environment.catalog_fingerprint,
+            compatibility_modes: BTreeSet::from([LanguageCompatibilityMode::Matlab]),
+            target: ExecutionHostTarget::BrowserWasm,
+            capabilities: CapabilitySet(BTreeSet::from([CapabilityRequirement::Filesystem])),
+            adapters: Vec::new(),
+            process_stack_available: false,
+            host_bridge_available: false,
+            trust_tier: ExecutionTrustTier::CustomerTrusted,
+        };
+        assert!(requirement.is_satisfied_by(&host).is_err());
+        host.capabilities = CapabilitySet(BTreeSet::from([CapabilityRequirement::Network]));
+        assert!(requirement.is_satisfied_by(&host).is_err());
+        host.capabilities = CapabilitySet(BTreeSet::from([
+            CapabilityRequirement::Filesystem,
+            CapabilityRequirement::Network,
+        ]));
+        requirement
+            .is_satisfied_by(&host)
+            .expect("both source services admit the callable");
+    }
 }
