@@ -1,8 +1,10 @@
 use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native.rs"]
 mod native;
 #[cfg(target_arch = "wasm32")]
+#[path = "tests/wasm.rs"]
 mod wasm;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
