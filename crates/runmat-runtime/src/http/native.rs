@@ -52,7 +52,7 @@ impl<T> Drop for AbortOnDrop<T> {
     }
 }
 
-async fn send_impl(request: HttpRequest) -> Result<HttpResponse, TransportError> {
+async fn send_impl(mut request: HttpRequest) -> Result<HttpResponse, TransportError> {
     let client = reqwest::Client::builder()
         .timeout(request.timeout)
         .user_agent(&request.user_agent)
@@ -84,8 +84,8 @@ async fn send_impl(request: HttpRequest) -> Result<HttpResponse, TransportError>
         })?;
         builder = builder.header(key, value);
     }
-    if let Some(body) = &request.body {
-        builder = builder.body(body.clone());
+    if let Some(body) = request.body.take() {
+        builder = builder.body(body);
     }
     let response = builder
         .send()
