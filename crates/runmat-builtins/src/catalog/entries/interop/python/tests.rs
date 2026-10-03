@@ -1,5 +1,10 @@
 use super::*;
+use crate::{catalog::inference::infer_catalog_call, BuiltinCatalogEntry, BuiltinPortability};
 use runmat_types::*;
+
+fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer_catalog_call(entry, request)
+}
 
 fn request(arguments: Vec<ValueFact>, count: usize) -> CallRequest {
     CallRequest {
@@ -11,7 +16,7 @@ fn request(arguments: Vec<ValueFact>, count: usize) -> CallRequest {
 
 #[test]
 fn pyargs_is_a_portable_local_bundle_not_a_python_service_call() {
-    let result = pyargs::inference::infer(&request(Vec::new(), 1), &PYARGS_CATALOG_ENTRY);
+    let result = infer(&request(Vec::new(), 1), &PYARGS_CATALOG_ENTRY);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert!(result.capabilities.0.is_empty());
     assert_eq!(
@@ -35,7 +40,7 @@ fn pyargs_rejects_known_bad_pair_while_preserving_integer_value_facts() {
         class: NumericClass::Int64,
         domain: NumericDomain::Real,
     }));
-    let result = pyargs::inference::infer(
+    let result = infer(
         &request(vec![numeric.clone(), numeric.clone()], 1),
         &PYARGS_CATALOG_ENTRY,
     );
@@ -43,7 +48,7 @@ fn pyargs_rejects_known_bad_pair_while_preserving_integer_value_facts() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-PYTHON-TEXT"));
-    let odd = pyargs::inference::infer(
+    let odd = infer(
         &request(vec![ValueFact::scalar(ValueKindFact::String)], 1),
         &PYARGS_CATALOG_ENTRY,
     );
@@ -56,8 +61,17 @@ fn pyargs_rejects_known_bad_pair_while_preserving_integer_value_facts() {
 #[test]
 fn foreign_calls_keep_foreign_capability_and_unknown_return_values() {
     let source = ValueFact::scalar(ValueKindFact::String);
-    let outputs = ValueFact::scalar(ValueKindFact::String);
-    let result = pyrun::inference::infer(&request(vec![source, outputs], 2), &PYRUN_CATALOG_ENTRY);
+    let text = ValueFact::scalar(ValueKindFact::String);
+    let outputs = ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(text.clone()),
+            elements: vec![text.clone(), text],
+            elements_complete: true,
+        }),
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Opaque,
+    );
+    let result = infer(&request(vec![source, outputs], 2), &PYRUN_CATALOG_ENTRY);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(result.outputs.len(), 2);
     assert!(result
@@ -72,7 +86,7 @@ fn foreign_calls_keep_foreign_capability_and_unknown_return_values() {
 
 #[test]
 fn pyenv_and_terminate_retain_environment_class_and_reject_known_invalid_receiver() {
-    let status = pyenv::inference::infer(&request(Vec::new(), 1), &PYENV_CATALOG_ENTRY);
+    let status = infer(&request(Vec::new(), 1), &PYENV_CATALOG_ENTRY);
     assert!(status.effects.0.contains(&EffectKind::FilesystemRead));
     assert!(status.effects.0.contains(&EffectKind::EnvironmentRead));
     assert!(!status.effects.0.contains(&EffectKind::EnvironmentWrite));
@@ -83,7 +97,7 @@ fn pyenv_and_terminate_retain_environment_class_and_reject_known_invalid_receive
         .runtime_class
         .as_ref()
         .is_some_and(|class| class.is(PYTHON_ENVIRONMENT_CLASS)));
-    let invalid = terminate::inference::infer(
+    let invalid = infer(
         &request(vec![ValueFact::scalar(ValueKindFact::String)], 1),
         &TERMINATE_CATALOG_ENTRY,
     );
@@ -96,7 +110,7 @@ fn pyenv_and_terminate_retain_environment_class_and_reject_known_invalid_receive
 #[test]
 fn script_effects_and_known_tail_arity_are_not_erased_by_foreign_dynamic_result() {
     let text = ValueFact::scalar(ValueKindFact::String);
-    let file = pyrunfile::inference::infer(
+    let file = infer(
         &request(vec![text.clone(), text.clone(), text.clone()], 1),
         &PYRUNFILE_CATALOG_ENTRY,
     );
