@@ -164,9 +164,13 @@ impl RuntimeAccelerationService for RejectPreparation {
 }
 
 fn base_context() -> RuntimeContext {
-    RuntimeContext::new(Rc::new(
+    let context = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
+    ));
+    context.set_runmat_extensions_enabled(
+        runmat_runtime::compatibility::runmat_extensions_enabled(),
+    );
+    context
 }
 
 fn provider() -> (&'static InProcessProvider, ThreadProviderGuard) {
