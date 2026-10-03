@@ -18,6 +18,8 @@ use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericScalar, Te
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod preflight;
+
 const BUILTIN_NAME: &str = "imwrite";
 
 #[runtime_builtin(
@@ -57,11 +59,19 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "filename must not be empty",
         ));
     }
-    preflight_resident_argument_roles(&args)?;
-    preflight_option_text(&args, filename_index + 1)?;
+    preflight::preflight_resident_argument_roles(&args)?;
+    let format = preflight::preflight_option_text(&args, filename_index + 1, &filename)?;
+    if matches!(format, ImageFormat::Gif | ImageFormat::Tiff)
+        && preflight::image_is_single(&args[0])
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMWRITE_SINGLE_GIF_TIFF_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let mut host_args = Vec::with_capacity(args.len());
     for arg in &args {
-        host_args.push(gather_imwrite_argument(arg).await?);
+        host_args.push(preflight::gather_imwrite_argument(arg).await?);
     }
 
     let invocation = parse_invocation(&host_args)?;
@@ -90,154 +100,6 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         })?;
 
     Ok(Value::OutputList(Vec::new()))
-}
-
-fn preflight_option_text(args: &[Value], mut index: usize) -> BuiltinResult<()> {
-    if let Some(first) = args.get(index) {
-        let text = string_arg(
-            "format or option name",
-            first,
-            &IMWRITE_ERROR_INVALID_OPTION,
-        )?;
-        if ImwriteOption::from_name(&text).is_none() {
-            parse_format_hint(&text)?;
-            index += 1;
-        }
-    }
-    while index < args.len() {
-        let name = string_arg("option name", &args[index], &IMWRITE_ERROR_INVALID_OPTION)?;
-        match ImwriteOption::from_name(&name) {
-            None => {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_OPTION,
-                    format!("unsupported option '{name}'"),
-                ));
-            }
-            Some(ImwriteOption::UnsupportedAdvanced) => {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_OPTION,
-                    format!("option '{name}' is not supported yet"),
-                ));
-            }
-            Some(_) => {}
-        }
-        if index + 1 >= args.len() {
-            return Err(imwrite_error_with_detail(
-                &IMWRITE_ERROR_INVALID_OPTION,
-                format!("option '{name}' requires a value"),
-            ));
-        }
-        index += 2;
-    }
-    Ok(())
-}
-
-fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult<()> {
-    for value in args {
-        if let Value::GpuTensor(handle) = value {
-            validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
-        }
-    }
-    let Some(image) = args.first() else {
-        return Ok(());
-    };
-    preflight_resident_image_class(image)?;
-    if args.get(1).is_some_and(|value| !is_string_like(value)) {
-        if let Some(Value::GpuTensor(map)) = args.get(1) {
-            let owner = validate_resident_numeric_metadata(map, &IMWRITE_ERROR_INVALID_COLORMAP)?;
-            if runmat_accelerate_api::handle_integer_type(map).is_some()
-                || runmat_accelerate_api::handle_is_logical(map)
-                || runmat_accelerate_api::handle_precision(map)
-                    != Some(runmat_accelerate_api::ProviderPrecision::F64)
-                || owner.precision() != runmat_accelerate_api::ProviderPrecision::F64
-            {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_COLORMAP,
-                    "map must be a double Nx3 colormap",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_resident_numeric_metadata(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    error: &'static BuiltinErrorDescriptor,
-) -> BuiltinResult<&'static dyn runmat_accelerate_api::AccelProvider> {
-    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| {
-            imwrite_error_with_detail(error, "no acceleration provider owns the gpuArray handle")
-        })?;
-    if runmat_accelerate_api::handle_storage(handle)
-        != runmat_accelerate_api::GpuTensorStorage::Real
-    {
-        return Err(imwrite_error_with_detail(
-            error,
-            "gpuArray arguments must use real numeric storage",
-        ));
-    }
-    let precision = runmat_accelerate_api::handle_precision(handle);
-    let integer = runmat_accelerate_api::handle_integer_type(handle);
-    let logical = runmat_accelerate_api::handle_is_logical(handle);
-    if !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
-        handle, precision, integer, logical,
-    ) {
-        return Err(imwrite_error_with_detail(
-            error,
-            "gpuArray class metadata contradicts its physical storage",
-        ));
-    }
-    if integer.is_none() && precision != Some(owner.precision()) {
-        return Err(imwrite_error_with_detail(
-            error,
-            "gpuArray precision metadata contradicts its owning provider",
-        ));
-    }
-    Ok(owner)
-}
-
-async fn gather_imwrite_argument(value: &Value) -> BuiltinResult<Value> {
-    let Value::GpuTensor(handle) = value else {
-        return Ok(value.clone());
-    };
-    let owner = validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
-    let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(handle);
-    let result = crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
-        owner, handle,
-    )
-    .await;
-    result.map_err(|err| {
-        imwrite_error_with_source(
-            &IMWRITE_ERROR_INVALID_ARGUMENT,
-            "provider download failed",
-            err,
-        )
-    })
-}
-
-fn preflight_resident_image_class(value: &Value) -> BuiltinResult<()> {
-    let Value::GpuTensor(handle) = value else {
-        return Ok(());
-    };
-    validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_IMAGE)?;
-    if matches!(
-        runmat_accelerate_api::handle_integer_type(handle),
-        Some(
-            runmat_accelerate_api::IntegerElementType::I8
-                | runmat_accelerate_api::IntegerElementType::I16
-                | runmat_accelerate_api::IntegerElementType::I32
-                | runmat_accelerate_api::IntegerElementType::I64
-                | runmat_accelerate_api::IntegerElementType::U32
-                | runmat_accelerate_api::IntegerElementType::U64
-        )
-    ) {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_IMAGE,
-            "supported integer image classes are uint8 and uint16",
-        ));
-    }
-    Ok(())
 }
 
 fn value_numeric_dtype(value: &Value) -> Option<NumericDType> {
@@ -667,13 +529,15 @@ fn ensure_documented_alpha_class(alpha: &Tensor) -> BuiltinResult<()> {
 }
 
 fn image_dimensions(tensor: &Tensor) -> BuiltinResult<(usize, usize, usize)> {
-    match tensor.shape.len() {
+    image_dimensions_from_shape(&tensor.shape)
+}
+
+fn image_dimensions_from_shape(shape: &[usize]) -> BuiltinResult<(usize, usize, usize)> {
+    match shape.len() {
         0 => Ok((1, 1, 1)),
-        1 => Ok((1, tensor.shape[0], 1)),
-        2 => Ok((tensor.shape[0], tensor.shape[1], 1)),
-        3 if matches!(tensor.shape[2], 1 | 3 | 4) => {
-            Ok((tensor.shape[0], tensor.shape[1], tensor.shape[2]))
-        }
+        1 => Ok((1, shape[0], 1)),
+        2 => Ok((shape[0], shape[1], 1)),
+        3 if matches!(shape[2], 1 | 3 | 4) => Ok((shape[0], shape[1], shape[2])),
         _ => Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_IMAGE,
             "image must be MxN, MxNx3, or MxNx4",
@@ -1411,9 +1275,68 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use image::io::Reader as ImageReader;
+    use runmat_accelerate_api::{
+        AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
+        HostNumericTensorView, HostTensorView, ProviderPrecision, ThreadProviderGuard,
+    };
     use runmat_value::IntegerStorage;
     use std::fs;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tempfile::tempdir;
+
+    struct CountingDownloadProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        downloads: AtomicUsize,
+        pending: AtomicBool,
+        abandoned: AtomicUsize,
+    }
+
+    struct PendingRead<'a>(&'a AtomicUsize);
+
+    impl Drop for PendingRead<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl AccelProvider for CountingDownloadProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+        fn upload_numeric_raw(
+            &self,
+            host: &HostNumericTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload_numeric_raw(host)
+        }
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.downloads.fetch_add(1, Ordering::SeqCst);
+            self.inner.download(handle)
+        }
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> AccelNumericDownloadFuture<'a> {
+            Box::pin(async move {
+                self.downloads.fetch_add(1, Ordering::SeqCst);
+                if self.pending.load(Ordering::SeqCst) {
+                    let _pending = PendingRead(&self.abandoned);
+                    futures::future::pending::<()>().await;
+                    unreachable!()
+                }
+                self.inner.download_numeric(handle).await
+            })
+        }
+        fn device_info(&self) -> String {
+            self.inner.device_info()
+        }
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+        fn precision(&self) -> ProviderPrecision {
+            self.inner.precision()
+        }
+    }
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>, dtype: NumericDType) -> Tensor {
         Tensor::new_with_dtype(data, shape, dtype).expect("tensor")
@@ -1471,6 +1394,73 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_OPTION.identifier);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn known_invalid_geometry_and_controls_never_download_resident_image() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let owner = Box::leak(Box::new(CountingDownloadProvider {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            downloads: AtomicUsize::new(0),
+            pending: AtomicBool::new(false),
+            abandoned: AtomicUsize::new(0),
+        }));
+        let _thread = ThreadProviderGuard::set(Some(owner));
+        let dir = tempdir().unwrap();
+        let path = Value::String(dir.path().join("never.png").to_string_lossy().into_owned());
+
+        let invalid_channels = tensor(vec![0.0; 8], vec![2, 2, 2], NumericDType::F64);
+        let resident =
+            crate::builtins::common::gpu_helpers::upload_tensor(owner, &invalid_channels).unwrap();
+        let error = call(vec![Value::GpuTensor(resident), path.clone()]).unwrap_err();
+        assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
+        assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
+
+        let valid = tensor(vec![0.0; 4], vec![2, 2], NumericDType::F64);
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(owner, &valid).unwrap();
+        let invalid_map = Value::Tensor(tensor(vec![0.0; 4], vec![2, 2], NumericDType::F64));
+        let error = call(vec![
+            Value::GpuTensor(resident.clone()),
+            invalid_map,
+            path.clone(),
+        ])
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            IMWRITE_ERROR_INVALID_COLORMAP.identifier
+        );
+        assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
+
+        let error = call(vec![
+            Value::GpuTensor(resident.clone()),
+            path.clone(),
+            Value::String("Quality".into()),
+            Value::String("invalid".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_OPTION.identifier);
+        assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
+        assert!(block_on(owner.download_numeric(&resident)).is_ok());
+
+        let reads = owner.downloads.load(Ordering::SeqCst);
+        let unpolled = imwrite_builtin(vec![Value::GpuTensor(resident.clone()), path.clone()]);
+        drop(unpolled);
+        assert_eq!(owner.downloads.load(Ordering::SeqCst), reads);
+        assert!(!dir.path().join("never.png").exists());
+
+        owner.pending.store(true, Ordering::SeqCst);
+        let mut future = Box::pin(imwrite_builtin(vec![
+            Value::GpuTensor(resident.clone()),
+            path,
+        ]));
+        let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
+        assert!(std::future::Future::poll(future.as_mut(), &mut context).is_pending());
+        assert_eq!(owner.downloads.load(Ordering::SeqCst), reads + 1);
+        drop(future);
+        assert_eq!(owner.abandoned.load(Ordering::SeqCst), 1);
+        assert!(!dir.path().join("never.png").exists());
+        owner.pending.store(false, Ordering::SeqCst);
+        assert!(block_on(owner.download_numeric(&resident)).is_ok());
     }
 
     #[test]
