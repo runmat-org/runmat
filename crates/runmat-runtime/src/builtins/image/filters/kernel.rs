@@ -1,5 +1,5 @@
 use runmat_accelerate_api::{ImfilterOptions, ImfilterShape, ProviderPrecision};
-use runmat_value::Tensor;
+use runmat_value::{NumericDType, Tensor};
 
 use crate::builtins::common::tensor;
 
