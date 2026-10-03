@@ -68,24 +68,7 @@ impl PendingFeedback {
         let mut retained = Vec::new();
         for source in sources {
             let signature = source.signature();
-            let invalid = match invalidation {
-                PlacementInvalidation::All => true,
-                PlacementInvalidation::Program { revision } => {
-                    signature.revision.program.as_ref() == Some(revision)
-                }
-                PlacementInvalidation::Provider { digest } => {
-                    signature.revision.authority
-                        == runmat_execution::PlacementExecutionAuthorityRevision::Provider(*digest)
-                }
-                PlacementInvalidation::HostService { digest } => {
-                    signature.revision.authority
-                        == runmat_execution::PlacementExecutionAuthorityRevision::HostService(
-                            *digest,
-                        )
-                }
-                PlacementInvalidation::Policy { digest } => signature.revision.policy == *digest,
-                PlacementInvalidation::Signature { key } => signature.cache_key() == *key,
-            };
+            let invalid = invalidation.matches_signature(signature);
             if invalid {
                 self.discarded.set(self.discarded.get().saturating_add(1));
             } else {

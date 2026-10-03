@@ -2,7 +2,7 @@
 //! have finished before `finish`; dropping this owner abandons feedback.
 
 use crate::context::{RuntimeContext, RuntimeWholeWorkSelection};
-use runmat_execution::PlacementFeedback;
+use runmat_execution::WholeWorkObservationOutcome;
 use runmat_time::Instant;
 
 pub(crate) struct HostSinkReceipt {
@@ -27,14 +27,15 @@ impl HostSinkReceipt {
             return;
         }
         if let Some(service) = self.runtime.service_ports().placement() {
-            let _ = service.observe(PlacementFeedback {
-                signature: self.selected.decision.signature.clone(),
-                candidate: self.selected.decision.selected.candidate.clone(),
-                kind: self.selected.decision.selected.kind,
-                total_elapsed_ns: runmat_time::duration_ns_saturating(self.started.elapsed())
-                    .max(1),
-                succeeded: published,
-            });
+            let _ = service.observe_selected_whole_work(
+                &self.selected,
+                runmat_time::duration_ns_saturating(self.started.elapsed()).max(1),
+                if published {
+                    WholeWorkObservationOutcome::Success
+                } else {
+                    WholeWorkObservationOutcome::OperationalFailure
+                },
+            );
         }
     }
 }

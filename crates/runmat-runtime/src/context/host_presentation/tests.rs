@@ -84,6 +84,7 @@ impl RuntimePlacementService for Witness {
                 predicted_total_ns: None,
             },
             probe: None,
+            observation_permit: None,
         })
     }
     fn plan(&self, _: PlacementPlanRequest) -> Result<PlacementDecision, RuntimeError> {
@@ -108,6 +109,13 @@ impl RuntimeWholeWorkProbeLease for Probe {}
 impl Drop for Probe {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+struct TestObservationPermit(std::sync::atomic::AtomicBool);
+impl crate::context::RuntimeWholeWorkObservationPermit for TestObservationPermit {
+    fn is_current(&self) -> bool {
+        self.0.load(Ordering::Acquire)
     }
 }
 
@@ -151,6 +159,7 @@ fn receipt_owner(
             predicted_total_ns: None,
         },
         probe: Some(Box::new(Probe(probe_count))),
+        observation_permit: None,
     };
     HostPresentationReceipt::new(runtime, selected, receipt)
 }
@@ -173,6 +182,50 @@ fn publication_waits_for_actual_submission_completion_and_holds_probe() {
     witness.drain();
     assert_eq!(witness.feedback.borrow().len(), 1);
     assert_eq!(probes.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn revoked_selection_discards_late_provider_completion_without_feedback() {
+    let witness = Rc::new(Witness::default());
+    let cancellation = CancellationSource::new();
+    let probes = Arc::new(AtomicUsize::new(0));
+    let receipt = ProviderOperationReceipt::new();
+    let mut owner = receipt_owner(Some(&witness), &cancellation, probes.clone(), receipt);
+    let permit = Arc::new(TestObservationPermit(std::sync::atomic::AtomicBool::new(
+        true,
+    )));
+    owner.selected.observation_permit = Some(permit.clone());
+    let submission = owner.recorder().submission().unwrap();
+    owner.finish(Ok(true));
+    assert_eq!(witness.pending.borrow().len(), 1);
+    permit.0.store(false, Ordering::Release);
+    submission.complete();
+    witness.drain();
+    assert!(witness.feedback.borrow().is_empty());
+    assert!(witness.pending.borrow().is_empty());
+    assert_eq!(probes.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn revoked_selection_cannot_register_a_late_deferred_source() {
+    let witness = Rc::new(Witness::default());
+    let cancellation = CancellationSource::new();
+    let probes = Arc::new(AtomicUsize::new(0));
+    let receipt = ProviderOperationReceipt::new();
+    let mut owner = receipt_owner(Some(&witness), &cancellation, probes.clone(), receipt);
+    let permit = Arc::new(TestObservationPermit(std::sync::atomic::AtomicBool::new(
+        true,
+    )));
+    owner.selected.observation_permit = Some(permit.clone());
+    let submission = owner.recorder().submission().unwrap();
+    permit.0.store(false, Ordering::Release);
+    owner.finish(Ok(true));
+    assert!(witness.pending.borrow().is_empty());
+    assert!(witness.feedback.borrow().is_empty());
+    assert_eq!(probes.load(Ordering::SeqCst), 0);
+    submission.complete();
+    witness.drain();
+    assert!(witness.feedback.borrow().is_empty());
 }
 
 #[test]

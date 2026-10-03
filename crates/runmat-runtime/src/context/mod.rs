@@ -40,7 +40,8 @@ pub use services::{
     RuntimeHostService, RuntimeHttpService, RuntimeNativeService, RuntimeObjectService,
     RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackSource,
     RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
-    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService, RuntimeWholeWorkProbeLease,
-    RuntimeWholeWorkSelection, RuntimeWorkspaceService,
+    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService,
+    RuntimeWholeWorkObservationPermit, RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection,
+    RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;

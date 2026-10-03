@@ -152,6 +152,7 @@ impl HostPresentationReceipt {
             // Exploration remains reserved until completion evidence or a
             // terminal non-sample; enqueue/publication is not completion.
             _probe: self.selected.probe.take(),
+            observation_permit: self.selected.observation_permit.take(),
             cancellation: self.runtime.cancellation(),
             terminal_without_feedback: false,
         };
@@ -172,6 +173,7 @@ struct DeferredPresentationFeedback {
     signature: PlacementSignature,
     selected: SelectedExecutionCandidate,
     _probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+    observation_permit: Option<std::sync::Arc<dyn super::RuntimeWholeWorkObservationPermit>>,
     cancellation: CancellationToken,
     terminal_without_feedback: bool,
 }
@@ -182,6 +184,14 @@ impl RuntimePlacementFeedbackSource for DeferredPresentationFeedback {
     }
 
     fn take_ready(&mut self) -> Option<PlacementFeedback> {
+        if self
+            .observation_permit
+            .as_ref()
+            .is_some_and(|permit| !permit.is_current())
+        {
+            self.terminal_without_feedback = true;
+            return None;
+        }
         if self.cancellation.is_cancelled() {
             self.receipt.fail(ProviderObservationFailure::Cancelled);
         }

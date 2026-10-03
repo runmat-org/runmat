@@ -9,8 +9,7 @@ use runmat_execution::{
     CandidateOutputPresentation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementExecutionAuthorityRevision,
     PlacementResourceSnapshot, PlacementSignature, ResourceByteBound, WholeWorkCandidate,
-    WholeWorkConstraint, WholeWorkObservation, WholeWorkObservationOutcome,
-    WholeWorkPlacementRequest,
+    WholeWorkConstraint, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
 };
 use runmat_time::{duration_ns_saturating, Instant};
 
@@ -219,12 +218,11 @@ impl HostEffectReceipt {
             return;
         }
         if let Some(service) = self.runtime.service_ports().placement() {
-            let _ = service.observe_whole_work(WholeWorkObservation {
-                signature: self.selected.decision.signature.clone(),
-                selected: self.selected.decision.selected.clone(),
-                elapsed_ns: duration_ns_saturating(self.started.elapsed()).max(1),
+            let _ = service.observe_selected_whole_work(
+                &self.selected,
+                duration_ns_saturating(self.started.elapsed()).max(1),
                 outcome,
-            });
+            );
         }
     }
 }

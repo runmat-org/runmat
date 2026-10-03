@@ -8,7 +8,7 @@ use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::{
     CancellationReason, PlacementDecision, PlacementFeedback, PlacementInvalidation,
     PlacementPlanRequest, PlacementRevision, ResourceBoundUnavailable, WholeWorkDecision,
-    WholeWorkDecisionKind,
+    WholeWorkDecisionKind, WholeWorkObservation,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -106,6 +106,7 @@ impl RuntimePlacementService for Placement {
                 predicted_total_ns: None,
             },
             probe: Some(Box::new(Probe(self.probes.clone()))),
+            observation_permit: None,
         })
     }
     fn observe_whole_work(

@@ -54,6 +54,18 @@ impl PlacementSession {
         &self,
         request: WholeWorkPlacementRequest,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
+        let mut selected = self.select_whole_work_untracked(request)?;
+        selected.observation_permit = Some(
+            self.observation_permits
+                .register(&selected.decision.signature),
+        );
+        Ok(selected)
+    }
+
+    fn select_whole_work_untracked(
+        &self,
+        request: WholeWorkPlacementRequest,
+    ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
         request.validate().map_err(invalid_request)?;
         if request.resources.cancellation_requested {
             return Err(PlacementPlanError {
@@ -173,6 +185,7 @@ impl PlacementSession {
                         .and_then(|cost| cost.checked_total_ns()),
                 },
                 probe: None,
+                observation_permit: None,
             });
         }
 
@@ -197,6 +210,7 @@ impl PlacementSession {
                         active: Arc::clone(&self.whole_work_probes),
                         key,
                     })),
+                    observation_permit: None,
                 });
             }
         }
@@ -260,6 +274,7 @@ impl PlacementSession {
                 predicted_total_ns: Some(plan.predicted_total_ns),
             },
             probe: None,
+            observation_permit: None,
         })
     }
 }
@@ -280,6 +295,7 @@ fn unmeasured_host(
             predicted_total_ns: None,
         },
         probe: None,
+        observation_permit: None,
     })
 }
 

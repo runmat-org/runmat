@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use super::{partition::evaluate_selections, partition::solve_partition, PlacementPolicy};
 mod evidence;
+mod observation_permits;
 mod pending;
 mod whole_work;
 #[cfg(test)]
@@ -165,6 +166,7 @@ pub struct PlacementSession {
     config: PlacementSessionConfig,
     state: RefCell<PlacementSessionState>,
     pending: pending::PendingFeedback,
+    observation_permits: observation_permits::ObservationPermits,
     whole_work_probes: Arc<Mutex<BTreeSet<(Digest, String, ExecutionCandidateKind)>>>,
 }
 
@@ -180,6 +182,7 @@ impl PlacementSession {
             config,
             state: RefCell::new(PlacementSessionState::default()),
             pending: pending::PendingFeedback::default(),
+            observation_permits: observation_permits::ObservationPermits::default(),
             whole_work_probes: Arc::default(),
         }
     }
@@ -349,6 +352,7 @@ impl PlacementSession {
     }
 
     pub fn invalidate(&self, invalidation: PlacementInvalidation) {
+        self.observation_permits.invalidate(&invalidation);
         self.pending.invalidate(&invalidation);
         let mut state = self.state.borrow_mut();
         match invalidation {
@@ -464,6 +468,8 @@ impl PlacementSession {
         // from the previous profile must not repopulate the replacement later.
         // Validate the entire import first, so rejected imports change nothing.
         self.pending.invalidate(&PlacementInvalidation::All);
+        self.observation_permits
+            .invalidate(&PlacementInvalidation::All);
         let mut state = self.state.borrow_mut();
         state.tick = restored_tick;
         state.decisions.clear();

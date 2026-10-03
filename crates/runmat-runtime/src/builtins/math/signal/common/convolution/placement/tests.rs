@@ -106,6 +106,7 @@ impl RuntimePlacementService for PlacementWitnessService {
                 predicted_total_ns: None,
             },
             probe: None,
+            observation_permit: None,
         })
     }
 

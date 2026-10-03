@@ -238,9 +238,27 @@ pub trait RuntimePlacementFeedbackSource: Send {
 /// Dropping it releases the reservation without reporting a provider failure.
 pub trait RuntimeWholeWorkProbeLease: Send {}
 
+/// Read-only completion authority returned by the selecting service. Only
+/// that service can revoke its concrete permit on profile replacement or
+/// typed invalidation; consumers cannot re-enable a retired observation.
+pub trait RuntimeWholeWorkObservationPermit: Send + Sync {
+    fn is_current(&self) -> bool;
+}
+
 pub struct RuntimeWholeWorkSelection {
     pub decision: runmat_execution::WholeWorkDecision,
     pub probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+    /// Selection-owned validity; a matching invalidation or profile import
+    /// revokes late completion even before a deferred source is registered.
+    pub observation_permit: Option<std::sync::Arc<dyn RuntimeWholeWorkObservationPermit>>,
+}
+
+impl RuntimeWholeWorkSelection {
+    pub fn observation_is_current(&self) -> bool {
+        self.observation_permit
+            .as_ref()
+            .is_none_or(|permit| permit.is_current())
+    }
 }
 
 /// Host-owned, operation-specific evidence for a complete side-effecting call.
@@ -314,6 +332,30 @@ pub trait RuntimePlacementService {
             kind: observation.selected.kind,
             total_elapsed_ns: observation.elapsed_ns,
             succeeded,
+        })
+    }
+
+    /// Only the selection that owns an unrevoked observation permit may
+    /// publish complete-call evidence. This is shared by host effects, host
+    /// sinks, and other whole-work consumers rather than a builtin timer.
+    /// Runtime placement ports are Rc-owned and PlacementSession is !Sync;
+    /// permit validation and profile insertion are serialized on the owner
+    /// thread. Provider callbacks only complete Send receipts for later
+    /// owner-thread draining.
+    fn observe_selected_whole_work(
+        &self,
+        selected: &RuntimeWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), RuntimeError> {
+        if !selected.observation_is_current() {
+            return Ok(());
+        }
+        self.observe_whole_work(runmat_execution::WholeWorkObservation {
+            signature: selected.decision.signature.clone(),
+            selected: selected.decision.selected.clone(),
+            elapsed_ns,
+            outcome,
         })
     }
 

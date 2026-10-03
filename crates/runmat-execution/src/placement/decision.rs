@@ -97,3 +97,24 @@ pub enum PlacementInvalidation {
     Policy { digest: Digest },
     Signature { key: Digest },
 }
+
+impl PlacementInvalidation {
+    /// The same typed match governs cached feedback, pending receipts, and
+    /// still-running whole-work observation permits.
+    pub fn matches_signature(&self, signature: &PlacementSignature) -> bool {
+        match self {
+            Self::All => true,
+            Self::Program { revision } => signature.revision.program.as_ref() == Some(revision),
+            Self::Provider { digest } => {
+                signature.revision.authority
+                    == PlacementExecutionAuthorityRevision::Provider(*digest)
+            }
+            Self::HostService { digest } => {
+                signature.revision.authority
+                    == PlacementExecutionAuthorityRevision::HostService(*digest)
+            }
+            Self::Policy { digest } => signature.revision.policy == *digest,
+            Self::Signature { key } => signature.cache_key() == *key,
+        }
+    }
+}

@@ -103,6 +103,7 @@ impl RuntimePlacementService for Witness {
                 predicted_total_ns: None,
             },
             probe: None,
+            observation_permit: None,
         })
     }
 

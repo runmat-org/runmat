@@ -92,3 +92,69 @@ fn host_service_direct_effect_obeys_real_whole_work_memory_account() {
         "RunMat:Placement:InsufficientResourceEvidence"
     );
 }
+
+#[test]
+fn revoked_whole_work_receipt_cannot_restore_replaced_profile() {
+    let session = PlacementSession::default();
+    let selected = session
+        .select_whole_work(request(
+            &session,
+            ResourceByteBound::Known(12),
+            ResourceByteBound::Known(24),
+        ))
+        .unwrap();
+    session.restore_profile(session.profile_snapshot()).unwrap();
+    assert!(!selected.observation_is_current());
+    RuntimePlacementService::observe_selected_whole_work(
+        &session,
+        &selected,
+        17,
+        WholeWorkObservationOutcome::Success,
+    )
+    .unwrap();
+    assert!(session.profile_snapshot().feedback.is_empty());
+}
+
+#[test]
+fn typed_invalidation_revokes_only_matching_whole_work_authority() {
+    let session = PlacementSession::default();
+    let selected = session
+        .select_whole_work(request(
+            &session,
+            ResourceByteBound::Known(12),
+            ResourceByteBound::Known(24),
+        ))
+        .unwrap();
+    let host = match selected.decision.signature.revision.authority {
+        PlacementExecutionAuthorityRevision::HostService(digest) => digest,
+        PlacementExecutionAuthorityRevision::Provider(_) => unreachable!("host fixture"),
+    };
+    session.invalidate(runmat_execution::PlacementInvalidation::Provider { digest: host });
+    assert!(selected.observation_is_current());
+    RuntimePlacementService::observe_selected_whole_work(
+        &session,
+        &selected,
+        17,
+        WholeWorkObservationOutcome::Success,
+    )
+    .unwrap();
+    assert_eq!(session.profile_snapshot().feedback.len(), 1);
+
+    let stale = session
+        .select_whole_work(request(
+            &session,
+            ResourceByteBound::Known(12),
+            ResourceByteBound::Known(24),
+        ))
+        .unwrap();
+    session.invalidate(runmat_execution::PlacementInvalidation::HostService { digest: host });
+    assert!(!stale.observation_is_current());
+    RuntimePlacementService::observe_selected_whole_work(
+        &session,
+        &stale,
+        19,
+        WholeWorkObservationOutcome::Success,
+    )
+    .unwrap();
+    assert!(session.profile_snapshot().feedback.is_empty());
+}

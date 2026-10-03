@@ -45,6 +45,7 @@ fn selected() -> RuntimeWholeWorkSelection {
             predicted_total_ns: None,
         },
         probe: None,
+        observation_permit: None,
     }
 }
 

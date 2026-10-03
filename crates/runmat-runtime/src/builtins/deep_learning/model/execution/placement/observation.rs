@@ -1,6 +1,6 @@
 //! One genuine invocation's complete-route feedback, never a replay timer.
 
-use runmat_execution::{WholeWorkObservation, WholeWorkObservationOutcome};
+use runmat_execution::WholeWorkObservationOutcome;
 use runmat_time::{duration_ns_saturating, Instant};
 use std::error::Error;
 
@@ -35,14 +35,12 @@ impl PendingWholeWorkObservation {
     }
 
     fn observe(self, outcome: WholeWorkObservationOutcome) {
-        let observation = WholeWorkObservation {
-            signature: self.selected.decision.signature.clone(),
-            selected: self.selected.decision.selected.clone(),
-            elapsed_ns: duration_ns_saturating(self.started.elapsed()),
-            outcome,
-        };
         if let Some(service) = self.runtime.service_ports().placement() {
-            if let Err(error) = service.observe_whole_work(observation) {
+            if let Err(error) = service.observe_selected_whole_work(
+                &self.selected,
+                duration_ns_saturating(self.started.elapsed()),
+                outcome,
+            ) {
                 tracing::warn!(target: "runmat_placement", "whole-network observation rejected: {error}");
             }
         }
