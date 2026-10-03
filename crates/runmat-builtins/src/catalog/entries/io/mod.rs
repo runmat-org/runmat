@@ -8,8 +8,10 @@ mod http;
 mod inference;
 mod repl_fs;
 mod text_admission;
+mod audio;
 
 pub use self::archive::*;
+pub use self::audio::*;
 pub use self::console::*;
 pub use self::filetext::*;
 pub use self::http::*;
@@ -22,4 +24,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     filetext::extend_entries(values);
     repl_fs::extend_entries(values);
     http::extend_entries(values);
+    values.extend(audio::ENTRIES.iter().copied());
 }

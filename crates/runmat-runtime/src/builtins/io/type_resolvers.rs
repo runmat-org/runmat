@@ -34,11 +34,6 @@ pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
 }
 
-pub fn audioread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::tensor()
-}
-
 pub fn textscan_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::cell()
@@ -364,13 +359,6 @@ mod tests {
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
     assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
-    assert_resolver!(
-        audioinfo_type_resolver,
-        struct_type,
-        &[],
-        Type::Struct { known_fields: None }
-    );
-    assert_resolver!(audioread_type_resolver, audioread_type, &[], Type::tensor());
     assert_resolver!(
         importdata_type_resolver,
         importdata_type,
