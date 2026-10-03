@@ -258,6 +258,17 @@ pub trait RuntimePlacementService {
         None
     }
 
+    /// A complete host-service route has no provider capability digest.
+    /// Services that cannot identify the installed host authority return None;
+    /// callers with finite resource limits must then decline before effects.
+    fn whole_work_host_service_revision(
+        &self,
+        _program: Option<runmat_execution::ProgramRevision>,
+        _host_service: runmat_execution::Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        None
+    }
+
     /// Select one complete, already admitted invocation. Third-party
     /// implementations remain conservative until they support this contract.
     fn select_whole_work(
@@ -851,7 +862,7 @@ mod tests {
                 program: None,
                 catalog: digest,
                 compiler: digest,
-                provider: digest,
+                authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest),
                 policy: digest,
             },
         };

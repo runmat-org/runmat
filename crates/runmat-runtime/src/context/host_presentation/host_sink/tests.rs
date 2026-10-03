@@ -23,7 +23,9 @@ fn selected() -> RuntimeWholeWorkSelection {
                     program: None,
                     catalog: digest,
                     compiler: digest,
-                    provider: digest,
+                    authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(
+                        digest,
+                    ),
                     policy: digest,
                 },
             },

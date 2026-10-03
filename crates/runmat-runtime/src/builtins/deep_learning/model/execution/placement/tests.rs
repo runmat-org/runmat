@@ -41,7 +41,7 @@ impl RuntimePlacementService for SelectedRoute {
             program,
             catalog: Digest::sha256(b"test-catalog"),
             compiler: Digest::sha256(b"test-compiler"),
-            provider,
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(provider),
             policy: Digest::sha256(b"test-policy"),
         })
     }

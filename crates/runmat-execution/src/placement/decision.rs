@@ -11,8 +11,18 @@ pub struct PlacementRevision {
     pub program: Option<ProgramRevision>,
     pub catalog: Digest,
     pub compiler: Digest,
-    pub provider: Digest,
+    pub authority: PlacementExecutionAuthorityRevision,
     pub policy: Digest,
+}
+
+/// The execution authority whose capability revision makes one complete-route
+/// sample reusable. Host services are not GPU providers and cannot be
+/// invalidated as though their digests were provider capability snapshots.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "digest")]
+pub enum PlacementExecutionAuthorityRevision {
+    Provider(Digest),
+    HostService(Digest),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -83,6 +93,7 @@ pub enum PlacementInvalidation {
     All,
     Program { revision: ProgramRevision },
     Provider { digest: Digest },
+    HostService { digest: Digest },
     Policy { digest: Digest },
     Signature { key: Digest },
 }

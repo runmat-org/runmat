@@ -25,7 +25,9 @@ fn signature() -> PlacementSignature {
             program: None,
             catalog: Digest::sha256(b"catalog"),
             compiler: Digest::sha256(b"compiler"),
-            provider: Digest::sha256(b"provider"),
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(
+                Digest::sha256(b"provider"),
+            ),
             policy: Digest::sha256(b"policy"),
         },
     }

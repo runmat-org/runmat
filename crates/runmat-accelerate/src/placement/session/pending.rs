@@ -74,7 +74,14 @@ impl PendingFeedback {
                     signature.revision.program.as_ref() == Some(revision)
                 }
                 PlacementInvalidation::Provider { digest } => {
-                    signature.revision.provider == *digest
+                    signature.revision.authority
+                        == runmat_execution::PlacementExecutionAuthorityRevision::Provider(*digest)
+                }
+                PlacementInvalidation::HostService { digest } => {
+                    signature.revision.authority
+                        == runmat_execution::PlacementExecutionAuthorityRevision::HostService(
+                            *digest,
+                        )
                 }
                 PlacementInvalidation::Policy { digest } => signature.revision.policy == *digest,
                 PlacementInvalidation::Signature { key } => signature.cache_key() == *key,

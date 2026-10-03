@@ -35,7 +35,7 @@ fn budget_request(logical: u64, physical: u64, capacity: u64) -> WholeWorkPlacem
                 program: None,
                 catalog: digest,
                 compiler: digest,
-                provider: digest,
+                authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest),
                 policy: digest,
             },
         },

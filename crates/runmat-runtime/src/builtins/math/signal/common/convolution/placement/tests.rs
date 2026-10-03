@@ -76,7 +76,7 @@ impl RuntimePlacementService for PlacementWitnessService {
             program,
             catalog: Digest::sha256(b"convolution-witness-catalog"),
             compiler: Digest::sha256(b"convolution-witness-compiler"),
-            provider,
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(provider),
             policy: Digest::sha256(b"convolution-witness-policy"),
         })
     }

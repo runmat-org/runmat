@@ -235,7 +235,9 @@ mod tests {
                 program: None::<ProgramRevision>,
                 catalog: Digest::sha256(b"catalog"),
                 compiler: Digest::sha256(b"compiler"),
-                provider: Digest::sha256(b"provider"),
+                authority: super::PlacementExecutionAuthorityRevision::Provider(Digest::sha256(
+                    b"provider",
+                )),
                 policy: Digest::sha256(b"policy"),
             },
         }

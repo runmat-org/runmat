@@ -42,7 +42,7 @@ fn source(ready: Arc<AtomicBool>, dropped: Arc<AtomicUsize>) -> Box<Source> {
             runtime_facts: digest,
             revision: PlacementRevision {
                 program: None,
-                provider: digest,
+                authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest),
                 policy: digest,
                 compiler: digest,
                 catalog: digest,

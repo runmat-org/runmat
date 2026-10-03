@@ -64,7 +64,7 @@ impl RuntimePlacementService for Witness {
             program,
             catalog: digest,
             compiler: digest,
-            provider,
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(provider),
             policy: digest,
         })
     }
@@ -136,7 +136,9 @@ fn receipt_owner(
                     program: None,
                     catalog: digest,
                     compiler: digest,
-                    provider: digest,
+                    authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(
+                        digest,
+                    ),
                     policy: digest,
                 },
             },

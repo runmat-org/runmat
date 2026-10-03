@@ -1,17 +1,23 @@
-//! One owner for placement catalog/compiler/provider/policy revisions. Local
+//! One owner for placement catalog/compiler/authority/policy revisions. Local
 //! and complete-route decisions share the stable base, while policy-specific
 //! inputs remain distinct and typed.
 
-use runmat_execution::{Digest, PlacementRevision, ProgramRevision};
+use runmat_execution::{
+    Digest, PlacementExecutionAuthorityRevision, PlacementRevision, ProgramRevision,
+};
 
 use super::{ExplorationMode, PlacementPolicy, PlacementSessionConfig};
 
-fn base(program: Option<ProgramRevision>, provider: Digest, policy: Digest) -> PlacementRevision {
+fn base(
+    program: Option<ProgramRevision>,
+    authority: PlacementExecutionAuthorityRevision,
+    policy: Digest,
+) -> PlacementRevision {
     PlacementRevision {
         program,
         catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
         compiler: Digest::sha256(b"runmat-placement-compiler-v1"),
-        provider,
+        authority,
         policy,
     }
 }
@@ -24,7 +30,7 @@ pub(super) fn local(
     // Preserve the existing local profile identity while moving its authority.
     base(
         program,
-        provider,
+        PlacementExecutionAuthorityRevision::Provider(provider),
         Digest::sha256(format!(
             "local:{}:{}",
             policy.absolute_margin_ns, policy.relative_margin_basis_points
@@ -37,6 +43,14 @@ pub(super) fn whole_work(
     provider: Digest,
     config: PlacementSessionConfig,
 ) -> PlacementRevision {
+    base(
+        program,
+        PlacementExecutionAuthorityRevision::Provider(provider),
+        whole_work_policy(config),
+    )
+}
+
+fn whole_work_policy(config: PlacementSessionConfig) -> Digest {
     let mut bytes = b"runmat-whole-work-policy.v1\0".to_vec();
     let graph = PlacementPolicy::default();
     bytes.extend_from_slice(&graph.absolute_margin_ns.to_le_bytes());
@@ -51,7 +65,19 @@ pub(super) fn whole_work(
             bytes.extend_from_slice(&interval.to_le_bytes());
         }
     }
-    base(program, provider, Digest::sha256(bytes))
+    Digest::sha256(bytes)
+}
+
+pub(super) fn whole_work_host_service(
+    program: Option<ProgramRevision>,
+    host_service: Digest,
+    config: PlacementSessionConfig,
+) -> PlacementRevision {
+    base(
+        program,
+        PlacementExecutionAuthorityRevision::HostService(host_service),
+        whole_work_policy(config),
+    )
 }
 
 #[cfg(test)]
@@ -66,7 +92,7 @@ mod tests {
         let mut changed = PlacementSessionConfig::default();
         changed.leave_absolute_margin_ns += 1;
         assert_ne!(first.policy, whole_work(None, provider, changed).policy);
-        assert_ne!(first.provider, whole_work(None, other, changed).provider);
+        assert_ne!(first.authority, whole_work(None, other, changed).authority);
         assert_eq!(
             first.catalog,
             local(None, provider, PlacementPolicy::default()).catalog
@@ -74,6 +100,12 @@ mod tests {
         assert_eq!(
             first.compiler,
             local(None, provider, PlacementPolicy::default()).compiler
+        );
+        let host = whole_work_host_service(None, provider, PlacementSessionConfig::default());
+        assert_ne!(first.authority, host.authority);
+        assert_ne!(
+            serde_json::to_string(&first).unwrap(),
+            serde_json::to_string(&host).unwrap()
         );
     }
 }
