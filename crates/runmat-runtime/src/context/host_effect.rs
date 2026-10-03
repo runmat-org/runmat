@@ -12,64 +12,12 @@ use runmat_execution::{
     WholeWorkConstraint, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
 };
 use runmat_time::{duration_ns_saturating, Instant};
-use std::path::Path;
 use std::sync::Arc;
 
-/// The requested result is distinct from the committed side effects. No
-/// output still needs a bound for the temporary filename list and codec work.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
-pub enum HostEffectOutput {
-    EffectOnly,
-    ReturnedValue,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HostEffectSource<'a> {
-    LocalArchive(&'a Path),
-    HttpArchive(&'a str),
-}
-
-/// Typed operation identity at the service evidence boundary; no builtin
-/// spelling switch or secondary scheduler is introduced here.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HostEffectWorkload<'a> {
-    ArchiveExtract {
-        source: HostEffectSource<'a>,
-        destination: Option<&'a Path>,
-        output: HostEffectOutput,
-    },
-}
-
-#[derive(serde::Serialize)]
-enum HostEffectSourceFacts<'a> {
-    LocalArchive(&'a [u8]),
-    HttpArchive(&'a str),
-}
-
-impl<'a> HostEffectWorkload<'a> {
-    /// Cache and service identities use the exact platform path encoding.
-    /// Serializing `Path` as UTF-8 would reject native non-UTF-8 names, while
-    /// a lossy display string could merge two distinct filesystem targets.
-    pub fn identity_bytes(self) -> Vec<u8> {
-        let Self::ArchiveExtract {
-            source,
-            destination,
-            output,
-        } = self;
-        let source = match source {
-            HostEffectSource::LocalArchive(path) => {
-                HostEffectSourceFacts::LocalArchive(path.as_os_str().as_encoded_bytes())
-            }
-            HostEffectSource::HttpArchive(url) => HostEffectSourceFacts::HttpArchive(url),
-        };
-        serde_json::to_vec(&(
-            source,
-            destination.map(|path| path.as_os_str().as_encoded_bytes()),
-            output,
-        ))
-        .expect("typed host effect path bytes serialize")
-    }
-}
+mod workload;
+pub use workload::{
+    AudioDecodeOutput, AudioFrameRange, HostEffectOutput, HostEffectSource, HostEffectWorkload,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct HostEffectResourceEvidence {
@@ -148,9 +96,7 @@ pub fn select_host_effect(
                 .build(),
         );
     }
-    let output = match request.workload {
-        HostEffectWorkload::ArchiveExtract { output, .. } => output,
-    };
+    let output = request.workload.output();
     let retained_bytes = match output {
         HostEffectOutput::EffectOnly => ResourceByteBound::Known(0),
         HostEffectOutput::ReturnedValue => evidence.returned_value_bytes,

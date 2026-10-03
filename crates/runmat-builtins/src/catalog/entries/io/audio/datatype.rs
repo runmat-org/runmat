@@ -1,5 +1,5 @@
 /// The public audioread sample representation, independent of source coding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AudioReadDataType {
     Double,
     Native,
