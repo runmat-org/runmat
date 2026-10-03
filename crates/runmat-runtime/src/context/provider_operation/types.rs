@@ -283,10 +283,9 @@ mod tests {
         conditional_output_owner_valid, ConditionalUploadPublication, DirectProviderPublication,
     };
     use crate::builtins::common::gpu_helpers;
+    use crate::context::physical_test_support::OwnedPhysicalProvider;
     use runmat_accelerate::simple_provider::InProcessProvider;
-    use runmat_accelerate_api::{
-        same_provider_instance, AccelProvider, GpuTensorView, ThreadProviderGuard,
-    };
+    use runmat_accelerate_api::{same_provider_instance, AccelProvider, ThreadProviderGuard};
     use runmat_value::Tensor;
 
     struct ForeignFacade(&'static InProcessProvider);
@@ -362,43 +361,46 @@ mod tests {
 
     #[test]
     fn direct_publication_uses_selected_physical_extent_and_exact_owner() {
-        let owner: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
-        let foreign: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+        let owner: &'static OwnedPhysicalProvider =
+            Box::leak(Box::new(OwnedPhysicalProvider::new()));
+        let foreign: &'static OwnedPhysicalProvider =
+            Box::leak(Box::new(OwnedPhysicalProvider::new()));
         let _selected_owner = ThreadProviderGuard::set(Some(owner));
-        let exact = gpu_helpers::upload_tensor(
-            owner,
-            &Tensor::new(vec![1.0], vec![1, 1]).expect("exact tensor"),
-        )
-        .expect("exact output");
-        let retained_caller = gpu_helpers::upload_tensor(
-            owner,
-            &Tensor::new(vec![2.0; 4], vec![2, 2]).expect("large tensor"),
-        )
-        .expect("caller-owned allocation");
-        let larger_view = retained_caller
-            .with_view(GpuTensorView::contiguous(vec![1, 1]))
-            .expect("same view, larger backing allocation");
-        let expected = exact.physical().requested_bytes();
+        let exact = owner.allocate_f64(&[1, 1]);
+        let (retained_caller, larger_view) = owner.allocate_padded_f64_view(&[2, 2], &[1, 1]);
+        assert_eq!(larger_view.shape(), exact.handle.shape());
+        assert_eq!(
+            larger_view.physical().element_type(),
+            exact.handle.physical().element_type()
+        );
+        let expected = exact.handle.physical().requested_bytes();
+        assert!(larger_view.physical().requested_bytes() > expected);
         assert!(DirectProviderPublication::new(0, None)
             .expect("no-output form")
             .can_publish());
         assert!(DirectProviderPublication::new(1, None).is_none());
         let mut admitted = DirectProviderPublication::new(1, Some(expected)).expect("bound");
         assert!(!admitted.can_publish());
-        assert!(admitted.validate(owner, &[&exact]));
+        assert!(admitted.validate(owner, &[&exact.handle]));
         assert!(admitted.can_publish());
         let mut oversized = DirectProviderPublication::new(1, Some(expected)).expect("bound");
         assert!(!oversized.validate(owner, &[&larger_view]));
         assert!(!oversized.can_publish());
-        assert!(!oversized.validate(owner, &[&exact]));
+        assert!(!oversized.validate(owner, &[&exact.handle]));
         let mut wrong_owner = DirectProviderPublication::new(1, Some(expected)).expect("bound");
-        assert!(!wrong_owner.validate(foreign, &[&exact]));
+        assert!(!wrong_owner.validate(foreign, &[&exact.handle]));
         assert!(!wrong_owner.can_publish());
         let error = crate::build_runtime_error("invalid provider result")
             .with_identifier("RunMat:test")
             .build();
         let _ = gpu_helpers::reject_gpu_output(larger_view, error);
-        assert!(retained_caller.allocation_lease().validate_live().is_ok());
-        assert!(exact.allocation_lease().validate_live().is_ok());
+        assert!(retained_caller
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .is_ok());
+        assert!(exact.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(retained_caller.probe.retirements(), 0);
+        assert_eq!(exact.probe.retirements(), 0);
     }
 }

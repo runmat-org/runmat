@@ -1,10 +1,10 @@
 use super::*;
+use crate::context::physical_test_support::OwnedPhysicalProvider;
 use crate::context::{RuntimePlacementService, RuntimeServicePorts, RuntimeWholeWorkProbeLease};
 use crate::RuntimeError;
-use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::observation::ProviderOperationReceipt;
 use runmat_accelerate_api::{
-    GpuTensorView, ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency,
+    ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency,
     ProviderStorage, ThreadProviderGuard,
 };
 use runmat_execution::cancellation::CancellationSource;
@@ -13,7 +13,6 @@ use runmat_execution::{
     PlacementPlanRequest, PlacementRevision, WholeWorkDecision, WholeWorkDecisionKind,
     WholeWorkPlacementRequest,
 };
-use runmat_value::Tensor;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
@@ -238,21 +237,17 @@ fn absent_placement_service_retires_receipt_without_feedback() {
 
 #[test]
 fn admitted_upload_cannot_publish_success_without_its_realized_output_witness() {
-    let provider: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
+    let provider: &'static OwnedPhysicalProvider =
+        Box::leak(Box::new(OwnedPhysicalProvider::new()));
     let _owner = ThreadProviderGuard::set(Some(provider));
-    let exact = crate::builtins::common::gpu_helpers::upload_tensor(
-        provider,
-        &Tensor::new(vec![1.0], vec![1, 1]).expect("exact tensor"),
-    )
-    .expect("exact output");
-    let larger = crate::builtins::common::gpu_helpers::upload_tensor(
-        provider,
-        &Tensor::new(vec![1.0; 4], vec![2, 2]).expect("larger tensor"),
-    )
-    .expect("larger output");
-    let larger_view = larger
-        .with_view(GpuTensorView::contiguous(vec![1, 1]))
-        .expect("owner-valid small view");
+    let exact = provider.allocate_f64(&[1, 1]);
+    let (larger, larger_view) = provider.allocate_padded_f64_view(&[2, 2], &[1, 1]);
+    assert_eq!(larger_view.shape(), exact.handle.shape());
+    assert_eq!(
+        larger_view.physical().element_type(),
+        exact.handle.physical().element_type()
+    );
+    assert!(larger_view.physical().requested_bytes() > exact.handle.physical().requested_bytes());
     let admitted = || AdmittedHostUploadOutputs {
         provider,
         outputs: vec![ProviderRepresentation {
@@ -262,7 +257,7 @@ fn admitted_upload_cannot_publish_success_without_its_realized_output_witness() 
             shape: vec![1, 1],
             residency: ProviderResidency::Device,
         }],
-        one_output_requested_bytes: Some(exact.physical().requested_bytes()),
+        one_output_requested_bytes: Some(exact.handle.physical().requested_bytes()),
     };
 
     for mode in 0..3 {
@@ -281,7 +276,7 @@ fn admitted_upload_cannot_publish_success_without_its_realized_output_witness() 
             0 => { /* Attempt to bypass the publication validator. */ }
             1 => {
                 owner
-                    .validate_published_outputs(&[&exact])
+                    .validate_published_outputs(&[&exact.handle])
                     .expect("first exact output");
                 let error = owner
                     .validate_published_outputs(&[&larger_view])
@@ -290,10 +285,10 @@ fn admitted_upload_cannot_publish_success_without_its_realized_output_witness() 
                     error.identifier(),
                     Some("RunMat:Placement:InvalidPublishedOutput")
                 );
-                assert!(owner.validate_published_outputs(&[&exact]).is_err());
+                assert!(owner.validate_published_outputs(&[&exact.handle]).is_err());
             }
             _ => owner
-                .validate_published_outputs(&[&exact])
+                .validate_published_outputs(&[&exact.handle])
                 .expect("exact realized output"),
         }
         submission.complete();
@@ -302,6 +297,8 @@ fn admitted_upload_cannot_publish_success_without_its_realized_output_witness() 
         assert_eq!(witness.feedback().len(), usize::from(mode == 2));
         assert_eq!(probes.load(Ordering::SeqCst), 0);
     }
-    assert!(exact.allocation_lease().validate_live().is_ok());
-    assert!(larger.allocation_lease().validate_live().is_ok());
+    assert!(exact.handle.allocation_lease().validate_live().is_ok());
+    assert!(larger.handle.allocation_lease().validate_live().is_ok());
+    assert_eq!(exact.probe.retirements(), 0);
+    assert_eq!(larger.probe.retirements(), 0);
 }
