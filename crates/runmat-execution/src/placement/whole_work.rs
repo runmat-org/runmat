@@ -351,6 +351,40 @@ mod tests {
     }
 
     #[test]
+    fn conditional_provider_upload_requires_exact_owner_and_host_result_evidence() {
+        let mut provider = candidate(ExecutionCandidateKind::ProviderOperation, b"provider");
+        provider.presentation = CandidateOutputPresentation::ConditionalProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_result_bytes: Some(16.into()),
+            host_scratch_bytes: 8.into(),
+            provider_scratch_bytes: 8.into(),
+            queue_slots: 1,
+        };
+        assert!(provider.validate().is_ok());
+        let selected = provider.selected("imfilter");
+        if let CandidateOutputPresentation::ConditionalProviderUpload {
+            host_result_bytes, ..
+        } = &mut provider.presentation
+        {
+            *host_result_bytes = None;
+        }
+        assert!(provider.validate().is_err());
+        if let CandidateOutputPresentation::ConditionalProviderUpload {
+            host_result_bytes,
+            device_id,
+            ..
+        } = &mut provider.presentation
+        {
+            *host_result_bytes = Some(16.into());
+            *device_id = 8;
+        }
+        assert!(provider.validate().is_err());
+        provider.presentation = CandidateOutputPresentation::Direct;
+        assert_ne!(selected, provider.selected("imfilter"));
+    }
+
+    #[test]
     fn risk_adjustment_overflow_is_rejected_before_provider_ranking() {
         let mut provider = candidate(ExecutionCandidateKind::ProviderGraph, b"provider");
         provider.cost = CandidateCostEvidence::Estimated(ExecutionCostEstimate {

@@ -393,6 +393,18 @@ pub enum CandidateOutputPresentation {
         preparation: CandidatePreparationState,
         readbacks: ProviderReadbackDemands,
     },
+    /// A selected provider-first hook may, only on its typed Unsupported
+    /// outcome, compute a host result and upload it to the same original
+    /// output owner. This is a conditional stage, not a host candidate.
+    ConditionalProviderUpload {
+        device_id: u32,
+        transfer_bytes: Option<u64>,
+        host_result_bytes: Option<ResourceByteBound>,
+        /// Conditional host workspace excluding its result payload.
+        host_scratch_bytes: ResourceByteBound,
+        provider_scratch_bytes: ResourceByteBound,
+        queue_slots: u32,
+    },
 }
 
 impl Default for CandidateOutputPresentation {
@@ -450,11 +462,19 @@ impl CandidateOutputPresentation {
             ) if upload == output && queue_slots > 0
                 && !matches!(preparation, CandidatePreparationState::Preparing | CandidatePreparationState::Unknown)
                 && readbacks.is_canonical() && readbacks.iter().next().is_some() => Ok(()),
+            (
+                Self::ConditionalProviderUpload { device_id: upload, queue_slots, host_result_bytes: Some(_), .. },
+                CandidateExecutionLocation::Provider { device_id: execution },
+                CandidateOutputResidency::Provider { device_id: output },
+            ) if upload == execution && upload == output && queue_slots > 0 => Ok(()),
             (Self::ProviderUpload { .. }, _, _) => {
                 Err("provider upload presentation needs a ready stage, queue slot, and matching host route and output device")
             }
             (Self::ProviderReadbackUpload { .. }, _, _) => {
                 Err("provider readback/upload needs canonical input stages and a ready matching host-to-provider output")
+            }
+            (Self::ConditionalProviderUpload { .. }, _, _) => {
+                Err("conditional provider upload needs the same selected provider/output owner and a completion queue slot")
             }
             (Self::Direct, _, _) => Ok(()),
         }

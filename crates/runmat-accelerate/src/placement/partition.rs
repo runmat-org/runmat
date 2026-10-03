@@ -398,6 +398,7 @@ fn candidate_resource_adjustment_ns(
             presentation,
             CandidateOutputPresentation::ProviderUpload { .. }
                 | CandidateOutputPresentation::ProviderReadbackUpload { .. }
+                | CandidateOutputPresentation::ConditionalProviderUpload { .. }
         ))
         && require_transactional_results
         && !transactional_results
@@ -414,6 +415,14 @@ fn candidate_resource_adjustment_ns(
             ..
         }
         | CandidateOutputPresentation::ProviderReadbackUpload {
+            device_id,
+            host_result_bytes,
+            host_scratch_bytes,
+            provider_scratch_bytes,
+            queue_slots,
+            ..
+        }
+        | CandidateOutputPresentation::ConditionalProviderUpload {
             device_id,
             host_result_bytes,
             host_scratch_bytes,
@@ -448,23 +457,46 @@ fn candidate_resource_adjustment_ns(
         {
             return Err(ResourceAdmissionError::OverBudget);
         }
-        let scratch = ResourceAccount::default()
+        let mut scratch = ResourceAccount::default()
             .add(provider_scratch_bytes)
             .ok_or(ResourceAdmissionError::Overflow)?;
+        if matches!(
+            presentation,
+            CandidateOutputPresentation::ConditionalProviderUpload { .. }
+        ) {
+            // The direct route's peak_live includes its own output. The
+            // conditional upload is a different branch: its newly allocated
+            // output coexists with upload staging even when peak_live is set.
+            scratch = scratch
+                .add(demand.retained_bytes)
+                .ok_or(ResourceAdmissionError::Overflow)?;
+        }
         scratch.within(
             provider.scratch_available_bytes,
             ResourceBudgetKind::ProviderScratch(device_id),
         )?;
-        provider_demands.insert(device_id, scratch);
-        host_peak = host_peak
-            .add(host_scratch_bytes)
-            .ok_or(ResourceAdmissionError::Overflow)?;
-        // The host-produced value remains live while its provider presentation
-        // is uploaded. The provider's retained output is accounted below.
-        if matches!(output_residency, CandidateOutputResidency::Provider { .. }) {
-            host_peak = host_peak
-                .add(host_result_bytes.unwrap_or(demand.retained_bytes))
+        provider_demands
+            .entry(device_id)
+            .and_modify(|output_stage| *output_stage = output_stage.peak(scratch))
+            .or_insert(scratch);
+        if matches!(
+            presentation,
+            CandidateOutputPresentation::ConditionalProviderUpload { .. }
+        ) {
+            let fallback_peak = host_retained_bytes
+                .add(host_scratch_bytes)
+                .and_then(|peak| peak.add(host_result_bytes.unwrap_or(demand.retained_bytes)))
                 .ok_or(ResourceAdmissionError::Overflow)?;
+            host_peak = host_peak.peak(fallback_peak);
+        } else {
+            host_peak = host_peak
+                .add(host_scratch_bytes)
+                .ok_or(ResourceAdmissionError::Overflow)?;
+            if matches!(output_residency, CandidateOutputResidency::Provider { .. }) {
+                host_peak = host_peak
+                    .add(host_result_bytes.unwrap_or(demand.retained_bytes))
+                    .ok_or(ResourceAdmissionError::Overflow)?;
+            }
         }
     }
     let mut readback_stage_demands = BTreeMap::new();
@@ -553,6 +585,9 @@ fn candidate_resource_adjustment_ns(
             host_result_bytes, ..
         }
         | CandidateOutputPresentation::ProviderReadbackUpload {
+            host_result_bytes, ..
+        }
+        | CandidateOutputPresentation::ConditionalProviderUpload {
             host_result_bytes, ..
         } => host_result_bytes.unwrap_or(demand.retained_bytes),
         CandidateOutputPresentation::Direct

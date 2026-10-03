@@ -678,6 +678,68 @@ fn conditional_host_or_provider_output_does_not_double_count_same_host_payload()
 }
 
 #[test]
+fn conditional_provider_upload_peaks_sequential_host_and_device_stages() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.preparation = CandidatePreparationState::Ready;
+    provider.resources.retained_bytes = 16.into();
+    provider.resources.scratch_bytes =
+        ResourceByteBound::Unavailable(runmat_execution::ResourceBoundUnavailable::NoScratchBound);
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 24,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_host_workspace = Some(8.into());
+    provider.presentation =
+        runmat_execution::CandidateOutputPresentation::ConditionalProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(16),
+            host_result_bytes: Some(16.into()),
+            host_scratch_bytes: 8.into(),
+            provider_scratch_bytes: 16.into(),
+            queue_slots: 1,
+        };
+    let mut route = request(vec![provider]);
+    route.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    route.resources.memory_available_bytes = Some(24);
+    route.resources.providers[0].scratch_available_bytes = Some(32);
+    assert!(session.select_whole_work(route.clone()).is_ok());
+
+    route.resources.memory_available_bytes = Some(23);
+    assert_eq!(
+        session.select_whole_work(route.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    route.resources.memory_available_bytes = Some(24);
+    route.resources.providers[0].scratch_available_bytes = Some(31);
+    assert_eq!(
+        session.select_whole_work(route.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    route.resources.providers[0].scratch_available_bytes = Some(32);
+    route.resources.providers[0].queue_depth = Some(1);
+    route.resources.providers[0].queue_limit = Some(1);
+    assert_eq!(
+        session.select_whole_work(route.clone()).unwrap_err().code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+    route.resources.providers[0].queue_depth = Some(0);
+    if let runmat_execution::CandidateOutputPresentation::ConditionalProviderUpload {
+        host_scratch_bytes,
+        ..
+    } = &mut route.candidates[0].presentation
+    {
+        *host_scratch_bytes = ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        );
+    }
+    assert_eq!(
+        session.select_whole_work(route).unwrap_err().code,
+        "RunMat:Placement:InsufficientResourceEvidence"
+    );
+}
+
+#[test]
 fn provider_input_stages_include_live_preparation_and_peak_against_execution() {
     let session = PlacementSession::default();
     let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
