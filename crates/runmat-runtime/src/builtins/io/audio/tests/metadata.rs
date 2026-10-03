@@ -21,6 +21,26 @@ fn audioinfo_invalid_control_rejects_before_filesystem_read() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn audioinfo_rejects_numeric_resident_path_without_gather() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("genuine resident allocation");
+    let original = allocation.handle.wire_descriptor();
+    let err = block_on(audioinfo_builtin(Value::GpuTensor(
+        allocation.handle.clone(),
+    )))
+    .expect_err("numeric resident filename rejects");
+    assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
+    assert_eq!(allocation.handle.wire_descriptor(), original);
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn audioinfo_reads_wav_metadata() {
     let _lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("wav");

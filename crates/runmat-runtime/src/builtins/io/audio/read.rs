@@ -272,7 +272,9 @@ pub(super) fn collect_wave_samples<T>(
     let sample_count = frame_count
         .checked_mul(channels)
         .ok_or_else(|| "decoded audio dimensions overflow platform limits".to_string())?;
-    let mut out = Vec::with_capacity(sample_count);
+    let mut out = Vec::new();
+    out.try_reserve_exact(sample_count)
+        .map_err(|err| format!("decoded audio allocation failed: {err}"))?;
     for channel in 0..channels {
         for frame in start_frame..end_frame_exclusive {
             let sample_offset = frame
