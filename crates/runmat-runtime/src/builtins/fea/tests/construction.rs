@@ -52,7 +52,7 @@ fn fea_study_requires_profile() {
     let geometry_path = tmp.path().join("part.step");
     std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
     let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
-        geometry_path.to_string_lossy().to_string(),
+        Value::String(geometry_path.to_string_lossy().to_string()),
     ))
     .expect("geometry should load");
 
@@ -71,7 +71,7 @@ fn fea_model_requires_profile() {
     let geometry_path = tmp.path().join("part.step");
     std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
     let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
-        geometry_path.to_string_lossy().to_string(),
+        Value::String(geometry_path.to_string_lossy().to_string()),
     ))
     .expect("geometry should load");
 
@@ -347,7 +347,7 @@ fn typed_constructors_build_full_study_and_sweep_objects() {
     std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
 
     let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
-        geometry_path.to_string_lossy().to_string(),
+        Value::String(geometry_path.to_string_lossy().to_string()),
     ))
     .expect("geometry should load");
     let asset =
