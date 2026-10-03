@@ -1,10 +1,14 @@
-mod contract;
+mod descriptor;
 mod documentation;
 mod inference;
+mod integer;
+mod options;
 #[cfg(test)]
 mod tests;
 
-pub use contract::*;
+pub use descriptor::*;
+pub use integer::*;
+pub use options::*;
 
 use crate::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
