@@ -154,6 +154,21 @@ pub trait RuntimeHostService {
     }
 }
 
+/// Host-owned asynchronous HTTP authority. The returned future must not start
+/// I/O until first poll and must abort any submitted request when dropped.
+/// This includes a request awaiting response-body bytes, not only headers.
+pub trait RuntimeHttpService {
+    fn send(
+        &self,
+        request: crate::builtins::io::http::transport::HttpRequest,
+    ) -> RuntimeServiceFuture<
+        Result<
+            crate::builtins::io::http::transport::HttpResponse,
+            crate::builtins::io::http::transport::TransportError,
+        >,
+    >;
+}
+
 pub trait RuntimeErrorService {
     fn report(&self, error: &RuntimeError);
 }
@@ -597,6 +612,7 @@ pub struct RuntimeServicePorts {
     workspace: Option<Rc<dyn RuntimeWorkspaceService>>,
     object: Option<Rc<dyn RuntimeObjectService>>,
     host: Option<Rc<dyn RuntimeHostService>>,
+    http: Option<Rc<dyn RuntimeHttpService>>,
     error: Option<Rc<dyn RuntimeErrorService>>,
     acceleration: Option<Rc<dyn RuntimeAccelerationService>>,
     placement: Option<Rc<dyn RuntimePlacementService>>,
@@ -617,6 +633,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("workspace", &self.workspace.is_some())
             .field("object", &self.object.is_some())
             .field("host", &self.host.is_some())
+            .field("http", &self.http.is_some())
             .field("error", &self.error.is_some())
             .field("acceleration", &self.acceleration.is_some())
             .field("placement", &self.placement.is_some())
@@ -700,6 +717,14 @@ impl RuntimeServicePorts {
         host,
         RuntimeHostService,
         Host
+    );
+    port_accessors!(
+        with_http,
+        http,
+        require_http,
+        http,
+        RuntimeHttpService,
+        Http
     );
     port_accessors!(
         with_error,
@@ -843,6 +868,7 @@ mod tests {
             missing(ports.require_workspace("lookup")),
             missing(ports.require_object("class lookup")),
             missing(ports.require_host("console write")),
+            missing(ports.require_http("HTTP request")),
             missing(ports.require_error("report error")),
             missing(ports.require_acceleration("resident operation")),
             missing(ports.require_placement("placement plan")),
@@ -863,6 +889,7 @@ mod tests {
                 RuntimeCapability::Workspace,
                 RuntimeCapability::Object,
                 RuntimeCapability::Host,
+                RuntimeCapability::Http,
                 RuntimeCapability::Error,
                 RuntimeCapability::Acceleration,
                 RuntimeCapability::Placement,

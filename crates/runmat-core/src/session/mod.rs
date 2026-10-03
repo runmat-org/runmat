@@ -53,6 +53,7 @@ mod config;
 mod dynamic;
 mod executable;
 mod host_services;
+mod http_host;
 mod init;
 mod project;
 mod run;
