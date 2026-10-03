@@ -75,9 +75,14 @@ where
 #[runtime_builtin(
     name = "imread",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::imread"
 )]
-async fn imread_builtin(source: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn imread_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    source: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs.is_some_and(|count| count > 3) {
         return Err(imread_error(&IMREAD_ERROR_TOO_MANY_OUTPUTS));
@@ -99,7 +104,7 @@ async fn imread_builtin(source: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         _ => return Err(imread_error(&IMREAD_ERROR_TOO_MANY_INPUTS)),
     };
 
-    let bytes = read_source_bytes(&source).await?;
+    let bytes = read_source_bytes(&source, runtime.as_ref()).await?;
     let decoded = decode_image_bytes(&bytes, format_hint)?;
     let materialized = materialize_image(decoded)?;
 

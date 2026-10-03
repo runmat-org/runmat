@@ -1,9 +1,12 @@
 use super::*;
+use crate::builtins::io::http::transport::NativeHttpService;
+use crate::context::{RuntimeContext, RuntimeServicePorts};
 use image::{ImageBuffer, ImageOutputFormat, Luma, Rgb, RgbImage, Rgba, RgbaImage};
 use runmat_builtins::IMREAD_DESCRIPTOR;
 use runmat_value::IntegerStorage;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::rc::Rc;
 use std::sync::Arc;
 
 fn encode_image(image: DynamicImage, format: ImageOutputFormat) -> Vec<u8> {
@@ -37,6 +40,7 @@ fn run_imread(bytes: &[u8], extension: &str, rest: Vec<Value>) -> Value {
     let path = dir.path().join(format!("image.{extension}"));
     std::fs::write(&path, bytes).expect("write image");
     futures::executor::block_on(imread_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         rest,
     ))
@@ -66,6 +70,7 @@ fn imread_returns_alpha_as_third_output_for_rgba_png() {
     std::fs::write(&path, rgba_png()).expect("write image");
     let _guard = crate::output_count::push_output_count(Some(3));
     let result = futures::executor::block_on(imread_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         Vec::new(),
     ))
@@ -114,6 +119,7 @@ fn imread_windows_drive_letter_path_is_not_treated_as_url_scheme() {
     // treated as an unsupported URL scheme — it should fall through to the
     // local path reader and produce a file-not-found error, not a scheme error.
     let err = futures::executor::block_on(imread_builtin(
+        None,
         Value::from("C:/nonexistent/photo.png"),
         Vec::new(),
     ))
@@ -128,11 +134,13 @@ fn imread_windows_drive_letter_path_is_not_treated_as_url_scheme() {
 #[test]
 fn parsed_opaque_and_nonlocal_file_urls_reject_before_filesystem_access() {
     for source in ["mailto:alice@example.com", "ftp://example.test/pixels.png"] {
-        let err = futures::executor::block_on(imread_builtin(Value::from(source), Vec::new()))
-            .expect_err("unsupported URL scheme");
+        let err =
+            futures::executor::block_on(imread_builtin(None, Value::from(source), Vec::new()))
+                .expect_err("unsupported URL scheme");
         assert_eq!(err.identifier(), IMREAD_ERROR_UNSUPPORTED_SCHEME.identifier);
     }
     let err = futures::executor::block_on(imread_builtin(
+        None,
         Value::from("file://remote.example/pixels.png"),
         Vec::new(),
     ))
@@ -146,6 +154,7 @@ fn imread_respects_explicit_format_hint() {
     let path = dir.path().join("image-no-extension");
     std::fs::write(&path, rgb_png()).expect("write image");
     let result = futures::executor::block_on(imread_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         vec![Value::from("png")],
     ))
@@ -156,6 +165,7 @@ fn imread_respects_explicit_format_hint() {
 #[test]
 fn imread_rejects_unknown_format_hint() {
     let err = futures::executor::block_on(imread_builtin(
+        None,
         Value::from("missing"),
         vec![Value::from("not-a-format")],
     ))
@@ -166,11 +176,13 @@ fn imread_rejects_unknown_format_hint() {
 #[test]
 fn output_and_input_arity_reject_before_missing_file_or_provider_work() {
     let _outputs = crate::output_count::push_output_count(Some(4));
-    let err = futures::executor::block_on(imread_builtin(Value::from("missing.png"), Vec::new()))
-        .expect_err("excess outputs must fail before reading");
+    let err =
+        futures::executor::block_on(imread_builtin(None, Value::from("missing.png"), Vec::new()))
+            .expect_err("excess outputs must fail before reading");
     assert_eq!(err.identifier(), IMREAD_ERROR_TOO_MANY_OUTPUTS.identifier);
     drop(_outputs);
     let err = futures::executor::block_on(imread_builtin(
+        None,
         Value::from("missing.png"),
         vec![Value::from("png"), Value::Num(1.0)],
     ))
@@ -180,7 +192,7 @@ fn output_and_input_arity_reject_before_missing_file_or_provider_work() {
 
 #[test]
 fn numeric_filename_does_not_coerce_to_filesystem_path() {
-    let err = futures::executor::block_on(imread_builtin(Value::Num(42.0), Vec::new()))
+    let err = futures::executor::block_on(imread_builtin(None, Value::Num(42.0), Vec::new()))
         .expect_err("numeric filename must reject before reading");
     assert_eq!(err.identifier(), IMREAD_ERROR_INVALID_ARGUMENT.identifier);
 }
@@ -254,6 +266,7 @@ fn imread_materializes_multi_outputs_with_empty_colormap() {
     std::fs::write(&path, rgb_png()).expect("write image");
     let _guard = crate::output_count::push_output_count(Some(2));
     let result = futures::executor::block_on(imread_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         Vec::new(),
     ))
@@ -296,10 +309,20 @@ fn imread_decodes_16_bit_grayscale() {
 
 #[test]
 fn imread_fetches_http_url() {
+    let driver = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("test HTTP driver");
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_http(Rc::new(NativeHttpService::new(driver.handle().clone()))),
+        );
     let body = rgb_png();
     let response = http_response(200, "OK", "image/png", &body);
     let url = spawn_server(response);
     let result = futures::executor::block_on(imread_builtin(
+        Some(runtime),
         Value::from(format!("{url}/image.png")),
         Vec::new(),
     ))

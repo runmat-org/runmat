@@ -36,9 +36,12 @@ pub(super) fn parse_format_hint(value: &str) -> BuiltinResult<ImageFormat> {
     Ok(format)
 }
 
-pub(super) async fn read_source_bytes(source: &str) -> BuiltinResult<Vec<u8>> {
+pub(super) async fn read_source_bytes(
+    source: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Vec<u8>> {
     match ImreadSourceRoute::parse(source) {
-        ImreadSourceRoute::Http(url) => read_url_bytes(url).await,
+        ImreadSourceRoute::Http(url) => read_url_bytes(url, runtime).await,
         ImreadSourceRoute::FileUrl(url) => {
             let path = file_url_to_path(&url)?;
             read_local_path(&path).await
@@ -136,7 +139,10 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
-async fn read_url_bytes(url: Url) -> BuiltinResult<Vec<u8>> {
+async fn read_url_bytes(
+    url: Url,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Vec<u8>> {
     let request = HttpRequest {
         url,
         method: HttpMethod::Get,
@@ -148,7 +154,13 @@ async fn read_url_bytes(url: Url) -> BuiltinResult<Vec<u8>> {
         timeout: Duration::from_secs_f64(DEFAULT_TIMEOUT_SECONDS),
         user_agent: DEFAULT_USER_AGENT.to_string(),
     };
-    let response = transport::send_request(&request).map_err(imread_transport_error)?;
+    let response =
+        transport::send_request(request, runtime)
+            .await
+            .map_err(|error| match error {
+                transport::TransportCallError::Transport(error) => imread_transport_error(error),
+                transport::TransportCallError::Runtime(error) => error,
+            })?;
     Ok(response.body)
 }
 
