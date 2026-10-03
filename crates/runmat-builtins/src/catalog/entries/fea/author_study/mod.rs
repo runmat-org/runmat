@@ -2,24 +2,18 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     constructor_inference::{infer_constructor, FeaConstructorKind},
     descriptors::FEA_AUTHOR_STUDY_DESCRIPTOR,
-    example_fixtures::CLOSED_CUBE_STUDY,
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
 };
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
+mod examples;
+use examples::EXAMPLES;
+
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_constructor(request, entry, FeaConstructorKind::AuthorStudy)
 }
-const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
-    id: "reject-incomplete-summary", title: "Reject incomplete mesh evidence before authoring",
-    program: "geom = geometry.load('cube.stl');\nstudy = fea.authorStudy('candidate', geom, '{}', 'Profile', 'linear_static_structural');",
-    display_output: None, compatibility: BuiltinExampleCompatibility::RunMat,
-    harness: BuiltinExampleHarness::NativeFilesystem, fixture: CLOSED_CUBE_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
-    verification: BuiltinExampleVerification::ExpectedError { identifier: "RunMat:fea:InvalidInput" },
-}];
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.authorStudy", summary: "Author a typed FEA study from mesh-authoring evidence.",
     description: "`fea.authorStudy(id, geometry, meshAuthoringSummary, Name, Value, ...)` validates a typed geometry asset and solve-ready mesh-authoring summary, builds a model, and persists authoring evidence.",

@@ -1,0 +1,76 @@
+{
+  "mesh_authoring_summary": {
+    "schema_version": "mesh-authoring-summary/v1",
+    "mesh_id": "mesh_author_study_example",
+    "solve_ready": true,
+    "backend": "artifact_fixture",
+    "tetrahedron_generation_family": "artifact_fixture",
+    "tetrahedron_generation_attempted_family_count": 0,
+    "tetrahedron_generation_rejected_family_count": 0,
+    "tetrahedron_generation_selected_family_index": 0,
+    "tetrahedron_generation_interior_support_candidate_count": 0,
+    "tetrahedron_generation_interior_support_accepted_count": 0,
+    "topology": {
+      "node_count": 4,
+      "volume_element_count": 1,
+      "boundary_face_count": 4,
+      "boundary_edge_count": 6,
+      "adaptive_iteration_count": 0,
+      "bounds_min_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "bounds_max_m": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "quality": {
+      "meets_quality_thresholds": true,
+      "min_scaled_jacobian": 0.7071067811865475,
+      "min_exact_scaled_jacobian": 0.7071067811865475,
+      "max_aspect_ratio": 1.4142135623730951,
+      "max_boundary_projection_error_m": 0.0,
+      "inverted_element_count": 0,
+      "sliver_count": 0,
+      "sliver_removed_count": 0,
+      "unrepaired_exact_quality_count": 0
+    },
+    "recovery": {
+      "boundary_face_recovery_ratio": 1.0,
+      "boundary_edge_recovery_ratio": 1.0,
+      "recovery_item_count": 0,
+      "recovered_item_count": 0,
+      "missing_recovery_item_count": 0,
+      "unrecovered_tetrahedron_component_count": 0
+    },
+    "regions": {
+      "material_regions": [
+        {
+          "region_id": "region_default",
+          "element_count": 1,
+          "volume_m3": 0.16666666666666666,
+          "required": true
+        }
+      ],
+      "boundary_regions": [
+        {
+          "region_id": "region_default",
+          "face_count": 4,
+          "recovered_face_count": 4,
+          "edge_count": 6,
+          "fully_recovered": true,
+          "required": true
+        }
+      ],
+      "required_material_region_ids": [
+        "region_default"
+      ],
+      "required_boundary_region_ids": [
+        "region_default"
+      ]
+    }
+  }
+}
