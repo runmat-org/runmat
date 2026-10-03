@@ -1,7 +1,10 @@
+use super::kernel::fallback_accumulation;
 use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
-use runmat_builtins::IMFILTER_DESCRIPTOR;
+use runmat_builtins::{
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, IMFILTER_DESCRIPTOR,
+};
 use runmat_value::{IntegerStorage, Tensor, Value};
 
 async fn imfilter_builtin(
