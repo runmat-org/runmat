@@ -7,261 +7,22 @@ use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::{AnimationDecoder, Delay, DynamicImage, Frame, ImageFormat, ImageOutputFormat};
 use image::{ImageBuffer, Luma, Rgb, Rgba, RgbaImage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ImwriteOption, IMWRITE_DESCRIPTOR, IMWRITE_ERROR_ENCODE,
+    IMWRITE_ERROR_INVALID_ARGUMENT, IMWRITE_ERROR_INVALID_COLORMAP, IMWRITE_ERROR_INVALID_FILENAME,
+    IMWRITE_ERROR_INVALID_FORMAT, IMWRITE_ERROR_INVALID_IMAGE, IMWRITE_ERROR_INVALID_OPTION,
+    IMWRITE_ERROR_IO, IMWRITE_SINGLE_GIF_TIFF_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericScalar, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
-use crate::builtins::image::type_resolvers::imwrite_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "imwrite";
 
-const IMWRITE_INPUTS_IMAGE_FILENAME: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grayscale, truecolor, or RGBA image data.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output image path.",
-    },
-];
-
-const IMWRITE_INPUTS_INDEXED: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexed image data.",
-    },
-    BuiltinParamDescriptor {
-        name: "map",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Nx3 colormap.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output image path.",
-    },
-];
-
-const IMWRITE_INPUTS_OPTIONS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Image data.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output image path.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value option.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value option value.",
-    },
-];
-
-const IMWRITE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "imwrite(A, filename)",
-        inputs: &IMWRITE_INPUTS_IMAGE_FILENAME,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "imwrite(A, filename, fmt)",
-        inputs: &IMWRITE_INPUTS_OPTIONS,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "imwrite(A, filename, name, value, ...)",
-        inputs: &IMWRITE_INPUTS_OPTIONS,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "imwrite(X, map, filename, ...)",
-        inputs: &IMWRITE_INPUTS_INDEXED,
-        outputs: &[],
-    },
-];
-
-const IMWRITE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMWRITE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:imwrite:InvalidArgument"),
-    when: "Arguments do not match a supported imwrite form.",
-    message: "imwrite: invalid argument",
-};
-const IMWRITE_ERROR_INVALID_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMWRITE.INVALID_FILENAME",
-    identifier: Some("RunMat:imwrite:InvalidFilename"),
-    when: "Filename is missing or empty.",
-    message: "imwrite: invalid filename",
-};
-const IMWRITE_ERROR_INVALID_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMWRITE.INVALID_FORMAT",
-    identifier: Some("RunMat:imwrite:InvalidFormat"),
-    when: "Image format cannot be inferred or is unsupported.",
-    message: "imwrite: invalid image format",
-};
-const IMWRITE_ERROR_INVALID_IMAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMWRITE.INVALID_IMAGE",
-    identifier: Some("RunMat:imwrite:InvalidImage"),
-    when: "Image data has unsupported type, shape, or values.",
-    message: "imwrite: invalid image data",
-};
-const IMWRITE_ERROR_INVALID_COLORMAP: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMWRITE.INVALID_COLORMAP",
-    identifier: Some("RunMat:imwrite:InvalidColormap"),
-    when: "Indexed-image colormap is not an Nx3 numeric array.",
-    message: "imwrite: invalid colormap",
-};
-const IMWRITE_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMWRITE.INVALID_OPTION",
-    identifier: Some("RunMat:imwrite:InvalidOption"),
-    when: "Name-value option is malformed or unsupported for the requested format.",
-    message: "imwrite: invalid option",
-};
-const IMWRITE_ERROR_ENCODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMWRITE.ENCODE",
-    identifier: Some("RunMat:imwrite:EncodeError"),
-    when: "Image data cannot be encoded.",
-    message: "imwrite: encode error",
-};
-const IMWRITE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMWRITE.IO",
-    identifier: Some("RunMat:imwrite:Io"),
-    when: "Image file cannot be read for append or written.",
-    message: "imwrite: file I/O error",
-};
-
-const IMWRITE_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    IMWRITE_ERROR_INVALID_ARGUMENT,
-    IMWRITE_ERROR_INVALID_FILENAME,
-    IMWRITE_ERROR_INVALID_FORMAT,
-    IMWRITE_ERROR_INVALID_IMAGE,
-    IMWRITE_ERROR_INVALID_COLORMAP,
-    IMWRITE_ERROR_INVALID_OPTION,
-    IMWRITE_ERROR_ENCODE,
-    IMWRITE_ERROR_IO,
-];
-
-pub const IMWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IMWRITE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IMWRITE_ERRORS,
-};
-
-const IMWRITE_SINGLE_GIF_TIFF_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "imwrite-single-gif-tiff",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "imwrite accepts direct single image data for GIF and TIFF as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ImwriteSingleGifTiffExtension"),
-};
-pub const IMWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [IMWRITE_SINGLE_GIF_TIFF_EXTENSION];
-
-const IMWRITE_DOCUMENTED_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
-    [BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16];
-const IMWRITE_REJECTED_INTEGER_CLASSES: [BuiltinIntegerClass; 6] = [
-    BuiltinIntegerClass::Int8,
-    BuiltinIntegerClass::Int16,
-    BuiltinIntegerClass::Int32,
-    BuiltinIntegerClass::Int64,
-    BuiltinIntegerClass::Uint32,
-    BuiltinIntegerClass::Uint64,
-];
-const IMWRITE_DOCUMENTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "A_or_X", classes: &IMWRITE_DOCUMENTED_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Uint8 and uint16 direct or indexed images retain their native sample/index interpretation through the host encoder sink." }];
-const IMWRITE_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "A_or_X", classes: &IMWRITE_REJECTED_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Rejected, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Signed integer, uint32, and uint64 image arrays are outside the documented imwrite image-data surface and reject before file effects." }];
-const IMWRITE_ALPHA_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
-    [BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16];
-const IMWRITE_ALPHA_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "Alpha", classes: &IMWRITE_ALPHA_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Documented uint8 and uint16 Alpha matrices are read from authoritative storage and scaled by their own full class range into the encoded channel." }];
-const IMWRITE_CONTROL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "integer-valued format control", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "RowsPerStrip is documented for every integer class. Other integer-valued controls are format-specific; implemented controls read exact scalar storage before validation." }];
-pub const IMWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor { form: "imwrite(integer_A_or_X, ...)", inputs: &IMWRITE_DOCUMENTED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The documented host/file sink retains native uint8 or uint16 samples and indexed values through encoding. Resident image input is gathered non-destructively through its exact owner, and all validation/encoding completes before the write begins. Encoder limitations such as 16-bit JPEG and TIFF CMYK reject explicitly without changing the class contract or creating a file." },
-    BuiltinIntegerCapabilityDescriptor { form: "imwrite(unsupported_integer_A_or_X, ...)", inputs: &IMWRITE_REJECTED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Unsupported image classes reject from authoritative host or resident metadata without a floating compatibility conversion or file effect." },
-    BuiltinIntegerCapabilityDescriptor { form: "imwrite(A, ..., Alpha=integer_alpha)", inputs: &IMWRITE_ALPHA_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::SameSizeOrScalar, notes: "Documented uint8 and uint16 Alpha arrays preserve exact native samples until deterministic class-range scaling into the image bit depth; shape and format validation complete before file effects." },
-    BuiltinIntegerCapabilityDescriptor { form: "imwrite(A, ..., integer_control)", inputs: &IMWRITE_CONTROL_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "Typed scalar controls are read exactly and range-checked before encoding. Documented but not-yet-supported format controls, including RowsPerStrip and explicit BitDepth, reject with the stable invalid-option error before any file effect rather than silently coercing or ignoring the value." },
-];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::imwrite")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "imwrite",
-    op_kind: GpuOpKind::Custom("image-imwrite"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host image encoder sink; gpuArray inputs are gathered before writing.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::imwrite")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "imwrite",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "File I/O is not eligible for fusion.",
-};
-
 #[runtime_builtin(
     name = "imwrite",
-    category = "image/io",
-    summary = "Write image data to a file.",
-    keywords = "image,write,imwrite,png,jpeg,gif,bmp,tiff",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(imwrite_type),
-    descriptor(crate::builtins::image::imwrite::IMWRITE_DESCRIPTOR),
-    extensions(crate::builtins::image::imwrite::IMWRITE_EXTENSIONS),
-    integer_capabilities(crate::builtins::image::imwrite::IMWRITE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::image::imwrite"
 )]
 async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -274,7 +35,30 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
     }
 
+    if args.len() < 2 {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_ARGUMENT,
+            "expected image data and filename",
+        ));
+    }
+    // A path is host text, never a numeric provider operand. Check the
+    // identifiable path slot before any image/map readback or filesystem I/O.
+    let filename_index = if is_string_like(&args[1]) { 1 } else { 2 };
+    let filename = args.get(filename_index).ok_or_else(|| {
+        imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_ARGUMENT,
+            "indexed images require X, map, and filename",
+        )
+    })?;
+    let filename = string_arg("filename", filename, &IMWRITE_ERROR_INVALID_FILENAME)?;
+    if filename.trim().is_empty() {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_FILENAME,
+            "filename must not be empty",
+        ));
+    }
     preflight_resident_argument_roles(&args)?;
+    preflight_option_text(&args, filename_index + 1)?;
     let mut host_args = Vec::with_capacity(args.len());
     for arg in &args {
         host_args.push(gather_imwrite_argument(arg).await?);
@@ -298,13 +82,45 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     runmat_filesystem::write_async(&invocation.path, &bytes)
         .await
         .map_err(|err| {
-            imwrite_error_with_detail(
+            imwrite_error_with_source(
                 &IMWRITE_ERROR_IO,
-                format!("failed to write '{}': {err}", invocation.path.display()),
+                format!("failed to write '{}'", invocation.path.display()),
+                err,
             )
         })?;
 
     Ok(Value::OutputList(Vec::new()))
+}
+
+fn preflight_option_text(args: &[Value], mut index: usize) -> BuiltinResult<()> {
+    if let Some(first) = args.get(index) {
+        let text = string_arg(
+            "format or option name",
+            first,
+            &IMWRITE_ERROR_INVALID_OPTION,
+        )?;
+        if ImwriteOption::from_name(&text).is_none() {
+            parse_format_hint(&text)?;
+            index += 1;
+        }
+    }
+    while index < args.len() {
+        let name = string_arg("option name", &args[index], &IMWRITE_ERROR_INVALID_OPTION)?;
+        if ImwriteOption::from_name(&name).is_none() {
+            return Err(imwrite_error_with_detail(
+                &IMWRITE_ERROR_INVALID_OPTION,
+                format!("unsupported option '{name}'"),
+            ));
+        }
+        if index + 1 >= args.len() {
+            return Err(imwrite_error_with_detail(
+                &IMWRITE_ERROR_INVALID_OPTION,
+                format!("option '{name}' requires a value"),
+            ));
+        }
+        index += 2;
+    }
+    Ok(())
 }
 
 fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult<()> {
@@ -382,7 +198,13 @@ async fn gather_imwrite_argument(value: &Value) -> BuiltinResult<Value> {
         owner, handle,
     )
     .await;
-    result.map_err(|err| imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_ARGUMENT, err.message()))
+    result.map_err(|err| {
+        imwrite_error_with_source(
+            &IMWRITE_ERROR_INVALID_ARGUMENT,
+            "provider download failed",
+            err,
+        )
+    })
 }
 
 fn preflight_resident_image_class(value: &Value) -> BuiltinResult<()> {
@@ -504,8 +326,8 @@ fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
 
     let mut explicit_format = None;
     if idx < args.len() {
-        if let Some(text) = tensor::value_to_string(&args[idx]) {
-            if !is_option_name(&text) {
+        if let Some(text) = super::checked_text::scalar_text(&args[idx]) {
+            if ImwriteOption::from_name(&text).is_none() {
                 explicit_format = Some(parse_format_hint(&text)?);
                 idx += 1;
             }
@@ -526,13 +348,13 @@ fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
         let value = &args[idx];
         idx += 1;
 
-        match canonical_option_name(&name).as_str() {
-            "alpha" => {
+        match ImwriteOption::from_name(&name) {
+            Some(ImwriteOption::Alpha) => {
                 let alpha_tensor = tensor_from_numeric_like(value, "Alpha")?;
                 ensure_documented_alpha_class(&alpha_tensor)?;
                 alpha = Some(alpha_tensor);
             }
-            "quality" => {
+            Some(ImwriteOption::Quality) => {
                 let q = numeric_scalar(value, "Quality")?;
                 if !q.is_finite() || !(0.0..=100.0).contains(&q) {
                     return Err(imwrite_error_with_detail(
@@ -542,7 +364,7 @@ fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
                 }
                 options.quality = q.round() as u8;
             }
-            "writemode" => {
+            Some(ImwriteOption::WriteMode) => {
                 let mode = string_arg("WriteMode", value, &IMWRITE_ERROR_INVALID_OPTION)?;
                 options.write_mode = match mode.trim().to_ascii_lowercase().as_str() {
                     "overwrite" => WriteMode::Overwrite,
@@ -555,7 +377,7 @@ fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
                     }
                 };
             }
-            "delaytime" => {
+            Some(ImwriteOption::DelayTime) => {
                 let delay = numeric_scalar(value, "DelayTime")?;
                 if !delay.is_finite() || delay < 0.0 {
                     return Err(imwrite_error_with_detail(
@@ -565,7 +387,7 @@ fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
                 }
                 options.delay_time = Some(delay);
             }
-            "loopcount" => {
+            Some(ImwriteOption::LoopCount) => {
                 let count = numeric_scalar(value, "LoopCount")?;
                 if count.is_nan() || count < 0.0 {
                     return Err(imwrite_error_with_detail(
@@ -575,14 +397,13 @@ fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
                 }
                 options.loop_count = Some(count);
             }
-            "compression" | "bitdepth" | "mode" | "disposalmethod" | "backgroundcolor"
-            | "comment" | "transparentcolor" => {
+            Some(ImwriteOption::UnsupportedAdvanced) => {
                 return Err(imwrite_error_with_detail(
                     &IMWRITE_ERROR_INVALID_OPTION,
                     format!("option '{name}' is not supported yet"),
                 ));
             }
-            _ => {
+            None => {
                 return Err(imwrite_error_with_detail(
                     &IMWRITE_ERROR_INVALID_OPTION,
                     format!("unsupported option '{name}'"),
@@ -607,7 +428,7 @@ fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
 }
 
 fn is_string_like(value: &Value) -> bool {
-    tensor::value_to_string(value).is_some()
+    super::checked_text::scalar_text(value).is_some()
 }
 
 fn string_arg(
@@ -615,7 +436,7 @@ fn string_arg(
     value: &Value,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
-    tensor::value_to_string(value).ok_or_else(|| {
+    super::checked_text::scalar_text(value).ok_or_else(|| {
         imwrite_error_with_detail(
             error,
             format!("{label} must be a string scalar or char vector"),
@@ -679,31 +500,6 @@ fn numeric_scalar_to_exact_f64(value: NumericScalar, label: &str) -> BuiltinResu
         }
     };
     Ok(converted)
-}
-
-fn canonical_option_name(name: &str) -> String {
-    name.chars()
-        .filter(|ch| !ch.is_whitespace() && *ch != '_' && *ch != '-')
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-fn is_option_name(name: &str) -> bool {
-    matches!(
-        canonical_option_name(name).as_str(),
-        "alpha"
-            | "quality"
-            | "writemode"
-            | "delaytime"
-            | "loopcount"
-            | "compression"
-            | "bitdepth"
-            | "mode"
-            | "disposalmethod"
-            | "backgroundcolor"
-            | "comment"
-            | "transparentcolor"
-    )
 }
 
 fn parse_format_hint(value: &str) -> BuiltinResult<ImageFormat> {
@@ -1422,10 +1218,7 @@ fn image_to_dynamic(image: &MaterializedImage, keep_alpha: bool) -> BuiltinResul
 fn write_dynamic_image(image: DynamicImage, format: ImageOutputFormat) -> BuiltinResult<Vec<u8>> {
     let mut cursor = Cursor::new(Vec::new());
     image.write_to(&mut cursor, format).map_err(|err| {
-        imwrite_error_with_detail(
-            &IMWRITE_ERROR_ENCODE,
-            format!("unable to encode image: {err}"),
-        )
+        imwrite_error_with_source(&IMWRITE_ERROR_ENCODE, "unable to encode image", err)
     })?;
     Ok(cursor.into_inner())
 }
@@ -1439,27 +1232,22 @@ async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> Built
         let existing = runmat_filesystem::read_async(&invocation.path)
             .await
             .map_err(|err| {
-                imwrite_error_with_detail(
+                imwrite_error_with_source(
                     &IMWRITE_ERROR_IO,
                     format!(
-                        "failed to read GIF for append '{}': {err}",
+                        "failed to read GIF for append '{}'",
                         invocation.path.display()
                     ),
+                    err,
                 )
             })?;
         existing_repeat = gif_repeat_from_bytes(&existing);
         let decoder = GifDecoder::new(Cursor::new(existing)).map_err(|err| {
-            imwrite_error_with_detail(
-                &IMWRITE_ERROR_ENCODE,
-                format!("failed to decode GIF: {err}"),
-            )
+            imwrite_error_with_source(&IMWRITE_ERROR_ENCODE, "failed to decode GIF", err)
         })?;
         for frame in decoder.into_frames() {
             frames.push(frame.map_err(|err| {
-                imwrite_error_with_detail(
-                    &IMWRITE_ERROR_ENCODE,
-                    format!("failed to decode GIF frame: {err}"),
-                )
+                imwrite_error_with_source(&IMWRITE_ERROR_ENCODE, "failed to decode GIF frame", err)
             })?);
         }
     }
@@ -1475,18 +1263,12 @@ async fn encode_gif(image: &MaterializedImage, invocation: &Invocation) -> Built
         };
         if let Some(repeat) = repeat {
             encoder.set_repeat(repeat).map_err(|err| {
-                imwrite_error_with_detail(
-                    &IMWRITE_ERROR_ENCODE,
-                    format!("failed to set GIF repeat: {err}"),
-                )
+                imwrite_error_with_source(&IMWRITE_ERROR_ENCODE, "failed to set GIF repeat", err)
             })?;
         }
         for frame in frames {
             encoder.encode_frame(frame).map_err(|err| {
-                imwrite_error_with_detail(
-                    &IMWRITE_ERROR_ENCODE,
-                    format!("failed to encode GIF frame: {err}"),
-                )
+                imwrite_error_with_source(&IMWRITE_ERROR_ENCODE, "failed to encode GIF frame", err)
             })?;
         }
     }
@@ -1600,6 +1382,21 @@ fn imwrite_error_with_detail(
     builder.build()
 }
 
+fn imwrite_error_with_source<E>(
+    error: &'static BuiltinErrorDescriptor,
+    context: impl AsRef<str>,
+    source: E,
+) -> RuntimeError
+where
+    E: crate::runtime_error::RuntimeErrorSourceBound,
+{
+    build_runtime_error(format!("{}: {}: {source}", error.message, context.as_ref()))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(error.identifier.unwrap_or("RunMat:imwrite:Internal"))
+        .with_source(source)
+        .build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1619,6 +1416,36 @@ mod tests {
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(imwrite_builtin(args))
+    }
+
+    #[test]
+    fn invalid_filename_text_is_rejected_before_image_gather_or_write() {
+        let image = Value::Tensor(tensor(vec![0.0], vec![1, 1], NumericDType::F64));
+        let error = call(vec![image.clone(), Value::Num(42.0)]).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            IMWRITE_ERROR_INVALID_ARGUMENT.identifier
+        );
+        let error = call(vec![image, Value::Num(1.0), Value::Bool(true)]).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            IMWRITE_ERROR_INVALID_FILENAME.identifier
+        );
+    }
+
+    #[test]
+    fn unsupported_explicit_format_fails_before_writing() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("unsupported.dat");
+        let image = Value::Tensor(tensor(vec![0.0], vec![1, 1], NumericDType::F64));
+        let error = call(vec![
+            image,
+            Value::String(path.to_string_lossy().into_owned()),
+            Value::String("not-an-image-format".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_FORMAT.identifier);
+        assert!(!path.exists());
     }
 
     #[test]
