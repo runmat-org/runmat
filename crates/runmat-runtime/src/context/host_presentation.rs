@@ -27,7 +27,7 @@ pub(crate) use admission::{
 pub(crate) use host_sink::{
     select_exact_host_sink, select_exact_host_sink_with_readbacks, ExactHostSink, HostSinkReceipt,
 };
-use publication::AdmittedHostUploadOutputs;
+use publication::{AdmittedHostUploadOutputs, SelectedUploadPublication, UploadPublication};
 
 #[cfg(test)]
 #[path = "host_presentation/tests.rs"]
@@ -40,9 +40,7 @@ pub(crate) struct HostPresentationReceipt {
     runtime: RuntimeContext,
     selected: RuntimeWholeWorkSelection,
     receipt: ProviderOperationReceipt,
-    admitted_upload_outputs: Option<AdmittedHostUploadOutputs>,
-    admitted_upload_published: bool,
-    admitted_upload_validation_failed: bool,
+    upload_publication: UploadPublication,
 }
 
 impl HostPresentationReceipt {
@@ -55,9 +53,7 @@ impl HostPresentationReceipt {
             runtime,
             selected,
             receipt,
-            admitted_upload_outputs: None,
-            admitted_upload_published: false,
-            admitted_upload_validation_failed: false,
+            upload_publication: UploadPublication::NotApplicable,
         }
     }
 
@@ -65,7 +61,10 @@ impl HostPresentationReceipt {
         mut self,
         admitted: AdmittedHostUploadOutputs,
     ) -> Self {
-        self.admitted_upload_outputs = Some(admitted);
+        self.upload_publication = UploadPublication::Selected {
+            admitted,
+            state: SelectedUploadPublication::Pending,
+        };
         self
     }
 
@@ -76,21 +75,13 @@ impl HostPresentationReceipt {
         &mut self,
         outputs: &[&runmat_accelerate_api::GpuTensorHandle],
     ) -> BuiltinResult<()> {
-        self.admitted_upload_published = false;
-        self.admitted_upload_validation_failed = false;
-        if !self
-            .admitted_upload_outputs
-            .as_ref()
-            .is_some_and(|admitted| admitted.admits(outputs))
-        {
-            self.admitted_upload_validation_failed = true;
+        if !self.upload_publication.validate(outputs) {
             return Err(build_runtime_error(
                 "published host-upload result does not match its admitted owner, representation or physical allocation",
             )
             .with_identifier("RunMat:Placement:InvalidPublishedOutput")
             .build());
         }
-        self.admitted_upload_published = true;
         Ok(())
     }
 
@@ -137,7 +128,7 @@ impl HostPresentationReceipt {
     pub(crate) fn finish(mut self, published: Result<bool, ProviderObservationFailure>) {
         if self.runtime.is_cancelled() {
             self.receipt.fail(ProviderObservationFailure::Cancelled);
-        } else if self.admitted_upload_validation_failed {
+        } else if self.upload_publication.rejected() {
             self.receipt
                 .fail(ProviderObservationFailure::PublicationFailed);
         } else {
@@ -147,7 +138,7 @@ impl HostPresentationReceipt {
                     .receipt
                     .fail(ProviderObservationFailure::SharedRuntimeFallback),
                 Ok(true) => {
-                    if self.admitted_upload_outputs.is_some() && !self.admitted_upload_published {
+                    if !self.upload_publication.can_publish() {
                         self.receipt
                             .fail(ProviderObservationFailure::PublicationFailed);
                     } else if self.receipt.publish().is_err() {

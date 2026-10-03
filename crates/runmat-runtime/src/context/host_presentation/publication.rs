@@ -15,6 +15,67 @@ pub(super) struct AdmittedHostUploadOutputs {
     pub(super) one_output_requested_bytes: Option<u64>,
 }
 
+pub(super) enum UploadPublication {
+    NotApplicable,
+    RejectedNoAdmission,
+    Selected {
+        admitted: AdmittedHostUploadOutputs,
+        state: SelectedUploadPublication,
+    },
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum SelectedUploadPublication {
+    Pending,
+    Validated,
+    Rejected,
+}
+
+impl UploadPublication {
+    pub(super) fn validate(&mut self, handles: &[&GpuTensorHandle]) -> bool {
+        let (admitted, state) = match self {
+            Self::Selected { admitted, state } => (admitted, state),
+            Self::NotApplicable => {
+                *self = Self::RejectedNoAdmission;
+                return false;
+            }
+            Self::RejectedNoAdmission => return false,
+        };
+        if *state == SelectedUploadPublication::Rejected {
+            return false;
+        }
+        if admitted.admits(handles) {
+            *state = SelectedUploadPublication::Validated;
+            true
+        } else {
+            *state = SelectedUploadPublication::Rejected;
+            false
+        }
+    }
+
+    pub(super) fn rejected(&self) -> bool {
+        matches!(self, Self::RejectedNoAdmission)
+            || matches!(
+                self,
+                Self::Selected {
+                    state: SelectedUploadPublication::Rejected,
+                    ..
+                }
+            )
+    }
+
+    pub(super) fn can_publish(&self) -> bool {
+        matches!(self, Self::NotApplicable)
+            || matches!(
+                self,
+                Self::Selected {
+                    state: SelectedUploadPublication::Validated,
+                    ..
+                }
+            )
+    }
+}
+
 impl AdmittedHostUploadOutputs {
     pub(super) fn admits(&self, handles: &[&GpuTensorHandle]) -> bool {
         if handles.len() != self.outputs.len() || handles.is_empty() {

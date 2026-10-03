@@ -151,7 +151,7 @@ pub(super) async fn imfilter_gpu_host_fallback(
 
 pub(super) fn validate_conditional_restore(
     result: BuiltinResult<Value>,
-    selected: Option<&crate::context::provider_operation::SelectedProviderOperation>,
+    selected: Option<&mut crate::context::provider_operation::SelectedProviderOperation>,
     image: &GpuTensorHandle,
     kernel: Option<&GpuTensorHandle>,
     expected_shape: &[usize],

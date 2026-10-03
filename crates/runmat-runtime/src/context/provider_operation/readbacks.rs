@@ -1,0 +1,261 @@
+//! Authenticate original readback owners and compose typed stage/host demands.
+
+use super::types::{
+    ExactConditionalProviderUpload, ExactProviderOperation, ExactProviderReadbackPhase,
+};
+use crate::context::host_presentation::combine_host_scratch;
+use crate::{build_runtime_error, BuiltinResult};
+use runmat_accelerate_api::{
+    provider_for_handle, GpuHandleProvenance, GpuTensorLayout, ProviderCapabilitySnapshot,
+    ProviderFeasibilityQuery,
+};
+use runmat_execution::{
+    ProviderInputStageDemand, ProviderInputStageDemands, ProviderResourceSnapshot,
+    ResourceByteBound,
+};
+
+pub(super) struct PreparedReadbacks {
+    pub(super) provider_resources: Vec<ProviderResourceSnapshot>,
+    pub(super) source_capabilities: Vec<(u32, ProviderCapabilitySnapshot)>,
+    pub(super) readback_facts: Vec<(
+        ProviderFeasibilityQuery,
+        ResourceByteBound,
+        GpuTensorLayout,
+        Option<GpuHandleProvenance>,
+    )>,
+    pub(super) input_stages: Option<ProviderInputStageDemands>,
+    pub(super) preparation_host_workspace: ResourceByteBound,
+    pub(super) conditional_readback_host_workspace: ResourceByteBound,
+    pub(super) host_scratch: ResourceByteBound,
+    pub(super) conditional_provider_upload: Option<ExactConditionalProviderUpload>,
+}
+
+pub(super) fn prepare_readbacks(
+    request: &ExactProviderOperation<'_>,
+    parallel_memory_available_bytes: Option<u64>,
+) -> BuiltinResult<Option<PreparedReadbacks>> {
+    let provider = request.provider;
+    let mut provider_resources = vec![provider.placement_resources()];
+    let mut source_capabilities = Vec::with_capacity(request.readbacks.len());
+    let mut readback_facts = Vec::with_capacity(request.readbacks.len());
+    let mut input_stages = Vec::new();
+    let mut preparation_host_workspace = ResourceByteBound::Known(0);
+    let mut conditional_readback_host_workspace = ResourceByteBound::Known(0);
+    for readback in request.readbacks {
+        let source = readback.source;
+        let Some(source_provider) = provider_for_handle(source) else {
+            return Err(
+                build_runtime_error("provider input readback has no exact owner")
+                    .with_identifier("RunMat:Placement:InvalidReadbackOwner")
+                    .build(),
+            );
+        };
+        source.allocation_lease().validate_live().map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                build_runtime_error("provider input readback allocation is unavailable")
+                    .with_identifier("RunMat:Placement:InvalidReadbackOwner")
+                    .build(),
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?;
+        if source.device_id() != source_provider.device_id() {
+            return Err(
+                build_runtime_error("provider input readback owner device is invalid")
+                    .with_identifier("RunMat:Placement:InvalidReadbackOwner")
+                    .build(),
+            );
+        }
+        let source_resource = source_provider.placement_resources();
+        let Some(download) = ProviderFeasibilityQuery::exact_numeric_download(source) else {
+            if parallel_memory_available_bytes.is_some()
+                || source_resource.capacity_bytes.is_some()
+                || source_resource.scratch_available_bytes.is_some()
+            {
+                return Err(build_runtime_error(
+                    "provider input has no exact native readback under a finite resource budget",
+                )
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .build());
+            }
+            return Ok(None);
+        };
+        if !source_provider
+            .query_numeric_download_feasibility(source, &download)
+            .is_supported()
+        {
+            if parallel_memory_available_bytes.is_some()
+                || source_resource.capacity_bytes.is_some()
+                || source_resource.scratch_available_bytes.is_some()
+            {
+                return Err(build_runtime_error(
+                    "provider input readback has no proven route under a finite resource budget",
+                )
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .build());
+            }
+            return Ok(None);
+        }
+        let workspace = source_provider.download_numeric_host_workspace_bound(source);
+        match readback.phase {
+            ExactProviderReadbackPhase::Preparation => {
+                preparation_host_workspace =
+                    combine_host_scratch(preparation_host_workspace, workspace)?;
+            }
+            ExactProviderReadbackPhase::Conditional => {
+                conditional_readback_host_workspace =
+                    combine_host_scratch(conditional_readback_host_workspace, workspace)?;
+            }
+        }
+        let stage_peak = sum_resource_bounds(
+            readback.prior_created_bytes,
+            source_provider.download_numeric_provider_scratch_bound(source),
+        )?;
+        input_stages.push(ProviderInputStageDemand {
+            device_id: source_provider.device_id(),
+            incremental_peak_bytes: stage_peak,
+            queue_slots: source_provider.download_numeric_queue_slots(source),
+        });
+        source_capabilities.push((
+            source_provider.device_id(),
+            source_provider.capability_snapshot(),
+        ));
+        readback_facts.push((
+            download,
+            readback.prior_created_bytes,
+            source.view().layout(),
+            runmat_accelerate_api::handle_provenance(source),
+        ));
+        if !provider_resources
+            .iter()
+            .any(|resource| resource.device_id == source_resource.device_id)
+        {
+            provider_resources.push(source_resource);
+        }
+    }
+    if let Some(internal) = request.internal_input_stages {
+        if !internal.is_canonical() {
+            return Err(
+                build_runtime_error("provider input stage set is not canonical")
+                    .with_identifier("RunMat:Placement:InvalidInputStages")
+                    .build(),
+            );
+        }
+        if internal
+            .iter()
+            .any(|stage| stage.device_id != provider.device_id())
+        {
+            return Err(
+                build_runtime_error("provider internal stage has a foreign owner")
+                    .with_identifier("RunMat:Placement:InvalidInputStages")
+                    .build(),
+            );
+        }
+        input_stages.extend(internal.iter());
+    }
+    let input_stages = if input_stages.is_empty() {
+        None
+    } else {
+        Some(
+            ProviderInputStageDemands::sequential(input_stages).ok_or_else(|| {
+                build_runtime_error("provider input stages exceed the resource set")
+                    .with_identifier("RunMat:Placement:TooManyProviders")
+                    .build()
+            })?,
+        )
+    };
+    let prefix_host_workspace =
+        combine_host_scratch(request.host_scratch, preparation_host_workspace)?;
+    let direct_host_peak =
+        combine_host_scratch(prefix_host_workspace, request.provider_host_scratch)?;
+    let host_scratch = if request.conditional_host_fallback.is_some() {
+        let fallback = combine_host_scratch(
+            combine_host_scratch(prefix_host_workspace, conditional_readback_host_workspace)?,
+            request.conditional_host_scratch,
+        )?;
+        peak_resource_bounds(direct_host_peak, fallback)
+    } else {
+        direct_host_peak
+    };
+    let conditional_provider_upload = if let Some(upload) = request.conditional_provider_upload {
+        Some(ExactConditionalProviderUpload {
+            host_scratch_bytes: combine_host_scratch(
+                combine_host_scratch(prefix_host_workspace, conditional_readback_host_workspace)?,
+                upload.host_scratch_bytes,
+            )?,
+            ..upload
+        })
+    } else {
+        None
+    };
+    Ok(Some(PreparedReadbacks {
+        provider_resources,
+        source_capabilities,
+        readback_facts,
+        input_stages,
+        preparation_host_workspace,
+        conditional_readback_host_workspace,
+        host_scratch,
+        conditional_provider_upload,
+    }))
+}
+
+fn sum_resource_bounds(
+    left: ResourceByteBound,
+    right: ResourceByteBound,
+) -> BuiltinResult<ResourceByteBound> {
+    match (left, right) {
+        (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => left
+            .checked_add(right)
+            .map(ResourceByteBound::Known)
+            .ok_or_else(|| {
+                build_runtime_error("provider input stage byte bound overflows")
+                    .with_identifier("RunMat:Placement:ResourceOverflow")
+                    .build()
+            }),
+        (ResourceByteBound::Unavailable(reason), _)
+        | (_, ResourceByteBound::Unavailable(reason)) => Ok(ResourceByteBound::Unavailable(reason)),
+    }
+}
+
+fn peak_resource_bounds(left: ResourceByteBound, right: ResourceByteBound) -> ResourceByteBound {
+    match (left, right) {
+        (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => {
+            ResourceByteBound::Known(left.max(right))
+        }
+        (ResourceByteBound::Unavailable(reason), _)
+        | (_, ResourceByteBound::Unavailable(reason)) => ResourceByteBound::Unavailable(reason),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_execution::ResourceBoundUnavailable;
+
+    #[test]
+    fn provider_input_stage_overflow_is_a_resource_error_not_a_missing_selection() {
+        let error = sum_resource_bounds(
+            ResourceByteBound::Known(u64::MAX),
+            ResourceByteBound::Known(1),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:ResourceOverflow")
+        );
+    }
+
+    #[test]
+    fn provider_input_stage_unknown_never_becomes_zero() {
+        let unknown = ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound);
+        assert_eq!(sum_resource_bounds(16.into(), unknown).unwrap(), unknown);
+    }
+
+    #[test]
+    fn conditional_host_peak_is_maximum_of_sequential_branches() {
+        assert_eq!(peak_resource_bounds(24.into(), 32.into()), 32.into());
+        assert_eq!(peak_resource_bounds(40.into(), 32.into()), 40.into());
+        let unknown = ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound);
+        assert_eq!(peak_resource_bounds(40.into(), unknown), unknown);
+    }
+}

@@ -218,7 +218,7 @@ pub(super) async fn imfilter_gpu(
                 .await;
                 let result = validate_conditional_restore(
                     result,
-                    selected.as_ref(),
+                    selected.as_mut(),
                     &image_handle,
                     resident_kernel.as_ref(),
                     &expected_shape,
@@ -318,7 +318,7 @@ pub(super) async fn imfilter_gpu(
             .await;
             let result = validate_conditional_restore(
                 result,
-                selected.as_ref(),
+                selected.as_mut(),
                 &image_handle,
                 Some(&kernel_handle),
                 &expected_shape,

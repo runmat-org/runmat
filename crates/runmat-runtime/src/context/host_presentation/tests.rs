@@ -290,6 +290,7 @@ fn admitted_upload_cannot_publish_success_without_its_realized_output_witness() 
                     error.identifier(),
                     Some("RunMat:Placement:InvalidPublishedOutput")
                 );
+                assert!(owner.validate_published_outputs(&[&exact]).is_err());
             }
             _ => owner
                 .validate_published_outputs(&[&exact])
