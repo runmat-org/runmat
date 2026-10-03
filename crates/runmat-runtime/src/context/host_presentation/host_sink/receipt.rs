@@ -3,7 +3,7 @@
 
 use crate::context::{RuntimeContext, RuntimeWholeWorkSelection};
 use runmat_execution::PlacementFeedback;
-use std::time::Instant;
+use runmat_time::Instant;
 
 pub(crate) struct HostSinkReceipt {
     runtime: RuntimeContext,

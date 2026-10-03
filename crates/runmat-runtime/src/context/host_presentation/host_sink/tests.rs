@@ -7,6 +7,10 @@ use runmat_execution::{
 };
 use std::rc::Rc;
 
+// The crate root configures browser tests when plot-web is enabled.
+#[cfg(all(target_arch = "wasm32", not(feature = "plot-web")))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 fn selected() -> RuntimeWholeWorkSelection {
     let digest = Digest::sha256(b"host-sink-cancellation");
     RuntimeWholeWorkSelection {
@@ -42,7 +46,8 @@ fn selected() -> RuntimeWholeWorkSelection {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn cancellation_and_abandoned_host_sink_never_publish_feedback() {
     let witness = Rc::new(Witness::default());
     let cancellation = CancellationSource::new();
@@ -54,4 +59,15 @@ fn cancellation_and_abandoned_host_sink_never_publish_feedback() {
     cancellation.cancel(CancellationReason::User);
     HostSinkReceipt::new(runtime, selected()).finish(true);
     assert!(witness.feedback().is_empty());
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn completed_host_sink_reports_platform_clock_elapsed_time() {
+    let witness = Rc::new(Witness::default());
+    HostSinkReceipt::new(witness.context(), selected()).finish(true);
+    let feedback = witness.feedback();
+    assert_eq!(feedback.len(), 1);
+    assert!(feedback[0].total_elapsed_ns >= 1);
+    assert!(feedback[0].succeeded);
 }
