@@ -4,7 +4,7 @@ use super::*;
     name = "audioread",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::audio"
+    builtin_path = "crate::builtins::io::audio::read"
 )]
 pub(super) async fn audioread_builtin(
     runtime: Option<crate::context::RuntimeContext>,

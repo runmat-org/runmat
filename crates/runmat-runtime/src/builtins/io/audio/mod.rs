@@ -26,11 +26,11 @@ mod admission;
 mod cooperation;
 mod flac_aiff;
 mod ieee;
-mod info;
+pub(crate) mod info;
 mod input;
 mod mp3;
 mod ogg;
-mod read;
+pub(crate) mod read;
 mod stream;
 mod wave;
 #[cfg(test)]
