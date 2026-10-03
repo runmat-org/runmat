@@ -214,7 +214,10 @@ fn preflight_fid(value: &Value) -> BuiltinResult<()> {
             }
             Ok(())
         }
-        _ => Ok(()),
+        _ => Err(fgetl_error_with_detail(
+            &FGETL_ERROR_INVALID_INPUT,
+            "file identifier must be a numeric scalar",
+        )),
     }
 }
 

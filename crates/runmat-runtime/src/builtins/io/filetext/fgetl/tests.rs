@@ -4,7 +4,7 @@ use crate::builtins::io::filetext::{fopen, registry};
 use crate::RuntimeError;
 use runmat_accelerate_api::HostTensorView;
 use runmat_time::system_time_now;
-use runmat_value::{IntValue, IntegerStorage, Tensor};
+use runmat_value::{CellArray, IntValue, IntegerStorage, Tensor};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -94,6 +94,29 @@ fn fgetl_rejects_known_nonscalar_resident_identifier_before_download() {
     let error = run_evaluate(&Value::GpuTensor(allocation.handle.clone()), &[])
         .err()
         .expect("nonscalar identifier");
+    assert_eq!(error.identifier(), FGETL_ERROR_INVALID_INPUT.identifier);
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
+#[test]
+fn fgetl_rejects_cell_containing_resident_identifier_without_gather() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident scalar");
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let cell = CellArray::new(vec![Value::GpuTensor(allocation.handle.clone())], 1, 1)
+        .expect("cell fixture");
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let error = run_evaluate(&Value::Cell(cell), &[])
+        .err()
+        .expect("cell is not a file identifier");
     assert_eq!(error.identifier(), FGETL_ERROR_INVALID_INPUT.identifier);
     assert_eq!(allocation.probe.retirements(), 0);
 }
