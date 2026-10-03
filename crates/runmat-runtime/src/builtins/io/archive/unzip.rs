@@ -82,18 +82,36 @@ async fn evaluate_with_output(
     };
     let request = parse_arguments(args)?;
     check_cancelled(runtime)?;
+    // Resolve output first, then local input, as before. Capture the installed
+    // provider together with any effective CWD needed for relative/default
+    // paths; no path authority is read again after whole-work selection.
+    let mut captured_filesystem = None;
+    let output_folder =
+        resolve_output_folder(request.output_folder.as_deref(), &mut captured_filesystem)?;
+    let local_archive = match &request.archive {
+        runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
+            Some(resolve_archive_path(path, &mut captured_filesystem)?)
+        }
+        runmat_builtins::UnzipSourceRoute::Http(_) => None,
+    };
+    let output_provider = captured_filesystem
+        .map(|(provider, _)| provider)
+        .unwrap_or_else(vfs::current_provider);
+    let local_archive_text = local_archive.as_deref().map(path_to_string);
+    let output_folder_text = path_to_string(&output_folder);
     let source = match &request.archive {
         runmat_builtins::UnzipSourceRoute::Http(url) => HostEffectSource::HttpArchive(url.as_str()),
-        runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
-            HostEffectSource::LocalArchive(path.as_str())
-        }
+        runmat_builtins::UnzipSourceRoute::LocalPath(_) => HostEffectSource::LocalArchive(
+            local_archive_text
+                .as_deref()
+                .expect("resolved local archive"),
+        ),
     };
     let workload = HostEffectWorkload::ArchiveExtract {
         source,
-        destination: request.output_folder.as_deref(),
+        destination: Some(output_folder_text.as_str()),
         output,
     };
-    let output_provider = vfs::current_provider();
     let receipt = select_host_effect(
         runtime,
         HostEffectRequest {
@@ -106,15 +124,14 @@ async fn evaluate_with_output(
         },
     )?;
     let execution = async {
-        let output_folder = resolve_output_folder(request.output_folder.as_deref()).await?;
         let filenames = match request.archive {
             runmat_builtins::UnzipSourceRoute::Http(url) => {
                 extract_remote_archive(&url, &output_folder, runtime, output_provider).await?
             }
-            runmat_builtins::UnzipSourceRoute::LocalPath(path) => {
-                let path = resolve_archive_path(&path)?;
+            runmat_builtins::UnzipSourceRoute::LocalPath(_) => {
+                let path = local_archive.as_deref().expect("resolved local archive");
                 prepare_output_folder(&output_folder, runtime, output_provider.as_ref()).await?;
-                extract_local_archive(&path, &output_folder, runtime, output_provider).await?
+                extract_local_archive(path, &output_folder, runtime, output_provider).await?
             }
         };
         check_cancelled(runtime)?;

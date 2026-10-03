@@ -102,13 +102,42 @@ async fn local_archive_to_temp_file(
     Ok(temp)
 }
 
-pub(super) fn resolve_archive_path(text: &str) -> BuiltinResult<PathBuf> {
-    let expanded = expand_user_path(text.trim(), BUILTIN_NAME)
-        .map_err(|msg| unzip_error_with(&UNZIP_ERROR_FILENAME, msg))?;
-    Ok(PathBuf::from(expanded))
+pub(super) type CapturedFilesystem = (std::sync::Arc<dyn vfs::FsProvider>, PathBuf);
+
+fn captured_cwd<'a>(
+    captured: &'a mut Option<CapturedFilesystem>,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<&'a Path> {
+    if captured.is_none() {
+        *captured = Some(vfs::current_provider_with_current_dir().map_err(|err| {
+            unzip_error_with_source(
+                descriptor,
+                format!("unzip: unable to resolve current folder: {err}"),
+                err,
+            )
+        })?);
+    }
+    Ok(captured.as_ref().expect("captured filesystem").1.as_path())
 }
 
-pub(super) async fn resolve_output_folder(text: Option<&str>) -> BuiltinResult<PathBuf> {
+pub(super) fn resolve_archive_path(
+    text: &str,
+    captured: &mut Option<CapturedFilesystem>,
+) -> BuiltinResult<PathBuf> {
+    let expanded = expand_user_path(text.trim(), BUILTIN_NAME)
+        .map_err(|msg| unzip_error_with(&UNZIP_ERROR_FILENAME, msg))?;
+    let path = PathBuf::from(expanded);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(captured_cwd(captured, &UNZIP_ERROR_IO)?.join(path))
+    }
+}
+
+pub(super) fn resolve_output_folder(
+    text: Option<&str>,
+    captured: &mut Option<CapturedFilesystem>,
+) -> BuiltinResult<PathBuf> {
     match text {
         Some(raw) => {
             let expanded = expand_user_path(raw.trim(), BUILTIN_NAME)
@@ -117,23 +146,10 @@ pub(super) async fn resolve_output_folder(text: Option<&str>) -> BuiltinResult<P
             if path.is_absolute() {
                 Ok(path)
             } else {
-                let current = vfs::current_dir().map_err(|err| {
-                    unzip_error_with_source(
-                        &UNZIP_ERROR_OUTPUT_FOLDER,
-                        format!("unzip: unable to resolve current folder: {err}"),
-                        err,
-                    )
-                })?;
-                Ok(current.join(path))
+                Ok(captured_cwd(captured, &UNZIP_ERROR_OUTPUT_FOLDER)?.join(path))
             }
         }
-        None => vfs::current_dir().map_err(|err| {
-            unzip_error_with_source(
-                &UNZIP_ERROR_OUTPUT_FOLDER,
-                format!("unzip: unable to resolve current folder: {err}"),
-                err,
-            )
-        }),
+        None => Ok(captured_cwd(captured, &UNZIP_ERROR_OUTPUT_FOLDER)?.to_path_buf()),
     }
 }
 

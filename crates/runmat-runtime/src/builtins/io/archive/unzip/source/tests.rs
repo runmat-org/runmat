@@ -15,28 +15,38 @@ fn archive_bytes(contents: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn selected_filesystem_owns_local_archive_input_and_output_after_global_swap() {
+fn captured_relative_input_and_default_output_survive_provider_and_cwd_swap() {
     let _lock = vfs::provider_override_lock();
-    let selected = Arc::new(vfs::MemoryFsProvider::new());
-    let replacement = Arc::new(vfs::MemoryFsProvider::new());
-    let archive = Path::new("/archive.zip");
-    let output = Path::new("/selected-output");
+    let selected = Arc::new(vfs::MemoryFsProvider::with_current_dir("/selected-cwd"));
+    let replacement = Arc::new(vfs::MemoryFsProvider::with_current_dir("/replacement-cwd"));
     selected
-        .write_project_path(archive, &archive_bytes(b"selected owner"))
+        .write_project_path(
+            "/selected-cwd/archive.zip",
+            &archive_bytes(b"selected owner"),
+        )
         .expect("selected archive");
     replacement
-        .write_project_path(archive, &archive_bytes(b"replacement owner"))
-        .expect("replacement archive at the same path");
+        .write_project_path(
+            "/replacement-cwd/archive.zip",
+            &archive_bytes(b"replacement owner"),
+        )
+        .expect("replacement archive at the same relative path");
 
     // Capture the exact provider that admission would retain. Suspend the
     // invocation before its open, then replace the ambient owner while it is
     // awaiting continuation.
     let _selected_guard = vfs::replace_provider(selected.clone());
-    let selected_provider = vfs::current_provider();
+    vfs::set_current_dir("/selected-cwd").expect("selected working directory");
+    let mut captured = None;
+    let output = resolve_output_folder(None, &mut captured).expect("default output path");
+    let archive = resolve_archive_path("archive.zip", &mut captured).expect("relative input path");
+    assert_eq!(output, Path::new("/selected-cwd"));
+    assert_eq!(archive, Path::new("/selected-cwd/archive.zip"));
+    let selected_provider = captured.expect("selected owner and CWD captured").0;
     let (resume, suspended) = futures::channel::oneshot::channel::<()>();
     let mut invocation = Box::pin(async move {
         suspended.await.expect("resume selected invocation");
-        extract_local_archive(archive, output, None, selected_provider).await
+        extract_local_archive(&archive, &output, None, selected_provider).await
     });
     let waker = futures::task::noop_waker();
     let mut context = Context::from_waker(&waker);
@@ -45,18 +55,19 @@ fn selected_filesystem_owns_local_archive_input_and_output_after_global_swap() {
         Poll::Pending
     ));
     let _replacement_guard = vfs::replace_provider(replacement.clone());
+    vfs::set_current_dir("/replacement-cwd").expect("replacement working directory");
     resume.send(()).expect("resume suspended invocation");
     let files =
         futures::executor::block_on(invocation).expect("local extraction through selected owner");
 
-    assert_eq!(files, vec!["/selected-output/owner.txt"]);
+    assert_eq!(files, vec!["/selected-cwd/owner.txt"]);
     assert_eq!(
         selected
-            .read_project_path("/selected-output/owner.txt")
+            .read_project_path("/selected-cwd/owner.txt")
             .unwrap(),
         b"selected owner"
     );
     assert!(replacement
-        .read_project_path("/selected-output/owner.txt")
+        .read_project_path("/replacement-cwd/owner.txt")
         .is_err());
 }

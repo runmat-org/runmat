@@ -654,6 +654,32 @@ pub fn current_provider() -> Arc<dyn FsProvider> {
         .clone()
 }
 
+/// Capture the installed provider and its effective working directory as one
+/// invocation authority. A virtual CWD belongs to the same registry state as
+/// the provider; native process CWD is copied after that state is released.
+pub fn current_provider_with_current_dir() -> io::Result<(Arc<dyn FsProvider>, PathBuf)> {
+    let (provider, virtual_dir) = {
+        let state = provider_state_lock()
+            .read()
+            .expect("filesystem provider lock poisoned");
+        (state.provider.clone(), state.current_dir_override.clone())
+    };
+    let dir = match virtual_dir {
+        Some(dir) => dir,
+        None => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                std::env::current_dir()?
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                PathBuf::from("/")
+            }
+        }
+    };
+    Ok((provider, dir))
+}
+
 pub fn current_provider_supports_read() -> bool {
     // Provider metadata is implementation code and may reenter the registry.
     // Clone its current owner while locked, then invoke outside the lock.
