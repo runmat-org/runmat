@@ -257,7 +257,6 @@ pub(crate) fn select_exact_provider_operation(
         }
         let stage_peak = sum_resource_bounds(
             readback.prior_created_bytes,
-            readback.phase,
             source_provider.download_numeric_provider_scratch_bound(source),
         )?;
         input_stages.push(ProviderInputStageDemand {
