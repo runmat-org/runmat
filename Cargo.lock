@@ -6466,6 +6466,7 @@ name = "runmat-core"
 version = "0.6.2"
 dependencies = [
  "anyhow",
+ "async-trait",
  "futures",
  "log",
  "pollster 0.3.0",
