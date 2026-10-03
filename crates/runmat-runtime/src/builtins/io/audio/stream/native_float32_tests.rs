@@ -64,6 +64,7 @@ fn decode(
     .expect("Float32 WAVE decode")
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn native_float32_preserves_bits_and_column_major_channels() {
     with_input(|input| {
@@ -92,6 +93,7 @@ fn native_float32_preserves_bits_and_column_major_channels() {
     });
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn native_float32_range_and_double_representation_remain_distinct() {
     with_input(|input| {
