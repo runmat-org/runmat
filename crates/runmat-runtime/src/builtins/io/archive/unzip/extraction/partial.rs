@@ -95,7 +95,7 @@ impl Drop for PartialEntry {
         let path = self.path.clone();
         let provider = self.provider.clone();
         #[cfg(not(target_arch = "wasm32"))]
-        let _ = futures::executor::block_on(provider.remove_file(&path));
+        let _ = vfs::remove_file_in_provider(provider, &path);
         #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(async move {
             let _ = provider.remove_file(&path).await;

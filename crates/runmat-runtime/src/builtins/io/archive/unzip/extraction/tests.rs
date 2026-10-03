@@ -101,13 +101,13 @@ fn dropped_partial_and_source_leases_remove_unpublished_files() {
     let _provider_lock = vfs::provider_override_lock();
     let output = tempfile::tempdir().unwrap();
     let partial_path = output.path().join(".partial");
-    let mut partial = block_on(PartialEntry::create(
-        partial_path.clone(),
-        vfs::current_provider(),
-    ))
-    .unwrap();
-    partial.write_all(b"not published").unwrap();
-    drop(partial);
+    block_on(async {
+        let mut partial = PartialEntry::create(partial_path.clone(), vfs::current_provider())
+            .await
+            .unwrap();
+        partial.write_all(b"not published").unwrap();
+        drop(partial);
+    });
     assert!(!partial_path.exists());
 
     let mut source = super::super::source::TempArchive::create().unwrap();

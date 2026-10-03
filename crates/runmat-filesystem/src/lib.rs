@@ -750,6 +750,18 @@ pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     wait_for_fs(move || async move { remove_file_async(path).await })
 }
 
+/// Remove through a retained provider without consulting process-global
+/// provider state. Safe to call from a synchronous destructor inside an
+/// already-running executor on native hosts: `wait_for_fs` owns the worker.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn remove_file_in_provider(
+    provider: Arc<dyn FsProvider>,
+    path: impl AsRef<Path>,
+) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { provider.remove_file(&path).await })
+}
+
 pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
@@ -1456,6 +1468,23 @@ mod tests {
             assert_eq!(read_dir(&parent).expect("read dir").len(), 1);
             remove_file(&path).expect("remove");
         });
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn explicit_provider_cleanup_inside_executor_does_not_switch_ambient_provider() {
+        let _guard = test_lock();
+        let ambient = current_provider();
+        let provider = Arc::new(MemoryFsProvider::new());
+        provider.write_project_path("/partial", b"discard").unwrap();
+        futures::executor::block_on(async {
+            remove_file_in_provider(provider.clone(), "/partial").expect("nested cleanup");
+        });
+        assert_eq!(
+            provider.read_project_path("/partial").unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+        assert!(Arc::ptr_eq(&ambient, &current_provider()));
     }
 
     #[test]
