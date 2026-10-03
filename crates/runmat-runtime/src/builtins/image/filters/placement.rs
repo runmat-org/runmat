@@ -3,6 +3,7 @@
 //! preparation routes remain with their respective domain owners.
 
 use super::imfilter::filter_output_shape;
+use crate::context::host_presentation::combine_host_scratch;
 use crate::context::provider_operation::{
     select_exact_provider_operation, ExactProviderOperation, ExactProviderReadback,
     SelectedProviderOperation,
@@ -17,6 +18,15 @@ use runmat_accelerate_api::{
 };
 use runmat_execution::{Digest, ResourceByteBound};
 
+/// A genuine Unsupported hook may publish a host value only when the caller
+/// has admitted this complete conditional branch before any preparation.
+/// Readbacks are original live handles; no owned host payload is serialized.
+pub(in crate::builtins::image::filters) struct ConditionalHostRoute<'a> {
+    pub(in crate::builtins::image::filters) result_bytes: ResourceByteBound,
+    pub(in crate::builtins::image::filters) operation_scratch: ResourceByteBound,
+    pub(in crate::builtins::image::filters) readbacks: &'a [&'a GpuTensorHandle],
+}
+
 /// The narrow no-preparation route: both original operands already belong to
 /// the output owner. Other public forms require a separate prepared-stage
 /// admission and must not borrow this physical estimate.
@@ -27,6 +37,7 @@ pub(in crate::builtins::image::filters) fn select_direct(
     kernel: &GpuTensorHandle,
     options: &ImfilterOptions,
     original_kernel_readback: bool,
+    conditional_host: Option<ConditionalHostRoute<'_>>,
 ) -> BuiltinResult<Option<SelectedProviderOperation>> {
     let Some(provider) = runmat_accelerate_api::provider_for_handle(image) else {
         return Ok(None);
@@ -75,10 +86,26 @@ pub(in crate::builtins::image::filters) fn select_direct(
         source: kernel,
         prior_created_bytes: ResourceByteBound::Known(0),
     };
-    let readbacks = if original_kernel_readback {
-        std::slice::from_ref(&readback)
+    let mut readbacks = Vec::new();
+    if original_kernel_readback {
+        readbacks.push(readback);
+    }
+    if let Some(route) = conditional_host.as_ref() {
+        for &source in route.readbacks {
+            if !readbacks.iter().any(|stage: &ExactProviderReadback<'_>| {
+                stage.source.view_identity() == source.view_identity()
+            }) {
+                readbacks.push(ExactProviderReadback {
+                    source,
+                    prior_created_bytes: ResourceByteBound::Known(0),
+                });
+            }
+        }
+    }
+    let host_scratch = if let Some(route) = conditional_host.as_ref() {
+        combine_host_scratch(ResourceByteBound::Known(0), route.operation_scratch)?
     } else {
-        &[]
+        ResourceByteBound::Known(0)
     };
     select_exact_provider_operation(
         runtime,
@@ -88,14 +115,14 @@ pub(in crate::builtins::image::filters) fn select_direct(
             semantic_operation,
             variant: "imfilter.same_owner_direct.v1",
             domain_facts,
-            host_scratch: ResourceByteBound::Known(0),
+            host_scratch,
             provider_host_scratch: physical.host_workspace,
             host_cpu_millicores: 1_000,
             already_live_bytes,
-            readbacks,
+            readbacks: &readbacks,
             internal_input_stages: Some(physical.input_stages),
             output_queue_slots: Some(physical.output_queue_slots),
-            conditional_host_fallback: None,
+            conditional_host_fallback: conditional_host.map(|route| route.result_bytes),
         },
     )
 }
@@ -221,6 +248,7 @@ pub(in crate::builtins::image::filters) fn select_prepared(
     projected_kernel: ProviderRepresentation,
     options: &ImfilterOptions,
     operation_host_scratch: ResourceByteBound,
+    conditional_host: Option<ConditionalHostRoute<'_>>,
 ) -> BuiltinResult<Option<SelectedPreparedFilter>> {
     let Some(provider) = runmat_accelerate_api::provider_for_handle(image) else {
         return Ok(None);
@@ -267,7 +295,25 @@ pub(in crate::builtins::image::filters) fn select_prepared(
         source,
         prior_created_bytes: ResourceByteBound::Known(0),
     });
-    let readbacks = readback.as_ref().map(std::slice::from_ref).unwrap_or(&[]);
+    let mut readbacks = readback.into_iter().collect::<Vec<_>>();
+    if let Some(route) = conditional_host.as_ref() {
+        for &source in route.readbacks {
+            if !readbacks
+                .iter()
+                .any(|stage| stage.source.view_identity() == source.view_identity())
+            {
+                readbacks.push(ExactProviderReadback {
+                    source,
+                    prior_created_bytes: ResourceByteBound::Known(0),
+                });
+            }
+        }
+    }
+    let host_scratch = if let Some(route) = conditional_host.as_ref() {
+        combine_host_scratch(operation_host_scratch, route.operation_scratch)?
+    } else {
+        operation_host_scratch
+    };
     let selected = select_exact_provider_operation(
         runtime,
         ExactProviderOperation {
@@ -276,14 +322,14 @@ pub(in crate::builtins::image::filters) fn select_prepared(
             semantic_operation,
             variant: "imfilter.prepared_kernel_direct.v1",
             domain_facts,
-            host_scratch: operation_host_scratch,
+            host_scratch,
             provider_host_scratch: physical.host_workspace,
             host_cpu_millicores: 1_000,
             already_live_bytes,
-            readbacks,
+            readbacks: &readbacks,
             internal_input_stages: Some(physical.input_stages),
             output_queue_slots: Some(physical.output_queue_slots),
-            conditional_host_fallback: None,
+            conditional_host_fallback: conditional_host.map(|route| route.result_bytes),
         },
     )?;
     Ok(selected.map(|selection| SelectedPreparedFilter {

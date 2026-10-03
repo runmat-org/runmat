@@ -292,7 +292,15 @@ fn select_provider_route(
                 .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         {
             return Ok((
-                placement::select_direct(runtime, IMFILTER_BUILTIN, image, handle, options, true)?,
+                placement::select_direct(
+                    runtime,
+                    IMFILTER_BUILTIN,
+                    image,
+                    handle,
+                    options,
+                    true,
+                    None,
+                )?,
                 None,
             ));
         }
@@ -314,6 +322,7 @@ fn select_provider_route(
             projected,
             options,
             scratch,
+            None,
         )? {
             Some(prepared) => (
                 Some(prepared.selection),

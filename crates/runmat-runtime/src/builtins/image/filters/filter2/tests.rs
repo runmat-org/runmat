@@ -12,6 +12,37 @@ async fn filter2_builtin(
     super::filter2_builtin(None, kernel, image, rest).await
 }
 
+#[test]
+fn conditional_host_workspace_is_typed_and_overflow_is_not_zero() {
+    use runmat_execution::{ResourceBoundUnavailable, ResourceByteBound};
+    let (scratch, output) = conditional_host_bounds(
+        &[2, 2],
+        &[1, 1],
+        &ImfilterOptions::default(),
+        true,
+        false,
+        true,
+    );
+    assert!(matches!(scratch, ResourceByteBound::Known(bytes) if bytes > 4 * 4));
+    assert_eq!(output, ResourceByteBound::Known(16));
+    let (scratch, output) = conditional_host_bounds(
+        &[usize::MAX, 2],
+        &[1, 1],
+        &ImfilterOptions::default(),
+        false,
+        false,
+        false,
+    );
+    assert_eq!(
+        scratch,
+        ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound)
+    );
+    assert_eq!(
+        output,
+        ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoRetainedValueBound)
+    );
+}
+
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
     Tensor::new(data, vec![rows, cols]).expect("tensor construction")
 }
