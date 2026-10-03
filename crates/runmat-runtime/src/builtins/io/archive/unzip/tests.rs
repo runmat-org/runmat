@@ -254,13 +254,13 @@ fn numeric_resident_path_is_rejected_without_provider_download_or_filesystem_eff
         .unwrap();
     let root = tempdir().unwrap();
     let destination = root.path().join("never-created");
-    let error = run_unzip(
+    let error = block_on(unzip_builtin(
+        None,
         vec![
             Value::GpuTensor(resident),
             Value::String(destination.to_string_lossy().into_owned()),
         ],
-        None,
-    )
+    ))
     .expect_err("numeric gpuArray cannot be a ZIP source");
     assert_eq!(error.identifier(), UNZIP_ERROR_FILENAME.identifier);
     assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
