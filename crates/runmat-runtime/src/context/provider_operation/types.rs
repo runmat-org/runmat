@@ -77,6 +77,7 @@ pub(crate) struct SelectedProviderOperation {
 pub(super) enum ConditionalUploadPublication {
     NotApplicable,
     Pending(u64),
+    Active(u64),
     Validated(u64),
     Rejected,
 }
@@ -86,10 +87,20 @@ impl ConditionalUploadPublication {
         bytes.map_or(Self::NotApplicable, Self::Pending)
     }
 
+    fn begin(&mut self) {
+        *self = match *self {
+            Self::Pending(bytes) => Self::Active(bytes),
+            _ => Self::Rejected,
+        };
+    }
+
     fn validate(&mut self, bytes: u64, owner_valid: bool) -> bool {
         let expected = match *self {
-            Self::Pending(expected) | Self::Validated(expected) => expected,
-            Self::NotApplicable | Self::Rejected => return false,
+            Self::Active(expected) | Self::Validated(expected) => expected,
+            Self::NotApplicable | Self::Pending(_) | Self::Rejected => {
+                *self = Self::Rejected;
+                return false;
+            }
         };
         if owner_valid && bytes == expected {
             *self = Self::Validated(expected);
@@ -103,14 +114,20 @@ impl ConditionalUploadPublication {
     fn validated(&self) -> bool {
         matches!(self, Self::Validated(_))
     }
+
+    fn conditional_attempted(&self) -> bool {
+        matches!(self, Self::Active(_) | Self::Validated(_) | Self::Rejected)
+    }
 }
 
 impl SelectedProviderOperation {
     pub(crate) fn begin_conditional_provider_upload(&mut self) {
+        self.conditional_upload.begin();
         self.receipt.begin_conditional_provider_upload();
     }
 
     pub(crate) fn begin_preparation_provider_upload(&mut self) {
+        self.conditional_upload.begin();
         self.receipt.begin_preparation_provider_upload();
     }
 
@@ -131,15 +148,30 @@ impl SelectedProviderOperation {
     }
 
     pub(crate) fn finish(self, published: Result<bool, ProviderObservationFailure>) {
-        self.receipt.finish(published);
+        if matches!(published, Ok(true)) && self.conditional_upload.conditional_attempted() {
+            self.receipt
+                .finish(Err(ProviderObservationFailure::PublicationFailed));
+        } else {
+            self.receipt.finish(published);
+        }
     }
 
     pub(crate) fn finish_conditional_host_fallback(self) {
-        self.receipt.finish_conditional_host_fallback();
+        if self.conditional_upload.conditional_attempted() {
+            self.receipt
+                .finish(Err(ProviderObservationFailure::PublicationFailed));
+        } else {
+            self.receipt.finish_conditional_host_fallback();
+        }
     }
 
     pub(crate) fn finish_preparation_host_fallback(self) {
-        self.receipt.finish_preparation_host_fallback();
+        if self.conditional_upload.conditional_attempted() {
+            self.receipt
+                .finish(Err(ProviderObservationFailure::PublicationFailed));
+        } else {
+            self.receipt.finish_preparation_host_fallback();
+        }
     }
 
     pub(crate) fn finish_conditional_provider_upload(self) {
@@ -169,12 +201,20 @@ mod tests {
     fn conditional_physical_publication_needs_exact_witness_and_rejection_is_terminal() {
         let mut pending = ConditionalUploadPublication::new(Some(8));
         assert!(!pending.validated());
+        assert!(!pending.conditional_attempted());
+        pending.begin();
+        assert!(pending.conditional_attempted());
         assert!(pending.validate(8, true));
         assert!(pending.validated());
         assert!(!pending.validate(32, true));
         assert!(!pending.validate(8, true));
         assert!(!pending.validated());
         assert!(!ConditionalUploadPublication::new(None).validate(8, true));
-        assert!(!ConditionalUploadPublication::new(Some(8)).validate(8, false));
+        let mut invalid_owner = ConditionalUploadPublication::new(Some(8));
+        invalid_owner.begin();
+        assert!(!invalid_owner.validate(8, false));
+        let mut premature = ConditionalUploadPublication::new(Some(8));
+        assert!(!premature.validate(8, true));
+        assert!(premature.conditional_attempted());
     }
 }
