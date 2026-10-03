@@ -11,6 +11,8 @@ struct State {
     failure: Option<ProviderObservationFailure>,
     taken: bool,
     selected_execution: Option<bool>,
+    conditional_host_fallback: bool,
+    route_outcome: Option<ProviderRouteOutcome>,
     expected_execution: Option<(u32, crate::ProviderOperationIdentity)>,
     stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     pipelines: ProviderPipelineObservations,
@@ -146,6 +148,8 @@ impl ProviderOperationReceipt {
                         .then_some(ProviderObservationFailure::InvalidTiming),
                     taken: false,
                     selected_execution: None,
+                    conditional_host_fallback: false,
+                    route_outcome: None,
                     expected_execution: None,
                     stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
                     pipelines: ProviderPipelineObservations::default(),
@@ -202,6 +206,39 @@ impl ProviderOperationReceipt {
         });
     }
 
+    /// A public form may require a provider attempt while expressly allowing
+    /// a host result only after that hook returns Unsupported. Admit that
+    /// conditional route before any staging; it is not a second selectable
+    /// host candidate or a provider-execution witness.
+    pub fn allow_conditional_host_fallback(&mut self) {
+        self.0.with(|state| {
+            if state.registered != 0 || state.publication.is_some() || state.taken {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.conditional_host_fallback = true;
+            }
+        });
+    }
+
+    /// Called by the owning runtime only after an actual Unsupported result
+    /// and successful validation of the fallback host publication. Pending
+    /// provider submissions, if any, still gate completion of this receipt.
+    pub fn confirm_conditional_host_fallback(&mut self) {
+        self.0.with(|state| {
+            if !state.conditional_host_fallback
+                || state.expected_execution.is_none()
+                || state.selected_execution != Some(false)
+                || state.publication.is_some()
+                || state.taken
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::ConditionalHostFallback);
+            }
+        });
+    }
+
     /// Seal submission registration after all selected-route work and successful
     /// output publication. Positively identified synchronous/empty work with no
     /// submissions completes here. Missing instrumentation is not such evidence;
@@ -245,6 +282,7 @@ impl ProviderOperationReceipt {
             state.taken = true;
             Some(ProviderOperationObservation {
                 status,
+                route_outcome: state.route_outcome,
                 stages: state.stages,
                 pipelines: state.pipelines,
             })
@@ -275,6 +313,7 @@ impl ProviderOperationReceipt {
             (
                 Poll::Ready(Some(ProviderOperationObservation {
                     status,
+                    route_outcome: state.route_outcome,
                     stages: state.stages,
                     pipelines: state.pipelines,
                 })),
@@ -343,6 +382,7 @@ impl ProviderOperationRecorder {
                     state.fail(ProviderObservationFailure::ExecutionUnproven);
                 } else if state.publication.is_none() && state.selected_execution.is_some() {
                     state.selected_execution = Some(true);
+                    state.route_outcome = Some(ProviderRouteOutcome::SelectedProvider);
                 }
             }
             ProviderExecutionDisposition::SharedRuntimeFallback => {
@@ -374,6 +414,7 @@ impl ProviderOperationRecorder {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else if state.failure.is_none() {
                 state.selected_execution = Some(true);
+                state.route_outcome = Some(ProviderRouteOutcome::SelectedProvider);
             }
         });
     }

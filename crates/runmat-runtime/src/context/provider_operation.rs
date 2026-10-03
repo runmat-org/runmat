@@ -30,6 +30,10 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// Physical bytes of authenticated borrowed inputs already represented
     /// in the provider's live-allocation resource snapshot.
     pub(crate) already_live_bytes: u64,
+    /// The public form permits a host result only after this provider hook
+    /// returns Unsupported. This is one conditional route, not an equivalent
+    /// host alternative offered to placement policy.
+    pub(crate) conditional_host_fallback: bool,
 }
 
 pub(crate) struct SelectedProviderOperation {
@@ -51,6 +55,10 @@ impl SelectedProviderOperation {
         published: Result<bool, runmat_accelerate_api::observation::ProviderObservationFailure>,
     ) {
         self.receipt.finish(published);
+    }
+
+    pub(crate) fn finish_conditional_host_fallback(self) {
+        self.receipt.finish_conditional_host_fallback();
     }
 }
 
@@ -112,12 +120,17 @@ pub(crate) fn select_exact_provider_operation(
             device_id: provider.device_id(),
         },
         preparation: CandidatePreparationState::Ready,
-        output_residency: CandidateOutputResidency::Provider {
-            device_id: provider.device_id(),
+        output_residency: if request.conditional_host_fallback {
+            CandidateOutputResidency::Unknown
+        } else {
+            CandidateOutputResidency::Provider {
+                device_id: provider.device_id(),
+            }
         },
         presentation: CandidateOutputPresentation::Direct,
         route_facts: Digest::sha256(
-            serde_json::to_vec(&(query, &estimate)).expect("provider route serializes"),
+            serde_json::to_vec(&(query, &estimate, request.conditional_host_fallback))
+                .expect("provider route serializes"),
         ),
         cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
         resources: CandidateResourceDemand {
@@ -180,6 +193,9 @@ pub(crate) fn select_exact_provider_operation(
         return Ok(None);
     };
     receipt.require_provider_execution(provider.device_id(), query.operation.clone());
+    if request.conditional_host_fallback {
+        receipt.allow_conditional_host_fallback();
+    }
     Ok(Some(SelectedProviderOperation {
         provider,
         receipt: HostPresentationReceipt::new(runtime.clone(), selected, receipt),

@@ -268,20 +268,26 @@ async fn fspecial_builtin(
     let tensor = spec.generate_tensor()?;
     let recorder = selected.as_ref().map(|selection| selection.recorder());
     let provider = selected.as_ref().map(|selection| selection.provider());
-    let result =
+    let publication =
         finalize_output_with_observation(&spec, tensor, materialize_on_gpu, provider, recorder);
+    let publication_is_unsupported_fallback = publication
+        .as_ref()
+        .is_ok_and(|published| published.unsupported_fallback);
+    let result = publication.map(|published| published.value);
     if let Some(selection) = selected {
-        let published = match &result {
-            Ok(Value::GpuTensor(_)) => Ok(true),
-            Ok(_) => Ok(false),
-            Err(error) if error.identifier() == Some("RunMat:Cancelled") => {
-                Err(runmat_accelerate_api::observation::ProviderObservationFailure::Cancelled)
+        match &result {
+            Ok(Value::GpuTensor(_)) => selection.finish(Ok(true)),
+            Ok(Value::Tensor(_)) if publication_is_unsupported_fallback => {
+                selection.finish_conditional_host_fallback()
             }
-            Err(_) => {
-                Err(runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed)
-            }
-        };
-        selection.finish(published);
+            Ok(_) => selection.finish(Ok(false)),
+            Err(error) if error.identifier() == Some("RunMat:Cancelled") => selection.finish(Err(
+                runmat_accelerate_api::observation::ProviderObservationFailure::Cancelled,
+            )),
+            Err(_) => selection.finish(Err(
+                runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+            )),
+        }
     }
     result
 }
@@ -386,6 +392,12 @@ fn finalize_output_with_gpu_policy(
     materialize_on_gpu: bool,
 ) -> BuiltinResult<Value> {
     finalize_output_with_observation(spec, tensor, materialize_on_gpu, None, None)
+        .map(|published| published.value)
+}
+
+struct FspecialPublication {
+    value: Value,
+    unsupported_fallback: bool,
 }
 
 fn finalize_output_with_observation(
@@ -394,9 +406,12 @@ fn finalize_output_with_observation(
     materialize_on_gpu: bool,
     admitted_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
     recorder: Option<runmat_accelerate_api::observation::ProviderOperationRecorder>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<FspecialPublication> {
     if !materialize_on_gpu || !spec.is_gpu_supported() {
-        return Ok(Value::Tensor(tensor));
+        return Ok(FspecialPublication {
+            value: Value::Tensor(tensor),
+            unsupported_fallback: false,
+        });
     }
 
     #[cfg(all(test, feature = "wgpu"))]
@@ -407,6 +422,7 @@ fn finalize_output_with_observation(
             );
         }
     }
+    let mut unsupported_fallback = false;
     if let Some(provider) = admitted_provider.or_else(runmat_accelerate_api::provider) {
         match spec.to_request() {
             Ok(request) => match runmat_accelerate_api::observation::with_provider_observation(
@@ -442,10 +458,14 @@ fn finalize_output_with_observation(
                             handle, error,
                         ));
                     }
-                    return Ok(Value::GpuTensor(handle));
+                    return Ok(FspecialPublication {
+                        value: Value::GpuTensor(handle),
+                        unsupported_fallback: false,
+                    });
                 }
                 Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
                     warn!("fspecial: provider hook unavailable, falling back to host path: {err}");
+                    unsupported_fallback = true;
                 }
                 Err(err) => {
                     return Err(crate::runtime_error::with_provider_execution_source(
@@ -466,7 +486,10 @@ fn finalize_output_with_observation(
         }
     }
 
-    Ok(Value::Tensor(tensor))
+    Ok(FspecialPublication {
+        value: Value::Tensor(tensor),
+        unsupported_fallback,
+    })
 }
 
 fn should_materialize_on_gpu() -> bool {

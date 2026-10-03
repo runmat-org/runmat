@@ -104,6 +104,14 @@ pub enum ProviderObservationStatus {
     Failed(ProviderObservationFailure),
 }
 
+/// The route actually published by a conditional provider-first invocation.
+/// A host fallback is never evidence that the selected provider kernel ran.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderRouteOutcome {
+    SelectedProvider,
+    ConditionalHostFallback,
+}
+
 /// Stage measurements are separate from the end-to-end total: intervals may
 /// overlap. These are measured durations, never enqueue-time execution estimates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -154,6 +162,7 @@ pub struct ProviderStageMeasurement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderOperationObservation {
     pub status: ProviderObservationStatus,
+    pub route_outcome: Option<ProviderRouteOutcome>,
     pub stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     /// Actual selected pipeline events, not global cache-counter differences.
     pub pipelines: ProviderPipelineObservations,

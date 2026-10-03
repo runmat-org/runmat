@@ -53,6 +53,14 @@ impl HostPresentationReceipt {
         self.receipt.recorder()
     }
 
+    /// A provider-first conditional route may publish a host result only
+    /// after the owning hook actually returned Unsupported. Keep the same
+    /// receipt and probe until all attempted submissions have completed.
+    pub(crate) fn finish_conditional_host_fallback(mut self) {
+        self.receipt.confirm_conditional_host_fallback();
+        self.finish(Ok(true));
+    }
+
     /// `published` means every requested output was validated as owned by the
     /// admitted provider and matched its admitted representation or bound.
     pub(crate) fn finish(mut self, published: Result<bool, ProviderObservationFailure>) {
