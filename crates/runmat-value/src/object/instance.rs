@@ -1,5 +1,5 @@
 use super::{ContainersMapStorage, DynamicPropertyDef};
-use crate::Value;
+use crate::{ForeignRef, Value};
 use runmat_gc_api::{Trace, Tracer};
 use runmat_types::ClassIdentity;
 use std::collections::HashMap;
@@ -17,12 +17,14 @@ pub struct ObjectInstance {
 #[derive(Debug, Clone, PartialEq)]
 enum NativeObjectPayload {
     ContainersMap(ContainersMapStorage),
+    ForeignHostControl(ForeignRef),
 }
 
 impl Trace for NativeObjectPayload {
     fn trace(&self, tracer: &mut dyn Tracer) {
         match self {
             Self::ContainersMap(storage) => storage.trace(tracer),
+            Self::ForeignHostControl(_) => {}
         }
     }
 }
@@ -42,17 +44,29 @@ impl ObjectInstance {
         self
     }
 
+    pub fn with_foreign_host_control(mut self, reference: ForeignRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::ForeignHostControl(reference)));
+        self
+    }
+
+    pub fn foreign_host_control(&self) -> Option<&ForeignRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::ForeignHostControl(reference)) => Some(reference),
+            Some(NativeObjectPayload::ContainersMap(_)) | None => None,
+        }
+    }
+
     pub fn containers_map_payload(&self) -> Option<&ContainersMapStorage> {
         match self.native_payload.as_deref() {
             Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
-            None => None,
+            Some(NativeObjectPayload::ForeignHostControl(_)) | None => None,
         }
     }
 
     pub fn containers_map_payload_mut(&mut self) -> Option<&mut ContainersMapStorage> {
         match self.native_payload.as_deref_mut() {
             Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
-            None => None,
+            Some(NativeObjectPayload::ForeignHostControl(_)) | None => None,
         }
     }
 
@@ -61,8 +75,11 @@ impl ObjectInstance {
     }
 
     pub fn for_each_native_value(&self, mut visitor: impl FnMut(&Value)) {
-        if let Some(NativeObjectPayload::ContainersMap(storage)) = self.native_payload.as_deref() {
-            storage.for_each_value(&mut visitor);
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => {
+                storage.for_each_value(&mut visitor);
+            }
+            Some(NativeObjectPayload::ForeignHostControl(_)) | None => {}
         }
     }
 

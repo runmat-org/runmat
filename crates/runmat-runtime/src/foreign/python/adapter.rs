@@ -13,7 +13,10 @@ use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
     ForeignTypeIdentity,
 };
-use runmat_value::{ForeignRef, ForeignResourceKey, ObjectInstance, Value, WeakForeignRef};
+use runmat_value::{ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
+
+mod environment;
+use environment::{environment_metadata, issued_python_status_value, validate_environment};
 
 use super::super::{
     foreign_callback_request, foreign_error, invoke_foreign_callback, ForeignAdapter,
@@ -170,7 +173,7 @@ impl PythonAdapter {
             ));
         }
         self.handles
-            .set_host_policy(&self.host_identity, policy(configuration.execution_mode))?;
+            .reconfigure_host(&self.host_identity, policy(configuration.execution_mode))?;
         *self.configuration.borrow_mut() = configuration;
         self.terminated.set(false);
         Ok(())
@@ -184,13 +187,27 @@ impl PythonAdapter {
         &self,
         bundle: &PythonArtifactBundle,
     ) -> Result<(), RuntimeError> {
+        self.install_artifact_bundle_with_configuration(
+            bundle,
+            self.configuration.borrow().clone(),
+            false,
+        )
+    }
+
+    fn install_artifact_bundle_with_configuration(
+        &self,
+        bundle: &PythonArtifactBundle,
+        configuration: PythonRuntimeConfiguration,
+        reset_terminated: bool,
+    ) -> Result<(), RuntimeError> {
         if self.is_running() || self.isolated_call_active.get() {
             return Err(invalid_call(
                 "Python artifacts cannot change after the interpreter starts",
             ));
         }
+        self.handles
+            .admit_host_reconfiguration(&self.host_identity)?;
         bundle.validate().map_err(python_artifact_error)?;
-        let configuration = self.configuration.borrow().clone();
         let installation =
             discover_python(&discovery_request(&configuration)).map_err(python_runtime_error)?;
         if let Some(required) = &bundle.environment {
@@ -219,8 +236,13 @@ impl PythonAdapter {
         let mut updated = configuration;
         updated.module_paths = installed.module_paths().to_vec();
         updated.artifact_identities = bundle.artifact_identities();
+        self.handles
+            .reconfigure_host(&self.host_identity, policy(updated.execution_mode))?;
         *self.configuration.borrow_mut() = updated;
         *self.installed_artifacts.borrow_mut() = Some(installed);
+        if reset_terminated {
+            self.terminated.set(false);
+        }
         Ok(())
     }
 
@@ -240,7 +262,7 @@ impl PythonAdapter {
             configuration.required_platform_tag = Some(environment.platform_tag.clone());
             configuration.module_paths.clear();
             configuration.artifact_identities.clear();
-            self.configure(configuration)?;
+            return self.install_artifact_bundle_with_configuration(bundle, configuration, true);
         }
         self.install_artifact_bundle(bundle)
     }
@@ -251,6 +273,7 @@ impl PythonAdapter {
                 "Python artifacts cannot be cleared after the interpreter starts",
             ));
         }
+        self.handles.revoke_host_controls(&self.host_identity)?;
         let mut configuration = self.configuration.borrow_mut();
         configuration.module_paths.clear();
         configuration.artifact_identities.clear();
@@ -323,7 +346,7 @@ impl PythonAdapter {
             }
             "terminate" => {
                 return self
-                    .terminate_value()
+                    .terminate_value(call.arguments)
                     .and_then(super::super::single_output_sequence)
             }
             _ => {}
@@ -605,12 +628,14 @@ impl PythonAdapter {
             .as_ref()
             .and_then(IsolatedPythonClient::process_id)
             .or_else(|| running.then(std::process::id));
-        Ok(python_status_value(
+        issued_python_status_value(
+            &self.handles,
+            &self.host_identity,
             &configuration,
             running,
             self.terminated.get(),
             process_id,
-        ))
+        )
     }
 
     fn configure_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
@@ -661,7 +686,8 @@ impl PythonAdapter {
         self.status_value()
     }
 
-    fn terminate_value(&self) -> Result<Value, RuntimeError> {
+    fn terminate_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
+        validate_environment(&self.handles, &self.host_identity, &arguments)?;
         if self.configuration.borrow().execution_mode != PythonExecutionMode::OutOfProcess {
             return Err(invalid_call(
                 "terminate is available only for an OutOfProcess Python environment",
@@ -690,82 +716,6 @@ impl PythonAdapter {
             terminated: Rc::clone(&self.terminated),
         }
     }
-}
-
-fn python_status_value(
-    configuration: &PythonRuntimeConfiguration,
-    running: bool,
-    terminated: bool,
-    process_id: Option<u32>,
-) -> Value {
-    let installation = discover_python(&discovery_request(configuration)).ok();
-    let mut environment = ObjectInstance::new("py.PythonEnvironment");
-    environment.properties.insert(
-        "Version".into(),
-        Value::String(
-            installation
-                .as_ref()
-                .map(|value| value.version.to_string())
-                .unwrap_or_default(),
-        ),
-    );
-    environment.properties.insert(
-        "Executable".into(),
-        Value::String(
-            installation
-                .as_ref()
-                .map(|value| value.executable.display().to_string())
-                .unwrap_or_default(),
-        ),
-    );
-    environment.properties.insert(
-        "Library".into(),
-        Value::String(
-            installation
-                .as_ref()
-                .map(|value| value.library.display().to_string())
-                .unwrap_or_default(),
-        ),
-    );
-    environment.properties.insert(
-        "Home".into(),
-        Value::String(
-            installation
-                .as_ref()
-                .map(|value| value.home.display().to_string())
-                .unwrap_or_default(),
-        ),
-    );
-    environment.properties.insert(
-        "Status".into(),
-        Value::String(
-            if running {
-                "Loaded"
-            } else if terminated {
-                "Terminated"
-            } else {
-                "NotLoaded"
-            }
-            .into(),
-        ),
-    );
-    environment.properties.insert(
-        "ExecutionMode".into(),
-        Value::String(configuration.execution_mode.as_compatibility_name().into()),
-    );
-    environment.properties.insert(
-        "ProcessID".into(),
-        if let Some(process_id) = process_id {
-            Value::Int(runmat_value::IntValue::U32(process_id))
-        } else {
-            Value::Num(f64::NAN)
-        },
-    );
-    environment.properties.insert(
-        "ProcessName".into(),
-        Value::String(if running { "RunMat" } else { "" }.into()),
-    );
-    Value::Object(environment)
 }
 
 async fn invoke_isolated(
@@ -851,13 +801,22 @@ fn isolated_outputs(
     }
 }
 
-async fn terminate_isolated(state: IsolatedPythonState) -> Result<Value, RuntimeError> {
+async fn terminate_isolated(
+    state: IsolatedPythonState,
+    arguments: Vec<Value>,
+) -> Result<Value, RuntimeError> {
     if state.call_active.replace(true) {
         return Err(invalid_call(
             "terminate cannot run during an active isolated Python call",
         ));
     }
     let result = async {
+        validate_environment(&state.handles, &state.host_identity, &arguments)?;
+        if state.configuration.borrow().execution_mode != PythonExecutionMode::OutOfProcess {
+            return Err(invalid_call(
+                "terminate is available only for an OutOfProcess Python environment",
+            ));
+        }
         let client = state.client.borrow_mut().take();
         let shutdown = if let Some(mut client) = client {
             let released = take_releases(&state.released)?;
@@ -873,7 +832,14 @@ async fn terminate_isolated(state: IsolatedPythonState) -> Result<Value, Runtime
         state.terminated.set(true);
         shutdown?;
         let configuration = state.configuration.borrow().clone();
-        Ok(python_status_value(&configuration, false, true, None))
+        issued_python_status_value(
+            &state.handles,
+            &state.host_identity,
+            &configuration,
+            false,
+            true,
+            None,
+        )
     }
     .await;
     state.call_active.set(false);
@@ -946,8 +912,9 @@ impl ForeignAdapter for PythonAdapter {
         }
         if call.symbol == "terminate" {
             let state = self.isolated_state();
+            let arguments = call.arguments;
             return Box::pin(async move {
-                terminate_isolated(state)
+                terminate_isolated(state, arguments)
                     .await
                     .and_then(super::super::single_output_sequence)
             });
@@ -1137,6 +1104,8 @@ fn invalid_call(message: impl Into<String>) -> RuntimeError {
 
 #[cfg(test)]
 mod tests {
+    use runmat_value::ObjectInstance;
+
     impl super::PythonAdapter {
         fn retained_values(&self) -> Option<Vec<runmat_value::Value>> {
             let mut values = Vec::new();
@@ -1316,6 +1285,178 @@ mod tests {
             environment.properties.get("Status"),
             Some(&Value::String("NotLoaded".into()))
         );
+        let later = adapter.status_value().expect("read status again");
+        validate_environment(
+            &adapter.handles,
+            &adapter.host_identity,
+            &[Value::Object(environment)],
+        )
+        .unwrap();
+        validate_environment(&adapter.handles, &adapter.host_identity, &[later]).unwrap();
         assert!(!adapter.is_running());
+    }
+
+    #[test]
+    fn environment_control_rejects_synthetic_cross_registry_and_stale_values() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let original = adapter.status_value().unwrap();
+        let Value::Object(original_object) = &original else {
+            panic!("expected PythonEnvironment");
+        };
+        assert!(original_object.foreign_host_control().is_some());
+        let mut synthetic = ObjectInstance::new(runmat_builtins::PYTHON_ENVIRONMENT_CLASS.owned());
+        synthetic.properties = original_object.properties.clone();
+        assert_eq!(
+            validate_environment(
+                &adapter.handles,
+                &adapter.host_identity,
+                &[Value::Object(synthetic)]
+            )
+            .unwrap_err()
+            .identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+        let other = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let other_status = other.status_value().unwrap();
+        assert_eq!(
+            validate_environment(&other.handles, &other.host_identity, &[original.clone()])
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:HandleMetadataMismatch")
+        );
+        validate_environment(&other.handles, &other.host_identity, &[other_status]).unwrap();
+
+        let mut out_of_process = adapter.configuration.borrow().clone();
+        out_of_process.execution_mode = PythonExecutionMode::OutOfProcess;
+        adapter.configure(out_of_process).unwrap();
+        assert_eq!(
+            validate_environment(&adapter.handles, &adapter.host_identity, &[original])
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        let fresh = adapter.status_value().unwrap();
+        validate_environment(&adapter.handles, &adapter.host_identity, &[fresh.clone()]).unwrap();
+        adapter.terminate_value(vec![fresh]).unwrap();
+        assert!(adapter.terminated.get());
+    }
+
+    #[test]
+    fn rejected_terminate_never_fences_a_valid_environment() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let mut configuration = adapter.configuration.borrow().clone();
+        configuration.execution_mode = PythonExecutionMode::OutOfProcess;
+        adapter.configure(configuration).unwrap();
+        let valid = adapter.status_value().unwrap();
+        let synthetic = Value::Object(ObjectInstance::new(
+            runmat_builtins::PYTHON_ENVIRONMENT_CLASS.owned(),
+        ));
+        assert_eq!(
+            adapter
+                .terminate_value(vec![synthetic])
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+        assert!(!adapter.terminated.get());
+        validate_environment(&adapter.handles, &adapter.host_identity, &[valid.clone()]).unwrap();
+        let terminated = adapter.terminate_value(vec![valid.clone()]).unwrap();
+        assert_eq!(
+            validate_environment(&adapter.handles, &adapter.host_identity, &[valid])
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        validate_environment(&adapter.handles, &adapter.host_identity, &[terminated]).unwrap();
+    }
+
+    #[test]
+    fn failed_reconfiguration_preserves_ticket_and_real_python_resources_block_policy_change() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let environment = adapter.status_value().unwrap();
+        let object = adapter
+            .handles
+            .register_resource(&adapter.host_identity, environment_metadata())
+            .unwrap();
+        let mut configuration = adapter.configuration.borrow().clone();
+        configuration.execution_mode = PythonExecutionMode::OutOfProcess;
+        assert_eq!(
+            adapter
+                .configure(configuration.clone())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+        assert_eq!(
+            adapter.clear_artifact_bundle().unwrap_err().identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+        validate_environment(
+            &adapter.handles,
+            &adapter.host_identity,
+            &[environment.clone()],
+        )
+        .unwrap();
+        drop(object);
+        adapter.configure(configuration).unwrap();
+        assert_eq!(
+            validate_environment(&adapter.handles, &adapter.host_identity, &[environment])
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+    }
+
+    #[test]
+    fn failed_portable_artifact_install_keeps_previous_configuration_and_ticket() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let original = adapter.status_value().unwrap();
+        let previous = adapter.configuration.borrow().clone();
+        let mut bundle = PythonArtifactBundle::empty();
+        bundle.schema_version = 0;
+        bundle.environment = Some(runmat_python::PythonEnvironmentIdentity {
+            implementation: "cpython".into(),
+            version: runmat_python::PythonVersion {
+                major: 3,
+                minor: 11,
+                patch: 0,
+            },
+            abi_tag: "invalid-test-abi".into(),
+            platform_tag: "invalid-test-platform".into(),
+            execution_mode: PythonExecutionMode::OutOfProcess,
+        });
+        assert!(adapter.install_portable_artifact_bundle(&bundle).is_err());
+        assert_eq!(*adapter.configuration.borrow(), previous);
+        validate_environment(&adapter.handles, &adapter.host_identity, &[original]).unwrap();
+    }
+
+    #[test]
+    fn isolated_terminate_validates_again_before_shutdown_state_changes() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let mut configuration = adapter.configuration.borrow().clone();
+        configuration.execution_mode = PythonExecutionMode::OutOfProcess;
+        adapter.configure(configuration).unwrap();
+        let valid = adapter.status_value().unwrap();
+        let state = adapter.isolated_state();
+        let invalid = Value::Object(ObjectInstance::new(
+            runmat_builtins::PYTHON_ENVIRONMENT_CLASS.owned(),
+        ));
+        assert_eq!(
+            pollster::block_on(terminate_isolated(state.clone(), vec![invalid]))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+        assert!(!state.call_active.get());
+        assert!(!state.terminated.get());
+        validate_environment(&state.handles, &state.host_identity, &[valid.clone()]).unwrap();
+        let result = pollster::block_on(terminate_isolated(state, vec![valid.clone()])).unwrap();
+        assert!(matches!(result, Value::Object(_)));
+        assert_eq!(
+            validate_environment(&adapter.handles, &adapter.host_identity, &[valid])
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
     }
 }

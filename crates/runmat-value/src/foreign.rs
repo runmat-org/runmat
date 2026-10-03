@@ -122,6 +122,15 @@ impl ForeignRef {
         self.lease.is_some()
     }
 
+    /// Prove that two references share the same registry-issued lease, not
+    /// merely the same public host/handle/generation fields.
+    pub fn shares_managed_lease(&self, other: &Self) -> bool {
+        match (&self.lease, &other.lease) {
+            (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
+
     pub fn is_same_resource(&self, other: &Self) -> bool {
         self.host_identity == other.host_identity
             && self.handle == other.handle

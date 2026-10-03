@@ -7,6 +7,9 @@ use runmat_types::{
 };
 use runmat_value::{ForeignRef, ForeignResourceKey, ForeignResourceRelease};
 
+mod control;
+use control::ControlRecord;
+
 use super::{foreign_error, ForeignErrorKind, ForeignExecutionPolicy};
 use crate::RuntimeError;
 
@@ -51,12 +54,14 @@ struct HostRecord {
     adapter: String,
     session_identity: String,
     generation: u64,
+    control_generation: u64,
     next_resource: u64,
     capabilities: BTreeSet<ForeignCapability>,
     policy: ForeignExecutionPolicy,
     origin_thread: ThreadId,
     release: Arc<dyn ForeignHostRelease>,
     resources: BTreeMap<u64, ResourceRecord>,
+    controls: BTreeMap<u64, ControlRecord>,
 }
 
 #[derive(Debug, Default)]
@@ -157,12 +162,14 @@ impl ForeignHandleRegistry {
                 adapter: registration.adapter,
                 session_identity: registration.session_identity,
                 generation: 1,
+                control_generation: 1,
                 next_resource: 1,
                 capabilities: registration.capabilities,
                 policy: registration.policy,
                 origin_thread: std::thread::current().id(),
                 release: registration.release,
                 resources: BTreeMap::new(),
+                controls: BTreeMap::new(),
             },
         );
         Ok(1)
@@ -300,6 +307,19 @@ impl ForeignHandleRegistry {
                 )
             })?;
             let previous_generation = host.generation;
+            let next_generation = host.generation.checked_add(1).ok_or_else(|| {
+                foreign_error(
+                    ForeignErrorKind::HostUnavailable,
+                    format!("foreign host {host_identity} exhausted its generation space"),
+                )
+            })?;
+            let next_control_generation =
+                host.control_generation.checked_add(1).ok_or_else(|| {
+                    foreign_error(
+                        ForeignErrorKind::HostUnavailable,
+                        "foreign host control generation exhausted",
+                    )
+                })?;
             let keys = host
                 .resources
                 .keys()
@@ -310,13 +330,12 @@ impl ForeignHandleRegistry {
                 })
                 .collect::<Vec<_>>();
             host.resources.clear();
-            host.generation = host.generation.checked_add(1).ok_or_else(|| {
-                foreign_error(
-                    ForeignErrorKind::HostUnavailable,
-                    format!("foreign host {host_identity} exhausted its generation space"),
-                )
-            })?;
-            host.next_resource = 1;
+            host.generation = next_generation;
+            host.control_generation = next_control_generation;
+            host.controls.clear();
+            // Control and object generations can differ after reconfiguration.
+            // Never recycle an ID: a previous control's public resource key
+            // must not equal a newly issued ordinary object's key.
             (Arc::clone(&host.release), keys, host.generation)
         };
         for key in keys {
@@ -485,6 +504,103 @@ mod tests {
             Some("RunMat:Foreign:HostUnavailable")
         );
         drop(reference);
+        assert_eq!(releases.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn host_controls_require_the_exact_issuing_lease_and_registry() {
+        let releases = Arc::new(ReleaseCounter::default());
+        let first = registry(Arc::clone(&releases));
+        let second = registry(Arc::clone(&releases));
+        let issued = first.register_host_control("host-a", metadata()).unwrap();
+        let other = second.register_host_control("host-a", metadata()).unwrap();
+        assert_eq!(issued.resource_key(), other.resource_key());
+        first
+            .resolve_host_control(&issued.clone(), &metadata())
+            .unwrap();
+        assert_eq!(
+            second
+                .resolve_host_control(&issued, &metadata())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:HandleMetadataMismatch")
+        );
+        let detached = ForeignRef::detached(
+            issued.resource_key(),
+            issued.type_identity.clone(),
+            issued.ownership,
+            issued.affinity,
+            issued.lifetime,
+        );
+        assert_eq!(
+            first
+                .resolve_host_control(&detached, &metadata())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:HandleMetadataMismatch")
+        );
+        let forged = ForeignRef::managed(
+            issued.resource_key(),
+            issued.type_identity.clone(),
+            issued.ownership,
+            issued.affinity,
+            issued.lifetime,
+            Arc::new(ReleaseCounter::default()),
+        );
+        assert_eq!(
+            first
+                .resolve_host_control(&forged, &metadata())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:HandleMetadataMismatch")
+        );
+        drop(issued);
+        drop(other);
+        drop(forged);
+        assert_eq!(releases.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn control_revocation_preserves_real_resource_policy_and_restart_fences_both() {
+        let releases = Arc::new(ReleaseCounter::default());
+        let registry = registry(Arc::clone(&releases));
+        let old = registry
+            .register_host_control("host-a", metadata())
+            .unwrap();
+        registry
+            .set_host_policy("host-a", ForeignExecutionPolicy::trusted_in_process())
+            .unwrap();
+        registry.revoke_host_controls("host-a").unwrap();
+        assert_eq!(
+            registry
+                .resolve_host_control(&old, &metadata())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        let fresh = registry
+            .register_host_control("host-a", metadata())
+            .unwrap();
+        let resource = registry.register_resource("host-a", metadata()).unwrap();
+        assert_eq!(
+            registry
+                .set_host_policy("host-a", ForeignExecutionPolicy::trusted_in_process())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+        registry.restart_host("host-a").unwrap();
+        assert_eq!(
+            registry
+                .resolve_host_control(&fresh, &metadata())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        assert_eq!(releases.0.load(Ordering::SeqCst), 1);
+        drop(resource);
+        drop(fresh);
+        drop(old);
         assert_eq!(releases.0.load(Ordering::SeqCst), 1);
     }
 }
