@@ -1,6 +1,8 @@
 mod artifact;
 mod authoring;
 mod cad;
+#[cfg(feature = "example-fixtures")]
+pub mod example_fixtures;
 #[cfg(feature = "dev-evidence")]
 pub mod dev_traces;
 pub mod summaries;

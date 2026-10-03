@@ -400,6 +400,65 @@ fn authoring_analysis_mesh_artifacts(dir: &std::path::Path) -> (String, String, 
     )
 }
 
+#[cfg(feature = "fea-example-fixtures")]
+#[test]
+fn imported_tetra_fixture_authors_a_study_with_matching_mesh_provenance() {
+    use runmat_meshing_evidence::example_fixtures::{
+        author_study_example_files, EVIDENCE_PATH, MESH_PATH, TETRA_PATH, TETRA_STL,
+    };
+
+    let geometry = crate::geometry::geometry_load(TETRA_PATH, TETRA_STL.as_bytes())
+        .expect("public tetra STL should import");
+    let files = author_study_example_files(&geometry)
+        .expect("typed mesh, evidence, and summary should agree with the imported geometry");
+    let summary_json: serde_json::Value =
+        serde_json::from_slice(&files.summary).expect("typed summary should decode");
+    let summary = crate::builtins::io::json::jsondecode::value_from_json(&summary_json)
+        .expect("public JSON summary should become a language value");
+    let geometry_value = serializable_to_object(
+        AUTHOR_STUDY_NAME,
+        &ERROR_INTERNAL,
+        GEOMETRY_ASSET_CLASS,
+        &geometry,
+        Some(GEOMETRY_ASSET_JSON_PROPERTY),
+    )
+    .expect("imported geometry should become a public geometry.Asset");
+    let result = create_author_study_object_from_args(vec![
+        Value::String("authored_tetra".to_string()),
+        geometry_value,
+        summary,
+        Value::String("Profile".to_string()),
+        Value::String("linear_static_structural".to_string()),
+        Value::String("AnalysisMeshArtifactPath".to_string()),
+        Value::String(MESH_PATH.to_string()),
+        Value::String("AnalysisMeshEvidenceArtifactPath".to_string()),
+        Value::String(EVIDENCE_PATH.to_string()),
+    ])
+    .expect("public imported geometry and typed fixture should author a study");
+    let Value::Object(object) = result else {
+        panic!("authorStudy should return a typed study");
+    };
+    assert!(object.class_name.is(FEA_STUDY_CLASS));
+    let Some(Value::String(payload)) = object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY) else {
+        panic!("typed study should contain its spec");
+    };
+    let study: crate::analysis::AnalysisStudySpec =
+        serde_json::from_str(payload).expect("authored study spec should decode");
+    assert_eq!(study.geometry.geometry_id, geometry.geometry_id);
+    assert_eq!(
+        study.analysis_mesh_artifact_path.as_deref(),
+        Some(MESH_PATH)
+    );
+    assert_eq!(
+        study.analysis_mesh_evidence_artifact_path.as_deref(),
+        Some(EVIDENCE_PATH)
+    );
+    let model = study.model.expect("authored study should contain a model");
+    assert_eq!(model.material_assignments[0].region_id, "region_default");
+    assert_eq!(model.boundary_conditions[0].region_id, "region_default");
+    assert_eq!(model.loads[0].region_id, "region_default");
+}
+
 #[test]
 fn builds_study_from_mesh_authoring_summary() {
     let study = create_author_study_object_from_args(vec![
