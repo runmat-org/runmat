@@ -4,9 +4,11 @@ pub(super) fn preflight_option_text(
     args: &[Value],
     mut index: usize,
     filename: &str,
+    indexed_source: bool,
 ) -> BuiltinResult<ImageFormat> {
     let mut explicit_format = None;
     let mut append = false;
+    let mut alpha_applied = false;
     if let Some(first) = args.get(index) {
         let text = string_arg(
             "format or option name",
@@ -43,6 +45,9 @@ pub(super) fn preflight_option_text(
             ));
         }
         preflight_known_option_value(option.expect("validated above"), &args[index + 1], &args[0])?;
+        if option == Some(ImwriteOption::Alpha) {
+            alpha_applied = true;
+        }
         if option == Some(ImwriteOption::WriteMode)
             && super::checked_text::scalar_text(&args[index + 1])
                 .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("append"))
@@ -52,12 +57,36 @@ pub(super) fn preflight_option_text(
         index += 2;
     }
     let format = explicit_format.map_or_else(|| infer_format_from_path(Path::new(filename)), Ok)?;
-    if append && format != ImageFormat::Gif {
-        return Err(imwrite_error_with_detail(
-            &IMWRITE_ERROR_INVALID_OPTION,
-            "WriteMode append is supported only for GIF",
-        ));
-    }
+    let (_, _, direct_channels) = match &args[0] {
+        Value::GpuTensor(handle) => image_dimensions_from_shape(handle.shape())?,
+        Value::Tensor(tensor) => image_dimensions(tensor)?,
+        Value::LogicalArray(array) => image_dimensions_from_shape(&array.shape)?,
+        _ => (1, 1, 1),
+    };
+    let sixteen_bit = !indexed_source
+        && match &args[0] {
+            Value::Tensor(tensor) => tensor.numeric_dtype() == NumericDType::U16,
+            Value::Int(IntValue::U16(_)) => true,
+            Value::GpuTensor(handle) => {
+                runmat_accelerate_api::handle_integer_type(handle)
+                    == Some(runmat_accelerate_api::IntegerElementType::U16)
+            }
+            _ => false,
+        };
+    admission::validate(&admission::EncoderFacts {
+        format,
+        channels: if alpha_applied {
+            4
+        } else if indexed_source {
+            3
+        } else {
+            direct_channels
+        },
+        sixteen_bit,
+        indexed_source,
+        alpha_applied,
+        append,
+    })?;
     Ok(format)
 }
 
@@ -119,29 +148,7 @@ fn preflight_known_option_value(
         ImwriteOption::Quality | ImwriteOption::DelayTime | ImwriteOption::LoopCount => {
             let Value::GpuTensor(handle) = value else {
                 let number = numeric_scalar(value, "writer control")?;
-                match option {
-                    ImwriteOption::Quality
-                        if !number.is_finite() || !(0.0..=100.0).contains(&number) =>
-                    {
-                        return Err(imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_OPTION,
-                            "Quality must be a scalar from 0 to 100",
-                        ));
-                    }
-                    ImwriteOption::DelayTime if !number.is_finite() || number < 0.0 => {
-                        return Err(imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_OPTION,
-                            "DelayTime must be a finite non-negative scalar in seconds",
-                        ));
-                    }
-                    ImwriteOption::LoopCount if number.is_nan() || number < 0.0 => {
-                        return Err(imwrite_error_with_detail(
-                            &IMWRITE_ERROR_INVALID_OPTION,
-                            "LoopCount must be non-negative or Inf",
-                        ));
-                    }
-                    _ => {}
-                }
+                options::validate_numeric(option, number)?;
                 return Ok(());
             };
             if handle
@@ -158,15 +165,7 @@ fn preflight_known_option_value(
         }
         ImwriteOption::WriteMode => {
             let mode = string_arg("WriteMode", value, &IMWRITE_ERROR_INVALID_OPTION)?;
-            if !matches!(
-                mode.trim().to_ascii_lowercase().as_str(),
-                "overwrite" | "append"
-            ) {
-                return Err(imwrite_error_with_detail(
-                    &IMWRITE_ERROR_INVALID_OPTION,
-                    "WriteMode must be 'overwrite' or 'append'",
-                ));
-            }
+            options::parse_write_mode(&mode)?;
         }
         ImwriteOption::UnsupportedAdvanced => unreachable!("rejected above"),
     }
@@ -204,6 +203,15 @@ pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult
             }
             Value::Tensor(tensor) => {
                 ensure_double_colormap(map)?;
+                if !crate::builtins::common::tensor::tensor_values_f64_cow(tensor)
+                    .iter()
+                    .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                {
+                    return Err(imwrite_error_with_detail(
+                        &IMWRITE_ERROR_INVALID_COLORMAP,
+                        "map values must be finite and in the range [0, 1]",
+                    ));
+                }
                 tensor.shape.as_slice()
             }
             _ => {

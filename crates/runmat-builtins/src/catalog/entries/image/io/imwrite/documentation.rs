@@ -10,12 +10,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["imread", "imfinfo", "gpuArray"],
     sections: &[
         BuiltinDocumentationSection { heading: "Data and formats", paragraphs: &[
-            "Direct images may be M-by-N grayscale, M-by-N-by-3 RGB, or M-by-N-by-4 RGBA. Logical, double, single, uint8, and uint16 image data are accepted. Floating-point samples are interpreted in [0,1] and clamped when encoded; uint8 retains its byte scale. uint16 is preserved by supported PNG/TIFF encoders and projected to eight bits for other formats. Other integer image classes reject before writing.",
+            "Direct images may be M-by-N grayscale or M-by-N-by-3 RGB; PNG also accepts M-by-N-by-4 RGBA. Direct four-channel TIFF is treated as CMYK and is not supported by this encoder. Logical, double, single, uint8, and uint16 image data are accepted when the selected format can encode them. Floating-point samples are interpreted in [0,1] and clamped when encoded; uint8 retains its byte scale. uint16 is supported for PNG/TIFF; the GIF, JPEG, and BMP routes reject 16-bit direct data. Other integer image classes reject before writing.",
             "`imwrite(X,map,filename,...)` uses an Nx3 finite double colormap with entries in [0,1]. Floating indices are one-based; uint8 and uint16 indices are zero-based. The filename is scalar text; the extension chooses PNG, JPEG, GIF, BMP, or TIFF unless a supported explicit format is supplied.",
             "A resident numeric image or colormap is downloaded non-destructively through its owning provider before host encoding. No provider kernel or fusion route writes image files. Input class and owner metadata are checked before readback; decoded bytes are not sent back to the provider.",
         ]},
         BuiltinDocumentationSection { heading: "Options and effects", paragraphs: &[
-            "`Alpha` supplies an M-by-N double, single, uint8, or uint16 plane for formats that support alpha. JPEG `Quality` is 0 to 100 (default 75). GIF `DelayTime` is a non-negative number of seconds; `LoopCount` is non-negative or Inf. `WriteMode` is `overwrite` or `append`; append is supported only for GIF and reads existing frames before rewriting the destination.",
+            "`Alpha` supplies an M-by-N double, single, uint8, or uint16 plane for PNG or GIF; the current TIFF encoder rejects four-channel output. JPEG `Quality` is 0 to 100 (default 75). GIF `DelayTime` is a finite non-negative duration representable by the encoder; `LoopCount` is an integer from 0 to 65535 or Inf. `WriteMode` is `overwrite` or `append`; append is supported only for GIF and reads existing frames before rewriting the destination. Direct RGB GIF is not admitted; use grayscale or indexed input, optionally with `Alpha`.",
             "Unsupported advanced controls such as Compression and BitDepth fail explicitly. Image, option, and encoder validation occurs before the final write, but a filesystem write failure can leave a partial destination. GIF append is read-modify-write without a portable file lock, so concurrent writers must coordinate externally. This call returns no outputs and does not print an automatic result.",
             "Direct single-precision GIF and TIFF writes are a RunMat extension and require that compatibility extensions be enabled. The destination uses the active filesystem service. Native and browser runtimes need a writable filesystem or browser filesystem bridge. A local destination is not implicitly transferable to a remote worker; run the effect where its filesystem is available.",
         ]},
@@ -31,6 +31,18 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
                 source: "assert(isa(reread,'uint8')); assert(isequal(size(reread),[2 3 3])); assert(reread(1,1,1)==255); assert(reread(1,1,2)==0);",
+            },
+        },
+        BuiltinExample {
+            id: "rgba-png", title: "Preserve a direct PNG alpha channel",
+            program: "rgba = reshape(uint8([10 20 30 40]),[1 1 4]); imwrite(rgba,'rgba.png'); [rgb,map,alpha] = imread('rgba.png');\nalpha",
+            display_output: Some("ans = 40"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::NativeFilesystem,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions {
+                source: "assert(isequal(size(rgb),[1 1 3])); assert(isempty(map)); assert(alpha(1,1)==40); assert(rgb(1,1,1)==10);",
             },
         },
         BuiltinExample {
@@ -82,8 +94,16 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Image writer and encoders", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imwrite.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Image classes, options, GIF append, and resident owner behavior", location: "crates/runmat-runtime/src/builtins/image/imwrite.rs" }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Image writer call", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imwrite.rs") },
+            BuiltinDocumentationLink { label: "Image writer admission and preflight", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imwrite/preflight.rs") },
+            BuiltinDocumentationLink { label: "Image writer materialization", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imwrite/materialize.rs") },
+            BuiltinDocumentationLink { label: "Image writer encoders", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imwrite/encode.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Preflight, resident owner, and cancellation behavior", location: "crates/runmat-runtime/src/builtins/image/imwrite/tests.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Image classes, format options, and GIF append", location: "crates/runmat-runtime/src/builtins/image/imwrite/tests/encoding.rs" },
+        ],
         notes: &[],
     },
     introduced: None,
