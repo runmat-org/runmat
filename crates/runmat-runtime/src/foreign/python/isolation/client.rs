@@ -51,6 +51,28 @@ pub struct IsolatedPythonClient {
 }
 
 impl IsolatedPythonClient {
+    #[cfg(all(test, unix))]
+    pub(crate) async fn pending_test_client() -> Self {
+        let mut command = HostCommand::new("/bin/sh");
+        command.arguments = vec!["-c".into(), "exec /bin/sleep 30".into()];
+        let mut child = command.spawn().await.expect("spawn owned pending host");
+        let stdio = child.take_stdio().expect("take pending host stdio");
+        Self {
+            child,
+            snapshots: SharedSnapshotStore::create().expect("test snapshots"),
+            reader: stdio.stdout,
+            writer: stdio.stdin,
+            limits: FrameLimits {
+                max_message_bytes: PYTHON_HOST_MAX_MESSAGE_BYTES,
+            },
+            next_request_id: 1,
+            next_callback_id: 1,
+            local_to_remote: BTreeMap::new(),
+            remote_to_local: BTreeMap::new(),
+            callbacks: BTreeMap::new(),
+        }
+    }
+
     pub fn process_id(&self) -> Option<u32> {
         self.child.id()
     }

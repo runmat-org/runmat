@@ -16,7 +16,9 @@ use runmat_types::{
 use runmat_value::{ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
 
 mod environment;
+mod isolated;
 use environment::{environment_metadata, issued_python_status_value, validate_environment};
+use isolated::IsolatedCallGuard;
 
 use super::super::{
     foreign_callback_request, foreign_error, invoke_foreign_callback, ForeignAdapter,
@@ -738,53 +740,50 @@ async fn invoke_isolated(
         })??;
         return isolated_outputs(outputs, requested_outputs);
     }
-    let result = async {
-        let mut client = state.client.borrow_mut().take();
-        if client.is_none() {
-            let configuration = state.configuration.borrow().clone();
-            client = Some(
-                IsolatedPythonClient::spawn(&configuration)
-                    .await
-                    .map_err(super::isolation::runtime_error)?,
-            );
-            state.terminated.set(false);
-        }
-        let mut client = client.expect("isolated Python client initialized");
-        let released = take_releases(&state.released)?;
-        let requested_outputs = call.requested_outputs;
-        let outcome = client
-            .invoke(
-                context,
-                call,
-                &state.handles,
-                &state.host_identity,
-                released,
-                &state.nested_calls,
-            )
-            .await
-            .and_then(|outputs| isolated_outputs(outputs, requested_outputs));
-        let terminal = outcome.as_ref().err().is_some_and(|error| {
-            matches!(
-                error.identifier(),
-                Some(
-                    "RunMat:Python:Cancelled"
-                        | "RunMat:Python:HostCrashed"
-                        | "RunMat:Python:HostTransport"
-                        | "RunMat:Python:HostAuthentication"
-                )
-            )
-        });
-        if terminal {
-            state.handles.restart_host(&state.host_identity)?;
-            state.terminated.set(true);
-        } else {
-            *state.client.borrow_mut() = Some(client);
-        }
-        outcome
+    let mut guard = IsolatedCallGuard::begin(state.clone());
+    if guard.client().is_none() {
+        let configuration = state.configuration.borrow().clone();
+        *guard.client() = Some(
+            IsolatedPythonClient::spawn(&configuration)
+                .await
+                .map_err(super::isolation::runtime_error)?,
+        );
+        state.terminated.set(false);
     }
-    .await;
-    state.call_active.set(false);
-    result
+    let released = take_releases(&state.released)?;
+    let requested_outputs = call.requested_outputs;
+    let outcome = guard
+        .client()
+        .as_mut()
+        .expect("isolated Python client initialized")
+        .invoke(
+            context,
+            call,
+            &state.handles,
+            &state.host_identity,
+            released,
+            &state.nested_calls,
+        )
+        .await
+        .and_then(|outputs| isolated_outputs(outputs, requested_outputs));
+    let terminal = outcome.as_ref().err().is_some_and(|error| {
+        matches!(
+            error.identifier(),
+            Some(
+                "RunMat:Python:Cancelled"
+                    | "RunMat:Python:HostCrashed"
+                    | "RunMat:Python:HostTransport"
+                    | "RunMat:Python:HostAuthentication"
+            )
+        )
+    });
+    if terminal {
+        state.handles.restart_host(&state.host_identity)?;
+        guard.finish_terminated();
+    } else {
+        guard.finish_running();
+    }
+    outcome
 }
 
 fn isolated_outputs(
@@ -805,45 +804,39 @@ async fn terminate_isolated(
     state: IsolatedPythonState,
     arguments: Vec<Value>,
 ) -> Result<Value, RuntimeError> {
+    validate_environment(&state.handles, &state.host_identity, &arguments)?;
+    if state.configuration.borrow().execution_mode != PythonExecutionMode::OutOfProcess {
+        return Err(invalid_call(
+            "terminate is available only for an OutOfProcess Python environment",
+        ));
+    }
     if state.call_active.replace(true) {
         return Err(invalid_call(
             "terminate cannot run during an active isolated Python call",
         ));
     }
-    let result = async {
-        validate_environment(&state.handles, &state.host_identity, &arguments)?;
-        if state.configuration.borrow().execution_mode != PythonExecutionMode::OutOfProcess {
-            return Err(invalid_call(
-                "terminate is available only for an OutOfProcess Python environment",
-            ));
-        }
-        let client = state.client.borrow_mut().take();
-        let shutdown = if let Some(mut client) = client {
-            let released = take_releases(&state.released)?;
-            client
-                .shutdown(released)
-                .await
-                .map_err(super::isolation::runtime_error)
-        } else {
-            Ok(())
-        };
-        state.handles.restart_host(&state.host_identity)?;
-        state.nested_calls.borrow_mut().clear();
-        state.terminated.set(true);
-        shutdown?;
-        let configuration = state.configuration.borrow().clone();
-        issued_python_status_value(
-            &state.handles,
-            &state.host_identity,
-            &configuration,
-            false,
-            true,
-            None,
-        )
-    }
-    .await;
-    state.call_active.set(false);
-    result
+    let mut guard = IsolatedCallGuard::begin(state.clone());
+    let shutdown = if let Some(client) = guard.client().as_mut() {
+        let released = take_releases(&state.released)?;
+        client
+            .shutdown(released)
+            .await
+            .map_err(super::isolation::runtime_error)
+    } else {
+        Ok(())
+    };
+    state.handles.restart_host(&state.host_identity)?;
+    guard.finish_terminated();
+    shutdown?;
+    let configuration = state.configuration.borrow().clone();
+    issued_python_status_value(
+        &state.handles,
+        &state.host_identity,
+        &configuration,
+        false,
+        true,
+        None,
+    )
 }
 
 fn take_releases(released: &ReleaseQueue) -> Result<Vec<u64>, RuntimeError> {
@@ -1458,5 +1451,167 @@ mod tests {
                 .identifier(),
             Some("RunMat:Foreign:StaleHandle")
         );
+    }
+
+    #[test]
+    fn abandoned_isolated_call_releases_slot_and_fences_old_authority() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let mut configuration = adapter.configuration.borrow().clone();
+        configuration.execution_mode = PythonExecutionMode::OutOfProcess;
+        adapter.configure(configuration).unwrap();
+        let environment = adapter.status_value().unwrap();
+        let object = adapter
+            .handles
+            .register_resource(&adapter.host_identity, environment_metadata())
+            .unwrap();
+        let state = adapter.isolated_state();
+        state.call_active.set(true);
+        let guard = IsolatedCallGuard::begin(state.clone());
+        let (reply, _response) = tokio::sync::oneshot::channel();
+        state.nested_calls.borrow_mut().push_back(NestedPythonCall {
+            call: ForeignCall {
+                adapter: PYTHON_ADAPTER_ID.into(),
+                symbol: "pending".into(),
+                arguments: vec![Value::String("retained".into())],
+                requested_outputs: 1,
+            },
+            reply,
+        });
+        drop(guard);
+        assert!(!state.call_active.get());
+        assert!(state.terminated.get());
+        assert!(state.nested_calls.borrow().is_empty());
+        assert_eq!(
+            validate_environment(&state.handles, &state.host_identity, &[environment])
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        assert_eq!(
+            state
+                .handles
+                .resolve(&object, ForeignCapability::Invoke)
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        assert!(state.released.0.lock().unwrap().is_empty());
+        let fresh = adapter.status_value().unwrap();
+        validate_environment(&state.handles, &state.host_identity, &[fresh]).unwrap();
+        drop(object);
+        assert!(state.released.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn unpolled_isolated_shutdown_does_not_revoke_or_take_the_client_slot() {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let mut configuration = adapter.configuration.borrow().clone();
+        configuration.execution_mode = PythonExecutionMode::OutOfProcess;
+        adapter.configure(configuration).unwrap();
+        let status = adapter.status_value().unwrap();
+        let future = terminate_isolated(adapter.isolated_state(), vec![status.clone()]);
+        drop(future);
+        assert!(!adapter.isolated_call_active.get());
+        assert!(!adapter.terminated.get());
+        validate_environment(&adapter.handles, &adapter.host_identity, &[status]).unwrap();
+    }
+
+    #[cfg(unix)]
+    async fn pending_isolated_adapter() -> (Rc<PythonAdapter>, Value, ForeignRef, u32) {
+        let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
+        let mut configuration = adapter.configuration.borrow().clone();
+        configuration.execution_mode = PythonExecutionMode::OutOfProcess;
+        adapter.configure(configuration).unwrap();
+        let status = adapter.status_value().unwrap();
+        let object = adapter
+            .handles
+            .register_resource(&adapter.host_identity, environment_metadata())
+            .unwrap();
+        let client = IsolatedPythonClient::pending_test_client().await;
+        let pid = client.process_id().expect("owned test child pid");
+        *adapter.isolated_client.borrow_mut() = Some(client);
+        (adapter, status, object, pid)
+    }
+
+    #[cfg(unix)]
+    async fn assert_abandoned_child_and_authority(
+        adapter: &PythonAdapter,
+        old_status: Value,
+        old_object: ForeignRef,
+        pid: u32,
+    ) {
+        assert!(!adapter.isolated_call_active.get());
+        assert!(!adapter.is_running());
+        assert!(adapter.terminated.get());
+        assert_eq!(
+            validate_environment(&adapter.handles, &adapter.host_identity, &[old_status])
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        assert_eq!(
+            adapter
+                .handles
+                .resolve(&old_object, ForeignCapability::Invoke)
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        let fresh = adapter.status_value().unwrap();
+        validate_environment(&adapter.handles, &adapter.host_identity, &[fresh]).unwrap();
+        drop(old_object);
+        assert!(adapter.released.0.lock().unwrap().is_empty());
+        let mut stopped = false;
+        for _ in 0..100 {
+            // kill_on_drop is synchronous; Tokio may reap the child on a
+            // later runtime tick, so allow a bounded reap interval.
+            if unsafe { libc::kill(pid as libc::pid_t, 0) } == -1 {
+                stopped = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            stopped,
+            "abandoned owned Python child {pid} is still present"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn dropped_pending_isolated_request_kills_child_and_fences_both_leases() {
+        let (adapter, status, object, pid) = pending_isolated_adapter().await;
+        let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let call = ForeignCall {
+            adapter: PYTHON_ADAPTER_ID.into(),
+            symbol: "status".into(),
+            arguments: Vec::new(),
+            requested_outputs: 1,
+        };
+        let mut pending = Box::pin(invoke_isolated(adapter.isolated_state(), context, call));
+        tokio::select! {
+            result = &mut pending => panic!("sleeping child unexpectedly replied: {result:?}"),
+            () = tokio::time::sleep(std::time::Duration::from_millis(20)) => {}
+        }
+        assert!(adapter.isolated_call_active.get());
+        drop(pending);
+        assert_abandoned_child_and_authority(&adapter, status, object, pid).await;
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn dropped_pending_isolated_shutdown_kills_child_and_fences_both_leases() {
+        let (adapter, status, object, pid) = pending_isolated_adapter().await;
+        let mut pending = Box::pin(terminate_isolated(
+            adapter.isolated_state(),
+            vec![status.clone()],
+        ));
+        tokio::select! {
+            result = &mut pending => panic!("sleeping child unexpectedly replied: {result:?}"),
+            () = tokio::time::sleep(std::time::Duration::from_millis(20)) => {}
+        }
+        assert!(adapter.isolated_call_active.get());
+        drop(pending);
+        assert_abandoned_child_and_authority(&adapter, status, object, pid).await;
     }
 }

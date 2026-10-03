@@ -56,6 +56,7 @@ struct HostRecord {
     generation: u64,
     control_generation: u64,
     next_resource: u64,
+    retired: bool,
     capabilities: BTreeSet<ForeignCapability>,
     policy: ForeignExecutionPolicy,
     origin_thread: ThreadId,
@@ -164,6 +165,7 @@ impl ForeignHandleRegistry {
                 generation: 1,
                 control_generation: 1,
                 next_resource: 1,
+                retired: false,
                 capabilities: registration.capabilities,
                 policy: registration.policy,
                 origin_thread: std::thread::current().id(),
@@ -193,6 +195,12 @@ impl ForeignHandleRegistry {
                     format!("foreign host {host_identity} is not registered"),
                 )
             })?;
+            if host.retired {
+                return Err(foreign_error(
+                    ForeignErrorKind::HostUnavailable,
+                    "foreign host identity has been retired",
+                ));
+            }
             let handle = host.next_resource;
             host.next_resource = host.next_resource.checked_add(1).ok_or_else(|| {
                 foreign_error(
@@ -344,24 +352,79 @@ impl ForeignHandleRegistry {
         Ok(generation)
     }
 
+    /// Abandon a host whose owning asynchronous call was dropped. This must
+    /// revoke authority without an async cleanup step or a fallible restart:
+    /// a poisoned lock and exhausted generation must never leave old handles
+    /// valid after the child has been destroyed.
+    pub(crate) fn abandon_host_sync(&self, host_identity: &str) {
+        let (release, keys) = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(host) = state.hosts.get_mut(host_identity) else {
+                return;
+            };
+            let keys = host
+                .resources
+                .keys()
+                .map(|handle| ForeignResourceKey {
+                    host_identity: host_identity.to_owned(),
+                    handle: *handle,
+                    generation: host.generation,
+                })
+                .collect::<Vec<_>>();
+            let release = Arc::clone(&host.release);
+            match (
+                host.generation.checked_add(1),
+                host.control_generation.checked_add(1),
+            ) {
+                (Some(generation), Some(control_generation)) => {
+                    host.resources.clear();
+                    host.controls.clear();
+                    host.generation = generation;
+                    host.control_generation = control_generation;
+                }
+                _ => {
+                    // Keep this identity occupied forever. Re-registering it
+                    // at generation one could alias an old public resource key.
+                    host.resources.clear();
+                    host.controls.clear();
+                    host.retired = true;
+                }
+            }
+            (release, keys)
+        };
+        for key in keys {
+            release.release(&key);
+        }
+    }
+
     pub fn unregister_host(&self, host_identity: &str) -> Result<(), RuntimeError> {
-        let host = self
-            .state
-            .lock()
-            .map_err(|_| {
+        let host = {
+            let mut state = self.state.lock().map_err(|_| {
                 foreign_error(
                     ForeignErrorKind::HostUnavailable,
                     "foreign host registry lock was poisoned",
                 )
-            })?
-            .hosts
-            .remove(host_identity)
-            .ok_or_else(|| {
+            })?;
+            if state
+                .hosts
+                .get(host_identity)
+                .is_some_and(|host| host.retired)
+            {
+                return Err(foreign_error(
+                    ForeignErrorKind::HostUnavailable,
+                    "retired foreign host identity cannot be recycled",
+                ));
+            }
+            state.hosts.remove(host_identity).ok_or_else(|| {
                 foreign_error(
                     ForeignErrorKind::HostUnavailable,
                     format!("foreign host {host_identity} is not registered"),
                 )
-            })?;
+            })?
+        };
         for handle in host.resources.keys() {
             host.release.release(&ForeignResourceKey {
                 host_identity: host_identity.to_string(),
@@ -443,6 +506,116 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:Foreign:StaleHandle"));
         drop(reference);
+        assert_eq!(releases.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn abandoned_host_fences_both_kinds_of_reference_without_double_release() {
+        let releases = Arc::new(ReleaseCounter::default());
+        let registry = registry(Arc::clone(&releases));
+        let resource = registry.register_resource("host-a", metadata()).unwrap();
+        let control = registry
+            .register_host_control("host-a", metadata())
+            .unwrap();
+        registry.abandon_host_sync("host-a");
+        assert_eq!(releases.0.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            registry
+                .resolve(&resource, ForeignCapability::Invoke)
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        assert_eq!(
+            registry
+                .resolve_host_control(&control, &metadata())
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        registry
+            .register_host_control("host-a", metadata())
+            .unwrap();
+        registry.abandon_host_sync("host-a");
+        drop(resource);
+        drop(control);
+        assert_eq!(releases.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn abandoned_exhausted_host_keeps_identity_tombstone() {
+        let releases = Arc::new(ReleaseCounter::default());
+        let registry = registry(Arc::clone(&releases));
+        {
+            let mut state = registry.state.lock().unwrap();
+            let host = state.hosts.get_mut("host-a").unwrap();
+            host.generation = u64::MAX;
+            host.control_generation = u64::MAX;
+        }
+        let resource = registry.register_resource("host-a", metadata()).unwrap();
+        let control = registry
+            .register_host_control("host-a", metadata())
+            .unwrap();
+        registry.abandon_host_sync("host-a");
+        assert_eq!(releases.0.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            registry
+                .resolve(&resource, ForeignCapability::Invoke)
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:StaleHandle")
+        );
+        assert!(registry
+            .resolve_host_control(&control, &metadata())
+            .is_err());
+        assert!(registry.register_resource("host-a", metadata()).is_err());
+        assert!(registry
+            .register_host_control("host-a", metadata())
+            .is_err());
+        assert!(registry.unregister_host("host-a").is_err());
+        let registration = ForeignHostRegistration {
+            identity: "host-a".into(),
+            adapter: "test".into(),
+            session_identity: "session-b".into(),
+            capabilities: BTreeSet::new(),
+            policy: ForeignExecutionPolicy::trusted_in_process(),
+            release: releases,
+        };
+        assert_eq!(
+            registry
+                .register_host(registration)
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Foreign:HostAlreadyRegistered")
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn abandoned_host_revokes_even_after_registry_mutex_poison() {
+        let releases = Arc::new(ReleaseCounter::default());
+        let registry = registry(Arc::clone(&releases));
+        let resource = registry.register_resource("host-a", metadata()).unwrap();
+        let control = registry
+            .register_host_control("host-a", metadata())
+            .unwrap();
+        let state = Arc::clone(&registry.state);
+        let _ = std::thread::spawn(move || {
+            let _lock = state.lock().unwrap();
+            panic!("poison registry for abandonment test");
+        })
+        .join();
+        registry.abandon_host_sync("host-a");
+        let state = registry
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let host = state.hosts.get("host-a").unwrap();
+        assert!(host.resources.is_empty());
+        assert!(host.controls.is_empty());
+        drop(state);
+        drop(resource);
+        drop(control);
         assert_eq!(releases.0.load(Ordering::SeqCst), 1);
     }
 

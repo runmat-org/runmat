@@ -121,6 +121,12 @@ impl ForeignHandleRegistry {
                 format!("foreign host {host_identity} is not registered"),
             )
         })?;
+        if host.retired {
+            return Err(foreign_error(
+                ForeignErrorKind::HostUnavailable,
+                "foreign host identity has been retired",
+            ));
+        }
         let handle = host.next_resource;
         host.next_resource = host.next_resource.checked_add(1).ok_or_else(|| {
             foreign_error(
