@@ -22,7 +22,7 @@ pub(super) fn select_decode(
     };
     let range = options
         .range
-        .map(|range| {
+        .map(|range| -> BuiltinResult<AudioFrameRange> {
             Ok(AudioFrameRange {
                 first: u64::try_from(range.first).map_err(|_| {
                     audioread_error_with(

@@ -19,9 +19,10 @@ pub(super) async fn audioinfo_builtin(
     }
     let path = resolve_audioinfo_path(&filename)?;
     let input = FsInputLease::capture(path.clone(), &AUDIOINFO_ERROR_IO, AUDIOINFO_BUILTIN_NAME)?;
+    let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOINFO_BUILTIN_NAME);
+    cooperation.completed(0).await?;
     let receipt = select_metadata(runtime.as_ref(), &input)?;
     let result = async {
-        let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOINFO_BUILTIN_NAME);
         cooperation.completed(0).await?;
         let scan = read_audioinfo_scan(&input).await?;
         let metadata = AudioMetadata::parse(&scan).map_err(|message| {

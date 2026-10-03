@@ -172,7 +172,7 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
             block_on(audioinfo_builtin(Some(runtime), value())).expect("zero-output metadata");
         assert_eq!(field(&info, "TotalSamples"), &Value::Num(2.0));
     }
-    assert_eq!(resources.calls.get(), 6);
+    assert_eq!(resources.calls.get(), 4);
     assert_eq!(placement.selections.get(), 6);
     assert_eq!(placement.observations.borrow().len(), 6);
     assert!(placement
@@ -306,7 +306,7 @@ fn operational_error_cancel_and_pending_drop_retire_probe_without_replay() {
     assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
     assert_eq!(fs.effects().0, opens_before + 1);
     assert_eq!(placement.observations.borrow().len(), 2);
-    assert_eq!(resources.calls.get(), 6);
+    assert_eq!(resources.calls.get(), 4);
 
     let never_polled = audioread_builtin(Some(runtime.clone()), value(), vec![]);
     drop(never_polled);
@@ -322,9 +322,9 @@ fn operational_error_cancel_and_pending_drop_retire_probe_without_replay() {
     assert_eq!(placement.probes.load(Ordering::SeqCst), 1);
     drop(pending_info);
     assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
-    assert_eq!(resources.calls.get(), 7);
+    assert_eq!(resources.calls.get(), 5);
     assert_eq!(fs.effects().0, opens_before + 2);
     let never_polled_info = audioinfo_builtin(Some(runtime.clone()), value());
     drop(never_polled_info);
-    assert_eq!(resources.calls.get(), 7);
+    assert_eq!(resources.calls.get(), 5);
 }

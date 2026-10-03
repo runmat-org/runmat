@@ -29,8 +29,9 @@ pub(super) async fn audioread_builtin(
     let options = parse_audioread_options(&args)?;
     let path = resolve_audioread_path(&filename)?;
     let input = FsInputLease::capture(path, &AUDIOREAD_ERROR_IO, AUDIOREAD_BUILTIN_NAME)?;
-    let receipt = select_decode(runtime.as_ref(), &input, options, outputs)?;
     let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOREAD_BUILTIN_NAME);
+    cooperation.completed(0).await?;
+    let receipt = select_decode(runtime.as_ref(), &input, options, outputs)?;
     let result = async {
         cooperation.completed(0).await?;
         let decoded = decode_wave_stream(&input, options, &mut cooperation).await?;
