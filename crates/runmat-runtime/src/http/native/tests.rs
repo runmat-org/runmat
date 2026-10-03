@@ -246,7 +246,7 @@ fn post_preserves_auth_body_response_headers_and_status_error() {
     let driver = tokio::runtime::Runtime::new().expect("native HTTP test driver");
     let service = NativeHttpService::new(driver.handle().clone());
     let (listener, url) = server();
-    let server = std::thread::spawn(move || {
+    let post_server = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().expect("request");
         socket
             .set_read_timeout(Some(Duration::from_secs(2)))
@@ -277,7 +277,7 @@ fn post_preserves_auth_body_response_headers_and_status_error() {
         .headers
         .iter()
         .any(|(name, value)| name.eq_ignore_ascii_case("x-runmat") && value == "yes"));
-    server.join().unwrap();
+    post_server.join().unwrap();
 
     let (listener, url) = server();
     let server = std::thread::spawn(move || {

@@ -106,7 +106,7 @@ tokio = { version = "1.36", features = ["macros", "rt", "time", "sync"] }
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Blob", "Url", "XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "TextDecoder", "DomException", "CustomEvent", "CustomEventInit", "EventTarget"] }
+web-sys = { version = "0.3", features = ["Blob", "Url", "XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "WorkerGlobalScope", "AbortController", "AbortSignal", "Headers", "Request", "RequestInit", "Response", "ReadableStream", "ReadableStreamDefaultReader", "TextDecoder", "DomException", "CustomEvent", "CustomEventInit", "EventTarget"] }
 getrandom = { version = "0.2", features = ["js"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
