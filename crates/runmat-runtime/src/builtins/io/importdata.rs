@@ -271,10 +271,38 @@ async fn importdata_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<
         None
     };
 
-    let text = fs::read_to_string_async(&path).await.map_err(|err| {
+    // Pin the filesystem owner and effective working directory before the
+    // asynchronous read. A later provider/CWD change must not redirect this
+    // invocation to a different file.
+    let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|err| {
         importdata_error_with_source(
             &IMPORTDATA_ERROR_IO,
-            format!("importdata: unable to read \"{}\" ({err})", path.display()),
+            "importdata: unable to capture file owner",
+            err,
+        )
+    })?;
+    let resolved = if path.is_absolute() {
+        path.clone()
+    } else {
+        cwd.join(&path)
+    };
+    let bytes = provider.read(&resolved).await.map_err(|err| {
+        importdata_error_with_source(
+            &IMPORTDATA_ERROR_IO,
+            format!(
+                "importdata: unable to read \"{}\" ({err})",
+                resolved.display()
+            ),
+            err,
+        )
+    })?;
+    let text = String::from_utf8(bytes).map_err(|err| {
+        importdata_error_with_source(
+            &IMPORTDATA_ERROR_IO,
+            format!(
+                "importdata: unable to decode \"{}\" ({err})",
+                resolved.display()
+            ),
             err,
         )
     })?;
@@ -680,15 +708,9 @@ fn parse_header_lines(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
-    match value {
-        Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_path(&text)
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
-        _ => Err(importdata_error(&IMPORTDATA_ERROR_ARGUMENT)),
-    }
+    let text = crate::builtins::common::validation::value_text_scalar_string(value)
+        .ok_or_else(|| importdata_error(&IMPORTDATA_ERROR_ARGUMENT))?;
+    normalize_path(&text)
 }
 
 fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
@@ -704,15 +726,12 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
 }
 
 fn string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(importdata_error_with(
+    crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+        importdata_error_with(
             &IMPORTDATA_ERROR_ARGUMENT,
             format!("importdata: expected {context} as a string scalar or character vector"),
-        )),
-    }
+        )
+    })
 }
 
 fn cell_from_rows(rows: &[Vec<String>]) -> BuiltinResult<Value> {
@@ -816,6 +835,40 @@ mod tests {
         assert!(labels.contains(&"A = importdata(filename)"));
         assert!(labels.contains(&"A = importdata(filename, delimiterIn)"));
         assert!(labels.contains(&"A = importdata(filename, delimiterIn, headerlinesIn)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn paged_character_controls_reject_before_file_access() {
+        let paged_name =
+            runmat_value::CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2])
+                .expect("paged filename");
+        let paged_delimiter =
+            runmat_value::CharArray::new_with_shape(",;".chars().collect(), vec![1, 1, 2])
+                .expect("paged delimiter");
+        assert!(resolve_path(&Value::CharArray(paged_name)).is_err());
+        assert!(parse_delimiter_arg(&Value::CharArray(paged_delimiter)).is_err());
+        let trailing =
+            runmat_value::CharArray::new_with_shape("file.txt".chars().collect(), vec![1, 8, 1])
+                .expect("trailing singleton");
+        assert_eq!(
+            resolve_path(&Value::CharArray(trailing)).expect("row"),
+            PathBuf::from("file.txt")
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn relative_import_reads_from_installed_memory_provider() {
+        let _lock = fs::provider_override_lock();
+        let provider = std::sync::Arc::new(fs::MemoryFsProvider::with_current_dir("/import"));
+        provider
+            .write_project_path("/import/data.txt", b"1 2\n3 4\n")
+            .expect("fixture");
+        let _owner = fs::replace_provider(provider);
+        let out = block_on(importdata_builtin(Value::from("data.txt"), Vec::new()))
+            .expect("import from captured owner");
+        assert_eq!(tensor_data(&out), (vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
