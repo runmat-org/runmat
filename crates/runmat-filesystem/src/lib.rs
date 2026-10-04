@@ -51,6 +51,17 @@ use data_contract::{
 
 #[async_trait(?Send)]
 pub trait FileHandle: Read + Write + Seek + Send + Sync {
+    /// Providers may override these for suspension-aware streaming. The
+    /// default retains their synchronous handle semantics for one bounded
+    /// chunk; callers can still cooperate between chunks.
+    async fn read_async(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.read(bytes)
+    }
+
+    async fn write_async(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.write(bytes)
+    }
+
     async fn metadata_async(&self) -> io::Result<FsMetadata> {
         Err(io::Error::new(
             ErrorKind::Unsupported,
@@ -1071,6 +1082,10 @@ pub fn copy_file_on(provider: &dyn FsProvider, from: &Path, to: &Path) -> io::Re
     )?);
     io::copy(&mut reader, &mut writer)
 }
+
+#[path = "copy_stream.rs"]
+mod copy_stream;
+pub use copy_stream::{copy_file_on_async, FsCopyCheckpoint, FsCopyError};
 
 #[cfg(test)]
 #[path = "copy_tests.rs"]

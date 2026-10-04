@@ -3,6 +3,7 @@
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult};
+use async_trait::async_trait;
 use std::future::Future;
 
 pub(super) struct CopyCooperation {
@@ -17,8 +18,12 @@ impl CopyCooperation {
     }
 
     pub(super) async fn checkpoint(&mut self) -> BuiltinResult<()> {
+        self.completed_bytes(0).await
+    }
+
+    async fn completed_bytes(&mut self, bytes: u64) -> BuiltinResult<()> {
         if let Some(budget) = self.budget.as_mut() {
-            budget.checkpoint(0).await.map_err(runtime_error)?;
+            budget.checkpoint(bytes).await.map_err(runtime_error)?;
         }
         Ok(())
     }
@@ -40,6 +45,15 @@ impl CopyCooperation {
             self.checkpoint().await?;
         }
         result
+    }
+}
+
+#[async_trait(?Send)]
+impl runmat_filesystem::FsCopyCheckpoint for CopyCooperation {
+    type Error = crate::RuntimeError;
+
+    async fn checkpoint(&mut self, completed_bytes: u64) -> Result<(), Self::Error> {
+        self.completed_bytes(completed_bytes).await
     }
 }
 

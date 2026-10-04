@@ -54,7 +54,7 @@ async fn copy_file(
     destination: &Path,
 ) -> io::Result<()> {
     require_existing_parent(fs, destination).await?;
-    fs.copy_file(source, destination)?;
+    fs.copy_file(source, destination).await?;
     preserve_readonly(fs, source, destination).await;
     Ok(())
 }

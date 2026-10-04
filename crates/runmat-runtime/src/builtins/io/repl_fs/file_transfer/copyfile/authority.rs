@@ -12,6 +12,7 @@ pub(super) struct CopyFilesystem {
     cwd: PathBuf,
     lease: Option<vfs::CapturedFsResourceLease>,
     cancellation: Option<CancellationToken>,
+    runtime: Option<RuntimeContext>,
 }
 
 impl CopyFilesystem {
@@ -30,6 +31,7 @@ impl CopyFilesystem {
             cwd,
             lease,
             cancellation: runtime.map(RuntimeContext::cancellation),
+            runtime: runtime.cloned(),
         })
     }
 
@@ -124,9 +126,20 @@ impl CopyFilesystem {
         result
     }
 
-    pub(super) fn copy_file(&self, from: &Path, to: &Path) -> io::Result<u64> {
+    pub(super) async fn copy_file(&self, from: &Path, to: &Path) -> io::Result<u64> {
         self.check()?;
-        let result = vfs::copy_file_on(self.provider.as_ref(), &self.path(from), &self.path(to));
+        let mut cooperation = super::cooperation::CopyCooperation::new(self.runtime.as_ref());
+        let result = vfs::copy_file_on_async(
+            self.provider.as_ref(),
+            &self.path(from),
+            &self.path(to),
+            &mut cooperation,
+        )
+        .await
+        .map_err(|error| match error {
+            vfs::FsCopyError::Io(error) => error,
+            vfs::FsCopyError::Checkpoint(error) => io::Error::other(error),
+        });
         if result.is_ok() {
             self.check()?;
         }
