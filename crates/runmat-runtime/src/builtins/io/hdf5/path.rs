@@ -1,12 +1,17 @@
-use super::{hdf5_error, ERR_IO, ERR_PROVIDER, ERR_WASM};
-use crate::{build_runtime_error, BuiltinResult};
+#[cfg(not(target_arch = "wasm32"))]
+use super::{hdf5_error, ERR_IO, ERR_PROVIDER};
+#[cfg(target_arch = "wasm32")]
+use super::{hdf5_error, ERR_WASM};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::build_runtime_error;
+use crate::BuiltinResult;
 use runmat_filesystem::NativePathIntent;
 use std::path::PathBuf;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) type Hdf5PathLease = runmat_filesystem::CapturedNativePath;
 #[cfg(target_arch = "wasm32")]
-pub(super) type Hdf5PathLease = PathBuf;
+pub(super) enum Hdf5PathLease {}
 
 pub(super) fn capture(
     path: PathBuf,
@@ -44,7 +49,7 @@ pub(super) fn check(path: &Hdf5PathLease, builtin: &'static str) -> BuiltinResul
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (path, builtin);
-        Ok(())
+        let _ = builtin;
+        match *path {}
     }
 }
