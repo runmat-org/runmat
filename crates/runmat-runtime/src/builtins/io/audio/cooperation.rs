@@ -136,8 +136,7 @@ mod tests {
             valid.store(false, Ordering::SeqCst);
             Ok::<_, std::io::Error>(7u8)
         }))
-        .err()
-        .expect("revoked authority");
+        .expect_err("revoked authority");
         assert_eq!(
             error.identifier(),
             Some("RunMat:Placement:StaleResourceAuthority")
