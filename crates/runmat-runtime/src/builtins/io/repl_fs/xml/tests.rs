@@ -341,7 +341,7 @@ fn readstruct_supports_xml_option_aliases() {
 #[test]
 fn xmlwrite_serializes_dom_to_string_or_file() {
     let _guard = fs_test_guard();
-    let mut root = ObjectInstance::new("org.w3c.dom.Element".to_string());
+    let mut root = ObjectInstance::new(XML_ELEMENT_CLASS);
     root.properties
         .insert("TagName".to_string(), char_value("root"));
     let mut attrs = StructValue::new();

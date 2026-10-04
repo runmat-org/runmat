@@ -208,7 +208,7 @@ async fn xmlread_builtin(
         .map_err(|err| xml_io_error(operation, err))?;
     cooperation.completed(text.len()).await?;
     let root = parse_xml_document_with_context(&text, &mut cooperation).await?;
-    let mut object = ObjectInstance::new(XML_DOCUMENT_CLASS.display_name().to_string());
+    let mut object = ObjectInstance::new(XML_DOCUMENT_CLASS);
     object
         .properties
         .insert("Filename".to_string(), char_value(&filename));

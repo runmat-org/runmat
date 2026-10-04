@@ -111,7 +111,7 @@ impl XmlNode {
         cooperation
             .completed(self.name.len() + self.text.len())
             .await?;
-        let mut object = ObjectInstance::new(XML_ELEMENT_CLASS.display_name().to_string());
+        let mut object = ObjectInstance::new(XML_ELEMENT_CLASS);
         object
             .properties
             .insert("NodeName".to_string(), char_value(&self.name));
