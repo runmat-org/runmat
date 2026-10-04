@@ -7,7 +7,7 @@ mod render;
 use convert::value_to_json;
 use options::{
     parse_options, preflight_jsonencode_extensions, preflight_option_extensions,
-    validate_option_layout,
+    prepare_option_layout,
 };
 use render::render_json;
 
@@ -100,8 +100,8 @@ enum JsonNumber {
     builtin_path = "crate::builtins::io::json::jsonencode"
 )]
 async fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    validate_option_layout(&rest)?;
-    preflight_jsonencode_extensions(&value, &rest)?;
+    let layout = prepare_option_layout(&rest)?;
+    preflight_jsonencode_extensions(&value, &rest, &layout)?;
     let host_value = gather_if_needed_async(&value)
         .await
         .map_err(jsonencode_flow_with_context)?;
@@ -114,8 +114,8 @@ async fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRes
         );
     }
 
-    preflight_option_extensions(&gathered_args)?;
-    let options = parse_options(&gathered_args)?;
+    preflight_option_extensions(&layout, &gathered_args)?;
+    let options = parse_options(&layout, &gathered_args)?;
     let json_value = value_to_json(&host_value, &options)?;
     let json_string = render_json(&json_value, &options);
 

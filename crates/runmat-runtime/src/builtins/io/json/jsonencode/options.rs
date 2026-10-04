@@ -1,6 +1,44 @@
 use super::*;
 
-pub(super) fn preflight_jsonencode_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+#[derive(Debug)]
+pub(super) struct PreparedOptionLayout {
+    entries: Vec<PreparedOption>,
+}
+
+#[derive(Debug)]
+struct PreparedOption {
+    name: JsonEncodeOptionName,
+    location: OptionLocation,
+}
+
+#[derive(Debug)]
+enum OptionLocation {
+    StructField(String),
+    PairValue(usize),
+}
+
+impl PreparedOption {
+    fn value<'a>(&self, rest: &'a [Value]) -> BuiltinResult<&'a Value> {
+        match &self.location {
+            OptionLocation::StructField(key) => match rest {
+                [Value::Struct(options)] => options
+                    .fields
+                    .get(key)
+                    .ok_or_else(|| jsonencode_error(&JSONENCODE_ERROR_INTERNAL)),
+                _ => Err(jsonencode_error(&JSONENCODE_ERROR_INTERNAL)),
+            },
+            OptionLocation::PairValue(index) => rest
+                .get(*index)
+                .ok_or_else(|| jsonencode_error(&JSONENCODE_ERROR_INTERNAL)),
+        }
+    }
+}
+
+pub(super) fn preflight_jsonencode_extensions(
+    value: &Value,
+    rest: &[Value],
+    layout: &PreparedOptionLayout,
+) -> BuiltinResult<()> {
     if value_contains_complex(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &JSONENCODE_COMPLEX_INPUT_EXTENSION,
@@ -13,7 +51,7 @@ pub(super) fn preflight_jsonencode_extensions(value: &Value, rest: &[Value]) -> 
             BUILTIN_NAME,
         )?;
     }
-    preflight_option_extensions(rest)?;
+    preflight_option_extensions(layout, rest)?;
     if value_contains_explicit_gpu(value) || rest.iter().any(value_contains_explicit_gpu) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &JSONENCODE_RESIDENT_INPUT_EXTENSION,
@@ -23,17 +61,23 @@ pub(super) fn preflight_jsonencode_extensions(value: &Value, rest: &[Value]) -> 
     Ok(())
 }
 
-pub(super) fn validate_option_layout(rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn prepare_option_layout(rest: &[Value]) -> BuiltinResult<PreparedOptionLayout> {
     if rest.is_empty() {
-        return Ok(());
+        return Ok(PreparedOptionLayout {
+            entries: Vec::new(),
+        });
     }
     if rest.len() == 1 {
         return match &rest[0] {
             Value::Struct(options) => {
+                let mut entries = Vec::with_capacity(options.fields.len());
                 for name in options.fields.keys() {
-                    ensure_known_option(name)?;
+                    entries.push(PreparedOption {
+                        name: decode_option_name(name)?,
+                        location: OptionLocation::StructField(name.clone()),
+                    });
                 }
-                Ok(())
+                Ok(PreparedOptionLayout { entries })
             }
             _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTIONS_CONFIG)),
         };
@@ -41,26 +85,32 @@ pub(super) fn validate_option_layout(rest: &[Value]) -> BuiltinResult<()> {
     if !rest.len().is_multiple_of(2) {
         return Err(jsonencode_error(&JSONENCODE_ERROR_NAME_VALUE_PAIRS));
     }
-    for pair in rest.chunks_exact(2) {
+    let mut entries = Vec::with_capacity(rest.len() / 2);
+    for (pair_index, pair) in rest.chunks_exact(2).enumerate() {
         let name = option_name(&pair[0])?;
-        ensure_known_option(&name)?;
+        entries.push(PreparedOption {
+            name: decode_option_name(&name)?,
+            location: OptionLocation::PairValue(pair_index * 2 + 1),
+        });
     }
-    Ok(())
+    Ok(PreparedOptionLayout { entries })
 }
 
-fn ensure_known_option(name: &str) -> BuiltinResult<()> {
-    if JsonEncodeOptionName::from_public_name(name).is_some() {
-        Ok(())
-    } else {
-        Err(jsonencode_error_with(
+fn decode_option_name(name: &str) -> BuiltinResult<JsonEncodeOptionName> {
+    JsonEncodeOptionName::from_public_name(name).ok_or_else(|| {
+        jsonencode_error_with(
             &JSONENCODE_ERROR_UNKNOWN_OPTION,
             format!("{} ('{}')", JSONENCODE_ERROR_UNKNOWN_OPTION.message, name),
-        ))
-    }
+        )
+    })
 }
 
-pub(super) fn preflight_option_extensions(rest: &[Value]) -> BuiltinResult<()> {
-    for (name, option_value) in raw_options(rest)? {
+pub(super) fn preflight_option_extensions(
+    layout: &PreparedOptionLayout,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    for entry in &layout.entries {
+        let option_value = entry.value(rest)?;
         if !option_value_is_scalar(option_value) {
             return Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE));
         }
@@ -70,8 +120,7 @@ pub(super) fn preflight_option_extensions(rest: &[Value]) -> BuiltinResult<()> {
                 BUILTIN_NAME,
             )?;
         } else if is_floating_numeric_option(option_value)
-            && !(JsonEncodeOptionName::from_public_name(&name)
-                == Some(JsonEncodeOptionName::ConvertInfAndNaN)
+            && !(entry.name == JsonEncodeOptionName::ConvertInfAndNaN
                 && is_documented_numeric_bool(option_value))
         {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -86,19 +135,6 @@ pub(super) fn preflight_option_extensions(rest: &[Value]) -> BuiltinResult<()> {
         }
     }
     Ok(())
-}
-
-fn raw_options(rest: &[Value]) -> BuiltinResult<Vec<(String, &Value)>> {
-    if let [Value::Struct(options)] = rest {
-        return Ok(options
-            .fields
-            .iter()
-            .map(|(name, value)| (name.clone(), value))
-            .collect());
-    }
-    rest.chunks_exact(2)
-        .map(|pair| option_name(&pair[0]).map(|name| (name, &pair[1])))
-        .collect()
 }
 
 fn option_value_is_scalar(value: &Value) -> bool {
@@ -186,43 +222,15 @@ fn value_contains_explicit_gpu(value: &Value) -> bool {
     }
 }
 
-pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<JsonEncodeOptions> {
+pub(super) fn parse_options(
+    layout: &PreparedOptionLayout,
+    args: &[Value],
+) -> BuiltinResult<JsonEncodeOptions> {
     let mut options = JsonEncodeOptions::default();
-    if args.is_empty() {
-        return Ok(options);
+    for entry in &layout.entries {
+        apply_option(entry.name, entry.value(args)?, &mut options)?;
     }
-
-    if args.len() == 1 {
-        if let Value::Struct(struct_value) = &args[0] {
-            apply_struct_options(struct_value, &mut options)?;
-            return Ok(options);
-        }
-        return Err(jsonencode_error(&JSONENCODE_ERROR_OPTIONS_CONFIG));
-    }
-
-    if !args.len().is_multiple_of(2) {
-        return Err(jsonencode_error(&JSONENCODE_ERROR_NAME_VALUE_PAIRS));
-    }
-
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let name = option_name(&args[idx])?;
-        let value = &args[idx + 1];
-        apply_option(&name, value, &mut options)?;
-        idx += 2;
-    }
-
     Ok(options)
-}
-
-fn apply_struct_options(
-    struct_value: &StructValue,
-    options: &mut JsonEncodeOptions,
-) -> BuiltinResult<()> {
-    for (key, value) in &struct_value.fields {
-        apply_option(key, value, options)?;
-    }
-    Ok(())
 }
 
 fn option_name(value: &Value) -> BuiltinResult<String> {
@@ -235,27 +243,19 @@ fn option_name(value: &Value) -> BuiltinResult<String> {
 }
 
 fn apply_option(
-    raw_name: &str,
+    name: JsonEncodeOptionName,
     value: &Value,
     options: &mut JsonEncodeOptions,
 ) -> BuiltinResult<()> {
-    match JsonEncodeOptionName::from_public_name(raw_name) {
-        Some(JsonEncodeOptionName::PrettyPrint) => {
+    match name {
+        JsonEncodeOptionName::PrettyPrint => {
             options.pretty_print = coerce_bool(value)?;
             Ok(())
         }
-        Some(JsonEncodeOptionName::ConvertInfAndNaN) => {
+        JsonEncodeOptionName::ConvertInfAndNaN => {
             options.convert_inf_and_nan = coerce_bool(value)?;
             Ok(())
         }
-        None => Err(jsonencode_error_with(
-            &JSONENCODE_ERROR_UNKNOWN_OPTION,
-            format!(
-                "{} ('{}')",
-                JSONENCODE_ERROR_UNKNOWN_OPTION.message,
-                raw_name.to_ascii_lowercase()
-            ),
-        )),
     }
 }
 

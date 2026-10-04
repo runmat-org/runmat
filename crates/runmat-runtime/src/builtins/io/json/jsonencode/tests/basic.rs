@@ -1,5 +1,17 @@
 use super::*;
 
+#[test]
+fn prepared_option_identity_is_not_reparsed_after_materialization() {
+    let original = vec![Value::from("pReTtYpRiNt"), Value::Bool(true)];
+    let layout = prepare_option_layout(&original).expect("known public spelling");
+    // A materializer preserves host text in production. Even if a later value
+    // carrier changes, the admitted semantic option is the one parsed once.
+    let materialized = vec![Value::from("NotAnOption"), Value::Bool(false)];
+    let options = parse_options(&layout, &materialized).expect("typed option identity");
+    assert!(!options.pretty_print);
+    assert!(options.convert_inf_and_nan);
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_descriptor_signatures_cover_core_forms() {
