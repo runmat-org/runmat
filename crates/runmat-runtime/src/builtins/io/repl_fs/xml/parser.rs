@@ -17,14 +17,44 @@ impl Default for ReadStructOptions {
 }
 
 impl ReadStructOptions {
+    pub(super) fn preflight(args: &[Value]) -> BuiltinResult<()> {
+        for pair in args.chunks_exact(2) {
+            known_text(&pair[0], "readstruct", "option")?;
+            known_text(&pair[1], "readstruct", "option value")?;
+            if !matches!(&pair[0], Value::GpuTensor(_)) {
+                let name = scalar_text(&pair[0], "readstruct", "option")?;
+                let Some(option) = ReadStructOption::from_name(&name) else {
+                    return Err(compat_error(
+                        "readstruct",
+                        format!(
+                            "readstruct: unsupported option '{}'",
+                            name.to_ascii_lowercase()
+                        ),
+                    ));
+                };
+                if option == ReadStructOption::FileType && !matches!(&pair[1], Value::GpuTensor(_))
+                {
+                    let file_type = scalar_text(&pair[1], "readstruct", "FileType")?;
+                    if !file_type.eq_ignore_ascii_case("xml") {
+                        return Err(compat_error(
+                            "readstruct",
+                            "readstruct: only XML FileType is supported",
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn parse(args: &[Value]) -> BuiltinResult<Self> {
         let mut options = Self::default();
         let mut idx = 0usize;
         while idx < args.len() {
             let name = scalar_text(&args[idx], "readstruct", "option")?;
             let value = &args[idx + 1];
-            match name.to_ascii_lowercase().as_str() {
-                "filetype" => {
+            match ReadStructOption::from_name(&name) {
+                Some(ReadStructOption::FileType) => {
                     let file_type = scalar_text(value, "readstruct", "FileType")?;
                     if !file_type.eq_ignore_ascii_case("xml") {
                         return Err(compat_error(
@@ -33,16 +63,19 @@ impl ReadStructOptions {
                         ));
                     }
                 }
-                "attributesuffix" => {
+                Some(ReadStructOption::AttributeSuffix) => {
                     options.attribute_suffix = scalar_text(value, "readstruct", "AttributeSuffix")?;
                 }
-                "textnodename" => {
+                Some(ReadStructOption::TextNodeName) => {
                     options.text_node_name = scalar_text(value, "readstruct", "TextNodeName")?;
                 }
-                other => {
+                None => {
                     return Err(compat_error(
                         "readstruct",
-                        format!("readstruct: unsupported option '{other}'"),
+                        format!(
+                            "readstruct: unsupported option '{}'",
+                            name.to_ascii_lowercase()
+                        ),
                     ));
                 }
             }
@@ -71,7 +104,7 @@ impl XmlNode {
     }
 
     pub(super) fn into_object(self) -> BuiltinResult<ObjectInstance> {
-        let mut object = ObjectInstance::new("org.w3c.dom.Element".to_string());
+        let mut object = ObjectInstance::new(XML_ELEMENT_CLASS.display_name().to_string());
         object
             .properties
             .insert("NodeName".to_string(), char_value(&self.name));

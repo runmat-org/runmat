@@ -21,6 +21,39 @@ fn xml_scalar_text_preserves_exact_uint64() {
     );
 }
 
+#[test]
+fn known_invalid_xml_controls_reject_before_filesystem_effects() {
+    let _guard = fs_test_guard();
+    let missing = Value::String("missing-structured-fixture.xml".into());
+    let err = run(readstruct_builtin(vec![
+        missing.clone(),
+        Value::String("Bogus".into()),
+        Value::String("x".into()),
+    ]))
+    .unwrap_err();
+    assert!(err.message().contains("unsupported option"));
+    let err = run(xmlwrite_builtin(vec![
+        Value::String("missing-structured-output.xml".into()),
+        Value::Bool(true),
+    ]))
+    .unwrap_err();
+    assert!(err.message().contains("expected XML document"));
+    let err = run(xmlread_builtin(vec![missing, Value::Bool(true)])).unwrap_err();
+    assert!(err.message().contains("exactly one filename"));
+}
+
+#[test]
+fn xmlwrite_accepts_scalar_string_array_and_rejects_nonscalar_text() {
+    let one = runmat_value::StringArray::new(vec!["<root/>".into()], vec![1, 1]).unwrap();
+    assert_eq!(
+        run(xmlwrite_builtin(vec![Value::StringArray(one)])).unwrap(),
+        char_value("<root/>")
+    );
+    let many = runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
+    let err = run(xmlwrite_builtin(vec![Value::StringArray(many)])).unwrap_err();
+    assert!(err.message().contains("document must be a string scalar"));
+}
+
 fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
     futures::executor::block_on(value)
 }

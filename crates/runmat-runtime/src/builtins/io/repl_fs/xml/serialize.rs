@@ -2,7 +2,7 @@ use super::*;
 pub(super) fn serialize_xml_value(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::StringArray(_) | Value::CharArray(_) => scalar_text(value, "xmlwrite", "document"),
         Value::Object(object) if object.class_name.is(XML_DOCUMENT_CLASS) => {
             if let Some(Value::String(text)) = object.properties.get("Text") {
                 return Ok(text.clone());
@@ -112,7 +112,7 @@ fn serialize_xml_struct_field(name: &str, value: &Value) -> BuiltinResult<String
     }
 }
 
-fn scalar_xml_text(value: &Value) -> BuiltinResult<String> {
+pub(super) fn scalar_xml_text(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
