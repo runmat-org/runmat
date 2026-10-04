@@ -25,4 +25,5 @@ pub(super) const ENTRY_GROUPS: &[&[&BuiltinCatalogEntry]] = &[
     super::super::uigetdir::ENTRIES,
     super::super::uigetfile::ENTRIES,
     super::super::uiputfile::ENTRIES,
+    super::super::filesystem::ENTRIES,
 ];

@@ -16,6 +16,7 @@ mod data_family;
 mod hdf5;
 mod mat;
 mod structured_data;
+mod import;
 
 pub use self::archive::*;
 pub use self::audio::*;
@@ -26,6 +27,7 @@ pub use self::data_path::*;
 pub use self::filetext::*;
 pub use self::hdf5::*;
 pub use self::http::*;
+pub use self::import::*;
 pub(in crate::catalog) use self::inference::infer;
 pub use self::json::*;
 pub use self::mat::*;
@@ -45,4 +47,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(hdf5::ENTRIES.iter().copied());
     values.extend(mat::ENTRIES.iter().copied());
     values.extend(structured_data::ENTRIES.iter().copied());
+    values.extend(import::ENTRIES.iter().copied());
 }

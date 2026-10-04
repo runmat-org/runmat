@@ -57,3 +57,5 @@ mod uigetdir;
 mod uigetfile;
 #[path = "uiputfile/mod.rs"]
 mod uiputfile;
+#[path = "filesystem/mod.rs"]
+mod filesystem;
