@@ -1,6 +1,7 @@
 mod discovery;
 mod env;
 mod file;
+pub use discovery::ApplicationSettingsDirectory;
 
 use anyhow::Result;
 use log::{debug, info};

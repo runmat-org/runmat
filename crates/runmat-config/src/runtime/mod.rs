@@ -1,6 +1,7 @@
 mod loader;
 mod schema;
 
+pub use loader::ApplicationSettingsDirectory;
 pub use loader::ConfigLoader;
 pub use schema::{
     error_namespace_for_language_compat, AccelPowerPreference, AccelerateConfig,
