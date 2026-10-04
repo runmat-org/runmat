@@ -7,8 +7,7 @@ use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
     PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
-use runmat_value::HandleRef;
-use runmat_value::ValueSequence;
+use runmat_value::{CellArray, HandleRef, ValueSequence};
 use std::cell::Cell;
 use std::future::Future;
 use std::num::NonZeroU64;
@@ -127,28 +126,74 @@ fn poll_once<F: Future + ?Sized>(future: Pin<&mut F>) -> Poll<F::Output> {
 fn pending_default_future_roots_caller_handle_until_drop() {
     runmat_gc::gc_test_context(|| {
         let service = IsolatedMemoryPreferenceService::new();
+        block_on(service.set_many(
+            runtime(),
+            "app".into(),
+            vec![("existing".into(), Value::Num(3.0))],
+        ))
+        .unwrap();
         let document = block_on(service.document.lock());
         let initial = runmat_gc::gc_allocate_rooted(Value::String("pending".into())).unwrap();
         let handle = initial.handle();
-        let default = Value::HandleObject(HandleRef {
-            class_name: "PendingPreference".into(),
-            target: handle,
-            valid: true,
-        });
+        let default = Value::Cell(
+            CellArray::new(
+                vec![Value::HandleObject(HandleRef {
+                    class_name: "PendingPreference".into(),
+                    target: handle,
+                    valid: true,
+                })],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+        let cancellation = CancellationSource::new();
         let mut future = service.read_or_create_many(
-            runtime(),
+            RuntimeContext::with_cancellation(
+                Rc::new(crate::execution::RuntimeExecutionService::new()),
+                cancellation.token(),
+            ),
             "app".into(),
-            vec!["name".into()],
+            vec!["existing".into()],
             Some(vec![default]),
         );
         initial.unroot().unwrap();
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(
+            runmat_gc::gc_clone_value(&handle).is_ok(),
+            "unpolled future roots input"
+        );
         assert!(poll_once(future.as_mut()).is_pending());
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        cancellation.cancel(CancellationReason::User);
+        assert!(matches!(
+            poll_once(future.as_mut()),
+            Poll::Ready(Err(PreferenceServiceError::Execution(
+                ExecutionServiceError::Cancelled
+            )))
+        ));
         drop(future);
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_err());
         drop(document);
+        assert_eq!(
+            block_on(service.read_or_create_many(
+                runtime(),
+                "app".into(),
+                vec!["existing".into()],
+                None,
+            ))
+            .unwrap(),
+            vec![Value::Num(3.0)],
+            "cancelled ignored default cannot mutate the stored value"
+        );
+        block_on(service.set_many(
+            runtime(),
+            "app".into(),
+            vec![("fresh".into(), Value::Num(4.0))],
+        ))
+        .unwrap();
     });
 }
 

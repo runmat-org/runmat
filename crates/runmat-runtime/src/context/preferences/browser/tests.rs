@@ -303,6 +303,62 @@ async fn dropped_pending_default_reader_keeps_gc_input_root_until_terminal_obser
 }
 
 #[wasm_bindgen_test(async)]
+async fn public_default_reader_roots_nested_ignored_input_while_waiting_for_gate() {
+    let service = unique_service();
+    service
+        .set_many(
+            runtime(),
+            "app".into(),
+            vec![("existing".into(), Value::Num(1.0))],
+        )
+        .await
+        .unwrap();
+    let gate = service.gate.clone().lock_owned().await;
+    let initial = runmat_gc::gc_allocate_rooted(Value::String("public pending".into())).unwrap();
+    let handle = initial.handle();
+    let default = Value::Cell(
+        runmat_value::CellArray::new(
+            vec![Value::HandleObject(runmat_value::HandleRef {
+                class_name: "PreferenceDefault".into(),
+                target: handle,
+                valid: true,
+            })],
+            1,
+            1,
+        )
+        .unwrap(),
+    );
+    let mut pending = service.read_or_create_many(
+        runtime(),
+        "app".into(),
+        vec!["existing".into()],
+        Some(vec![default]),
+    );
+    initial.unroot().unwrap();
+    assert!(matches!(
+        Future::poll(
+            pending.as_mut(),
+            &mut Context::from_waker(futures::task::noop_waker_ref())
+        ),
+        Poll::Pending
+    ));
+    runmat_gc::gc_collect_major().unwrap();
+    assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+    drop(pending);
+    runmat_gc::gc_collect_major().unwrap();
+    assert!(runmat_gc::gc_clone_value(&handle).is_err());
+    drop(gate);
+    assert_eq!(
+        service
+            .read_or_create_many(runtime(), "app".into(), vec!["existing".into()], None)
+            .await
+            .unwrap(),
+        vec![Value::Num(1.0)]
+    );
+    delete_namespace(&service).await;
+}
+
+#[wasm_bindgen_test(async)]
 async fn late_missing_name_aborts_private_document_without_partial_publication() {
     let service = unique_service();
     let database = connection::open(&service.namespace).await.unwrap();

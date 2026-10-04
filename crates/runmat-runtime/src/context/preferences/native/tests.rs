@@ -2,7 +2,7 @@ use super::*;
 use crate::context::UserPathSetting;
 use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
-use runmat_value::IntValue;
+use runmat_value::{HandleRef, IntValue};
 use std::future::Future;
 use std::io::BufRead;
 use std::rc::Rc;
@@ -135,6 +135,49 @@ fn missing_without_default_does_not_create_a_settings_file() {
     .unwrap_err();
     assert!(matches!(error, PreferenceServiceError::Missing { .. }));
     assert!(!path.exists());
+}
+
+#[test]
+fn pending_native_default_reader_roots_input_until_abandoned() {
+    runmat_gc::gc_test_context(|| {
+        let directory = tempfile::tempdir().unwrap();
+        let driver = driver();
+        let service = NativePreferenceService::new(
+            directory.path().join("preferences.json"),
+            driver.handle().clone(),
+        )
+        .unwrap();
+        let gate = block_on(service.gate.clone().acquire_owned()).unwrap();
+        let initial =
+            runmat_gc::gc_allocate_rooted(Value::String("native pending".into())).unwrap();
+        let handle = initial.handle();
+        let default = Value::HandleObject(HandleRef {
+            class_name: "PendingPreference".into(),
+            target: handle,
+            valid: true,
+        });
+        let mut call = service.read_or_create_many(
+            runtime(),
+            "app".into(),
+            vec!["name".into()],
+            Some(vec![default]),
+        );
+        initial.unroot().unwrap();
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(Future::poll(call.as_mut(), &mut context).is_pending());
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        drop(call);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        drop(gate);
+        block_on(service.set_many(
+            runtime(),
+            "app".into(),
+            vec![("fresh".into(), Value::Num(1.0))],
+        ))
+        .unwrap();
+    });
 }
 
 #[test]
