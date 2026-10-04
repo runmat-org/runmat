@@ -34,6 +34,9 @@ pub(super) async fn validate_matrix(
     owner: MatEncodingOwner,
     cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
 ) -> BuiltinResult<()> {
+    if array.dims.len() < 2 {
+        return Err(invalid(owner, "MAT arrays require at least two dimensions"));
+    }
     if array.dims.iter().any(|&extent| extent > i32::MAX as usize) {
         return Err(invalid(owner, "dimension exceeds MAT-file int32 range"));
     }
@@ -76,6 +79,8 @@ pub(super) async fn validate_matrix(
                     "logical MAT payload does not match its shape",
                 ));
             }
+            u32::try_from(data.len())
+                .map_err(|_| invalid(owner, "MAT logical payload exceeds uint32 length"))?;
         }
         MatData::Char { data } => {
             if array.class != MatClass::Char || data.len() != count {
@@ -110,7 +115,7 @@ pub(super) async fn validate_matrix(
             col_ptrs,
             row_indices,
             values,
-            ..
+            logical,
         } => {
             if array.class != MatClass::Sparse || array.dims.as_slice() != [*rows, *cols].as_slice()
             {
@@ -127,6 +132,23 @@ pub(super) async fn validate_matrix(
                 ));
             }
             numeric_payload(values, owner)?;
+            if *logical {
+                let NumericStorage::U8(data) = values else {
+                    return Err(invalid(
+                        owner,
+                        "sparse logical MAT values must have uint8 storage",
+                    ));
+                };
+                for chunk in data.chunks(4096) {
+                    if chunk.iter().any(|&value| value != 1) {
+                        return Err(invalid(
+                            owner,
+                            "sparse logical MAT values must be true at every stored index",
+                        ));
+                    }
+                    super::completed(cooperation, chunk.len()).await?;
+                }
+            }
             let mut previous = 0;
             for chunk in col_ptrs.chunks(4096) {
                 for &pointer in chunk {
@@ -148,6 +170,22 @@ pub(super) async fn validate_matrix(
                     return Err(invalid(owner, "sparse MAT row index exceeds row count"));
                 }
                 super::completed(cooperation, chunk.len()).await?;
+            }
+            for col in 0..*cols {
+                super::completed(cooperation, 1).await?;
+                let mut prior = None;
+                for chunk in row_indices[col_ptrs[col]..col_ptrs[col + 1]].chunks(4096) {
+                    for &row in chunk {
+                        if prior.is_some_and(|previous| previous >= row) {
+                            return Err(invalid(
+                                owner,
+                                "sparse MAT row indices must be sorted and unique in each column",
+                            ));
+                        }
+                        prior = Some(row);
+                    }
+                    super::completed(cooperation, chunk.len()).await?;
+                }
             }
         }
     }

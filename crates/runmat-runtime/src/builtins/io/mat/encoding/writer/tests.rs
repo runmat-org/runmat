@@ -166,6 +166,57 @@ fn sparse_row_and_column_metadata_reject_before_mat_bytes() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn sparse_order_and_logical_value_metadata_reject_before_mat_bytes() {
+    let sparse = |row_indices: Vec<usize>, values: NumericStorage, logical| MatVar {
+        name: "s".into(),
+        array: MatArray {
+            class: MatClass::Sparse,
+            dims: vec![3, 1],
+            data: MatData::Sparse {
+                rows: 3,
+                cols: 1,
+                col_ptrs: vec![0, 2],
+                row_indices,
+                values,
+                logical,
+            },
+        },
+    };
+    let duplicate = sparse(vec![1, 1], NumericStorage::F64(vec![1.0, 2.0]), false);
+    let error = write_mat_bytes(&[duplicate]).expect_err("duplicate CSC row indices");
+    assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+    assert!(error.message().contains("sorted and unique"));
+
+    let wrong_class = sparse(vec![0, 1], NumericStorage::F64(vec![1.0, 1.0]), true);
+    let error = write_mat_bytes(&[wrong_class]).expect_err("logical CSC storage class");
+    assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+    assert!(error.message().contains("uint8 storage"));
+
+    let false_entry = sparse(vec![0, 1], NumericStorage::U8(vec![1, 0]), true);
+    let error = write_mat_bytes(&[false_entry])
+        .expect_err("logical CSC pattern contains only true entries");
+    assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+    assert!(error.message().contains("true at every stored index"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn matrix_rank_rejects_before_mat_bytes() {
+    let short_rank = MatVar {
+        name: "x".into(),
+        array: MatArray {
+            class: MatClass::Logical,
+            dims: vec![1],
+            data: MatData::Logical { data: vec![1] },
+        },
+    };
+    let error = write_mat_bytes(&[short_rank]).expect_err("MAT array rank");
+    assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+    assert!(error.message().contains("at least two dimensions"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn cancelled_encoding_never_publishes_to_captured_owner() {
     let _lock = runmat_filesystem::provider_override_lock();
     let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
