@@ -5710,6 +5710,7 @@ checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
 dependencies = [
  "encoding_rs",
  "memchr",
+ "tokio",
 ]
 
 [[package]]
@@ -7292,6 +7293,7 @@ dependencies = [
  "openblas-src",
  "parquet",
  "pollster 0.3.0",
+ "quick-xml",
  "regex",
  "reqwest 0.12.28",
  "runmat-accelerate",
