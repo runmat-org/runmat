@@ -100,7 +100,8 @@ pub const ACCEPT_ERROR_ACCEPT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescr
     when: "Underlying socket accept call fails for reasons other than timeout.",
     message: "accept: failed to accept client",
 };
-const ACCEPT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const ACCEPT_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    super::super::NET_ERROR_UNSUPPORTED_TARGET,
     ACCEPT_ERROR_INVALID_SERVER,
     ACCEPT_ERROR_TIMEOUT,
     ACCEPT_ERROR_INVALID_NAME_VALUE,

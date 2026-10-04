@@ -30,6 +30,7 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
         extract_server_id(&server)?;
     }
     preflight_accept_options(&rest)?;
+    super::transport::require_native_tcp(BUILTIN_NAME)?;
     let server = gather_if_needed_async(&server)
         .await
         .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
@@ -367,7 +368,7 @@ fn accept_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>)
     accept_error_with_detail(error, message)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::super::client_state::remove_client_for_test;
     use super::super::server_state::{remove_server_for_test, HANDLE_ID_FIELD as SERVER_FIELD};

@@ -207,7 +207,8 @@ pub const TCPCLIENT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescrip
     when: "Internal stream setup or metadata query fails.",
     message: "tcpclient: internal error",
 };
-const TCPCLIENT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const TCPCLIENT_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    super::super::NET_ERROR_UNSUPPORTED_TARGET,
     TCPCLIENT_ERROR_INVALID_ADDRESS,
     TCPCLIENT_ERROR_INVALID_PORT,
     TCPCLIENT_ERROR_INVALID_NAME_VALUE,

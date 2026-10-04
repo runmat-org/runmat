@@ -76,6 +76,7 @@ pub(crate) async fn tcpserver_builtin(
         )?;
     }
     preflight_name_value_extensions(&rest).await?;
+    super::transport::require_native_tcp(BUILTIN_NAME)?;
     let address = gather_if_needed_async(&address).await?;
     let port = gather_if_needed_async(&port).await?;
 
@@ -435,7 +436,7 @@ fn parse_timeout(value: &Value) -> Result<f64, TimeoutParseError> {
     Ok(timeout)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::super::server_state::remove_server_for_test;
     use super::*;

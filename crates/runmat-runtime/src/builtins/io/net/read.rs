@@ -63,8 +63,10 @@ fn map_control_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -
     binding_variant = "default",
     builtin_path = "crate::builtins::io::net::read"
 )]
-async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let options = parse_arguments(rest).await?;
+pub(super) async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let known = preflight_known_arguments(&rest)?;
+    super::transport::require_native_tcp(BUILTIN_NAME)?;
+    let options = parse_arguments(rest, known).await?;
     let client = gather_if_needed_async(&client)
         .await
         .map_err(|err| map_control_flow(err, &READ_ERROR_INVALID_CLIENT))?;
@@ -490,8 +492,7 @@ fn f64_from(bytes: &[u8], order: ByteOrder) -> f64 {
     }
 }
 
-async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
-    let known = preflight_known_arguments(&rest)?;
+async fn parse_arguments(rest: Vec<Value>, known: KnownReadControls) -> BuiltinResult<ReadOptions> {
     match rest.len() {
         0 => Ok(ReadOptions {
             mode: ReadMode::Available,
@@ -693,6 +694,6 @@ impl Drop for NonBlockingGuard {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "read/tests.rs"]
 pub(crate) mod tests;

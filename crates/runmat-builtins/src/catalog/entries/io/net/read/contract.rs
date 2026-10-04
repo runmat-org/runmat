@@ -119,7 +119,8 @@ pub const READ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Internal socket/control-flow conversion fails.",
     message: "read: internal socket error",
 };
-pub const READ_ERRORS: [BuiltinErrorDescriptor; 8] = [
+pub const READ_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    super::super::NET_ERROR_UNSUPPORTED_TARGET,
     READ_ERROR_INVALID_CLIENT,
     READ_ERROR_INVALID_INPUT,
     READ_ERROR_NOT_CONNECTED,

@@ -9,7 +9,10 @@ pub mod readline;
 pub(crate) mod server_state;
 pub mod tcpclient;
 pub mod tcpserver;
+mod transport;
 pub mod write;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod test_support;
+#[cfg(all(test, target_arch = "wasm32"))]
+mod browser_tests;

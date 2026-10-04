@@ -60,10 +60,14 @@ fn map_readline_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) 
     binding_variant = "default",
     builtin_path = "crate::builtins::io::net::readline"
 )]
-async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn readline_builtin(
+    client: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(readline_error(&READLINE_ERROR_INVALID_ARGUMENTS));
     }
+    super::transport::require_native_tcp(BUILTIN_NAME)?;
 
     let client = gather_if_needed_async(&client)
         .await
@@ -262,7 +266,7 @@ fn struct_field<'a>(value: &'a StructValue, name: &str) -> Option<&'a Value> {
     value.fields.get(name)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::net::client_state::{

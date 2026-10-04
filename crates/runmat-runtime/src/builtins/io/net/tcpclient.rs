@@ -79,6 +79,7 @@ pub(crate) async fn tcpclient_builtin(
     }
     ensure_integer_extension(&port, &INTEGER_PORT_EXTENSION)?;
     preflight_name_value_extensions(&rest).await?;
+    super::transport::require_native_tcp(BUILTIN_NAME)?;
     let host = gather_if_needed_async(&host)
         .await
         .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
@@ -599,7 +600,7 @@ fn build_tcpclient_struct(
     Value::Struct(st)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::super::client_state::remove_client_for_test;
     use super::*;

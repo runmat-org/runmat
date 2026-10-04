@@ -163,7 +163,8 @@ pub const TCPSERVER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescrip
     when: "Internal listener metadata retrieval fails.",
     message: "tcpserver: internal error",
 };
-const TCPSERVER_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const TCPSERVER_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    super::super::NET_ERROR_UNSUPPORTED_TARGET,
     TCPSERVER_ERROR_INVALID_ADDRESS,
     TCPSERVER_ERROR_INVALID_PORT,
     TCPSERVER_ERROR_INVALID_NAME_VALUE,

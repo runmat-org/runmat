@@ -63,13 +63,14 @@ fn map_write_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> 
     binding_variant = "default",
     builtin_path = "crate::builtins::io::net::write"
 )]
-async fn write_builtin(
+pub(super) async fn write_builtin(
     client: Value,
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     ensure_write_extensions(&data)?;
     let datatype = preflight_datatype(rest)?;
+    super::transport::require_native_tcp(BUILTIN_NAME)?;
     let client = gather_if_needed_async(&client)
         .await
         .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_CLIENT))?;
@@ -903,7 +904,7 @@ fn is_connection_closed_error(err: &io::Error) -> bool {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::net::client_state::{insert_client, remove_client_for_test};

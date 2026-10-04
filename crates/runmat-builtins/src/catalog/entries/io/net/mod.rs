@@ -1,6 +1,7 @@
 //! TCP socket construction and stream I/O identities.
 
 mod accept;
+mod capability;
 mod constructor_option;
 mod datatype;
 mod constructor_inference;
@@ -11,6 +12,7 @@ mod tcpserver;
 mod write;
 
 pub use accept::*;
+pub use capability::NET_ERROR_UNSUPPORTED_TARGET;
 pub use constructor_option::NetConstructorOption;
 pub use datatype::NetDataType;
 pub use read::*;
