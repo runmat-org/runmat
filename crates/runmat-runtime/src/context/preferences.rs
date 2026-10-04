@@ -5,6 +5,12 @@ use crate::RuntimeError;
 use runmat_value::Value;
 use std::collections::BTreeMap;
 
+#[path = "preferences/memory.rs"]
+mod memory;
+pub use memory::IsolatedMemoryPreferenceService;
+#[path = "preferences/document.rs"]
+mod document;
+
 pub type PreferenceValues = BTreeMap<String, Value>;
 pub type PreferenceGroups = BTreeMap<String, PreferenceValues>;
 
@@ -22,6 +28,12 @@ pub enum PreferenceServiceError {
     ),
     #[error("preference storage failed: {0}")]
     Storage(#[source] RuntimeError),
+    #[error("preference commit outcome could not be determined: {0}")]
+    CommitIndeterminate(#[source] RuntimeError),
+    #[error("unsupported preference document version {0}")]
+    UnsupportedDocumentVersion(u32),
+    #[error("invalid preference document: {0}")]
+    Document(#[source] serde_json::Error),
 }
 
 /// Installed by the application host, not created by a builtin or session.
@@ -30,11 +42,16 @@ pub enum PreferenceServiceError {
 /// storage, while deterministic hosts explicitly install isolated storage.
 ///
 /// Each future checks its invocation's cancellation and session lease before
-/// effects and publication. A dropped future must not publish a deferred
-/// mutation. Mutating operations are atomic across every supplied name: all
-/// values must be validated and encoded before the commit point, and concurrent
-/// transactions must not lose unrelated updates. Implementations must report
-/// encode, persistence and schema failures rather than silently resetting data.
+/// effects and final commit authorization. Preparation and staged writes are
+/// abortable on cancellation or drop. Once an atomic host commit has been
+/// authorized, a dropped caller cannot be promised rollback: the host-owned
+/// active transaction must observe its definitive outcome, release its owner,
+/// and never report cancellation as proof of rollback. A live caller receives
+/// definitive success/failure or a typed indeterminate outcome if observation
+/// is lost. Mutating operations are atomic across every supplied name: all
+/// values are validated and encoded before authorization, and concurrent
+/// transactions must not lose unrelated updates. Implementations report
+/// encode, persistence and schema failures rather than resetting stored data.
 pub trait RuntimePreferenceService {
     /// `None` means retained-value visibility is unavailable, not empty.
     fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {

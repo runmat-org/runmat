@@ -66,6 +66,14 @@ impl ValidationBudget<'_> {
         self.node(depth)?;
         match payload {
             ValuePayload::Inline(value) => self.inline(value, depth),
+            ValuePayload::Object(_) | ValuePayload::Distributed(_) | ValuePayload::Composite(_)
+                if self.durable =>
+            {
+                Err(ContractError::invalid(
+                    "durable preference value",
+                    "execution references are not durable",
+                ))
+            }
             ValuePayload::Object(reference) => self.reference(reference),
             ValuePayload::Distributed(handle) => handle.validate(),
             ValuePayload::Composite(handle) => handle.validate(),
@@ -322,6 +330,7 @@ impl ValidationBudget<'_> {
         }
         self.elements(count)?;
         for element in &value.elements {
+            self.node(depth + 1)?;
             if element.class_identity != value.class_identity {
                 return Err(ContractError::invalid(
                     "object array",

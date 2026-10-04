@@ -27,7 +27,8 @@ pub mod preparation;
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
 pub use preferences::{
-    PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService,
+    IsolatedMemoryPreferenceService, PreferenceGroups, PreferenceServiceError, PreferenceValues,
+    RuntimePreferenceService,
 };
 pub use runtime::{
     ProgramExecutionAssignmentGuard, ProgramExecutionJobGuard, RuntimeContext,
