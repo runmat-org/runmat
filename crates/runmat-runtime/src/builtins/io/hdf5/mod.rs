@@ -55,7 +55,19 @@ fn admit_output_count(
     builtin: &'static str,
     descriptor: &'static BuiltinDescriptor,
 ) -> BuiltinResult<()> {
-    crate::output_count::validate_fixed_outputs(descriptor, &ERR_ARGUMENT, builtin)
+    crate::output_count::validate_fixed_outputs(descriptor, &ERR_ARGUMENT, builtin).map_err(
+        |source| {
+            build_runtime_error(format!("{builtin}: too many output arguments"))
+                .with_builtin(builtin)
+                .with_identifier(
+                    ERR_ARGUMENT
+                        .identifier
+                        .expect("declared HDF5 argument identifier"),
+                )
+                .with_source(source)
+                .build()
+        },
+    )
 }
 
 fn map_control_flow(builtin: &'static str, err: RuntimeError) -> RuntimeError {
