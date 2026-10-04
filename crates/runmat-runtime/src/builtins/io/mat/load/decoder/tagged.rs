@@ -2,6 +2,7 @@
 
 use super::super::super::format::MI_COMPRESSED;
 use super::super::{load_error_with_source, LOAD_ERROR_IO};
+use super::cooperation::MatDecodeCooperation;
 use super::Endian;
 use crate::BuiltinResult;
 use std::io::Read;
@@ -20,11 +21,20 @@ pub(super) struct TaggedData {
     pub(super) data: Vec<u8>,
 }
 
-pub(super) fn read_tagged<R: Read>(
+enum TagHeader {
+    Inline(TaggedData),
+    Body {
+        data_type: u32,
+        length: usize,
+        padding: usize,
+    },
+}
+
+fn read_header<R: Read + ?Sized>(
     reader: &mut R,
     allow_eof: bool,
     endian: Endian,
-) -> BuiltinResult<Option<TaggedData>> {
+) -> BuiltinResult<Option<TagHeader>> {
     let mut type_bytes = [0u8; 4];
     let first = loop {
         match reader.read(&mut type_bytes[..1]) {
@@ -88,7 +98,7 @@ pub(super) fn read_tagged<R: Read>(
             )
         })?;
         let data = inline[..num_bytes].to_vec();
-        Ok(Some(TaggedData { data_type, data }))
+        Ok(Some(TagHeader::Inline(TaggedData { data_type, data })))
     } else {
         let mut len_bytes = [0u8; 4];
         reader.read_exact(&mut len_bytes).map_err(|err| {
@@ -99,41 +109,121 @@ pub(super) fn read_tagged<R: Read>(
             )
         })?;
         let length = endian.read_u32(&len_bytes) as usize;
-        let mut data = Vec::new();
-        data.try_reserve_exact(length).map_err(|err| {
-            super::super::load_error_with_source(
-                &LOAD_ERROR_IO,
-                "load: MAT element length cannot be allocated",
-                err,
-            )
-        })?;
-        data.resize(length, 0);
-        reader.read_exact(&mut data).map_err(|err| {
+        let padding = if type_field == MI_COMPRESSED {
+            0
+        } else {
+            (8 - (length % 8)) % 8
+        };
+        Ok(Some(TagHeader::Body {
+            data_type: type_field,
+            length,
+            padding,
+        }))
+    }
+}
+
+fn append_checked(data: &mut Vec<u8>, chunk: &[u8]) -> BuiltinResult<()> {
+    data.try_reserve(chunk.len()).map_err(|err| {
+        load_error_with_source(
+            &LOAD_ERROR_IO,
+            "load: MAT element length cannot be allocated",
+            err,
+        )
+    })?;
+    data.extend_from_slice(chunk);
+    Ok(())
+}
+
+fn read_body<R: Read + ?Sized>(reader: &mut R, length: usize) -> BuiltinResult<Vec<u8>> {
+    let mut data = Vec::new();
+    let mut chunk = [0u8; 64 * 1024];
+    while data.len() < length {
+        let next = (length - data.len()).min(chunk.len());
+        reader.read_exact(&mut chunk[..next]).map_err(|err| {
             load_error_with_source(
                 &LOAD_ERROR_IO,
                 format!("load: failed to read MAT element body: {err}"),
                 err,
             )
         })?;
-        let padding = if type_field == MI_COMPRESSED {
-            0
-        } else {
-            (8 - (length % 8)) % 8
-        };
-        if padding != 0 {
-            let mut pad = vec![0u8; padding];
-            reader.read_exact(&mut pad).map_err(|err| {
-                load_error_with_source(
-                    &LOAD_ERROR_IO,
-                    format!("load: failed to read MAT padding: {err}"),
-                    err,
-                )
-            })?;
+        append_checked(&mut data, &chunk[..next])?;
+    }
+    Ok(data)
+}
+
+fn read_padding<R: Read + ?Sized>(reader: &mut R, padding: usize) -> BuiltinResult<()> {
+    if padding != 0 {
+        let mut pad = [0u8; 7];
+        reader.read_exact(&mut pad[..padding]).map_err(|err| {
+            load_error_with_source(
+                &LOAD_ERROR_IO,
+                format!("load: failed to read MAT padding: {err}"),
+                err,
+            )
+        })?;
+    }
+    Ok(())
+}
+
+pub(super) fn read_tagged<R: Read + ?Sized>(
+    reader: &mut R,
+    allow_eof: bool,
+    endian: Endian,
+) -> BuiltinResult<Option<TaggedData>> {
+    let Some(header) = read_header(reader, allow_eof, endian)? else {
+        return Ok(None);
+    };
+    match header {
+        TagHeader::Inline(data) => Ok(Some(data)),
+        TagHeader::Body {
+            data_type,
+            length,
+            padding,
+        } => {
+            let data = read_body(reader, length)?;
+            read_padding(reader, padding)?;
+            Ok(Some(TaggedData { data_type, data }))
         }
-        Ok(Some(TaggedData {
-            data_type: type_field,
-            data,
-        }))
+    }
+}
+
+pub(super) async fn read_tagged_cooperative<R: Read + ?Sized>(
+    reader: &mut R,
+    allow_eof: bool,
+    endian: Endian,
+    cooperation: &mut MatDecodeCooperation<'_>,
+) -> BuiltinResult<Option<TaggedData>> {
+    let Some(header) = read_header(reader, allow_eof, endian)? else {
+        return Ok(None);
+    };
+    match header {
+        TagHeader::Inline(data) => {
+            cooperation.completed(8).await?;
+            Ok(Some(data))
+        }
+        TagHeader::Body {
+            data_type,
+            length,
+            padding,
+        } => {
+            let mut data = Vec::new();
+            let mut chunk = [0u8; 64 * 1024];
+            while data.len() < length {
+                let next = (length - data.len()).min(chunk.len());
+                reader.read_exact(&mut chunk[..next]).map_err(|err| {
+                    load_error_with_source(
+                        &LOAD_ERROR_IO,
+                        format!("load: failed to read MAT element body: {err}"),
+                        err,
+                    )
+                })?;
+                append_checked(&mut data, &chunk[..next])?;
+                cooperation.completed(next).await?;
+            }
+            read_padding(reader, padding)?;
+            cooperation.completed(8 + padding).await?;
+            Ok(Some(TaggedData { data_type, data }))
+        }
     }
 }
 

@@ -7,6 +7,9 @@ use flate2::read::ZlibDecoder;
 use runmat_value::Value;
 use std::io::{Cursor, Read};
 
+mod cooperation;
+pub(super) use cooperation::MatDecodeCooperation;
+
 #[derive(Clone, Copy, Debug)]
 enum Endian {
     Little,
@@ -72,6 +75,11 @@ impl Endian {
 }
 
 pub(super) fn read_mat_reader<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(String, Value)>> {
+    let endian = read_mat_header(reader)?;
+    read_variables_from_elements(reader, endian)
+}
+
+fn read_mat_header<R: Read>(reader: &mut R) -> BuiltinResult<Endian> {
     let mut header = [0u8; MAT_HEADER_LEN];
     reader.read_exact(&mut header).map_err(|err| {
         load_error_with_source(
@@ -93,8 +101,7 @@ pub(super) fn read_mat_reader<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(Str
         (b'M', b'I') => Endian::Big,
         _ => return Err(load_error("load: file is not a MATLAB Level-5 MAT-file")),
     };
-
-    read_variables_from_elements(reader, endian)
+    Ok(endian)
 }
 
 fn read_variables_from_elements<R: Read>(
@@ -128,6 +135,46 @@ fn read_variables_from_elements<R: Read>(
     Ok(variables)
 }
 
+/// Decode opened MAT elements while charging real input/decompression work to
+/// the invocation. A compressed stream is parsed directly rather than first
+/// expanding its entire payload into an unbounded second byte vector.
+pub(super) async fn read_mat_reader_cooperative<R: Read>(
+    reader: &mut R,
+    cooperation: &mut MatDecodeCooperation<'_>,
+) -> BuiltinResult<Vec<(String, Value)>> {
+    let endian = read_mat_header(reader)?;
+    cooperation.completed(MAT_HEADER_LEN).await?;
+    let mut streams: Vec<Box<dyn Read + '_>> = vec![Box::new(reader)];
+    let mut variables = Vec::new();
+    while let Some(stream) = streams.last_mut() {
+        let Some(tagged) =
+            tagged::read_tagged_cooperative(stream.as_mut(), true, endian, cooperation).await?
+        else {
+            streams.pop();
+            continue;
+        };
+        match tagged.data_type {
+            MI_MATRIX => {
+                let parsed = parse_matrix(&tagged.data, endian)?;
+                let value = mat_array_to_value(parsed.array)?;
+                variables.push((parsed.name, value));
+                cooperation.completed(tagged.data.len()).await?;
+            }
+            MI_COMPRESSED => {
+                if streams.len() >= 64 {
+                    return Err(load_error(
+                        "load: compressed MAT element nesting is too deep",
+                    ));
+                }
+                streams.push(Box::new(ZlibDecoder::new(Cursor::new(tagged.data))));
+                cooperation.completed(1).await?;
+            }
+            _ => cooperation.completed(tagged.data.len()).await?,
+        }
+    }
+    Ok(variables)
+}
+
 mod arrays;
 use arrays::parse_matrix;
 mod numeric;
@@ -136,3 +183,7 @@ mod values;
 pub(super) use values::mat_array_to_value;
 mod tagged;
 use tagged::{bytes_to_string, read_tagged, TaggedData};
+
+#[cfg(test)]
+#[path = "decoder/tests.rs"]
+mod tests;

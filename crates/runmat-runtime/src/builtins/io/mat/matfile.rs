@@ -9,7 +9,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 
 use super::authority::{issue_matfile, resolve_matfile, MatFsPath};
-use super::load::read_mat_file_for_builtin_on;
+use super::load::read_mat_file_for_builtin_on_with_context;
 use super::save::encode_workspace_to_mat_bytes;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -144,7 +144,8 @@ async fn matfile_read_step(
             .cloned()
             .ok_or_else(|| matfile_error("matfile object is missing Properties"));
     }
-    let entries = read_mat_file_for_builtin_on(&owner.source, BUILTIN_NAME).await?;
+    let entries =
+        read_mat_file_for_builtin_on_with_context(&owner.source, BUILTIN_NAME, runtime).await?;
     resolve_matfile(runtime, &object)?;
     entries
         .into_iter()
@@ -333,7 +334,8 @@ async fn read_existing_entries_for_assignment(
     match path.metadata().await {
         Ok(_) => {
             resolve_matfile(runtime, object)?;
-            let entries = read_mat_file_for_builtin_on(path, BUILTIN_NAME).await?;
+            let entries =
+                read_mat_file_for_builtin_on_with_context(path, BUILTIN_NAME, runtime).await?;
             resolve_matfile(runtime, object)?;
             Ok(entries)
         }

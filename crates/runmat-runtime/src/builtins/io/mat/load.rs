@@ -52,9 +52,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "load",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::mat::load"
 )]
-async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn load_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let requested_outputs = match crate::output_count::current_output_scope() {
         crate::output_count::InvocationOutputScope::Requested(count) => Some(count),
         crate::output_count::InvocationOutputScope::Implicit => None,
@@ -68,7 +72,7 @@ async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "load supports at most one output argument",
         ));
     }
-    let eval = evaluate(&args).await?;
+    let eval = evaluate_with_context(&args, runtime.as_ref()).await?;
 
     // The same invocation-owned output request remains authoritative across
     // the awaited decode/restoration work.
@@ -143,6 +147,13 @@ fn load_error_with_source(
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
+    evaluate_with_context(args, None).await
+}
+
+async fn evaluate_with_context(
+    args: &[Value],
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<LoadEval> {
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -196,7 +207,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
             err,
         )
     })?;
-    let entries = read_mat_file_on(&source).await?;
+    let entries = read_mat_file_on_with_context(&source, runtime).await?;
 
     let selected = select_variables(&entries, &request)?;
     Ok(LoadEval {
@@ -413,11 +424,12 @@ pub(crate) async fn read_mat_file_for_builtin(
     }
 }
 
-pub(crate) async fn read_mat_file_for_builtin_on(
+pub(crate) async fn read_mat_file_for_builtin_on_with_context(
     source: &MatFsPath,
     builtin: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<Vec<(String, Value)>> {
-    match read_mat_file_on(source).await {
+    match read_mat_file_on_with_context(source, runtime).await {
         Ok(entries) => Ok(entries),
         Err(err) => {
             let message = err.message().replacen("load:", &format!("{builtin}:"), 1);
@@ -442,6 +454,13 @@ pub(crate) async fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Val
 }
 
 pub(crate) async fn read_mat_file_on(source: &MatFsPath) -> BuiltinResult<Vec<(String, Value)>> {
+    read_mat_file_on_with_context(source, None).await
+}
+
+pub(crate) async fn read_mat_file_on_with_context(
+    source: &MatFsPath,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Vec<(String, Value)>> {
     let file = source.open().await.map_err(|err| {
         load_error_with_source(
             &LOAD_ERROR_IO,
@@ -450,7 +469,8 @@ pub(crate) async fn read_mat_file_on(source: &MatFsPath) -> BuiltinResult<Vec<(S
         )
     })?;
     let mut reader = BufReader::new(file);
-    let entries = read_mat_reader(&mut reader)?;
+    let mut cooperation = decoder::MatDecodeCooperation::new(runtime, Some(source));
+    let entries = decoder::read_mat_reader_cooperative(&mut reader, &mut cooperation).await?;
     check_source_current(source)?;
     restore_loaded_entries(entries, Some(source)).await
 }
