@@ -37,6 +37,24 @@ fn migrated_identities_have_one_production_binding_and_no_legacy_authority() {
         })
         .collect();
     assert_eq!(data_entries.len(), 45, "complete Data cutover inventory");
+    assert!(
+        inventory
+            .snapshot
+            .observed
+            .gpu_specs
+            .iter()
+            .all(|spec| spec.key != "data.*"),
+        "obsolete wildcard Data GPU declaration"
+    );
+    assert!(
+        inventory
+            .snapshot
+            .observed
+            .fusion_specs
+            .iter()
+            .all(|spec| spec.key != "data.*"),
+        "obsolete wildcard Data fusion declaration"
+    );
     for entry in entries.iter().copied().chain(data_entries) {
         let name = entry.identity.name;
         let bindings = runmat_runtime::builtin::runtime_builtin_bindings_by_name(name);
