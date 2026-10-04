@@ -7,7 +7,10 @@ const LINKS: &[BuiltinDocumentationLink] = &[BuiltinDocumentationLink {
     target: BuiltinDocumentationLinkTarget::Documentation("/docs/fs/datasets"),
 }];
 const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
-    BuiltinDocumentationLink { label: "Dataset receiver runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/data/mod.rs") },
+    BuiltinDocumentationLink { label: "Dataset receiver runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/data/dataset.rs") },
+    BuiltinDocumentationLink { label: "DataArray receiver runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/data/array.rs") },
+    BuiltinDocumentationLink { label: "DataTransaction runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/data/transaction.rs") },
+    BuiltinDocumentationLink { label: "Shared data payload kernels", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/data/kernel/mod.rs") },
     BuiltinDocumentationLink { label: "Sealed filesystem owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/data/authority.rs") },
     BuiltinDocumentationLink { label: "Manifest and chunk storage", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/data/mod.rs") },
 ];
