@@ -104,4 +104,39 @@ mod tests {
             ObjectPersistencePayloadKind::MemmapReceiver
         );
     }
+
+    #[test]
+    fn detached_snapshot_is_visible_to_native_value_visitors_and_clones_independently() {
+        let snapshot = Value::Int(crate::IntValue::U64(u64::MAX));
+        let original =
+            ObjectInstance::new("memmapfile").with_memmap_receiver(MemmapReceiverState {
+                authority: MemmapReceiverAuthority::Detached(Box::new(snapshot.clone())),
+                offset: 0,
+                repeat: Some(1),
+                writable: false,
+                fields: vec![MemmapFieldState {
+                    name: None,
+                    element: MemmapElementType::Numeric(NumericDType::U64),
+                    shape: vec![1, 1],
+                }],
+                format_presentation: MemmapFormatPresentationState::TypeName,
+            });
+        let mut visited = Vec::new();
+        original.for_each_native_value(|value| visited.push(value.clone()));
+        assert_eq!(visited, vec![snapshot.clone()]);
+
+        let mut clone = original.clone();
+        let MemmapReceiverAuthority::Detached(cloned) =
+            &mut clone.memmap_receiver_mut().unwrap().authority
+        else {
+            panic!("detached clone")
+        };
+        **cloned = Value::Int(crate::IntValue::U64(0));
+        let MemmapReceiverAuthority::Detached(retained) =
+            &original.memmap_receiver().unwrap().authority
+        else {
+            panic!("detached original")
+        };
+        assert_eq!(**retained, snapshot);
+    }
 }
