@@ -1575,14 +1575,14 @@ async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.read")?;
-    let root = dataset_root(&path);
-    let manifest = read_manifest_async(&root).await?;
+    let (owner, name) = authority::resolve_array(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let meta = manifest
         .arrays
         .get(&name)
         .ok_or_else(|| data_error(format!("DataArray.read: array '{name}' not found")))?;
-    let payload = read_array_payload_async(&root, meta).await?;
+    let payload =
+        crate::data::read_array_payload_on(owner.filesystem.as_ref(), &owner.root, meta).await?;
     let sliced = if let Some(slice_spec) = rest.first() {
         read_slice_payload(&payload, slice_spec)?
     } else {
@@ -1631,23 +1631,31 @@ async fn data_array_resize_builtin(
     new_shape: Value,
     _rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.resize")?;
+    let (owner, name) = authority::resolve_array(&base)?;
     let shape = parse_shape_from_value(&new_shape)?;
-    let root = dataset_root(&path);
-    let mut manifest = read_manifest_async(&root).await?;
+    let mut manifest =
+        crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let meta = manifest
         .arrays
         .get_mut(&name)
         .ok_or_else(|| data_error(format!("DataArray.resize: array '{name}' not found")))?;
     meta.shape = shape.clone();
     let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
-    let (payload_path, chunk_index_path) =
-        write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
-    meta.data_path = make_rel_data_path(&root, &payload_path)?;
-    meta.chunk_index_path = Some(make_rel_data_path(&root, &chunk_index_path)?);
+    let mut budget = None;
+    let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
+        owner.filesystem.as_ref(),
+        &owner.root,
+        &name,
+        &payload,
+        &meta.chunk_shape,
+        &mut budget,
+    )
+    .await?;
+    meta.data_path = make_rel_data_path(&owner.root, &payload_path)?;
+    meta.chunk_index_path = Some(make_rel_data_path(&owner.root, &chunk_index_path)?);
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest_async(&root, &manifest).await?;
+    crate::data::write_manifest_on(owner.filesystem.as_ref(), &owner.root, &manifest).await?;
     Ok(Value::Bool(true))
 }
 
@@ -1665,21 +1673,29 @@ async fn data_array_fill_builtin(
     value: Value,
     _rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.fill")?;
-    let root = dataset_root(&path);
-    let mut manifest = read_manifest_async(&root).await?;
+    let (owner, name) = authority::resolve_array(&base)?;
+    let mut manifest =
+        crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let meta = manifest
         .arrays
         .get_mut(&name)
         .ok_or_else(|| data_error(format!("DataArray.fill: array '{name}' not found")))?;
     let payload = DataArrayPayload::filled(meta.dtype.clone(), meta.shape.clone(), &value)?;
-    let (payload_path, chunk_index_path) =
-        write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
-    meta.data_path = make_rel_data_path(&root, &payload_path)?;
-    meta.chunk_index_path = Some(make_rel_data_path(&root, &chunk_index_path)?);
+    let mut budget = None;
+    let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
+        owner.filesystem.as_ref(),
+        &owner.root,
+        &name,
+        &payload,
+        &meta.chunk_shape,
+        &mut budget,
+    )
+    .await?;
+    meta.data_path = make_rel_data_path(&owner.root, &payload_path)?;
+    meta.chunk_index_path = Some(make_rel_data_path(&owner.root, &chunk_index_path)?);
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest_async(&root, &manifest).await?;
+    crate::data::write_manifest_on(owner.filesystem.as_ref(), &owner.root, &manifest).await?;
     Ok(Value::Bool(true))
 }
 
@@ -4205,6 +4221,23 @@ mod tests {
             panic!("Dataset.arrays must return a cell");
         };
         assert_eq!(arrays.data, vec![Value::String("sample".into())]);
+        let array = call_builtin(
+            "Dataset.array",
+            &[result.clone(), Value::String("sample".into())],
+        )
+        .expect("child array inherits selected provider");
+        let dtype = call_builtin("DataArray.dtype", std::slice::from_ref(&array))
+            .expect("array metadata retains selected provider");
+        assert_eq!(dtype, Value::String("uint64".into()));
+        let values = call_builtin("DataArray.read", &[array])
+            .expect("array payload retains selected provider");
+        let Value::Tensor(values) = values else {
+            panic!("DataArray.read must return a tensor");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![0]))
+        );
         assert_eq!(*suspensions.lock().expect("suspension count"), 1);
         let root = dir.path().join("pinned.data");
         assert!(root.join("manifest.json").is_file());
