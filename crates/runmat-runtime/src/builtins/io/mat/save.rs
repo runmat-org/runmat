@@ -284,8 +284,9 @@ fn save_error_with_source(
     builder.build()
 }
 
-mod workspace;
-use workspace::{
+#[path = "save/workspace.rs"]
+mod workspace_io;
+use workspace_io::{
     append_existing_entries, append_struct_fields, collect_workspace_entries, deduplicate_entries,
     ensure_workspace_entries, find_in_entries, lookup_workspace,
 };
