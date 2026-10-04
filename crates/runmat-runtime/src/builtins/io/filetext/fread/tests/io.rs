@@ -184,6 +184,46 @@ fn fread_big_endian_machine_format() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn fread_public_binding_projects_zero_one_and_two_outputs() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let path = unique_path("fread_output_count");
+    let mut file = File::create(&path).expect("create");
+    file.write_all(&[7, 9]).expect("write");
+    drop(file);
+    let open = run_fopen(&[
+        Value::from(path.to_string_lossy().to_string()),
+        Value::from("rb"),
+    ])
+    .expect("fopen");
+    let fid = Value::Num(open.as_open().unwrap().fid as f64);
+    {
+        let _outputs = crate::output_count::push_output_count(Some(0));
+        let result = futures::executor::block_on(fread_builtin(fid.clone(), Vec::new())).unwrap();
+        assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
+    }
+    futures::executor::block_on(crate::builtins::io::filetext::frewind::evaluate(&fid)).unwrap();
+    {
+        let _outputs = crate::output_count::push_output_count(Some(1));
+        let result = futures::executor::block_on(fread_builtin(fid.clone(), Vec::new())).unwrap();
+        assert!(matches!(result, Value::OutputList(values) if values.len() == 1));
+    }
+    futures::executor::block_on(crate::builtins::io::filetext::frewind::evaluate(&fid)).unwrap();
+    {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let result = futures::executor::block_on(fread_builtin(fid.clone(), Vec::new())).unwrap();
+        let Value::OutputList(values) = result else {
+            panic!("two-output fread result")
+        };
+        assert_eq!(values.len(), 2);
+        assert!(matches!(&values[1], Value::Num(2.0)));
+    }
+    run_fclose(&[fid]).unwrap();
+    test_support::fs::remove_file(path).unwrap();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn fread_invalid_fid_errors() {
     let _guard = registry_guard();
     registry::reset_for_tests();
