@@ -15,7 +15,7 @@ const MAT_LINKS: &[BuiltinDocumentationLink] = &[
     },
 ];
 
-pub(super) const MATFILE: BuiltinDocumentation = BuiltinDocumentation {
+pub(in super::super) const MATFILE: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("matfile"),
     slug: Some("matfile"),
@@ -53,7 +53,7 @@ pub(super) const MATFILE: BuiltinDocumentation = BuiltinDocumentation {
     status: Some(BuiltinDocumentationStatus::Stable),
 };
 
-pub(super) const SUBSREF: BuiltinDocumentation = BuiltinDocumentation {
+pub(in super::super) const SUBSREF: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("matlab.io.MatFile.subsref"),
     slug: Some("matlab.io.MatFile.subsref"),
@@ -74,7 +74,7 @@ pub(super) const SUBSREF: BuiltinDocumentation = BuiltinDocumentation {
     status: Some(BuiltinDocumentationStatus::Stable),
 };
 
-pub(super) const SUBSASGN: BuiltinDocumentation = BuiltinDocumentation {
+pub(in super::super) const SUBSASGN: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("matlab.io.MatFile.subsasgn"),
     slug: Some("matlab.io.MatFile.subsasgn"),

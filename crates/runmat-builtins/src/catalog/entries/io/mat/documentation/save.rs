@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
+pub(in super::super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("save"),
     slug: Some("save"),
