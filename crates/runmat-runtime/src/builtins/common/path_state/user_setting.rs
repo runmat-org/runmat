@@ -25,6 +25,18 @@ pub struct ResolvedUserPath {
 }
 
 impl CapturedUserPathAuthority {
+    /// Pure shape/control admission before provider capture or application
+    /// storage. Resolution still validates the captured namespace separately.
+    pub fn validate_custom_text(text: &str) -> io::Result<()> {
+        if text.is_empty() || text.contains(super::PATH_LIST_SEPARATOR) || text.contains('\0') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "custom user path is not one path-list entry",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn capture() -> io::Result<Self> {
         let (provider, cwd) = fs::current_provider_with_current_dir()?;
         let resource = fs::capture_resource_lease(Arc::clone(&provider));
@@ -77,13 +89,8 @@ impl CapturedUserPathAuthority {
     }
 
     pub fn resolve_custom(&self, text: &str) -> io::Result<ResolvedUserPath> {
+        Self::validate_custom_text(text)?;
         self.check_current()?;
-        if text.is_empty() || text.contains(super::PATH_LIST_SEPARATOR) || text.contains('\0') {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "custom user path is not one path-list entry",
-            ));
-        }
         let expanded = self.expand_home(text)?;
         let path = Path::new(&expanded);
         let resolved = if path.is_absolute() {

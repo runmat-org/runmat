@@ -13,6 +13,9 @@ enum Request {
 
 pub(super) async fn run(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<Value> {
     let request = decode(args)?;
+    if let Request::Change(UserPathMutation::Set(ref text)) = request {
+        CapturedUserPathAuthority::validate_custom_text(text).map_err(path_error)?;
+    }
     let runtime = runtime.ok_or_else(unavailable)?;
     let service = runtime
         .service_ports()
@@ -397,5 +400,18 @@ mod tests {
                 .expect_err("stale setting must block source lookup")
                 .contains("requires rehydration")
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn known_invalid_path_list_rejects_before_context_or_provider_capture() {
+        let invalid = format!(
+            "first{}second",
+            crate::builtins::common::path_state::PATH_LIST_SEPARATOR
+        );
+        let error =
+            futures::executor::block_on(run(None, vec![super::super::char_value(&invalid)]))
+                .expect_err("one user path cannot contain path-list separators");
+        assert_eq!(error.identifier(), Some("RunMat:userpath:InvalidPath"));
     }
 }
