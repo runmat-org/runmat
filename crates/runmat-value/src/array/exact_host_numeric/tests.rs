@@ -71,8 +71,8 @@ fn exact_float32_allocation_moves_into_tensor_without_payload_copy() {
 
 #[test]
 fn exact_double_and_empty_allocations_have_exact_reported_capacity() {
-    let permit = permit(16);
-    let mut double = ExactHostNumericAllocation::new(NumericDType::F64, 2, &permit).unwrap();
+    let double_permit = permit(16);
+    let mut double = ExactHostNumericAllocation::new(NumericDType::F64, 2, &double_permit).unwrap();
     double
         .as_f64_slice_mut()
         .unwrap()
@@ -84,6 +84,37 @@ fn exact_double_and_empty_allocations_have_exact_reported_capacity() {
     assert_eq!(empty.capacity_bytes(), 0);
     let tensor = Tensor::from_host_buffer(empty.into_host_buffer(), vec![0, 1]).unwrap();
     assert!(tensor.is_empty());
+}
+
+#[test]
+fn rejected_shape_and_unfinished_owner_release_reservation() {
+    let quota = permit(8);
+    let owned = ExactHostNumericAllocation::new(NumericDType::F64, 1, &quota).unwrap();
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 8);
+    assert!(Tensor::from_host_buffer(owned.into_host_buffer(), vec![2, 1]).is_err());
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+
+    let owned = ExactHostNumericAllocation::new(NumericDType::F64, 1, &quota).unwrap();
+    drop(owned);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn shared_clone_retains_reservation_until_original_allocation_drops() {
+    let quota = permit(8);
+    let mut owned = ExactHostNumericAllocation::new(NumericDType::F64, 1, &quota).unwrap();
+    owned.as_f64_slice_mut().unwrap()[0] = 3.0;
+    let original = Tensor::from_host_buffer(owned.into_host_buffer(), vec![1, 1]).unwrap();
+    let mut clone = original.clone();
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 8);
+    clone.set2(0, 0, 4.0).unwrap();
+    // Copy-on-write creates a new allocation outside the original call. Its
+    // resource admission belongs to that later mutation, not this permit.
+    assert_eq!(clone.as_f64_slice(), Some([4.0].as_slice()));
+    assert_eq!(original.as_f64_slice(), Some([3.0].as_slice()));
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 8);
+    drop(original);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -101,6 +132,7 @@ fn exact_allocation_rejects_over_budget_overflow_and_unadopted_integer_class() {
         ExactHostNumericAllocation::new(NumericDType::I16, 2, &permit),
         Err(ExactHostNumericAllocationError::UnsupportedClass)
     ));
+    assert_eq!(permit.retained.load(Ordering::SeqCst), 0);
 }
 
 #[test]
